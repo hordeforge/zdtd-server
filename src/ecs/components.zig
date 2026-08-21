@@ -393,6 +393,10 @@ pub const Turret = struct {
 };
 
 pub const max_journal: usize = 8;
+/// Max flat objectives per quest (indexes QuestProgress.obj_progress; kept in
+/// lockstep with quest.max_phases — a phase has at most one objective per
+/// flat slot, and there are at most max_phases phases).
+pub const max_quest_objectives: usize = 32;
 /// Stock TraderInfo.MaxItems (50): the trader window holds up to 50 stacks.
 pub const max_stock: usize = 50;
 /// Toolbelt 0..9, bag 10..41, equipment 42..46 (armor slots), total 47.
@@ -448,9 +452,18 @@ pub const QuestProgress = struct {
     active: bool = false,
     completed: bool = false,
     ready_turn_in: bool = false,
+    /// Failed by a ForcePhaseFinish objective left incomplete (stock
+    /// Quest.CloseQuest(Failed)): the slot stays visible to the client as a
+    /// failed quest and is never re-offered while present.
+    failed: bool = false,
     progress: u16 = 0,
     /// 1-based phase matching stock quest objective phase attributes.
     phase: u8 = 1,
+    /// Per-flat-objective progress (index == flat objective order; only the
+    /// XML-parsed quests with `def.objectives` use it — legacy defs use
+    /// `progress`). Stock refreshQuestCompletion reads each objective's
+    /// CurrentValue.
+    obj_progress: [max_quest_objectives]u16 = [_]u16{0} ** max_quest_objectives,
     /// Stock Quest.RallyMarkerActivated (asm.il 989046): the marker block is
     /// spent for this quest and BlockRallyMarker stops offering activation.
     rally_activated: bool = false,
@@ -492,6 +505,16 @@ pub const Journal = struct {
     pub fn hasActive(self: *const Journal, def_id: u16) bool {
         for (self.slots) |s| {
             if (s.active and !s.completed and s.def_id == def_id) return true;
+        }
+        return false;
+    }
+
+    /// True when the journal holds a failed entry for `def_id`: stock
+    /// FindQuest matches any state, so a failed quest is neither re-offered
+    /// nor re-accepted while its journal entry exists.
+    pub fn hasFailed(self: *const Journal, def_id: u16) bool {
+        for (self.slots) |s| {
+            if (s.failed and s.def_id == def_id) return true;
         }
         return false;
     }

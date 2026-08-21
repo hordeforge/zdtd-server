@@ -58,6 +58,24 @@ fn questKillAtPoi(g: *game_mod.Game, c: *game_mod.Client) void {
     systems.questOnZombieKilled(&g.sim, c.slot, x, z);
 }
 
+/// Tick the stay-within constraints for `c`'s active quest at its bound POI
+/// center (or the def spot when the quest has no POI), so shared-phase stay
+/// objectives (POIStayWithin) receive their trigger in the sweep.
+fn questStayAtPoi(g: *game_mod.Game, c: *game_mod.Client) void {
+    if (g.sim.playerByPeer(c.slot)) |ps| {
+        for (&g.sim.journal[ps].slots) |*s| {
+            if (!s.active) continue;
+            const d = g.sim.catalog.byId(s.def_id) orelse continue;
+            if (s.poi.valid()) {
+                systems.questTickStayWithin(&g.sim, c.slot, s.poi.x + s.poi.size_x * 0.5, s.poi.z + s.poi.size_z * 0.5);
+            } else {
+                systems.questTickStayWithin(&g.sim, c.slot, d.tx, d.tz);
+            }
+            break;
+        }
+    }
+}
+
 test "scenario pre-login world package is rejected by production dispatch" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4745,6 +4763,9 @@ test "scenario every stock quest def completes (99-def sweep over real quests.xm
             systems.questTickGoto(&g.sim, c.slot, 8, 70, 8);
             systems.questTickStayWithin(&g.sim, c.slot, d.tx, d.tz);
             systems.questTickStayWithin(&g.sim, c.slot, 8, 8);
+            // Shared phases with a POIStayWithin constraint need the player in
+            // the bound POI: tick at the quest's POI center too.
+            questStayAtPoi(g, c);
             if (systems.questFindActive(&g.sim, c.slot, d.id)) |q| {
                 _ = systems.questObjectiveEvent(&g.sim, c.slot, q.quest_code, .block_activate);
                 _ = systems.questOnRallyActivated(&g.sim, c.slot, q.quest_code);

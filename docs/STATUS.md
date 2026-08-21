@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 196 `WORKS`,
-93 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 197 `WORKS`,
+92 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -119,7 +119,15 @@ event, `PhaseSpec.poi_gated` from the ClearSleepers objective type - and
 completing the phase suppresses the POI's sleeper volumes in the persistent
 sleepers_cleared.zsc store, so a cleared POI does not re-arm on re-trigger or
 restart; closes the NetPackageQuestEvent row's open item), total
-**196/93/44**. The dashboard
+**196/93/44**. Then the phase-graph row went WORKS: quests carry a flat
+per-objective list (def.objectives) and a phase advances only when ALL its
+non-optional objectives complete (stock refreshQuestCompletion, asm.il
+983645-983904) — the shared tier1_clear phase 3 (ClearSleepers +
+POIStayWithin) and always-active phase-0 objectives are enforced,
+per-objective progress rides the journal wire and the ZPV6 save, and a
+ForcePhaseFinish objective can fail a quest (0 stock uses, unit-tested); the
+99-def sweep over the real quests.xml completes 99/99. Total **197/92/44**.
+The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

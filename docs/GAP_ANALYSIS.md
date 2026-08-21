@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 30 | 1 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently |
+| [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **196** | **93** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **197** | **92** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -534,15 +534,25 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/assets/quests.zig:123`, `src/ecs/quest.zig` PhaseSpec,
   `src/ecs/systems.zig:516`, `asm.il:1391090-1391107`, `asm.il:966955-966966`
 
-- **Phase graph construction** `PARTIAL`
-  `buildPhaseGraph` mirrors `QuestClass.HighestPhase` and picks the
-  highest-scoring non-auto objective per phase. Verified: `tier1_clear` gives
-  `highest_phase=4, phases=[goto_point:1, rally:1, kill_zombies:5,
-  trader_interact:1]`. Stock's `refreshQuestCompletion` requires **all**
-  non-optional objectives of a phase; zdtd tracks exactly one, so the
-  `POIStayWithin` constraint and the second half of a shared phase are ignored.
-  `Optional` and `ForcePhaseFinish` are unread, so quests can never fail.
-  *Anchors:* `src/assets/quests.zig:205`, `src/ecs/systems.zig:234`, `:258`,
+- **Phase graph construction** `WORKS` `(2026-08-21)`
+  `buildPhaseGraph` mirrors `QuestClass.HighestPhase` and emits a flat
+  per-objective list (`def.objectives`, stock CreateQuest order) beside the
+  per-phase advancing spec. A phase advances only when **all** its non-optional
+  objectives complete (stock `refreshQuestCompletion`, asm.il 983645-983904) —
+  including always-active phase-0 objectives — so the `POIStayWithin`
+  constraint on `tier1_clear` phase 3 (ClearSleepers + stay) and the second
+  half of shared phases are enforced; every phase kind receives its events
+  (`phaseHasKind` gates, not the single advancing spec kind). Arrival
+  objectives (goto/stay/trader/rally) keep required=1 — their `value` is a
+  distance (stock ObjectiveGoto::distance), never a count. `Optional`
+  objectives never block; `ForcePhaseFinish` fails the quest when the phase is
+  incomplete (slot flips to the wire's Failed state, not re-offered;
+  0 uses in the stock file, unit-tested). The 99-def sweep over the real
+  quests.xml completes **99/99**. Per-objective progress rides the journal
+  wire (each objective's CurrentValue) and the ZPV6 save.
+  *Anchors:* `src/assets/quests.zig` buildPhaseGraph,
+  `src/ecs/systems.zig` bumpPhase/phaseObjectivesComplete/phaseHasKind/failQuest,
+  `src/ecs/quest.zig` FlatObjective, `asm.il:983645-983904`,
   `asm.il:987390-987648`, `asm.il:986500-986686`, `asm.il:959396-959410`
 
 - **completiontype TurnIn vs AutoComplete** `WORKS`

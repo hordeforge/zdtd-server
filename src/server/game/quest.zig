@@ -74,11 +74,13 @@ pub fn fillStockJournalWrites(
     if (!self.sim.mask[ps].journal) return 0;
     var n: usize = 0;
     for (self.sim.journal[ps].slots) |s| {
-        if (!s.active and !s.completed) continue;
+        if (!s.active and !s.completed and !s.failed) continue;
         if (n >= out.len or n >= reward_store.len) break;
         const d = self.sim.catalog.byId(s.def_id) orelse continue;
         if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
-        const state: packages.stock_quest.QuestState = if (s.completed)
+        const state: packages.stock_quest.QuestState = if (s.failed)
+            .failed
+        else if (s.completed)
             .completed
         else if (s.ready_turn_in)
             .ready_turn_in
@@ -116,10 +118,27 @@ pub fn fillStockJournalWrites(
             1;
         const qcode: i32 = if (s.quest_code != 0) s.quest_code else @intCast(d.id);
         // Per-objective CurrentValue from the phase graph: completed phases
-        // report 255 (>= client required), the active phase reports clamped
-        // progress, future phases 0. Legacy defs fall back to first_objective_value.
+        // report 255 (>= client required), the active phase reports the
+        // objective's own progress, future phases 0. XML-parsed quests carry
+        // per-objective progress (stock refreshQuestCompletion reads each
+        // objective's CurrentValue); legacy defs fall back to first_objective_value.
         var obj_vals: []const u8 = &.{};
-        if (d.objective_phases.len > 0) {
+        if (d.objectives.len > 0) {
+            var oi: usize = 0;
+            const lim = @min(d.objectives.len, obj_val_store[n].len);
+            while (oi < lim) : (oi += 1) {
+                const o = d.objectives[oi];
+                const done = s.completed or s.failed or o.phase < s.phase or
+                    (o.phase == s.phase and oi < s.obj_progress.len and s.obj_progress[oi] >= @max(1, o.required));
+                obj_val_store[n][oi] = if (done)
+                    255
+                else if (o.phase == s.phase and oi < s.obj_progress.len)
+                    @intCast(@min(s.obj_progress[oi], @as(u16, 255)))
+                else
+                    0;
+            }
+            obj_vals = obj_val_store[n][0..lim];
+        } else if (d.objective_phases.len > 0) {
             const req: u16 = if (s.phase > 0 and s.phase <= d.phases.len)
                 d.phases[s.phase - 1].required
             else
@@ -257,7 +276,7 @@ pub fn buildTraderQuestOffers(
         // Stock filters the trader's quest list by DifficultyTier == the
         // requested tierLevel (asm.il 827746-827975). tier 0 = no filter.
         if (tier != 0 and d.difficulty_tier != tier) continue;
-        if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
+        if (self.sim.mask[ps].journal and (self.sim.journal[ps].hasActive(qid) or self.sim.journal[ps].hasFailed(qid))) continue;
         // Stock pre-positions every offer (EntityTrader offer loop →
         // Quest.SetupPosition; RE: 7dtd-research docs/quests-challenges.md
         // "Quest POI selection"): the entry carries the real QuestLocation

@@ -672,13 +672,91 @@ fn advancePhaseGraph(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef
     skipAutoPhases(w, ps, s, d);
 }
 
-/// Advance the current phase iff its objective kind matches `kind`; add `n`
-/// toward the phase's required count and advance when it is reached.
+/// Advance the current phase: add `n` to every current-phase (and always-active
+/// phase-0) objective whose kind matches, then advance when ALL non-optional
+/// objectives of the phase are complete (stock Quest.refreshQuestCompletion
+/// requires the whole phase, asm.il 983645-983904). Legacy phase-less defs
+/// keep the single `progress` counter.
 fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: quest.PhaseKind, n: u16) void {
+    if (d.objectives.len > 0) {
+        var advanced = false;
+        for (d.objectives, 0..) |o, i| {
+            if (o.kind != kind) continue;
+            if (o.phase != s.phase and o.phase != 0) continue;
+            if (i >= s.obj_progress.len) continue;
+            const req: u16 = @max(1, o.required);
+            s.obj_progress[i] = @min(@as(u16, s.obj_progress[i]) +| n, req);
+            advanced = true;
+        }
+        if (!advanced) return;
+        // Mirror the old single-progress semantics for the wire/tests: the
+        // advancing phase objective's progress.
+        var max_p: u16 = 0;
+        for (d.objectives, 0..) |o, i| {
+            if (o.kind != kind or (o.phase != s.phase and o.phase != 0)) continue;
+            if (i < s.obj_progress.len and s.obj_progress[i] > max_p) max_p = s.obj_progress[i];
+        }
+        if (max_p > 0) s.progress = max_p;
+        const phase_done = phaseObjectivesComplete(d, s);
+        if (phase_done) {
+            advancePhaseGraph(w, ps, s, d);
+            return;
+        }
+        // ForcePhaseFinish: with the phase incomplete, any objective carrying
+        // the flag fails the quest (refreshQuestCompletion IL_00CB-0104).
+        var any_force = false;
+        for (d.objectives) |o| {
+            if (o.phase != s.phase and o.phase != 0) continue;
+            if (o.force) {
+                any_force = true;
+                break;
+            }
+        }
+        if (any_force) failQuest(w, ps, s);
+        return;
+    }
     const spec = currentPhaseSpec(d, s) orelse return;
     if (spec.kind != kind) return;
     s.progress +|= n;
     if (s.progress >= spec.required) advancePhaseGraph(w, ps, s, d);
+}
+
+/// Stock refreshQuestCompletion's per-phase gate: every non-optional objective
+/// of the current phase (plus always-active phase-0 objectives) is complete.
+/// `.auto` scaffolding objectives never block (unmodelled objective types
+/// auto-complete on entry).
+fn phaseObjectivesComplete(d: quest.QuestDef, s: *const c.QuestProgress) bool {
+    for (d.objectives, 0..) |o, i| {
+        if (o.optional or o.kind == .auto) continue;
+        if (o.phase != s.phase and o.phase != 0) continue;
+        if (i >= s.obj_progress.len or s.obj_progress[i] < @max(1, o.required)) return false;
+    }
+    return true;
+}
+
+/// True when the current phase (or an always-active phase-0 objective) has an
+/// objective of `kind`. Objective-tracked quests use this for the per-kind
+/// event gates instead of the single advancing spec kind, so mixed phases
+/// (e.g. ClearSleepers + POIStayWithin) receive all their events.
+fn phaseHasKind(d: quest.QuestDef, s: *const c.QuestProgress, kind: quest.PhaseKind) bool {
+    if (d.objectives.len == 0) return false;
+    for (d.objectives) |o| {
+        if (o.kind == kind and (o.phase == s.phase or o.phase == 0)) return true;
+    }
+    return false;
+}
+
+/// Close a quest as failed (stock Quest.CloseQuest(Failed, null)): the slot
+/// leaves the active set but stays visible to the client as a failed quest
+/// (QuestState.failed), and the POI lock is released.
+fn failQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
+    if (s.poi.valid()) {
+        questPoiUnlock(w, if (w.mask[ps].network_id) w.network_id[ps].id else -1, s.poi.x, s.poi.z);
+    }
+    s.active = false;
+    s.completed = false;
+    s.ready_turn_in = false;
+    s.failed = true;
 }
 
 pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
@@ -693,7 +771,7 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
         if (qf(w.quest_accept_ctx, @intCast(peer_slot), def_id) < 0) return false;
     }
     var j = &w.journal[ps];
-    if (j.hasActive(def_id)) return false;
+    if (j.hasActive(def_id) or j.hasFailed(def_id)) return false;
     const s = j.findFree() orelse return false;
     const code = w.next_quest_code;
     w.next_quest_code +%= 1;
@@ -764,7 +842,7 @@ pub fn questAcceptStarter(w: *World, peer_slot: usize) bool {
     // slot (GAP starter-quest row).
     const starter = w.catalog.starter_id;
     for (w.journal[ps].slots) |s| {
-        if (s.def_id == starter and (s.active or s.completed)) return false;
+        if (s.def_id == starter and (s.active or s.completed or s.failed)) return false;
     }
     return questAccept(w, peer_slot, starter);
 }
@@ -803,8 +881,12 @@ pub fn questOnTraderOpen(w: *World, peer_slot: usize) void {
         const d = w.catalog.byId(s.def_id) orelse continue;
         if (d.phases.len > 0) {
             if (currentPhaseSpec(d, s)) |spec| {
-                if (spec.kind == .trader_interact and !s.ready_turn_in) {
-                    bumpPhase(w, ps, s, d, .trader_interact, spec.required);
+                if (!s.ready_turn_in) {
+                    if (d.objectives.len > 0) {
+                        if (phaseHasKind(d, s, .trader_interact)) bumpPhase(w, ps, s, d, .trader_interact, 1);
+                    } else if (spec.kind == .trader_interact) {
+                        bumpPhase(w, ps, s, d, .trader_interact, spec.required);
+                    }
                 }
             }
             // Turning in at the trader completes a ready quest.
@@ -856,7 +938,11 @@ pub fn questOnCraft(w: *World, peer_slot: usize, recipe_name: []const u8) void {
         const d = w.catalog.byId(s.def_id) orelse continue;
         if (d.phases.len > 0) {
             if (currentPhaseSpec(d, s)) |spec| {
-                if (spec.kind == .craft) bumpPhase(w, ps, s, d, .craft, 1);
+                if (d.objectives.len > 0) {
+                    if (phaseHasKind(d, s, .craft)) bumpPhase(w, ps, s, d, .craft, 1);
+                } else if (spec.kind == .craft) {
+                    bumpPhase(w, ps, s, d, .craft, 1);
+                }
             }
             continue;
         }
@@ -937,7 +1023,11 @@ pub fn questOnRallyActivated(w: *World, peer_slot: usize, quest_code: i32) bool 
     const d = w.catalog.byId(s.def_id) orelse return true;
     if (d.phases.len > 0) {
         if (currentPhaseSpec(d, s)) |spec| {
-            if (spec.kind == .rally) bumpPhase(w, ps, s, d, .rally, spec.required);
+            if (d.objectives.len > 0) {
+                if (phaseHasKind(d, s, .rally)) bumpPhase(w, ps, s, d, .rally, 1);
+            } else if (spec.kind == .rally) {
+                bumpPhase(w, ps, s, d, .rally, spec.required);
+            }
         }
     }
     return true;
@@ -954,7 +1044,11 @@ pub fn questTickStayWithin(w: *World, peer_slot: usize, px: f32, pz: f32) void {
         const radius: f32 = blk: {
             if (d.phases.len > 0) {
                 const spec = currentPhaseSpec(d, s) orelse continue;
-                if (spec.kind != .stay_within) continue;
+                if (d.objectives.len > 0) {
+                    if (!phaseHasKind(d, s, .stay_within)) continue;
+                } else if (spec.kind != .stay_within) {
+                    continue;
+                }
                 // The objective's parsed distance in metres wins; the
                 // `[quests]` policy stay_radius is the fallback (ADR 0021).
                 break :blk if (spec.radius > 0) spec.radius else @max(w.catalog.policy.stay_radius, @as(f32, @floatFromInt(spec.required)));
@@ -1003,7 +1097,11 @@ pub fn questTickGoto(w: *World, peer_slot: usize, px: f32, py: f32, pz: f32) voi
         const gz: f32 = if (use_poi) s.poi.z + s.poi.size_z * 0.5 else d.tz;
         if (d.phases.len > 0) {
             const spec = currentPhaseSpec(d, s) orelse continue;
-            if (spec.kind != .goto_point) continue;
+            if (d.objectives.len > 0) {
+                if (!phaseHasKind(d, s, .goto_point)) continue;
+            } else if (spec.kind != .goto_point) {
+                continue;
+            }
             // Arrival radius: the objective's parsed distance in metres (stock
             // ObjectiveGoto::distance); the `[quests]` policy goto_radius is
             // the fallback (ADR 0021).
@@ -4025,6 +4123,148 @@ test "ClearSleepers kills gate to the bound POI and suppress its sleepers" {
     questOnZombieKilled(&w, 0, 20, 20);
     try std.testing.expect(!questHasActive(&w, 0, 50));
     try std.testing.expectEqual(@as(u32, 1), cleared_n);
+}
+
+test "phase advances only when all its objectives complete (shared phase)" {
+    // Stock refreshQuestCompletion requires ALL non-optional objectives of the
+    // phase (here ClearSleepers-style kills + a stay constraint). Killing the
+    // zombies alone must not advance while the stay objective is incomplete.
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 1, .kind = .kill_zombies, .required = 2 },
+        .{ .phase = 1, .kind = .stay_within, .required = 1 },
+        .{ .phase = 2, .kind = .trader_interact, .required = 1 },
+    };
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 2 },
+        .{ .kind = .trader_interact, .required = 1 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 60,
+        .kind = .kill_zombies,
+        .name = "sh",
+        .title = "SH",
+        .target_count = 2,
+        .reward_coin = 10,
+        .objective_count = 3,
+        .phases = &phases,
+        .highest_phase = 2,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 60, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 60));
+    // Both kills land, but the stay objective is still incomplete: the phase
+    // holds (the old single-objective model would have advanced here).
+    questOnZombieKilled(&w, 0, 10, 10);
+    questOnZombieKilled(&w, 0, 20, 20);
+    try std.testing.expectEqual(@as(u8, 1), questFindActive(&w, 0, 60).?.phase);
+    try std.testing.expect(questHasActive(&w, 0, 60));
+    // Satisfying the stay constraint completes the shared phase (def spot
+    // (0,0); the def has no POI so the plain-radius check applies).
+    questTickStayWithin(&w, 0, 0, 0);
+    try std.testing.expectEqual(@as(u8, 2), questFindActive(&w, 0, 60).?.phase);
+}
+
+test "optional objectives never block the phase" {
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 1, .kind = .kill_zombies, .required = 1 },
+        .{ .phase = 1, .kind = .fetch_item, .required = 5, .optional = true },
+    };
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 1 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 61,
+        .kind = .kill_zombies,
+        .name = "op",
+        .title = "OP",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 2,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 61, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 61));
+    // The optional fetch objective is untouched, yet the kill completes the quest.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(!questHasActive(&w, 0, 61));
+}
+
+test "phase-0 objectives gate every phase" {
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 0, .kind = .craft, .required = 1 }, // always-active
+        .{ .phase = 1, .kind = .kill_zombies, .required = 1 },
+        .{ .phase = 2, .kind = .trader_interact, .required = 1 },
+    };
+    const phases = [_]quest.PhaseSpec{
+        .{ .kind = .kill_zombies, .required = 1 },
+        .{ .kind = .trader_interact, .required = 1 },
+    };
+    const defs = [_]quest.QuestDef{.{
+        .id = 62,
+        .kind = .kill_zombies,
+        .name = "", // empty name: the craft hook's recipe-name filter must not
+        // reject the event before it reaches the phase-0 craft objective
+        .title = "P0",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 3,
+        .phases = &phases,
+        .highest_phase = 2,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 62, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 62));
+    // Phase 1's kill completes, but the always-active craft objective (phase 0)
+    // is still incomplete: the phase must not advance.
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expectEqual(@as(u8, 1), questFindActive(&w, 0, 62).?.phase);
+    // Crafting satisfies the always-active objective and the phase advances.
+    questOnCraft(&w, 0, "sweep");
+    try std.testing.expectEqual(@as(u8, 2), questFindActive(&w, 0, 62).?.phase);
+}
+
+test "ForcePhaseFinish objective fails the quest while incomplete" {
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{
+        .{ .phase = 1, .kind = .kill_zombies, .required = 2 },
+        .{ .phase = 1, .kind = .fetch_item, .required = 1, .force = true },
+    };
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 2 }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 63,
+        .kind = .kill_zombies,
+        .name = "fp",
+        .title = "FP",
+        .target_count = 2,
+        .reward_coin = 10,
+        .objective_count = 2,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 63, .source = .builtin };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 63));
+    // The phase stays incomplete (fetch objective untouched) and a phase
+    // objective carries ForcePhaseFinish: the quest fails (stock
+    // refreshQuestCompletion IL_00F8-0104 CloseQuest(Failed)).
+    questOnZombieKilled(&w, 0, 10, 10);
+    var found_failed = false;
+    for (&w.journal[0].slots) |*s2| {
+        if (s2.def_id == 63 and s2.failed) found_failed = true;
+    }
+    try std.testing.expect(found_failed);
+    try std.testing.expect(!questHasActive(&w, 0, 63));
 }
 
 test "fetch_trader goto target stays the def spot, not a covering POI center" {

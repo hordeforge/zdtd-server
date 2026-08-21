@@ -82,6 +82,16 @@ fn objectivePhase(body: []const u8, oi: usize, elem_end: usize) u8 {
     return 1;
 }
 
+/// Stock BaseObjective.Optional / ForcePhaseFinish (BaseObjective.HandleVariables
+/// parses both via DynamicProperties.ParseBool, asm il): the objective attr
+/// (`optional="true"`) or a nested `<property name="optional" value="true">`.
+/// `el` is the whole objective element (open tag + body); xml.attr's first-`>`
+/// window keeps it to the open tag.
+fn objectiveFlag(el: []const u8, name: []const u8) bool {
+    if (xml.attr(el, 0, name)) |a| return std.mem.eql(u8, a, "true");
+    return std.mem.eql(u8, xml.propertyValue(el, name) orelse "", "true");
+}
+
 /// Count-target for one objective (value / count attr or nested item_count).
 fn objectiveTarget(body: []const u8, oi: usize, elem_end: usize) u16 {
     var t: u16 = 1;
@@ -153,6 +163,8 @@ const PhaseGraph = struct {
     highest_phase: u8,
     objective_phases: []const u8,
     objective_kinds: []const quest.ObjectiveWireKind,
+    /// Per-flat-objective sim data (stock BaseObjective list, same order).
+    objectives: []const quest.FlatObjective,
 };
 
 /// Build the ordered phase graph from a quest body, mirroring stock
@@ -173,6 +185,11 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         /// ClearSleepers objectives gate kills to the bound POI (stock
         /// QuestEvent_SleepersCleared).
         poi_gated: bool = false,
+        /// Stock BaseObjective.Optional / ForcePhaseFinish (0 uses in the
+        /// stock file; modded files). Optional objectives never block the
+        /// phase; force fails the quest if left incomplete.
+        optional: bool = false,
+        force: bool = false,
     };
     var objs: [quest.max_phases]ObjInfo = undefined;
     var obj_phase_bytes: [quest.max_phases]u8 = undefined;
@@ -208,7 +225,18 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         // catalog arena (a bare slice would dangle once the parse buffer frees).
         const nav_object_raw = xml.propertyValue(body[oi..elem_end], "nav_object") orelse "";
         const nav_object = if (nav_object_raw.len > 0) try arena.dupe(u8, nav_object_raw) else "";
-        objs[n] = .{ .phase = phase, .kind = kind, .score = objectiveScore(typ, oid), .target = target, .radius = radius, .nav_object = nav_object, .poi_gated = std.mem.eql(u8, typ, "ClearSleepers") };
+        const el = body[oi..elem_end];
+        objs[n] = .{
+            .phase = phase,
+            .kind = kind,
+            .score = objectiveScore(typ, oid),
+            .target = target,
+            .radius = radius,
+            .nav_object = nav_object,
+            .poi_gated = std.mem.eql(u8, typ, "ClearSleepers"),
+            .optional = objectiveFlag(el, "optional"),
+            .force = objectiveFlag(el, "force_phase_finish"),
+        };
         obj_phase_bytes[n] = phase;
         // Objective Write subclass by type (stock CreateQuest). Everything not
         // listed writes the BaseObjective shape (FileVersion + CurrentValue).
@@ -221,7 +249,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         if (phase > highest) highest = phase;
         n += 1;
     }
-    if (n == 0 or highest == 0) return .{ .phases = &.{}, .highest_phase = 0, .objective_phases = &.{}, .objective_kinds = &.{} };
+    if (n == 0 or highest == 0) return .{ .phases = &.{}, .highest_phase = 0, .objective_phases = &.{}, .objective_kinds = &.{}, .objectives = &.{} };
     if (highest > quest.max_phases) highest = quest.max_phases;
 
     const specs = try arena.alloc(quest.PhaseSpec, highest);
@@ -242,7 +270,33 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
 
     const obj_phases = try arena.dupe(u8, obj_phase_bytes[0..n]);
     const obj_kinds = try arena.dupe(quest.ObjectiveWireKind, obj_kind_bytes[0..n]);
-    return .{ .phases = specs, .highest_phase = highest, .objective_phases = obj_phases, .objective_kinds = obj_kinds };
+    // Flat objective list in document order (stock CreateQuest order). Phase 0
+    // (always-active) objectives use phase 0 in the byte list too, so the
+    // wire and the completion check agree.
+    const flat = try arena.alloc(quest.FlatObjective, n);
+    for (objs[0..n], 0..) |o, fi| {
+        flat[fi] = .{
+            .phase = o.phase,
+            .kind = o.kind,
+            // Arrival objectives (goto/stay/trader/rally) parse `value` as a
+            // distance, never a count (stock ObjectiveGoto::distance), so
+            // their required is 1 — the single arrival completes them. Only
+            // count kinds (kill/fetch/craft/block) use the target.
+            .required = if (objectiveIsArrival(o.kind)) 1 else if (o.target == 0) 1 else o.target,
+            .optional = o.optional,
+            .force = o.force,
+        };
+    }
+    return .{ .phases = specs, .highest_phase = highest, .objective_phases = obj_phases, .objective_kinds = obj_kinds, .objectives = flat };
+}
+
+/// Arrival-semantics phase kinds: the objective's `value` is a distance, not a
+/// count, so the single arrival completes it.
+fn objectiveIsArrival(kind: quest.PhaseKind) bool {
+    return switch (kind) {
+        .goto_point, .stay_within, .trader_interact, .rally => true,
+        else => false,
+    };
 }
 
 /// Dukes total from stock `<reward type="Item" id="casinoCoin" value="N">`
@@ -422,6 +476,7 @@ fn parseQuestDefBody(
         .highest_phase = graph.highest_phase,
         .objective_phases = graph.objective_phases,
         .objective_kinds = graph.objective_kinds,
+        .objectives = graph.objectives,
     };
 }
 

@@ -16,6 +16,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Quest phases now advance only when **all** their objectives complete (stock
+  refreshQuestCompletion): the shared `tier1_clear` phase 3 (ClearSleepers +
+  POIStayWithin) and always-active phase-0 objectives are enforced, per-objective
+  progress rides the journal wire and the ZPV6 save, and a ForcePhaseFinish
+  objective can fail a quest. The 99-def sweep over the real quests.xml
+  completes 99/99.
 - ClearSleepers quests are real now: kills only count inside the quest's
   bound POI (victim position rides the kill event), and completing the phase
   permanently suppresses the POI's sleeper volumes (persisted across restart),

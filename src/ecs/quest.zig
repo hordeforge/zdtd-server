@@ -5,6 +5,7 @@ const std = @import("std");
 const c = @import("components.zig");
 
 pub const max_journal = c.max_journal;
+pub const max_quest_objectives = c.max_quest_objectives;
 
 pub const QuestKind = enum(u8) {
     kill_zombies,
@@ -314,6 +315,27 @@ pub const QuestDef = struct {
     /// same order as objective_phases). Mirrors the wire ObjectiveWriteKind;
     /// ecs stays wire-free, game.zig maps this to the stock enum.
     objective_kinds: []const ObjectiveWireKind = &.{},
+    /// Flat objective list (XML-parsed quests only; builtin/legacy defs leave
+    /// it empty and keep the single-progress path). Drives per-objective phase
+    /// completion: stock Quest.refreshQuestCompletion requires ALL non-optional
+    /// objectives of the current phase (plus always-active phase-0 objectives)
+    /// to be complete before the phase advances.
+    objectives: []const FlatObjective = &.{},
+};
+
+/// One flat objective (stock BaseObjective), same order as the client's
+/// CreateQuest objective list. `required` carries the count the objective
+/// needs (stock `currentValue >= required`); `optional` objectives never
+/// block the phase; `force` (ForcePhaseFinish) fails the quest if left
+/// incomplete. Grounded in Quest.refreshQuestCompletion (asm.il 983645-983904).
+pub const FlatObjective = struct {
+    /// Stock BaseObjective.Phase (1-based; 0 = always-active, checked in
+    /// every phase).
+    phase: u8 = 1,
+    kind: PhaseKind = .auto,
+    required: u16 = 1,
+    optional: bool = false,
+    force: bool = false,
 };
 
 /// Objective Write subclass (Quest.Write CreateQuest): BaseObjective writes
