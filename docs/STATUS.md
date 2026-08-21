@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 189 `WORKS`,
-100 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 190 `WORKS`,
+99 `PARTIAL`, 44 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -505,6 +505,12 @@ TreasureChest/StayWithin do not consume the value client-side - exactly
 like stock, whose Reads ignore it for those types - so the wire carries
 the stock layout with stock semantics. Quests 22/9/1 -> 23/8/1, total
 188/101/44 -> **189/100/44**.
+
+Quest.PositionData row -> WORKS 2026-08-22: QuestGiver (0) is now written -
+the giver position is captured at trader accept (the offering NPC's
+position, for the client's return-to-giver marker; unset for starter
+quests) alongside the existing Location / POIPosition / POISize entries.
+Quests 23/8/1 -> 24/7/1, total 189/100/44 -> **190/99/44**.
 
 ## Wave 2026-08-20 (config + provenance pass)
 

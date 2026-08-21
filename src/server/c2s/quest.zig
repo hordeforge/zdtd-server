@@ -274,6 +274,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
                     if (idx == head.remove_index) {
                         _ = self.acceptQuestFor(c, qid);
+                        // Quest giver for PositionDataTypes.QuestGiver (0):
+                        // the trader that offered the quest, so the client's
+                        // return-to-giver marker points at the real NPC.
+                        if (self.sim.playerByPeer(c.slot)) |pslot| {
+                            if (self.sim.mask[pslot].journal) {
+                                if (self.sim.journal[pslot].findActive(qid)) |qs| {
+                                    qs.giver_x = tx;
+                                    qs.giver_y = ty;
+                                    qs.giver_z = tz;
+                                }
+                            }
+                        }
                         break;
                     }
                     idx += 1;

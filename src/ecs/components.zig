@@ -461,6 +461,12 @@ pub const QuestProgress = struct {
     /// (ShareAllQuestsWithParty). Cleared/removed when the owner leaves the
     /// party or disconnects.
     is_shared: bool = false,
+    /// Quest giver position (PositionDataTypes.QuestGiver=0): the trader/NPC
+    /// that offered the quest, for the client's return-to-giver marker.
+    /// Unset (0,0,0) for quests accepted without a giver (starter quests).
+    giver_x: f32 = 0,
+    giver_y: f32 = 0,
+    giver_z: f32 = 0,
 };
 
 pub const Journal = struct {

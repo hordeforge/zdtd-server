@@ -131,7 +131,7 @@ scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (189/100/44) and the scorecard rows below
+canonical WORKS/PARTIAL/MISSING tag (190/99/44) and the scorecard rows below
 are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
 (`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
 `CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 23 | 8 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
+| [Quests](#4-quests) | 24 | 7 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete |
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 18 | 5 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 47 | 4 | 5 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence |
-| **Total** | **189** | **100** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **190** | **99** | **44** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -452,7 +452,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**23 WORKS · 8 PARTIAL · 1 MISSING**
+**24 WORKS · 7 PARTIAL · 1 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -628,16 +628,19 @@ not a sleeper-volume clear), not completion blockers.
   stock layout with the stock semantics.
   *Anchors:* `src/server/game/quest.zig` (`obj_vals` in the journal writer)
 
-- **Quest.PositionData** `PARTIAL`
-  Location, POIPosition and POISize are written and the POI rect is resolved from
-  `prefabs.xml` at accept time. Missing: `PositionDataTypes.QuestGiver` (0) is
-  never written. Goto-target positions are no longer invented: goto_point /
+- **Quest.PositionData** `WORKS` `(2026-08-22)`
+  QuestGiver (0), Location (1), POIPosition (2) and POISize (3) are all
+  written: the giver position is captured at trader accept (the offering
+  NPC's position, for the client's return-to-giver marker; unset for
+  starter quests), and the POI rect is resolved from `prefabs.xml` at
+  accept time. Goto-target positions are no longer invented: goto_point /
   stay_within / craft quests bind the nearest real POI at accept
   (`World.nearestPoi` over the prefab index, audit B26), and the Location,
   NavObject marker and goto check all use the bound POI center. The FNV-hash
   coordinate survives only as the no-POI-data fallback for offline/test worlds.
-  *Anchors:* `src/server/game.zig:8015-8038`, `src/ecs/systems.zig:326-338`,
-  `src/ecs/world.zig:391-399`, `src/assets/quests.zig:350-361`,
+  *Anchors:* `src/server/game/quest.zig` (journal writer position data),
+  `src/server/c2s/quest.zig` (giver capture at accept),
+  `src/ecs/systems.zig:326-338`, `src/ecs/world.zig:391-399`,
   `src/wire/stock_quest.zig:12`, `:614`
 
 - **NetPackageNPCQuestList FetchList + QuestPacketEntry wire** `WORKS`

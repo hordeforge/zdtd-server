@@ -5,7 +5,7 @@
 const admin_cmds = @import("../admin_cmds.zig");
 const persist = @import("../persist.zig");
 
-pub const max_quest_position_data: usize = 3;
+pub const max_quest_position_data: usize = 4; // QuestGiver + Location + POIPosition + POISize
 
 pub const admin_help_index = [_]admin_cmds.HelpEntry{
     .{ .names = "admin", .description = "Manage user permission levels" },

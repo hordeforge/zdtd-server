@@ -137,9 +137,20 @@ pub fn fillStockJournalWrites(
             }
             obj_vals = obj_val_store[n][0..lim];
         }
-        // PositionData: the Location marker plus, when the quest was placed
-        // in a POI, the rect ObjectiveRallyPoint scans for its rally block.
+        // PositionData: QuestGiver (the trader who offered the quest, for the
+        // client's return-to-giver marker), the Location marker plus, when
+        // the quest was placed in a POI, the rect ObjectiveRallyPoint scans
+        // for its rally block.
         var pn: usize = 0;
+        if (s.giver_x != 0 or s.giver_y != 0 or s.giver_z != 0) {
+            pos_store[n][pn] = .{
+                .kind = packages.stock_quest.position_data_quest_giver,
+                .x = s.giver_x,
+                .y = s.giver_y,
+                .z = s.giver_z,
+            };
+            pn += 1;
+        }
         if (d.kind == .goto_point or d.kind == .kill_zombies or d.kind == .fetch_item) {
             // Goto target: the bound POI center (audit B26) or the def
             // marker when no POI data exists.

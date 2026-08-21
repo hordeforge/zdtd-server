@@ -4380,8 +4380,8 @@ test "scenario journal PDF carries max_journal quests (GAP 12)" {
     var reward_store: [@import("../ecs/components.zig").max_journal][quest_mod.max_reward_flags]packages.stock_quest.RewardWire = undefined;
     var obj_val_store: [@import("../ecs/components.zig").max_journal][quest_mod.max_phases]u8 = undefined;
     var kind_store: [@import("../ecs/components.zig").max_journal][quest_mod.max_phases]packages.stock_quest.ObjectiveWriteKind = undefined;
-    // game.zig max_quest_position_data = 3; keep the two in lockstep.
-    var pos_store: [@import("../ecs/components.zig").max_journal][3]packages.stock_quest.PositionEntry = undefined;
+    // game.zig max_quest_position_data = 4; keep the two in lockstep.
+    var pos_store: [@import("../ecs/components.zig").max_journal][4]packages.stock_quest.PositionEntry = undefined;
     const qn = g.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &kind_store, &pos_store);
     try std.testing.expectEqual(got, qn);
     try std.testing.expect(qn > 2); // the old hardcoded cap
