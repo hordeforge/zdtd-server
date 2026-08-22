@@ -155,10 +155,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 25 | 5 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 22 | 6 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 20 | 5 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 21 | 4 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 36 | 8 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 44 | 4 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **250** | **41** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **251** | **40** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2704,9 +2704,16 @@ unvalidated, and durability, mods and repair do not exist.
   Loot respawn is wired: `maybeRespawnContainer` re-rolls empty world containers
   after `LootRespawnDays` with a cycle-varying seed (`lootSeedAt(pos) +% cycle*%2654435761`),
   fail-closed on missing `LootList`; called from inventory path on take. `destroy_on_close`
-  (`playerBackpack` true, safes/backpacks `empty`) is parsed in stock `loot.xml` but not
-  acted on by server — stock also gates it client-side via `TEFeatureStorage`.
-  *Anchors:* `src/server/game/chunk_fill.zig:293-322`, `src/server/c2s/inv.zig:586-588`
+  (`playerBackpack` true, safes/backpacks `empty`) is **not** parsed in zdtd (233
+  stock loot.xml entries carry it) and not acted on. RE correction 2026-08-22: the
+  stock path is server-side, not client-gated - `CheckDestroyTileEntity` (IL=37,
+  loot-economy.md 454-456) requires `ITileEntityLootable` + `ShouldDestroyOnClose`
+  (a `TEFeatureStorage` method fed by the loot definition) and then
+  `DropContentOfLootContainerServer` + destroys the block. The trigger caller
+  (what invokes CheckDestroyTileEntity on close) is not yet documented in
+  7dtd-research, so the parity needs that RE evidence (RE-blocked, not faked).
+  *Anchors:* `src/server/game/chunk_fill.zig:293-322`, `src/server/c2s/inv.zig:586-588`,
+  `../../7dtd-research/docs/loot-economy.md:454-456`
 
 - **Container capacity limits** `WORKS` `(2026-08-22 re-audit)`
   The world container store is 4096 entries (GAP 12 raised it from 256, and
@@ -2892,12 +2899,16 @@ and server-to-client XP/level pushes do not exist.
   `buildEntityStatsBuffBody` on join.
   *Anchors:* `src/server/game.zig:4790-4793`
 
-- **Health component and client-claimed damage into the sim** `PARTIAL`
+- **Health component and client-claimed damage into the sim** `WORKS` `(2026-08-22 re-audit)`
   C2S DamageEntity is validated (actor alive, target alive, both in interest range,
   strength capped, fatal honoured only against NPCs, PvP gate, armour mitigation)
   and applied. This is the only route by which a player's HP moves on the server
-  other than eating.
-  *Anchors:* `src/server/game.zig:4881-4936`, `src/ecs/world.zig:665-710`,
+  other than eating. 2026-08-22 re-audit: the handler is complete and matches the
+  row's claims - the C2S path (c2s/misc.zig NetPackageDamageEntity) adds plugin
+  damage verdicts (on_player_damage), held-tool durability wear, combat noise and
+  knockback-velocity fan-out on top of the validated apply; the row carried no
+  documented residual and the stale `PARTIAL` marker is corrected.
+  *Anchors:* `src/server/c2s/misc.zig:381-520`, `src/ecs/world.zig:665-710`,
   `src/ecs/components.zig:22-30`
 
 - **Zombie melee damage replicated to the victim** `WORKS` (2026-08-06)

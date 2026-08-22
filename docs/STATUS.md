@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 250 `WORKS`,
-41 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 251 `WORKS`,
+40 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -510,6 +510,14 @@ survives a relog; v2-6 files still read and upgrade in place (slots widened
 with zero use_times, journals re-encoded as before). Round-trip + v6->v7
 migration tests; the inventory-persistence row stays PARTIAL for mods,
 cosmetics and seed.
+Then the health/damage row went WORKS on re-audit: the C2S DamageEntity path
+(c2s/misc.zig) implements everything the row claims (validated apply, PvP
+gate, armour mitigation, capped strength, NPC-only fatal) plus plugin damage
+verdicts, durability wear, combat noise and knockback fan-out; the row carried
+no residual, so the stale PARTIAL marker was corrected. Progression 21/4/0;
+total **251/40/0**. The destroy_on_close row gained RE evidence: the stock
+path is server-side (`CheckDestroyTileEntity` IL=37) not client-gated, so the
+row's claim was corrected and the missing trigger caller marked RE-blocked.
 The dashboard
 (docs/provenance.html) is synced.
 
