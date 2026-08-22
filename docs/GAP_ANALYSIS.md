@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 22 | 1 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 32 | 12 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 20 | 7 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 21 | 6 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory |
 | [Player progression](#10-player-progression) | 17 | 5 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **251** | **44** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **252** | **43** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2488,22 +2488,23 @@ unvalidated, and durability, mods and repair do not exist.
   recipe-unlock check needs the progression/magazine system.
   *Anchors:* `src/server/game/craft.zig:121`, `src/assets/recipes.zig:181-184`
 
-- **NetPackageInventoryTransactionRequest / Response wire format** `PARTIAL`
-  The stock `InventoryTransaction::Read` layout is now parsed and detected:
-  `parseStockInvTx` (`src/wire/packages.zig`) decodes i32 opCount then per
-  inventory Guid key, i32 InitialHash, i32 FinalHash, i32 opCount, and
-  `InventoryOperation.Write` per op (i16 op: 0 SetAbsolute / 1 SetRelative /
-  2 SetAll; op<=1 ItemStack.Write + i32 index, op 2 ItemStack.WriteArray with
-  i16 count, -1 = null), all capped and fail-closed. `c2s/inv.zig` tries the
-  native 11-byte body first and falls back to the stock parse, counting hits on
-  `c2s_stock_invtx`. Stock Response is bool, i32 count, then (Guid, bool,
-  ItemStack[])*. Remaining: apply ops to the ECS inventory and emit the stock
-  response - blocked on Guid-key resolution: `InventoryTransaction.Read` clears
-  the whole transaction on an unknown key, and the server registry population
-  path (`CreateInventoryServer` callers, Key delivery to the client) has no
-  callers in the RE corpus (RE-blocked, protocol-packages.md 6.13; candidate
-  capture: container-open sequence vs stock dedi).
-  *Anchors:* `src/wire/packages.zig:3518-3640`, `src/server/c2s/inv.zig`,
+- **NetPackageInventoryTransactionRequest / Response wire format** `WORKS`
+  The stock `InventoryTransaction::Read` layout is parsed (`parseStockInvTx`
+  decodes per-inventory Guid key, InitialHash, FinalHash, opCount and
+  `InventoryOperation.Write` ops: 0 SetAbsolute / 1 SetRelative /
+  2 SetAll, all capped and fail-closed), and the ops now APPLY to the player's
+  ECS inventory (SetAbsolute/SetRelative write the client's reported stack at
+  the index, SetAll replaces the array, bounds + stack caps hold) with the
+  stock minimal response ack (success + count 0). The handler tries the stock
+  layout before the native 11-byte body (the native parser only checks
+  len >= 11 and would otherwise misread stock traffic). The Guid registry
+  population path stays unpinned RE (protocol-packages.md 6.13), so the
+  player's own transactions accept without key validation - the same
+  client-trust model as the C2S PlayerInventory push (ADR 0007), no wider
+  surface. Scenario `stock InventoryTransaction applies and acks` pins the
+  apply + ack.
+  *Anchors:* `src/wire/packages.zig:4313-4400` (`parseStockInvTx`),
+  `src/server/c2s/inv.zig:536-591` (stock apply + ack),
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`
 

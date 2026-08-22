@@ -775,7 +775,7 @@ fn skipPackedBoolArray(r: *binary.Reader) binary.ReadError!void {
     r.pos += nbytes;
 }
 
-fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) components.InvSlot {
+pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) components.InvSlot {
     if (s.type_id == 0 or s.count == 0) return .{};
     const item_id: u16 = if (reverse) |rv| rv(ctx, s.type_id) else fallbackEcsId(s.type_id);
     if (item_id == 0) return .{};

@@ -533,17 +533,63 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        const tx = packages.parseInvTxRequest(body) catch {
-            // Stock-shaped request? (RE protocol-packages.md 6.13): a real
-            // stock client sends InventoryTransaction.Write, which the native
-            // parser cannot read. The transactional mapping (Guid resolution,
-            // op application, hash check, stock response) is the top wire
-            // item; for now detect + count so real client traffic is visible.
-            if (packages.parseStockInvTx(body)) |_| {
-                self.harness.counters.inc(.c2s_stock_invtx);
-            } else |_| {}
+        // A real stock client sends InventoryTransaction.Write (RE
+        // protocol-packages.md 6.13). Try the stock layout first: the native
+        // 11-byte parser only checks len >= 11, so a stock body would
+        // otherwise be misread as a native request. Native bodies fail the
+        // stock parse (the first i32 count misreads the op bytes).
+        if (packages.parseStockInvTx(body) catch null) |stx| {
+            // Apply the stock ops to the player's inventory (same
+            // client-trust model as ADR 0007 PlayerInventory: the C2S
+            // PlayerInventory push is already authoritative, so a stock
+            // backpack/container transaction is no wider a surface) and ack
+            // with the stock minimal response. The Guid registry population
+            // path is unpinned RE, so the player's own transactions accept
+            // without key validation; bounds + stack caps hold.
+            self.harness.counters.inc(.c2s_stock_invtx);
+            if (self.sim.playerByPeer(c.slot)) |ps| {
+                if (self.sim.mask[ps].inventory) {
+                    var ok = true;
+                    for (stx.entries[0..stx.entry_n]) |*en| {
+                        for (en.ops[0..en.op_n]) |op| {
+                            switch (op.op) {
+                                0, 1 => { // SetAbsolute / SetRelative:
+                                    // the client's reported stack at the index
+                                    // is authoritative
+                                    if (op.index < 0 or op.index >= @as(i32, @intCast(ecs.components.max_inv_slots))) {
+                                        ok = false;
+                                        continue;
+                                    }
+                                    self.sim.inventory[ps].slots[@intCast(op.index)] = packages.stock_inv.toEcs(op.stack, reverseItemType, self);
+                                },
+                                2 => { // SetAll: replace the inventory array
+                                    if (op.new_n > ecs.components.max_inv_slots) {
+                                        ok = false;
+                                        continue;
+                                    }
+                                    @memset(&self.sim.inventory[ps].slots, .{});
+                                    var si: u16 = 0;
+                                    while (si < op.new_n) : (si += 1) {
+                                        self.sim.inventory[ps].slots[si] = packages.stock_inv.toEcs(op.new_stacks[si], reverseItemType, self);
+                                    }
+                                },
+                                else => ok = false,
+                            }
+                        }
+                    }
+                    if (ok) {
+                        self.clampInventoryStacks(&self.sim.inventory[ps]);
+                        self.sim.markDirty(ps, .{ .inv = true });
+                        // Stock minimal ack: success true + count 0 (full
+                        // stacks ride only for non-primary players).
+                        var ack: [5]u8 = .{ 1, 0, 0, 0, 0 };
+                        try self.sendGame(peer, "NetPackageInventoryTransactionResponse", &ack);
+                    }
+                }
+            }
             return true;
-        };
+        }
+        const tx = packages.parseInvTxRequest(body) catch return true;
         var r: invsys.Result = .{};
         // Captured before apply: a rejected place must refund what it consumed.
         const place_item_id: u16 = blk: {

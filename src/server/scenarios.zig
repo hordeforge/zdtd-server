@@ -7499,3 +7499,63 @@ test "scenario blood-moon music is per-party, not global" {
     try std.testing.expect(!g.playerBloodMoonMusic(ca));
     std.debug.print("PASS bm-music: per-party eligibility, global-bool approximation gone\n", .{});
 }
+
+test "scenario stock InventoryTransaction applies and acks" {
+    // A real stock client sends InventoryTransaction.Write (RE
+    // protocol-packages.md 6.13), which the native parser cannot read. The
+    // server now applies the ops to the player's inventory (SetAll replaces
+    // the array) and replies with the stock minimal ack (success + count 0).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // The starter kit puts wood at some slot; remember the first non-empty
+    // slot so SetAll's replacement is observable.
+    var wood_slot: usize = std.math.maxInt(usize);
+    for (g.sim.inventory[ps].slots, 0..) |sl, i| {
+        if (sl.item_id == 7) {
+            wood_slot = i;
+            break;
+        }
+    }
+    if (wood_slot == std.math.maxInt(usize)) return error.SkipZigTest;
+
+    // Stock SetAll body: 1 inventory, Guid, hashes, opCount 1, op 2 with an
+    // empty array (count 0 = clear).
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeI32(1);
+    for (0..16) |i| try w.writeByte(@intCast(i));
+    try w.writeI32(1);
+    try w.writeI32(2);
+    try w.writeI32(1); // opCount
+    try w.writeI16(2); // SetAll
+    try w.writeI16(0); // empty array
+    var fb: [192]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", w.written()));
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[wood_slot].item_id);
+    // The stock minimal ack arrives (success true + count 0).
+    const ack_id = packages.idOf("NetPackageInventoryTransactionResponse").?;
+    var got_ack = false;
+    for (cap.slots[0..cap.n]) |s| {
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == ack_id and p.body.len >= 5 and p.body[0] == 1) got_ack = true;
+        }
+    }
+    try std.testing.expect(got_ack);
+    std.debug.print("PASS stock-invtx: SetAll applied + minimal ack\n", .{});
+}
