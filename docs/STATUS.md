@@ -516,6 +516,12 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then the provenance dashboard became interactive: scripts/gen_provenance.py
+regenerates docs/provenance.html from the live GAP_ANALYSIS markers - the
+scorecard counts recount per category, every GAP feature row embeds under
+its category (click a row to expand), a search box filters categories and
+features, state chips toggle WORKS/PARTIAL/waived rows, and the numeric
+headers sort. Regenerate with `python3 scripts/gen_provenance.py`.
 Then the quests.xml stage modifiers landed: gamestage_mod/gamestage_bonus
 parse per quest def and the player's active quest feeds gameStageOf (stock
 get_gameStage, progression.md 5) - an infested clear (mod .6, bonus 30)
