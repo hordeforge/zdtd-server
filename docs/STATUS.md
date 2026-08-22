@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 219 `WORKS`,
-76 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 220 `WORKS`,
+75 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -259,6 +259,11 @@ lists), and the GroupGenericZombie sleeper volumes resolve through
 gamestages (sleeper.zig resolves the stage spawn group before the
 byName/entitygroups chain) instead of falling through to zombieBoe.
 Entities 27/17/4 -> **29/15/4**; total **219/76/38**.
+Then the daytime wildlife spawner row went WORKS on re-audit: the class
+lookup resolves the per-player-biome wildlife group and picks real classes
+(rabbits/chickens/does/boars from WildGameForest with their own A35 stats)
+instead of the stag-only slot-7 scan; the stag is now only the no-group
+fallback. Entities 29/15/4 -> **30/14/4**; total **220/75/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

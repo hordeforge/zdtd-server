@@ -149,12 +149,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 29 | 15 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; timid animals flee; wildlife despawns and animates like stock; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **219** | **76** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **220** | **75** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2130,12 +2130,18 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/systems.zig:1072-1128`, `src/server/game.zig:3096-3134`,
   `src/ecs/systems.zig:1337-1339`
 
-- **Daytime wildlife spawner** `PARTIAL`
-  One animal per 60 s during daylight up to the cap. The class lookup scans
-  `class_table` for `kind==.animal` and only slot 7 is ever an animal, filled with
-  `defaultAnimal() = animalStag`. Every animal in the world is a stag regardless of
-  the WildGameForest pick. No rabbits, chickens, does, boars.
-  *Anchors:* `src/ecs/aidirector.zig:188-231`, `src/server/game.zig:763-773`,
+- **Daytime wildlife spawner** `WORKS` `(2026-08-22 re-audit)`
+  One animal per 60 s during daylight up to the cap (MaxSpawnedAnimals). The
+  class lookup is no longer the stag-only slot-7 scan: `spawnAnimalsNearPlayers`
+  resolves the **per-player-biome wildlife group** (`biome_group_fn`, the
+  Biome-aware spawn-group-selection row), picks a class by name from the group
+  (`group_pick_fn`), and falls back to the full entityclasses stats via
+  `class_resolve_fn` (A35) when the class is not preloaded - so WildGameForest
+  picks spawn rabbits, chickens, does and boars with their own stats, not just
+  `defaultAnimal() = animalStag` (the stag is only the no-group fallback).
+  All three callbacks are wired in `init_assets.zig`.
+  *Anchors:* `src/ecs/aidirector.zig:464` spawnAnimalsNearPlayers,
+  `src/server/game/init_assets.zig:377-384` (callback wiring),
   `src/assets/entities.zig:74-80`
 
 - **Enemy animals (wolf, bear, dire wolf, mountain lion, snake, coyote)** `PARTIAL (waived)`
