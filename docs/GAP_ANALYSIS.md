@@ -146,7 +146,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
-| [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
+| [Traders](#5-traders) | 16 | 4 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, lazy full-reroll restock, stock persistence, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 23 | 21 | 4 | 48 | Real fights with real stakes and real A*; timid animals flee instead of sprinting at you (AITask-gated); population is still thin |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **207** | **88** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **208** | **87** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1106,20 +1106,23 @@ parsed, and quest offering is unwired.
   `src/server/game.zig` (`stockEntries`), `asm.il:856828-856866`,
   `asm.il:860548-860586`, `asm.il:1830586-1830600`
 
-- **Restock timer** `PARTIAL`
-  `traderRestock` respects each trader's `<trader_info>` `reset_interval`
-  (-1 never, 0 every day roll, N every N days; `fillTraderFromXml` copies it
-  into `TraderStock.reset_interval` and stamps `last_restock_day` at fill), so
-  the cadence is stock-faithful. The refill itself stays a refill: it adds +10
-  to every existing entry capped at 50 and restores the money pool, where stock
-  does a full reroll on the channel-1 lock when
-  `worldTime - lastInventoryUpdate >= ResetIntervalInTicks` (3 days for humans, 1
-  for vending) via `HandleFullReset` plus `SpawnTierGroup`. zdtd never introduces
-  new items and never drops sold-out ones (the inventory-roll and depth rows own
-  that). Trader stock is not persisted either.
-  *Anchors:* `src/ecs/systems.zig:711-736`, `src/ecs/components.zig:538-556`,
-  `src/server/game.zig:8452-8457`, `src/ecs/aidirector.zig:213-251`,
-  `asm.il:863657-863767`, `asm.il:863770-863910`, `Data/Config/traders.xml:1240`
+- **Restock timer** `WORKS` `(2026-08-22)`
+  The cadence is stock-faithful (`reset_interval` parsed from `<trader_info>`:
+  -1 never, 0 every day roll, N every N days), and the refill is now stock's
+  full reroll: `maybeRestockTrader` is `HandleFullReset` on the channel-1 lock
+  (trader open), re-running the seeded roll so sold-out entries drop and new
+  stock appears (`fillTraderFromXml` rebuilds the window; scenario
+  `trader-restock` proves the lazy open-time trigger, the day advance and the
+  wallet regen). The tick-side `traderRestock` keeps drained stackables from
+  sitting at zero between opens. Trader stock now **persists** across restart
+  (traders.zst: entries by item name, wallet, reset cadence; restored by
+  trader name over the fresh XML fill; unknown item names fail closed to a
+  skipped entry; scenario `trader-persist` round-trips a traded-against
+  window). The inventory-roll/depth rows still own roll semantics.
+  *Anchors:* `src/server/game/trader.zig:207` (maybeRestockTrader),
+  `src/server/c2s/misc.zig:668`, `src/server/persist.zig` saveTraders/
+  loadTraders, `src/ecs/systems.zig:1288` (traderRestock),
+  `asm.il:863657-863767`, `asm.il:863770-863910`
 
 - **Open hours and the closed-door behaviour** `WORKS` (door TE features residual)
   `open_time`/`close_time` are parsed per `<trader_info>` and the lock-open path

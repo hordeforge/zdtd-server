@@ -821,6 +821,16 @@ pub const Game = struct {
 
         try game_init_assets.loadAssets(self, allocator, opts);
         try @import("game/init_world.zig").initWorld(self, allocator, port, opts, had_saved_entities);
+        // Trader stock survives restart (traders.zst): initWorld filled the
+        // fresh XML rolls; a saved window overrides them by trader name (stock
+        // TraderManager persists its inventory, so a reboot must not re-roll
+        // what a player was looking at). Missing file = fresh world.
+        self.loadTraders() catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load traders", e);
+                return e;
+            }
+        };
     }
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
@@ -1358,6 +1368,19 @@ pub const Game = struct {
 
     fn loadEntities(self: *Game) !void {
         return persist.loadEntities(self);
+    }
+
+    /// Trader stock persists across restart (traders.zst): a saved window
+    /// overrides the fresh XML fill by trader name, so a reboot does not
+    /// re-roll what a player was looking at (stock TraderManager saves its
+    /// inventory). Entries ride item names (AssignIds ids are version-
+    /// dependent); unknown names fail closed to a skipped entry.
+    pub fn saveTraders(self: *Game) !void {
+        return persist.saveTraders(self);
+    }
+
+    fn loadTraders(self: *Game) !void {
+        return persist.loadTraders(self);
     }
 
     pub fn saveClaims(self: *Game) !void {

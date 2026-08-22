@@ -16,6 +16,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Trader stock persists across restart (traders.zst): a saved window
+  overrides the fresh XML fill by trader name, so a reboot does not re-roll
+  what a player was looking at (stock TraderManager saves its inventory).
+  Entries ride item names (AssignIds ids are version-dependent); unknown
+  names fail closed to a skipped entry.
 - Timid animals no longer attack: `approach_attack` is gated by the class's
   inherited AITask-* list parsed from `entityclasses.xml` (stock timid
   templates carry RunawayWhenHurt/RunawayFromEntity/Look/Wander, no attack

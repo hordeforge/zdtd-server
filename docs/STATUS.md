@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 207 `WORKS`,
-88 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 208 `WORKS`,
+87 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -184,6 +184,15 @@ proves the discriminator is the task list, not IsEnemyEntity (it overrides
 that to false for safe-zone spawning but keeps its attack task). The field
 rides the per-entity class copy on every spawn path; unit test + systems
 test. Entities 22/22/4 -> **23/21/4**; total **207/88/38**.
+Then the restock-timer row went WORKS: the refill is stock's full reroll on
+the channel-1 lock (`maybeRestockTrader` = HandleFullReset, lazy on the
+trader open when reset_interval elapsed, re-rolling the window so sold-out
+entries drop and fresh stock appears; the tick-side refill only keeps
+drained stackables alive between opens), and trader stock now **persists**
+across restart (traders.zst: entries by item name, wallet, reset cadence;
+restored by trader name over the fresh XML fill, unknown item names fail
+closed; scenario trader-persist round-trips a traded-against window).
+Traders 15/5/3 -> **16/4/3**; total **208/87/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

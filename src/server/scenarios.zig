@@ -6170,6 +6170,85 @@ test "scenario trader restock rebuilds the window lazily on open" {
     std.debug.print("PASS trader-restock: lazy window rebuild on open after reset_interval\n", .{});
 }
 
+test "scenario trader stock persists across restart (traders.zst)" {
+    // GAP restock-timer row: stock TraderManager persists its inventory, so a
+    // reboot must not re-roll what a player was looking at. initWorld spawns
+    // "Trader Jen" deterministically and fills the fresh XML roll; the saved
+    // window (traders.zst) overrides it by trader name on the restart, and the
+    // wallet / restock cadence come back with it. Entries ride item names
+    // (AssignIds ids are version-dependent); unknown names fail closed.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_traderpersist");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var wood_name: []const u8 = "";
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_traderpersist", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        // Find the initWorld trader and shape a traded-against window: a
+        // distinctive entry, drained wallet, and a 3-day reset cadence.
+        var ts: ?ecs.Slot = null;
+        var s: usize = 0;
+        while (s < ecs.max_entities) : (s += 1) {
+            if (g.sim.alive[s] and g.sim.mask[s].trader_stock and
+                std.mem.eql(u8, g.sim.trader_stock[s].name, "Trader Jen"))
+            {
+                ts = @intCast(s);
+                break;
+            }
+        }
+        const t = ts orelse return error.TestUnexpectedResult;
+        const wood = g.items.byName("resourceWood") orelse return error.TestUnexpectedResult;
+        g.sim.trader_stock[t].entries[0] = .{
+            .item = wood.id,
+            .count = 37,
+            .quality = 1,
+            .price = 222,
+            .sell = 11,
+            .markup = 0,
+        };
+        wood_name = wood.name;
+        g.sim.trader_stock[t].n = 1;
+        g.sim.trader_stock[t].wallet = 1234;
+        g.sim.trader_stock[t].wallet_default = 4321;
+        g.sim.trader_stock[t].reset_interval = 3;
+        g.sim.trader_stock[t].last_restock_day = 7;
+        try g.saveTraders();
+    }
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_traderpersist", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var ts: ?ecs.Slot = null;
+        var s: usize = 0;
+        while (s < ecs.max_entities) : (s += 1) {
+            if (g.sim.alive[s] and g.sim.mask[s].trader_stock and
+                std.mem.eql(u8, g.sim.trader_stock[s].name, "Trader Jen"))
+            {
+                ts = @intCast(s);
+                break;
+            }
+        }
+        const t = ts orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(@as(usize, 1), g.sim.trader_stock[t].n);
+        try std.testing.expectEqual(@as(u16, 37), g.sim.trader_stock[t].entries[0].count);
+        try std.testing.expectEqual(@as(u16, 222), g.sim.trader_stock[t].entries[0].price);
+        try std.testing.expectEqual(@as(u16, 11), g.sim.trader_stock[t].entries[0].sell);
+        try std.testing.expectEqualStrings(wood_name, g.items.byId(g.sim.trader_stock[t].entries[0].item).?.name);
+        try std.testing.expectEqual(@as(i32, 1234), g.sim.trader_stock[t].wallet);
+        try std.testing.expectEqual(@as(i32, 4321), g.sim.trader_stock[t].wallet_default);
+        try std.testing.expectEqual(@as(i32, 3), g.sim.trader_stock[t].reset_interval);
+        try std.testing.expectEqual(@as(u32, 7), g.sim.trader_stock[t].last_restock_day);
+        std.debug.print("PASS trader-persist: stock/wallet/cadence restored across restart by trader name\n", .{});
+    }
+}
+
 test "scenario air drop pushes a supply_drop NavObject marker" {
     // AIDirectorAirDropComponent.RefreshCrates (map-objects.md section 8): the
     // one server-push nav marker case, sent alongside the loot-bag spawn.
