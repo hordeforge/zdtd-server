@@ -1,6 +1,7 @@
 //! ECS world: dense SoA columns, resources, O(1) net id map, spawn helpers.
 
 const std = @import("std");
+const rng_util = @import("../util/rng.zig");
 const ent = @import("entity.zig");
 const c = @import("components.zig");
 const electric = @import("electric.zig");
@@ -1117,13 +1118,15 @@ pub const World = struct {
     /// impulse is a small deterministic per-cell draw (seeded by world pos, so
     /// the same collapse reproduces the same scatter).
     pub fn spawnFallingBlock(self: *World, cell: c.FallingCell, mass_kg: f32) ?NetId {
-        var prng = std.Random.Xoshiro256.init(
+        // Position-seeded stream through util.rng (the one sim PRNG policy);
+        // the SplitMix64 fold in initFromU64 keeps distinct cells on distinct
+        // streams so the same collapse reproduces the same scatter.
+        var prng = rng_util.XorShift32.initFromU64(
             @as(u64, @bitCast(@as(i64, cell.x))) *% 0x9E37_79B1_7F4A_7C15 ^
                 @as(u64, @bitCast(@as(i64, cell.y))) *% 0xBF58_476D_1CE4_E5B9 ^
                 @as(u64, @bitCast(@as(i64, cell.z))) *% 0x94D0_49BB_1331_11EB,
         );
-        const rnd = prng.random();
-        const dy: f32 = (rnd.float(f32) - 0.5) * 0.2; // stock -0.1..0.1
+        const dy: f32 = (prng.nextFloat() - 0.5) * 0.2; // stock -0.1..0.1
         const s = self.spawnBase(
             .falling_block,
             @as(f32, @floatFromInt(cell.x)) + 0.5,
@@ -1134,8 +1137,8 @@ pub const World = struct {
         self.mask[s].falling = true;
         self.falling[s] = .{
             .n = 1,
-            .vx = (rnd.float(f32) - 0.5) * 1.0,
-            .vz = (rnd.float(f32) - 0.5) * 1.0,
+            .vx = (prng.nextFloat() - 0.5) * 1.0,
+            .vz = (prng.nextFloat() - 0.5) * 1.0,
             .mass_kg = mass_kg,
         };
         self.falling[s].cells[0] = cell;

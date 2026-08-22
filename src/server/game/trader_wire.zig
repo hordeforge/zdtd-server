@@ -82,6 +82,10 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
         const epos = self.sim.transform[ts];
         if (!inTradeReach(self, c, epos.x, epos.y, epos.z)) return;
         const st = &self.sim.trader_stock[ts];
+        // Atomic: validate and map before mutating. Any bad entry aborts without
+        // partial trader state. `target` holds the server entry index for each
+        // echo entry (-1 = no server match / no mutation yet).
+        var target: [ecs.components.max_stock]i16 = [_]i16{-1} ** ecs.components.max_stock;
         var used: [ecs.components.max_stock]bool = [_]bool{false} ** ecs.components.max_stock;
         var i: usize = 0;
         while (i < read.n) : (i += 1) {
@@ -91,18 +95,25 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
             const iname = self.items.nameByStockType(src.item.type_id) orelse return;
             const eid = self.items.ecsIdByName(iname);
             if (eid == 0) return;
-            // First server entry with the same item (sells keep a trader's
-            // window unchanged, so appends here would be an edit, not a buy).
             var si: usize = 0;
             while (si < st.entries.len) : (si += 1) {
                 if (!used[si] and st.entries[si].item == eid) {
                     used[si] = true;
-                    st.entries[si].count = src.item.count;
-                    st.entries[si].quality = @intCast(src.item.quality);
-                    st.entries[si].markup = src.markup;
+                    target[i] = @intCast(si);
                     break;
                 }
             }
+        }
+        // All validated: apply.
+        i = 0;
+        while (i < read.n) : (i += 1) {
+            const ti = target[i];
+            if (ti < 0) continue;
+            const src = entries_buf[i];
+            const si: usize = @intCast(ti);
+            st.entries[si].count = src.item.count;
+            st.entries[si].quality = @intCast(src.item.quality);
+            st.entries[si].markup = src.markup;
         }
         // Entries the echo no longer carries were bought out (stock removes a
         // depleted PrimaryInventory row); clear them.
@@ -117,41 +128,47 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
 
     const vm = self.vending.get(.{ .x = td.te_x, .y = td.te_y, .z = td.te_z }) orelse return;
     if (!inTradeReach(self, c, @floatFromInt(td.te_x), @floatFromInt(td.te_y), @floatFromInt(td.te_z))) return;
-    var used: [vending_mod.max_vending_stock]bool = [_]bool{false} ** vending_mod.max_vending_stock;
-    var i: usize = 0;
-    while (i < read.n) : (i += 1) {
-        const src = entries_buf[i];
+    // Atomic: validate whole batch, plan mutations, then apply. Record desired
+    // per-echo mutation as target slot + counts/quality so no partial vending
+    // state leaks on a bad tail entry.
+    const Pending = struct { slot: i16 = -1, type_id: i32 = 0, count: i32 = 0, quality: u8 = 1, markup: i8 = 0, is_append: bool = false };
+    var pending: [vending_mod.max_vending_stock + ecs.components.max_stock]Pending = [_]Pending{.{}} ** (vending_mod.max_vending_stock + ecs.components.max_stock);
+    var pending_n: usize = 0;
+    var used_plan: [vending_mod.max_vending_stock]bool = [_]bool{false} ** vending_mod.max_vending_stock;
+    // First pass: validate and reserve slots without mutating vm.stock.
+    var pi: usize = 0;
+    while (pi < read.n) : (pi += 1) {
+        const src = entries_buf[pi];
         if (src.item.type_id == 0) continue;
         if (src.item.quality < 1 or src.item.quality > 6) return;
         if (self.items.nameByStockType(src.item.type_id) == null) return;
         var si: usize = 0;
         while (si < vm.stock.len) : (si += 1) {
-            if (!used[si] and vm.stock[si].type_id == src.item.type_id) {
-                used[si] = true;
-                vm.stock[si].count = @intCast(src.item.count);
-                vm.stock[si].quality = @intCast(src.item.quality);
-                vm.stock[si].markup = src.markup;
-                break;
-            }
+            if (!used_plan[si] and vm.stock[si].type_id == src.item.type_id) break;
         }
-        if (si == vm.stock.len) {
-            // A sold item the machine never stocked: append it (stock
-            // Entry.addedByPlayer; vending is owner-priced so markup rides
-            // the entry and the client prices from it).
+        if (si < vm.stock.len) {
+            used_plan[si] = true;
+            pending[pending_n] = .{ .slot = @intCast(si), .type_id = src.item.type_id, .count = @intCast(src.item.count), .quality = @intCast(src.item.quality), .markup = src.markup };
+            pending_n += 1;
+        } else {
             var free: usize = 0;
-            while (free < vm.stock.len and vm.stock[free].type_id != 0) : (free += 1) {}
+            while (free < vm.stock.len and (vm.stock[free].type_id != 0 or used_plan[free])) : (free += 1) {}
             if (free < vm.stock.len) {
-                used[free] = true;
-                vm.stock[free] = .{
-                    .type_id = src.item.type_id,
-                    .count = @intCast(src.item.count),
-                    .quality = @intCast(src.item.quality),
-                    .markup = src.markup,
-                };
+                used_plan[free] = true;
+                pending[pending_n] = .{ .slot = @intCast(free), .type_id = src.item.type_id, .count = @intCast(src.item.count), .quality = @intCast(src.item.quality), .markup = src.markup, .is_append = true };
+                pending_n += 1;
             }
         }
     }
-    i = 0;
+    var used: [vending_mod.max_vending_stock]bool = [_]bool{false} ** vending_mod.max_vending_stock;
+    var pj: usize = 0;
+    while (pj < pending_n) : (pj += 1) {
+        const p2 = pending[pj];
+        const si: usize = @intCast(p2.slot);
+        used[si] = true;
+        vm.stock[si] = .{ .type_id = p2.type_id, .count = p2.count, .quality = p2.quality, .markup = p2.markup };
+    }
+    var i: usize = 0;
     while (i < vm.stock.len) : (i += 1) {
         if (!used[i]) vm.stock[i] = .{};
     }

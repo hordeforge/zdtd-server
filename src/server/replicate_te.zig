@@ -24,6 +24,7 @@ const game_trader = @import("game/trader.zig");
 const rng_util = @import("../util/rng.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const stock_te = packages.stock_te;
+const util_log = @import("../util/log.zig");
 
 pub fn wsGroupToStock(self: *Game, dst: []packages.stock_inv.StockSlot, src: []const ecs.components.InvSlot) void {
     for (dst, src) |*d, s| {
@@ -76,7 +77,7 @@ pub fn broadcastDirtyWorkstations(self: *Game) !void {
         // Keep dirty until encode+broadcast succeed so a failed send retries next tick.
         const body = buildWorkstationBody(self, w, self.body_buf[8192..16384]) catch |err| {
             self.harness.counters.inc(.encode_errors);
-            std.debug.print("zdtd: 
+            util_log.err(
                 "workstation TE encode failed at ({d},{d},{d}): {s}\n",
                 .{ w.x, w.y, w.z, @errorName(err) },
             );
@@ -90,7 +91,7 @@ pub fn broadcastDirtyWorkstations(self: *Game) !void {
             self.interest_range,
         ) catch |err| {
             self.harness.counters.inc(.net_send_errors);
-            std.debug.print("zdtd: 
+            util_log.err(
                 "workstation TE broadcast failed at ({d},{d},{d}): {s}\n",
                 .{ w.x, w.y, w.z, @errorName(err) },
             );
@@ -135,7 +136,7 @@ pub fn seedChestBlockId(self: *Game) u16 {
     // "no override" when the operator left a broken/unreadable file.
     const slice = io_fs.readFileInto(path, &buf) catch |err| {
         if (err != error.FileNotFound) {
-            std.debug.print(
+            util_log.warn(
                 "seed_chest_block_id read failed: {s}; using AssignIds/default\n",
                 .{@errorName(err)},
             );
@@ -144,7 +145,7 @@ pub fn seedChestBlockId(self: *Game) u16 {
     };
     const trimmed = std.mem.trim(u8, slice, " \t\r\n");
     const v = std.fmt.parseInt(u16, trimmed, 10) catch {
-        std.debug.print("zdtd: seed_chest_block_id not a u16; using AssignIds/default\n", .{});
+        util_log.warn("seed_chest_block_id not a u16; using AssignIds/default\n", .{});
         return captured;
     };
     return if (v >= 20) v else captured;

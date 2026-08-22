@@ -120,7 +120,10 @@ pub const Buffer = struct {
             }
         }
         const leftover = self.n - count;
-        if (leftover > 0) std.mem.copyForwards(Op, self.ops[0..leftover], self.ops[count..self.n]);
+        if (leftover > 0) {
+            std.mem.copyForwards(Op, self.ops[0..leftover], self.ops[count..self.n]);
+            std.mem.copyForwards(i16, self.srcs[0..leftover], self.srcs[count..self.n]);
+        }
         self.n = leftover;
         return r;
     }

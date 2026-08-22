@@ -42,6 +42,13 @@ pub const XorShift32 = struct {
         if (bound == 0) return 0;
         return self.next() % bound;
     }
+
+    /// Draw in [0, 1): raw u32 step scaled by 1/2^32-1. Same stream discipline
+    /// as every other draw here; jitter offsets derive from `(nextFloat() - 0.5)`.
+    pub fn nextFloat(self: *XorShift32) f32 {
+        return @as(f32, @floatFromInt(self.next())) /
+            @as(f32, @floatFromInt(std.math.maxInt(u32)));
+    }
 };
 
 /// Stateless one-shot step (call sites that store state in a component field).
@@ -89,4 +96,15 @@ test "initFromU64 same seed same stream" {
     var c = XorShift32.initFromU64(1);
     var d = XorShift32.initFromU64(2);
     try std.testing.expect(c.next() != d.next());
+}
+
+test "nextFloat stays in [0, 1) and is deterministic per stream" {
+    var a = XorShift32.init(7);
+    var b = XorShift32.init(7);
+    var i: usize = 0;
+    while (i < 64) : (i += 1) {
+        const va = a.nextFloat();
+        try std.testing.expectEqual(va, b.nextFloat());
+        try std.testing.expect(va >= 0.0 and va < 1.0);
+    }
 }

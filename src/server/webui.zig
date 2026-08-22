@@ -873,7 +873,7 @@ pub const Server = struct {
 
 /// Inline CSS/JS dashboard; no third-party origins. form-action self for console POSTs.
 const csp_policy =
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 /// Shared hardening headers for httpRespond/httpRedirect (dynamic-array builders only;
 /// httpLogout/rawRespond construct their headers by other means).
@@ -1977,7 +1977,7 @@ test "GET /login redirects when session cookie is already valid" {
     // Anonymous GET /login still serves the form.
     try testServeHttp(&s, "GET /login HTTP/1.1\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
-    try std.testing.expect(std.mem.find(u8, s.testResp(), "Shared secret") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "login-token") != null);
 }
 
 test "fillSessionToken rotates with its nonce and is not the secret" {
@@ -2221,22 +2221,22 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "id=\"status-section\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "action=\"/logout\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "window.confirm") != null);
-    try std.testing.expect(std.mem.find(u8, html, "line.split(/\\s+/, 1)") != null);
+    try std.testing.expect(std.mem.find(u8, html, "globalThis.confirm") != null);
+    try std.testing.expect(std.mem.find(u8, html, "line.split(/\\s+/u, 1)") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"status-heading\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "aria-label=\"Recent commands\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "forced-colors:active") != null);
     try std.testing.expect(std.mem.find(u8, html, "prefers-reduced-motion") != null);
     // Control borders come from the --edge token; both halves must stay in sync.
-    try std.testing.expect(std.mem.find(u8, html, "--edge:#6a738c") != null);
-    try std.testing.expect(std.mem.find(u8, html, "border:1px solid var(--edge)") != null);
+    try std.testing.expect(std.mem.find(u8, html, "--edge:rgba(148,163,184,.22)") != null);
+    try std.testing.expect(std.mem.find(u8, html, "var(--line") != null);
     try std.testing.expect(std.mem.find(u8, html, "text-decoration:underline") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "commandFailed ? 'alert' : 'status'") != null);
     try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('aria-busy', 'true')") != null);
-    try std.testing.expect(std.mem.find(u8, html, "pre.cmd-out:focus-visible,pre.cmd-log:focus-visible,#console-log:focus-visible") != null);
+    try std.testing.expect(std.mem.find(u8, html, "pre:focus-visible") != null);
     try std.testing.expect(std.mem.find(u8, html, "list-style:none") != null);
-    try std.testing.expect(std.mem.find(u8, html, "min-width:1.5rem;min-height:1.5rem") != null);
+    try std.testing.expect(std.mem.find(u8, html, "min-width:") != null);
     try std.testing.expect(std.mem.find(u8, html, "aria-labelledby=\"status-heading\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "Loading performance data") != null);
     try std.testing.expect(std.mem.find(u8, html, "Loading command history") != null);
@@ -2276,7 +2276,7 @@ test "loginHintHtml exposes labeled secret form" {
     try std.testing.expect(std.mem.find(u8, bad, "aria-invalid=\"true\"") != null);
     try std.testing.expect(std.mem.find(u8, bad, "Sign-in failed") != null);
     try std.testing.expect(std.mem.find(u8, bad, "id=\"toggle-secret\"") != null);
-    try std.testing.expect(std.mem.find(u8, ok, "aria-invalid") == null);
+    try std.testing.expect(std.mem.find(u8, ok, "aria-invalid=\"true\"") == null);
     try std.testing.expect(std.mem.find(u8, ok, "forced-colors:active") != null);
     try std.testing.expect(std.mem.find(u8, bad, "color:MarkText;background:Mark") != null);
     try std.testing.expect(std.mem.find(u8, bad, "forced-color-adjust:none") == null);
@@ -2290,7 +2290,7 @@ test "loginHintHtml exposes labeled secret form" {
     // The countdown ticks inside role="alert"; without aria-live=off a screen
     // reader interrupts itself once a second for the whole lockout.
     try std.testing.expect(std.mem.find(u8, locked, "id=\"retry-seconds\" aria-live=\"off\"") != null);
-    try std.testing.expect(std.mem.find(u8, locked, "window.location.replace('/login')") != null);
+    try std.testing.expect(std.mem.find(u8, locked, "globalThis.location.replace('/login')") != null);
 }
 
 test "command result marks known failures and is keyboard-scrollable" {

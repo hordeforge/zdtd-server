@@ -155,6 +155,8 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
                 .time = parseTime(time_s),
                 .kind = parseKind(type_s),
                 .respawn_days = lowF32List(rd_s),
+                .tags = try arena.dupe(u8, tags_s),
+                .notags = try arena.dupe(u8, notags_s),
             });
             j = si + 7;
         }

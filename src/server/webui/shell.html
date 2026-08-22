@@ -1,83 +1,258 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Server dashboard · zdtd</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/static/xterm.css">
 <style>
-/* Palette, fonts and type scale are the webui token set; login.html, login_failed.html
-   and login_lockout.html carry the same :root block. Machine-produced values (counters,
-   table data, console) are mono + tabular; prose and chrome are sans. */
-:root{color-scheme:dark;--bg:#12141a;--card:#1c2030;--sunken:#141824;--well:#0e1018;--line:#2a3144;--edge:#6a738c;--fg:#e8eaef;--muted:#aab2c2;--acc:#72b3e4;--ok:#82d68b;--warn:#f0b64f;--err:#ff8585;--sans:system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--fs-micro:0.8125rem;--fs-sm:0.875rem;--fs-lead:1.125rem;--fs-title:1.25rem}
-*{box-sizing:border-box}body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.45}
-.skip-link{position:absolute;left:1rem;top:0;transform:translateY(-150%);background:var(--warn);color:#0a0c10;padding:0.65rem 0.85rem;border-radius:0 0 6px 6px;font-weight:700;z-index:1}.skip-link:focus{transform:translateY(0)}
-header{padding:1rem 1.25rem;border-bottom:1px solid var(--line);display:flex;gap:1rem;align-items:center;flex-wrap:wrap;background:var(--bg)}
-header h1{font-size:var(--fs-title);margin:0;font-weight:600;letter-spacing:0.02em}header .meta{color:var(--muted);font-family:var(--mono);font-size:var(--fs-micro)}
-.refresh-ctrl{margin-left:auto;display:inline-flex;align-items:center;gap:0.4rem;color:var(--muted);font-size:var(--fs-sm);cursor:pointer;min-height:44px}
-.refresh-ctrl input{width:1.5rem;height:1.5rem;min-width:1.5rem;min-height:1.5rem;accent-color:var(--acc)}
-.refresh-now,.logout-form button{min-height:44px;padding:0.45rem 0.75rem;border:1px solid var(--edge);border-radius:6px;background:transparent;color:var(--fg);font:inherit;cursor:pointer}
-.refresh-now:hover,.logout-form button:hover,.cmd-row button:hover{filter:brightness(1.08)}.refresh-now:active,.logout-form button:active,.cmd-row button:active{filter:brightness(0.95)}
+/* zdtd-tokens */
+/* Tokens — single source of truth, inlined into every page by build-webui-ts.sh */
+:root{
+  color-scheme:dark;
+  --bg:#080c12;
+  --bg2:#0d121b;
+  --card:#101722;
+  --card2:#141e2e;
+  --sunken:#0a101a;
+  --well:#060a12;
+  --line:rgba(148,163,184,.09);
+  --line2:rgba(148,163,184,.14);
+  --edge:rgba(148,163,184,.22);
+  --fg:#e6edf7;
+  --muted:#8694b0;
+  --muted2:#64748d;
+  --muted3:#4a5873;
+  --acc:#8fb4ff;
+  --acc2:#6e9bff;
+  --acc-soft:rgba(143,180,255,.12);
+  --acc-ghost:rgba(143,180,255,.06);
+  --acc-ring:rgba(143,180,255,.35);
+  --ok:#34d399;
+  --ok-soft:rgba(52,211,153,.12);
+  --warn:#fbbf24;
+  --warn-soft:rgba(251,191,36,.12);
+  --err:#fb7185;
+  --err-soft:rgba(251,113,133,.11);
+  --nav:#0a0e15;
+  --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Cascadia Mono","JetBrains Mono",monospace;
+  --fs-micro:0.6875rem;
+  --fs-sm:0.8125rem;
+  --fs:0.875rem;
+  --fs-lead:1rem;
+  --r-xs:6px;
+  --r-sm:8px;
+  --r-md:10px;
+  --r-lg:12px;
+  --r-xl:14px;
+  --r-pill:999px;
+  --shadow-card:0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.28);
+  --shadow-lg:0 16px 48px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.04) inset;
+}
+/* /zdtd-tokens */
+*{box-sizing:border-box}
+html{scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+body{font-family:var(--sans);margin:0;background:var(--bg);color:var(--fg);line-height:1.55;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--acc);text-decoration:none}
+a:hover{color:var(--acc2);text-decoration:underline;text-underline-offset:3px}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,pre:focus-visible{outline:2px solid var(--acc-ring);outline-offset:2px}
+code{font-family:var(--mono);font-size:0.84em;background:rgba(143,180,255,.08);border:1px solid rgba(143,180,255,.12);padding:0.12em 0.38em;border-radius:6px;color:var(--muted)}
+kbd{font-family:var(--mono);font-size:0.72em;line-height:1;background:var(--well);border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:0.18em 0.38em;color:var(--muted2);box-shadow:0 1px 0 rgba(0,0,0,.2)}
+.skip-link{position:absolute;left:1rem;top:0;transform:translateY(-150%);background:var(--fg);color:var(--bg);padding:0.55rem 0.8rem;border-radius:0 0 8px 8px;font-weight:700;font-size:0.8125rem;z-index:20;text-decoration:none}
+.skip-link:focus{transform:translateY(0)}
+
+/* Header — single row, quiet */
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:0.75rem;min-height:44px;padding:0 1rem;background:rgba(8,12,18,.92);backdrop-filter:saturate(1.05) blur(10px);-webkit-backdrop-filter:saturate(1.05) blur(10px);border-bottom:1px solid var(--line)}
+header h1{font-family:var(--mono);font-size:0.8125rem;font-weight:750;letter-spacing:0.09em;text-transform:uppercase;margin:0;color:var(--fg);display:flex;align-items:center;gap:0.5rem}
+header h1::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--ok-soft);flex:none}
+header .meta{color:var(--muted2);font-family:var(--mono);font-size:0.66rem;letter-spacing:0.025em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28rem;opacity:.9}
+.header-actions{margin-left:auto;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap}
+.refresh-ctrl{display:inline-flex;align-items:center;gap:0.45rem;color:var(--muted);font-size:0.8125rem;cursor:pointer;user-select:none;padding:0.18rem 0.55rem 0.18rem 0.28rem;border:1px solid transparent;border-radius:var(--r-pill);transition:color .15s,background .15s,border-color .15s}
+.refresh-ctrl:hover{color:var(--fg);background:var(--acc-ghost);border-color:rgba(143,180,255,.14)}
+.refresh-ctrl input{appearance:none;width:34px;height:20px;border-radius:999px;background:var(--line2);border:1px solid rgba(255,255,255,.06);position:relative;cursor:pointer;transition:background .18s,border-color .18s;flex:none}
+.refresh-ctrl input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg);transition:transform .18s,background .18s;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.refresh-ctrl input:checked{background:var(--acc);border-color:var(--acc)}
+.refresh-ctrl input:checked::after{transform:translateX(14px);background:white}
+.header-actions button{appearance:none;min-height:32px;padding:0 0.75rem;border-radius:8px;border:1px solid var(--line2);background:rgba(255,255,255,.02);color:var(--muted);font:inherit;font-size:0.78rem;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
+.header-actions button:hover{background:rgba(255,255,255,.06);border-color:var(--edge);color:var(--fg)}
 .logout-form{margin:0}
-.page-nav{display:flex;flex-wrap:wrap;gap:0.35rem 0.85rem;padding:0.55rem 1.25rem;border-bottom:1px solid var(--line);background:#161922;position:sticky;top:0;z-index:2}
-.page-nav a{color:var(--acc);text-decoration:underline;min-height:44px;display:inline-flex;align-items:center;padding:0.2rem 0.15rem;font-size:var(--fs-sm)}
-main{padding:1rem 1.25rem;display:grid;gap:1rem;max-width:56rem;width:100%;margin-inline:auto}
-section{background:var(--card);border-radius:8px;padding:0.85rem 1rem;border:1px solid var(--line);scroll-margin-top:3.5rem}
-section h2{margin:0 0 0.6rem;font-size:var(--fs-sm);color:var(--acc);font-weight:600;text-transform:uppercase;letter-spacing:0.08em}
-section h3{margin:1rem 0 0.5rem;font-size:var(--fs-micro);color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em}
-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}th,td{text-align:left;padding:0.35rem 0.5rem;border-bottom:1px solid var(--line)}
-th{color:var(--muted);font-weight:500}td{font-family:var(--mono);font-variant-numeric:tabular-nums} .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* Tabs */
+.page-nav{position:sticky;top:44px;z-index:9;display:flex;align-items:stretch;gap:0;padding:0 1rem;background:var(--bg2);border-bottom:1px solid var(--line);overflow:auto;scrollbar-width:none}
+.page-nav::-webkit-scrollbar{display:none}
+.tab{appearance:none;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--muted);font:inherit;font-size:0.78rem;font-weight:600;letter-spacing:0.015em;min-height:40px;padding:0 0.7rem;margin-bottom:-1px;cursor:pointer;white-space:nowrap;transition:color .12s,border-color .12s}
+.tab:hover{color:var(--fg)}
+.tab[aria-selected=true]{color:var(--fg);border-bottom-color:var(--acc)}
+
+/* Layout */
+main{padding:1rem 1rem 1.75rem;display:grid;gap:0.75rem;max-width:66rem;width:100%;margin-inline:auto}
+section{background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl);overflow:hidden;scroll-margin-top:6.5rem;box-shadow:var(--shadow-card)}
+section h2{margin:0;font-size:0.62rem;font-weight:700;letter-spacing:0.11em;text-transform:uppercase;color:var(--muted);padding:0.8rem 1rem 0.6rem;border-bottom:1px solid var(--line);background:linear-gradient(to bottom, rgba(255,255,255,.02), transparent)}
+section h3{margin:0;font-size:0.6rem;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted2);padding:0.7rem 1rem 0.5rem;border-top:1px solid var(--line);background:rgba(255,255,255,.01)}
+section h3:first-of-type{border-top:0}
+section > div[id]{padding:0}
+#status,#apm,#players,#settings{padding:0}
+#players{overflow:auto}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+th,td{padding:0.5rem 0.7rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+thead th{color:var(--muted2);font-weight:600;font-size:0.68rem;letter-spacing:0.055em;text-transform:uppercase;background:rgba(255,255,255,.02);white-space:nowrap}
+tbody tr:last-child td,tbody tr:last-child th{border-bottom:0}
+td{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:0.8125rem;color:var(--fg)}
+tbody tr:hover td,tbody tr:hover th{background:rgba(143,180,255,.035)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.5rem,1fr));gap:0.5rem;list-style:none;margin:0;padding:0}
-.stat{background:var(--sunken);border-radius:6px;padding:0.5rem 0.65rem}.stat b{display:block;font-family:var(--mono);font-size:var(--fs-lead);font-variant-numeric:tabular-nums}.stat span{color:var(--muted);font-size:var(--fs-micro)}
-.warn-text{color:var(--warn);font-weight:700}
-footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}footer a{color:var(--acc);text-decoration:underline}
-.cmd-row{display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;align-items:center}
-.cmd-row input[type=text]{flex:1;min-width:12rem;min-height:44px;background:var(--sunken);border:1px solid var(--edge);color:var(--fg);padding:0.45rem 0.6rem;border-radius:6px;font-family:var(--mono)}
-.cmd-row button{background:var(--acc);color:#0a0c10;border:0;border-radius:6px;padding:0.55rem 0.9rem;min-height:44px;min-width:4.5rem;font-weight:600;cursor:pointer}.cmd-row button:disabled{opacity:0.65;cursor:wait}
-a:focus-visible,button:focus-visible,input:focus-visible,pre.cmd-out:focus-visible,pre.cmd-log:focus-visible,#console-log:focus-visible{outline:3px solid var(--warn);outline-offset:3px}
-/* The page-nav is sticky at top:0, so a focused control scrolled to the viewport
-   top would sit under it (WCAG 2.2 SC 2.4.11 Focus Not Obscured). */
-a,button,input,[tabindex]{scroll-margin-top:3.5rem}
-pre.cmd-out,pre.cmd-log{margin:0.5rem 0 0;background:var(--well);border-radius:6px;padding:0.6rem 0.75rem;font-family:var(--mono);font-size:var(--fs-sm);overflow:auto;max-height:14rem;white-space:pre-wrap;word-break:break-word}
-.pbar{display:inline-block;width:4.5rem;height:0.55rem;border-radius:3px;background:var(--sunken);vertical-align:middle;overflow:hidden;margin-right:0.4rem}.pbar::before{content:"";display:block;height:100%;width:var(--p);background:var(--ok);border-radius:3px}
+
+/* Stat grid — denser, mono value + muted label, hairline dividers */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:0;background:transparent;border-top:1px solid var(--line);margin:0;list-style:none}
+.grid + h3{margin-top:0}
+.stat{background:transparent;padding:0.65rem 0.9rem;display:flex;flex-direction:column;gap:0.2rem;min-width:0;border-left:1px solid var(--line);border-bottom:1px solid transparent}
+.stat:first-child{border-left:0}
+.stat b{display:block;font-family:var(--mono);font-size:0.9rem;font-weight:650;line-height:1.2;letter-spacing:-0.01em;color:var(--fg);overflow-wrap:anywhere}
+.stat b.num{font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted2);font-size:0.62rem;letter-spacing:0.04em;line-height:1.25;text-transform:uppercase;font-weight:500}
+.warn-text{color:var(--warn)}
+.stat.warn b{color:var(--warn)}
+
+/* Footer */
+footer{padding:0.75rem 1rem;color:var(--muted2);font-size:0.6875rem;font-family:var(--mono);letter-spacing:0.01em;border-top:1px solid var(--line);background:var(--bg2);display:flex;flex-wrap:wrap;gap:0.35rem 0.7rem;align-items:center}
+footer a{color:var(--muted);text-decoration:none;border-bottom:1px dashed rgba(148,163,184,.28);text-underline-offset:2px}
+footer a:hover{color:var(--acc);border-bottom-color:var(--acc);text-decoration:none}
+#refresh-state{color:var(--muted2)}
+
+/* Console */
+.cmd-row{display:flex;gap:0.5rem;align-items:center;padding:0.75rem 1rem}
+.cmd-row input[type=text]{flex:1;min-width:10rem;min-height:38px;background:var(--well);border:1px solid var(--line2);color:var(--fg);padding:0.5rem 0.7rem;border-radius:9px;font-family:var(--mono);font-size:0.875rem;transition:border-color .14s,box-shadow .14s,background .14s}
+.cmd-row input[type=text]::placeholder{color:var(--muted3)}
+.cmd-row input[type=text]:focus{outline:none;border-color:var(--acc-ring);box-shadow:0 0 0 3px var(--acc-ghost);background:var(--sunken)}
+.cmd-row button{background:var(--acc);color:var(--bg);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:0 1rem;min-height:38px;min-width:4.6rem;font-weight:700;font-size:0.875rem;cursor:pointer;box-shadow:0 1px 0 rgba(255,255,255,.12) inset;transition:filter .12s,transform .05s,opacity .12s}
+.cmd-row button:hover{filter:brightness(1.06)}
+.cmd-row button:active{transform:translateY(1px)}
+.cmd-row button:disabled{opacity:.55;cursor:wait;transform:none}
+.quick-row{display:flex;flex-wrap:wrap;gap:0.35rem;padding:0.6rem 1rem;border-top:1px solid var(--line);background:rgba(255,255,255,.01)}
+.quick-cmd{background:var(--well);border:1px solid var(--line);color:var(--muted);border-radius:var(--r-pill);padding:0.3rem 0.65rem;min-height:30px;font:inherit;font-size:0.72rem;font-weight:600;letter-spacing:0.01em;cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s,color .12s}
+.quick-cmd:hover{color:var(--fg);background:rgba(255,255,255,.06);border-color:var(--line2)}
+.row-cmd{background:transparent;border:1px solid var(--line2);color:var(--muted2);border-radius:7px;padding:0.22rem 0.5rem;min-height:28px;font:inherit;font-size:0.72rem;font-weight:600;cursor:pointer;white-space:nowrap;transition:color .12s,border-color .12s,background .12s}
+.row-cmd:hover{color:var(--err);border-color:rgba(251,113,133,.45);background:var(--err-soft)}
+.console-term{display:none;position:relative;height:19rem;margin:0 1rem 0.85rem;padding:0.35rem;background:var(--well);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.02)}
+.console-term.active{display:block}
+.console-term .xterm{height:100%}
+#apm-chart-wrap{background:var(--well);border:1px solid var(--line);border-radius:var(--r-md);padding:0.6rem;margin:0.75rem 1rem}
+#apm-canvas{width:100%;height:auto;display:block;border-radius:6px}
+a,button,input,[tabindex]{scroll-margin-top:7rem}
+pre.cmd-out,pre.cmd-log{margin:0 1rem 0.85rem;background:var(--well);border:1px solid var(--line);border-radius:var(--r-md);padding:0.65rem 0.75rem;font-family:var(--mono);font-size:var(--fs-sm);line-height:1.55;overflow:auto;max-height:15rem;white-space:pre-wrap;word-break:break-word}
+#cmd-out{padding:0}
+.pbar{display:inline-block;width:4.75rem;height:6px;border-radius:999px;background:rgba(255,255,255,.08);vertical-align:middle;overflow:hidden;margin-right:0.45rem}
+.pbar::before{content:"";display:block;height:100%;width:var(--p);background:var(--ok);border-radius:999px}
 pre .in{color:var(--acc)} .err{color:var(--err)} .ok{color:var(--ok)} pre .meta{color:var(--muted)}
-#players{overflow-x:auto}#players:focus-visible{outline:3px solid var(--warn);outline-offset:3px}#players table{min-width:30rem}
-.noscript{margin:0;padding:0.75rem 1.25rem;background:#3a2410;color:var(--warn);border-bottom:1px solid #6a4a20}
-@media(max-width:36rem){main{padding:0.75rem}header,footer,.page-nav{padding-left:0.75rem;padding-right:0.75rem}section{padding:0.75rem}.cmd-row{display:grid;grid-template-columns:minmax(0,1fr) auto}.cmd-row input[type=text]{min-width:0}.refresh-ctrl{margin-left:0}}
-@media(prefers-reduced-motion:reduce){.skip-link{transition:none}html{scroll-behavior:auto}}
-@media(forced-colors:active){:root{--bg:Canvas;--card:Canvas;--sunken:Canvas;--well:Canvas;--line:CanvasText;--edge:ButtonText;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:MarkText}body,section,.stat,pre.cmd-out,pre.cmd-log,.page-nav{background:Canvas;color:CanvasText;border-color:CanvasText}.cmd-row input[type=text],.cmd-row button,.logout-form button,.refresh-now{border:1px solid ButtonText}.err,.noscript,.warn-text{color:MarkText;background:Mark}a:focus-visible,button:focus-visible,input:focus-visible,pre.cmd-out:focus-visible,pre.cmd-log:focus-visible,#console-log:focus-visible,.skip-link:focus{outline:3px solid Highlight;outline-offset:3px}}
-</style></head>
+#players:focus-visible{outline:2px solid var(--acc-ring);outline-offset:2px}
+#players table{min-width:36rem}
+.logs-tools{display:flex;gap:0.5rem;align-items:center;margin:0;padding:0.65rem 1rem;border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}
+.logs-tools select,.logs-tools input[type=search]{min-height:36px;background:var(--well);border:1px solid var(--line2);color:var(--fg);border-radius:8px;padding:0.35rem 0.6rem;font-family:var(--mono);font-size:var(--fs-sm);transition:border-color .14s,box-shadow .14s}
+.logs-tools select:focus,.logs-tools input[type=search]:focus{outline:none;border-color:var(--acc-ring);box-shadow:0 0 0 3px var(--acc-ghost)}
+.logs-tools input[type=search]{flex:1;min-width:12rem}
+.logs-tools input[type=search]::placeholder{color:var(--muted3)}
+#logs-view{margin:0;background:transparent;border:0;border-radius:0;padding:0;font-family:var(--mono);font-size:0.78rem;overflow:auto;max-height:26rem;scroll-margin-top:7rem}
+.log-line{display:flex;gap:0.6rem;align-items:baseline;padding:0.32rem 1rem;line-height:1.55;border-bottom:1px solid var(--line)}
+.log-line:last-child{border-bottom:0}
+.log-badge{flex:none;min-width:3rem;text-transform:uppercase;font-size:0.66rem;letter-spacing:0.06em;font-weight:700}
+.log-ts{flex:none;color:var(--muted2);font-variant-numeric:tabular-nums;font-size:0.74rem}
+.log-msg{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;color:var(--fg);font-size:0.78rem}
+.lvl-debug .log-badge,.lvl-info .log-badge{color:var(--muted2);font-weight:600}
+.lvl-warn .log-badge{color:var(--warn);font-weight:700}
+.lvl-err .log-badge{color:var(--err);font-weight:700}
+.lvl-crit .log-badge{color:var(--err);font-weight:800;text-decoration:underline;text-underline-offset:2px}
+.meta{color:var(--muted);font-family:var(--mono);font-size:var(--fs-micro)}
+#status .meta,#apm .meta,#players .meta,#console-log .meta,#logs-view .meta{padding:1rem}
+.noscript{margin:0;padding:0.7rem 1.25rem;background:rgba(251,191,36,.08);color:var(--warn);border-bottom:1px solid rgba(251,191,36,.18);font-size:var(--fs-sm)}
+@media(max-width:44rem){
+  header{padding:0 0.75rem;gap:0.5rem}
+  header .meta{display:none}
+  .page-nav{padding:0 0.5rem;top:44px}
+  .tab{padding:0 0.55rem;font-size:0.76rem}
+  main{padding:0.75rem}
+  section{border-radius:var(--r-lg)}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cmd-row{flex-wrap:wrap}
+  .cmd-row input[type=text]{min-width:0}
+  footer{padding:0.65rem 0.75rem}
+  .header-actions{gap:0.35rem}
+}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}html{scroll-behavior:auto}}
+@media(forced-colors:active){:root{--bg:Canvas;--card:Canvas;--sunken:Canvas;--well:Canvas;--line:CanvasText;--edge:ButtonText;--fg:CanvasText;--muted:GrayText;--muted2:GrayText;--acc:LinkText;--ok:CanvasText;--warn:Highlight;--err:MarkText}body,section,.stat,pre.cmd-out,pre.cmd-log,.page-nav,#logs-view{background:Canvas;color:CanvasText;border-color:CanvasText}.cmd-row input[type=text],.cmd-row button,.logout-form button,.refresh-now,.tab,.logs-tools select,.logs-tools input[type=search]{border:1px solid ButtonText}.tab[aria-selected=true]{border-bottom-color:Highlight}.err,.noscript,.warn-text{color:MarkText;background:Mark}}
+</style>
+</head>
 <body>
-<a class="skip-link" href="#main-content">Skip to dashboard</a>
-<noscript><p class="noscript">JavaScript is required for live updates. Console commands still submit, but the response replaces this page.</p></noscript>
-<header>
-<h1>zdtd</h1><span class="meta">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · ops dashboard</span>
-<label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
-<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm players console-log">Refresh now</button>
-<form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="__ZDTD_CSRF__"><button type="submit">Sign out</button></form>
-</header>
-<nav class="page-nav" aria-label="Dashboard sections">
-<a href="#status-section">Status</a>
-<a href="#apm-section">Performance</a>
-<a href="#players-section">Players</a>
-<a href="#console-section">Console</a>
-</nav>
-<main id="main-content" tabindex="-1">
-<section id="status-section" aria-labelledby="status-heading"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
-<section id="apm-section" aria-labelledby="apm-heading"><h2 id="apm-heading">Performance and counters</h2><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
-<section id="players-section" aria-labelledby="players-heading"><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
-<section id="console-section" aria-labelledby="console-heading">
-<h2 id="console-heading">Console</h2>
-<p id="cmd-help" class="meta" style="margin:0 0 0.4rem;color:var(--muted);font-size:0.85rem">Use the same commands as the admin console, such as help, status, give, kick, and settime.</p>
-<form id="cmd-form" class="cmd-row" method="post" action="/api/cmd">
-<input type="hidden" name="csrf" value="__ZDTD_CSRF__">
-<label for="cmd-line" class="sr-only">Admin command</label>
-<input type="text" name="line" id="cmd-line" placeholder="Enter a command, for example: status" aria-describedby="cmd-help" autocomplete="off" spellcheck="false" maxlength="256" required>
-<button type="submit">Run</button>
-</form>
-<div id="cmd-out" aria-live="polite" aria-atomic="true"></div>
-<div id="console-log" aria-label="Recent commands" role="region" tabindex="-1" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
-</section>
-</main>
-<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">Performance JSON</a> · <a href="/healthz">Liveness check</a> · <a href="/readyz">Readiness check</a></footer>
-<script>
+155	<a class="skip-link" href="#main-content">Skip to dashboard</a>
+156	<noscript><p class="noscript">JavaScript is required for live updates. Console commands still submit, but the response replaces this page.</p></noscript>
+157	<header>
+158	<h1>zdtd</h1><span class="meta">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · ops dashboard</span>
+159	<div class="header-actions">
+160	<label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
+161	<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm players console logs settings">Refresh</button>
+162	<form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="__ZDTD_CSRF__"><button type="submit">Sign out</button></form>
+163	</div>
+164	</header>
+165	<nav class="page-nav" role="tablist" aria-label="Dashboard sections">
+166	<button type="button" class="tab" id="tab-status" role="tab" aria-selected="true" aria-controls="status-section">Status</button>
+167	<button type="button" class="tab" id="tab-apm" role="tab" aria-selected="false" aria-controls="apm-section">Performance</button>
+168	<button type="button" class="tab" id="tab-players" role="tab" aria-selected="false" aria-controls="players-section">Players</button>
+169	<button type="button" class="tab" id="tab-console" role="tab" aria-selected="false" aria-controls="console-section">Console</button>
+170	<button type="button" class="tab" id="tab-logs" role="tab" aria-selected="false" aria-controls="logs-section">Logs</button>
+171	<button type="button" class="tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="settings-section">Settings</button>
+172	</nav>
+173	<main id="main-content" tabindex="-1">
+174	<section id="status-section" role="tabpanel" aria-labelledby="tab-status"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
+175	<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm-chart-wrap"><canvas id="apm-canvas" width="600" height="150" aria-label="Live tick latency and section means">Live performance graphs require JavaScript.</canvas></div><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
+176	<section id="players-section" role="tabpanel" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
+177	<section id="console-section" role="tabpanel" aria-labelledby="tab-console" hidden>
+178	<h2 id="console-heading">Console</h2>
+179	<p id="cmd-help" class="meta" style="margin:0;padding:0.7rem 1rem 0;color:var(--muted);font-size:0.78rem;border-bottom:1px solid var(--line)">Same commands as the admin telnet console — <code>help</code>, <code>status</code>, <code>give</code>, <code>kick</code>, <code>settime</code>. Press <kbd>/</kbd> to focus, <kbd>↑</kbd><kbd>↓</kbd> for history.</p>
+180	<div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
+181	<button type="button" class="quick-cmd" data-cmd="help">help</button>
+182	<button type="button" class="quick-cmd" data-cmd="status">status</button>
+183	<button type="button" class="quick-cmd" data-cmd="lp">players</button>
+184	<button type="button" class="quick-cmd" data-cmd="save">save</button>
+185	<button type="button" class="quick-cmd" data-cmd="settime day">day</button>
+186	<button type="button" class="quick-cmd" data-cmd="settime night">night</button>
+187	</div>
+188	<div id="console-term" class="console-term"></div>
+189	<form id="cmd-form" class="cmd-row" method="post" action="/api/cmd">
+190	<input type="hidden" name="csrf" value="__ZDTD_CSRF__">
+191	<label for="cmd-line" class="sr-only">Admin command</label>
+192	<input type="text" name="line" id="cmd-line" placeholder="try help  ·  status  ·  settime day" aria-describedby="cmd-help" autocomplete="off" spellcheck="false" maxlength="256" required>
+193	<button type="submit">Run</button>
+194	</form>
+195	<div id="cmd-out" aria-live="polite" aria-atomic="true"></div>
+196	<div id="console-log" aria-label="Recent commands" role="region" tabindex="-1" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
+197	</section>
+198	<section id="settings-section" role="tabpanel" aria-labelledby="tab-settings" hidden>
+199	<h2 id="settings-heading">Settings</h2>
+200	<div id="settings" aria-live="polite" aria-atomic="true" hx-get="/partials/settings" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading settings…</p></div>
+201	</section>
+202	<section id="logs-section" role="tabpanel" aria-labelledby="tab-logs" hidden>
+203	<h2 id="logs-heading">Server log</h2>
+204	<div class="logs-tools" role="group" aria-label="Log filters">
+205	<label class="sr-only" for="log-level">Minimum severity</label>
+206	<select id="log-level">
+207	<option value="debug" selected>All</option>
+208	<option value="info">info +</option>
+209	<option value="warn">warn +</option>
+210	<option value="err">err +</option>
+211	<option value="crit">crit</option>
+212	</select>
+213	<label class="sr-only" for="log-filter">Filter log messages</label>
+214	<input type="search" id="log-filter" placeholder="Filter — chunk, join, error…" autocomplete="off" spellcheck="false">
+215	<span id="logs-state" class="meta" role="status">Loading…</span>
+216	</div>
+217	<div id="logs-view" role="region" aria-label="Server log lines" tabindex="0"><p class="meta">Loading server log…</p></div>
+218	<p class="meta" style="margin:0;padding:0.6rem 1rem;border-top:1px solid var(--line)">Newest first · 2048 lines kept · <code>loglevel</code> controls verbosity.</p>
+219	</section>
+220	</main>
+221	<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">apm.json</a> · <a href="/api/logs.json">logs.json</a> · <a href="/healthz">healthz</a> · <a href="/readyz">readyz</a></footer>
+222	<script src="/static/xterm.js"></script>
+223	<script src="/static/addon-fit.js"></script>
+224	<script>
 /* zdtd-ts:shell */
 "use strict";
 //! Webui dashboard shell: htmx-style poller for the [hx-get] partials,
