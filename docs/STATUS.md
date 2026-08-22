@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 245 `WORKS`,
-50 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 246 `WORKS`,
+49 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -434,6 +434,13 @@ equipment 6..11 on the C2S apply, losing items on relog), the apply keeps
 every slot and the persist buffer/wire encoders scale off the same
 constants (ADR 0007 amended); the row stays PARTIAL for the per-item state
 beyond id/count/quality/meta (UseTimes durability resets on relog).
+Then the DropOnDeath-backpack row went WORKS on re-audit: the server spawns
+the death bag itself on the lethal event (C2S DamageEntity death and the
+hp-replicate AI-kill detector both call spawnDeathBag, dropping the victim's
+real inventory range per DropOnDeath and marking the backpack map pin; the
+scenario pins the content), so the "single scrap" placeholder the row
+described is gone - the client's RequestToSpawnEntity ECD stays refused as
+redundant. Player progression 13/9/15 -> **14/8/15**; total **246/49/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

@@ -151,10 +151,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 20 | 7 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction |
-| [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 14 | 8 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **245** | **50** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **246** | **49** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2948,19 +2948,20 @@ and server-to-client XP/level pushes do not exist.
   placement choice is waived as respawn-choice subsystem.
   *Anchors:* `src/server/game.zig:5540-5558`, `src/wire/packages.zig:467-468`
 
-- **DropOnDeath backpack** `PARTIAL`
-  Broken in both directions. zdtd spawns a bag containing one unit of ECS item 1
-  ("scrap") at the death position, ignoring the player's actual inventory.
-  Meanwhile stock's real backpack is client-driven:
-  `EntityPlayerLocal::dropItemOnDeath` does removeItemsOnDeath plus
-  degradeItemsOnDeath plus `dropBackpack(true)`, and `dropBackpack` ends in
-  `RequestToSpawnEntityServer(ECD)` which becomes `NetPackageRequestToSpawnEntity`.
-  zdtd refuses that package outright as "not authoritative enough". So the client
-  empties its own bag on death and then sends SavePlayerData, which zdtd applies to
-  the sim inventory: the gear is destroyed and no recoverable backpack ever exists.
-  What the player sees at the death site is a single scrap.
-  *Anchors:* `src/server/game.zig:4948-4958`, `:4859-4866`, `:4737-4783`,
-  `src/assets/items.zig:336`, `asm.il:523092`, `asm.il:523893`, `asm.il:524453`
+- **DropOnDeath backpack** `WORKS` `(2026-08-22 re-audit)`
+  The server spawns the death bag itself on the lethal event - both the C2S
+  DamageEntity death path and the hp-replicate AI-kill detector call
+  `spawnDeathBag`, which drops the victim's real inventory range (DropOnDeath
+  1 all / 2 toolbelt / 3 backpack) at the death position and broadcasts the
+  bag + the backpack map marker (`Client.has_backpack` coordinates the two
+  paths so a death is never bagged twice; scenario `AI kill drops the
+  player's real inventory as a death bag` pins the content). The client's
+  `NetPackageRequestToSpawnEntity` ECD is still refused (the server bag makes
+  it redundant and it proves no ownership), so the "single scrap" placeholder
+  bag the row described is gone.
+  *Anchors:* `src/server/game.zig:2677-2701` (`spawnDeathBag`),
+  `src/server/c2s/misc.zig:513-536`, `src/server/game/replicate_health.zig:30`,
+  scenario `AI kill drops the player's real inventory as a death bag`
 
 - **DeathPenalty server option** `PARTIAL`
   The GameStats blob carries death_penalty but it is hardcoded to the struct
