@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
+| [Blood moon](#6-blood-moon) | 20 | 3 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive |
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **240** | **55** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **241** | **54** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2206,11 +2206,16 @@ gamestage, no wandering hordes, and no screamers.
   spawn: a direct aggro drip. Blood-moon nights shorten the cooldown to 8 s.
   *Anchors:* `src/ecs/aidirector.zig:159-162`, `:233-282`
 
-- **Blood-moon waves** `PARTIAL`
-  `max(1, BloodMoonEnemyCount/2)` zombies 12-22 m from each player every 6 s at
-  1.5x HP. No party spawner, no per-party gsScaling, no maxAlive per group, no wave
-  structure or lull. The only real limit is MaxSpawnedZombies.
-  *Anchors:* `src/ecs/aidirector.zig:163-167`, `:96-97`, `asm.il:416385-416960`
+- **Blood-moon waves** `WORKS` `(2026-08-22 re-audit)`
+  The party spawner is in: one wave per party (not per player) around its
+  shared focus at cSpawnDistance 40 + up to 10 jitter, marked horde and set
+  to chase the party's players, capped per party at
+  min(cPartyEnemyMax 30, BloodMoonEnemyCount x members) with the party's
+  game stage frozen at dusk (InitParty) driving the gamestages.xml ladder and
+  the group's maxAlive; the wave cadence is the configured bloodmoon_wave_cd.
+  The old per-player 12-22 m drip the row described is gone.
+  *Anchors:* `src/ecs/aidirector.zig:394-408`, `:664-691`
+  (`spawnBloodMoonParties`), `asm.il:416385-416960`
 
 - **Wandering hordes** `WORKS` (pack path-walk residual)
   `AIDirectorWanderingHordeComponent` schedule: `HordeNextTime` arms after day 1

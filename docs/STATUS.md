@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 240 `WORKS`,
-55 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 241 `WORKS`,
+54 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -397,6 +397,13 @@ shaped: volume spawn counts roll position-seeded between the group's
 min/max (RE entity-ai.md AddSpawnCount RandomRange) instead of the fixed
 min + (vi % span) cycle; the sight/light wake thresholds, pose and
 respawn map remain open.
+Then the blood-moon-waves row went WORKS on re-audit: the party spawner is
+in - one wave per party around its shared focus (cSpawnDistance 40 + 10
+jitter), horde-marked and chasing the party's players, capped per party at
+min(cPartyEnemyMax 30, BloodMoonEnemyCount x members), with the party's
+game stage frozen at dusk driving the gamestages ladder and the group's
+maxAlive; the row described the old per-player 12-22 m drip. Blood moon
+19/4/3 -> **20/3/3**; total **241/54/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
