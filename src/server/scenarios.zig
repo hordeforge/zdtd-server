@@ -1946,6 +1946,12 @@ test "scenario in-game player console: allowlist, deny, and admin routing" {
     var hbuf: [512]u8 = undefined;
     const help = try sendCmd(g, c, &cap, "help", &hbuf);
     try std.testing.expect(std.mem.indexOf(u8, help, "zdtd console commands") != null);
+    // gettime carries the jittered CalcNextDay blood-moon countdown (the
+    // plain frequency modulus ignored BloodMoonRange).
+    g.sim.director.clock.bloodmoon_frequency = 7;
+    var gbuf: [512]u8 = undefined;
+    const gt = try sendCmd(g, c, &cap, "gettime", &gbuf);
+    try std.testing.expect(std.mem.indexOf(u8, gt, "bloodmoon in") != null);
     // A non-allowlisted verb is denied for a plain player.
     var dbuf: [512]u8 = undefined;
     const deny = try sendCmd(g, c, &cap, "kick nobody", &dbuf);

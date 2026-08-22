@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 242 `WORKS`,
-53 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 243 `WORKS`,
+52 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -409,6 +409,12 @@ follows the stock ConsoleCmdSetTime arity - 1 arg `day`/`night`/raw world
 time (the playtest `settime 22000` barrier lands the clock at 22:00) or 3
 args through DayTimeToWorldTime - and a test now pins the raw-time path.
 Blood moon 20/3/3 -> **21/2/3**; total **242/53/38**.
+Then the blood-moon-visibility row went WORKS: gettime, the webui status page
+(now "next in Nd") and daysToBloodMoon all read the jittered CalcNextDay
+schedule (bloodMoonDayFor) instead of the plain frequency modulus, so
+BloodMoonRange no longer puts the ops countdown on the wrong night; a test
+pins the player-console gettime line. Blood moon 21/2/3 -> **22/1/3**; total
+**243/52/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

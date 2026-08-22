@@ -64,6 +64,9 @@ pub const Snapshot = struct {
     hours: f32 = 8,
     bloodmoon_active: bool = false,
     bloodmoon_frequency: u32 = 7,
+    /// Days to the jittered CalcNextDay horde (999 = disabled); the webui
+    /// status line and the ops gettime share this.
+    bloodmoon_in_days: u32 = 999,
     joined: u16 = 0,
     entered: u16 = 0,
     peers_alive: u16 = 0,
@@ -471,7 +474,7 @@ pub const Server = struct {
                 }
                 // Show lockout on the form page so operators know why Sign in is refused.
                 if (self.loginLocked()) {
-                    var lockout_buf: [4096]u8 = undefined;
+                    var lockout_buf: [8192]u8 = undefined;
                     var retry_buf: [8]u8 = undefined;
                     const remaining_s = self.lockoutRemainingS();
                     const retry_hdr = std.fmt.bufPrint(&retry_buf, "{d}", .{remaining_s}) catch "30";
@@ -489,7 +492,7 @@ pub const Server = struct {
                     return;
                 }
                 if (self.loginLocked()) {
-                    var lockout_buf: [4096]u8 = undefined;
+                    var lockout_buf: [8192]u8 = undefined;
                     var retry_buf: [8]u8 = undefined;
                     const remaining_s = self.lockoutRemainingS();
                     const retry_hdr = std.fmt.bufPrint(&retry_buf, "{d}", .{remaining_s}) catch "30";
@@ -588,8 +591,9 @@ pub const Server = struct {
             return;
         }
 
-        // Shell HTML is the largest body; keep headroom for CSS/JS polish (poll path only).
-        var body_buf: [16384]u8 = undefined;
+        // Shell HTML with the compiled TS JS is the largest body; 32 KiB keeps
+        // headroom for CSS/JS polish (poll path only; the tick thread's stack).
+        var body_buf: [32768]u8 = undefined;
 
         if (std.mem.eql(u8, path, "/api/cmd")) {
             if (method != .POST) {
@@ -1392,11 +1396,11 @@ test "renderTemplate leaves an unknown placeholder in place" {
 }
 
 test "renderLoginLockout substitutes the real remaining seconds" {
-    var buf: [4096]u8 = undefined;
+    var buf: [8192]u8 = undefined;
     const out = try renderLoginLockout(&buf, 7);
     try std.testing.expect(std.mem.find(u8, out, "__ZDTD_RETRY_S__") == null);
     try std.testing.expect(std.mem.find(u8, out, "id=\"retry-seconds\" aria-live=\"off\">7<") != null);
-    try std.testing.expect(std.mem.find(u8, out, "let remaining=7;") != null);
+    try std.testing.expect(std.mem.find(u8, out, "let remaining = 7;") != null);
 }
 
 test "lockoutRemainingS counts down and clamps at zero" {
@@ -1432,7 +1436,7 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
         \\<ul class="grid">
         \\<li class="stat"><b class="num">{d}</b><span>server tick</span></li>
         \\<li class="stat"><b class="num">d{d} {d:0>2}:{d:0>2}</b><span>world time</span></li>
-        \\<li class="stat"><b>{s}</b><span>blood moon (every {d}d)</span></li>
+        \\<li class="stat"><b>{s}</b><span>blood moon (every {d}d, next in {d}d)</span></li>
         \\<li class="stat"><b class="num">{d}/{d}</b><span>joined / max</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>entered world</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>peers connected</span></li>
@@ -1446,6 +1450,7 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
         mm,
         bm,
         s.bloodmoon_frequency,
+        s.bloodmoon_in_days,
         s.joined,
         s.max_players,
         s.entered,
@@ -2200,7 +2205,7 @@ fn fuzzHttpHelpers(_: void, smith: *std.testing.Smith) !void {
 }
 
 test "renderShell exposes console names and status updates" {
-    var buf: [16 * 1024]u8 = undefined;
+    var buf: [32 * 1024]u8 = undefined;
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x33} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
@@ -2217,7 +2222,7 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "action=\"/logout\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "window.confirm") != null);
-    try std.testing.expect(std.mem.find(u8, html, "line.split(/\\s+/,1)") != null);
+    try std.testing.expect(std.mem.find(u8, html, "line.split(/\\s+/, 1)") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"status-heading\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "aria-label=\"Recent commands\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "forced-colors:active") != null);
@@ -2227,8 +2232,8 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "border:1px solid var(--edge)") != null);
     try std.testing.expect(std.mem.find(u8, html, "text-decoration:underline") != null);
     try std.testing.expect(std.mem.find(u8, html, "id=\"refresh-state\" role=\"status\"") != null);
-    try std.testing.expect(std.mem.find(u8, html, "commandFailed?'alert':'status'") != null);
-    try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('aria-busy','true')") != null);
+    try std.testing.expect(std.mem.find(u8, html, "commandFailed ? 'alert' : 'status'") != null);
+    try std.testing.expect(std.mem.find(u8, html, "out.setAttribute('aria-busy', 'true')") != null);
     try std.testing.expect(std.mem.find(u8, html, "pre.cmd-out:focus-visible,pre.cmd-log:focus-visible,#console-log:focus-visible") != null);
     try std.testing.expect(std.mem.find(u8, html, "list-style:none") != null);
     try std.testing.expect(std.mem.find(u8, html, "min-width:1.5rem;min-height:1.5rem") != null);
@@ -2239,21 +2244,21 @@ test "renderShell exposes console names and status updates" {
     // Automatic polling must not replace a focused scroll region; explicit
     // Refresh now and post-command refreshes may force a swap.
     try std.testing.expect(std.mem.find(u8, html, "el.contains(document.activeElement)") != null);
-    try std.testing.expect(std.mem.find(u8, html, "el._hxOnce=()=>swap(true)") != null);
-    try std.testing.expect(std.mem.find(u8, html, "r.status===401") != null);
-    try std.testing.expect(std.mem.find(u8, html, "let inFlight=false") != null);
-    try std.testing.expect(std.mem.find(u8, html, "if(!el.hasAttribute('data-load-error'))") != null);
+    try std.testing.expect(std.mem.find(u8, html, "el._hxOnce = () => swap(true)") != null);
+    try std.testing.expect(std.mem.find(u8, html, "r.status === HTTP_UNAUTHORIZED") != null);
+    try std.testing.expect(std.mem.find(u8, html, "let inFlight = false;") != null);
+    try std.testing.expect(std.mem.find(u8, html, "if (!el.hasAttribute('data-load-error'))") != null);
     try std.testing.expect(std.mem.find(u8, html, "forced-color-adjust:none") == null);
     try std.testing.expect(std.mem.find(u8, html, ".err,.noscript,.warn-text{color:MarkText;background:Mark}") != null);
     try std.testing.expect(std.mem.find(u8, html, "prefers-reduced-motion: reduce').matches") == null);
     try std.testing.expect(std.mem.find(u8, html, "JavaScript is required for live updates") != null);
-    try std.testing.expect(std.mem.find(u8, html, "'kick','kickall','ban'") != null);
+    try std.testing.expect(std.mem.find(u8, html, "'kick', 'kickall', 'ban'") != null);
     try std.testing.expect(std.mem.find(u8, html, "its outcome is unknown") != null);
     // Shared secret must not appear in HTML; CSRF uses session token only.
     try std.testing.expect(std.mem.find(u8, html, "s3cr3t") == null);
     try std.testing.expect(std.mem.find(u8, html, sess[0..]) != null);
-    // Runtime body_buf for GET / is 16384; shell must fit.
-    try std.testing.expect(html.len < 16384);
+    // Runtime body_buf for GET / is 32768; shell must fit.
+    try std.testing.expect(html.len < 32768);
 }
 
 test "loginHintHtml exposes labeled secret form" {
@@ -2264,7 +2269,7 @@ test "loginHintHtml exposes labeled secret form" {
     try std.testing.expect(std.mem.find(u8, ok, "maxlength=\"128\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "id=\"toggle-secret\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "aria-pressed=\"false\"") != null);
-    try std.testing.expect(std.mem.find(u8, ok, "token.type=shown?'password':'text'") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "token.type = shown ? 'password' : 'text'") != null);
     try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
     const bad = loginHintHtml(true);
     try std.testing.expect(std.mem.find(u8, bad, "role=\"alert\"") != null);
@@ -2332,7 +2337,7 @@ test "command result marks known failures and is keyboard-scrollable" {
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x44} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
-    var shell_buf: [16 * 1024]u8 = undefined;
+    var shell_buf: [32 * 1024]u8 = undefined;
     const shell = try renderShell(&shell_buf, sess[0..]);
     // role= so the aria-label is actually exposed (a bare div has no name),
     // tabindex=-1 so the poll's focus restore has somewhere to land.

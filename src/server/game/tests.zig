@@ -1190,6 +1190,11 @@ test "console replies use the stock error and listing shapes" {
     // A lone numeric is RAW world time (1000 = 1 h), not a day: the stock
     // playtest barrier sends `settime 22000` for the blood-moon night.
     try std.testing.expectEqualStrings("Set time to 22000\n", adminRun(g, &sink, "settime 22000"));
+    // gettime / daysToBloodMoon follow the jittered CalcNextDay schedule
+    // (BloodMoonRange), not the plain frequency modulus.
+    g.sim.director.clock.bloodmoon_frequency = 7;
+    const d0 = g.daysToBloodMoon();
+    try std.testing.expect(d0 >= 1 and d0 <= 7);
 
     // listents rows carry the stock field order for the seeded zombies.
     const ents = adminRun(g, &sink, "listents");

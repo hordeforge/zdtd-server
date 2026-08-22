@@ -118,6 +118,7 @@ pub fn fillWebuiSnap(self: *Game) void {
     s.players_ent = @intCast(@min(self.sim.countKind(.player), 65535));
     s.chunks = @intCast(@min(self.world.chunks.count(), 0xffff_ffff));
     s.bloodmoon_frequency = self.sim.director.clock.bloodmoon_frequency;
+    s.bloodmoon_in_days = self.daysToBloodMoon();
     s.net_packets_in = self.harness.counters.get(.net_packets_in);
     s.net_packets_out = self.harness.counters.get(.net_packets_out);
     s.net_bytes_in = self.harness.counters.get(.net_bytes_in);
@@ -528,8 +529,11 @@ pub fn forceAirDrop(self: *Game) bool {
 pub fn daysToBloodMoon(self: *const Game) u32 {
     const clk = self.sim.director.clock;
     if (clk.bloodmoon_frequency == 0) return 999;
-    if (clk.day % clk.bloodmoon_frequency == 0) return 0;
-    const next = ((clk.day / clk.bloodmoon_frequency) + 1) * clk.bloodmoon_frequency;
+    // The jittered CalcNextDay schedule (BloodMoonRange included): the plain
+    // frequency modulus put the red moon on the wrong night with range jitter
+    // and misled gettime/webui operators.
+    const next: u32 = @intCast(clk.bloodMoonDayFor(clk.day));
+    if (next <= clk.day) return 0;
     return next - clk.day;
 }
 
