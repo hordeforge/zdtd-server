@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 208 `WORKS`,
-87 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 209 `WORKS`,
+86 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -193,6 +193,15 @@ across restart (traders.zst: entries by item name, wallet, reset cadence;
 restored by trader name over the fresh XML fill, unknown item names fail
 closed; scenario trader-persist round-trips a traded-against window).
 Traders 15/5/3 -> **16/4/3**; total **208/87/38**.
+Then the quest turn-in / trader-open row went WORKS: questOnTraderOpen fires
+on the stock client's open path - the NetPackageLockRequest trade-window
+open (channel 1, EntityTraderLockContext) triggers it in the lock handler,
+so a stock client's trader visit advances trader_interact phases and turns
+in ready quests with the reward (the TraderData branch stays a fallback).
+Scenario trader-quest-open drives the wire end to end: the Goto->Interact->
+TurnIn starter completes on the second lock-open with coins, a fetch quest
+parked at ready_turn_in on a single open. Traders 16/4/3 -> **17/3/3**;
+total **209/86/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

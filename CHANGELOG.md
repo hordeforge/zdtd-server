@@ -16,6 +16,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Quest turn-in and trader-interact phases advance on the stock client's
+  trader open: the NetPackageLockRequest trade-window open (channel 1,
+  EntityTraderLockContext) fires the quest interact/turn-in event, so a
+  stock client's trader visit completes ready quests with the reward (no
+  zdtd-only package needed).
 - Trader stock persists across restart (traders.zst): a saved window
   overrides the fresh XML fill by trader name, so a reboot does not re-roll
   what a player was looking at (stock TraderManager saves its inventory).

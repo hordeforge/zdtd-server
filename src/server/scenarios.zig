@@ -1708,6 +1708,74 @@ test "scenario quest accept kill complete and trader buy" {
     );
 }
 
+test "scenario quest turn-in and phase advance fire on the stock trader lock-open" {
+    // GAP "Quest turn-in / phase advance on trader open": the stock client
+    // opens the trade window with NetPackageLockRequest (EntityTraderLockContext
+    // "trade"), and the server fires QuestEventManager's interact/turn-in on
+    // that open. Drive the whole path through the wire, not the direct hook:
+    // the starter (Goto -> Interact -> TurnIn) completes on the second lock-
+    // open with the coin reward, and a fetch quest parked at ready_turn_in
+    // completes on a single open.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_trader_quest_open");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_trader_quest_open", 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap); // auto-accepts the starter
+    // info_id 0 = no trader_info hours, always open.
+    const te = g.sim.spawnTrader("traderOpen", 0, 70, 8, 0, 5000).?;
+
+    // Stock lock-open body (channel 1, Entity target, EntityTraderLockContext).
+    const openTrade = struct {
+        fn f(gg: *game_mod.Game, cc: *game_mod.Client, target_id: i32, cap_p: *ln_peer.Capture) !void {
+            cap_p.clear();
+            var lr_body: [64]u8 = undefined;
+            var lw: binary.Writer = .{ .buf = &lr_body };
+            try lw.writeBool(true); // locking
+            try lw.writeU16(1); // channel 1 (trade)
+            try lw.writeI32(1); // target count
+            try lw.writeByte(1); // present
+            try lw.writeByte(2); // Entity target
+            try lw.writeI32(target_id);
+            try lw.writeString("EntityTraderLockContext");
+            try lw.writeString("trade");
+            try lw.writeBool(false); // client-side hasTraderData (server fills)
+            var lfb: [256]u8 = undefined;
+            try gg.injectFramed(cc, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
+            const lock_id = packages.idOf("NetPackageLockResponse").?;
+            _ = cap_p.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+        }
+    }.f;
+
+    const starter_id = g.sim.catalog.starter_id;
+    const coins0 = systems.questCoins(&g.sim, c.slot);
+    // Open 1: phase 2 (InteractWithNPC) advances; the TurnIn phase parks the
+    // quest ready.
+    try openTrade(g, c, te, &cap);
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, starter_id));
+    // Open 2: the ready quest turns in and pays.
+    try openTrade(g, c, te, &cap);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, starter_id));
+    try std.testing.expect(systems.questCoins(&g.sim, c.slot) > coins0);
+
+    // A fetch quest parked at ready_turn_in completes on the next open.
+    const fetch = g.sim.catalog.byName("tier1_fetch") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, fetch.id));
+    systems.questOnFetchItem(&g.sim, c.slot, 1);
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, fetch.id));
+    try openTrade(g, c, te, &cap);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, fetch.id));
+    std.debug.print("PASS trader-quest-open: lock path fires turn-in (starter 2 opens, fetch 1 open)\n", .{});
+}
+
 test "scenario vending machine opens via LockRequest with TraderData" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_vending");
