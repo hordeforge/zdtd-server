@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 253 `WORKS`,
-42 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 254 `WORKS`,
+41 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -483,6 +483,11 @@ exchange is complete - FetchList answers with the trader's quest_list,
 RemoveQuest accepts the picked offer into the journal with the giver
 position and re-sends the list without it. Traders 19/1/3 ->
 **20/0/3**; total **253/42/38**.
+Then the InventoryDataRequest row went WORKS on re-audit: the back half of
+the RequestInventoryFromServer loop is closed by the stock InvTx apply
+(2026-08-22) - a mutation made through the pos-Guid keyed request now lands
+on the player inventory with the stock ack. Items 21/6/6 ->
+**22/5/6**; total **254/41/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
