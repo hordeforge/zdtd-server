@@ -151,10 +151,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 20 | 7 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction |
-| [Player progression](#10-player-progression) | 15 | 7 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 16 | 6 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **247** | **48** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **248** | **47** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2927,14 +2927,18 @@ and server-to-client XP/level pushes do not exist.
   *Anchors:* `src/server/game.zig:4937-4959`, `src/ecs/world.zig:677-705`,
   `src/server/game.zig:2865-2877`
 
-- **Respawn: heal, teleport, PlayerSpawnedInWorld(died), re-bundle** `PARTIAL`
-  The sequence fires and the client recovers (`PASS finale/player_respawn`), and
-  the heal is correctly gated on actually being dead so a live player cannot spam
-  RequestToSpawnPlayer for a free heal. But the respawn position is always the
-  world primary spawn, and the playtest saw `hp=50` client-side against the
-  server's 100 with `spawned=False`, so the two sides do not agree on the
-  post-respawn state.
-  *Anchors:* `src/server/game.zig:3942-4009`, `:3956-3988`, `:6022-6056`
+- **Respawn: heal, teleport, PlayerSpawnedInWorld(died), re-bundle** `WORKS`
+  The sequence fires and the client recovers (`PASS finale/player_respawn`),
+  the heal is gated on actually being dead (a live player cannot spam
+  RequestToSpawnPlayer for a free heal), the respawn target is the player's
+  bedroll when placed else the world spawn (scenario `bedroll respawn`
+  pins the death-screen list and the target), and the wire order is
+  respawn-confirm first, then the teleport to the respawn point and the
+  EntityStatChanged 100/100 (the redundant world-spawn teleport that flashed
+  the client to spawn before the bed was removed 2026-08-22; the stat now
+  follows the spawn confirm so it cannot be discarded in the death state).
+  *Anchors:* `src/server/c2s/join.zig:323-381`,
+  scenario `bedroll respawn`, `finale/player_respawn`
 
 - **Respawn zeroes food and water** `WORKS`
   `respawnPlayer` now mutates hp/max_hp only, preserving food/water/stamina and

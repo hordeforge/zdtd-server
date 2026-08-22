@@ -359,15 +359,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     @as(f32, @floatFromInt(bed_surf.y)) + 0.08,
                     @floatFromInt(bed_surf.z),
                 );
-                if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
-                    try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
-                } else |_| {}
-                if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @floatFromInt(sp.x), @floatFromInt(sp.y), @floatFromInt(sp.z), 0, 0, 0, true)) |tb| {
-                    try self.sendGame(peer, "NetPackageEntityTeleport", tb);
-                } else |_| {}
-                if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(bed_surf.x)), @as(f32, @floatFromInt(bed_surf.y)) + 0.08, @as(f32, @floatFromInt(bed_surf.z)), 0, 0, 0, true)) |tb| {
-                    try self.sendGame(peer, "NetPackageEntityTeleport", tb);
-                } else |_| {}
+                // Respawn confirm first (the client leaves the death screen
+                // and enters the spawned state), then position + HP so the
+                // post-respawn state cannot be discarded while still dead.
                 const spawned = try packages.buildSpawnedBody(
                     self.body_buf[256..384],
                     @intFromEnum(packages.RespawnType.died),
@@ -377,6 +371,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     c.entity_id,
                 );
                 try self.sendGame(peer, "NetPackagePlayerSpawnedInWorld", spawned);
+                if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(bed_surf.x)), @as(f32, @floatFromInt(bed_surf.y)) + 0.08, @as(f32, @floatFromInt(bed_surf.z)), 0, 0, 0, true)) |tb| {
+                    try self.sendGame(peer, "NetPackageEntityTeleport", tb);
+                } else |_| {}
+                if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
+                    try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
+                } else |_| {}
                 std.debug.print("zdtd: respawn heal entity={d}\n", .{c.entity_id});
             }
         } else {

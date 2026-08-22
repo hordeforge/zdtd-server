@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 247 `WORKS`,
-48 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 248 `WORKS`,
+47 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -447,6 +447,14 @@ the Game, emitted in the GameStats blob, settable via setoptions, ranged in
 the mode packs and in serverconfig.example.xml; the client-side death flow
 switches on the stat, so an operator can now change it. Player progression
 14/8/15 -> **15/7/15**; total **247/48/38**.
+Then the respawn row went WORKS: the respawn target is the player's bedroll
+when placed (else the world spawn, scenario `bedroll respawn` pins the
+death-screen list), and the wire order is now respawn-confirm first, then
+the teleport to the respawn point and EntityStatChanged 100/100 - the
+redundant world-spawn teleport that flashed the client to spawn before the
+bed was removed and the stat now follows the confirm so it cannot be
+discarded in the death state. Player progression 15/7/15 -> **16/6/15**;
+total **248/47/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
