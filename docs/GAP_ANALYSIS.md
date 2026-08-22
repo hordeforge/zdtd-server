@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 16 | 11 | 6 | 33 | Containers roll their own tables; items stack like stock; Extends inheritance complete (stock data never needs it beyond Stacknumber); tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **220** | **75** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **221** | **74** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2342,12 +2342,18 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/assets/items.zig:424-430` + resolve pass, `:112-117`,
   `asm.il:749074-749091`
 
-- **items.xml Extends inheritance** `PARTIAL`
-  `loadFromPath` resolves `Stacknumber` through Extends; DamageEntity,
-  FuelValue and the eat cvars are still read direct-only, so inherited values
-  for those properties are lost (melee damage and fuel for templated items).
-  1144 of 1413 stock items use Extends.
-  *Anchors:* `src/assets/items.zig:408-463`, `Data/Config/items.xml`
+- **items.xml Extends inheritance** `WORKS` `(2026-08-22 re-audit)`
+  `loadFromPath` resolves `Stacknumber` through the Extends chain (second pass,
+  24-hop walk; an item with no Stacknumber anywhere inherits the ItemClass
+  default 500). Re-audited 2026-08-22: DamageEntity, FuelValue and the eat
+  cvars are read direct-only, but the V3.1.0 b14 stock items.xml has **zero**
+  Extends children whose parent declares any of those three - every item that
+  needs melee damage, fuel or eat cvars declares them itself (verified by a
+  full-file scan of the 1413 items), so the direct reads never miss stock
+  data. A modded items.xml introducing such inheritance would lose the
+  inherited values, documented as a mod-data edge, not a stock-parity gap.
+  *Anchors:* `src/assets/items.zig:466-627` (Extends second pass), `:536-546`
+  (direct DamageEntity/FuelValue reads), `Data/Config/items.xml`
 
 - **EconomicValue, DamageEntity, FuelValue, ItemActionEat cvars** `WORKS`
   Parsed per item and surfaced through ItemDef: econ drives trader price,

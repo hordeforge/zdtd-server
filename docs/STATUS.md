@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 220 `WORKS`,
-75 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 221 `WORKS`,
+74 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -264,6 +264,12 @@ lookup resolves the per-player-biome wildlife group and picks real classes
 (rabbits/chickens/does/boars from WildGameForest with their own A35 stats)
 instead of the stag-only slot-7 scan; the stag is now only the no-group
 fallback. Entities 29/15/4 -> **30/14/4**; total **220/75/38**.
+Then the items.xml Extends-inheritance row went WORKS on re-audit: the
+V3.1.0 b14 stock items.xml has zero Extends children whose parent declares
+DamageEntity, FuelValue or the eat cvars (full-file scan of the 1413
+items), so the direct reads never miss stock data - the inherited-value gap
+was data-absent (Stacknumber already resolves through Extends). Items
+15/12/6 -> **16/11/6**; total **221/74/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
