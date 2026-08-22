@@ -85,6 +85,24 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
             return d.g.getBlockHp(wx, y, wz);
         }
     };
+    // Per-cell biome provider (GAP per-chunk-biome row): same sources as the
+    // dominant (proc field / biomes.png / height fallback), but per column so
+    // transitions follow the map instead of snapping to the chunk boundary.
+    const BiomeCtx = struct {
+        g: *Game,
+        fallback: u8,
+        fn at(ctx: ?*anyopaque, wx: i32, wz: i32) u8 {
+            const b: *const @This() = @ptrCast(@alignCast(ctx.?));
+            if (b.g.world.terrain_source == .proc) {
+                if (b.g.world.worldgen) |*wg|
+                    return b.g.world.biome_layers_table.biomeIdAt(wg.biomeAt(@floatFromInt(wx), @floatFromInt(wz)));
+            } else if (b.g.world.biomes) |*bm| {
+                if (bm.atWorld(wx, wz)) |id| return id;
+            }
+            return b.fallback;
+        }
+    };
+    var biome_ctx: BiomeCtx = .{ .g = self, .fallback = biome_id };
     var dmg_ctx: DmgCtx = .{ .g = self, .cx = cx, .cz = cz };
     // Stock Chunk.write payload inside NetPackageChunk (overwrite=false first delivery).
     const body = try packages.stock_chunk.buildNetPackageChunkNew(&self.body_buf, .{
@@ -108,6 +126,11 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .dmg_at = DmgCtx.at,
         .dmg_ctx = &dmg_ctx,
         .raws_scratch = &self.chunk_raws,
+        // Per-cell biome (GAP per-chunk-biome row): the biome map under each
+        // column, so transitions follow biomes.png / the proc field instead of
+        // snapping to the chunk dominant. Falls back to the cached dominant.
+        .biome_at = &BiomeCtx.at,
+        .biome_ctx = &biome_ctx,
     });
     const before_out = self.harness.counters.get(.net_packets_out);
     try self.sendGame(peer, "NetPackageChunk", body);

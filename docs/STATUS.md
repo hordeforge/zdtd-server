@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 229 `WORKS`,
-66 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 230 `WORKS`,
+65 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -320,6 +320,13 @@ upgrade whose target is not the block's table entry, so a modified client
 cannot upgrade anything to anything; resource consumption and upgrade XP are
 client-side stock mechanics (the dig/repair path already grants mining XP).
 World 27/15/6 -> **28/14/6**; total **229/66/38**.
+Then the per-chunk biome row went WORKS: the chunk wire now carries a
+per-cell biome id (biome map at each world XZ instead of one byte for all
+256 cells), the BiomeIntensity per column reports that cell's id, and
+DominantBiome/AreaMasterDominantBiome follow stock CalcDominantBiome (modal
+cell, first maximum); transitions follow biomes.png per cell on stock maps
+and the proc biome field on RWG. World 28/14/6 -> **29/13/6**; total
+**230/65/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

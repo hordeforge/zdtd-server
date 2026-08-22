@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 28 | 14 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [World systems](#11-world-systems) | 29 | 13 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **229** | **66** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **230** | **65** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3046,11 +3046,17 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   than dropping; force-serial under DST so fault injection still surfaces errors.
   *Anchors:* `src/world/chunk_flush.zig:1-80`, `src/world/store.zig:789-822`
 
-- **Per-chunk biome** `PARTIAL`
-  One biome byte written into all 256 biome cells plus a fixed BiomeIntensity per
-  column. Biome transitions snap to 16-block chunk boundaries instead of following
-  biomes.png per cell, and there is no blending.
-  *Anchors:* `src/wire/stock_chunk.zig:345-362`, `src/server/game.zig:7297-7308`
+- **Per-chunk biome** `WORKS`
+  Each of the 256 biome cells carries the biome-map value at its world XZ
+  (biomes.png for stock maps, the proc field for RWG), so transitions follow
+  the map per 1-block cell instead of snapping to the chunk dominant; the
+  per-column BiomeIntensity reports that cell's id at full strength, and
+  DominantBiome / AreaMasterDominantBiome are the modal cell (stock
+  CalcDominantBiome semantics: count, first maximum). Client-side microsplat
+  blending is a renderer concern, not server wire; no per-cell blend weights
+  exist in the stock chunk body.
+  *Anchors:* `src/wire/stock_chunk.zig:77-78,521-555`,
+  `src/server/game/chunk_fill.zig:91-110,132-133`
 
 - **Topsoil bitfield / splat maps** `PARTIAL`
   `m_bTopSoilBroken` is written all-0xFF (every column marked broken) so the client

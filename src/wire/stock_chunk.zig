@@ -71,6 +71,11 @@ pub const EncodeOpts = struct {
     /// Optional density override (TTS). Null → densityForBlock(type).
     dens_at: ?DensAtFn = null,
     biome: u8 = 3, // pine forest-ish placeholder
+    /// Optional per-cell biome provider (world XZ -> wire biome id): fills the
+    /// 256 biome cells + intensities so transitions follow the biome map
+    /// instead of snapping to the chunk dominant. Null -> uniform `biome`.
+    biome_at: ?*const fn (ctx: ?*anyopaque, wx: i32, wz: i32) u8 = null,
+    biome_ctx: ?*anyopaque = null,
     /// AssignIds water block id; 0 disables the water channel (all-zero).
     /// When set, cells whose block type is water carry water_mass_full.
     water_block_id: u16 = 0,
@@ -135,6 +140,24 @@ fn blockType(raw: u32) u16 {
 /// Layer cell index matching stock: x + z*16 + (y&3)*256 within a 4-high band.
 fn layerCell(lx: i32, y_in_layer: i32, lz: i32) usize {
     return @intCast(lx + lz * 16 + y_in_layer * 256);
+}
+
+/// Most common biome id across the 256 cells (stock CalcDominantBiome counts
+/// by value; ties fall to the first maximum). `fallback` seeds the dominant and
+/// wins only when no cell count exceeds zero (an all-0 cell grid is dominant 0).
+fn dominantOf(biomes: *const [256]u8, fallback: u8) u8 {
+    var counts: [256]u16 = .{0} ** 256;
+    for (biomes) |b| counts[b] +|= 1;
+    var dom = fallback;
+    var best: u16 = 0;
+    var i: usize = 0;
+    while (i < 256) : (i += 1) {
+        if (counts[i] > best) {
+            best = counts[i];
+            dom = @intCast(i);
+        }
+    }
+    return dom;
 }
 
 // --- SIMD helpers (portable @Vector; scalar tail). Hot path: stack only. ---
@@ -497,6 +520,20 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
 
     // biomes 256
     var biomes: [256]u8 = .{opts.biome} ** 256;
+    // Per-cell biome provider (biomes.png / proc): smooths biome transitions
+    // to the cell instead of snapping to the chunk dominant. Fallback keeps
+    // the uniform dominant value.
+    if (opts.biome_at) |bf| {
+        var lz: i32 = 0;
+        while (lz < 16) : (lz += 1) {
+            var lx: i32 = 0;
+            while (lx < 16) : (lx += 1) {
+                const wx = opts.cx * 16 + lx;
+                const wz = opts.cz * 16 + lz;
+                biomes[@as(usize, @intCast(lz * 16 + lx))] = bf(opts.biome_ctx, wx, wz);
+            }
+        }
+    }
     try w.writeBytes(&biomes);
 
     // biome intensities: 1536 bytes = BiomeIntensity[256], 6 bytes each interleaved:
@@ -506,13 +543,16 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     var i: usize = 0;
     while (i < 256) : (i += 1) {
         const o = i * 6;
-        intensities[o] = opts.biome;
+        intensities[o] = biomes[i];
         intensities[o + 4] = 0x0F;
     }
     try w.writeBytes(&intensities);
 
-    try w.writeByte(opts.biome); // DominantBiome
-    try w.writeByte(opts.biome); // AreaMasterDominantBiome
+    // DominantBiome / AreaMasterDominantBiome: most common cell (stock
+    // CalcDominantBiome picks by count; ties fall to the first maximum).
+    const dom = if (opts.biome_at != null) dominantOf(&biomes, opts.biome) else opts.biome;
+    try w.writeByte(dom); // DominantBiome
+    try w.writeByte(dom); // AreaMasterDominantBiome
 
     // custom data count (network filter): u16
     try w.writeU16(0);
@@ -787,6 +827,61 @@ test "stock chunk empty sky is smaller" {
     });
     // Only bedrock at y=0 so one layer present.
     try std.testing.expect(body.len < 8000);
+}
+
+test "stock chunk per-cell biome changes wire and is deterministic" {
+    var heights: [256]u8 = .{60} ** 256;
+    // Separate buffers: encodeNetworkChunk returns a slice into its caller
+    // buffer, so sharing one buffer would alias later writes over earlier views.
+    var buf_a: [65536]u8 = undefined;
+    var buf_b: [65536]u8 = undefined;
+    var buf_c: [65536]u8 = undefined;
+    const Ctx = struct {
+        fn at(_: ?*anyopaque, wx: i32, wz: i32) u8 {
+            return @intCast(@mod(wx + wz, 3));
+        }
+    };
+    const body = try encodeNetworkChunk(&buf_a, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .biome_at = Ctx.at,
+        .biome_ctx = null,
+    });
+    const uniform = try encodeNetworkChunk(&buf_b, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .biome = 3,
+    });
+    // Per-cell values 0/1/2 must differ from the uniform single-biome wire.
+    try std.testing.expect(!std.mem.eql(u8, body, uniform));
+    // A constant per-cell provider must be byte-identical to the uniform encode
+    // (same cells, same intensities, same dominant).
+    const ConstCtx = struct {
+        fn at(_: ?*anyopaque, _: i32, _: i32) u8 {
+            return 3;
+        }
+    };
+    const const_body = try encodeNetworkChunk(&buf_c, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .biome_at = ConstCtx.at,
+        .biome_ctx = null,
+    });
+    try std.testing.expect(std.mem.eql(u8, const_body, uniform));
+}
+
+test "dominantOf picks most common biome id with first-max ties" {
+    var biomes: [256]u8 = .{1} ** 256;
+    @memset(biomes[240..], 5);
+    try std.testing.expectEqual(@as(u8, 1), dominantOf(&biomes, 3));
+    var all_zero: [256]u8 = .{0} ** 256;
+    try std.testing.expectEqual(@as(u8, 0), dominantOf(&all_zero, 3));
+    var tie: [256]u8 = .{0} ** 256;
+    @memset(tie[128..], 9); // 128×0, 128×9: first maximum (0) wins
+    try std.testing.expectEqual(@as(u8, 0), dominantOf(&tie, 3));
 }
 
 test "stock chunk emits per-block textureFull for painted blocks" {
