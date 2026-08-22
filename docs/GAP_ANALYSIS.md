@@ -149,12 +149,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 27 | 17 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; timid animals flee; wildlife despawns and animates like stock; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 29 | 15 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; timid animals flee; wildlife despawns and animates like stock; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **217** | **78** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **219** | **76** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1939,13 +1939,15 @@ gamestage, no wandering hordes, and no screamers.
   the chunk-group state machine — waived as spawn-balance polish.
   *Anchors:* `asm.il:1093735-1093863`, `src/ecs/aidirector.zig:159-178`
 
-- **entitygroups.xml weighted group table** `PARTIAL`
-  Parses `<entitygroup>` / `<e n= p=>` and picks deterministically in integer
-  milli-weights, but `max_groups` is 512 and stock ships 1892. The live server logs
-  `entitygroups n=512`: 1380 groups are silently dropped at the parse cap.
-  Everything past name #512 (`sleeperHordeStageGS623`) is gone, which is most of
-  the gamestage-keyed horde/sleeper/scout lists.
-  *Anchors:* `src/assets/entitygroups.zig:7`, `:112`, `server-orch.log`
+- **entitygroups.xml weighted group table** `WORKS` `(2026-08-22 re-audit)`
+  The 512-group cap is gone: the table is now a flat arena slice and the parse
+  walks the whole file, so all ~1890 stock groups load (the file comment cites
+  1875 groups and feralHordeStageGS2 at index 1177, the tail that the old cap
+  dropped - the gamestage-keyed horde/sleeper/scout lists). Picks stay
+  deterministic integer milli-weight (round(weight*1000), fixed-point walk so
+  the pick path does not depend on f32 accumulation order).
+  *Anchors:* `src/assets/entitygroups.zig:20-27` (arena slice), `:106-125`
+  (uncapped parse), `src/server/game/init_assets.zig:236` (n= count)
 
 - **Entity class variety actually reachable at spawn** `RESOLVED (2026-08-08)`
   The class_table is still the fixed 16-slot offline cache, but a spawn-picked
@@ -1987,16 +1989,18 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/server/game.zig:6995-7074`, `src/world/sleepers.zig:246-380`,
   `asm.il:197877`, `server-orch.log`
 
-- **Sleeper group name to entity class resolution** `PARTIAL`
-  `resolveSleeperClass` tries entityclasses byName, then entitygroups.pick, then
-  `defaultZombie()`. The dominant stock value is `GroupGenericZombie` (4781
-  occurrences across Data/Prefabs/POIs), which is **not** an entitygroup: it is a
-  `gamestages.xml` `<group name="1GroupGenericZombie" spawner="SleeperGSList"/>`
-  indirection. With gamestages unparsed, every such volume falls through to
-  zombieBoe. Only volumes naming a class directly (~1000 occurrences) get the right
-  model.
-  *Anchors:* `src/server/game.zig:7076-7086`, `Data/Config/gamestages.xml:153`,
-  `Data/Prefabs/POIs/*.xml`
+- **Sleeper group name to entity class resolution** `WORKS` `(2026-08-22 re-audit)`
+  The `GroupGenericZombie` indirection resolves through gamestages: the sleeper
+  spawn path (`src/server/game/sleeper.zig:109-110`) resolves the volume's
+  class name via `gamestages.sleeperEntityGroup(class, stage)` and passes the
+  stage spawn group into `resolveSleeperClass`, whose chain is stage group
+  pick -> entityclasses byName -> entitygroups.pick -> defaultZombie. So the
+  dominant sleeper value (GroupGenericZombie, a `gamestages.xml` SleeperGSList
+  spawner indirection) spawns a gamestage-appropriate class instead of falling
+  through to zombieBoe, and volumes naming a class directly keep their model.
+  *Anchors:* `src/server/game/sleeper.zig:109-110`,
+  `src/server/game.zig:2627` resolveSleeperClass,
+  `Data/Config/gamestages.xml:153`, `Data/Prefabs/POIs/*.xml`
 
 - **Sleeper wake condition** `PARTIAL`
   Two independent mechanisms: an AABB test to spawn the group, then a per-entity

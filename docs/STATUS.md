@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 217 `WORKS`,
-78 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 219 `WORKS`,
+76 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -252,6 +252,13 @@ sense surface is stock-faithful: per-class SightRange, MaxViewAngle cone,
 block LOS, stealth-scaled hearing and smell - the old flat-48m through-walls
 claims are stale; the residual target-choice refinements are documented.
 Entities 25/19/4 -> **27/17/4**; total **217/78/38**.
+Then the entitygroups and sleeper-resolution rows went WORKS on re-audit:
+the 512-group cap is gone (the table is a flat arena slice parsing the whole
+file, so all ~1890 stock groups load including the gamestage-keyed horde
+lists), and the GroupGenericZombie sleeper volumes resolve through
+gamestages (sleeper.zig resolves the stage spawn group before the
+byName/entitygroups chain) instead of falling through to zombieBoe.
+Entities 27/17/4 -> **29/15/4**; total **219/76/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
