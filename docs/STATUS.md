@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 236 `WORKS`,
-59 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 238 `WORKS`,
+57 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -373,6 +373,13 @@ pinned by test) and the sleeper load uses that predicate instead of the
 "sleeper" name prefix, so the ~338 POIs carrying infestedSleeper* markers
 keep their whole authored spawn set (offline loads fall back to the prefix).
 POIs 19/11/0 -> **20/10/0**; total **236/59/38**.
+Then two POI rows flipped WORKS on re-audit: sleeper volume world placement
+(volume corners rotate with the same stock-clockwise rotateLocalXZ as the
+TTS stamp, so rot 1/3 volumes land in the rooms TFP marked) and the prefab
+TE scan as a container source (the TE-type filter now uses the stock
+TileEntityType values from the te_types fix, so real Loot/SecureLoot/
+Composite TE bytes seed world containers correctly). POIs 20/10/0 ->
+**22/8/0**; total **238/57/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
