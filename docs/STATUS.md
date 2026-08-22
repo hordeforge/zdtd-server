@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 226 `WORKS`,
-69 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 227 `WORKS`,
+68 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -302,6 +302,12 @@ clears (plus shutdown and the periodic autosave), so XP survives restarts
 and disconnects; awards resolve per-class ExperienceGain. The client XP
 push stays the waived server-to-client row. Progression 12/10/15 ->
 **13/9/15**; total **226/69/38**.
+Then the POI/prefab placement row went WORKS on re-audit: part_ prefabs are
+placed (height flatten to ground, no pad) and painted under the 24^3 volume
+cap, and Navezgane's 72 parts (driveways, town signs, the pedestrian bridge)
+all fit, so roads and driveways are present on stock maps; the huge RWG
+clutter parts skip painting as a documented perf choice. World 25/17/6 ->
+**26/16/6**; total **227/68/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

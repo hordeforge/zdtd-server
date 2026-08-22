@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [World systems](#11-world-systems) | 26 | 16 | 6 | 48 | Walk, dig, build, persist; POIs and parts (roads/driveways) place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **226** | **69** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **227** | **68** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3072,13 +3072,16 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   `DistributeStability`.
   *Anchors:* `src/wire/stock_chunk.zig:329`, `asm.il:1127022`, `asm.il:1127044`
 
-- **POI / prefab placement from prefabs.xml plus .tts** `PARTIAL`
+- **POI / prefab placement from prefabs.xml plus .tts** `WORKS` `(2026-08-22 re-audit)`
   Full POIs flatten heights and paint their block/texture/density planes, and TEs
-  are enumerated for storage. Every prefab whose name starts `part_` is skipped
-  outright, so roads, driveways and every part-based decoration are absent. (Full
-  detail in [section 7](#7-pois-and-prefabs).)
-  *Anchors:* `src/world/prefabs.zig:79-114`, `:222-242`, `:232`,
-  `src/world/tts.zig:1-200`
+  are enumerated for storage. Re-audited 2026-08-22: `part_` prefabs are **not**
+  skipped - they are placed (height flatten to ground, no pad) and painted under
+  the `part_paint_volume_cap` (24^3; `isPaintablePart`), and Navezgane's 72 parts
+  (driveways, town signs, the pedestrian bridge) all fit under it, so roads and
+  driveways are present on stock maps. The huge RWG clutter parts skip painting
+  as a documented perf choice (RWG-owned, section 3).
+  *Anchors:* `src/world/prefabs.zig:49-66` (isPart / isPaintablePart), `:216-235`
+  (part flatten), `:487` (paint gate), `src/world/tts.zig:1-200`
 
 - **Player-placed block rotation / meta in the chunk plane** `PARTIAL`
   `setBlockWorld` writes only the bare u16 id into `Chunk.blocks`, so rotation and
