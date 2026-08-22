@@ -1213,69 +1213,85 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
     }
     var stock = &w.trader_stock[ts];
     var e: usize = 0;
-    while (e < stock.n) : (e += 1) {
-        if (stock.entries[e].item != item) continue;
-        if (side == 0) {
-            if (stock.entries[e].count < qty) return false;
-            const unit: u32 = @max(1, @as(u32, stock.entries[e].price));
-            const cost: u32 = unit * qty;
-            if (cost > std.math.maxInt(u16)) return false;
-            if (w.wallet[ps].coins < cost) return false;
-            // Spend coins from the client bag first so it matches the wallet;
-            // only the remainder draws on server-side balance (quest rewards).
-            // Removing min(have, cost) keeps wallet >= inv coins, so the sync
-            // above can never re-mint what a buy already spent.
-            if (w.mask[ps].inventory) {
-                const inventory_before = w.inventory[ps];
-                const have = w.inventory[ps].countItem(coin_id);
-                const from_inv: u32 = @min(have, cost);
-                if (from_inv > 0) {
-                    if (!w.inventory[ps].removeItem(coin_id, @intCast(from_inv))) {
-                        w.inventory[ps] = inventory_before;
-                        return false;
-                    }
-                }
-                if (!w.depositItem(ps, item, qty)) {
+    while (e < stock.n and stock.entries[e].item != item) : (e += 1) {}
+    const entry = if (e < stock.n) &stock.entries[e] else null;
+    if (side == 0) {
+        // Buy: the item must be stocked.
+        const en = entry orelse return false;
+        if (en.count < qty) return false;
+        const unit: u32 = @max(1, @as(u32, en.price));
+        const cost: u32 = unit * qty;
+        if (cost > std.math.maxInt(u16)) return false;
+        if (w.wallet[ps].coins < cost) return false;
+        // Spend coins from the client bag first so it matches the wallet;
+        // only the remainder draws on server-side balance (quest rewards).
+        // Removing min(have, cost) keeps wallet >= inv coins, so the sync
+        // above can never re-mint what a buy already spent.
+        if (w.mask[ps].inventory) {
+            const inventory_before = w.inventory[ps];
+            const have = w.inventory[ps].countItem(coin_id);
+            const from_inv: u32 = @min(have, cost);
+            if (from_inv > 0) {
+                if (!w.inventory[ps].removeItem(coin_id, @intCast(from_inv))) {
                     w.inventory[ps] = inventory_before;
                     return false;
                 }
-                w.markDirty(ps, .{ .inv = true });
             }
-            stock.entries[e].count -= qty;
-            w.wallet[ps].coins -= cost;
-            // Stock credits the trader's AvailableMoney with the sale (the
-            // wire TraderData shows the live balance). Clamp at i32 max.
-            stock.wallet = @intCast(@min(@as(i64, stock.wallet) + cost, std.math.maxInt(i32)));
-            // Demand spike: a buy raises the entry's markup to +100
-            // (TraderData/Entry::IncreaseMarkup, asm.il 856828-856866).
-            stock.entries[e].markup = 100;
-        } else {
-            const gain: u32 = @as(u32, stock.entries[e].sell) * qty;
-            if (gain > std.math.maxInt(u16)) return false;
-            if (w.wallet[ps].coins > std.math.maxInt(u32) - gain) return false;
-            if (stock.entries[e].count > std.math.maxInt(u16) - qty) return false;
-            // Stock debits the trader's AvailableMoney when buying from the
-            // player and refuses the sale once the money runs out
-            // (TraderInfo money pool; TraderBuyLimit is a separate row).
-            if (stock.wallet < 0 or gain > @as(u32, @intCast(stock.wallet))) return false;
-            // Take goods from inv when selling.
-            if (w.mask[ps].inventory) {
-                const inventory_before = w.inventory[ps];
-                if (w.inventory[ps].countItem(item) < qty) return false;
-                if (!w.inventory[ps].removeItem(item, qty)) return false;
-                if (!w.depositItem(ps, coin_id, @intCast(gain))) {
-                    w.inventory[ps] = inventory_before;
-                    return false;
-                }
-                w.markDirty(ps, .{ .inv = true });
+            if (!w.depositItem(ps, item, qty)) {
+                w.inventory[ps] = inventory_before;
+                return false;
             }
-            stock.entries[e].count += qty;
-            w.wallet[ps].coins += gain;
-            stock.wallet -= @intCast(gain);
+            w.markDirty(ps, .{ .inv = true });
+        }
+        en.count -= qty;
+        w.wallet[ps].coins -= cost;
+        // Stock credits the trader's AvailableMoney with the sale (the
+        // wire TraderData shows the live balance). Clamp at i32 max.
+        stock.wallet = @intCast(@min(@as(i64, stock.wallet) + cost, std.math.maxInt(i32)));
+        // Demand spike: a buy raises the entry's markup to +100
+        // (TraderData/Entry::IncreaseMarkup, asm.il 856828-856866).
+        en.markup = 100;
+        return true;
+    } else {
+        // Sell: stocked items price from their entry; any other item sells at
+        // its EconomicValue x EconomicSellScale x SellMarkdown via the hook
+        // (stock lets you sell anything, RE GetSellPrice).
+        const unit: u32 = if (entry) |en|
+            @as(u32, en.sell)
+        else if (w.sell_price_fn) |f|
+            f(w.sell_price_ctx, item, ts)
+        else
+            return false;
+        if (unit == 0) return false;
+        const gain: u32 = unit * qty;
+        if (gain > std.math.maxInt(u16)) return false;
+        if (w.wallet[ps].coins > std.math.maxInt(u32) - gain) return false;
+        if (entry) |en| {
+            if (en.count > std.math.maxInt(u16) - qty) return false;
+        }
+        // Stock debits the trader's AvailableMoney when buying from the
+        // player and refuses the sale once the money runs out
+        // (TraderInfo money pool; TraderBuyLimit is a separate row).
+        if (stock.wallet < 0 or gain > @as(u32, @intCast(stock.wallet))) return false;
+        // Take goods from inv when selling.
+        if (w.mask[ps].inventory) {
+            const inventory_before = w.inventory[ps];
+            if (w.inventory[ps].countItem(item) < qty) return false;
+            if (!w.inventory[ps].removeItem(item, qty)) return false;
+            if (!w.depositItem(ps, coin_id, @intCast(gain))) {
+                w.inventory[ps] = inventory_before;
+                return false;
+            }
+            w.markDirty(ps, .{ .inv = true });
+        }
+        if (entry) |en| {
+            en.count += qty;
             // A sell eases demand: step the entry's markup down by 4
             // (DecreaseMarkup, asm.il 856828-856866), saturating at i8 min.
-            stock.entries[e].markup -|= 4;
+            en.markup -|= 4;
         }
+        w.wallet[ps].coins += gain;
+        stock.wallet -= @intCast(gain);
         return true;
     }
     return false;
@@ -5742,4 +5758,40 @@ test "demolition: primes at the health threshold, countdowns, then requests the 
     w2.health[s2].hp = 1;
     for (0..3) |_| _ = systemZombieAi(&w2, 0.05);
     try std.testing.expect(!w2.zombie_ai[s2].primed);
+}
+
+test "trader buys an item it does not stock via the sell-price hook" {
+    // Stock lets you sell anything (GetSellPrice: EconomicValue x scale x
+    // markdown); the hook prices non-stocked items. 0 / unset keeps the
+    // stocked-only restriction.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 5, .quality = 1 };
+    w.inventory[ps].slots[c.inv_equip_start - 1] = .{}; // free slot for coin payout
+    w.trader_stock[ts].entries[0] = .{ .item = 99, .count = 2, .price = 10, .sell = 100 };
+    const Hook = struct {
+        fn price(_: ?*anyopaque, item: u16, _: u16) u32 {
+            return if (item == 77) 25 else 0; // 25 dukes per non-stocked unit
+        }
+    };
+    w.sell_price_ctx = null;
+    w.sell_price_fn = &Hook.price;
+
+    // Without a stocked entry the sale still lands at the hooked price.
+    // The starter kit already carried 50 casinoCoin, so the wallet ends at
+    // 50 (starter) + 50 (2 x 25 sell) = 100.
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 100), w.wallet[ps].coins);
+    try std.testing.expectEqual(@as(i32, 450), w.trader_stock[ts].wallet);
+    // The stocked entry is untouched by a non-stocked sale.
+    try std.testing.expectEqual(@as(u16, 2), w.trader_stock[ts].entries[0].count);
+    // Unset hook: non-stocked sells are refused (test worlds keep the old rule).
+    w.sell_price_fn = null;
+    const coins_before = w.wallet[ps].coins;
+    try std.testing.expect(!trade(&w, 0, trader_id, 77, 1, 1, 6));
+    try std.testing.expectEqual(coins_before, w.wallet[ps].coins);
 }

@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 243 `WORKS`,
-52 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 244 `WORKS`,
+51 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -415,6 +415,13 @@ schedule (bloodMoonDayFor) instead of the plain frequency modulus, so
 BloodMoonRange no longer puts the ops countdown on the wrong night; a test
 pins the player-console gettime line. Blood moon 21/2/3 -> **22/1/3**; total
 **243/52/38**.
+Then the trade-execution row went WORKS: `systems.trade` no longer requires
+the item in the trader's stock for a sale - a non-stocked item prices at its
+EconomicValue x EconomicSellScale x SellMarkdown through the Game's
+sell-price hook (stock lets you sell anything, RE GetSellPrice), with unit
+tests for the stocked, non-stocked and unset-hook paths; buys and sells stay
+atomic with the wallet and trader money pool. Traders 18/2/3 ->
+**19/1/3**; total **244/51/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

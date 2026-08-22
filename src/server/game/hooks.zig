@@ -520,3 +520,25 @@ pub fn homeLockout(ctx: ?*anyopaque, entity_id: i32, px: f32, pz: f32) u8 {
     }
     return bits;
 }
+
+/// Unit sell price for an item the trader does not stock (stock lets you
+/// sell anything: EconomicValue x EconomicSellScale x SellMarkdown, RE
+/// GetSellPrice). Same formula as fillTraderFromXml's stocked-entry sell.
+/// 0 = cannot sell (unknown item or trader).
+pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const d = g.items.byId(item_id) orelse return 0;
+    if (d.econ == 0) return 0;
+    var sell_markup: f32 = 0.02;
+    if (g.sim.mask[trader_slot].trader_stock) {
+        const info_id = g.sim.trader_stock[trader_slot].trader_info_id;
+        if (info_id != 0) {
+            if (g.traders.traderInfo(info_id)) |ti| {
+                if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
+            }
+        }
+        if (sell_markup == 0.02 and g.traders.sell_markdown > 0) sell_markup = g.traders.sell_markdown;
+    }
+    const scaled: f64 = @as(f64, d.econ) * @as(f64, d.econ_sell_scale) * @as(f64, sell_markup);
+    return @max(1, @as(u32, @intCast(@min(@as(u64, @intFromFloat(@floor(scaled))), 65535))));
+}

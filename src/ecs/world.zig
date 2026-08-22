@@ -415,6 +415,12 @@ pub const World = struct {
     /// action recorded but not fired (test worlds without gamestage data).
     quest_spawn_ctx: ?*anyopaque = null,
     quest_spawn_fn: ?*const fn (?*anyopaque, c.PoiRect, []const u8, u8, u8, f32, f32) void = null,
+    /// Unit sell price for an item the trader does NOT stock (stock lets you
+    /// sell any item: EconomicValue x EconomicSellScale x SellMarkdown, RE
+    /// GetSellPrice). The Game resolves the per-trader markup; 0 = cannot
+    /// sell (unset hook keeps the stocked-only restriction in test worlds).
+    sell_price_ctx: ?*anyopaque = null,
+    sell_price_fn: ?*const fn (?*anyopaque, item_id: u16, trader_slot: u16) u32 = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.

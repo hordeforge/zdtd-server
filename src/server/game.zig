@@ -732,6 +732,10 @@ pub const Game = struct {
         // entry (stock SpawnQuestEntity placement).
         self.sim.quest_spawn_ctx = self;
         self.sim.quest_spawn_fn = &questSpawnGsEnemy;
+        // Sell any item, not just stocked ones (stock lets you sell anything):
+        // unit price = EconomicValue x EconomicSellScale x SellMarkdown.
+        self.sim.sell_price_ctx = self;
+        self.sim.sell_price_fn = &traderSellPrice;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -882,6 +886,10 @@ pub const Game = struct {
 
     fn questSpawnGsEnemy(ctx: ?*anyopaque, rect: ecs.components.PoiRect, list: []const u8, min: u8, max: u8, px: f32, pz: f32) void {
         return game_hooks.questSpawnGsEnemy(ctx, rect, list, min, max, px, pz);
+    }
+
+    fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
+        return game_hooks.traderSellPrice(ctx, item_id, trader_slot);
     }
 
     fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
