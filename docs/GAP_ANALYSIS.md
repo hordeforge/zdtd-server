@@ -156,9 +156,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 23 | 5 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 21 | 4 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 36 | 8 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [World systems](#11-world-systems) | 37 | 7 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 44 | 4 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **252** | **39** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **253** | **38** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2024,7 +2024,7 @@ gamestage, no wandering hordes, and no screamers.
   stage; `gameStageBornAtWorldTime` rides the PlayerId PDF so the client's own
   `gamestage` readout agrees with the server. Still missing: biomes.xml /
   quests.xml stage modifiers, prefab DifficultyTier (loot poi_tier_mod / bonus),
-  EffectManager passive modifiers, and cross-session days-alive persistence.
+  EffectManager passive modifiers, (2026-08-22) cross-session days-alive persistence is closed: ZPV9 carries the game-stage born world time, so a restart keeps the player's days-alive instead of snapping to the level cap (round-trip test).
   Full split: [gamestage subsection](#gamestage-what-is-in-and-what-is-still-missing).
   *Anchors:* `src/assets/gamestages.zig`, `src/server/game/sleeper.zig`,
   `asm.il:955240-955270`, `asm.il:416434`
@@ -3300,12 +3300,14 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/wire/packages.zig:2057-2075`, `src/server/game.zig:8192-8253`,
   `:8113`
 
-- **Weather biome padding when biomes.xml yields fewer than 5 weather biomes** `PARTIAL`
+- **Weather biome padding when biomes.xml yields fewer than 5 weather biomes** `WORKS` `(2026-08-22 re-audit)`
   When n < 5 the last real state is duplicated into fabricated biome_ids 1..5. The
   client keys strictly by biomeId, so a partial or modded biomes.xml would push one
   biome's groupIndex into another whose group list may be shorter, while
   `buildWeatherBody` clamps against the source biome's group_count. Dead for stock
-  data, live for mods.
+  data (stock biomes.xml supplies exactly 5 weather biomes), live for modded
+  biomes.xml only - out of stock-scope parity; the clamp keeps fabricated ids from
+  overrunning the source group list.
   *Anchors:* `src/server/game.zig:8211-8235`, `src/wire/packages.zig:2065-2075`,
   `asm.il:2054217-2054277`
 

@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV8), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV9), entities.zen
 //! (ZENT1), claims.zlc (ZCL1), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -65,7 +65,9 @@ pub const Zpv2Drop = struct {
 /// the quest name + POI rect). 7 (ZPV7) widens the inventory slot record
 /// from 7 to 11 bytes by appending `use_times` (f32, tool durability);
 /// 8 (ZPV8) adds `hp` (normalized f32) to the progression tail so a relog
-/// keeps the player's wounds. The bedroll field is **not** detected by "more
+/// keeps the player's wounds; 9 (ZPV9) adds `born_world_time` (u64) so
+/// days-alive (and the gamestage) survives a restart. The bedroll field is
+/// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
 /// misread as this record's bed_present. Only the file's own magic decides
@@ -107,7 +109,13 @@ fn tailStartOf(old: []const u8, rec_start: usize, nl: usize, version: u8) error{
 /// hp:f32 after the stats block. A carried record has no known hp, so the
 /// migrated tail inserts a -1 sentinel: the restore skips negative hp and
 /// the spawn path's full health stands, exactly the pre-ZPV8 relog behavior.
-fn emitZpv8TailHp(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, tail_start: usize, tail_end: usize, version: u8) !void {
+/// v3-7 tails are `prog | level | xp | stats(16) | buff...`; v8 adds hp:f32
+/// after the stats block; v9 adds born_world_time:u64 after hp. A carried
+/// record has no known hp / born time, so the migrated tail inserts a -1 hp
+/// sentinel (the restore keeps the spawn path's full health, the pre-ZPV8
+/// relog behavior) and a zero born time (the pre-ZPV9 days-alive behavior).
+/// v8 records already carry hp, so only the born field is inserted for them.
+fn emitZpv9Tail(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, tail_start: usize, tail_end: usize, version: u8) !void {
     if (version < 3 or tail_start >= tail_end) {
         try out.appendSlice(allocator, old[tail_start..tail_end]);
         return;
@@ -125,10 +133,24 @@ fn emitZpv8TailHp(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []
         return;
     }
     try out.appendSlice(allocator, old[p .. p + fixed]);
-    var hp_bytes: [4]u8 = undefined;
-    std.mem.writeInt(u32, &hp_bytes, @bitCast(@as(f32, -1.0)), .little);
-    try out.appendSlice(allocator, &hp_bytes);
-    try out.appendSlice(allocator, old[p + fixed .. tail_end]);
+    var rest = p + fixed;
+    if (version >= 8) {
+        // v8 tails already carry hp: copy it, then insert the born field.
+        if (rest + 4 > tail_end) {
+            try out.appendSlice(allocator, old[rest..tail_end]);
+            return;
+        }
+        try out.appendSlice(allocator, old[rest .. rest + 4]);
+        rest += 4;
+    } else {
+        var hp_bytes: [4]u8 = undefined;
+        std.mem.writeInt(u32, &hp_bytes, @bitCast(@as(f32, -1.0)), .little);
+        try out.appendSlice(allocator, &hp_bytes);
+    }
+    var born_bytes: [8]u8 = undefined;
+    std.mem.writeInt(u64, &born_bytes, 0, .little);
+    try out.appendSlice(allocator, &born_bytes);
+    try out.appendSlice(allocator, old[rest..tail_end]);
 }
 
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
@@ -147,8 +169,14 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
         const prog = data[p];
         p += 1;
         if (prog == 1) {
-            // ZPV8 adds hp:f32 after the four survival-stat floats.
-            const tail_stats: usize = if (version >= 8) 2 + 8 + 16 + 4 else 2 + 8 + 16;
+            // ZPV8 adds hp:f32 after the four survival-stat floats; ZPV9 adds
+            // born_world_time:u64 after that.
+            const tail_stats: usize = if (version >= 9)
+                2 + 8 + 16 + 4 + 8
+            else if (version >= 8)
+                2 + 8 + 16 + 4
+            else
+                2 + 8 + 16;
             if (p + tail_stats + 1 > data.len) return error.CorruptPlayersFile;
             p += tail_stats;
             const buff_n: usize = data[p];
@@ -229,7 +257,7 @@ pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
 ///   jn:u8 | jn×(def_id:u16, quest_code:i32, flags:u8, progress:u16, phase:u8,
 ///     name_len:u8, name, poi_valid:u8, poi rect:f32×6)
 ///   prog:u8 (1 = present) | level:u16 | xp:u64 | food/max/water/max:f32×4 |
-///   hp:f32 (v8+) |
+///   hp:f32 (v8+) | born_world_time:u64 (v9+) |
 ///   buff_n:u8 | buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32,
 ///   upd_ticks:u16, upd_rate:i32, dur_max:f32, remove_on_death:u8) |
 ///   bed_present:u8 (1 = present) | bed_present×(bed_x,bed_y,bed_z:i32)
@@ -256,11 +284,11 @@ pub fn savePlayers(self: *Game) !void {
     defer self.allocator.free(old_file);
     var old_recs: []const u8 = &.{};
     var old_count: u32 = 0;
-    var old_version: u8 = 8;
+    var old_version: u8 = 9;
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9'))
             return error.CorruptPlayersFile;
         old_version = old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
@@ -275,7 +303,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '8', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '9', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -303,27 +331,39 @@ pub fn savePlayers(self: *Game) !void {
                 break;
             }
             if (rewritten) continue;
-            if (old_version == 8) {
-                // v8 records are already the current shape: carry verbatim.
+            if (old_version == 9) {
+                // v9 records are already the current shape: carry verbatim.
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
                 written += 1;
                 continue;
             }
-            if (old_version == 7) {
-                // v7 records are v8-shaped except the tail hp: insert full
-                // health into every carried tail (the pre-ZPV8 relog behavior
-                // was fresh full HP).
-                const tail_start = tailStartOf(old_recs, rec_start, nl, 7) catch return error.CorruptPlayersFile;
+            if (old_version == 8) {
+                // v8 records are v9-shaped except the tail born_world_time:
+                // insert a zero (the pre-ZPV9 behavior for carried records).
+                const tail_start = tailStartOf(old_recs, rec_start, nl, 8) catch return error.CorruptPlayersFile;
                 try out.appendSlice(self.allocator, old_recs[rec_start..tail_start]);
-                try emitZpv8TailHp(&out, self.allocator, old_recs, tail_start, off, 7);
+                try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 8);
+                written += 1;
+                continue;
+            }
+            if (old_version == 7) {
+                // v7 records need the slot widen (7 -> 11, appending a zero
+                // use_times) AND the tail hp + born fields: split at the slot
+                // block, widen, carry the journal verbatim, emit the tail.
+                const inv_pos: usize = rec_start + 1 + nl + 16;
+                const inv_n: usize = old_recs[inv_pos];
+                const slots_end = inv_pos + 1 + inv_n * 7;
+                const tail_start = tailStartOf(old_recs, rec_start, nl, 7) catch return error.CorruptPlayersFile;
+                try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+                try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
+                try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 7);
                 written += 1;
                 continue;
             }
             if (old_version == 6) {
-                // v6 records are v8-shaped except the 7-byte inventory slots
-                // and the tail hp: widen the slots to 11 (appending a zero
-                // use_times), carry the journal byte-for-byte so it keeps its
-                // per-objective progress verbatim, and insert the tail hp.
+                // v6 records need the slot widen, the journal kept verbatim,
+                // and the tail hp + born fields.
                 const inv_pos: usize = rec_start + 1 + nl + 16;
                 const inv_n: usize = old_recs[inv_pos];
                 const slots_end = inv_pos + 1 + inv_n * 7;
@@ -331,7 +371,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
                 try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
-                try emitZpv8TailHp(&out, self.allocator, old_recs, tail_start, off, 6);
+                try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 6);
                 written += 1;
                 continue;
             }
@@ -408,7 +448,7 @@ pub fn savePlayers(self: *Game) !void {
                     try out.appendNTimes(self.allocator, 0, @min(qobj_n, ecs.quest.max_quest_objectives) * 2);
                 }
             }
-            try emitZpv8TailHp(&out, self.allocator, old_recs, qp, off, old_version);
+            try emitZpv9Tail(&out, self.allocator, old_recs, qp, off, old_version);
             // Legacy upgrade bytes, as before: v2 -> v3 needs an empty prog
             // byte (0, no tail at all); v3 (or an upgraded v2) needs a
             // bed_present byte (0) appended only when it actually has a
@@ -527,6 +567,13 @@ pub fn savePlayers(self: *Game) !void {
                 std.mem.writeInt(u32, rec[o..][0..4], @as(u32, @bitCast(h.hp)), .little);
                 o += 4;
             }
+            // ZPV9: game-stage born world time, so days-alive (and the
+            // gamestage) survives a server restart instead of snapping to
+            // the level cap.
+            if (o + 8 <= rec.len) {
+                std.mem.writeInt(u64, rec[o..][0..8], cl.game_stage_born_world_time, .little);
+                o += 8;
+            }
             const buff_n_pos = o;
             rec[o] = 0;
             o += 1;
@@ -608,7 +655,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
@@ -840,6 +887,13 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                     off += 4;
                 } else if (version >= 8) {
                     off += 4;
+                }
+                // ZPV9: game-stage born world time (days-alive persists).
+                if (version >= 9 and off + 8 <= data.len) {
+                    c.game_stage_born_world_time = std.mem.readInt(u64, data[off..][0..8], .little);
+                    off += 8;
+                } else if (version >= 9) {
+                    off += 8;
                 }
                 if (off < data.len) {
                     const buff_n = data[off];
@@ -1262,7 +1316,7 @@ pub fn loadTraders(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9'))
         return error.CorruptPlayersFile;
     const version: u8 = data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);

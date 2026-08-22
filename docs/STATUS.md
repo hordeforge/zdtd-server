@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 252 `WORKS`,
-39 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 253 `WORKS`,
+38 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -516,6 +516,16 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then players.zsv went ZPV9: the progression tail now carries the game-stage
+born world time, so days-alive (and the gamestage the client reads) survives
+a server restart instead of snapping to the level cap; v2-8 records migrate
+with a zero born time (the pre-ZPV9 behavior), and the v8 and v7 paths
+carried records with inventory + tails are covered by new migration tests.
+Gamestage row stays PARTIAL (biomes/quests stage modifiers, prefab
+DifficultyTier, EffectManager passives). The weather-biome-padding row went
+WORKS on re-audit (dead for stock data, which carries exactly 5 weather
+biomes; modded-biomes.xml only, out of stock scope). World 37/7/0; total
+**253/38/0**.
 Then the trader quality lerp landed: the root `quality_mod="1,2"` parses
 into `TraderInfo.quality_min/max_mod` and buy/sell prices scale by the item
 quality (Lerp(min, max, (quality-1)/5), QL1 -> min, QL6 -> max) at stock

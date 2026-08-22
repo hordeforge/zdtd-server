@@ -223,7 +223,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV8", data[0..4]);
+        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -242,6 +242,220 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
         try std.testing.expectEqual(g.sim.health[ps].max_hp, g.sim.health[ps].hp);
         try std.testing.expectEqual(@as(u16, 5), cl.level);
         std.debug.print("PASS zpv7->zpv8: carried tail gains full hp on save\n", .{});
+    }
+}
+
+test "players zpv9 round-trips game-stage born time (days-alive) across restart" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        // A player who has been alive for a while: born 10 days ago (advance
+        // the clock first so the subtraction cannot underflow).
+        g.sim.director.clock.day = 15;
+        cl.game_stage_born_world_time = g.sim.director.clock.worldTimeBits() - 10 * assets_gamestages.ticks_per_day;
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        // The restore runs after the join-time `if (!was_joined)` set, so the
+        // persisted born time wins: days-alive (and the gamestage) survives.
+        // (The world clock ticks between the two Games, so assert the
+        // invariant - ~1 day alive - not an exact born value.)
+        // The world clock ticks between the two Games (and the saved clock
+        // restores day 15), so assert the invariant: the persisted born time
+        // survives (not a fresh reset) and days-alive is ~10.
+        const now = g.sim.director.clock.worldTimeBits();
+        try std.testing.expect(cl.game_stage_born_world_time > 0);
+        try std.testing.expect(cl.game_stage_born_world_time < now);
+        try std.testing.expectEqual(@as(u16, 10), assets_gamestages.daysAlive(now, cl.game_stage_born_world_time, 99));
+    }
+}
+
+test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
+    // Hand-built ZPV8 file with a tail (prog, level, xp, stats, hp). The save
+    // must insert born_world_time=0 (the pre-ZPV9 days-alive behavior) so the
+    // v9 tail walk stays aligned, and a restart must restore the tail values.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var buf: [512]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[o..][0..4], "ZPV8");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
+    o += 4;
+    buf[o] = 3; // name_len "Bot"
+    o += 1;
+    @memcpy(buf[o..][0..3], "Bot");
+    o += 3;
+    @memset(buf[o..][0..16], 0); // xyz + coins
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 1; // prog: tail present
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // level
+    o += 2;
+    std.mem.writeInt(u64, buf[o..][0..8], 1000, .little); // xp
+    o += 8;
+    inline for ([_]f32{ 60, 100, 70, 100 }) |f| {
+        std.mem.writeInt(u32, buf[o..][0..4], @bitCast(f), .little);
+        o += 4;
+    }
+    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 0.4)), .little); // hp
+    o += 4;
+    buf[o] = 0; // buff_n
+    o += 1;
+    buf[o] = 0; // bed_present
+    o += 1;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        _ = try g.attachJoinedClient(&capture);
+        try g.savePlayers();
+    }
+    {
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
+    }
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        try std.testing.expectEqual(@as(u16, 5), cl.level);
+        // The v8 hp rides through the migration (0.4 > 0, applied).
+        try std.testing.expectEqual(@as(f32, 0.4), g.sim.health[ps].hp);
+        std.debug.print("PASS zpv8->zpv9: carried tail gains zero born time on save\n", .{});
+    }
+}
+
+test "players zpv7 inventory + tail migrate to zpv9 on save" {
+    // Hand-built ZPV7 file with one 11-byte inventory slot AND a tail. The
+    // save must insert hp + born into the tail (the slots are already the
+    // 11-byte shape) and a restart must restore the item and tail values.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var buf: [512]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[o..][0..4], "ZPV7");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
+    o += 4;
+    buf[o] = 3; // name_len "Bot"
+    o += 1;
+    @memcpy(buf[o..][0..3], "Bot");
+    o += 3;
+    @memset(buf[o..][0..16], 0); // xyz + coins
+    o += 16;
+    buf[o] = 1; // inv_n
+    o += 1;
+    // v7 slot records are already 11 bytes (item, count, quality, meta,
+    // use_times f32); the tail is what lacks hp/born.
+    std.mem.writeInt(u16, buf[o..][0..2], 7, .little); // item
+    o += 2;
+    std.mem.writeInt(u16, buf[o..][0..2], 3, .little); // count
+    o += 2;
+    buf[o] = 4; // quality
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // meta
+    o += 2;
+    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 10.0)), .little); // use_times
+    o += 4;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 1; // prog: tail present
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // level
+    o += 2;
+    std.mem.writeInt(u64, buf[o..][0..8], 1000, .little); // xp
+    o += 8;
+    inline for ([_]f32{ 60, 100, 70, 100 }) |f| {
+        std.mem.writeInt(u32, buf[o..][0..4], @bitCast(f), .little);
+        o += 4;
+    }
+    buf[o] = 0; // buff_n
+    o += 1;
+    buf[o] = 0; // bed_present
+    o += 1;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        _ = try g.attachJoinedClient(&capture);
+        try g.savePlayers();
+    }
+    {
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
+    }
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        var found = false;
+        for (g.sim.inventory[ps].slots) |s| {
+            if (s.item_id == 7 and s.count == 3 and s.quality == 4 and s.meta == 5) found = true;
+        }
+        try std.testing.expect(found);
+        try std.testing.expectEqual(@as(u16, 5), cl.level);
+        // The v7 use_times rides through (10.0).
+        var ut: f32 = 0;
+        for (g.sim.inventory[ps].slots) |s| {
+            if (s.item_id == 7) ut = s.use_times;
+        }
+        try std.testing.expectEqual(@as(f32, 10.0), ut);
+        std.debug.print("PASS zpv7->zpv9: inventory + tail carried with hp/born inserted\n", .{});
     }
 }
 
@@ -304,7 +518,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV8", data[0..4]);
+        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -608,7 +822,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV8", data[0..4]);
+        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.
