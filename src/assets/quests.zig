@@ -502,6 +502,8 @@ fn parseQuestDefBody(
         .tz = tz,
         .reward_coin = reward_coin,
         .difficulty_tier = tier,
+        .gamestage_mod = if (xml.propertyValue(body, "gamestage_mod")) |v| std.fmt.parseFloat(f32, v) catch 0 else 0,
+        .gamestage_bonus = if (xml.propertyValue(body, "gamestage_bonus")) |v| std.fmt.parseFloat(f32, v) catch 0 else 0,
         .turn_in = turn_in,
         .category = try dupe(arena, cat),
         .quest_tags = meta.tags_mask,

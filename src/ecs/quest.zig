@@ -270,6 +270,12 @@ pub const QuestDef = struct {
     tz: f32 = 0,
     reward_coin: u32 = 10,
     difficulty_tier: u8 = 0,
+    /// QuestClass stage modifiers (progression.md 5 get_gameStage: the active
+    /// quest's terms multiply/add onto the player stage). Stock quests.xml:
+    /// `<property name="gamestage_mod" value=".6"/>` /
+    /// `gamestage_bonus` (7 stock quests, e.g. the infested clears).
+    gamestage_mod: f32 = 0,
+    gamestage_bonus: f32 = 0,
     turn_in: bool = false,
     category: []const u8 = "quest",
     /// Objective-derived quest tags (union of BaseObjective.SetupQuestTag):

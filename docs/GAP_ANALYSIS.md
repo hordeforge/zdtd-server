@@ -2036,7 +2036,11 @@ gamestage, no wandering hordes, and no screamers.
   modifiers are in (gamestage_modifier/bonus + lootstage_modifier/bonus parse
   into biome_layers and feed gameStageOf/lootStageOf by the player's biome,
   RE progression.md 5; Navezgane test asserts snow 90/40 vs pine 18/10).
-  Still missing: quests.xml stage modifiers, prefab DifficultyTier (loot
+  2026-08-22: the quests.xml stage modifiers are in (gamestage_mod/bonus
+  parse per quest def; the active quest's terms feed gameStageOf - test
+  active quest stage modifiers scale the player gamestage; 7 stock quests
+  carry the terms, e.g. the infested clears).
+  Still missing: prefab DifficultyTier (loot
   poi_tier_mod / bonus), EffectManager passive modifiers.
   Full split: [gamestage subsection](#gamestage-what-is-in-and-what-is-still-missing).
   *Anchors:* `src/assets/gamestages.zig`, `src/server/game/sleeper.zig`,

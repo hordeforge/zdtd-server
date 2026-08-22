@@ -2977,3 +2977,54 @@ test "poi lockout reports bedroll and land claim homes" {
     bits = game_hooks.homeLockout(g, g.clients[0].entity_id, 250, 250);
     try std.testing.expectEqual(@as(u8, 0), bits);
 }
+
+test "active quest stage modifiers scale the player gamestage" {
+    // Stock get_gameStage adds the active quest's QuestClass gamestage_mod /
+    // gamestage_bonus onto the stage (progression.md 5): an infested clear
+    // (mod .6, bonus 30) pushes the player's stage up while active.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const phases = [_]ecs.quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 3 }};
+    const defs = [_]ecs.quest.QuestDef{
+        .{
+            .id = 69,
+            .kind = .kill_zombies,
+            .name = "plain_clear",
+            .title = "Plain",
+            .target_count = 3,
+            .phases = &phases,
+            .highest_phase = 1,
+            .objective_phases = &[_]u8{1},
+        },
+        .{
+            .id = 70,
+            .kind = .kill_zombies,
+            .name = "infested_clear",
+            .title = "Infested",
+            .target_count = 3,
+            .gamestage_mod = 0.6,
+            .gamestage_bonus = 30,
+            .phases = &phases,
+            .highest_phase = 1,
+            .objective_phases = &[_]u8{1},
+        },
+    };
+    g.sim.catalog = .{ .defs = &defs, .starter_id = 69, .source = .builtin };
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    g.sim.director.clock.day = 10;
+    cl.level = 10;
+    cl.game_stage_born_world_time = g.sim.director.clock.worldTimeBits() - 5 * assets_gamestages.ticks_per_day;
+    // No active quest: plain (level + days) stage.
+    try std.testing.expectEqual(@as(i32, 15), g.gameStageOf(cl.slot));
+    try std.testing.expect(systems.questAccept(&g.sim, cl.slot, 70));
+    // With the infested quest active: (10 * (1 + 0.6) + 5 + 30) = 51.
+    try std.testing.expectEqual(@as(i32, 51), g.gameStageOf(cl.slot));
+}

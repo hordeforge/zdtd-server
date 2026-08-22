@@ -157,11 +157,32 @@ pub fn gameStageOf(self: *const Game, slot: usize) i32 {
     const c = &self.clients[slot];
     const now = self.sim.director.clock.worldTimeBits();
     const bmods = biomeStageMods(self, slot);
+    // QuestClass stage terms (progression.md 5): the active quest's
+    // gamestage_mod/bonus multiply/add onto the stage. Stock uses
+    // ActiveQuest (the first active journal quest); 7 stock quests carry the
+    // terms (infested clears).
+    var qmod: f32 = 0;
+    var qbonus: f32 = 0;
+    if (self.sim.playerByPeer(c.slot)) |ps| {
+        if (self.sim.mask[ps].journal) {
+            for (self.sim.journal[ps].slots) |q| {
+                if (!q.active or q.completed or q.ready_turn_in) continue;
+                const qd = self.sim.catalog.byId(q.def_id) orelse continue;
+                if (qd.gamestage_mod != 0 or qd.gamestage_bonus != 0) {
+                    qmod = qd.gamestage_mod;
+                    qbonus = qd.gamestage_bonus;
+                    break;
+                }
+            }
+        }
+    }
     return assets_gamestages.playerStage(self.gamestages.config, .{
         .level = c.level,
         .days_alive = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level),
         .biome_mod = bmods.game_mod,
         .biome_bonus = bmods.game_bonus,
+        .quest_mod = qmod,
+        .quest_bonus = qbonus,
     });
 }
 
