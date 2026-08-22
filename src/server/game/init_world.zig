@@ -25,7 +25,6 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             defer refs.deinit(allocator);
             // Pass 1: within ~512m of spawn
             for (pf.items) |d| {
-                if (world_store.prefabs.isPart(d.name)) continue;
                 const dx = d.x - sp0.x;
                 const dz = d.z - sp0.z;
                 if (dx * dx + dz * dz > 512 * 512) continue;
@@ -45,7 +44,6 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             // Pass 2: fill remaining budget with farther POIs
             if (refs.items.len < 800) {
                 for (pf.items) |d| {
-                    if (world_store.prefabs.isPart(d.name)) continue;
                     const dx = d.x - sp0.x;
                     const dz = d.z - sp0.z;
                     if (dx * dx + dz * dz <= 512 * 512) continue;

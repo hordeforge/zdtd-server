@@ -6,7 +6,6 @@ const io_fs = @import("../util/io_fs.zig");
 const xml = @import("../assets/xml_util.zig");
 const tts_rot = @import("tts.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
-const prefabs = @import("prefabs.zig");
 const maxdamage = @import("../assets/maxdamage.zig");
 
 pub const max_volumes: usize = 8192;
@@ -293,9 +292,6 @@ pub fn loadFromPrefabs(
     var path_buf: [2048]u8 = undefined;
 
     for (decorations) |d| {
-        // Skip tiny parts: volumes mostly on full POIs.
-        if (prefabs.isPart(d.name)) continue;
-
         const body = blk: {
             if (xml_cache.get(d.name)) |b| break :blk b;
             var found: ?[]const u8 = null;
@@ -587,4 +583,29 @@ test "quest-cleared volumes persist and suppress re-arm" {
     try std.testing.expect(store2.volumes[0].quest_cleared);
     try std.testing.expect(store2.volumes[0].triggered);
     try std.testing.expect(!store2.volumes[1].quest_cleared);
+}
+
+test "part_ ambulance wreck carries its authored sleeper volume" {
+    // 51 stock parts (wrecked ambulances, campsites, car accidents) carry
+    // authored sleeper volumes; the caller used to exclude parts entirely, so
+    // those sleepers never spawned. A part ref must load its volumes like a
+    // full POI (prefabs_root Parts subdir).
+    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!io_fs.fileExists(root ++ "/Parts/part_ambulance_01.xml")) return error.SkipZigTest;
+    const decos = [_]PrefabRef{.{
+        .name = "part_ambulance_01",
+        .x = 500,
+        .y = 60,
+        .z = 500,
+        .rot = 0,
+        .size_x = 0,
+        .size_y = 0,
+        .size_z = 0,
+    }};
+    var store = try loadFromPrefabs(std.testing.allocator, root, &decos, null, null);
+    defer store.deinit();
+    try std.testing.expect(store.volumes.len >= 1);
+    // The ambulance volume sits inside the part AABB (start 0,0,0 size 5,3,8).
+    try std.testing.expect(store.contains(0, 501, 61, 502));
+    try std.testing.expectEqualStrings("S_-_Group_Hospital", store.volumes[0].groups[0].class_name);
 }
