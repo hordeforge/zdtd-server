@@ -539,6 +539,12 @@ claim is now true again. Craft row 2487 re-audited: workstation craft_time
 is server-paced (one_item_craft_time/craft_time_left cycle the queue),
 hand crafting stays client-driven per stock; the only residual is the
 magazine unlock, tracked under its own row. Total **263/28/0**.
+Then sleeper `triggered` persistence shipped: a POI the players woke no
+longer re-pops its sleeper group on restart (sleepers_triggered.zst, ZSTG1,
+mirroring the quest-cleared ZSCL1 file; unit round-trip + re-audit of the
+is_sleeper_passive wire flag on both spawn paths). The re-arm timer and the
+marker-pose wire byte stay RE-blocked (no respawnTime/pose table in RE);
+rows POI sleeper volumes + sleeper wake/trigger updated. Total **263/28/0**.
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the

@@ -169,6 +169,76 @@ pub const Store = struct {
             self.markClearedRect(x, y, z, sx, sy, sz);
         }
     }
+
+    /// Re-mark volumes whose AABB overlaps a persisted rect as triggered.
+    /// Mirrors markClearedRect but only latches `triggered` (no quest state):
+    /// a POI the players already woke must not re-pop on restart. Does not
+    /// bump trigger_count - persisted state is not a session trigger.
+    pub fn markTriggeredRect(self: *Store, x: f32, y: f32, z: f32, size_x: f32, size_y: f32, size_z: f32) void {
+        _ = y;
+        _ = size_y;
+        for (self.volumes) |*v| {
+            if (@as(f32, @floatFromInt(v.x1)) <= x or @as(f32, @floatFromInt(v.x0)) >= x + size_x or
+                @as(f32, @floatFromInt(v.z1)) <= z or @as(f32, @floatFromInt(v.z0)) >= z + size_z)
+                continue;
+            v.triggered = true;
+        }
+    }
+
+    /// Persist triggered volumes (sleepers_triggered.zst, ZSTG1): the rects of
+    /// volumes the players already woke, so a restart does not re-pop them.
+    /// Quest-cleared volumes already live in ZSCL1 and are excluded here
+    /// (markClearedRect sets both flags). Rects mirror ZSCL1 (24 bytes each).
+    pub fn saveTriggered(self: *const Store, allocator: std.mem.Allocator, world_dir: []const u8) !void {
+        var path_buf: [512]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/sleepers_triggered.zst", .{world_dir});
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(allocator);
+        try out.appendSlice(allocator, "ZSTG1");
+        var n: u32 = 0;
+        for (self.volumes) |*v| {
+            if (v.triggered and !v.quest_cleared) n += 1;
+        }
+        var n_buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &n_buf, n, .little);
+        try out.appendSlice(allocator, &n_buf);
+        for (self.volumes) |v| {
+            if (!v.triggered or v.quest_cleared) continue;
+            inline for (.{ @as(f32, @floatFromInt(v.x0)), @as(f32, @floatFromInt(v.y0)), @as(f32, @floatFromInt(v.z0)), @as(f32, @floatFromInt(v.x1 - v.x0)), @as(f32, @floatFromInt(v.y1 - v.y0)), @as(f32, @floatFromInt(v.z1 - v.z0)) }) |f| {
+                var fb: [4]u8 = undefined;
+                std.mem.writeInt(u32, &fb, @bitCast(f), .little);
+                try out.appendSlice(allocator, &fb);
+            }
+        }
+        try io_fs.writeFile(path, out.items);
+    }
+
+    /// Load triggered volumes (ZSTG1) and re-mark matching volumes after the
+    /// store is rebuilt from the prefab XMLs. Best-effort: a missing or
+    /// corrupt file leaves the store as-is.
+    pub fn loadTriggered(self: *Store, allocator: std.mem.Allocator, world_dir: []const u8) void {
+        var path_buf: [512]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}/sleepers_triggered.zst", .{world_dir}) catch return;
+        const raw = io_fs.readFileAll(allocator, path) catch return;
+        defer allocator.free(raw);
+        if (raw.len < 9 or !std.mem.eql(u8, raw[0..5], "ZSTG1")) return;
+        const n = std.mem.readInt(u32, raw[5..9], .little);
+        var off: usize = 9;
+        var i: u32 = 0;
+        while (i < n and off + 24 <= raw.len) : (i += 1) {
+            var x: f32 = undefined;
+            var y: f32 = undefined;
+            var z: f32 = undefined;
+            var sx: f32 = undefined;
+            var sy: f32 = undefined;
+            var sz: f32 = undefined;
+            inline for (.{ &x, &y, &z, &sx, &sy, &sz }) |f| {
+                f.* = @bitCast(std.mem.readInt(u32, raw[off..][0..4], .little));
+                off += 4;
+            }
+            self.markTriggeredRect(x, y, z, sx, sy, sz);
+        }
+    }
 };
 
 /// Split `a, b, c#d, e, f` on `#` into segments.
@@ -614,6 +684,35 @@ test "quest-cleared volumes persist and suppress re-arm" {
     try std.testing.expect(store2.volumes[0].quest_cleared);
     try std.testing.expect(store2.volumes[0].triggered);
     try std.testing.expect(!store2.volumes[1].quest_cleared);
+}
+
+test "triggered volumes persist and do not re-pop on restart" {
+    // A volume the players woke (triggered, not quest-cleared) must stay
+    // triggered across a restart (sleepers_triggered.zst): the same POI must
+    // not re-pop its sleeper group. worlds/ is gitignored, so the relative
+    // path is safe.
+    io_fs.mkdirPath("worlds/zdtd_sc_sleepers_trig");
+    defer io_fs.removeDirTree("worlds/zdtd_sc_sleepers_trig");
+
+    var vols = [_]Volume{
+        .{ .x0 = 0, .y0 = 60, .z0 = 0, .x1 = 30, .y1 = 70, .z1 = 30 },
+        .{ .x0 = 400, .y0 = 60, .z0 = 400, .x1 = 430, .y1 = 70, .z1 = 430 },
+    };
+    var store: Store = .{ .volumes = &vols };
+    store.markTriggeredRect(0, 60, 0, 30, 10, 30);
+    try std.testing.expect(store.volumes[0].triggered);
+    try std.testing.expect(!store.volumes[1].triggered);
+
+    try store.saveTriggered(std.testing.allocator, "worlds/zdtd_sc_sleepers_trig");
+    var vols2 = [_]Volume{
+        .{ .x0 = 0, .y0 = 60, .z0 = 0, .x1 = 30, .y1 = 70, .z1 = 30 },
+        .{ .x0 = 400, .y0 = 60, .z0 = 400, .x1 = 430, .y1 = 70, .z1 = 430 },
+    };
+    var store2: Store = .{ .volumes = &vols2 };
+    store2.loadTriggered(std.testing.allocator, "worlds/zdtd_sc_sleepers_trig");
+    try std.testing.expect(store2.volumes[0].triggered);
+    try std.testing.expect(!store2.volumes[1].triggered);
+    try std.testing.expect(!store2.volumes[0].quest_cleared);
 }
 
 test "part_ ambulance wreck carries its authored sleeper volume" {

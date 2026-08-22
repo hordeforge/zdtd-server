@@ -1890,11 +1890,15 @@ can walk into every POI but none of them is the building TFP authored.
   a nonzero id wakes every other volume of the same prefab placement sharing
   the id, gated on placement origin so duplicate POI instances never
   cross-wake; scenario `sleeper-cascade`, unit `sleeper volume group ids parse
-  per volume`. Missing: sight/sound/light wake thresholds (crouch/darkness do
-  nothing - walking within 20 m always wakes), priority volumes,
-  boss/loot/quest-exclude flags, spawn pose (the marker block name encodes
-  Sit/Back/SideLeft/Stomach/Idle and is discarded), spawnMode,
-  respawnMap/respawnTime.
+  per volume`. 2026-08-23: the `triggered` latch now persists (ZSTG1) so a
+  restart does not re-pop cleared POIs. Missing: sight/sound/light wake
+  thresholds (crouch/darkness do nothing - walking within 20 m always wakes;
+  the entityclasses.xml SleeperNoiseToSense/ToWake + SightToWakeMin/Max data
+  needs a player movement-noise model, and the light leg needs the server
+  light model, both RE-blocked), priority volumes, boss/loot/quest-exclude
+  flags, spawn pose (the marker block name encodes Sit/Back/SideLeft/Stomach/
+  Idle but is discarded; the wire pose byte table is not in RE), spawnMode,
+  respawnMap/respawnTime (RE-blocked).
   *Anchors:* `src/server/game/sleeper.zig:90-147,154-174`,
   `src/world/sleepers.zig:26`
 
@@ -2081,9 +2085,18 @@ gamestage, no wandering hordes, and no screamers.
   scenario `sleeper-cascade`), and the "only groups[0] used" gap is resolved
   by data: all 887 stock prefabs carry exactly one (name,min,max) group per
   volume (nvol names or nvol*3 triples, zero mismatches), so `groups[0]` is
-  the volume's group. Remaining gaps: `triggered` is one-shot and never
-  persists or re-arms, no sleeper pose, no `is_sleeper_passive`, no gamestage
-  count scaling.
+  the volume's group. 2026-08-23: `triggered` **persists** (sleepers_triggered
+  .zst, ZSTG1 - a POI the players woke does not re-pop on restart; the
+  quest-cleared ZSCL1 path already covered ClearSleepers). Re-audit: the
+  `is_sleeper_passive` wire flag **is** set for spawned sleepers on both
+  spawn paths (join burst join.zig:534-547 and tick replicate
+  replicate.zig:146-147, `mask.sleeper and !awake`), so the sleeping pose
+  reaches the client until the wake flips it (plus NetPackageSleeperWakeup).
+  Remaining gaps: `triggered` never **re-arms** (stock respawnTime, RE-blocked
+  - row 2018), no sleeper pose from the marker block name (Sit/Back/
+  SideLeft/Stomach/Idle are discarded; the wire pose byte table is not in RE,
+  so this stays RE-blocked), no gamestage count scaling beyond the stage
+  group's num/alive caps.
   *Anchors:* `src/server/game.zig:6995-7074`, `src/server/game/sleeper.zig:90-147`,
   `src/world/sleepers.zig:246-380`, `asm.il:197877`, `server-orch.log`
 

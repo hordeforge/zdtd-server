@@ -82,6 +82,9 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
                 // Re-apply ClearSleepers suppressions from a previous session
                 // (sleepers_cleared.zsc): a cleared quest POI must not re-arm.
                 self.sleepers.loadCleared(self.allocator, self.world.world_dir);
+                // Re-apply plain triggered volumes (sleepers_triggered.zst): a
+                // POI the players already woke must not re-pop on restart.
+                self.sleepers.loadTriggered(self.allocator, self.world.world_dir);
             }
         }
     }
