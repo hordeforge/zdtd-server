@@ -147,12 +147,17 @@ fn writeStorageFeature(
 ) !void {
     // network mode: no version u16
     try w.writeBool(false); // no loot list name
-    // container size: prefer 2×N or 9×6 for 54
+    // container size: the observed grid (loot.xml LootContainer size_x/size_y
+    // stored on the container at lock time) wins; otherwise synthesize 2xN or
+    // 9x6 for 54. The declared grid must hold every stack written below, or
+    // the stock client's TEFeatureStorage.read indexes past its container and
+    // throws.
     const n = cont.slot_count;
-    const size_x: u16 = if (n > 18) 9 else 2;
+    const has_real = cont.size_x > 0 and @as(usize, cont.size_x) * @as(usize, cont.size_y) >= n;
+    const size_x: u16 = if (has_real) cont.size_x else if (n > 18) 9 else 2;
     // Ceil: declared grid must hold every stack written below, or the stock
     // client's TEFeatureStorage.read indexes past its container and throws.
-    const size_y: u16 = @max(1, (n + size_x - 1) / size_x);
+    const size_y: u16 = if (has_real) cont.size_y else @max(1, (n + size_x - 1) / size_x);
     try w.writeU16(size_x);
     try w.writeU16(size_y);
     try w.writeBool(cont.touched);
@@ -785,6 +790,15 @@ test "storage te encode decode roundtrip" {
     try std.testing.expect(parsed.item_count >= 3);
     try std.testing.expectEqual(@as(u16, 12), parsed.items[0].count);
     try std.testing.expectEqual(@as(i32, stock_inv.items_start_here + 7), parsed.items[0].type_id);
+    // Unknown grid (0/0) synthesizes 2xN; a stored 6x2 grid rides the wire.
+    try std.testing.expectEqual(@as(u16, 2), parsed.size_x);
+    try std.testing.expectEqual(@as(u16, 4), parsed.size_y);
+    cont.size_x = 6;
+    cont.size_y = 2;
+    const body2 = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+    const parsed2 = try parseStorageTeBody(body2);
+    try std.testing.expectEqual(@as(u16, 6), parsed2.size_x);
+    try std.testing.expectEqual(@as(u16, 2), parsed2.size_y);
 }
 
 // --- TileEntityVendingMachine (TileEntityType.VendingMachine = 7) ---

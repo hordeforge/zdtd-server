@@ -344,6 +344,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             else
                 @intCast(@min(@max(parsed.item_count, 8), containers_mod.max_container_slots));
             const cont = self.containers.getOrCreate(pos, sc, parsed.block_id) orelse return true;
+            // The client's TE write carries the loot.xml container grid it
+            // observes (6x2 wooden chest, 9x6 gun safe, ...): keep it on the
+            // container so the storage TE echo (chunk stream and lock grant)
+            // renders the real grid instead of the 2xN synthesis. Validate:
+            // both axes non-zero and the grid must hold the slot count (the
+            // client's TEFeatureStorage.read indexes by the declared size).
+            if (parsed.size_x > 0 and parsed.size_y > 0 and
+                @as(usize, parsed.size_x) * @as(usize, parsed.size_y) >= cont.slot_count and
+                @as(usize, parsed.size_x) * @as(usize, parsed.size_y) <= containers_mod.max_container_slots)
+            {
+                cont.size_x = @intCast(parsed.size_x);
+                cont.size_y = @intCast(parsed.size_y);
+            }
             stock_te.applyParsedToContainer(&parsed, cont, reverseItemType, self);
             self.clampStackSlots(cont.slots[0..cont.slot_count]);
             // A player looting a container is the server-side trigger for

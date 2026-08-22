@@ -12,7 +12,7 @@ pub const max_container_slots: usize = 54; // 9x6 common chest
 /// alone has thousands of loot containers and a hard cap truncates the tail —
 /// every container past it comes back empty).
 pub const max_containers: usize = 4096;
-const persisted_container_size: usize = 20 + max_container_slots * 7 + 4; // + touched_day u32
+const persisted_container_size: usize = 20 + max_container_slots * 7 + 4 + 2; // + touched_day u32 + size_x/size_y u8 (ZCT2)
 const save_capacity: usize = 6 + max_containers * persisted_container_size;
 
 pub const PosKey = struct {
@@ -33,6 +33,12 @@ pub const Container = struct {
     inv_guid: [16]u8 = .{0} ** 16,
     slots: [max_container_slots]components.InvSlot = [_]components.InvSlot{.{}} ** max_container_slots,
     slot_count: u16 = 8, // default 2x4
+    /// Grid size the client observed for this container (loot.xml
+    /// LootContainer size_x/size_y on the stock client's TE write). 0/0 =
+    /// unknown -> the wire writer synthesizes 2xN (or 9x6 above 18 slots).
+    /// Persisted in ZCT2 so a restarted container keeps its real grid shape.
+    size_x: u8 = 0,
+    size_y: u8 = 0,
     touched: bool = false,
     /// In-game day the container's loot was generated or last taken from
     /// (LootRespawnDays re-roll base). 0 = unknown (pre-persistence saves).
@@ -166,9 +172,12 @@ pub const ContainerStore = struct {
         }
     }
 
-    /// Persist file: magic "ZCT1" | u16 count | per container:
+    /// Persist file: magic "ZCT2" | u16 count | per container:
     /// pos xyz i32*3 | block_id i32 | slot_count u16 | touched u8 | player u8 |
-    /// slot_count * (item_id u16 | count u16 | quality u8 | meta u16).
+    /// slot_count * (item_id u16 | count u16 | quality u8 | meta u16) |
+    /// touched_day u32 | size_x u8 | size_y u8. ZCT1 (no touched_day tail,
+    /// no sizes) still loads; ZCT2 keeps the observed grid shape across
+    /// restarts.
     ///
     /// Records are sorted by world pos so bytes are independent of sparse slot
     /// assignment order (needed for DST fault injection / mid-save replay).
@@ -181,7 +190,7 @@ pub const ContainerStore = struct {
         const buf = try allocator.alloc(u8, save_capacity);
         defer allocator.free(buf);
         var o: usize = 0;
-        @memcpy(buf[0..4], "ZCT1");
+        @memcpy(buf[0..4], "ZCT2");
         o = 6; // count patched below
 
         // Collect used indices, sort by (x,y,z). max_containers is fixed.
@@ -228,16 +237,24 @@ pub const ContainerStore = struct {
             // load as 0 (no immediate respawn).
             std.mem.writeInt(u32, buf[o..][0..4], c.touched_day, .little);
             o += 4;
+            // size_x/size_y u8 each (ZCT2): the observed grid shape.
+            buf[o] = c.size_x;
+            buf[o + 1] = c.size_y;
+            o += 2;
             count += 1;
         }
         std.mem.writeInt(u16, buf[4..6], count, .little);
         try io_fs.writeFile(p, buf[0..o]);
     }
 
-    /// Decode a ZCT1 buffer (magic | count | records). Used by load and fuzz.
+    /// Decode a ZCT1/ZCT2 buffer (magic | count | records). Used by load and
+    /// fuzz. ZCT2 records carry the observed grid size (size_x/size_y u8) after
+    /// touched_day; ZCT1 records end after the slots and load sizes as 0
+    /// (the wire writer synthesizes the grid).
     pub fn loadFromSlice(self: *ContainerStore, buf: []const u8) !void {
         const len = buf.len;
-        if (len < 6 or !std.mem.eql(u8, buf[0..4], "ZCT1")) return error.ReadFailed;
+        if (len < 6 or !(std.mem.eql(u8, buf[0..4], "ZCT1") or std.mem.eql(u8, buf[0..4], "ZCT2"))) return error.ReadFailed;
+        const with_size = std.mem.eql(u8, buf[0..4], "ZCT2");
         const count = std.mem.readInt(u16, buf[4..6], .little);
         var o: usize = 6;
         var ci: u16 = 0;
@@ -277,6 +294,12 @@ pub const ContainerStore = struct {
             if (o + 4 <= len) {
                 c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
                 o += 4;
+            }
+            // ZCT2: size_x/size_y u8 each follow touched_day.
+            if (with_size and o + 2 <= len) {
+                c.size_x = buf[o];
+                c.size_y = buf[o + 1];
+                o += 2;
             }
         }
     }
@@ -337,6 +360,23 @@ test "container store save load roundtrip" {
     try std.testing.expectEqual(@as(u16, 12), c2.slots[0].count);
     try std.testing.expectEqual(@as(u8, 2), c2.slots[0].quality);
     try std.testing.expect(c2.touched);
+}
+
+test "container store ZCT2 persists the observed grid size" {
+    var s: ContainerStore = .{};
+    const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 12, 42).?;
+    c.size_x = 6;
+    c.size_y = 2; // stock 6x2 wooden chest
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
+    var s2: ContainerStore = .{};
+    try s2.load(dir);
+    const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
+    try std.testing.expectEqual(@as(u8, 6), c2.size_x);
+    try std.testing.expectEqual(@as(u8, 2), c2.size_y);
 }
 
 test "container save order is pos-sorted not slot-order" {

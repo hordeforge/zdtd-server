@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 222 `WORKS`,
-73 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 223 `WORKS`,
+72 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -276,6 +276,13 @@ offsets instead of a placeholder unit, on both kill paths (C2S damage and
 the hp-replicate AI-kill detector, coordinated through has_backpack so a
 death is never bagged twice); scenario + unit test. Items 16/11/6 ->
 **17/10/6**; total **222/73/38**.
+Then the storage TileEntity S2C row went WORKS: the container grid rides the
+wire - the lock path captures the client-observed loot.xml size (validated),
+the storage TE writer emits it instead of the 2xN synthesis, and ZCT2
+persists it across restarts (ZCT1 still loads). The lootListName bool stays
+false as a documented internal difference (loot is rolled at creation and
+respawned by touched_day; the client UI does not render the list name).
+Items 17/10/6 -> **18/9/6**; total **223/72/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

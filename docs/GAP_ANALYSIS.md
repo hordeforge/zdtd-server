@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 17 | 10 | 6 | 33 | Containers roll their own tables; items stack like stock; death bags carry the real inventory (DropOnDeath modes); Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 18 | 9 | 6 | 33 | Containers roll their own tables and render their real grid size (ZCT2 persists it); items stack like stock; death bags carry the real inventory; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **222** | **73** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **223** | **72** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2598,13 +2598,21 @@ unvalidated, and durability, mods and repair do not exist.
   `src/server/game/replicate_health.zig:26`, `src/server/c2s/misc.zig:529`,
   `src/ecs/world.zig:1000` spawnLootBagFrom
 
-- **Storage TileEntity S2C** `PARTIAL`
+- **Storage TileEntity S2C** `WORKS` `(2026-08-22)`
   Composite TE with one Storage feature is built and pushed on chunk stream and
-  lock grant, matching `TEFeatureStorage.Write` field order. Two divergences: the
-  lootListName bool is always written false, and the container grid is synthesized
-  as 2xN (or 9x6 above 18 slots) from slot_count rather than from the loot.xml
-  container size, so a stock 6x2 wooden chest renders as a 2x4 grid.
-  *Anchors:* `src/wire/stock_te.zig:140-189`, `src/server/game.zig:7405`,
+  lock grant, matching `TEFeatureStorage.Write` field order. 2026-08-22: the
+  container grid now rides the wire - the client's TE write carries the
+  loot.xml `LootContainer` size it observes (6x2 wooden chest, 9x6 gun safe),
+  the lock path validates it (both axes non-zero, grid holds the slot count,
+  capped) and stores it on the container (`size_x`/`size_y`), the writer emits
+  it instead of the 2xN synthesis, and ZCT2 persists it across restarts (ZCT1
+  still loads; unknown grids synthesize). The lootListName bool stays false as
+  a documented internal difference: zdtd rolls the container's loot at
+  creation (deterministic per block) and respawns by touched_day, so the
+  server-side lazy-roll key (RE loot-economy.md `LootContainerOpened`) is not
+  needed and the client UI does not render the list name.
+  *Anchors:* `src/wire/stock_te.zig:148-162` (grid), `src/server/c2s/inv.zig`
+  (lock-path size capture), `src/world/containers.zig` (ZCT2),
   `asm.il:156979`
 
 - **Storage TileEntity C2S apply and broadcast** `WORKS`
