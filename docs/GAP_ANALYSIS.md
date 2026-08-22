@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 54 | 2 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S and S2C coverage complete (the remaining names are mod/EAC/editor/Twitch/drone/cosmetic scope); invisible to browsers, thin persistence; the ops verb set is complete |
-| **Total** | **212** | **83** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
+| **Total** | **213** | **82** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3871,7 +3871,7 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/admin.zig:21-27`, `:204-300`,
   `src/server/game.zig:2452-2470`, `:2001-2018`, `asm.il:204226-204320`
 
-- **In-game player console (NetPackageConsoleCmdServer)** `PARTIAL` `(2026-08-22)`
+- **In-game player console (NetPackageConsoleCmdServer)** `WORKS` `(2026-08-22)`
   Handled and answered with ConsoleCmdClient, with a verb-only audit line and a
   read-only allowlist for players (settime/giveself/spawnentity/killall/kick/ban
   rejected). Since 2026-08-22 an admin (permission list entry) routes
@@ -3879,9 +3879,14 @@ persists so little that a restart visibly damages a built base.
   runAdminLine path as the TCP/webui consoles, with the reply captured into
   the ConsoleCmdClient response - so stock admins can administer from the
   in-game console. Players without a permission entry still get
-  "permission denied".
+  "permission denied"; the per-command permission levels (stock
+  ConsoleCmdCommandPermission) gate before routing. Scenario
+  `in-game player console` drives the wire end to end: help answers with the
+  allowlist text, a player's non-allowlisted verb is denied, and an admin's
+  same verb routes through the admin surface with the reply captured.
   *Anchors:* `src/server/game.zig:2186-2260`, `src/server/c2s_text.zig:38-57`,
-  `src/server/admin_console.zig` (`handleConsoleCmd` admin route)
+  `src/server/admin_console.zig` (`handleConsoleCmd` admin route), scenario
+  `in-game player console`
 
 - **Web dashboard** `PARTIAL`
   zdtd ships its own web UI with a required shared secret (min 8 chars,

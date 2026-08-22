@@ -1776,6 +1776,73 @@ test "scenario quest turn-in and phase advance fire on the stock trader lock-ope
     std.debug.print("PASS trader-quest-open: lock path fires turn-in (starter 2 opens, fetch 1 open)\n", .{});
 }
 
+test "scenario in-game player console: allowlist, deny, and admin routing" {
+    // GAP in-game console row: NetPackageConsoleCmdServer is answered with
+    // ConsoleCmdClient. Players get the read-only allowlist (help/gettime/
+    // listplayers/...); a non-allowlisted verb is denied. An admin
+    // (permission list entry) routes the same verb through the full admin
+    // command surface with the reply captured into the response.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const sendCmd = struct {
+        fn f(gg: *game_mod.Game, cc: *game_mod.Client, cap_p: *ln_peer.Capture, cmd: []const u8, joined: *[512]u8) ![]const u8 {
+            cap_p.clear();
+            var body: [64]u8 = undefined;
+            var w: binary.Writer = .{ .buf = &body };
+            try w.writeString(cmd);
+            var fb: [128]u8 = undefined;
+            try gg.injectFramed(cc, try packages.framed(&fb, "NetPackageConsoleCmdServer", w.written()));
+            const cid = packages.idOf("NetPackageConsoleCmdClient").?;
+            const resp = cap_p.findPkgId(cid) orelse return error.TestUnexpectedResult;
+            var r: binary.Reader = .{ .data = resp };
+            const n = try r.readI32();
+            var scratch: [256]u8 = undefined;
+            var jn: usize = 0;
+            var i: i32 = 0;
+            while (i < n and jn + 1 <= joined.len) : (i += 1) {
+                const ln = try r.readString(&scratch);
+                if (jn + ln.len + 1 > joined.len) break;
+                @memcpy(joined[jn..][0..ln.len], ln);
+                jn += ln.len;
+                joined[jn] = '\n';
+                jn += 1;
+            }
+            return joined[0..jn];
+        }
+    }.f;
+
+    // Player (no admin entry, level 1000): the allowlisted verb answers with
+    // the friendly help text.
+    var hbuf: [512]u8 = undefined;
+    const help = try sendCmd(g, c, &cap, "help", &hbuf);
+    try std.testing.expect(std.mem.indexOf(u8, help, "zdtd console commands") != null);
+    // A non-allowlisted verb is denied for a plain player.
+    var dbuf: [512]u8 = undefined;
+    const deny = try sendCmd(g, c, &cap, "kick nobody", &dbuf);
+    try std.testing.expect(std.mem.indexOf(u8, deny, "permission denied") != null);
+    // Admin (permission list entry): the same verb routes through the full
+    // admin surface; the reply is captured (kick's target error), not denied.
+    try std.testing.expect(g.admin_list.add("Bot", 0));
+    var abuf: [512]u8 = undefined;
+    const adm = try sendCmd(g, c, &cap, "kick nobody", &abuf);
+    try std.testing.expect(std.mem.indexOf(u8, adm, "permission denied") == null);
+    try std.testing.expect(adm.len > 0);
+    std.debug.print("PASS player-console: allowlist + deny + admin routing with captured reply\n", .{});
+}
+
 test "scenario vending machine opens via LockRequest with TraderData" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_vending");
