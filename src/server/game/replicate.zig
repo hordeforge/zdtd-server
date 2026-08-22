@@ -221,7 +221,7 @@ pub fn replicate(self: *Game) !void {
         var flags_framed: ?[]const u8 = null;
         var vel_framed: ?[]const u8 = null;
         var turret_framed: ?[]const u8 = null;
-        if (self.sim.mask[i].kind and self.sim.kind[i] == .zombie) {
+        if (self.sim.mask[i].kind and (self.sim.kind[i] == .zombie or self.sim.kind[i] == .animal)) {
             var fwd: f32 = 0.2;
             var state: u8 = 1;
             var flags: u16 = packages.cF_spawned;

@@ -149,12 +149,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 23 | 21 | 4 | 48 | Real fights with real stakes and real A*; timid animals flee instead of sprinting at you (AITask-gated); population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 25 | 19 | 4 | 48 | Real fights with real stakes and real A*; timid animals flee instead of sprinting at you (AITask-gated); wildlife despawns and animates like stock; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **213** | **82** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **215** | **80** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2133,17 +2133,23 @@ gamestage, no wandering hordes, and no screamers.
   movement + `EntityFlying` parity — waived as entity-variety, not parity gate.
   *Anchors:* `src/ecs/components.zig:5-13`
 
-- **Animals never despawn** `PARTIAL`
-  `systemDespawnFar` copies only the `.zombie` kind group, so animals accumulate to
-  MaxSpawnedAnimals (default 50) and stay alive forever, holding entity slots and
-  `known_entities` bits. Zombies do despawn beyond 200 m.
-  *Anchors:* `src/ecs/systems.zig:1707-1740`, `:1716`
+- **Animals never despawn** `WORKS` `(2026-08-22)`
+  `systemDespawnFar` now walks both mob kind groups (zombie and animal) with
+  the same rules, so wildlife beyond `despawn_dist_sq` (200 m default) is
+  released like zombies instead of accumulating to MaxSpawnedAnimals and
+  holding entity slots + `known_entities` bits forever; sleepers and alerted
+  mobs stay (POI volumes / engaged fights). Systems test `far animals despawn
+  like zombies; near animals stay` covers far/near/alerted.
+  *Anchors:* `src/ecs/systems.zig:2952` systemDespawnFar, `:1716`
 
-- **Animal replication carries no movement state** `PARTIAL`
-  `replicate()` sends EntitySpawn and PosAndRot for `.animal`, but the
-  EntitySpeeds / EntityAliveFlags block is gated on `kind == .zombie`, so the
-  client animates animals with movementState 0 while their transform slides.
-  *Anchors:* `src/server/game.zig:8826`, `:8927-8952`
+- **Animal replication carries no movement state** `WORKS` `(2026-08-22)`
+  The EntitySpeeds / EntityAliveFlags block now covers `.animal` too: animals
+  stream the same movement state as zombies (wander -> walking state 1, chase
+  -> running state 2 with the approach flag), so the client no longer animates
+  a sliding animal with movementState 0. Scenario `animal movement state
+  replicates` asserts a wandering animal streams movement_state 1.
+  *Anchors:* `src/server/game/replicate.zig:224`, scenario `animal movement
+  state replicates`
 
 - **Night horde** `PARTIAL`
   Every 45 s of night, 2 zombies spawn 18-28 m from each player already flagged

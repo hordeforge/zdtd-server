@@ -2951,36 +2951,41 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
 /// (caller broadcasts EntityRemove with Despawned reason).
 pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
     const despawn_dist_sq = w.rules.ai.despawn_dist_sq;
-    if (w.countKind(.zombie) == 0) return 0;
+    if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps, false);
     var n: u8 = 0;
-    // This loop destroys, so it walks a snapshot of the zombie group rather
-    // than the live group (same ascending order, so the capped out_ids picks
-    // the same ids as the old open scan).
-    var zombies: [max_entities]Slot = undefined;
-    const zn = query.copyKindInto(w, .zombie, &zombies);
-    for (zombies[0..zn]) |i| {
-        if (n >= out_ids.len) break;
-        if (!w.alive[i] or !w.mask[i].transform) continue;
-        // Sleepers stay (POI volumes re-trigger on approach otherwise).
-        if (w.mask[i].sleeper) continue;
-        if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
-        var near = false;
-        for (snaps[0..pn]) |p| {
-            const dx = p.x - w.transform[i].x;
-            const dz = p.z - w.transform[i].z;
-            if (dx * dx + dz * dz < despawn_dist_sq) {
-                near = true;
-                break;
+    // This loop destroys, so it walks snapshots of the mob kind groups rather
+    // than the live groups (same ascending order, so the capped out_ids picks
+    // the same ids as the old open scan). Animals despawn like zombies: stock
+    // despawns far entities regardless of kind, otherwise wildlife accumulates
+    // to MaxSpawnedAnimals and holds slots + known_entities bits forever.
+    var slots: [max_entities]Slot = undefined;
+    const mob_kinds = [_]c.Kind{ .zombie, .animal };
+    for (mob_kinds) |k| {
+        const kn = query.copyKindInto(w, k, &slots);
+        for (slots[0..kn]) |i| {
+            if (n >= out_ids.len) break;
+            if (!w.alive[i] or !w.mask[i].transform) continue;
+            // Sleepers stay (POI volumes re-trigger on approach otherwise).
+            if (w.mask[i].sleeper) continue;
+            if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
+            var near = false;
+            for (snaps[0..pn]) |p| {
+                const dx = p.x - w.transform[i].x;
+                const dz = p.z - w.transform[i].z;
+                if (dx * dx + dz * dz < despawn_dist_sq) {
+                    near = true;
+                    break;
+                }
             }
+            if (near) continue;
+            if (w.mask[i].network_id) {
+                out_ids[n] = w.network_id[i].id;
+                n += 1;
+            }
+            w.destroy(i);
         }
-        if (near) continue;
-        if (w.mask[i].network_id) {
-            out_ids[n] = w.network_id[i].id;
-            n += 1;
-        }
-        w.destroy(i);
     }
     return n;
 }
@@ -3555,6 +3560,28 @@ test "timid animal near a player never attacks; a predator does" {
     try std.testing.expect(w.zombie_ai[ss].active_task != c.TaskId.approach_attack);
     // The predator, same distance, picks approach_attack and moves in.
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[ws].active_task);
+}
+
+test "far animals despawn like zombies; near animals stay" {
+    // GAP animals-never-despawn row: systemDespawnFar copied only the zombie
+    // kind group, so wildlife accumulated to MaxSpawnedAnimals and held slots
+    // forever. Animals now despawn beyond despawn_dist_sq with the same rules
+    // (sleepers and alerted mobs stay).
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const far = w.spawnAnimal(400, 70, 0, 30, 0, "").?;
+    const near = w.spawnAnimal(10, 70, 0, 30, 0, "").?;
+    const alert = w.spawnAnimal(400, 70, 2, 30, 0, "").?;
+    const as = w.slotOfNetId(alert).?;
+    w.zombie_ai[as].alert = true; // alerted mobs stay (like zombies)
+    var ids: [8]i32 = undefined;
+    const n = systemDespawnFar(&w, &ids);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqual(far, ids[0]);
+    try std.testing.expectEqual(@as(?u16, null), w.slotOfNetId(far));
+    try std.testing.expect(w.slotOfNetId(near) != null);
+    try std.testing.expect(w.slotOfNetId(alert) != null);
 }
 
 /// Stock decoy distraction state (items.xml resourceRockDecoy): tags

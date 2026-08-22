@@ -160,6 +160,37 @@ test "scenario two-peer motion: B receives A PosAndRot" {
     );
 }
 
+test "scenario animal movement state replicates (EntitySpeeds)" {
+    // GAP animal-replication row: the EntitySpeeds/AliveFlags block was gated
+    // on kind == .zombie, so the client animated animals with movementState 0
+    // while their transform slid. Animals now stream the same movement state
+    // as zombies (wander -> walking, chase -> running).
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_animal_rep");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_animal_rep", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const adef = g.entities.defaultAnimal();
+    const an = g.sim.spawnAnimalDef(g.sim.transform[ps].x + 8, g.sim.transform[ps].y, g.sim.transform[ps].z, g.entityClassOf(adef)).?;
+    cap.clear();
+    try g.replicateNow();
+    const speeds_id = packages.idOf("NetPackageEntitySpeeds").?;
+    const sb = cap.findPkgIdEntity(speeds_id, an) orelse return error.TestUnexpectedResult;
+    const parsed = try packages.parseEntitySpeedsBody(sb);
+    // A wandering animal must stream a non-zero movement state (walking), not
+    // the 0 the old zombie-only gate sent.
+    try std.testing.expect(parsed.movement_state != 0);
+    std.debug.print("PASS animal-replicate: EntitySpeeds movement_state={d} for animal id={d}\n", .{ parsed.movement_state, an });
+}
+
 test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     // Players must see each other: the joiner receives every other player as
     // EntitySpawn (player class + name), and a disconnect broadcasts

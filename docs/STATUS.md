@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 213 `WORKS`,
-82 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 215 `WORKS`,
+80 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -237,6 +237,12 @@ the stock client never contacts (not a game wire path), so its residual
 createwebuser) does not block client-visible parity and it stays PARTIAL
 with the note. Net/ops is now at client-visible parity: 55 WORKS / 1
 non-client-visible PARTIAL / 0 MISSING.
+Then the two animal rows went WORKS: systemDespawnFar walks both mob kind
+groups (wildlife beyond 200 m is released like zombies instead of holding
+slots forever; sleepers and alerted mobs stay), and the EntitySpeeds/
+AliveFlags replicate block covers animals too, so the client animates a
+wandering animal (movement state 1) instead of sliding it with state 0.
+Entities 23/21/4 -> **25/19/4**; total **215/80/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
