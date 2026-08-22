@@ -146,7 +146,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
-| [Traders](#5-traders) | 17 | 3 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
+| [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 23 | 21 | 4 | 48 | Real fights with real stakes and real A*; timid animals flee instead of sprinting at you (AITask-gated); population is still thin |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **209** | **86** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **210** | **85** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1056,15 +1056,19 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/ecs/systems.zig:623-689`, `:636-640`,
   `src/server/scenarios.zig:614-633`
 
-- **Trader wallet / AvailableMoney** `PARTIAL`
-  Each trader now owns a live money pool (`TraderStock.wallet`, spawned from
+- **Trader wallet / AvailableMoney** `WORKS` `(2026-08-22)`
+  Each trader owns a live money pool (`TraderStock.wallet`, spawned from
   `trader_wallet_dukes`): the wire TraderData shows the real balance, buying
   from the trader credits it, selling to the trader debits it and refuses the
-  sale once it runs out, and `traderRestock` regenerates it toward the spawn
-  default. Remaining: `TraderInfo.TraderBuyLimit` (per-item buy caps) and the
-  restock timer is still not wired to the tick.
-  *Anchors:* `src/ecs/components.zig:538`, `src/ecs/systems.zig:628` (`trade`),
-  `:700` (`traderRestock`), `src/server/game.zig` (`traderMoney`), `asm.il:861697`
+  sale once it runs out, and restock regenerates it toward the spawn default
+  (the lazy open-time full reroll and the tick-side refill both do; the pool
+  also survives restart via traders.zst). Re-audit 2026-08-22: the two
+  remaining notes resolved - `TraderBuyLimit` has zero uses in the V3.1.0 b14
+  traders.xml (nothing for the client to observe), and the restock timer is
+  wired (the Restock timer row went WORKS).
+  *Anchors:* `src/ecs/components.zig:757` TraderStock,
+  `src/ecs/systems.zig:1201` (trade), `:1288` (traderRestock),
+  `src/server/game/trader_wire.zig`, `asm.il:861697`
 
 - **Haggling / barter perks** `PARTIAL (waived)`
   `perkBetterBarter` / `perkDaringAdventurer` Bartering/TraderStage perks

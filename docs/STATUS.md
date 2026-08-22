@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 209 `WORKS`,
-86 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 210 `WORKS`,
+85 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -202,6 +202,12 @@ Scenario trader-quest-open drives the wire end to end: the Goto->Interact->
 TurnIn starter completes on the second lock-open with coins, a fetch quest
 parked at ready_turn_in on a single open. Traders 16/4/3 -> **17/3/3**;
 total **209/86/38**.
+Then the trader-wallet row went WORKS on re-audit: the live money pool is
+complete (buy credits it, sell debits it and refuses once out, restock
+regenerates toward the spawn default, and the pool survives restart via
+traders.zst); the two remaining notes resolved - TraderBuyLimit has zero
+uses in the V3.1.0 b14 traders.xml, and the restock timer is wired (that
+row went WORKS). Traders 17/3/3 -> **18/2/3**; total **210/85/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
