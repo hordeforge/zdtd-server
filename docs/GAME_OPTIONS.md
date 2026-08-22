@@ -229,7 +229,7 @@ test, so a retune cannot land silently).
 | `scout_drip_cd` | 120.0 | Daytime scout drip cadence (zdtd mechanic; stock scouts come from heat events only, GAP 1407) |
 | `animal_drip_cd` | 60.0 | Daytime wildlife drip cadence (zdtd mechanic) |
 | `bloodmoon_wave_cd` | 6.0 | Blood-moon wave cadence (zdtd approximation of the stock wave system) |
-| `bloodmoon_hp_mult` | 1.5 | Blood-moon zombie HP multiplier (zdtd policy) |
+| `bloodmoon_hp_mult` | 1.5 | Blood-moon HP floor for classes the gamestage ladder cannot resolve (offline/builtin data). Stock has no flat multiplier: with stock data the ladder's feral/radiated classes carry their own HP |
 
 `[rules.world]` / `[rules.vehicle]` (ADR 0021):
 

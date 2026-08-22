@@ -730,7 +730,12 @@ pub const Director = struct {
                 ct = w.class_table[csel];
             }
         }
-        const bm_mul: f32 = if (self.bloodmoon_active) w.rules.director.bloodmoon_hp_mult else 1.0;
+        // Stock has no flat blood-moon HP multiplier: blood-moon difficulty
+        // comes from the gamestage ladder picking feral/radiated classes with
+        // their own stats (GAP "Blood-moon zombie strength"). The rules floor
+        // stays only for the unresolved class_table fallback (offline/builtin
+        // data, where no ladder class exists to carry the difficulty).
+        const bm_mul: f32 = if (self.bloodmoon_active and resolved == null) w.rules.director.bloodmoon_hp_mult else 1.0;
         const hp: f32 = (if (resolved) |d| d.max_hp else ct.max_hp) * bm_mul * self.hpScale();
         const id = if (resolved) |d|
             w.spawnZombieDef(x, y, z, hp, d)
@@ -1485,4 +1490,39 @@ test "night spawns ground-snap through the world ground hook" {
         if (w.transform[s].y == 50.0) saw_ground = true;
     }
     try std.testing.expect(saw_ground);
+}
+
+test "blood-moon HP floor applies only to unresolved fallback classes" {
+    // Stock has no flat blood-moon HP multiplier: the gamestage ladder class
+    // carries its own stats (GAP "Blood-moon zombie strength"). The rules
+    // floor (bloodmoon_hp_mult, default 1.5) applies only when no class
+    // resolved (offline/builtin fallback through the class_table rotation).
+    var w: ecs_world.World = .{};
+    var dir: Director = .{ .bloodmoon_active = true, .difficulty = 2 }; // hpScale 1.0
+    var ci: usize = 0;
+    while (ci < w.class_table.len) : (ci += 1) {
+        const ct = w.class_table[ci];
+        if (ct.kind == .zombie and ct.hash != 0 and ct.max_hp > 0) break;
+    }
+    const cls = w.class_table[ci];
+    const Pick = struct {
+        fn pick(ctx: ?*anyopaque, _: []const u8, _: u32) ?[]const u8 {
+            const c: *const ecs_world.EntityClass = @ptrCast(@alignCast(ctx.?));
+            return c.name;
+        }
+    };
+    dir.group_pick_ctx = @ptrCast(@constCast(&cls));
+    dir.group_pick_fn = &Pick.pick;
+    // Resolved from the group: the class's own HP, no 1.5x.
+    const slot = dir.spawnOneZombie(&w, 0, 70, 0, "HordeGS1", 42, true) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, cls.max_hp), w.health[slot].hp);
+
+    // Unresolved (no group): the class_table rotation keeps the 1.5x floor.
+    const seed: u32 = 7;
+    const rotation = [_]usize{ 1, 8, 9, 10, 11 };
+    const fct = w.class_table[rotation[seed % rotation.len]];
+    const f2 = dir.spawnOneZombie(&w, 0, 70, 5, "", seed, false) orelse return error.TestUnexpectedResult;
+    if (fct.hash != 0 and fct.kind == .zombie) {
+        try std.testing.expectApproxEqAbs(@as(f32, fct.max_hp * 1.5), w.health[f2].hp, 0.01);
+    }
 }

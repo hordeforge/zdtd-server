@@ -151,14 +151,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 32 | 2 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 18 | 2 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
-| [Blood moon](#6-blood-moon) | 21 | 2 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
+| [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 25 | 5 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 23 | 5 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 21 | 4 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 38 | 6 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **258** | **33** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **259** | **32** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1456,13 +1456,18 @@ encoding is one day high.
   `asm.il:413090`, `asm.il:412744`, `asm.il:413818` (InitParty), `asm.il:414221`,
   `asm.il:412618` (EndBloodMoon)
 
-- **Blood-moon zombie strength** `PARTIAL`
-  Real and observable: hp x1.5 on top of the GameDifficulty scale, `ZombieBMMove`
-  speed band while active, and `BlockDamageAIBM` replacing `BlockDamageAI`. All
-  three are zdtd approximations; stock has no flat 1.5x hp, difficulty comes from
-  the gamestage groups picking feral and radiated classes with their own stats.
-  *Anchors:* `src/ecs/aidirector.zig:266`, `:132`, `src/server/game.zig:3097`,
-  `src/server/config.zig:51`, `:57`
+- **Blood-moon zombie strength** `WORKS` `(2026-08-22)`
+  Real and observable: `ZombieBMMove` speed band while active, and
+  `BlockDamageAIBM` replacing `BlockDamageAI` (both stock serverconfig
+  options). `(2026-08-22)` the flat 1.5x HP multiplier is gone for stock
+  data: the gamestage ladder's BloodMoonHorde groups already pick
+  feral/radiated classes with their own stats (the stock difficulty
+  source), so a resolved ladder class spawns at its class HP; the
+  `bloodmoon_hp_mult` floor (default 1.5) remains only for the unresolved
+  class_table fallback (offline/builtin data, no ladder). Test
+  `blood-moon HP floor applies only to unresolved fallback classes`.
+  *Anchors:* `src/ecs/aidirector.zig:733` (bm_mul gate), `:218`,
+  `src/server/game.zig:3097`, `src/server/config.zig:51`, `:57`
 
 - **Blood-moon end and despawn at dawn** `WORKS` (2026-08-20)
   The horde window spans dusk to dawn (IsBloodMoonTime); at dawn the director

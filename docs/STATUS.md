@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 258 `WORKS`,
-33 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 259 `WORKS`,
+32 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -516,6 +516,13 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then blood-moon zombie strength went WORKS: the flat 1.5x HP multiplier
+is gone for stock data - the gamestage ladder's BloodMoonHorde groups pick
+feral/radiated classes with their own stats (the stock difficulty source),
+so a resolved ladder class spawns at its class HP; the bloodmoon_hp_mult
+floor stays only for the unresolved class_table fallback (offline/builtin
+data). Test blood-moon HP floor applies only to unresolved fallback
+classes. Blood moon 22/1/0; total **259/32/0**.
 Then Net and ops went 100% (48/48 WORKS): the four remaining rows are all
 non-client-visible and were re-audited to WORKS with documented scope - the
 web dashboard (operator-side surface, own authenticated UI; the stock Lua
