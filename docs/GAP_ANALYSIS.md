@@ -151,10 +151,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
-| [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 12 | 10 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **224** | **71** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **225** | **70** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2834,17 +2834,20 @@ and server-to-client XP/level pushes do not exist.
   player is dead rather than a ghost.
   *Anchors:* `src/ecs/systems.zig`, `src/server/game.zig`, `asm.il:199650`
 
-- **Food / water application on eat** `PARTIAL`
+- **Food / water application on eat** `WORKS` `(2026-08-22)`
   Works end to end and is the one live-verified vitals path (playtest
   `PASS economy/eat_food_consume ... food0=50.0 food=55.1`), driven by items.xml
-  `$foodAmountAdd` / foodHealthAmount / `$waterAmountAdd`. Two caveats: a
-  deliberate demo hack drops food to 50% of max before adding whenever food is at
-  or above 85% of max, so eating on a nearly full stomach **lowers** your food bar
-  (100 to 50 to 65 for a chili); and stock routes the whole thing through the
-  `buffProcessConsumables` buff with requirement gates that do not exist here.
-  *Anchors:* `src/ecs/inventory.zig:250-280`, `:256-261`,
-  `src/assets/items.zig:444-456`, `src/server/game.zig:4530-4533`,
-  `Data/Config/items.xml:20015-20029`, `Data/Config/buffs.xml:8477`
+  `$foodAmountAdd` / foodHealthAmount / `$waterAmountAdd`. 2026-08-22: the
+  demo hack is gone - eating adds and caps at max (stock
+  buffProcessConsumables), so a nearly-full stomach no longer drops the food
+  bar to half before adding (the old 85% drain lowered 100 food to 65).
+  Eating at full simply caps; unit test pins the no-drain cap. Stock routes
+  the consumable through a buff with requirement gates; the net effect (food/
+  water/HP add, capped) is what zdtd applies - documented internal
+  difference.
+  *Anchors:* `src/ecs/inventory.zig:285-306` applyEatProps,
+  `src/assets/items.zig:444-456`, `Data/Config/items.xml:20015-20029`,
+  `Data/Config/buffs.xml:8477`
 
 - **Food / water decay over time** `WORKS`
   `tickSurvival` depletes food/water per game hour (`Rules.progression`

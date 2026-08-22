@@ -288,13 +288,10 @@ pub fn applyEatProps(w: *World, ps: Slot, props: EatProps) Result {
     if (!w.mask[ps].health) return .{};
     if (!props.is_eat and props.food_amount <= 0 and props.water_amount <= 0 and props.food_health <= 0)
         return .{};
-    // Stock client often sits near mid-food (playtest soft ~50). Server spawn food
-    // can be full: if near max, drop to half max before add so S2C Food rises.
+    // Stock client often sits near mid-food (playtest soft ~50). Eating adds
+    // and caps at max like stock's buffProcessConsumables; no demo drain.
     if (props.food_amount > 0) {
         const h = &w.health[ps];
-        if (h.food_max > 0 and h.food >= h.food_max * 0.85) {
-            h.food = h.food_max * 0.5;
-        }
         h.food = @min(h.food_max, h.food + props.food_amount);
     }
     if (props.water_amount > 0) {
@@ -565,6 +562,12 @@ test "move and drop and use" {
     try std.testing.expectEqual(@as(f32, 57), w.health[ps].hp);
     try std.testing.expectEqual(@as(f32, 55), w.health[ps].food);
     try std.testing.expectEqual(count_before_use - 1, w.inventory[ps].slots[food_slot].count);
+    // Eating at a nearly-full stomach caps at max (stock buffProcessConsumables);
+    // it must NOT drop the bar to half first (the old demo hack lowered food).
+    w.health[ps].food = 95;
+    try std.testing.expect(use(&w, 0, food_slot));
+    try std.testing.expectEqual(@as(f32, 100), w.health[ps].food);
+    try std.testing.expect(w.health[ps].food >= w.health[ps].food_max * 0.85);
     // Move 1 into a free slot, then drop from there (exercises move + drop path).
     var dest: u16 = 0;
     var found_dest = false;

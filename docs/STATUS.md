@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 224 `WORKS`,
-71 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 225 `WORKS`,
+70 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -291,6 +291,11 @@ tags drive the client's local crafting UI, use_ingredient_modifier only
 scales forge-emptying material recipes, and craft_time stays client-driven -
 documented residuals, not stock-parity gaps. Items 18/9/6 -> **19/8/6**;
 total **224/71/38**.
+Then the food/water-on-eat row went WORKS: the demo hack is gone - eating
+adds and caps at max like stock buffProcessConsumables, so a nearly-full
+stomach no longer drops the food bar to half before adding (the old 85%
+drain lowered 100 food to 65); unit test pins the no-drain cap. Progression
+11/11/15 -> **12/10/15**; total **225/70/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
