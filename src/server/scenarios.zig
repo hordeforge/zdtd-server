@@ -1179,6 +1179,41 @@ test "scenario zombie opens a door on its path instead of chewing" {
     std.debug.print("PASS zombie-door: blocked zombie opens the door and walks through\n", .{});
 }
 
+test "scenario zombie chews a 1-tall wall at feet level instead of getting stuck" {
+    // A zombie pressed against a 1-block-tall wall (solid at feet, air at
+    // head) must chew the feet cell: the old head-height-only probe saw air
+    // and the zombie stayed stuck forever.
+    freshScenarioDir("worlds/zdtd_sc_lowwall");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lowwall", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 7;
+    g.sim.transform[ps].y = 71;
+    g.sim.transform[ps].z = 5;
+    const zs = g.sim.spawnZombie(5, 71, 5, 200).?;
+    const zi = g.sim.slotOfNetId(zs).?;
+    g.sim.zombie_ai[zi].state = .chase;
+    g.sim.zombie_ai[zi].target_id = c.entity_id;
+    // 1-tall wall in front at the zombie's feet (71), air at head (72).
+    try g.world.setBlockWorld(6, 71, 5, 1);
+    try std.testing.expect(try g.world.isSolidWorld(6, 71, 5));
+    try std.testing.expect(!try g.world.isSolidWorld(6, 72, 5));
+    const hp_before = g.getBlockHp(6, 71, 5);
+    g.tickZombieBlockDamage();
+    // The wall took bite damage: hp moved.
+    const hp_after = g.getBlockHp(6, 71, 5);
+    try std.testing.expect(hp_after > hp_before);
+    std.debug.print("PASS zombie-lowwall: feet-level wall chewed (hp {d} -> {d})\n", .{ hp_before, hp_after });
+}
+
 test "scenario power switch: meta flip gates the grid and keeps the meta on the echo" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_switch");

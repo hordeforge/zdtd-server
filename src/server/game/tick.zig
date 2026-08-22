@@ -230,22 +230,40 @@ pub fn tickZombieBlockDamage(self: *Game) void {
         dz /= len;
         const bx: i32 = @floor(zt.x + dx);
         const bz: i32 = @floor(zt.z + dz);
-        const by: i32 = @floor(zt.y + 1); // head height
-        const solid = self.world.isSolidWorld(bx, by, bz) catch continue;
-        if (!solid) continue;
+        // The cell the zombie collides with sits at its body height: probe
+        // the front column from feet to head and chew the first solid cell.
+        // The old single head-height probe left zombies stuck against
+        // 1-block-tall walls/fences (the head cell is air while the wall is
+        // at feet level), so they never broke out.
+        const feet_y: i32 = @floor(zt.y);
+        const head_y: i32 = @floor(zt.y + 1);
+        const by: i32 = blk: {
+            var yi: i32 = feet_y;
+            while (yi <= head_y) : (yi += 1) {
+                if (self.world.isSolidWorld(bx, yi, bz) catch false) break :blk yi;
+            }
+            break :blk -1;
+        };
+        if (by < 0) continue;
         const id = self.blockIdAtWorld(bx, by, bz);
         if (id == 0) continue;
         // Zombies open unlocked doors on their path instead of chewing (RE
         // entity-ai.md CheckForDoorAndOpen: block with the door tag +
         // TEFeatureDoor, SetOpen when not open). Set the open meta bit and
-        // broadcast; an already-open door is skipped (no re-broadcast).
+        // broadcast; an already-open door is skipped (no re-broadcast). A
+        // 2-tall door spans two cells, so the vertical partner gets the same
+        // open bit (the probe may have landed on either half).
         if (self.blocks.byId(id)) |def| {
             if (def.is_door) {
-                const raw = self.world.rawWorld(bx, by, bz) catch continue;
-                if ((packages.blockMeta(raw) & packages.block_meta_on) == 0) {
+                const door_dys = [_]i32{ 0, 1, -1 };
+                for (door_dys) |dy| {
+                    const yy = by + dy;
+                    if (self.blockIdAtWorld(bx, yy, bz) != id) continue;
+                    const raw = self.world.rawWorld(bx, yy, bz) catch continue;
+                    if ((packages.blockMeta(raw) & packages.block_meta_on) != 0) continue;
                     const open_raw = packages.withBlockMeta(raw, packages.block_meta_on);
-                    self.world.setBlockRawWorld(bx, by, bz, open_raw) catch continue;
-                    if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], bx, by, bz, open_raw, 0, -1, -1)) |sb| {
+                    self.world.setBlockRawWorld(bx, yy, bz, open_raw) catch continue;
+                    if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], bx, yy, bz, open_raw, 0, -1, -1)) |sb| {
                         self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
                     } else |_| {}
                 }

@@ -516,6 +516,12 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then zombie block damage improved its probe: the front-column scan runs
+feet to head and chews the first solid cell, so a zombie pressed against a
+1-block-tall wall chews it instead of getting stuck forever (the old
+head-height-only probe saw air), and a 2-tall door opens on both halves
+(scenarios zombie-lowwall + zombie-door). The row stays PARTIAL for the
+ray-less probe vs real AI block-target selection.
 Then the progression catalog fixed its two parse bugs: each perk now reads
 its own `parent` attribute (stock parent="skill*" / "att*" - the old
 walk-back resolved every perk to the file's last <attribute>), and

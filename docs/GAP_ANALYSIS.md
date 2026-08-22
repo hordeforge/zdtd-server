@@ -3481,12 +3481,16 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/game.zig:5162-5166`, `asm.il:96828-96833`
 
 - **Zombie block damage** `PARTIAL`
-  Zombies in chase/attack within 3 blocks chew the cell in front at head height, 10
-  damage per 2 Hz bite scaled by BlockDamageAI (AIBM on blood moon), broadcast on
-  break. Simplified: a single ray-less cell probe rather than real AI block-target
-  selection (the damage store now shares the exact per-chunk plane as player
-  damage, so no cap or eviction remains).
-  *Anchors:* `src/server/game/tick.zig:246-267`, `:355-376`
+  Zombies in chase/attack within 3 blocks chew the solid cell in the front
+  column (feet to head, first solid), 10 damage per 2 Hz bite scaled by
+  BlockDamageAI (AIBM on blood moon), broadcast on break. 2026-08-22: the
+  probe scans the body height instead of head-only, so zombies chew
+  1-block-tall walls instead of getting stuck forever, and a 2-tall door
+  opens on both halves (scenarios zombie-lowwall + zombie-door). Simplified:
+  a single ray-less cell probe rather than real AI block-target selection
+  (the damage store now shares the exact per-chunk plane as player damage,
+  so no cap or eviction remains).
+  *Anchors:* `src/server/game/tick.zig:215-290`, `:355-376`
 
 - **Block max HP from blocks.xml MaxDamage** `WORKS`
   Resolved per block id from the parsed table with Extends resolution; fails closed
