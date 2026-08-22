@@ -141,9 +141,12 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         };
         try attrs.append(allocator, .{
             .name = try arena.dupe(u8, aname),
-            .min_level = def_min,
-            .max_level = def_max,
-            .base_cost = def_cost,
+            // Per-attribute overrides win over the <attributes> defaults
+            // (stock: attBooks/attCrafting/attGeneralPerks carry their own
+            // min_level/max_level/base_skill_point_cost).
+            .min_level = if (xml.attr(clean, ai, "min_level")) |v| std.fmt.parseInt(u8, v, 10) catch def_min else def_min,
+            .max_level = if (xml.attr(clean, ai, "max_level")) |v| std.fmt.parseInt(u8, v, 10) catch def_max else def_max,
+            .base_cost = if (xml.attr(clean, ai, "base_skill_point_cost")) |v| std.fmt.parseInt(u16, v, 10) catch def_cost else def_cost,
             .cost_mult = def_mult,
         });
         i = ai + 11;
@@ -160,11 +163,12 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.attr(clean, pi, "max_level")) |v| {
             max_l = std.fmt.parseInt(u8, v, 10) catch 5;
         }
-        // parent: walk back for nearest <attribute name=
+        // parent: the perk row's own `parent` attribute (a skill/attribute
+        // name in stock, e.g. parent="skillPerceptionCombat"). The old
+        // walk-back grabbed the last <attribute> in the file, so every perk
+        // resolved to the same wrong attribute.
         var parent: []const u8 = "";
-        if (std.mem.findLast(u8, clean[0..pi], "<attribute ")) |ab| {
-            if (xml.attr(clean, ab, "name")) |pn| parent = try arena.dupe(u8, pn);
-        }
+        if (xml.attr(clean, pi, "parent")) |pn| parent = try arena.dupe(u8, pn);
         try perks.append(allocator, .{
             .name = try arena.dupe(u8, pname),
             .max_level = max_l,
@@ -229,4 +233,51 @@ test "load progression.xml when present" {
     try std.testing.expect(t.attributes.len >= 4);
     try std.testing.expect(t.perks.len > 10);
     try std.testing.expect(t.curve.expForLevel(1) >= t.curve.exp_to_level);
+}
+
+test "perk parent and per-attribute overrides parse from stock progression.xml" {
+    // (a) each <perk> carries its own `parent` (a skill/attribute name); the
+    // old walk-back resolved every perk to the file's last <attribute>.
+    // (b) attBooks/attCrafting/attGeneralPerks carry their own
+    // min_level/max_level/base_skill_point_cost overrides.
+    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadTableFromPath(std.testing.allocator, p);
+    defer t.deinit();
+
+    // A combat perk: parent resolves to its skill, not the last attribute.
+    var found_dead_eye = false;
+    for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkDeadEye")) {
+            try std.testing.expectEqualStrings("skillPerceptionCombat", pk.parent_attr);
+            found_dead_eye = true;
+        }
+    }
+    try std.testing.expect(found_dead_eye);
+    // The rest of the ladder resolves to their skills, not the last
+    // attribute in the file.
+    var skill_parents: usize = 0;
+    for (t.perks) |pk| {
+        if (std.mem.startsWith(u8, pk.parent_attr, "skill")) skill_parents += 1;
+    }
+    try std.testing.expect(skill_parents > 20);
+
+    // Attribute overrides: attBooks is 0/0/0, the default rows stay 1/10/1.
+    var att_books = false;
+    var att_perception = false;
+    for (t.attributes) |a| {
+        if (std.mem.eql(u8, a.name, "attBooks")) {
+            try std.testing.expectEqual(@as(u8, 0), a.min_level);
+            try std.testing.expectEqual(@as(u8, 0), a.max_level);
+            try std.testing.expectEqual(@as(u16, 0), a.base_cost);
+            att_books = true;
+        }
+        if (std.mem.eql(u8, a.name, "attPerception")) {
+            try std.testing.expectEqual(@as(u8, 1), a.min_level);
+            try std.testing.expectEqual(@as(u16, 1), a.base_cost);
+            att_perception = true;
+        }
+    }
+    try std.testing.expect(att_books);
+    try std.testing.expect(att_perception);
 }

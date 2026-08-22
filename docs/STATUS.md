@@ -516,6 +516,14 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then the progression catalog fixed its two parse bugs: each perk now reads
+its own `parent` attribute (stock parent="skill*" / "att*" - the old
+walk-back resolved every perk to the file's last <attribute>), and
+per-attribute min_level/max_level/base_skill_point_cost overrides parse
+(attBooks/attCrafting/attGeneralPerks carry their own). Test perk parent
+and per-attribute overrides; the catalog row stays PARTIAL for the unparsed
+<skill>/<crafting_skill>/book rows and the zero runtime consumers (perk
+runtime is a separate open area).
 Then blood-moon zombie strength went WORKS: the flat 1.5x HP multiplier
 is gone for stock data - the gamestage ladder's BloodMoonHorde groups pick
 feral/radiated classes with their own stats (the stock difficulty source),

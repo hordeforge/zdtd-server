@@ -2856,12 +2856,14 @@ and server-to-client XP/level pushes do not exist.
   *Anchors:* `src/wire/packages.zig:158-159`, `asm.il:813609`
 
 - **progression.xml attribute and perk catalog load** `PARTIAL`
-  Names and counts load (8 attributes, 57 live perks), but the catalog is thin and
-  partly wrong. (a) `perk.parent_attr` is derived by walking back to the nearest
-  `<attribute ` before the perk; every perk in stock sits after `</attributes>`,
-  so all 57 resolve to `attCrafting` instead of their real `parent="skill*"`. (b)
-  Per-attribute min_level/max_level/base_skill_point_cost overrides are ignored.
-  (c) `<skill>` (16 rows), `<crafting_skill>` (23 rows), override_cost,
+  Names and counts load (8 attributes, 57 live perks), but the catalog is thin.
+  `(2026-08-22)` (a) the `perk.parent_attr` bug is fixed: each perk's own
+  `parent` attribute parses (stock: parent="skill*" or "att*"; the old
+  walk-back resolved every perk to the file's last `<attribute>`), and (b)
+  per-attribute `min_level`/`max_level`/`base_skill_point_cost` overrides
+  parse (attBooks/attCrafting/attGeneralPerks carry their own; test
+  `perk parent and per-attribute overrides`). Still open: (c) `<skill>`
+  (16 rows), `<crafting_skill>` (23 rows), override_cost,
   level_requirements, effect_group, unlock_entry, display_entry, book and
   book_group are not parsed at all. (d) Nothing in `src/` reads perks or
   attributes: `perkByName` and `attrByName` have zero callers outside their own
