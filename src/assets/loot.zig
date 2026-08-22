@@ -281,14 +281,13 @@ pub const LootTable = struct {
         while (i < cont.entry_n and n < out.len) : (i += 1) {
             const e = cont.entries[i];
             s = s *% 1103515245 +% 12345;
-            // Always include the first entry unless it carries a loot stage
-            // template: a template's prob is the stage gate itself, and stock
-            // never emits an entry whose band prob is 0. A force_prob entry
-            // gates independently on its own prob (stock forceProb branch).
-            const gate = if (e.force_prob)
-                !self.probGate(e, loot_stage, s)
-            else
-                (i > 0 or e.prob_template != 0) and !self.probGate(e, loot_stage, s);
+            // Every entry rolls its own prob (stock LootContainer.roll): a
+            // force_prob entry gates independently (stock forceProb branch)
+            // and a plain entry gates on its prob the same way. The old
+            // index-0-always exception is gone - it was data-benign (0 of the
+            // 339 stock containers have a plain first entry with prob < 1)
+            // but wrong for hypothetical data.
+            const gate = !self.probGate(e, loot_stage, s);
             if (gate) continue;
             if (e.is_group) {
                 n += self.rollGroup(e.name, loot_stage, s, out[n..], 0, cont.quality_template);

@@ -594,6 +594,14 @@ Navezgane POI lights render with their authored colour/intensity/range
 the chunk light-level propagation, RE-blocked). Tests light payload parse +
 wire round-trip. Full suite 1274 pass, 1 fail (the concurrent agent's
 in-flight webui log-console test). Total **264/28/0** (292 rows).
+Then the loot roll gate was made uniform: rollContainer now rolls every
+entry's prob (the index-0-always exception is gone - data-benign, 0 of 339
+stock containers have a plain first entry with prob < 1, but wrong for
+hypothetical data; the stock stream is byte-identical). The difficulty_tier
+row's "trader tier gating open" residual was re-audited stale (the offer
+builder filters difficulty_tier != tierLevel, asm.il 827746). Full suite
+1289 pass, 1 fail (the concurrent agent's in-flight xml_util refactor broke
+the weather-storm fixture scenario). Total **264/28/0** (292 rows).
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the

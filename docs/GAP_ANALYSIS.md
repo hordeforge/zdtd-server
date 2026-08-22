@@ -577,9 +577,14 @@ not a sleeper-volume clear), not completion blockers.
   back to the property value. zdtd now resolves variables (last occurrence
   wins, so the derived quest overrides the template) and reads the tier through
   the param. Verified against the stock file: `tier2_fetch` reports 2 while
-  `tier1_fetch` reports 1. The tier still only scales the default kill count;
-  trader tier gating and the `NPCQuestList` `tierLevel` filter remain open.
-  *Anchors:* `src/assets/quests.zig:294`, `:227`, `:303`
+  `tier1_fetch` reports 1. 2026-08-23 re-audit: the row's "trader tier gating
+  and NPCQuestList tierLevel filter remain open" residual is stale - the offer
+  builder filters `d.difficulty_tier != tier` against the requested tierLevel
+  (asm.il 827746-827975; scenario proves a tier-2 fetch gets nothing from a
+  tier-1 list, see "Trader quest offers" WORKS). The tier's remaining use is
+  the default kill count.
+  *Anchors:* `src/assets/quests.zig:294`, `:227`, `:303`,
+  `src/server/game/quest.zig:277-278` (tier filter)
 
 - **Rewards: counting and per-reward wire shape flags** `WORKS` `(2026-08-22)`
   The count and shape are right (LootItem 498, Item 132, Exp 85, Quest 6,
@@ -2759,10 +2764,15 @@ unvalidated, and durability, mods and repair do not exist.
   a 0-prob item never drops (test `container group rolls are prob-weighted,
   not uniform`); `lootstage` templates (42 lootprobtemplate in stock) resolve
   per stage through `entryProb`, the loot stage itself derives from the party
-  gamestage, and force_prob entries gate independently. Remaining:
-  `rollContainer` still includes a plain index-0 entry without a gate,
+  gamestage, and force_prob entries gate independently. 2026-08-23: the
+  index-0-always exception is gone - every entry (plain or template) rolls
+  its own prob (`!probGate`), matching stock LootContainer.roll. The old
+  exception was data-benign (0 of the 339 stock containers have a plain
+  first entry with prob < 1; verified by scan) but wrong for hypothetical
+  data; the roll stream is byte-identical for stock. Remaining:
   `<requirement>` filtering (85 stock uses) and per-entry `abundance_type`
-  (68 stock uses) are unparsed.
+  (68 stock uses) are unparsed (both structurally blocked: rolls happen at
+  chunk fill with no opener context, and abundance is sandbox-coupled).
   *Anchors:* `src/assets/loot.zig` rollGroup + groupEntryWeight,
   test `container group rolls are prob-weighted, not uniform`
 
