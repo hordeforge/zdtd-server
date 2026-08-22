@@ -2314,10 +2314,16 @@ gamestage, no wandering hordes, and no screamers.
   state replicates`
 
 - **Night horde** `PARTIAL`
-  Every 45 s of night, 2 zombies spawn 18-28 m from each player already flagged
-  `.chase` with the player as target. Not a stock wandering horde and not a biome
-  spawn: a direct aggro drip. Blood-moon nights shorten the cooldown to 8 s.
-  *Anchors:* `src/ecs/aidirector.zig:159-162`, `:233-282`
+  Every `horde_drip_cd` (45 s) of night, 2 zombies spawn in the
+  `enemy_spawn_ring_min..max` band (28-54 m; the row's old 18-28 m claim was
+  stale) around each player, spawned `.chase` with the player as target
+  (the AIDirector ring placement, asm.il:413135, with seeded bearing jitter).
+  Blood-moon nights shorten the cooldown to `bloodmoon_horde_drip_cd` (8 s).
+  Still not the stock biome-night spawner (per-80m-cell
+  ChunkAreaBiomeSpawnData with per-rule timers and maxcount) nor the
+  scheduled wandering horde (that component is WORKS); a direct aggro drip.
+  *Anchors:* `src/ecs/aidirector.zig:159-162`, `:233-282`, `:388-393`,
+  `src/ecs/rules.zig:358-359,366-367`
 
 - **Blood-moon waves** `WORKS` `(2026-08-22 re-audit)`
   The party spawner is in: one wave per party (not per player) around its

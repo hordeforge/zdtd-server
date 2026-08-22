@@ -566,7 +566,8 @@ GameDifficulty row gained its RE-block: the per-difficulty
 IncomingDamage/EntityIncomingDamage preset values have no dumpable class in
 the dedi dll (R9 hpScale stays). All nine section headlines in GAP_ANALYSIS
 were re-synced to the live markers (they had drifted from the original
-states). Total **264/27/0**.
+states). The night-horde row's spawn band was corrected (28-54 m
+enemy_spawn_ring band, not the stale 18-28 m). Total **264/27/0**.
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the
