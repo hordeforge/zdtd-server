@@ -3298,7 +3298,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/world/dtm.zig:12-49`, `Data/Worlds/Navezgane/dtm.raw`,
   `map_info.xml`
 
-- **DTM sub-block precision** `PARTIAL → RE-CORRECTED (2026-08-23)`
+- **DTM sub-block precision (2026-08-23 re-audit)** `PARTIAL`
   The row's premise was stale: stock's surface density is **binary** too -
   `fillDensityInBlock` (IL=16, dumped 2026-08-23) sets `IsTerrain() ?
   DensityTerrain : DensityAir` and `GenerateTerrain` stamps the surface cell
