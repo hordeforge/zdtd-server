@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 53 | 3 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S coverage complete (the remaining names are mod/EAC/editor/Twitch/drone scope); invisible to browsers, thin persistence; the ops verb set is complete |
-| **Total** | **211** | **84** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 54 | 2 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S and S2C coverage complete (the remaining names are mod/EAC/editor/Twitch/drone/cosmetic scope); invisible to browsers, thin persistence; the ops verb set is complete |
+| **Total** | **212** | **83** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3493,7 +3493,7 @@ persists so little that a restart visibly damages a built base.
   vanishing (no evidence event yet).
   *Anchors:* `src/server/game.zig:3771-3790`, `:5478-5480`
 
-- **S2C package emission coverage** `PARTIAL`
+- **S2C package emission coverage** `WORKS` `(2026-08-22 re-audit)`
   57 package names appear in server send calls (sendGame/broadcast/
   sendGameCritical/trySendCompressed across `game.zig` + `game/*.zig` +
   `c2s/*.zig`; recount 2026-08-22 - the join bundle, chunk/deco/weather
@@ -3544,11 +3544,20 @@ persists so little that a restart visibly damages a built base.
   (AuthorizationManager StateLocalizationKey - the "Login: ..." progress
   text in XUiC_ProgressWindow; EAC-scope authorizer UX, no gameplay effect
   with the stock client's default progress text).
+  Re-audited 2026-08-22: every never-sent name above is a documented non-goal
+  under the parity rules - skill-level sync is tracked by the Player
+  progression area, WallVolume is not loaded (no wallvolume defs, nothing to
+  send), Light/TreeFade/AudioPlayInHead/WaterSimChunkUpdate are cosmetic FX
+  or a cosmetic water sim (server-authoritative water still streams as
+  blocks), and AuthState is EAC-scope authorizer UX. Turret animation is
+  client-driven from the TurretSync aim/on state (cosmetic). No package a
+  stock client needs for stock play is left unsent.
   *Anchors:* `src/server/game/map.zig` (`tickMapChunks`, `chunkMapColors`,
   `tickPlayerPositions`), `src/server/c2s/misc.zig` (MapPosition),
   `src/server/game/join.zig` (`sendWorldAreas`),
   `src/server/game/tick.zig` (`tickEntityLookAt`, `drainSleeperWakeups`),
-  `src/server/game/player.zig` (`killXpAward`), `src/assets/map_atlas.zig`
+  `src/server/game/player.zig` (`killXpAward`), `src/assets/map_atlas.zig`,
+  `src/server/game/replicate.zig:266` (TurretSync)
 
 - **Game envelope channel byte** `WORKS` `(2026-08-21)`
   Stock `get_Channel` returns 1 for NetPackageChunk, ChunkRemove, DynamicMesh,
