@@ -1543,16 +1543,22 @@ encoding is one day high.
   *Anchors:* `src/server/admin.zig:764-792`, `asm.il:251877`,
   `src/server/game/tests.zig:1183-1190`
 
-- **Where the blood-moon options come from** `PARTIAL`
-  zdtd reads BloodMoonFrequency/Range/EnemyCount as serverconfig properties.
-  Stock V3.1.0's shipped serverconfig no longer defines them at all: only
-  `TwitchBloodMoonAllowed` and `SandboxCode`, with
-  `UpdateInGameValuesWithSandboxOptions` pulling SandboxOptions 48/49/51 into the
-  component statics. zdtd writes empty SandboxPreset/SandboxCode, so the client
-  falls back to its own local GamePrefs.
-  *Anchors:* `src/server/config.zig:104`, `src/wire/packages.zig:2009`,
-  `asm.il:2501788`, `serverconfig.xml:103`,
-  `output_log_client_zdtd_connect.txt:3672-3675`
+- **Where the blood-moon options come from** `WORKS` `(2026-08-23 re-audit)`
+  The V3.1.0 SandboxCode path is implemented end to end (the row's
+  "writes empty SandboxCode" claim was stale): the operator's
+  `serverconfig.xml` SandboxCode (default `AAAJABJACJADJARFBNC`) parses into
+  `cfg.sandbox_code`, `src/assets/sandbox.zig` decodes the option stream
+  (RE sandbox-options §8) and `config.zig applySandboxCode` overlays
+  BloodMoonFrequency/Range/EnemyCount (SandboxOptions 48/49/51 per
+  `UpdateInGameValuesWithSandboxOptions`, asm.il:2501770) onto the sim
+  config, which feeds the CalcNextDay schedule (stat 58 row, WORKS). The
+  same string echoes verbatim into GameStats(71) (`packages.zig:2217`), so a
+  joining client decodes the server's settings instead of its local
+  GamePrefs. The legacy BloodMoonFrequency serverconfig property remains a
+  fallback when no SandboxCode is set.
+  *Anchors:* `src/server/config.zig:313-340,422-423,459`,
+  `src/assets/sandbox.zig:149`, `src/wire/packages.zig:2217`,
+  `asm.il:2501770`, `serverconfig.xml:103`
 
 - **Wandering horde / screamer heat** `WORKS`
   Both components now exist alongside the blood-moon component:
@@ -1624,16 +1630,14 @@ can walk into every POI but none of them is the building TFP authored.
   `asm.il:944180-944243`
 
 - **Prefab rotation: block coordinate mapping** `WORKS` (2026-08-06)
-  Rotations 1 and 3 are swapped: zdtd rotates +90*r where stock rotates -90*r.
-  Stock forward map: r=1 gives `(sz-1-z, x)`; r=3 gives `(z, sx-1-x)`. zdtd has
-  those two swapped. `Prefab::RotatePointOnY` confirms the sign directly
-  (`AngleAxis(-90, up)` on the `_bLeft` path). Independent data proof: for the 130
-  Navezgane decorations declaring `POIMarkerType=RoadExit`, the stock map puts the
-  marker within 4 blocks of a road pixel in `splat3_processed.png` for 129/130
-  (rot1 24/24, rot3 23/23); zdtd's map only 94/130, and only 6/24 and 6/23 for rot
-  1 and 3. 709 of 1559 decorations use rotation 1 or 3, so front doors, garages
-  and driveways of ~46% of POIs face away from their road.
-  *Anchors:* `src/world/tts.zig:310`, `asm.il:915424-915618`,
+  `rotateLocalXZ` matches the stock forward map exactly (fixed 2026-08-06
+  with the per-block facing work): r=1 gives `(sz-1-z, x)`, r=3 gives
+  `(z, sx-1-x)` - stock `Prefab::RotatePointOnY` (`AngleAxis(-90, up)` on the
+  `_bLeft` path). The row's earlier "swapped" claim was corrected by the
+  sleeper-volume placement re-audit (2026-08-22): volume corners rotated with
+  the same `rotateLocalXZ` land in the rooms TFP marked. Data proof cited
+  then: 129/130 RoadExit decorations land within 4 blocks of a road pixel.
+  *Anchors:* `src/world/tts.zig:328-336`, `asm.il:915424-915618`,
   `asm.il:915620-915698`, `asm.il:921639-921684`, `asm.il:931080-931180`
 
 - **Prefab rotation: per-block facing** `PARTIAL` (step count fixed 2026-08-06)
@@ -1656,14 +1660,18 @@ can walk into every POI but none of them is the building TFP authored.
   `asm.il:171283-171414`, `Data/Config/blocks.xml` Shape values
 
 - **Prefab YOffset** `WORKS` (2026-08-06)
-  `paintDecoration` uses `origin_y = d.y` and never reads the prefab .xml
-  `YOffset`; stock applies it in `DynamicPrefabDecorator.Load` right after
-  `GetPrefabRotated`. 679 of the 1487 full-POI decorations (46%) have a nonzero
-  YOffset. Houses are typically -1 or -2, so their ground floor sits a block above
-  the pad. The extremes are structural: canyon_mine -55, house_old_ranch_13 -44,
-  cave_07 -33, cave_03 -32, bunker_00 -30, quarry_02 -30, ten caves at -25. Every
-  cave, mine, quarry and bunker is stamped as a surface box with no entrance.
-  *Anchors:* `src/world/tts.zig:373`, `src/world/prefabs.zig:222`,
+  `parseYOffset` pulls `<property name="YOffset" value="N"/>` out of each
+  prefab .xml (exact name compare against `DistantPOIYOffset`; stock reads
+  `properties.GetInt("YOffset")` at the end of `Prefab::Load`, asm.il
+  902414-902420) and `Decoration.stampY` applies it: `y_is_ground ? y +
+  y_offset : y`. `paintDecoration` stamps at `d.stampY()` and the prefab TE
+  loop uses the same origin, so houses sit on their pad and the deep
+  structural offsets (canyon_mine -55, the ten caves at -25) drop the body
+  below ground instead of stamping a surface box. The runtime terrain
+  flatten targets the pad level (`deco.y-1`, "Terrain flatten under a POI
+  footprint").
+  *Anchors:* `src/world/prefabs.zig:144-155` (`stampY`), `:494`
+  (`paintDecoration` call), `:657-665` (`parseYOffset`),
   `asm.il:902414-902420`, `asm.il:917079-917081`, `asm.il:914052`
 
 - **Terrain flatten under a POI footprint** `WORKS`
@@ -1735,13 +1743,25 @@ can walk into every POI but none of them is the building TFP authored.
   face material instead of rendering grey.
   *Anchors:* `src/world/tts.zig:148`, `src/world/store.zig:597`
 
-- **Prefab tile-entity list to world positions** `PARTIAL`
-  TEs are rotated with the same inverted `rotateLocalXZ`, so they land where the
-  inverted paint put their block: consistent with the stamped building but 180
-  degrees off stock for rot 1/3. Only the local position and type byte are used;
-  the payload (authored contents, lock state, sign text, light colour) is dropped,
-  so POI safes and lockers arrive empty and unlocked and POI signs blank.
-  *Anchors:* `src/world/prefabs.zig:243`, `:261`, `src/world/tts.zig:22`, `:228`
+- **Prefab tile-entity list to world positions** `PARTIAL` `(2026-08-23 re-audit)`
+  TEs rotate with the same stock-clockwise `rotateLocalXZ` as the paint, so
+  they land where the stamped building puts them (the "180 degrees off" claim
+  predates the 2026-08-06 rotation fix). The local position + type byte drive
+  the world-container seeding (`chunk_fill.zig` onTe: Loot/SecureLoot/
+  Composite storage types fill from the block's LootList - "Loot content per
+  container" WORKS). Re-audit 2026-08-23 (full-prefab scan with the real .tts
+  parser): the row's "authored contents / lock state / sign text payload is
+  dropped" claim is **data-absent** - V3.1.0 prefab .tts files carry **zero**
+  Loot (5) / SecureLoot (10) / Sign (13) TE entries across the whole POI set;
+  the TE lists hold Light (18) and Sleeper (20) markers plus oddments, so
+  there is no authored loot/lock/sign payload to decode (POI safes fill from
+  their block LootList; POI signs carry no authored text in the data). The
+  remaining payload is the **Light** TE (18): colour/intensity per light
+  marker (269 across Navezgane), which needs the server light model
+  (RE-blocked, "server light model" row) before the wire can carry it.
+  *Anchors:* `src/world/prefabs.zig:495-525` (`foreachTeInChunk`),
+  `src/world/tts.zig:247-292` (payload capture), `src/server/game/chunk_fill.zig:246-267`,
+  `src/wire/te_types.zig`, full-prefab TE scan (2026-08-23, types 5/10/13 = 0)
 
 - **TileEntityType constants** `WORKS`
   `src/wire/te_types.zig` now matches the stock enum exactly (RE IL

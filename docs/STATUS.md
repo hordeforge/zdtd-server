@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 263 `WORKS`,
-28 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 264 `WORKS`,
+27 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -545,6 +545,17 @@ mirroring the quest-cleared ZSCL1 file; unit round-trip + re-audit of the
 is_sleeper_passive wire flag on both spawn paths). The re-arm timer and the
 marker-pose wire byte stay RE-blocked (no respawnTime/pose table in RE);
 rows POI sleeper volumes + sleeper wake/trigger updated. Total **263/28/0**.
+Then the blood-moon options row went WORKS on re-audit: the V3.1.0 SandboxCode
+path is implemented end to end (parse -> sandbox.zig decode -> options 48/49/51
+overlay -> CalcNextDay schedule; the same string echoes into GameStats 71 so
+the client decodes the server's settings). Prefab-rotation + YOffset row bodies
+corrected (both were stale: rotateLocalXZ matches stock, stampY applies
+YOffset). And the prefab TE payload row was re-audited with a full-prefab
+scan: V3.1.0 .tts files carry zero Loot/SecureLoot/Sign TE entries (only
+Light 18 + Sleeper 20 markers), so the "authored contents/lock/sign dropped"
+claim is data-absent - POI loot fills from block LootList and the only real
+payload residual is the Light TE colour/intensity (server light model,
+RE-blocked). Blood moon 23/0/0; total **264/27/0**.
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the
