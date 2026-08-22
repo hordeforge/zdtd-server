@@ -722,6 +722,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // Unlock only if we hold the channel (or free).
                 if (self.lock_channel[ch] == @as(i32, @intCast(c.slot)) or self.lock_channel[ch] < 0) {
                     self.clearLockSlot(ch);
+                    // Stock TEFeatureStorage.OnUnlockedServer -> CheckDestroyTileEntity
+                    // (loot-economy.md 454-456): a container whose loot def has
+                    // destroy_on_close is destroyed on close (airDrop "true"
+                    // always; safes/backpacks "empty" only when emptied).
+                    if (firstLockTargetPos(req.targets_blob)) |tp| {
+                        self.maybeDestroyContainerOnClose(tp.x, tp.y, tp.z);
+                    }
                     const resp = try packages.buildLockResponseUnlock(&self.body_buf, true);
                     try self.sendGame(peer, "NetPackageLockResponse", resp);
                 } else {

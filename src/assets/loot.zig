@@ -60,6 +60,11 @@ pub const LootContainer = struct {
     size_y: u8 = 6,
     /// loot_quality_template name (stock every container carries one).
     quality_template: []const u8 = "",
+    /// destroy_on_close: 0 none, 1 "true" (destroy on unlock always), 2
+    /// "empty" (destroy on unlock only when emptied). Stock
+    /// TEFeatureStorage.ShouldDestroyOnClose (IL=19) + CheckDestroyTileEntity
+    /// (IL=37, loot-economy.md 454-456).
+    destroy_on_close: u8 = 0,
     entries: [max_entries]LootEntry = [_]LootEntry{.{}} ** max_entries,
     entry_n: u8 = 0,
 };
@@ -723,6 +728,15 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             if (std.mem.findScalar(u8, sz, ',')) |comma| {
                 c.size_x = @intCast(xml.parseU16(std.mem.trim(u8, sz[0..comma], " \t")) orelse 8);
                 c.size_y = @intCast(xml.parseU16(std.mem.trim(u8, sz[comma + 1 ..], " \t")) orelse 6);
+            }
+        }
+        // destroy_on_close: "true" (1) / "empty" (2) / absent (0). Values
+        // feed TEFeatureStorage.ShouldDestroyOnClose (loot-economy.md).
+        if (xml.attr(clean, tag, "destroy_on_close")) |doc| {
+            if (std.mem.eql(u8, doc, "true")) {
+                c.destroy_on_close = 1;
+            } else if (std.mem.eql(u8, doc, "empty")) {
+                c.destroy_on_close = 2;
             }
         }
         var bi: usize = 0;

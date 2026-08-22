@@ -44,6 +44,10 @@ pub const Container = struct {
     /// (LootRespawnDays re-roll base). 0 = unknown (pre-persistence saves).
     touched_day: u32 = 0,
     player_storage: bool = true,
+    /// loot.xml container name whose table filled this container (set by the
+    /// fill path; the destroy_on_close check reads it). Points into the loot
+    /// table's arena; not persisted (a reload re-derives it at fill).
+    loot_list: []const u8 = "",
 
     pub fn clear(self: *Container) void {
         self.slots = [_]components.InvSlot{.{}} ** max_container_slots;

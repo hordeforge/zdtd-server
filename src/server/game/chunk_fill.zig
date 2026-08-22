@@ -277,6 +277,9 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
 }
 
 pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
+    // Remember the table that filled this container: the destroy_on_close
+    // check on unlock reads it (ShouldDestroyOnClose, loot-economy.md 454).
+    cont.loot_list = loot_name;
     // Stock LootContainer.size (loot.xml <lootcontainer size="x,y">) sizes
     // the storage grid; the client reads the cell count from the TE body,
     // so a gun safe (4x3) shows 12 cells instead of the flat 8. The size
@@ -354,4 +357,58 @@ pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void 
         ll,
         lootSeedAt(pos.x, pos.y, pos.z) +% cycle *% 2654435761,
     );
+}
+
+/// Stock TEFeatureStorage.OnUnlockedServer (IL=6) fires
+/// GameManager.CheckDestroyTileEntity (IL=37, loot-economy.md 454-456) when
+/// a storage container unlocks (the player closed it): a loot def with
+/// `destroy_on_close` ("true" -> always, "empty" -> only when emptied,
+/// TEFeatureStorage.ShouldDestroyOnClose IL=19) drops the remaining contents
+/// as an EntityLootContainer bag at +0.5,0.75,+0.5 and destroys the block.
+/// Fires from the C2S LockRequest unlock path; no-op for containers without
+/// a known loot def or a non-destroying def.
+pub fn maybeDestroyContainerOnClose(self: *Game, x: i32, y: i32, z: i32) void {
+    const pos = containers_mod.PosKey{ .x = x, .y = y, .z = z };
+    const cont = self.containers.get(pos) orelse return;
+    const ll = cont.loot_list;
+    if (ll.len == 0) return;
+    const lc = self.loot.containerByName(ll) orelse return;
+    if (lc.destroy_on_close == 0) return;
+    if (lc.destroy_on_close == 2) {
+        // "empty": destroy only when the player emptied it.
+        var empty = true;
+        for (cont.slots) |s| {
+            if (s.count > 0 and s.item_id != 0) {
+                empty = false;
+                break;
+            }
+        }
+        if (!empty) return;
+    }
+    // Drop the remaining contents ("true" mode; "empty" has nothing left).
+    var drop_inv: ecs.components.Inventory = .{};
+    var n: usize = 0;
+    for (cont.slots) |s| {
+        if (s.count > 0 and s.item_id != 0 and n < ecs.components.max_inv_slots) {
+            drop_inv.slots[n] = s;
+            n += 1;
+        }
+    }
+    const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+    const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
+    const fz: f32 = @as(f32, @floatFromInt(z)) + 0.5;
+    if (n > 0) {
+        if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, n)) |bag_nid| {
+            self.broadcastLootSpawn(bag_nid) catch {};
+        }
+    }
+    self.containers.remove(pos);
+    // Block takes MaxDamage (stock DamageBlock(..., MaxDamage, ...)): air +
+    // broadcast, exactly like the block-break paths (tick.zig).
+    _ = self.world.setBlockWorld(x, y, z, 0) catch {};
+    self.clearBlockHp(x, y, z);
+    self.clearBlockRaw(x, y, z);
+    if (packages.buildSetBlockBody(&self.body_buf, x, y, z, 0)) |sb| {
+        self.broadcastNear("NetPackageSetBlock", sb, fx, fz, self.interest_range) catch {};
+    } else |_| {}
 }

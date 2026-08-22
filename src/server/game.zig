@@ -2739,6 +2739,12 @@ pub const Game = struct {
         game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed);
     }
 
+    /// Stock CheckDestroyTileEntity on container unlock (close): a loot def
+    /// with destroy_on_close drops the contents and breaks the block.
+    pub fn maybeDestroyContainerOnClose(self: *Game, x: i32, y: i32, z: i32) void {
+        game_chunk_fill.maybeDestroyContainerOnClose(self, x, y, z);
+    }
+
     /// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
     /// container re-rolls its contents when the interval since the touch day
     /// has elapsed (game/chunk_fill.zig).

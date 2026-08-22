@@ -1590,6 +1590,86 @@ test "scenario persist with stock map: edit survives restart under same --map" {
     }
 }
 
+test "scenario destroy_on_close container breaks on unlock and drops contents" {
+    // Stock TEFeatureStorage.OnUnlockedServer (IL=6) ->
+    // GameManager.CheckDestroyTileEntity (IL=37, loot-economy.md 454-456):
+    // destroy_on_close="true" drops the remaining contents as an
+    // EntityLootContainer bag at +0.5,0.75,+0.5 and destroys the block on
+    // close; "empty" destroys only when the player emptied the container.
+    freshScenarioDir("worlds/zdtd_sc_destroyclose");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_destroyclose", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    // Custom loot table: a "true" container and an "empty" container.
+    var conts = [_]assets_loot.LootContainer{
+        .{ .name = "testAirdrop", .size_x = 4, .size_y = 3, .destroy_on_close = 1 },
+        .{ .name = "testSmallSafe", .size_x = 8, .size_y = 5, .destroy_on_close = 2 },
+    };
+    g.loot = .{ .containers = &conts, .source = .xml };
+
+    const bx = 100;
+    const by = 60;
+    const bz = 100;
+    const pos = containers_mod.PosKey{ .x = bx, .y = by, .z = bz };
+    try g.world.setBlockWorld(bx, by, bz, world_store.block_stone);
+
+    // "true" container with contents: close -> bag spawns with the items and
+    // the block breaks.
+    {
+        const cont = g.containers.getOrCreate(pos, 12, world_store.block_stone) orelse unreachable;
+        cont.loot_list = "testAirdrop";
+        cont.slots[0] = .{ .item_id = 1, .count = 3, .quality = 1 };
+        cont.slots[1] = .{ .item_id = 2, .count = 1, .quality = 1 };
+        g.maybeDestroyContainerOnClose(bx, by, bz);
+        try std.testing.expect(g.containers.get(pos) == null);
+        try std.testing.expectEqual(@as(u16, 0), g.world.rawWorld(bx, by, bz) catch 0);
+        var bag_near: usize = 0;
+        for (g.sim.kind_groups.slice(.loot_bag)) |bs| {
+            const t = g.sim.transform[bs];
+            if (t.x > bx - 2 and t.x < bx + 2 and t.y > by - 2 and t.y < by + 3 and t.z > bz - 2 and t.z < bz + 2) bag_near += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 1), bag_near);
+        const bs = g.sim.kind_groups.slice(.loot_bag);
+        var bag_items: usize = 0;
+        for (bs) |sl| {
+            for (g.sim.inventory[sl].slots) |s| {
+                if (s.count > 0 and s.item_id != 0) bag_items += 1;
+            }
+        }
+        try std.testing.expectEqual(@as(usize, 2), bag_items);
+    }
+
+    // "empty" container with contents: NOT destroyed on close.
+    const pos2 = containers_mod.PosKey{ .x = 200, .y = 60, .z = 200 };
+    try g.world.setBlockWorld(200, 60, 200, world_store.block_stone);
+    {
+        const cont = g.containers.getOrCreate(pos2, 40, world_store.block_stone) orelse unreachable;
+        cont.loot_list = "testSmallSafe";
+        cont.slots[0] = .{ .item_id = 1, .count = 2, .quality = 1 };
+        g.maybeDestroyContainerOnClose(200, 60, 200);
+        try std.testing.expect(g.containers.get(pos2) != null);
+        try std.testing.expect(g.world.rawWorld(200, 60, 200) catch 0 != 0);
+    }
+
+    // Emptied "empty" container: destroyed, nothing to drop.
+    {
+        const cont = g.containers.get(pos2) orelse unreachable;
+        cont.slots[0] = .{};
+        g.maybeDestroyContainerOnClose(200, 60, 200);
+        try std.testing.expect(g.containers.get(pos2) == null);
+        try std.testing.expectEqual(@as(u16, 0), g.world.rawWorld(200, 60, 200) catch 0);
+    }
+    std.debug.print("PASS destroy-on-close: true drops+breaks, empty breaks when emptied\n", .{});
+}
+
 test "scenario synthetic DTM fixture always runs" {
     // Tiny 32×32 DTM on disk → loadStockMap path without Steam tree.
     var tmp = std.testing.tmpDir(.{});
