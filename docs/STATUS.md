@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 235 `WORKS`,
-60 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 236 `WORKS`,
+59 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -366,6 +366,13 @@ prefab TE scan classifies the real .tts TE bytes correctly (Light 18 /
 Composite 25 seed storage; Sleeper 20 does not) instead of accepting
 Composite only through the mislabeled light constant. POIs 18/12/0 ->
 **19/11/0**; total **235/60/38**.
+Then the authored-sleeper-spawn-points row went WORKS: the marker scan now
+mirrors stock Block.IsSleeperBlock - maxdamage resolves Class through Extends
+into the full 34-block sleeper set (18 sleeper* + 16 infestedSleeper*, count
+pinned by test) and the sleeper load uses that predicate instead of the
+"sleeper" name prefix, so the ~338 POIs carrying infestedSleeper* markers
+keep their whole authored spawn set (offline loads fall back to the prefix).
+POIs 19/11/0 -> **20/10/0**; total **236/59/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

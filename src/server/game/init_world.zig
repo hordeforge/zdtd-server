@@ -62,7 +62,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
                     if (refs.items.len >= 1200) break;
                 }
             }
-            if (sleepers_mod.loadFromPrefabs(allocator, pf.prefabs_root, refs.items) catch |err| blk: {
+            if (sleepers_mod.loadFromPrefabs(allocator, pf.prefabs_root, refs.items, &Game.isSleeperName, self) catch |err| blk: {
                 var ts: [19]u8 = undefined;
                 std.debug.print("zdtd: {s} sleeper load failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
                 break :blk null;

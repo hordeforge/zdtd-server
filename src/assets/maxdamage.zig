@@ -59,6 +59,11 @@ pub const Table = struct {
     power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{},
     /// block name → blocks.xml Class (Generator, BatteryBank, …). Arena keys.
     power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// Block names whose Extends-resolved Class is "Sleeper" (BlockSleeper's
+    /// ctor sets IsSleeperBlock, asm.il 133430-133460; RE world-generation.md).
+    /// The stock set is 34 blocks, 16 of them named infestedSleeper* which a
+    /// "sleeper" name prefix misses.
+    sleeper_class_names: std.StringHashMapUnmanaged(void) = .{},
     /// Generator MaxFuel (blocks.xml); missing → no fuel budget entry.
     power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{},
     /// Generator OutputPerFuel (blocks.xml).
@@ -115,6 +120,7 @@ pub const Table = struct {
             self.name_by_id = .{};
             self.power_watts_by_name = .{};
             self.power_class_by_name = .{};
+            self.sleeper_class_names = .{};
             self.power_max_fuel_by_name = .{};
             self.power_output_per_fuel_by_name = .{};
             self.power_output_per_charge_by_name = .{};
@@ -261,6 +267,13 @@ pub const Table = struct {
     /// blocks.xml Class property for a block name, else null.
     pub fn classByName(self: *const Table, name: []const u8) ?[]const u8 {
         return self.power_class_by_name.get(name);
+    }
+
+    /// True when the block's resolved Class is Sleeper (authored POI sleeper
+    /// spawn markers: prefabs store the marker block, and the stock scan is
+    /// Block.IsSleeperBlock, not a name prefix).
+    pub fn isSleeperName(self: *const Table, name: []const u8) bool {
+        return self.sleeper_class_names.contains(name);
     }
 
     pub fn maxFuelByName(self: *const Table, name: []const u8) ?f32 {
@@ -557,6 +570,28 @@ fn resolveUpgrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []c
     return null;
 }
 
+/// True when a block's Extends-resolved Class is "Sleeper" (BlockSleeper's
+/// ctor sets IsSleeperBlock, asm.il 133430-133460; RE world-generation.md).
+/// Children inherit the base's Class through Extends, so a "sleeper" name
+/// prefix misses the 16 infestedSleeper* blocks of the 34-block stock set.
+fn resolveSleeperClass(
+    facts: *const std.StringHashMapUnmanaged(DecoFacts),
+    classes: *const std.StringHashMapUnmanaged([]const u8),
+    name: []const u8,
+) bool {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        if (classes.get(cur)) |cls| {
+            if (std.mem.eql(u8, cls, "Sleeper")) return true;
+        }
+        const f = facts.get(cur) orelse return false;
+        cur = f.extends orelse return false;
+    }
+    return false;
+}
+
 fn bodyHasStorage(body: []const u8) bool {
     // LootList property or CompositeTileEntity class → storage TE candidate.
     if (xml.propertyValue(body, "LootList") != null) return true;
@@ -680,6 +715,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
     var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{};
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
+    var sleeper_class_names: std.StringHashMapUnmanaged(void) = .{};
     var fit = own_facts.iterator();
     while (fit.next()) |e| {
         const r = resolveDecoFacts(&own_facts, e.key_ptr.*);
@@ -696,6 +732,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (resolveUpgrade(&own_facts, e.key_ptr.*)) |tb| {
             try upgrade_to_names.put(arena, e.key_ptr.*, tb);
         }
+        if (resolveSleeperClass(&own_facts, &power_class_by_name, e.key_ptr.*)) {
+            try sleeper_class_names.put(arena, e.key_ptr.*, {});
+        }
     }
     own_facts.deinit(arena);
 
@@ -707,6 +746,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .loot_list_by_name = loot_list_by_name,
         .power_watts_by_name = power_watts_by_name,
         .power_class_by_name = power_class_by_name,
+        .sleeper_class_names = sleeper_class_names,
         .power_max_fuel_by_name = power_max_fuel_by_name,
         .power_output_per_fuel_by_name = power_output_per_fuel_by_name,
         .power_output_per_charge_by_name = power_output_per_charge_by_name,
@@ -1042,4 +1082,23 @@ test "explosion DamageBonus category resolves per block from materials.xml" {
     if (t.idByName("woodShapes:cube")) |wood_id| {
         _ = t.categoryForBlock(wood_id);
     }
+}
+
+test "Class=Sleeper resolves through Extends (infestedSleeper included)" {
+    // Block.IsSleeperBlock = Extends-resolved Class "Sleeper" (asm.il
+    // 133430-133460): the stock set is 34 blocks, 16 of them named
+    // infestedSleeper*, which a "sleeper" name prefix misses.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(t.isSleeperName("sleeperSit"));
+    try std.testing.expect(t.isSleeperName("sleeperCrawlerOnly")); // inherits Class via Extends
+    try std.testing.expect(t.isSleeperName("infestedSleeperSit"));
+    try std.testing.expect(t.isSleeperName("infestedSleeperCrawlerOnly"));
+    try std.testing.expect(!t.isSleeperName("woodShapes:cube"));
+    try std.testing.expect(!t.isSleeperName("terrDirt"));
+    // The full stock set is 34 blocks (18 sleeper* + 16 infestedSleeper*),
+    // per the RE count in world-generation.md.
+    try std.testing.expectEqual(@as(usize, 34), t.sleeper_class_names.count());
 }

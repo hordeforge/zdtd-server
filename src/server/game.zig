@@ -2437,6 +2437,14 @@ pub const Game = struct {
     /// when the biome map, the biome name, or the biome's rule is unknown.
     /// Fixes the wasteland-at-midnight-getting-forest-walkers gap: stock
     /// resolves per ChunkAreaBiomeSpawnData from the actual biome.
+    /// Class=Sleeper marker test (authored POI sleeper spawn points; RE
+    /// world-generation.md: Block.IsSleeperBlock via Extends-resolved Class,
+    /// not a name prefix). Wired as the sleepers loadFromPrefabs callback.
+    pub fn isSleeperName(ctx: ?*anyopaque, name: []const u8) bool {
+        const self: *Game = @ptrCast(@alignCast(ctx.?));
+        return self.maxdamage.isSleeperName(name);
+    }
+
     /// True when the block id is a bedroll (stock respawn bed): the classic
     /// bedroll plus the colored variants. Name-based via the runtime AssignIds
     /// dump, never a hardcoded id list.

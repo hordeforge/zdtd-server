@@ -7,6 +7,7 @@ const xml = @import("../assets/xml_util.zig");
 const tts_rot = @import("tts.zig");
 const blocks_nim = @import("../assets/blocks_nim.zig");
 const prefabs = @import("prefabs.zig");
+const maxdamage = @import("../assets/maxdamage.zig");
 
 pub const max_volumes: usize = 8192;
 pub const max_group_classes: usize = 4;
@@ -239,11 +240,19 @@ pub const PrefabRef = struct {
     size_z: i32,
 };
 
+/// Class=Sleeper marker test for authored spawn points (Block.IsSleeperBlock,
+/// RE world-generation.md): resolves the marker block name through blocks.xml
+/// Class+Extends, not a "sleeper" name prefix (stock has 16 infestedSleeper*
+/// blocks of the 34-class set). Null = offline fallback keeps the prefix test.
+pub const IsSleeperFn = *const fn (ctx: ?*anyopaque, name: []const u8) bool;
+
 /// Load sleeper volumes for decorations under prefabs_root (POIs/Parts/RWGTiles).
 pub fn loadFromPrefabs(
     allocator: std.mem.Allocator,
     prefabs_root: []const u8,
     decorations: []const PrefabRef,
+    is_sleeper: ?IsSleeperFn,
+    sleeper_ctx: ?*anyopaque,
 ) !Store {
     if (prefabs_root.len == 0 or decorations.len == 0) return Store.empty();
 
@@ -382,7 +391,11 @@ pub fn loadFromPrefabs(
             while (bi < cnt) : (bi += 1) {
                 const tid: u16 = @truncate(tb.types[@intCast(bi)] & 0xffff);
                 const name = nm.nameOf(tid) orelse continue;
-                if (!std.mem.startsWith(u8, name, "sleeper")) continue;
+                // Stock Block.IsSleeperBlock = resolved Class "Sleeper"; the
+                // prefix fallback (offline/no table) misses infestedSleeper*.
+                if (is_sleeper) |f| {
+                    if (!f(sleeper_ctx, name)) continue;
+                } else if (!std.mem.startsWith(u8, name, "sleeper")) continue;
                 const c = tb.offsetToCoord(bi);
                 try sleeper_local.append(allocator, .{ .x = c.x, .y = c.y, .z = c.z });
             }
@@ -473,7 +486,7 @@ test "parse abandoned_house sleeper volumes if present" {
         .size_y = 21,
         .size_z = 42,
     }};
-    var store = try loadFromPrefabs(std.testing.allocator, root, &decos);
+    var store = try loadFromPrefabs(std.testing.allocator, root, &decos, null, null);
     defer store.deinit();
     try std.testing.expect(store.volumes.len >= 3);
     // first volume start 15,0,14 size 5,13,13 → world 115..120, 60..73, 214..227
@@ -501,7 +514,17 @@ test "abandoned_house authored sleeper spawn points inside volumes if present" {
         .size_y = 21,
         .size_z = 42,
     }};
-    var store = try loadFromPrefabs(std.testing.allocator, root, &decos);
+    // Class=Sleeper marker test from the stock blocks.xml (the Game wires the
+    // same predicate through init_world; offline builds fall back to null).
+    var md = (maxdamage.tryLoad(std.testing.allocator, "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server", null) catch null) orelse return error.SkipZigTest;
+    defer md.deinit();
+    const IsSleeper = struct {
+        fn check(ctx: ?*anyopaque, name: []const u8) bool {
+            const t: *const maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+            return t.isSleeperName(name);
+        }
+    };
+    var store = try loadFromPrefabs(std.testing.allocator, root, &decos, IsSleeper.check, &md);
     defer store.deinit();
     // At least one volume carries authored spawn points from Class=Sleeper blocks.
     var total: usize = 0;

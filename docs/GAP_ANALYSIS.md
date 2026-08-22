@@ -148,13 +148,13 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
-| [POIs and prefabs](#7-pois-and-prefabs) | 19 | 11 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock |
+| [POIs and prefabs](#7-pois-and-prefabs) | 20 | 10 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **235** | **60** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **236** | **59** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1803,16 +1803,18 @@ can walk into every POI but none of them is the building TFP authored.
   corresponding room, but they are not the rooms TFP marked.
   *Anchors:* `src/world/sleepers.zig:154`, `:336`
 
-- **Authored sleeper spawn points** `PARTIAL`
-  Scans the `.tts` type plane, resolves each id through the prefab's
-  `.blocks.nim` and accepts names starting `"sleeper"`. Stock's test is
-  `Block.IsSleeperBlock`, set by `BlockSleeper`'s ctor; resolving `Class=Sleeper`
-  through Extends gives 34 blocks, 16 of them named `infestedSleeper*`, which the
-  case-sensitive prefix misses. Across the shipped `.blocks.nim` files, 886 of
-  1105 POIs contain `sleeper*` markers and 338 contain `infestedSleeper*`, so
-  about a third of POIs lose part of their authored spawn set.
-  *Anchors:* `src/world/sleepers.zig:306`, `:314`, `asm.il:133430-133460`,
-  `asm.il:923100-923213`
+- **Authored sleeper spawn points** `WORKS`
+  The spawn-marker scan now mirrors stock `Block.IsSleeperBlock`: maxdamage
+  resolves each block's `Class` property through `Extends` (asm.il
+  133430-133460, RE world-generation.md) into the full 34-block sleeper set
+  (18 `sleeper*` + 16 `infestedSleeper*`, count pinned by test), and the
+  sleeper load passes that predicate into the `.tts` scan instead of the
+  `"sleeper"` name prefix, so the ~338 POIs carrying `infestedSleeper*`
+  markers keep their whole authored spawn set. Offline loads (no blocks.xml)
+  fall back to the prefix test.
+  *Anchors:* `src/assets/maxdamage.zig` (`sleeper_class_names`,
+  `resolveSleeperClass`), `src/world/sleepers.zig:249-259,385-391`,
+  `src/server/game/init_world.zig:65`, `asm.il:133430-133460`
 
 - **Sleeper volume coverage across the map** `PARTIAL`
   The volume store is built from at most ~1200 prefab refs (pass 1 unbounded
