@@ -16,8 +16,9 @@ const admin_xml = @import("../admin_xml.zig");
 const io_fs = @import("../../util/io_fs.zig");
 
 pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: game_mod.InitOptions, had_saved_entities: bool) !void {
-    // Prefab sleeper volumes (stock map only). Prefer POIs near primary spawn first
-    // so max_volumes budget covers playable area; remainder skipped (honest cap).
+    // Prefab sleeper volumes (stock map only). Prefer POIs near primary spawn
+    // first, then the rest of the map (max_volumes bounds the volume store;
+    // the ref list itself is uncapped so far POIs keep their authored sleepers).
     if (self.world.prefabs) |*pf| {
         if (pf.prefabs_root.len > 0) {
             const sp0 = self.world.primarySpawn();
@@ -41,24 +42,25 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
                     .size_z = d.size_z,
                 });
             }
-            // Pass 2: fill remaining budget with farther POIs
-            if (refs.items.len < 800) {
-                for (pf.items) |d| {
-                    const dx = d.x - sp0.x;
-                    const dz = d.z - sp0.z;
-                    if (dx * dx + dz * dz <= 512 * 512) continue;
-                    try refs.append(allocator, .{
-                        .name = d.name,
-                        .x = d.x,
-                        .y = d.stampY(),
-                        .z = d.z,
-                        .rot = d.rot,
-                        .size_x = d.size_x,
-                        .size_y = d.size_y,
-                        .size_z = d.size_z,
-                    });
-                    if (refs.items.len >= 1200) break;
-                }
+            // Pass 2: the rest of the map. No ref cap beyond the volume-store
+            // budget (max_volumes): every POI's authored volumes should wake
+            // sleepers, not just the ones near spawn (a far building with no
+            // sleepers is a dead building). Distinct prefab XMLs parse once
+            // (xml_cache); prefabs without SleeperVolumeSize cost one read.
+            for (pf.items) |d| {
+                const dx = d.x - sp0.x;
+                const dz = d.z - sp0.z;
+                if (dx * dx + dz * dz <= 512 * 512) continue;
+                try refs.append(allocator, .{
+                    .name = d.name,
+                    .x = d.x,
+                    .y = d.stampY(),
+                    .z = d.z,
+                    .rot = d.rot,
+                    .size_x = d.size_x,
+                    .size_y = d.size_y,
+                    .size_z = d.size_z,
+                });
             }
             if (sleepers_mod.loadFromPrefabs(allocator, pf.prefabs_root, refs.items, &Game.isSleeperName, self) catch |err| blk: {
                 var ts: [19]u8 = undefined;

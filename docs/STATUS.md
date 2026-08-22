@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 239 `WORKS`,
-56 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 240 `WORKS`,
+55 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -386,6 +386,12 @@ longer excludes parts - 51 stock parts carry authored sleeper volumes
 feeds them in, so a roadside ambulance spawns its hospital sleepers like
 stock (parts already painted under the isPaintablePart volume cap). POIs
 22/8/0 -> **23/7/0**; total **239/56/38**.
+Then the sleeper-volume-coverage row went WORKS: the volume-store ref build
+is uncapped beyond the max_volumes budget (8192) - pass 2 previously broke at
+1200 refs, leaving a few hundred far POIs with no sleepers; now every POI's
+authored volumes load (stock ships ~887 POI + 51 part volumes, comfortably
+inside the budget), so a building anywhere on the map wakes its sleepers.
+POIs 23/7/0 -> **24/6/0**; total **240/55/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
