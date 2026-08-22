@@ -73,7 +73,6 @@ pub const Zpv2Drop = struct {
 /// misread as this record's bed_present. Only the file's own magic decides
 /// whether a bedroll field is present, the same way `prog` already gates the
 /// rest of the v3 tail.
-
 /// Inventory slot-record stride in bytes: 7 through v6
 /// (item:u16, count:u16, quality:u8, meta:u16), 11 from v7 (those plus
 /// use_times: f32).

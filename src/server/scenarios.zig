@@ -1535,30 +1535,62 @@ test "scenario group-id sleeper volumes cascade within one placement only" {
     const vols = try gpa.alloc(sleepers_mod.Volume, 4);
     defer gpa.free(vols);
     vols[0] = .{
-        .x0 = 100, .y0 = 70, .z0 = 100, .x1 = 108, .y1 = 76, .z1 = 108,
-        .group_id = 1, .group_n = 1,
+        .x0 = 100,
+        .y0 = 70,
+        .z0 = 100,
+        .x1 = 108,
+        .y1 = 76,
+        .z1 = 108,
+        .group_id = 1,
+        .group_n = 1,
         .prefab = "AAA_utility_waterworks",
-        .origin_x = 500, .origin_y = 60, .origin_z = 500,
+        .origin_x = 500,
+        .origin_y = 60,
+        .origin_z = 500,
     };
     vols[1] = .{
-        .x0 = 200, .y0 = 70, .z0 = 200, .x1 = 208, .y1 = 76, .z1 = 208,
-        .group_id = 1, .group_n = 1,
+        .x0 = 200,
+        .y0 = 70,
+        .z0 = 200,
+        .x1 = 208,
+        .y1 = 76,
+        .z1 = 208,
+        .group_id = 1,
+        .group_n = 1,
         .prefab = "AAA_utility_waterworks",
-        .origin_x = 500, .origin_y = 60, .origin_z = 500,
+        .origin_x = 500,
+        .origin_y = 60,
+        .origin_z = 500,
     };
     // Duplicate placement of the same prefab: same id, different origin.
     vols[2] = .{
-        .x0 = 300, .y0 = 70, .z0 = 300, .x1 = 308, .y1 = 76, .z1 = 308,
-        .group_id = 1, .group_n = 1,
+        .x0 = 300,
+        .y0 = 70,
+        .z0 = 300,
+        .x1 = 308,
+        .y1 = 76,
+        .z1 = 308,
+        .group_id = 1,
+        .group_n = 1,
         .prefab = "AAA_utility_waterworks",
-        .origin_x = 9000, .origin_y = 60, .origin_z = 9000,
+        .origin_x = 9000,
+        .origin_y = 60,
+        .origin_z = 9000,
     };
     // Same placement, standalone id 0.
     vols[3] = .{
-        .x0 = 400, .y0 = 70, .z0 = 400, .x1 = 408, .y1 = 76, .z1 = 408,
-        .group_id = 0, .group_n = 1,
+        .x0 = 400,
+        .y0 = 70,
+        .z0 = 400,
+        .x1 = 408,
+        .y1 = 76,
+        .z1 = 408,
+        .group_id = 0,
+        .group_n = 1,
         .prefab = "AAA_utility_waterworks",
-        .origin_x = 500, .origin_y = 60, .origin_z = 500,
+        .origin_x = 500,
+        .origin_y = 60,
+        .origin_z = 500,
     };
     for (vols) |*v| v.groups[0] = .{ .class_name = "GroupGenericZombie", .min_count = 1, .max_count = 2 };
     g.sleepers.volumes = vols;
