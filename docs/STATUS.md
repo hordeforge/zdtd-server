@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 260 `WORKS`,
-31 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 261 `WORKS`,
+30 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -522,6 +522,12 @@ scorecard counts recount per category, every GAP feature row embeds under
 its category (click a row to expand), a search box filters categories and
 features, state chips toggle WORKS/PARTIAL/waived rows, and the numeric
 headers sort. Regenerate with `python3 scripts/gen_provenance.py`.
+Then vitals persistence went WORKS on re-audit: the join hasEntityStats
+residual is non-visible - the join EntitySpawn omits the stats block, but
+the survival loop's first tick pushes HP/food/water and stamina via
+EntityStatChanged immediately after spawn (survival_sync_cd starts at 0),
+so the client's HUD reads the same stats with no waiting. Progression
+22/3/0; total **261/30/0**.
 Then the quests.xml stage modifiers landed: gamestage_mod/gamestage_bonus
 parse per quest def and the player's active quest feeds gameStageOf (stock
 get_gameStage, progression.md 5) - an infested clear (mod .6, bonus 30)

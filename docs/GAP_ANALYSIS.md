@@ -155,10 +155,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 25 | 5 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 23 | 5 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 21 | 4 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 38 | 6 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **260** | **31** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **261** | **30** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3092,17 +3092,20 @@ and server-to-client XP/level pushes do not exist.
   length 0 so the client UI can miss restored buffs until a later S2C path.
   *Anchors:* `src/server/game.zig` (ZPV3 buff tail), `src/ecs` buff slots
 
-- **Vitals persistence (health, food, water)** `PARTIAL`
+- **Vitals persistence (health, food, water)** `WORKS` `(2026-08-22 re-audit)`
   Food/water (and maxes) are in the ZPV3 progression tail and restored into
   `sim.health`. `(2026-08-22)` ZPV8 adds the player's current `hp` to the
   tail: the post-spawn restore pass applies it, so a relog keeps the player's
   wounds instead of granting a free full heal (v2-7 files migrate with a -1
   sentinel that keeps the spawn path's full health; round-trip + migration
-  tests). Join PDF `hasEntityStats` residual may still omit a full
-  PlayerEntityStats block; survival stats are also pushed on other S2C paths
-  after join.
-  *Anchors:* `src/server/persist.zig` ZPV8 tail, `src/server/c2s/join.zig:203,230`
-  (restore before/after spawn), spawn/heal path
+  tests). Re-audit 2026-08-22: the join `hasEntityStats` residual is
+  non-visible - the join EntitySpawn writes `hasEntityStats=false`, but the
+  survival loop's first tick pushes HP/food/water/max and stamina via
+  `NetPackageEntityStatChanged` immediately after spawn (`survival_sync_cd`
+  starts at 0), so the client's HUD reads the same stats with no waiting.
+  *Anchors:* `src/server/persist.zig` ZPV8/9 tail, `src/server/c2s/join.zig:203,230`
+  (restore before/after spawn), `src/server/game/tick.zig:131` (first-tick sync),
+  `src/server/game/join.zig` sendSurvivalStats / sendStaminaStats
 
 - **progression.zig curve-only loader** `WORKS` `(2026-08-22 re-audit)`
   `loadFromPath` is a clean single parse (`readCleanFile` + `parseCurve`, no

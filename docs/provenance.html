@@ -49,7 +49,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <main id="main-content">
 <section id="scorecard" aria-labelledby="scorecard-heading">
 <h2 id="scorecard-heading">Stock game systems · GAP_ANALYSIS scorecard</h2>
-<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">260</b> WORKS / <b class="num">31</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">291</b> scored features = <b>89%</b> fully ported, <b>100%</b> at least partial (recount 2026-08-22 from the live markers; GAP_ANALYSIS scorecard wins on conflict).</p>
+<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">261</b> WORKS / <b class="num">30</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">291</b> scored features = <b>89%</b> fully ported, <b>100%</b> at least partial (recount 2026-08-22 from the live markers; GAP_ANALYSIS scorecard wins on conflict).</p>
 <div class="toolbar">
 <label class="sr-only" for="filter">Filter categories and features</label>
 <input id="filter" type="search" placeholder="Filter categories and features… (e.g. sleeper, trader, ZPV, quest)" autocomplete="off">
@@ -312,8 +312,8 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 </tbody></table></div></td></tr>
 <tr class="cat" data-name="Player progression" tabindex="0" aria-expanded="false">
 <th scope="row">Player progression</th>
-<td><span class="pbar" role="progressbar" aria-valuenow="84" aria-valuemin="0" aria-valuemax="100" style="--p:84%"><span class="sr-only">84% ported</span></span> 84%</td>
-<td class="num">21</td><td class="num">4</td><td class="num">0</td>
+<td><span class="pbar" role="progressbar" aria-valuenow="88" aria-valuemin="0" aria-valuemax="100" style="--p:88%"><span class="sr-only">88% ported</span></span> 88%</td>
+<td class="num">22</td><td class="num">3</td><td class="num">0</td>
 <td>Level, XP, survival stats and active buffs survive a restart (ZPV9, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; biome + quest stage modifiers feed gameStageOf; perk runtime, stats blob and XP pushes still open</td><td>A: progression.xml, buffs.xml · R: progression.md, entity-stats.md, save-persistence.md · Z: ZPV9 persist, survival knobs</td></tr>
 <tr class="feat-row" hidden><td colspan="7"><div class="feat-wrap"><table class="feat"><caption class="sr-only">Player progression GAP features</caption><tbody>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>progression.xml `&lt;level&gt;` curve parse</td></tr>
@@ -351,7 +351,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>players.zsv persistence: name, position, coins, inventory, journal</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Progression persistence across restart or relog</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Buff persistence across restart</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>Vitals persistence (health, food, water)</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Vitals persistence (health, food, water)</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>progression.zig curve-only loader</td></tr>
 </tbody></table></div></td></tr>
 <tr class="cat" data-name="World systems" tabindex="0" aria-expanded="false">
