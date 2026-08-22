@@ -147,14 +147,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
-| [Blood moon](#6-blood-moon) | 20 | 3 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive |
+| [Blood moon](#6-blood-moon) | 21 | 2 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time |
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **241** | **54** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **242** | **53** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1492,14 +1492,15 @@ encoding is one day high.
   *Anchors:* `src/server/game.zig:2219`, `:2435`, `src/server/webui.zig:1357`,
   `asm.il:412317`, `asm.il:2573467`
 
-- **settime command arity** `PARTIAL`
-  zdtd treats a lone numeric argument as a **day**, so the stock-syntax
-  `settime 22000` (raw world time, 1000 = one hour) sets the server to day 22000.
-  The playtest harness sends exactly that on the `settime_bloodmoon` barrier,
-  which is why the `combat/blood_moon_music` case only ever verifies that the
-  client clock reached night. `settime day` / `settime night` also differ.
-  *Anchors:* `src/server/game.zig:2273`, `:2284`, `asm.il:251877`,
-  `7dtd-playtest/scripts/playtest_run.py:1399`
+- **settime command arity** `WORKS` `(2026-08-22 re-audit)`
+  `settime` follows the stock ConsoleCmdSetTime arity (asm.il 251900): 1 arg
+  `day` / `night` / a lone numeric as raw world time (1000 = one hour; the
+  playtest `settime_bloodmoon` barrier sends `settime 22000` and lands the
+  clock at 22:00), or 3 args `day hour minute` through
+  GameUtils::DayTimeToWorldTime; other arities are rejected with the stock
+  message. Test pins the raw-time path.
+  *Anchors:* `src/server/admin.zig:764-792`, `asm.il:251877`,
+  `src/server/game/tests.zig:1183-1190`
 
 - **Where the blood-moon options come from** `PARTIAL`
   zdtd reads BloodMoonFrequency/Range/EnemyCount as serverconfig properties.

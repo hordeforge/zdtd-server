@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 241 `WORKS`,
-54 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 242 `WORKS`,
+53 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -404,6 +404,11 @@ min(cPartyEnemyMax 30, BloodMoonEnemyCount x members), with the party's
 game stage frozen at dusk driving the gamestages ladder and the group's
 maxAlive; the row described the old per-player 12-22 m drip. Blood moon
 19/4/3 -> **20/3/3**; total **241/54/38**.
+Then the settime-command-arity row went WORKS on re-audit: `settime` already
+follows the stock ConsoleCmdSetTime arity - 1 arg `day`/`night`/raw world
+time (the playtest `settime 22000` barrier lands the clock at 22:00) or 3
+args through DayTimeToWorldTime - and a test now pins the raw-time path.
+Blood moon 20/3/3 -> **21/2/3**; total **242/53/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

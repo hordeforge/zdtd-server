@@ -1187,6 +1187,9 @@ test "console replies use the stock error and listing shapes" {
     try std.testing.expectEqualStrings("Set time to 24000\n", adminRun(g, &sink, "settime night"));
     try std.testing.expectEqual(@as(u32, 2), g.sim.director.clock.day);
     try std.testing.expectEqual(@as(f32, 0), g.sim.director.clock.hours);
+    // A lone numeric is RAW world time (1000 = 1 h), not a day: the stock
+    // playtest barrier sends `settime 22000` for the blood-moon night.
+    try std.testing.expectEqualStrings("Set time to 22000\n", adminRun(g, &sink, "settime 22000"));
 
     // listents rows carry the stock field order for the seeded zombies.
     const ents = adminRun(g, &sink, "listents");
