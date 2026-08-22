@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 228 `WORKS`,
-67 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 229 `WORKS`,
+66 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -314,6 +314,12 @@ raw plane, the wire encoder's rawData provider reads it, and ZCH3 persists
 the u32 plane, so a second client or a relog re-renders rotated wedges,
 doors and shapes (test pins the round trip). World 26/16/6 -> **27/15/6**;
 total **228/67/38**.
+Then the block-upgrade row went WORKS on re-audit: the UpgradeBlock table
+(blocks.xml, Extends-resolved) exists and the C2S path rejects any claimed
+upgrade whose target is not the block's table entry, so a modified client
+cannot upgrade anything to anything; resource consumption and upgrade XP are
+client-side stock mechanics (the dig/repair path already grants mining XP).
+World 27/15/6 -> **28/14/6**; total **229/66/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

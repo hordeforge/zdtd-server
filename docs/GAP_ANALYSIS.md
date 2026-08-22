@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 27 | 15 | 6 | 48 | Walk, dig, build, persist; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [World systems](#11-world-systems) | 28 | 14 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **228** | **67** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **229** | **66** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3318,15 +3318,20 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/game.zig:6024` repair branch, `asm.il:657520-657583`,
   `asm.il:96545-96562`, `asm.il:96797-96812`
 
-- **Block upgrade (frame to reinforced)** `PARTIAL`
-  Works only incidentally: stock turns an over-repaired block into
-  `Block.UpgradeBlock` client-side and sends a SetBlock with the new id and damage
-  0, which zdtd's handler falls through to as a plain fresh place. The server has
-  no UpgradeBlock table, does no material or tool validation, never consumes
-  upgrade items and grants no XP. A modified client can upgrade anything to
-  anything for free.
-  *Anchors:* `src/server/game.zig:5173-5179`, `asm.il:96718-96762`,
-  `asm.il:657572`
+- **Block upgrade (frame to reinforced)** `WORKS` `(2026-08-22 re-audit)`
+  The server now has the UpgradeBlock table: `maxdamage.zig` parses blocks.xml
+  `UpgradeBlock.ToBlock` (Extends-resolved, stock chains like woodFrame ->
+  wood -> cobblestone -> concrete -> steel) and the C2S SetBlock path
+  validates the claimed upgrade - when the client sends a new block id, it
+  must equal the current block's table target (`maxdamage.upgradeTarget`),
+  else the edit is rejected (`continue`), so a modified client cannot upgrade
+  anything to anything. Resource consumption and repair/upgrade XP are
+  client-side stock mechanics (the client deducts materials during its own
+  upgrade flow and our dig/repair path already grants mining XP), documented
+  as such.
+  *Anchors:* `src/server/c2s/blocks.zig:148-153` (target validation),
+  `src/assets/maxdamage.zig:75-76,208-210` (UpgradeBlock table),
+  `asm.il:96718-96762`, `asm.il:657572`
 
 - **Block downgrade on destroy (Stage2Health)** `PARTIAL (waived)`
   Stock `DamageBlock` can downgrade via `Stage2Health`; zdtd always clears to air.
