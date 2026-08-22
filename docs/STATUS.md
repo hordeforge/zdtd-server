@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 215 `WORKS`,
-80 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 217 `WORKS`,
+78 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -243,6 +243,15 @@ slots forever; sleepers and alerted mobs stay), and the EntitySpeeds/
 AliveFlags replicate block covers animals too, so the client animates a
 wandering animal (movement state 1) instead of sliding it with state 0.
 Entities 23/21/4 -> **25/19/4**; total **215/80/38**.
+Then the EAI task-coverage and target-sensing rows went WORKS on re-audit:
+the task table has 9 classes (ApproachDistraction + RunawayFromEntity landed
+since the row was written - a thrown distraction is chased, a timid animal
+flees a wolf), and the absent classes have zero AITask uses in the V3.1.0
+b14 entityclasses.xml except Leap (mountain lion pounce, cosmetic). The
+sense surface is stock-faithful: per-class SightRange, MaxViewAngle cone,
+block LOS, stealth-scaled hearing and smell - the old flat-48m through-walls
+claims are stale; the residual target-choice refinements are documented.
+Entities 25/19/4 -> **27/17/4**; total **217/78/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

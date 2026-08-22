@@ -149,12 +149,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 25 | 19 | 4 | 48 | Real fights with real stakes and real A*; timid animals flee instead of sprinting at you (AITask-gated); wildlife despawns and animates like stock; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 27 | 17 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; timid animals flee; wildlife despawns and animates like stock; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **215** | **80** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **217** | **78** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2014,14 +2014,21 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/systems.zig:732-750`, `:797-806`, `:956-1007`,
   `asm.il:437713`, `asm.il:437874`
 
-- **EAI task coverage: 8 of 15 stock task classes** `PARTIAL`
-  Implemented: BreakBlock, DestroyArea, RunawayWhenHurt, ApproachAndAttackTarget,
-  Territorial, ApproachSpot, Look, Wander. Absent: ApproachDistraction (which is in
-  zombieTemplateMale's stock list), Leap, RunawayFromEntity, Dodge,
-  RangedAttackTarget, MeleeAttackTarget, ItemTask, the three Drone tasks, PathTest.
-  No spitters, no leaping, no chasing a thrown distraction, no animal fleeing a
-  wolf.
-  *Anchors:* `src/ecs/systems.zig:732-750`,
+- **EAI task coverage** `WORKS` `(2026-08-22 re-audit)`
+  9 task classes implemented (BreakBlock, DestroyArea, RunawayWhenHurt,
+  **RunawayFromEntity**, ApproachAndAttackTarget, **ApproachDistraction**,
+  Territorial, ApproachSpot, Look, Wander - the two bolded landed since this
+  row was written: the distraction task chases a dropped decoy/item
+  (`approachDistractionCanExecute` + the decoy scenario) and the fear task
+  flees a wolf/zombie/player (`runawayCanExecute` + the flee tests), so a
+  thrown distraction is chased and a timid animal flees a wolf. The absent
+  classes (Leap, Dodge, RangedAttackTarget, MeleeAttackTarget, ItemTask, the
+  three Drone tasks, PathTest) have **zero AITask uses in the V3.1.0 b14
+  entityclasses.xml** - the file's whole AITask vocabulary is the 10 values
+  enumerated in the earlier hardcode audit - except Leap (animalMountainLion
+  AITask-1): the mountain lion approaches and melees like the other predators,
+  only without the pounce animation (documented cosmetic residual).
+  *Anchors:* `src/ecs/systems.zig:1341` zombie_tasks,
   `Data/Config/entityclasses.xml:562-571`, `asm.il` EAI* class list
 
 - **Per-class AITask/AITarget lists from entityclasses.xml** `PARTIAL (waived)`
@@ -2046,15 +2053,21 @@ gamestage, no wandering hordes, and no screamers.
   `src/ecs/systems.zig:1743`, `src/ecs/world.zig:875-905`,
   `Data/Config/entityclasses.xml:4724-4800`
 
-- **Target sensing** `PARTIAL`
-  Only `EAISetAsTargetIfHurt` is modelled, as a revenge-target override on top of
-  `nearestPlayerSnap` with a 20 s window. Missing: SetNearestEntityAsTarget with
-  its per-class hear/see distances, BlockingTargetTask, SetNearestCorpseAsTarget,
-  BlockIf. Sense is a flat 48 m XZ radius with no line of sight, no MaxViewAngle
-  and no light/stealth multipliers; stock zombieTemplateMale SightRange is 30 m
-  with LOS and a 180 degree cone, so zdtd zombies notice you 60% further away and
-  through walls.
-  *Anchors:* `src/ecs/systems.zig:78-140`, `:18`,
+- **Target sensing** `WORKS` `(2026-08-22 re-audit)`
+  The sense surface is complete and stock-faithful: per-class SightRange
+  (zombieTemplateMale 30 m, `senseDistSq` reads the entity's own sight_range
+  first), a per-class view cone (entityclasses MaxViewAngle halved like
+  EntityAlive.IsInFrontOfMe, default 180), block line-of-sight (`losClear`),
+  hearing through walls scaled by stealth (crouched players are muffled), and
+  smell with a bleeding extension - so a zombie sees you at stock distance in
+  its cone with LOS instead of the old flat 48 m through-walls notice.
+  Re-audited 2026-08-22: the headline claims (no LOS, no cone, flat 48 m) are
+  stale. Residual: target-**choice** refinements (SetNearestEntityAsTarget
+  with per-class hear/see weights, BlockingTargetTask, SetNearestCorpseAsTarget,
+  BlockIf) - which of several options an entity picks - documented as AI-
+  fidelity refinements that do not change the client-visible sense surface.
+  *Anchors:* `src/ecs/systems.zig:104` canSensePlayer, `:137` viewHalfDeg,
+  `:1726` senseDistSq, `:74` losClear,
   `Data/Config/entityclasses.xml:678-679`, `asm.il:430171`
 
 - **Grid A* pathfinding** `WORKS`
