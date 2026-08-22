@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 244 `WORKS`,
-51 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 245 `WORKS`,
+50 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -422,6 +422,11 @@ sell-price hook (stock lets you sell anything, RE GetSellPrice), with unit
 tests for the stocked, non-stocked and unset-hook paths; buys and sells stay
 atomic with the wallet and trader money pool. Traders 18/2/3 ->
 **19/1/3**; total **244/51/38**.
+Then the container-capacity-limits row went WORKS on re-audit: the world
+container store is 4096 entries with world eviction (the row described the
+old 256 cap), and the per-chunk prefab TE scan budgets ([sim] te_scan_*)
+are configurable and retry on truncation instead of silently dropping.
+Items 19/8/6 -> **20/7/6**; total **245/50/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

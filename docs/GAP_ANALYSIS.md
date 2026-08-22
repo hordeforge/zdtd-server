@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 22 | 1 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 20 | 7 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **244** | **51** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **245** | **50** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2682,12 +2682,17 @@ unvalidated, and durability, mods and repair do not exist.
   acted on by server — stock also gates it client-side via `TEFeatureStorage`.
   *Anchors:* `src/server/game/chunk_fill.zig:293-322`, `src/server/c2s/inv.zig:586-588`
 
-- **Container capacity limits** `PARTIAL`
-  256 containers world-wide with a linear scan per lookup, 54 slots each; the
-  prefab TE scan stops after 32 block hits plus 48 TE-list hits per chunk. A dense
-  POI silently exceeds these.
-  *Anchors:* `src/world/containers.zig:7-11`, `src/server/game.zig:7409-7410`,
-  `:7421`
+- **Container capacity limits** `WORKS` `(2026-08-22 re-audit)`
+  The world container store is 4096 entries (GAP 12 raised it from 256, and
+  2026-08-21 added world-container eviction because Navezgane alone has
+  thousands of loot containers and a hard cap truncates the tail - every
+  container past it came back empty), 54 slots each, and the save path
+  buffers on the heap. The per-chunk prefab TE scan budgets (32 block hits /
+  48 TE-list hits, `[sim] te_scan_*` in zdtd.toml) bound one chunk fill so it
+  cannot stall the 50 ms tick, and a truncated scan retries on the next send
+  (`ch.te_scanned` stays false) rather than silently dropping containers.
+  *Anchors:* `src/world/containers.zig:7-14`, `src/server/game/types.zig:32-37`,
+  `src/server/game/chunk_fill.zig:250,267-268`
 
 - **Player inventory persistence of item state** `PARTIAL`
   players.zsv (ZPV3 / legacy ZPV2) stores item_id, count, quality and meta per slot into a 32-entry
