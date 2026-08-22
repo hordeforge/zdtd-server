@@ -138,8 +138,9 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
         const side: i32 = 2 * r + 1;
         // Relative membership of currently streamed keys inside the view
         // square: O(streamed_n) build, O(1) probe. Replaces O(n²) desired[]
-        // linear scans (up to 169×169 per client per stream period).
-        var in_view = std.StaticBitSet(256).initEmpty();
+        // linear scans (up to 625×625 per client per stream period). 640 bits
+        // covers the r=12 square (25×25 = 625).
+        var in_view = std.StaticBitSet(640).initEmpty();
         {
             var si_i: usize = 0;
             while (si_i < c.streamed_n) : (si_i += 1) {
@@ -150,7 +151,7 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                 const dz = cz - tcz;
                 if (@abs(dx) > r or @abs(dz) > r) continue;
                 const bit: usize = @intCast((dx + r) + (dz + r) * side);
-                if (bit < 256) in_view.set(bit);
+                if (bit < 640) in_view.set(bit);
             }
         }
         // removes: keys outside the current square
@@ -190,7 +191,7 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
             while (dx <= r) : (dx += 1) {
                 if (added >= self.chunk_adds_per_stream_tick) break :outer;
                 const bit: usize = @intCast((dx + r) + (dz + r) * side);
-                if (bit < 256 and in_view.isSet(bit)) continue;
+                if (bit < 640 and in_view.isSet(bit)) continue;
                 const cx = tcx + dx;
                 const cz = tcz + dz;
                 const key = packages.makeChunkKey(cx, cz);

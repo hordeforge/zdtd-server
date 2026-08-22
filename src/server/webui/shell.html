@@ -243,7 +243,7 @@ async function submitCommand() {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            // oxlint-disable-next-line @rikalabs/no-double-type-assertion, typescript/no-unsafe-type-assertion -- browsers accept FormData in the URLSearchParams constructor; the bundled lib.dom type omits it (erased at emit time)
+            // oxlint-disable-next-line @rikalabs/no-double-type-assertion, typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- SAFETY: browsers accept FormData in the URLSearchParams constructor; the bundled lib.dom type omits it (erased at emit time)
             body: new URLSearchParams(fd),
         });
         if (r.status === HTTP_UNAUTHORIZED) {

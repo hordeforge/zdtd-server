@@ -13,7 +13,7 @@ const POLL_FAST_MS = 2000;
 type HxPollerElement = HTMLElement & {
     _hxStart?: () => void;
     _hxStop?: () => void;
-    _hxOnce?: () => Promise<unknown>;
+    _hxOnce?: () => Promise<void>;
 };
 
 function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
@@ -34,11 +34,11 @@ function queryEl<T extends HTMLElement>(selector: string): T {
 // stays a thin wiring function. Inlining it would push hxPoll past the
 // 60-line function cap the strict preset enforces; the
 // @rikalabs/no-single-use-trivial-helpers off entry covers this.
-function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promise<unknown> {
+function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promise<void> {
     let inFlight = false;
     // Force=true skips the focus guard: Refresh now and post-command refreshes
     // must swap even while the operator is reading a focused scroll region.
-    return (force = false): Promise<unknown> => {
+    return (force = false): Promise<void> => {
         if (inFlight || (!force && el.contains(document.activeElement))) {
             return Promise.resolve();
         }
@@ -102,7 +102,7 @@ function hxPoll(el: HxPollerElement): void {
             timer = null;
         }
     };
-    el._hxOnce = (): Promise<unknown> => swap(true);
+    el._hxOnce = (): Promise<void> => swap(true);
 }
 
 const polls = [...document.querySelectorAll<HxPollerElement>('[hx-get]')];
@@ -178,7 +178,7 @@ async function submitCommand(): Promise<void> {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            // oxlint-disable-next-line @rikalabs/no-double-type-assertion, typescript/no-unsafe-type-assertion -- browsers accept FormData in the URLSearchParams constructor; the bundled lib.dom type omits it (erased at emit time)
+            // oxlint-disable-next-line @rikalabs/no-double-type-assertion, typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- SAFETY: browsers accept FormData in the URLSearchParams constructor; the bundled lib.dom type omits it (erased at emit time)
             body: new URLSearchParams(fd as unknown as URLSearchParams),
         });
         if (r.status === HTTP_UNAUTHORIZED) {

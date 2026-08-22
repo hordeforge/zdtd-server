@@ -54,7 +54,7 @@ pub const max_streamed_chunks_cap: usize = zdtd_config.max_streamed_chunks_cap;
 /// Default stream/authority values (also InitOptions / Game field defaults).
 pub const default_max_streamed_chunks: usize = max_streamed_chunks_cap;
 pub const default_chunk_stream_radius_min: i32 = 7;
-pub const default_chunk_stream_radius_max: i32 = 9;
+pub const default_chunk_stream_radius_max: i32 = 12;
 pub const default_chunk_adds_per_stream_tick: u32 = 8;
 
 /// Decorations this client has received, tracked per 128-block deco chunk so a

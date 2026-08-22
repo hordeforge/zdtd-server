@@ -121,7 +121,7 @@ pub const Snapshot = struct {
     save_mean_ns: u64 = 0,
     // Config / policy (read-only)
     view_radius: i32 = 7,
-    max_streamed_chunks: u16 = 169,
+    max_streamed_chunks: u16 = 625,
     interest_range: f32 = 160,
     max_edit_range: f32 = 96,
     max_spawned_zombies: u16 = 64,

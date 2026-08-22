@@ -156,9 +156,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 23 | 5 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 21 | 4 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 37 | 7 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [World systems](#11-world-systems) | 38 | 6 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 44 | 4 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **253** | **38** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **254** | **37** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3144,12 +3144,17 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/world/worldgen.zig:1-27`, `src/world/store.zig:235-241`,
   `:985-1015`
 
-- **Chunk streaming to the stock client** `PARTIAL`
-  Hole-free centred square, add/remove deltas, paced 8 adds per 5-tick period. Hard
-  compile cap `max_streamed_chunks_cap = 169` (a 13x13 square, ~104 blocks) while
-  the client is told `AllowedViewDistance = 12` (25x25 chunks). Beyond ~104 blocks
-  the player sees no server terrain at all.
-  *Anchors:* `src/server/game.zig:7548-7639`, `:233-239`, `:7284-7345`
+- **Chunk streaming to the stock client** `WORKS` `(2026-08-22)`
+  Hole-free centred square, add/remove deltas, paced 8 adds per 5-tick period.
+  `(2026-08-22)` the stream budget covers the full stock view: the compile cap
+  is now 625 (a 25x25 square, radius 12 - the stock client's view-distance-12
+  request) instead of 169, which truncated the default view-7 stream to a
+  13x13 hole-free disk (~104 blocks) with no server terrain beyond. The
+  default view-7 now streams its full 225 chunks, `chunk_stream_radius_max`
+  defaults to 12, and the in-view bitset grew to 640 bits so the O(1)
+  membership probe stays on the fast path at the full square.
+  *Anchors:* `src/server/zdtd_config.zig` max_streamed_chunks_cap,
+  `src/server/game/chunk_stream.zig` (bitset + radius), `src/server/game/types.zig`
 
 - **Resident chunk cap and deterministic eviction** `WORKS`
   4096 resident chunks, min-key victim (not HashMap walk order) so DST replay is

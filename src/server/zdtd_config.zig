@@ -336,8 +336,11 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
 }
 
 /// Compile cap for Client.streamed[]: config owns the clamp, `server/game/types.zig`
-/// sizes the array from this constant.
-pub const max_streamed_chunks_cap: usize = 169;
+/// sizes the array from this constant. 625 = a 25x25 square, covering the
+/// stock client's view-distance-12 request (GAP "Chunk streaming"): the old
+/// 169 cap truncated the default view-7 stream to a 13x13 hole-free disk,
+/// leaving no server terrain beyond ~104 blocks.
+pub const max_streamed_chunks_cap: usize = 625;
 
 /// Clamp / repair InitOptions after config merge. Logs adjustments; never panics.
 /// Safe to call even when no zdtd.toml was loaded (no-op on already-valid defaults).
@@ -652,7 +655,7 @@ test "parse [bots] section" {
 /// Mirror of the server init-options shape the merge helpers write into.
 /// One superset covers every test below; helpers ignore fields they do not know.
 const TestOpts = struct {
-    max_streamed_chunks: usize = 169,
+    max_streamed_chunks: usize = 625,
     chunk_adds_per_stream_tick: u32 = 8,
     chunk_stream_radius_min: i32 = 7,
     chunk_stream_radius_max: i32 = 9,
@@ -962,11 +965,12 @@ test "millisecond timeouts saturate instead of wrapping" {
 
 test "stream radii cannot overflow or exceed the streamed chunk budget" {
     var o: TestOpts = .{
-        .max_streamed_chunks = 169,
+        .max_streamed_chunks = 625,
         .chunk_stream_radius_min = std.math.maxInt(i32),
         .chunk_stream_radius_max = std.math.maxInt(i32),
     };
     sanitizeInitOptions(&o);
-    try std.testing.expectEqual(@as(i32, 6), o.chunk_stream_radius_min);
-    try std.testing.expectEqual(@as(i32, 6), o.chunk_stream_radius_max);
+    // 625 chunks = a 25x25 square: radius 12 is the largest fit.
+    try std.testing.expectEqual(@as(i32, 12), o.chunk_stream_radius_min);
+    try std.testing.expectEqual(@as(i32, 12), o.chunk_stream_radius_max);
 }

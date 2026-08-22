@@ -57,8 +57,14 @@
   "options": { "typeAware": true },
   "env": { "browser": true, "es2024": true },
   // @rikalabs/oxlint-standards plugin (anti-slop custom rules). Loaded by
-  // lint-webui.sh from a cached install; see the provenance note above.
-  "jsPlugins": ["@rikalabs/oxlint-standards/plugin"],
+  // lint-webui.sh from a cached install; see the provenance note above. The
+  // dmmulroy/anti-slop plugin is vendored source at a pinned SHA (same cache),
+  // and @oxlint/plugins is its plugin-API dependency, installed in the same
+  // npm invocation.
+  "jsPlugins": [
+    "@rikalabs/oxlint-standards/plugin",
+    { "name": "anti-slop", "specifier": "./anti-slop-src/index.ts" }
+  ],
   // Declaring `plugins` replaces oxlint's default-on set, so list every plugin
   // the rules below reference (same list as the baseline's strict-core preset);
   // import + promise are the two that would otherwise not be loaded.
@@ -204,6 +210,27 @@
     "import/max-dependencies": ["error", { "max": 35 }],
     "import/no-anonymous-default-export": "error",
     "@rikalabs/no-import-then-reexport": "error",
+    // ---- dmmulroy/anti-slop plugin rules (vendored source at pinned SHA,
+    //      fetched by lint-webui.sh). All error; no-runtime-typeof is off
+    //      because the FormData/URLSearchParams boundary parses with typeof
+    //      (shell.ts cmd-form), the same sanctioned boundary-parse pattern the
+    //      rule's own allowInTypeGuards exists for but cannot recognize
+    //      outside TSTypePredicate functions ----
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "error",
+    "anti-slop/no-known-value-widening": "error",
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-object-parameters": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "error",
+    "anti-slop/no-runtime-typeof": "off", // FormData.get() returns string|File|null; the typeof narrow at the cmd-form boundary is the parse (see header)
+    "anti-slop/no-shape-in-symbol-names": "error",
+    "anti-slop/no-unknown-parameters": "error",
+    "anti-slop/no-unknown-returns": "error",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-unsafe-dictionary-type": "error",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
     // ---- oxlint-standards v0.8.1 custom plugin (@rikalabs/*): anti-slop heuristics ----
     "@rikalabs/no-commented-out-code": "error",
     "@rikalabs/no-identical-branches": "error",
