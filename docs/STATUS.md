@@ -556,6 +556,17 @@ Light 18 + Sleeper 20 markers), so the "authored contents/lock/sign dropped"
 claim is data-absent - POI loot fills from block LootList and the only real
 payload residual is the Light TE colour/intensity (server light model,
 RE-blocked). Blood moon 23/0/0; total **264/27/0**.
+Then the core-temperature row was re-audited against RE (entity-stats.md 3,
+weather-environment.md 4): the stock dedicated build deliberately stubs the
+felt-temperature getters - the server's temperature surface is the per-biome
+slot-0 value shipped in NetPackageWeather (already present), and the client
+computes felt temp and applies cold/hot buffs from its own weathersurvival.xml
+(stock file is empty of tuning). The row's residual narrows to wellness. The
+GameDifficulty row gained its RE-block: the per-difficulty
+IncomingDamage/EntityIncomingDamage preset values have no dumpable class in
+the dedi dll (R9 hpScale stays). All nine section headlines in GAP_ANALYSIS
+were re-synced to the live markers (they had drifted from the original
+states). Total **264/27/0**.
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the

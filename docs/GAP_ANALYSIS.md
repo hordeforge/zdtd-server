@@ -456,7 +456,7 @@ drives it through its phase graph to completion/turn-in at the real triggers
 fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
 not a sleeper-volume clear), not completion blockers.
 
-**31 WORKS · 0 PARTIAL · 1 MISSING**
+**33 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **Locate and read stock quests.xml** `WORKS`
   `tryLoad` tries `quests_path`, override merge, `config_dir`,
@@ -895,7 +895,7 @@ economy around the NPC: no trader is placed in the five Navezgane POIs, no
 restock roll exists, per-trader item lists (Jen/Bob/Hugh/Joel/Rekt) are not
 parsed, and quest offering is unwired.
 
-**15 WORKS · 5 PARTIAL · 3 MISSING**
+**19 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **Trader placement in POIs** `WORKS`
   Each trader POI's NPC now spawns at its `IndexedBlockOffsets class="Trader"`
@@ -1293,7 +1293,7 @@ and the red moon and red HUD warning clock the client draws from
 `GameStats.BloodMoonDay` land on the wrong night because zdtd's WorldTime day
 encoding is one day high.
 
-**19 WORKS · 4 PARTIAL · 3 MISSING**
+**23 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **Blood-moon day schedule from BloodMoonFrequency** `WORKS` (2026-08-20)
   Stock `CalcNextDay` (asm.il 412880) is implemented as a persisted schedule:
@@ -1592,7 +1592,7 @@ files and reach a stock client, but they are built from the wrong block ids
 rotated the wrong way round for rotation 1/3 (46% of decorations), so a player
 can walk into every POI but none of them is the building TFP authored.
 
-**16 WORKS · 14 PARTIAL · 0 MISSING**
+**26 WORKS · 4 PARTIAL · 0 MISSING**
 
 - **prefabs.xml decoration parse** `WORKS`
   Reads all 1559 `<decoration>` elements with rotation mod 4 and
@@ -1976,7 +1976,7 @@ behind them is a thin approximation: one hardcoded pair of entity groups for the
 whole map, five zombie classes, one animal species (a stag that hunts you), no
 gamestage, no wandering hordes, and no screamers.
 
-**22 WORKS · 22 PARTIAL · 4 MISSING**
+**32 WORKS · 7 PARTIAL · 0 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
   `WorldClock.tick` advances from DayNightLength; `isNight` uses dawn 04:00 plus
@@ -2005,10 +2005,18 @@ gamestage, no wandering hordes, and no screamers.
 
 - **GameDifficulty HP scaling** `PARTIAL`
   `hpScale()` multiplies spawn HP by 0.5..2.0 and blood moon adds 1.5x. Stock
-  scales incoming and outgoing **damage** via `GameStageDefinition::DifficultyBonus`
-  and buffs, not max HP, so numbers differ even though the felt difficulty moves
-  the right way.
-  *Anchors:* `src/ecs/aidirector.zig:109-118`, `:266-267`, `asm.il:220834`
+  scales incoming and outgoing **damage** via `ItemActionAttack.difficultyModifier`
+  (IncomingDamageModifier for server attackers, EntityIncomingDamageModifier for
+  client ones, RE combat-damage.md) not max HP, so numbers differ even though
+  the felt difficulty moves the right way. 2026-08-23: the per-difficulty
+  modifier values are SandboxOption preset data and the dedi dll has no
+  `SandboxOptionPreset` class to dump (only the option value types); the
+  preset table needs a client-side RE source, so the damage-model change stays
+  RE-blocked and the R9 value-level hpScale stays as the documented
+  approximation.
+  *Anchors:* `src/ecs/aidirector.zig:109-118`, `:216-218`, `:266-267`,
+  `asm.il:220834`, `../7dtd-research/docs/combat-damage.md:491-494`,
+  `../7dtd-research/docs/sandbox-options.md:305`
 
 - **spawning.xml parsing** `PARTIAL`
   Parses biome name, entitygroup, maxcount, time, type and respawndelay. Never
@@ -2471,7 +2479,7 @@ gamestage, no wandering hordes, and no screamers.
 round-trips, but loot content is wrong at the source, crafting is instant and
 unvalidated, and durability, mods and repair do not exist.
 
-**15 WORKS · 12 PARTIAL · 6 MISSING**
+**23 WORKS · 5 PARTIAL · 0 MISSING**
 
 - **items.xml load: names plus stock ItemValue.type assignment** `WORKS`
   1413 unique `<item name=>` parsed in document order, first type =
@@ -2863,7 +2871,7 @@ runtime (client-owned spending, no server model), the client's
 `NetPackagePlayerStats` blob is dropped so other players never see your level,
 and server-to-client XP/level pushes do not exist.
 
-**11 WORKS · 11 PARTIAL · 15 MISSING**
+**22 WORKS · 3 PARTIAL · 0 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
@@ -3058,9 +3066,22 @@ and server-to-client XP/level pushes do not exist.
 
 - **Health regeneration / wellness / core temperature** `PARTIAL`
   Well-fed regen via `buffs.survival()` fraction-of-max gate is live; starvation
-  damage is live. Wellness and core-temperature (`weathersurvival.xml`) remain
-  absent.
-  *Anchors:* `src/server/game/tick.zig:78-107`, `src/wire/packages.zig:1549-1560`
+  damage is live. 2026-08-23 re-audit (RE entity-stats.md 3 + weather-
+  environment.md 4): the **core-temperature server surface is present** - the
+  server ships the per-biome temperature (slot 0) in `NetPackageWeather`
+  (weather.zig buildWeatherBodyFromBiomes, from the live biome weather
+  state machine) and the stock dedicated build deliberately **stubs the
+  felt-temperature getters**: the client computes felt temp and applies the
+  cold/hot buffs from its own weathersurvival.xml MinEvents, gated on the
+  server's WeatherSurvivalEnabled. The stock weathersurvival.xml carries no
+  tuning (only `TemperatureHeight height="0" addDegrees="0"`), so a server
+  parse adds nothing. Remaining: **wellness** (the max-health-over-time
+  system - eating quality food/drink raises wellness toward a cap, feeding
+  `PlayerEntityStats.MaxHealth`; no consumer today).
+  *Anchors:* `src/server/game/tick.zig:78-107`, `src/server/game/weather.zig:23-69`,
+  `src/wire/packages.zig:2251-2295`, `../7dtd-research/docs/entity-stats.md:141-166`,
+  `../7dtd-research/docs/weather-environment.md:257-300`,
+  `Data/Config/weathersurvival.xml`
 
 - **Death detection and the dead-player entity** `WORKS`
   A kill through C2S DamageEntity is detected, and the player entity is
@@ -3195,7 +3216,7 @@ expire, repair heals and supports collapse, but the world is visually bald (3
 deco objects per join), terrain is stepped rather than smooth, and block-rotation
 persistence and the HUD day counter each have specific, noticeable gaps.
 
-**25 WORKS · 17 PARTIAL · 6 MISSING**
+**38 WORKS · 6 PARTIAL · 0 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
@@ -3672,7 +3693,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**52 WORKS · 4 PARTIAL · 0 MISSING**
+**48 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **PackageIds name table (189 stock names, exact set)** `WORKS`
   `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
