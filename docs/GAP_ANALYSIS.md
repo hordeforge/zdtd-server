@@ -1062,8 +1062,12 @@ parsed, and quest offering is unwired.
   path (the lerp rides the sold stack's quality); QL1 prices at min, QL6 at
   max, `Lerp(min, max, (quality-1)/5)` per RE GetBuyPrice/GetSellPrice
   (asm.il 1830625-1830948; test `trader prices scale with item quality`).
-  Remaining: `PercentUsesLeft` (worn items sell for less; needs the
-  EffectManager MaxUseTimes passive, RE-blocked) and `Entry.Markup`.
+  2026-08-22: `Entry.Markup` no longer needs a server term - vending is
+  owner-priced (loot-economy.md 6) and the client's post-trade echo carries
+  each entry's markup plus the money delta, applied stock-faithfully on
+  CopyFrom (see "Vending machines" `WORKS`). Remaining: `PercentUsesLeft`
+  (worn items sell for less; needs the EffectManager MaxUseTimes passive,
+  RE-blocked).
   *Anchors:* `src/server/game/trader.zig:162-200` (fill lerp),
   `src/ecs/systems.zig` qualityPriceMod + non-stocked sell, `src/assets/traders.zig`
   root parse, `asm.il:1830625-1830948`, `Data/Config/traders.xml:3`
@@ -1187,7 +1191,7 @@ parsed, and quest offering is unwired.
   `src/server/game.zig` (`sendWorldAreas`), `src/world/prefabs.zig`
   (`QuestData.is_trader_area`), `../7dtd-research il dump` `TraderArea.il.txt:721`
 
-- **Vending machines** `WORKS` (open + stock; rent/edit SM and C2S buy residual)
+- **Vending machines** `WORKS`
   The vending TE (TileEntityVendingMachine, type 7) is now emitted: a
   world-position `vending` store keyed by block place/remove, TraderData seeded
   from trader_info by the block's `TraderID` (blocks.xml Class/TraderID parsed
@@ -1205,14 +1209,21 @@ parsed, and quest offering is unwired.
   (currentDay > rentalEndDay) returns to Unowned on the day roll; `removing`
   clears ownership only (the block identity and stock survive). Scenario
   `vending-rent` covers rent/deny/extend/clear/expire/one-per-player.
-  **Real-client trade CopyFrom ships 2026-08-07**: the stock
-  NetPackageTraderData ToServer body (isEntity | entityId/tePosition |
-  hasTraderData | TraderData::Write, asm.il 843046) is parsed and mirrored
-  (stock TraderData.CopyFrom) onto the entity trader's sim stock or the
-  vending store - count/markup/money from the client's post-trade copy, while
-  price/sell stay server-owned (the wire carries no price). The loadgen/sim
-  9-byte trade body still works (length-distinguishable). Scenario
-  `traderdata-copyfrom` covers both branches.
+  **Real-client trade CopyFrom (2026-08-07, hardened + restored 2026-08-22)**:
+  the stock NetPackageTraderData ToServer body (isEntity | entityId/tePosition
+  | hasTraderData | TraderData::Write, asm.il 843046) is parsed and mirrored
+  (stock TraderData.CopyFrom, loot-economy.md 5) onto the entity trader's sim
+  stock or the vending store - count/markup/money from the client's post-trade
+  copy, while price/sell stay server-owned (the wire carries no price).
+  2026-08-10 removed the apply (any peer could mint/rewrite the economy);
+  2026-08-22 restored it stock-faithfully behind two gates: the sender's
+  player must be within trade reach of the trader/machine (the client can only
+  open the window in use range; closes the world-wide rewrite vector), and
+  every echoed entry must resolve to a real item with quality 1-6. Entries
+  merge by item type, not index (a client drops a depleted PrimaryInventory
+  row and a vending sell appends a new one). The loadgen/sim 9-byte trade
+  body still works (length-distinguishable). Scenario `traderdata-copyfrom`
+  covers both branches (out-of-reach ignored, in-reach buy/sell applied).
   **Owner lock/password/allowed editing ships 2026-08-07**: the vending TE
   composite C2S (the mirror of TileEntityVendingMachine::write, payload
   version i32 3) is parsed (`parseVendingTeBody`) and applied owner-gated -
@@ -1628,16 +1639,21 @@ can walk into every POI but none of them is the building TFP authored.
 - **Prefab rotation: per-block facing** `PARTIAL` (step count fixed 2026-08-06)
   The 24-orientation permutation table is correct (re-derived from
   `BlockShapeNew::rotationsToQuats` with the world-space pre-multiply
-  `ConvertRotationFree` performs). What is wrong is the **step count**: stock
-  applies `CalcRotation(rot, 4-r)` because `RotateY` replaces `_rotCount` with
-  `4-_rotCount` when `_bLeft`. Since `rotateLocalXZ` is inverted the same way the
-  POI stays internally coherent, but for r=1 and r=3 the whole building is 180
-  degrees off stock. Also unmodelled: the remap is virtual per BlockShape in stock
-  (`BlockShape` base does `(rotation+rotCount)&15`; `BlockShapeCube` does a
-  band-local cycle) while zdtd applies the `BlockShapeNew` table to every block.
-  *Anchors:* `src/world/tts.zig:293`, `:309`, `asm.il:181926-181957`,
+  `ConvertRotationFree` performs), and the step count is stock's
+  `CalcRotation(rot, 4-r)` (`BlockShapeNew::RotateY` replaces `_rotCount` with
+  `4-_rotCount` on the left-turn path, `asm.il ~181926`) - applied at
+  `src/world/tts.zig:436` as `rotateRawY(raw, 4 -% (rot & 3))`. Re-audited
+  2026-08-23: the row's residual "virtual per BlockShape remap" (base
+  `(rotation+rotCount)&15` vs a `BlockShapeCube` band-local cycle) does not
+  apply to the V3.1.0 data - the stock blocks.xml Shape values are ModelEntity
+  (713), New (116), Terrain (17), Water (6), BillboardPlant (4), grass/invisible/
+  deco oddments; there are **no Cube shapes** to remap. What remains is the
+  ModelEntity rotation model (713 blocks): how stock maps the POI rotation onto
+  ModelEntity's facing needs RE (block-shapes.md); until then the New-table
+  step is the applied behavior for all shapes.
+  *Anchors:* `src/world/tts.zig:293`, `:436`, `asm.il:181926-181957`,
   `asm.il:181959-182018`, `asm.il:173648-173702`, `asm.il:166904-166921`,
-  `asm.il:171283-171414`
+  `asm.il:171283-171414`, `Data/Config/blocks.xml` Shape values
 
 - **Prefab YOffset** `WORKS` (2026-08-06)
   `paintDecoration` uses `origin_y = d.y` and never reads the prefab .xml
@@ -2533,13 +2549,20 @@ unvalidated, and durability, mods and repair do not exist.
 
 - **Server craft execution** `PARTIAL`
   `tryCraftRecipe` aggregates ingredients, snapshots the bag, consumes, deposits
-  and rolls back on failure. 2026-08-21: the general path now rejects
-  workstation-area, tool-bound and material_based recipes (generalCraftAllowed -
-  closing the zero-ingredient mint), and the workstation queue path rejects
-  material_based too; craft_tool is parsed from recipes.xml. Remaining: craft_time
-  is never applied server-side (the client drives its own progress), and the
-  recipe-unlock check needs the progression/magazine system.
-  *Anchors:* `src/server/game/craft.zig:121`, `src/assets/recipes.zig:181-184`
+  and rolls back on failure. The general path rejects workstation-area,
+  tool-bound and material_based recipes (generalCraftAllowed - closing the
+  zero-ingredient mint), and the workstation queue path rejects material_based
+  too; craft_tool is parsed from recipes.xml. 2026-08-22: craft_time **is**
+  applied server-side on the workstation path - the queue is server-paced via
+  `one_item_craft_time`/`craft_time_left` (both parsed from the client's TE
+  recipe blob like stock), and the tick decrements and cycles the queue as time
+  elapses (see "Workstation craft tick" `WORKS` below). Hand crafting stays
+  client-driven, which is stock's model (the client owns its own progress bar;
+  the server validates and applies the craft at request time). Remaining: the
+  recipe-unlock check needs the progression/magazine system (tracked under
+  "Crafting skills / magazines / recipe unlock by progression").
+  *Anchors:* `src/server/game/craft.zig:121`, `src/assets/recipes.zig:181-184`,
+  `src/world/workstations.zig:85-86,274-291`
 
 - **NetPackageInventoryTransactionRequest / Response wire format** `WORKS`
   The stock `InventoryTransaction::Read` layout is parsed (`parseStockInvTx`
@@ -2635,8 +2658,11 @@ unvalidated, and durability, mods and repair do not exist.
   instead of pick-1, and `LootGroup.entries` caps at 192 so stock groups
   (perkBooks, 133 entries) are not truncated. `loot_quality_template` (403)
   drives the looted item quality by stage (2026-08-08). Not parsed:
-  abundance_type, requirement children, group min/max level.
-  `LootContainer.size_x/size_y` drive the storage grid (2026-08-08).
+  abundance_type (sandbox-coupled) and requirement children (structurally
+  blocked - rolls happen at chunk fill with no opener context; verified
+  2026-08-22 that stock loot.xml carries no group min/max level attribute,
+  the row's earlier claim was stale). `LootContainer.size_x/size_y` drive
+  the storage grid (2026-08-08).
   *Anchors:* `src/assets/loot.zig` rollGroup pick_all / force_prob,
   `Data/Config/loot.xml:9656`
 

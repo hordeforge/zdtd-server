@@ -351,3 +351,18 @@ pub fn vendingOwnerId(self: *Game, v: *const vending_mod.Vending) ?packages.plat
         .id = v.owner.id[0..v.owner.id_len],
     };
 }
+
+/// Stock TileEntityVendingMachine.NotifyListeners (loot-economy.md 6): after a
+/// stock/money change the machine pushes its TE to every listener (the clients
+/// with the window open). We approximate with the view-radius interest set - a
+/// superset of the open windows - so a second buyer next to the machine does
+/// not keep a stale window after someone else's purchase.
+pub fn broadcastVendingTe(self: *Game, x: i32, y: i32, z: i32) !void {
+    var i: usize = 0;
+    while (i < self.clients.len) : (i += 1) {
+        const cl = &self.clients[i];
+        if (!cl.joined or cl.peer == null or cl.entity_id <= 0) continue;
+        if (!self.clientObserves(cl, @floatFromInt(x), @floatFromInt(z))) continue;
+        try sendVendingTe(self, cl.peer.?, x, y, z);
+    }
+}

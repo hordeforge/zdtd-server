@@ -5480,11 +5480,13 @@ test "scenario vending rent state machine (loot-economy §6)" {
     );
 }
 
-test "scenario TraderData copy-back cannot overwrite server economy" {
+test "scenario TraderData copy-back: out-of-reach ignored, in-reach applied" {
     // A real client sends its post-trade TraderData back over
     // NetPackageTraderData (isEntity | entityId/tePosition | hasTraderData |
-    // TraderData::Write). It is a client cache copy, so a modified client must
-    // not be able to replace shared trader or vending stock and money.
+    // TraderData::Write). Stock's ProcessPackage does TraderData.CopyFrom onto
+    // the live EntityTrader / TileEntityVendingMachine (loot-economy.md 5), so
+    // the echo is applied stock-faithfully - but only from a sender within
+    // trade reach, so a remote peer cannot rewrite the shared economy.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
@@ -5505,7 +5507,11 @@ test "scenario TraderData copy-back cannot overwrite server economy" {
 
     const wood_wire = g.items.byStockName("resourceWood") orelse return error.SkipZigTest;
     const wood_ecs = g.items.ecsIdByName("resourceWood");
+    const stone_wire = g.items.byStockName("resourceRockSmall") orelse return error.SkipZigTest;
     try std.testing.expect(wood_ecs != 0);
+
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // The attached client spawns at world spawn, far from the test targets.
 
     // --- Entity trader CopyFrom ---
     const tid = g.sim.spawnTrader("npcTraderJen", 50, 70, 60, 5, 5000).?;
@@ -5521,7 +5527,7 @@ test "scenario TraderData copy-back cannot overwrite server economy" {
     try w.writeI32(tid);
     try w.writeBool(true); // hasTraderData
     const entry = packages.stock_entity.TraderStockEntry{
-        .item = .{ .type_id = wood_wire, .count = 3 },
+        .item = .{ .type_id = wood_wire, .count = 3, .quality = 1 },
         .markup = -4,
     };
     try packages.stock_entity.writeTraderDataBody(&w, .{ .trader_id = 5, .available_money = 4000, .entries = &[_]packages.stock_entity.TraderStockEntry{entry} });
@@ -5529,7 +5535,7 @@ test "scenario TraderData copy-back cannot overwrite server economy" {
     const framed = try packages.framed(&frame_buf, "NetPackageTraderData", w.written());
     try g.injectFramed(c, framed);
 
-    // The client copy is ignored; every server-owned field survives.
+    // Out of reach: the copy is ignored; every server-owned field survives.
     const st = &g.sim.trader_stock[ts];
     try std.testing.expectEqual(@as(u16, 10), st.entries[0].count);
     try std.testing.expectEqual(@as(i8, 0), st.entries[0].markup);
@@ -5554,7 +5560,62 @@ test "scenario TraderData copy-back cannot overwrite server economy" {
     try std.testing.expectEqual(vm_before.stock[0].markup, vm.stock[0].markup);
     try std.testing.expectEqual(vm_before.available_money, vm.available_money);
 
-    std.debug.print("PASS traderdata-authority: forged entity+vending copies ignored\n", .{});
+    // --- In-reach legit buy: count + markup + money from the echo, price
+    // stays server-owned. ---
+    g.sim.transform[ps].x = 50;
+    g.sim.transform[ps].y = 70;
+    g.sim.transform[ps].z = 60;
+    // frame_buf was clobbered by the vending frame build; rebuild the entity
+    // frame from the still-intact body buffer.
+    const framed_in = try packages.framed(&frame_buf, "NetPackageTraderData", w.written());
+    try g.injectFramed(c, framed_in);
+    try std.testing.expectEqual(@as(u16, 3), st.entries[0].count);
+    try std.testing.expectEqual(@as(i8, -4), st.entries[0].markup);
+    try std.testing.expectEqual(@as(u16, 1), st.entries[0].price);
+    try std.testing.expectEqual(@as(i32, 4000), st.wallet);
+
+    // Bought out: the client's echo drops the depleted entry, so the server
+    // clears it (stock removes the PrimaryInventory row).
+    var body2: [512]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &body2 };
+    try w2.writeBool(true); // isEntity
+    try w2.writeI32(tid);
+    try w2.writeBool(true); // hasTraderData
+    try packages.stock_entity.writeTraderDataBody(&w2, .{ .trader_id = 5, .available_money = 4200, .entries = &.{} });
+    const framed2 = try packages.framed(&frame_buf, "NetPackageTraderData", w2.written());
+    try g.injectFramed(c, framed2);
+    try std.testing.expectEqual(@as(u16, 0), st.entries[0].count);
+    try std.testing.expectEqual(@as(u16, 0), st.entries[0].item);
+    try std.testing.expectEqual(@as(i32, 4200), st.wallet);
+
+    // --- In-reach vending sell: a new item appends and money credits. ---
+    g.sim.transform[ps].x = 10;
+    g.sim.transform[ps].y = 70;
+    g.sim.transform[ps].z = 20;
+    vm.stock = [_]vending_mod.StockEntry{.{}} ** vending_mod.max_vending_stock;
+    vm.stock_n = 0;
+    vm.available_money = 3000;
+    const sell_entry = packages.stock_entity.TraderStockEntry{
+        .item = .{ .type_id = stone_wire, .count = 5, .quality = 1 },
+        .markup = 3,
+    };
+    var sbody: [512]u8 = undefined;
+    var sw: binary.Writer = .{ .buf = &sbody };
+    try sw.writeBool(false); // isEntity = false -> tePosition
+    try sw.writeI32(10);
+    try sw.writeI32(70);
+    try sw.writeI32(20);
+    try sw.writeBool(true); // hasTraderData
+    try packages.stock_entity.writeTraderDataBody(&sw, .{ .trader_id = 5, .available_money = 3200, .entries = &[_]packages.stock_entity.TraderStockEntry{sell_entry} });
+    const sframed = try packages.framed(&frame_buf, "NetPackageTraderData", sw.written());
+    try g.injectFramed(c, sframed);
+    try std.testing.expectEqual(stone_wire, vm.stock[0].type_id);
+    try std.testing.expectEqual(@as(i32, 5), vm.stock[0].count);
+    try std.testing.expectEqual(@as(i8, 3), vm.stock[0].markup);
+    try std.testing.expectEqual(@as(u8, 1), vm.stock_n);
+    try std.testing.expectEqual(@as(i32, 3200), vm.available_money);
+
+    std.debug.print("PASS traderdata-copyfrom: out-of-reach ignored, in-reach buy/sell applied\n", .{});
 }
 
 test "scenario vending lock/password/allowed editing (owner-gated)" {

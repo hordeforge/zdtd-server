@@ -527,6 +527,18 @@ root 0,0.05,...,0.3) and feeds the quest reward roll - GetRewardItem rolls
 with gameStage = GetTraderStage(tier) = Level*(1+mod[tier-1]) (RE
 progression.md GetTraderStage IL=46; test quest reward stage scales by
 quest tier). Traders 19/1/0; total **263/28/0**.
+Then real-client trader/vending purchases went WORKS again: the
+NetPackageTraderData ToServer echo is applied stock-faithfully
+(TraderData.CopyFrom per loot-economy.md 5) with two gates - trade reach
+(the client can only open the window in use range, so a remote peer cannot
+rewrite the economy) and item-type resolution + quality 1-6; entries merge
+by item type (a depleted PrimaryInventory row is dropped, a vending sell
+appends), price/sell stay server-owned. The 2026-08-10 refusal (a15300a)
+left real-client buys/sells with no server-side effect; the vending row
+claim is now true again. Craft row 2487 re-audited: workstation craft_time
+is server-paced (one_item_craft_time/craft_time_left cycle the queue),
+hand crafting stays client-driven per stock; the only residual is the
+magazine unlock, tracked under its own row. Total **263/28/0**.
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the
