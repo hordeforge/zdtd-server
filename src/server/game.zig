@@ -738,6 +738,10 @@ pub const Game = struct {
         // unit price = EconomicValue x EconomicSellScale x SellMarkdown.
         self.sim.sell_price_ctx = self;
         self.sim.sell_price_fn = &traderSellPrice;
+        // Root quality_mod lerp bounds for the non-stocked sell path
+        // (stock GetSellPrice, asm.il 1830625-1830948).
+        self.sim.trader_quality_min_mod = self.traders.quality_min_mod;
+        self.sim.trader_quality_max_mod = self.traders.quality_max_mod;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a

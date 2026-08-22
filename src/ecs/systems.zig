@@ -1198,6 +1198,15 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
 
 /// Buy (side=0) or sell (side=1) against trader stock + wallet and/or casinoCoin stacks.
 /// `coin_item_id` = ECS id for casinoCoin from items table (ecsIdByName). 0 = fail closed.
+/// Stock quality price lerp: Lerp(min, max, (quality-1)/5), quality 1..6
+/// (GetBuyPrice/GetSellPrice, asm.il 1830625-1830948; traders.xml quality_mod
+/// comment: QL1 -> min, QL6 -> max).
+pub fn qualityPriceMod(min_mod: f32, max_mod: f32, quality: u8) f32 {
+    const q: f32 = @floatFromInt(@max(1, @min(quality, 6)));
+    const t: f32 = (q - 1.0) / 5.0;
+    return min_mod + (max_mod - min_mod) * t;
+}
+
 pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16, side: u8, coin_item_id: u16) bool {
     if (qty == 0) return false;
     if (coin_item_id == 0) return false;
@@ -1255,13 +1264,29 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
     } else {
         // Sell: stocked items price from their entry; any other item sells at
         // its EconomicValue x EconomicSellScale x SellMarkdown via the hook
-        // (stock lets you sell anything, RE GetSellPrice).
-        const unit: u32 = if (entry) |en|
+        // (stock lets you sell anything, RE GetSellPrice). Stock GetSellPrice
+        // also applies the quality lerp (quality_mod) to quality items - the
+        // stocked entries carry it from fill; for a non-stocked item the lerp
+        // rides the sold stack's quality (first matching slot).
+        var unit: u32 = if (entry) |en|
             @as(u32, en.sell)
         else if (w.sell_price_fn) |f|
             f(w.sell_price_ctx, item, ts)
         else
             return false;
+        if (entry == null and w.sell_price_fn != null) {
+            var sold_quality: u8 = 1;
+            if (w.mask[ps].inventory) {
+                for (w.inventory[ps].slots) |s| {
+                    if (s.item_id == item and s.count > 0) {
+                        sold_quality = s.quality;
+                        break;
+                    }
+                }
+            }
+            const qmod = qualityPriceMod(w.trader_quality_min_mod, w.trader_quality_max_mod, sold_quality);
+            unit = @intFromFloat(@max(1.0, @as(f64, @floatFromInt(unit)) * qmod));
+        }
         if (unit == 0) return false;
         const gain: u32 = unit * qty;
         if (gain > std.math.maxInt(u16)) return false;
@@ -5794,4 +5819,35 @@ test "trader buys an item it does not stock via the sell-price hook" {
     const coins_before = w.wallet[ps].coins;
     try std.testing.expect(!trade(&w, 0, trader_id, 77, 1, 1, 6));
     try std.testing.expectEqual(coins_before, w.wallet[ps].coins);
+}
+
+test "trader prices scale with item quality (quality_mod lerp)" {
+    // Stock GetBuyPrice/GetSellPrice apply Lerp(qualityMinMod, qualityMaxMod,
+    // (quality-1)/5); the traders.xml comment pins QL1 -> min and QL6 -> max.
+    // With the stock root quality_mod="1,2" a QL6 item prices at 2x a QL1.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    w.trader_quality_min_mod = 1.0;
+    w.trader_quality_max_mod = 2.0;
+    try std.testing.expectEqual(@as(f32, 1.0), qualityPriceMod(1, 2, 1));
+    try std.testing.expectEqual(@as(f32, 1.6), qualityPriceMod(1, 2, 4));
+    try std.testing.expectEqual(@as(f32, 2.0), qualityPriceMod(1, 2, 6));
+    try std.testing.expectEqual(@as(f32, 1.0), qualityPriceMod(1, 1, 6)); // unset = no effect
+
+    // Non-stocked sell: a QL6 stack pays 2x the hook price, QL1 pays 1x.
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 2, .quality = 6 };
+    w.inventory[ps].slots[c.inv_equip_start - 1] = .{}; // free slot for coin payout
+    const Hook = struct {
+        fn price(_: ?*anyopaque, item: u16, _: u16) u32 {
+            return if (item == 77) 25 else 0; // 25 dukes per non-stocked unit
+        }
+    };
+    w.sell_price_ctx = null;
+    w.sell_price_fn = &Hook.price;
+    // 50 (starter) + 2 x (25 * 2.0) = 150.
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 150), w.wallet[ps].coins);
 }

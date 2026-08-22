@@ -999,11 +999,12 @@ parsed, and quest offering is unwired.
   `TraderInfo.QualityMinMod/MaxMod` (asm.il 1397236-1397257), applied in the
   CLIENT's `ItemClass.GetBuyPrice/GetSellPrice` (asm.il 1830625-1830948) as
   `Lerp(qualityMinMod, qualityMaxMod, (quality-1)/5)` times the econ x markup
-  base (with `PercentUsesLeft`). zdtd's trade is client-mirrored (the wire
-  carries no price; the client computes it from its own traders.xml + items
-  and the server mirrors the resulting stock/money, trade.zig
-  applyTraderDataCopyFrom), so the missing lerp only shows in the server's
-  informational price/sell fields, not in the transaction. `quest_tier_mod`
+  base (with `PercentUsesLeft`). 2026-08-22: the lerp is applied server-side
+  (root `quality_mod` parses into `TraderInfo.quality_min/max_mod`; buy/sell
+  prices lerp by the item quality at fill and on the non-stocked sell hook,
+  so the transaction matches the client display; see the pricing row).
+  `PercentUsesLeft` (EffectManager MaxUseTimes) stays RE-blocked.
+  `quest_tier_mod`
   (stock root `0,0.05,...,0.3`) is quest-reward tier scaling
   (asm.il 504145-504157) and stays open with the quest reward economy.
   *Anchors:* `src/assets/traders.zig` root row, `src/server/game.zig`
@@ -1048,8 +1049,17 @@ parsed, and quest offering is unwired.
   `EconomicSellScale` (items.xml, default 1.0, RE `GetSellPrice`; added
   2026-08-20) but the quality lerp / `PercentUsesLeft` / `Entry.Markup` terms
   are still absent, so sell prices stay approximate.
-  *Anchors:* `src/server/game.zig:6757-6777`, `src/assets/items.zig:429-432`,
-  `asm.il:1830470-1830700`, `Data/Config/traders.xml:3`
+  `(2026-08-22)` the quality lerp is in: the root `quality_mod="min,max"`
+  (stock "1,2") parses into `TraderInfo.quality_min/max_mod` and applies to
+  both buy (`price`) and sell (`sell`) at fill, plus the non-stocked sell hook
+  path (the lerp rides the sold stack's quality); QL1 prices at min, QL6 at
+  max, `Lerp(min, max, (quality-1)/5)` per RE GetBuyPrice/GetSellPrice
+  (asm.il 1830625-1830948; test `trader prices scale with item quality`).
+  Remaining: `PercentUsesLeft` (worn items sell for less; needs the
+  EffectManager MaxUseTimes passive, RE-blocked) and `Entry.Markup`.
+  *Anchors:* `src/server/game/trader.zig:162-200` (fill lerp),
+  `src/ecs/systems.zig` qualityPriceMod + non-stocked sell, `src/assets/traders.zig`
+  root parse, `asm.il:1830625-1830948`, `Data/Config/traders.xml:3`
 
 - **Trade execution** `WORKS`
   `systems.trade` is coherent bookkeeping with rollback and overflow guards:

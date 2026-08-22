@@ -96,6 +96,12 @@ pub const TraderTable = struct {
     /// GetBuyPrice/GetSellPrice; per-trader Override* wins when set).
     buy_markup: f32 = 0,
     sell_markdown: f32 = 0,
+    /// Root `quality_mod="min,max"` (stock "1,2"): the buy/sell price lerp
+    /// for items with a quality tier, QL1 -> min, QL6 -> max (traders.xml
+    /// comment; RE GetBuyPrice/GetSellPrice asm.il 1830625-1830948). 1,1 =
+    /// no quality effect.
+    quality_min_mod: f32 = 1,
+    quality_max_mod: f32 = 1,
     /// Root `currency_item` name (stock traders.xml: "casinoCoin"). Game pays
     /// trade/rent in this item; empty = the stock-name fallback.
     currency_item: []const u8 = "",
@@ -380,11 +386,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     // per-item price math unless a trader_info Override* is set.
     var root_buy_markup: f32 = 0;
     var root_sell_markdown: f32 = 0;
+    var root_quality_min: f32 = 1;
+    var root_quality_max: f32 = 1;
     var root_currency: []const u8 = "";
     if (std.mem.findPos(u8, clean, 0, "<traders")) |tr| {
         if (xml.attr(clean, tr, "buy_markup")) |v| root_buy_markup = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, tr, "sell_markdown")) |v| root_sell_markdown = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, tr, "currency_item")) |v| root_currency = try arena.dupe(u8, v);
+        if (xml.attr(clean, tr, "quality_mod")) |qm| {
+            if (std.mem.findScalar(u8, qm, ',')) |comma| {
+                root_quality_min = std.fmt.parseFloat(f32, std.mem.trim(u8, qm[0..comma], " \t")) catch 1;
+                root_quality_max = std.fmt.parseFloat(f32, std.mem.trim(u8, qm[comma + 1 ..], " \t")) catch 1;
+            }
+        }
     }
 
     // traderAlways group refs = the shared fallback stock list.
@@ -452,6 +466,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
         .trader_infos = tisl,
         .trader_always_refs = trader_always,
         .buy_markup = root_buy_markup,
+        .quality_min_mod = root_quality_min,
+        .quality_max_mod = root_quality_max,
         .sell_markdown = root_sell_markdown,
         .currency_item = root_currency,
         .arena_ptr = arena_holder,

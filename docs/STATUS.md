@@ -516,6 +516,13 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then the trader quality lerp landed: the root `quality_mod="1,2"` parses
+into `TraderInfo.quality_min/max_mod` and buy/sell prices scale by the item
+quality (Lerp(min, max, (quality-1)/5), QL1 -> min, QL6 -> max) at stock
+fill and on the non-stocked sell hook - the transaction now matches the
+client's XUiM_Trader display instead of paying flat. PercentUsesLeft
+(worn-item discount) stays RE-blocked on the EffectManager MaxUseTimes
+passive; Entry.Markup open. Test `trader prices scale with item quality`.
 Then destroy_on_close went WORKS: the missing trigger was found by RE
 (TEFeatureStorage.OnUnlockedServer IL=6 -> CheckDestroyTileEntity IL=37,
 documented in 7dtd-research loot-economy.md), and the C2S LockRequest unlock

@@ -421,6 +421,10 @@ pub const World = struct {
     /// sell (unset hook keeps the stocked-only restriction in test worlds).
     sell_price_ctx: ?*anyopaque = null,
     sell_price_fn: ?*const fn (?*anyopaque, item_id: u16, trader_slot: u16) u32 = null,
+    /// Root traders.xml quality_mod lerp bounds (QL1 -> min, QL6 -> max),
+    /// wired by the Game next to sell_price_fn for the non-stocked sell path.
+    trader_quality_min_mod: f32 = 1,
+    trader_quality_max_mod: f32 = 1,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.

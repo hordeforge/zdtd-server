@@ -178,6 +178,10 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     }
     if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
     if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
+    // Stock GetBuyPrice/GetSellPrice apply the traders.xml quality_mod lerp
+    // (QL1 -> min, QL6 -> max) to quality items (asm.il 1830625-1830948).
+    const qmin = tt.quality_min_mod;
+    const qmax = tt.quality_max_mod;
     for (rolled[0..rn]) |r| {
         if (n >= ecs.components.max_stock) break;
         const iid = self.ecsIdFromItemName(r.name);
@@ -186,12 +190,13 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         // A39: the sell base is EconomicValue * EconomicSellScale (stock
         // GetSellPrice; default scale 1.0, a few items mark down to .5).
         const sell_scale: f32 = if (self.items.byId(iid)) |d| d.econ_sell_scale else 1.0;
+        const qmod = ecs.systems.qualityPriceMod(qmin, qmax, r.quality);
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
             .count = r.count,
             .quality = r.quality,
-            .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * buy_markup)), 65535)) else 5,
-            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * sell_markup)), 65535)))) else 1,
+            .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod))), 65535)) else 5,
+            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod))), 65535)))) else 1,
         };
         n += 1;
     }
