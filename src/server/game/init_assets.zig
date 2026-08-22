@@ -382,6 +382,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // wasteland at midnight spawns wasteland walkers, not pine_forest's.
         self.sim.director.biome_group_ctx = self;
         self.sim.director.biome_group_fn = &Game.biomeGroupName;
+        // Per-rule ambient spawn budget (spawning.xml maxcount/respawndelay):
+        // the biome drip enforces each rule's alive cap + respawn delay.
+        self.sim.director.rule_budget_ctx = self;
+        self.sim.director.rule_budget_fn = &Game.biomeRuleBudget;
         self.sim.director.group_pick_ctx = self;
         self.sim.director.group_pick_fn = &Game.pickEntityGroup;
         // Full class resolution: any entityclasses.xml class a spawn group

@@ -9,6 +9,8 @@ const ecs_world = @import("world.zig");
 /// live 2026-08-11: `gettime` on a fresh stock server reads "Day 1, 07:00").
 /// seconds_per_hour is the sim's time scale default (30 s per in-game hour);
 /// stock serverconfig DayNightLength (default 60 min day) sets the real scale.
+/// In-game ticks per day (DayTimeToWorldTime: 24000 ticks, 1000 per hour).
+pub const ticks_per_day: u64 = 24000;
 pub const WorldClock = struct {
     hours: f32 = 7.0,
     day: u32 = 1,
@@ -220,6 +222,9 @@ pub const hp_scale_by_difficulty = [_]f32{ 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
 /// tier semantic; numbers zdtd-tuned (R9).
 pub const move_scale_by_mode = [_]f32{ 0.5, 0.75, 1.0, 1.4, 1.7 };
 pub const max_heat_regions: usize = 32;
+/// Ambient spawn rule budget slots (spawning.xml rules are 57 in stock; the
+/// array is a bound, not a cap on the parsed table).
+pub const rule_budget_cap: usize = 64;
 pub const heat_scout_count: u32 = 2;
 pub const heat_scout_dist: f32 = director_defaults.heat_scout_dist; // chunk-heat spawner 0/8/10 constants
 
@@ -239,9 +244,36 @@ pub const BmParty = struct {
     alive: u32 = 0,
 };
 
+/// Per-rule ambient spawn budget (spawning.xml `maxcount` / `respawn_days`).
+/// The Game resolves the rule under a spawn point; the Director enforces the
+/// cap and the respawn delay (stock ChunkAreaBiomeSpawnData CountsAndTime per
+/// spawn group: CanSpawn = count < maxCount, count decremented on death and
+/// reset when the respawn delay elapses, spawning.md §3).
+pub const RuleBudget = struct {
+    /// Index into the spawning.xml rule table (0xffff = no rule / no budget).
+    index: u16 = 0xffff,
+    maxcount: u8 = 0,
+    /// Respawn delay in game days (spawning.xml respawndelay).
+    respawn_days: f32 = 1.0,
+};
+
+/// Per-rule runtime state (spawned-alive count + next respawn world time).
+pub const RuleBudgetState = struct {
+    count: u8 = 0,
+    next_respawn_wt: u64 = 0,
+};
+
 pub const Director = struct {
     /// Spawn-group kind for per-biome resolution (spawning.xml rule kind).
     pub const SpawnKind = enum(u8) { night = 0, day = 1, animal = 2 };
+
+    /// Ambient spawn rule budgets, keyed by the spawning.xml rule index. The
+    /// array is fixed-size; indices beyond it are treated as unbudgeted.
+    rule_budgets: [rule_budget_cap]RuleBudgetState = [_]RuleBudgetState{.{}} ** rule_budget_cap,
+    /// Optional per-spawn-point rule resolver: (ctx, x, z, kind) -> budget.
+    /// Game wires the spawning.xml table; null = unbudgeted ambient spawns.
+    rule_budget_ctx: ?*anyopaque = null,
+    rule_budget_fn: ?*const fn (?*anyopaque, f32, f32, SpawnKind) RuleBudget = null,
 
     clock: WorldClock = .{},
     horde_cd: f32 = 0,
@@ -470,6 +502,9 @@ pub const Director = struct {
             const r = min_r + (max_r - min_r) * @mod(ang, 1.0);
             const x = w.transform[p].x + @cos(ang) * r;
             const z = w.transform[p].z + @sin(ang) * r;
+            // Per-rule budget gate for the animal rules (maxcount/respawndelay).
+            const budget = self.budgetFor(w, x, z, .animal);
+            if (budget.index != 0xffff and !self.budgetAllows(budget, w)) continue;
             const y = w.groundY(x, z) orelse w.transform[p].y;
             // Wildlife group per player biome (fallback = the single group).
             var animal_ct: ?ecs_world.EntityClass = null;
@@ -511,6 +546,10 @@ pub const Director = struct {
             const nid = id orelse break;
             if (w.slotOfNetId(nid)) |slot| {
                 w.zombie_ai[slot].state = .wander; // wildlife roams, does not hunt
+                if (budget.index != 0xffff) {
+                    w.zombie_ai[slot].spawn_rule = budget.index;
+                    self.budgetConsume(budget, w);
+                }
                 n += 1;
             }
         }
@@ -538,7 +577,11 @@ pub const Director = struct {
     }
 
     /// `group_override` wins over the day/night spawning.xml groups; empty
-    /// keeps the existing biome-rule behaviour.
+    /// keeps the existing biome-rule behaviour. When a per-rule budget is
+    /// wired, each spawn point resolves its spawning.xml rule and the spawn
+    /// is gated on `count < maxcount` and the respawn delay (spawning.md §3);
+    /// the spawned zombie carries the rule index so `releaseRule` on destroy
+    /// decrements the alive count (kill attrition).
     fn spawnNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32, group_override: []const u8) u32 {
         var n: u32 = 0;
         var p: ecs_world.Slot = 0;
@@ -557,6 +600,9 @@ pub const Director = struct {
                 const r = min_r + (max_r - min_r) * (@mod(ang, 1.0));
                 const x = w.transform[p].x + @cos(ang) * r;
                 const z = w.transform[p].z + @sin(ang) * r;
+                // Per-rule budget gate (spawning.xml maxcount/respawndelay).
+                const budget = self.budgetFor(w, x, z, if (self.clock.isNight()) .night else .day);
+                if (budget.index != 0xffff and !self.budgetAllows(budget, w)) continue;
                 // Ground snap (RE spawn placement): the player's transform Y is
                 // its centre, ~1.7 m above the surface, so spawning at that Y
                 // embeds zombies in hillsides or leaves them floating on
@@ -566,10 +612,62 @@ pub const Director = struct {
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
                 w.zombie_ai[slot].alert = true;
+                if (budget.index != 0xffff) {
+                    w.zombie_ai[slot].spawn_rule = budget.index;
+                    self.budgetConsume(budget, w);
+                }
                 n += 1;
             }
         }
         return n;
+    }
+
+    /// Resolve the spawning.xml rule budget at a world position (fallback:
+    /// unbudgeted when no resolver is wired or the biome/rule is unknown).
+    fn budgetFor(self: *const Director, w: *const ecs_world.World, x: f32, z: f32, kind: SpawnKind) RuleBudget {
+        _ = w;
+        if (self.rule_budget_fn) |f| return f(self.rule_budget_ctx, x, z, kind);
+        return .{};
+    }
+
+    /// True when the rule's alive count is under maxcount, after rolling the
+    /// budget when the respawn delay has elapsed (stock ResetRespawn sets
+    /// maxCount when the delay elapses; CanSpawn = count < maxCount,
+    /// spawning.md §3). The reset happens on the check, so a fresh batch in
+    /// the same world-time window is not gated by the delay it just armed.
+    fn budgetAllows(self: *Director, budget: RuleBudget, w: *const ecs_world.World) bool {
+        const i: usize = budget.index;
+        if (i >= rule_budget_cap) return true;
+        if (budget.maxcount == 0) return true; // 0 = unbounded (stock maxcount 0)
+        const st = &self.rule_budgets[i];
+        const wt = w.director.clock.worldTimeBits();
+        if (wt >= st.next_respawn_wt) {
+            st.count = 0;
+            st.next_respawn_wt = std.math.maxInt(u64); // re-arm on consume
+        }
+        return st.count < budget.maxcount;
+    }
+
+    /// Charge one spawn against the rule budget: increment the alive count
+    /// and arm the next cycle's respawn delay on the first spawn of a cycle
+    /// (stock ResetRespawn arms the delay when the budget resets).
+    fn budgetConsume(self: *Director, budget: RuleBudget, w: *const ecs_world.World) void {
+        const i: usize = budget.index;
+        if (i >= rule_budget_cap or budget.maxcount == 0) return;
+        const st = &self.rule_budgets[i];
+        st.count +|= 1;
+        if (st.count == 1 and st.next_respawn_wt == std.math.maxInt(u64)) {
+            const days: u64 = @intFromFloat(@floor(budget.respawn_days));
+            st.next_respawn_wt = w.director.clock.worldTimeBits() + days *% ticks_per_day;
+        }
+    }
+
+    /// Decrement a rule's alive count when one of its spawns dies/despawns
+    /// (World.destroy calls this; stock kill attrition on the area budget).
+    pub fn releaseRule(self: *Director, rule: u16) void {
+        if (rule >= rule_budget_cap) return;
+        const st = &self.rule_budgets[rule];
+        if (st.count > 0) st.count -= 1;
     }
 
     /// Deterministic per-spawn jitter seed (0..9999) from the spawn counter,
@@ -1525,4 +1623,56 @@ test "blood-moon HP floor applies only to unresolved fallback classes" {
     if (fct.hash != 0 and fct.kind == .zombie) {
         try std.testing.expectApproxEqAbs(@as(f32, fct.max_hp * 1.5), w.health[f2].hp, 0.01);
     }
+}
+
+test "ambient rule budget caps the drip and releases on destroy" {
+    // The per-rule budget (spawning.xml maxcount/respawndelay) gates the
+    // ambient drip: a rule with maxcount 2 admits two spawns, blocks the
+    // third until one dies (releaseRule) and re-arms after respawn_days.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    // The budget lives on the World's own director so World.destroy's release
+    // finds it (the game drives w.director.tick the same way).
+    w.director.clock = .{ .day = 1, .hours = 23.0 };
+    w.director.max_alive = 64;
+    // A fixed rule resolver: index 3, maxcount 2, respawn 1 day.
+    const Ctx = struct {
+        fn f(_: ?*anyopaque, _: f32, _: f32, kind: Director.SpawnKind) RuleBudget {
+            if (kind != .night) return .{};
+            return .{ .index = 3, .maxcount = 2, .respawn_days = 1.0 };
+        }
+    };
+    var ctx = Ctx{};
+    w.director.rule_budget_ctx = &ctx;
+    w.director.rule_budget_fn = &Ctx.f;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+
+    // First drip tick: 2 spawns admitted (maxcount 2).
+    var ticks: u32 = 0;
+    while (ticks < 40 and w.countKind(.zombie) < 2) : (ticks += 1) _ = w.director.tick(&w, 0.05);
+    try std.testing.expectEqual(@as(u32, 2), w.countKind(.zombie));
+    try std.testing.expectEqual(@as(u8, 2), w.director.rule_budgets[3].count);
+
+    // The delay is armed: further drip ticks cannot add to the rule.
+    const before = w.countKind(.zombie);
+    for (0..60) |_| _ = w.director.tick(&w, 0.05);
+    try std.testing.expectEqual(before, w.countKind(.zombie));
+
+    // Kill attrition: destroy one zombie -> the rule count drops and a new
+    // spawn is admitted (the delay was armed, so the fresh cycle starts).
+    var found: ?ecs_world.Slot = null;
+    var si: ecs_world.Slot = 0;
+    while (si < ecs_world.max_entities) : (si += 1) {
+        if (w.alive[si] and w.mask[si].zombie_ai and !w.mask[si].player) {
+            found = si;
+            break;
+        }
+    }
+    try std.testing.expect(found != null);
+    w.destroy(found.?);
+    try std.testing.expectEqual(@as(u8, 1), w.director.rule_budgets[3].count);
+    // The drip re-runs when horde_cd (45 s) elapses (900 ticks at 0.05); the
+    // budget admits the slot freed by the kill within the same cycle.
+    for (0..950) |_| _ = w.director.tick(&w, 0.05);
+    try std.testing.expect(w.countKind(.zombie) >= 2);
 }

@@ -550,6 +550,11 @@ pub const World = struct {
         self.alive_bits.unset(slot);
         self.freed_this_tick[slot] = true;
         self.any_freed_this_tick = true;
+        // Release the ambient spawn-rule budget (kill attrition, spawning.md
+        // §3): a zombie spawned by the biome drip decrements its rule's count.
+        if (self.mask[slot].zombie_ai and self.zombie_ai[slot].spawn_rule != 0xffff) {
+            self.director.releaseRule(self.zombie_ai[slot].spawn_rule);
+        }
         // Drop from the group here too, so a death listener iterating a group
         // sees exactly what alive[] already tells it: this slot is gone.
         if (had_kind) self.kind_groups.remove(kind_val, slot);

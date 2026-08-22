@@ -2561,6 +2561,38 @@ pub const Game = struct {
         return fallback;
     }
 
+    /// spawning.xml rule budget at a world position (maxcount/respawndelay)
+    /// for the ambient per-rule spawn cap. Mirrors biomeGroupName's scan but
+    /// returns the rule's table index + budget instead of the group name;
+    /// 0xffff when no rule matches (ambient spawns stay unbudgeted, the
+    /// pre-2026-08-23 behaviour).
+    pub fn biomeRuleBudget(ctx: ?*anyopaque, x: f32, z: f32, kind: ecs.aidirector.Director.SpawnKind) ecs.aidirector.RuleBudget {
+        const self: *Game = @ptrCast(@alignCast(ctx.?));
+        const bm = self.world.biomes orelse return .{};
+        const biome_id = bm.atWorld(@floor(x), @floor(z)) orelse return .{};
+        const bname = self.world.biome_layers_table.nameById(biome_id) orelse return .{};
+        var ri: usize = 0;
+        while (ri < self.spawning.rules.len) : (ri += 1) {
+            const r = &self.spawning.rules[ri];
+            if (!std.mem.eql(u8, r.biome, bname)) continue;
+            const match = switch (kind) {
+                .night => r.kind == .zombie and r.time == .night,
+                .day => r.kind == .zombie and (r.time == .any or r.time == .day),
+                // Animals rotate across candidates; they share the first
+                // animal rule's budget (a per-candidate cap would need
+                // per-group tracking, out of scope for the drip).
+                .animal => r.kind == .animal,
+            };
+            if (!match) continue;
+            return .{
+                .index = @intCast(ri),
+                .maxcount = r.maxcount,
+                .respawn_days = r.respawn_days,
+            };
+        }
+        return .{};
+    }
+
     /// gamestages.xml spawner ladder → the stage's first <spawn> row.
     pub fn pickStageGroup(ctx: ?*anyopaque, spawner: []const u8, stage: i32) ?ecs.aidirector.StageGroup {
         const g: *Game = @ptrCast(@alignCast(ctx.?));

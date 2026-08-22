@@ -568,6 +568,15 @@ the dedi dll (R9 hpScale stays). All nine section headlines in GAP_ANALYSIS
 were re-synced to the live markers (they had drifted from the original
 states). The night-horde row's spawn band was corrected (28-54 m
 enemy_spawn_ring band, not the stale 18-28 m). Total **264/27/0**.
+Then the spawning.xml per-rule budget shipped: the ambient drip now
+enforces each biome rule's maxcount/respawndelay (Game.biomeRuleBudget
+resolves the rule under the spawn point; the director gates on count <
+maxcount with a respawn-delay roll per stock ChunkAreaBiomeSpawnData
+CanSpawn + ResetRespawn, spawning.md §3; spawned zombies carry the rule
+tag and World.destroy releases it on death/despawn). Rows spawning.xml
+parsing, MaxSpawnedZombies caps and Night horde updated; unit test
+"ambient rule budget caps the drip and releases on destroy". All 1262
+tests pass. Total **264/27/0**.
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the

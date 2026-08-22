@@ -1998,10 +1998,14 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/aidirector.zig:120-136`, `:149`, `src/server/config.zig:234`
 
 - **MaxSpawnedZombies / MaxSpawnedAnimals caps** `WORKS`
-  Both reach the director and gate spawning. Global cap only; stock also enforces
-  a per-`ChunkAreaBiomeSpawnData` maxcount, which zdtd does not.
+  Both reach the director and gate spawning. 2026-08-23: the per-rule
+  maxcount leg is in too - the ambient drip enforces each spawning.xml rule's
+  `maxcount`/`respawn_days` budget (see "spawning.xml parsing"), so a biome
+  rule cannot exceed its authored cap even under the global ceiling. The
+  stock per-`ChunkAreaBiomeSpawnData` cell structure itself (80 m cells,
+  POI-tag enabled flags) remains a separate row.
   *Anchors:* `src/server/game.zig:581-582`, `src/ecs/aidirector.zig:150-157`,
-  `:173-178`
+  `:173-178`, `:265-270` (rule_budgets)
 
 - **GameDifficulty HP scaling** `PARTIAL`
   `hpScale()` multiplies spawn HP by 0.5..2.0 and blood moon adds 1.5x. Stock
@@ -2018,12 +2022,20 @@ gamestage, no wandering hordes, and no screamers.
   `asm.il:220834`, `../7dtd-research/docs/combat-damage.md:491-494`,
   `../7dtd-research/docs/sandbox-options.md:305`
 
-- **spawning.xml parsing** `PARTIAL`
-  Parses biome name, entitygroup, maxcount, time, type and respawndelay. Never
-  parses the stock `tags` / `notags` POI-type attributes. `maxcount` and
-  `respawn_days` are stored on `Rule` and read by nothing in the whole tree. Live:
-  `spawning rules=57`.
+- **spawning.xml parsing** `PARTIAL` `(2026-08-23)`
+  Parses biome name, entitygroup, maxcount, time, type and respawndelay.
+  **maxcount + respawn_days are now consumed** (2026-08-23): the ambient
+  drip enforces each biome rule's budget - `Game.biomeRuleBudget` resolves
+  the rule under a spawn point and the director gates on `count < maxcount`
+  with a respawn-delay roll (stock ChunkAreaBiomeSpawnData CanSpawn +
+  ResetRespawn, spawning.md §3; spawned zombies carry the rule tag and
+  `World.destroy` releases it on death/despawn; unit test `ambient rule
+  budget caps the drip and releases on destroy`). Never parses the stock
+  `tags` / `notags` POI-type attributes (the chunk-area POI-tag scan, row
+  "POI-tag spawn filtering"). Live: `spawning rules=57`.
   *Anchors:* `src/assets/spawning.zig:14-22`, `:104-127`,
+  `src/server/game.zig` biomeRuleBudget, `src/ecs/aidirector.zig`
+  rule_budgets/budgetAllows/budgetConsume/releaseRule, `src/ecs/world.zig:554-557`,
   `Data/Config/spawning.xml:22-33`
 
 - **Biome-aware spawn group selection at runtime** `WORKS`
@@ -2319,11 +2331,14 @@ gamestage, no wandering hordes, and no screamers.
   stale) around each player, spawned `.chase` with the player as target
   (the AIDirector ring placement, asm.il:413135, with seeded bearing jitter).
   Blood-moon nights shorten the cooldown to `bloodmoon_horde_drip_cd` (8 s).
-  Still not the stock biome-night spawner (per-80m-cell
-  ChunkAreaBiomeSpawnData with per-rule timers and maxcount) nor the
-  scheduled wandering horde (that component is WORKS); a direct aggro drip.
+  2026-08-23: the drip now also enforces the per-rule budget (spawning.xml
+  maxcount/respawndelay, see "spawning.xml parsing"), so a biome rule's night
+  cap is respected. Still not the stock biome-night spawner's per-80m-cell
+  ChunkAreaBiomeSpawnData structure (per-cell timers, POI-tag enabled flags)
+  nor the scheduled wandering horde (that component is WORKS); a direct
+  aggro drip with per-rule budgets.
   *Anchors:* `src/ecs/aidirector.zig:159-162`, `:233-282`, `:388-393`,
-  `src/ecs/rules.zig:358-359,366-367`
+  `:588-606` (drip budget gate), `src/ecs/rules.zig:358-359,366-367`
 
 - **Blood-moon waves** `WORKS` `(2026-08-22 re-audit)`
   The party spawner is in: one wave per party (not per player) around its

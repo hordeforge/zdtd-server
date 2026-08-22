@@ -169,6 +169,9 @@ pub const kb_seconds: f32 = 0.3;
 pub const ZombieAi = struct {
     state: AiState = .idle,
     target_id: i32 = -1,
+    /// spawning.xml rule index that spawned this zombie (0xffff = none), for
+    /// the ambient per-rule budget release on destroy (aidirector.releaseRule).
+    spawn_rule: u16 = 0xffff,
     /// Stock EAITaskEntry.executeTime: per-task re-evaluation timer.
     decision_cd: f32 = 0,
     /// Winning task from the last selection pass (EAITaskList executing set).
