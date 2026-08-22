@@ -130,31 +130,35 @@ scorecard; the per-area headers match the row counts). On 2026-08-07 the
 scorecard was recounted from the per-feature markers, and two more gaps
 closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
-Recount 2026-08-21 from the same markers: **333 features** carry a
-canonical WORKS/PARTIAL/MISSING tag (192/97/44) and the scorecard rows below
-are corrected to those counts. Fifteen feature bullets use ad-hoc status labels
-(`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `50-ENTRY`, `DONE`,
-`CLOSED`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and
-are not counted; see [reviews/DOC_CONSISTENCY_AUDIT.md](reviews/DOC_CONSISTENCY_AUDIT.md).
+Recount 2026-08-22 from the live per-feature markers (the source of truth):
+**291 features** carry a canonical WORKS/PARTIAL/MISSING tag and the scorecard
+rows below are corrected to those counts. The 2026-08-21 "333 features / 44
+MISSING" figure was an incremental projection that had drifted from the
+markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
+was implemented or consolidated into a PARTIAL row with a documented residual.
+Fifty-three feature bullets use ad-hoc status labels (`PARTIAL (waived)`,
+`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `RESOLVED`, `PER-CLASS`,
+`DONE`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and are
+not counted; see [reviews/DOC_CONSISTENCY_AUDIT.md](reviews/DOC_CONSISTENCY_AUDIT.md).
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard
 
-333 features scored across nine areas (recounted 2026-08-21 from the
+291 features scored across nine areas (recounted 2026-08-22 from the
 per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 32 | 0 | 0 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
-| [Traders](#5-traders) | 20 | 0 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
-| [Blood moon](#6-blood-moon) | 22 | 1 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
-| [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
-| [Entities and AI](#8-entities-and-ai) | 32 | 12 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 22 | 5 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 17 | 5 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
-| [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **255** | **40** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Quests](#4-quests) | 32 | 2 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
+| [Traders](#5-traders) | 18 | 2 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
+| [Blood moon](#6-blood-moon) | 21 | 2 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
+| [POIs and prefabs](#7-pois-and-prefabs) | 25 | 5 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
+| [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 22 | 6 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
+| [Player progression](#10-player-progression) | 20 | 5 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [World systems](#11-world-systems) | 36 | 8 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [Net and ops](#12-net-and-ops) | 44 | 4 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
+| **Total** | **250** | **41** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 

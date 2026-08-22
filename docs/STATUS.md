@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 255 `WORKS`,
-40 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 250 `WORKS`,
+41 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -490,8 +490,13 @@ on the player inventory with the stock ack. Items 21/6/6 ->
 **22/5/6**; total **254/41/38**.
 Then the objective-count row went WORKS on re-audit: objectiveTarget reads
 value, count= and the stock item_count spelling, and the Goto family carries
-its value as the metre radius. Quests 31/0/1 -> **32/0/0** (the Quests area
-is fully WORKS); total **255/40/38**.
+its value as the metre radius. Quests 32/2/0 (two rows stay honestly PARTIAL:
+the treasure event-type-0 server path is RE-blocked on IL and the ClearSleepers
+required count is a policy floor, both documented in the rows). A 2026-08-22
+recount from the live markers corrected the scorecard: the running totals had
+drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
+MISSING" was an older inventory projection). Recount: 291 canonical features,
+total **250/41/0**.
 The dashboard
 (docs/provenance.html) is synced.
 
