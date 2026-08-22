@@ -101,6 +101,14 @@ pub const Chunk = struct {
     terrain: ?*const TerrainIds = null,
     /// On-disk / stock-wire surface Y (0..255). API returns u16 for headroom.
     heights: [256]u8 = .{sea_level} ** 256,
+    /// Stock `m_bTopSoilBroken` bitfield (32 bytes, 1 bit per XZ column):
+    /// clear = topsoil intact (the client renders the top terrain block via
+    /// MicroSplat splat maps), set = disturbed (client uses block textures).
+    /// Fresh chunks start clear (stock fresh-world state); dig/upgrade/
+    /// explosion paths set the bit via `setTopSoilBroken` (RE
+    /// Chunk.SetTopSoilBroken IL=36, world-chunks.md). Persisted in ZCH3
+    /// (trailing 32 bytes; old files without them load clear).
+    topsoil: [32]u8 = [_]u8{0} ** 32,
     /// Full BlockValue.rawData columns when allocated (lazy). Type = low 16 bits.
     blocks: ?[]u32 = null,
     /// Per-block textureFull paint (parallel to blocks), lazy. 0 = unpainted.
@@ -263,6 +271,16 @@ pub const Chunk = struct {
                 }
             }
         }
+    }
+
+    /// Mark one column's topsoil disturbed (stock SetTopSoilBroken: bit set,
+    /// never cleared). lx/lz are chunk-local 0..15. The client switches the
+    /// column from MicroSplat splat rendering to block textures (RE
+    /// Chunk.SetTopSoilBroken IL=36, world-chunks.md).
+    pub fn setTopSoilBroken(self: *Chunk, lx: i32, lz: i32) void {
+        const idx: u32 = @intCast(lz * 16 + lx);
+        self.topsoil[idx >> 3] |= @as(u8, 1) << @intCast(idx & 7);
+        self.dirty = true;
     }
 
     pub fn setBlockTexDens(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, raw: u32, tex: u64, dens: ?u8) !void {
@@ -828,6 +846,7 @@ pub const World = struct {
         const t = worldToChunk(x, z);
         const c = try self.getOrCreate(t.pos);
         try c.setBlock(self.allocator, t.lx, y, t.lz, id);
+        self.markTopSoilBroken(c, t.lx, y, t.lz);
         self.levelerPushIfWaterEdit(x, y, z, id);
     }
 
@@ -839,7 +858,29 @@ pub const World = struct {
         const t = worldToChunk(x, z);
         const c = try self.getOrCreate(t.pos);
         try c.setBlockRaw(self.allocator, t.lx, y, t.lz, raw);
+        self.markTopSoilBroken(c, t.lx, y, t.lz);
         self.levelerPushIfWaterEdit(x, y, z, @truncate(raw));
+    }
+
+    /// Stock SetTopSoilBroken trigger (blocks.md position path): a block
+    /// change at or above a column's surface marks that column's topsoil
+    /// disturbed, so the client stops splat-rendering it (dig/upgrade/
+    /// explosion expose the side textures). Border cells also mark the
+    /// 1-wide neighbor chunk's adjacent column (stock SetTopSoilBroken
+    /// neighbor pass) when that chunk exists - never created on demand.
+    /// Worldgen fills blocks directly and never lands here.
+    fn markTopSoilBroken(self: *World, c: *Chunk, lx: i32, y: i32, lz: i32) void {
+        const idx = @as(usize, @intCast(lz * 16 + lx));
+        if (y >= c.heights[idx]) c.setTopSoilBroken(lx, lz);
+        if (lx == 0 or lx == 15 or lz == 0 or lz == 15) {
+            const nx: i32 = if (lx == 0) c.pos.x - 1 else if (lx == 15) c.pos.x + 1 else c.pos.x;
+            const nz: i32 = if (lz == 0) c.pos.z - 1 else if (lz == 15) c.pos.z + 1 else c.pos.z;
+            const nl: i32 = if (lx == 0) 15 else if (lx == 15) 0 else lx;
+            const nlz: i32 = if (lz == 0) 15 else if (lz == 15) 0 else lz;
+            if (self.chunks.getPtr(ChunkPos.hash(.{ .x = nx, .z = nz }))) |nc| {
+                nc.setTopSoilBroken(nl, nlz);
+            }
+        }
     }
 
     /// Queue an edit that opened air or placed water for the leveling pass.
@@ -1111,7 +1152,7 @@ pub const World = struct {
         hdr[13] = @intFromBool(has_textures);
         hdr[14] = @intFromBool(has_densities);
         hdr[15] = @intFromBool(has_damages);
-        var total: usize = hdr.len + c.heights.len;
+        var total: usize = hdr.len + c.heights.len + c.topsoil.len;
         if (has_blocks) total += blocks_per_chunk * @sizeOf(u32);
         if (has_textures) total += blocks_per_chunk * @sizeOf(u64);
         if (has_densities) total += blocks_per_chunk + dens_set_bytes;
@@ -1144,6 +1185,12 @@ pub const World = struct {
             @memcpy(payload[o..][0..bytes.len], bytes);
             o += bytes.len;
         }
+        // Topsoil bitfield tail (32 bytes, optional on read: files saved by
+        // pre-topsoil zdtd lack it and load all-clear). Appended last so the
+        // pre-topsoil reader's field walk stops at its computed length and
+        // ignores the tail.
+        @memcpy(payload[o..][0..c.topsoil.len], &c.topsoil);
+        o += c.topsoil.len;
         std.debug.assert(o == total);
         return payload;
     }
@@ -1281,6 +1328,15 @@ pub const World = struct {
                 }
                 const dest = std.mem.sliceAsBytes(c.damages.?);
                 @memcpy(dest, data[o..][0..dmg_bytes]);
+                o += dmg_bytes;
+            }
+            // Topsoil bitfield tail: files saved by topsoil-aware zdtd carry
+            // the 32 bytes; older files lack them and load all-clear (the
+            // fresh-world state; bits re-set on the next dig/upgrade).
+            if (data.len >= o + c.topsoil.len) {
+                @memcpy(&c.topsoil, data[o..][0..c.topsoil.len]);
+            } else {
+                @memset(&c.topsoil, 0);
             }
         } else if (data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and data[3] == '1') {
             // v1: 12-byte hdr then heights.
@@ -1593,6 +1649,61 @@ test "ZCH3 damage plane roundtrips and stays per-cell" {
     const c3 = try w3.getOrCreate(.{ .x = 0, .z = 0 });
     try std.testing.expectEqual(@as(u16, 0), c3.dmgAt(3, 40, 4));
     try std.testing.expectEqual(@as(u16, 7), c3.dmgAt(1, 10, 2));
+}
+
+test "topsoil bitfield: fresh clear, dig marks, ZCH3 round-trips" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const c = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    const g: i32 = c.heightAt(0, 0); // flat sea_level surface
+    try std.testing.expectEqual(@as(u8, 0), c.topsoil[0]); // fresh = clear
+
+    // Dig AT the surface marks the column (stock SetTopSoilBroken trigger:
+    // block change at y >= surface). Column (0,0) is bit 0 of byte 0.
+    try w.setBlockWorld(0, g, 0, block_air);
+    try std.testing.expectEqual(@as(u8, 0x01), c.topsoil[0]);
+    // A tunnel BELOW the surface does not disturb the topsoil.
+    try w.setBlockWorld(1, g - 3, 0, block_air);
+    try std.testing.expectEqual(@as(u8, 0x01), c.topsoil[0]);
+    // Column (1,0) is bit 1: a surface edit there sets it too.
+    try w.setBlockWorld(1, g, 0, block_air);
+    try std.testing.expectEqual(@as(u8, 0x03), c.topsoil[0]);
+
+    // A border cell marks the neighbor chunk's adjacent column (only when the
+    // neighbor exists; never created on demand).
+    try w.setBlockWorld(15, g, 0, block_air); // lx=15, column bit 15 (byte 1 bit 7)
+    try std.testing.expectEqual(@as(u8, 0x80), c.topsoil[1]);
+    try std.testing.expect(w.chunks.getPtr(ChunkPos.hash(.{ .x = 1, .z = 0 })) == null);
+
+    // ZCH3 round-trip: the disturbed bits survive a reload; old files without
+    // the tail load all-clear.
+    try w.saveAll();
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    const c2 = try w2.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(@as(u8, 0x03), c2.topsoil[0]);
+    try std.testing.expectEqual(@as(u8, 0x80), c2.topsoil[1]);
+
+    // Pre-topsoil save (16-byte hdr + heights only): loads all-clear.
+    var path_buf2: [std.fs.max_path_bytes]u8 = undefined;
+    const path2 = try std.fmt.bufPrint(&path_buf2, "{s}/c_0_0.zch", .{dir});
+    var old: [16 + 256]u8 = .{0} ** (16 + 256);
+    old[0] = 'Z';
+    old[1] = 'C';
+    old[2] = 'H';
+    old[3] = '3';
+    std.mem.writeInt(i32, old[4..8], 0, .little);
+    std.mem.writeInt(i32, old[8..12], 0, .little);
+    try io_fs.writeFile(path2, &old);
+    var w3 = try World.init(std.testing.allocator, dir);
+    defer w3.deinit();
+    const c3 = try w3.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(@as(u8, 0), c3.topsoil[0]);
 }
 
 test "torn or misplaced chunk save cannot partially replace generated state" {

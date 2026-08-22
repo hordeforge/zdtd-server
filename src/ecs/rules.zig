@@ -306,6 +306,12 @@ pub const WorldGroup = struct {
     /// reach cap like max_edit_range, but ECS-visible (openContainer has no
     /// Game handle); R7.
     container_open_range: f32 = 8.0,
+    /// Force every column's topsoil "broken" on the wire (the pre-topsoil
+    /// look: the client renders block textures instead of MicroSplat splat
+    /// maps). False = stock: fresh terrain splat-renders and dig/upgrade
+    /// marks the disturbed columns. Worlds without splat maps (the flat demo
+    /// world) may render grey with the stock mode; set true for them.
+    topsoil_all_broken: bool = false,
 };
 
 /// Vehicle sim tuning (zdtd-owned: the stock dedicated server has no vehicle
@@ -497,6 +503,7 @@ pub const ProgressionOverlay = struct {
 
 pub const WorldGroupOverlay = struct {
     container_open_range: ?f32 = null,
+    topsoil_all_broken: ?bool = null,
 };
 
 pub const VehicleOverlay = struct {

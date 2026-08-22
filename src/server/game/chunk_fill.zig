@@ -21,6 +21,10 @@ const replicate_te = @import("../replicate_te.zig");
 
 const te_types = packages.te_types;
 
+/// All-broken topsoil bitfield (the pre-topsoil look; `topsoil_all_broken`
+/// rule for worlds without splat maps).
+const topsoil_broken = [_]u8{0xFF} ** 32;
+
 pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool {
     // Resident miss = disk load or procedural gen (worldgen W2 runs here,
     // on the tick, bounded by chunk_adds_per_stream_tick). world/ may not
@@ -108,6 +112,10 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .heights = &ch.heights,
         .ticks = self.sim.director.clock.worldTimeBits(),
         .biome = biome_id,
+        // Topsoil bitfield: the chunk's real disturbed state (fresh = clear,
+        // dig/upgrade sets bits). The topsoil_all_broken rule forces the
+        // legacy all-broken look for worlds without splat maps.
+        .topsoil = if (self.sim.rules.world.topsoil_all_broken) &topsoil_broken else &ch.topsoil,
         .block_at = BlockCtx.at,
         .block_ctx = ch,
         .tex_at = BlockCtx.tex,

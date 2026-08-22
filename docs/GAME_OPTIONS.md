@@ -236,6 +236,7 @@ test, so a retune cannot land silently).
 | Key | Default | Meaning |
 |---|---|---|
 | `container_open_range` | 8.0 | Container open/use reach in blocks, 3D (R7; authority reach cap, ECS-visible) |
+| `topsoil_all_broken` | false | Force every column's topsoil "broken" on the chunk wire: the client renders block textures instead of MicroSplat splat maps. False = stock (fresh terrain splat-renders; dig/upgrade marks disturbed columns). Worlds without splat maps (the flat demo world) may render grey with the stock mode; set true for them |
 | `accel_mps2` | 14.0 | Vehicle throttle acceleration (blocks/s^2 per throttle unit; zdtd sim, GAP 4816) |
 | `reverse_frac` | 0.3 | Vehicle reverse speed cap as a fraction of max speed |
 | `coast_decay` | 0.8 | Vehicle coast decay per second with no throttle |

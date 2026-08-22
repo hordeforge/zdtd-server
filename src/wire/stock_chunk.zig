@@ -82,6 +82,10 @@ pub const EncodeOpts = struct {
     /// Optional per-cell damage (u16). Null → no damage channel data.
     dmg_at: ?DmgAtFn = null,
     dmg_ctx: ?*anyopaque = null,
+    /// Stock m_bTopSoilBroken bitfield (32 bytes, 1 bit per XZ column):
+    /// clear = intact topsoil (client splat-renders), set = disturbed (block
+    /// textures). Null → all-clear (fresh-world state, stock default).
+    topsoil: ?*const [32]u8 = null,
     /// Dense precomputed raw plane (65536 BlockValue cells, x + z*16 + y*256).
     /// encodeNetworkChunk fills it once and shares it with the block-layer loop
     /// and the density/water channels so blockAt is not re-invoked per channel.
@@ -510,13 +514,15 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // terrain height 256 (same as surface for flat columns)
     try w.writeBytes(opts.heights);
 
-    // m_bTopSoilBroken: 32-byte bitfield (1 bit per XZ). IsTopSoil = bit clear.
-    // Unbroken topsoil + MicroSplat uses cColSplatMap (0,0,0,0) and needs live splat
-    // sampling; when that path is incomplete the whole floor renders black/grey clay.
-    // Mark all broken so VoxelMeshTerrain uses Block.GetSideTextureId colors (288→dirt
-    // etc from blocks.xml) instead of the empty splat sentinel.
-    var topsoil: [32]u8 = .{0xFF} ** 32;
-    try w.writeBytes(&topsoil);
+    // m_bTopSoilBroken: 32-byte bitfield (1 bit per XZ column). Clear =
+    // topsoil intact, the client splat-renders the top terrain block via
+    // MicroSplat; set = disturbed (dig/upgrade/explosion), block textures.
+    // The chunk's real state rides the wire; null opts fall back to the
+    // fresh-world all-clear (stock default). RE Chunk.SetTopSoilBroken
+    // IL=36 (world-chunks.md); the all-0xFF workaround is gone (it made
+    // every column render block textures, never the stock splat look).
+    const topsoil = opts.topsoil orelse &[_]u8{0} ** 32;
+    try w.writeBytes(topsoil);
 
     // biomes 256
     var biomes: [256]u8 = .{opts.biome} ** 256;
@@ -1042,6 +1048,58 @@ test "stock chunk surface density mixed band has both values" {
         if (b == density_air) has_a = true;
     }
     try std.testing.expect(has_t and has_a);
+}
+
+test "topsoil bitfield rides the chunk wire (stock m_bTopSoilBroken)" {
+    // The maps region (heightmap 256, terrain heights 256, then the 32
+    // topsoil bytes) follows the variable-length block layers. With every
+    // column at height 60, the maps region is a 512-byte run of 0x3C (60)
+    // followed by the topsoil: locate that run (block lower8 ids are small,
+    // never 60) and verify the 32 bytes after it match the chunk state while
+    // the rest of the payload is byte-identical.
+    const find512 = struct {
+        fn f(payload: []const u8) ?usize {
+            if (payload.len < 544) return null;
+            var i: usize = 0;
+            while (i + 544 <= payload.len) : (i += 1) {
+                var j: usize = 0;
+                while (j < 512 and payload[i + j] == 60) : (j += 1) {}
+                if (j == 512) return i;
+            }
+            return null;
+        }
+    }.f;
+    var heights: [256]u8 = .{60} ** 256;
+    var buf: [131072]u8 = undefined;
+    // Fresh world: the topsoil bytes after the maps run are clear
+    // (splat-rendered).
+    const fresh = try encodeNetworkChunk(&buf, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .biome = 3,
+    });
+    const fresh_off = find512(fresh) orelse return error.TestUnexpectedResult;
+    const fresh_top = fresh[fresh_off + 512 ..][0..32];
+    for (fresh_top) |b| try std.testing.expectEqual(@as(u8, 0), b);
+    // Disturbed columns (dig at (0,0) + columns 56..63): the same window now
+    // carries the bitfield; everything else stays identical.
+    var ts: [32]u8 = [_]u8{0} ** 32;
+    ts[0] = 0x01;
+    ts[7] = 0xFF;
+    const dist = try encodeNetworkChunk(&buf, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .biome = 3,
+        .topsoil = &ts,
+    });
+    try std.testing.expectEqual(fresh.len, dist.len);
+    const dist_off = find512(dist) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(fresh_off, dist_off);
+    try std.testing.expectEqualSlices(u8, fresh[0..fresh_off], dist[0..dist_off]);
+    try std.testing.expectEqualSlices(u8, ts[0..], dist[dist_off + 512 ..][0..32]);
+    try std.testing.expectEqualSlices(u8, fresh[fresh_off + 544 ..], dist[dist_off + 544 ..]);
 }
 
 test "simd layerIsUniform and anyNonAir" {

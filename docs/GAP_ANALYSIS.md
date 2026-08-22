@@ -3356,12 +3356,24 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/wire/stock_chunk.zig:77-78,521-555`,
   `src/server/game/chunk_fill.zig:91-110,132-133`
 
-- **Topsoil bitfield / splat maps** `PARTIAL`
-  `m_bTopSoilBroken` is written all-0xFF (every column marked broken) so the client
-  uses Block side textures instead of sampling MicroSplat. Terrain reads as uniform
-  blocks.xml colours; splat1-4.png are never used. Deliberate workaround per the
-  code comment.
-  *Anchors:* `src/wire/stock_chunk.zig:337-343`,
+- **Topsoil bitfield / splat maps** `PARTIAL` `(2026-08-22)`
+  The stock `m_bTopSoilBroken` bitfield now rides the wire for real: the
+  chunk keeps the 32-byte state (fresh = all-clear, so the client
+  splat-renders the top terrain block like stock; `setTopSoilBroken` marks
+  a column disturbed on a dig/upgrade/explosion at or above the column
+  surface, with the 1-wide border-neighbor pass, RE `Chunk.SetTopSoilBroken`
+  IL=36 / blocks.md position path), the wire writes the chunk's actual
+  bytes instead of the old all-0xFF workaround (which made every column
+  render block textures), and ZCH3 persists the bitfield as a trailing 32
+  bytes (older saves load all-clear; bits re-set on the next dig). The
+  `topsoil_all_broken` rules key (default false) restores the legacy look
+  for worlds without splat maps (the flat demo world). Client-visible:
+  Navezgane terrain now splat-blends like a stock server until a column is
+  dug. Not yet verified on a live client render; the playtest ground case
+  gates it.
+  *Anchors:* `src/world/store.zig` Chunk.topsoil/setTopSoilBroken +
+  markTopSoilBroken + ZCH3 tail, `src/wire/stock_chunk.zig` topsoil write,
+  `src/ecs/rules.zig` WorldGroup.topsoil_all_broken,
   `Data/Worlds/Navezgane/splat1.png`
 
 - **Chunk light seeding** `PARTIAL`

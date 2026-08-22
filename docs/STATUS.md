@@ -1172,6 +1172,23 @@ Buy/sell pricing row stays PARTIAL: the TraderBuyPrices/SellPrices sandbox
 scales (131/130) and the Bartering passives (148/149) remain open; counts
 unchanged.
 
+## Batch M 2026-08-22 (topsoil bitfield, stock splat terrain)
+
+The stock `m_bTopSoilBroken` bitfield is now real state instead of the
+all-0xFF workaround: the Chunk keeps the 32-byte plane (fresh = all-clear
+so the client splat-renders the top terrain block like a stock server;
+`setTopSoilBroken` marks a column disturbed on dig/upgrade/explosion at or
+above the column surface with the 1-wide border-neighbor pass, RE
+`Chunk.SetTopSoilBroken` IL=36 / blocks.md position path). The chunk wire
+writes the chunk's actual bytes (null opts fall back to all-clear), ZCH3
+persists the bitfield as a trailing 32 bytes (older saves load all-clear),
+and the `topsoil_all_broken` rules key (default false) restores the legacy
+look for worlds without splat maps. Tests: ZCH3 round-trip incl. the
+pre-topsoil save fallback, dig-below-surface does not disturb, border
+neighbor pass, and the wire carries the bitfield while the rest of the
+payload stays byte-identical. Row 3359 updated; client render not yet
+verified live (the playtest ground case gates it); counts unchanged.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the
