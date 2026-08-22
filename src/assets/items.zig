@@ -35,6 +35,13 @@ pub const ItemDef = struct {
     /// IL default 1.0; the sell price base is EconomicValue * scale, RE
     /// loot-economy.md GetSellPrice). A39.
     econ_sell_scale: f32 = 1.0,
+    /// items.xml passive_effect DegradationMax (passive 8, stock
+    /// `ItemClass.get_MaxUseTimesBase`, IL=25): the durability cap. Quality
+    /// tiers "min,max" (tier 1..6 = quality 1..6) lerp between the pair; a
+    /// single value is constant. 0 = no durability (PercentUsesLeft = 1).
+    /// RE items.md §7 + ItemValue.get_PercentUsesLeft (IL=17).
+    degradation_min: u32 = 0,
+    degradation_max: u32 = 0,
     /// items.xml Action0 DamageEntity (melee hand damage; 0 = none/unset).
     entity_damage: f32 = 0,
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
@@ -495,6 +502,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_dstrength.deinit(allocator);
     var stock_deat: std.ArrayList(i32) = .empty;
     defer stock_deat.deinit(allocator);
+    var stock_degrad_min: std.ArrayList(u32) = .empty;
+    defer stock_degrad_min.deinit(allocator);
+    var stock_degrad_max: std.ArrayList(u32) = .empty;
+    defer stock_degrad_max.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -586,6 +597,23 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
                 deat = std.fmt.parseInt(i32, v, 10) catch 0;
             }
+            // DegradationMax (passive 8): the durability cap, quality-tiered
+            // "min,max" (tier 1..6 = quality 1..6) or a single constant.
+            // Feeds MaxUseTimes -> ItemValue.PercentUsesLeft (worn items sell
+            // for less, RE GetSellPrice / items.md §7).
+            var dmin: u32 = 0;
+            var dmax: u32 = 0;
+            if (xml.passiveEffectValue(body, "DegradationMax")) |v| {
+                if (std.mem.findScalar(u8, v, ',')) |comma| {
+                    dmin = xml.parseU32(v[0..comma]) orelse 0;
+                    dmax = xml.parseU32(v[comma + 1 ..]) orelse 0;
+                } else {
+                    dmax = xml.parseU32(v) orelse 0;
+                    dmin = dmax;
+                }
+            }
+            try stock_degrad_min.append(allocator, dmin);
+            try stock_degrad_max.append(allocator, dmax);
             try stock_dtags.append(allocator, dtags);
             try stock_dradius.append(allocator, dradius);
             try stock_dlifetime.append(allocator, dlifetime);
@@ -639,6 +667,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.stack = stock_stacks.items[idx];
                 def.econ = stock_econs.items[idx];
                 def.econ_sell_scale = stock_econ_scales.items[idx];
+                def.degradation_min = stock_degrad_min.items[idx];
+                def.degradation_max = stock_degrad_max.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
@@ -671,6 +701,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .stock_type = stock_types.items[idx],
             .econ = stock_econs.items[idx],
             .econ_sell_scale = stock_econ_scales.items[idx],
+            .degradation_min = stock_degrad_min.items[idx],
+            .degradation_max = stock_degrad_max.items[idx],
             .entity_damage = stock_edmgs.items[idx],
             .fuel_value = stock_fuels.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
@@ -822,6 +854,17 @@ test "load stock items.xml when present" {
     try std.testing.expectEqual(@as(i32, 65537), t.byStockName("meleeToolRepairT0StoneAxe").?);
     try std.testing.expectEqual(t.byStockName("meleeToolRepairT0StoneAxe").?, t.stockTypeFor(8));
     try std.testing.expect(t.stockTypeFor(7) > stock_first_item_type); // wood
+    // DegradationMax (passive 8): the builtin stone axe quality tier is
+    // "250,500" (Q1 -> 250, Q6 -> 500; stock items.xml). Feeds the sell
+    // price's PercentUsesLeft term (worn items sell for less).
+    if (t.byId(8)) |axe| {
+        try std.testing.expectEqual(@as(u32, 250), axe.degradation_min);
+        try std.testing.expectEqual(@as(u32, 500), axe.degradation_max);
+    }
+    // Non-durable items (no DegradationMax) price full: pul term is 1.
+    if (t.byName("resourceWood")) |wood| {
+        try std.testing.expectEqual(@as(u32, 0), wood.degradation_max);
+    }
     // Stock gas can: FuelValue from items.xml (ammoGasCan).
     if (t.byName("ammoGasCan")) |gas| {
         try std.testing.expect(gas.fuel_value > 0);

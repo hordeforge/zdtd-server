@@ -1070,12 +1070,23 @@ parsed, and quest offering is unwired.
   2026-08-22: `Entry.Markup` no longer needs a server term - vending is
   owner-priced (loot-economy.md 6) and the client's post-trade echo carries
   each entry's markup plus the money delta, applied stock-faithfully on
-  CopyFrom (see "Vending machines" `WORKS`). Remaining: `PercentUsesLeft`
-  (worn items sell for less; needs the EffectManager MaxUseTimes passive,
-  RE-blocked).
+  CopyFrom (see "Vending machines" `WORKS`). `(2026-08-22)` `PercentUsesLeft`
+  is in: items.xml `DegradationMax` (passive 8) parses per item as the
+  quality tier "min,max" (single value constant; the builtin stone axe pins
+  250,500), and the sell arm prices the SOLD stack - base x quality lerp x
+  `PercentUsesLeft` (1 - FastClamp01(use_times / MaxUseTimes), RE
+  ItemValue.get_PercentUsesLeft IL=17; MaxUseTimes = quality-lerped
+  DegradationMax at the DurabilityModifier 1.0 default) - on both the
+  stocked and non-stocked paths, so worn tools sell for less like stock
+  (test `worn items sell for less`). Remaining: the `TraderBuyPrices` (131)
+  / `TraderSellPrices` (130) sandbox scales (parsed in `sandbox_data.zig`,
+  not yet applied in `trade`) and the BarteringBuying/Selling perk passives
+  (148/149) on both sides.
   *Anchors:* `src/server/game/trader.zig:162-200` (fill lerp),
-  `src/ecs/systems.zig` qualityPriceMod + non-stocked sell, `src/assets/traders.zig`
-  root parse, `asm.il:1830625-1830948`, `Data/Config/traders.xml:3`
+  `src/ecs/systems.zig` qualityPriceMod + sell arm, `src/assets/items.zig`
+  DegradationMax parse, `src/server/game/hooks.zig` percentUsesLeft,
+  `asm.il:1830625-1830948`, `il/items-scratch/ItemValue.txt:98`,
+  `Data/Config/traders.xml:3`
 
 - **Trade execution** `WORKS`
   `systems.trade` is coherent bookkeeping with rollback and overflow guards:

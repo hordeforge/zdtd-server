@@ -774,6 +774,10 @@ pub const Game = struct {
         // (stock GetSellPrice, asm.il 1830625-1830948).
         self.sim.trader_quality_min_mod = self.traders.quality_min_mod;
         self.sim.trader_quality_max_mod = self.traders.quality_max_mod;
+        // ItemValue.PercentUsesLeft for the sell price (worn items sell for
+        // less; RE ItemValue IL=17). Same ctx as the sell hook.
+        self.sim.percent_uses_left_ctx = self;
+        self.sim.percent_uses_left_fn = &percentUsesLeft;
         // Chest/TE contents + door/shape meta survive restart (best-effort: absent on fresh world).
         // Missing persist files are fine on first boot.
         // OpenFailed = no persist file yet (fresh world); anything else is a
@@ -936,6 +940,10 @@ pub const Game = struct {
 
     fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
         return game_hooks.traderSellPrice(ctx, item_id, trader_slot);
+    }
+
+    fn percentUsesLeft(ctx: ?*anyopaque, item_id: u16, quality: u8, use_times: f32) f32 {
+        return game_hooks.percentUsesLeft(ctx, item_id, quality, use_times);
     }
 
     fn nearestPoiAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {

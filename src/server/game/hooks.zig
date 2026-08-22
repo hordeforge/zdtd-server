@@ -10,6 +10,7 @@ const assets_maxdamage = @import("../../assets/maxdamage.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const rng_util = @import("../../util/rng.zig");
 const prefabs_mod = @import("../../world/prefabs.zig");
+const items = @import("../../assets/items.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -583,4 +584,30 @@ pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
     }
     const scaled: f64 = @as(f64, d.econ) * @as(f64, d.econ_sell_scale) * @as(f64, sell_markup);
     return @max(1, @as(u32, @intCast(@min(@as(u64, @intFromFloat(@floor(scaled))), 65535))));
+}
+
+/// Stock ItemValue.PercentUsesLeft (ItemValue.get_PercentUsesLeft IL=17):
+/// `max_use <= 0 ? 1 : 1 - FastClamp01(use_times / max_use)`. `max_use` is
+/// the quality-lerped DegradationMax (passive 8, get_MaxUseTimesBase IL=25)
+/// with the DurabilityModifier metadata at its 1.0 default (zdtd tracks no
+/// per-item durability metadata). GetSellPrice multiplies the sell base by
+/// this, so a worn tool sells for less (loot-economy.md §5).
+pub fn percentUsesLeft(ctx: ?*anyopaque, item_id: u16, quality: u8, use_times: f32) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const d = g.items.byId(item_id) orelse return 1;
+    const max_use = maxUseTimes(d, quality);
+    if (max_use == 0) return 1;
+    const frac = @min(@max(use_times / @as(f32, @floatFromInt(max_use)), 0.0), 1.0);
+    return 1 - frac;
+}
+
+/// MaxUseTimes for a quality (tier 1..6): the DegradationMax pair lerped
+/// over (quality-1)/5 like the stock passive tier range, truncated to int
+/// per get_MaxUseTimesBase's `(int)GetValue(...)` cast. 0 = no durability.
+fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
+    if (d.degradation_max == 0) return 0;
+    const q: f32 = @floatFromInt(@max(1, @min(quality, 6)));
+    const t: f32 = (q - 1.0) / 5.0;
+    const v: f64 = @as(f64, d.degradation_min) + (@as(f64, d.degradation_max) - @as(f64, d.degradation_min)) * @as(f64, t);
+    return @intFromFloat(v);
 }

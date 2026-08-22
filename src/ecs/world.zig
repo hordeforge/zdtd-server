@@ -436,6 +436,12 @@ pub const World = struct {
     /// wired by the Game next to sell_price_fn for the non-stocked sell path.
     trader_quality_min_mod: f32 = 1,
     trader_quality_max_mod: f32 = 1,
+    /// Stock ItemValue.PercentUsesLeft for a sold stack (RE
+    /// ItemValue.get_PercentUsesLeft IL=17): the durability fraction the
+    /// trader charges, so worn items sell for less. Wired by the Game from
+    /// the items table (DegradationMax -> MaxUseTimes); 1 = not wired.
+    percent_uses_left_ctx: ?*anyopaque = null,
+    percent_uses_left_fn: ?*const fn (?*anyopaque, item_id: u16, quality: u8, use_times: f32) f32 = null,
 
     // A10: offline defaults use stock loot container name (not item "scrap").
     // Game.setClassDef overwrites from entityclasses when game-dir loads.

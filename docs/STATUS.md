@@ -1155,6 +1155,23 @@ zero the seed (carried records predate seed persistence). New
 test now pins it (777) and the header gates accept 'A'. Row 2889 updated;
 counts unchanged (row stays PARTIAL for mods/cosmetics).
 
+## Batch L 2026-08-22 (sell price PercentUsesLeft, worn items)
+
+The trader sell price now prices the SOLD stack like stock
+`XUiM_Trader.GetSellPrice` (IL=217): base (EconomicValue x
+EconomicSellScale x SellMarkdown) x quality lerp x `PercentUsesLeft` on
+both the stocked and non-stocked paths. `PercentUsesLeft` (RE
+`ItemValue.get_PercentUsesLeft` IL=17) is 1 - FastClamp01(use_times /
+MaxUseTimes) with MaxUseTimes the quality-lerped items.xml
+`DegradationMax` (passive 8, "min,max" tier 1..6; single value constant;
+DurabilityModifier metadata at its 1.0 default), so a half-worn tool sells
+for half. New parse in items.zig (builtin stone axe pins 250,500 from the
+stock file), hook `percentUsesLeft` in game/hooks.zig wired through the
+World (same ctx as the sell hook), and a `worn items sell for less` test.
+Buy/sell pricing row stays PARTIAL: the TraderBuyPrices/SellPrices sandbox
+scales (131/130) and the Bartering passives (148/149) remain open; counts
+unchanged.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

@@ -1282,31 +1282,37 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         en.markup = 100;
         return true;
     } else {
-        // Sell: stocked items price from their entry; any other item sells at
-        // its EconomicValue x EconomicSellScale x SellMarkdown via the hook
-        // (stock lets you sell anything, RE GetSellPrice). Stock GetSellPrice
-        // also applies the quality lerp (quality_mod) to quality items - the
-        // stocked entries carry it from fill; for a non-stocked item the lerp
-        // rides the sold stack's quality (first matching slot).
-        var unit: u32 = if (entry) |en|
-            @as(u32, en.sell)
-        else if (w.sell_price_fn) |f|
-            f(w.sell_price_ctx, item, ts)
-        else
-            return false;
-        if (entry == null and w.sell_price_fn != null) {
-            var sold_quality: u8 = 1;
-            if (w.mask[ps].inventory) {
-                for (w.inventory[ps].slots) |s| {
-                    if (s.item_id == item and s.count > 0) {
-                        sold_quality = s.quality;
-                        break;
-                    }
+        // Sell: stock GetSellPrice (XUiM_Trader IL=217) prices the SOLD
+        // ItemValue - base EconomicValue x EconomicSellScale x SellMarkdown
+        // (the hook; stocked entries use the same base, their en.sell bakes
+        // the entry's own fresh quality) scaled by the sold stack's quality
+        // lerp (quality_mod) and PercentUsesLeft (worn items sell for less,
+        // RE ItemValue IL=17 / items.md §7). Without a hook (pure-ECS tests)
+        // the entry's sell stands.
+        var sold_quality: u8 = 1;
+        var sold_use_times: f32 = 0;
+        if (w.mask[ps].inventory) {
+            for (w.inventory[ps].slots) |s| {
+                if (s.item_id == item and s.count > 0) {
+                    sold_quality = s.quality;
+                    sold_use_times = s.use_times;
+                    break;
                 }
             }
-            const qmod = qualityPriceMod(w.trader_quality_min_mod, w.trader_quality_max_mod, sold_quality);
-            unit = @intFromFloat(@max(1.0, @as(f64, @floatFromInt(unit)) * qmod));
         }
+        var unit: u32 = if (w.sell_price_fn) |f|
+            f(w.sell_price_ctx, item, ts)
+        else if (entry) |en|
+            @as(u32, en.sell)
+        else
+            return false;
+        if (unit == 0) return false;
+        const qmod = qualityPriceMod(w.trader_quality_min_mod, w.trader_quality_max_mod, sold_quality);
+        var scaled: f64 = @as(f64, @floatFromInt(unit)) * qmod;
+        if (w.percent_uses_left_fn) |p| {
+            scaled *= @as(f64, p(w.percent_uses_left_ctx, item, sold_quality, sold_use_times));
+        }
+        unit = @intFromFloat(@max(1.0, scaled));
         if (unit == 0) return false;
         const gain: u32 = unit * qty;
         if (gain > std.math.maxInt(u16)) return false;
@@ -5923,4 +5929,45 @@ test "trader prices scale with item quality (quality_mod lerp)" {
     // 50 (starter) + 2 x (25 * 2.0) = 150.
     try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
     try std.testing.expectEqual(@as(u32, 150), w.wallet[ps].coins);
+}
+
+test "worn items sell for less (PercentUsesLeft rides the sold stack)" {
+    // Stock GetSellPrice multiplies the sell base by the SOLD ItemValue's
+    // PercentUsesLeft (ItemValue.get_PercentUsesLeft IL=17): a half-worn
+    // stone-axe-like stack pays half. The pul hook receives the sold stack's
+    // quality + use_times, not the entry's.
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 5000).?;
+    const ps = w.playerByPeer(0).?;
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 2, .quality = 1, .use_times = 125 };
+    w.inventory[ps].slots[c.inv_equip_start - 1] = .{}; // free slot for coin payout
+    const Hook = struct {
+        fn price(_: ?*anyopaque, item: u16, _: u16) u32 {
+            return if (item == 77) 100 else 0; // 100 dukes per non-stocked unit
+        }
+    };
+    const Pul = struct {
+        fn pul(_: ?*anyopaque, item: u16, quality: u8, use_times: f32) f32 {
+            // Stone-axe-like Q1 cap 250: 125/250 used -> half value. The
+            // coin totals below verify the hook receives the sold stack's
+            // quality/use_times (a wrong cap would price differently).
+            _ = item;
+            _ = quality;
+            return 1 - @min(@max(use_times / 250.0, 0), 1);
+        }
+    };
+    w.sell_price_ctx = null;
+    w.sell_price_fn = &Hook.price;
+    w.percent_uses_left_ctx = null;
+    w.percent_uses_left_fn = &Pul.pul;
+    // 50 (starter) + 2 x (100 x 1.0 qmod x 0.5 pul) = 150.
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 150), w.wallet[ps].coins);
+    // A fresh stack (use_times 0) pays full price: the wallet gains 200
+    // more (2 x 100) on top of the 150 from the worn sale.
+    w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 2, .quality = 1 };
+    try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
+    try std.testing.expectEqual(@as(u32, 350), w.wallet[ps].coins);
 }
