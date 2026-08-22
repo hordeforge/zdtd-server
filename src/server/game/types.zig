@@ -258,6 +258,7 @@ pub const InitOptions = struct {
     max_spawned_animals: u16 = 50,
     air_drop_frequency: u16 = 72,
     drop_on_death: u8 = 1,
+    death_penalty: u8 = 1,
     land_claim_size: u16 = 41,
     land_claim_online_durability_modifier: u16 = 4,
     land_claim_offline_durability_modifier: u16 = 4,

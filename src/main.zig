@@ -639,6 +639,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .max_spawned_animals = cfg.max_spawned_animals,
         .air_drop_frequency = cfg.air_drop_frequency,
         .drop_on_death = cfg.drop_on_death,
+        .death_penalty = cfg.death_penalty,
         .land_claim_size = cfg.land_claim_size,
         .land_claim_online_durability_modifier = cfg.land_claim_online_durability_modifier,
         .land_claim_offline_durability_modifier = cfg.land_claim_offline_durability_modifier,

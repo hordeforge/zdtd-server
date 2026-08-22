@@ -151,10 +151,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 20 | 7 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction |
-| [Player progression](#10-player-progression) | 14 | 8 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 15 | 7 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **246** | **49** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **247** | **48** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2963,17 +2963,20 @@ and server-to-client XP/level pushes do not exist.
   `src/server/c2s/misc.zig:513-536`, `src/server/game/replicate_health.zig:30`,
   scenario `AI kill drops the player's real inventory as a death bag`
 
-- **DeathPenalty server option** `PARTIAL`
-  The GameStats blob carries death_penalty but it is hardcoded to the struct
-  default 1 (XPOnly) and is not in `sendGameStats`'s override list, not in
-  `config.zig`'s property table, and not in `serverconfig.example.xml`. Live client
-  log confirms `GameStat.DeathPenalty = XPOnly` arriving. The behaviour itself is
-  entirely client-side in stock (`EntityPlayer::HandleClientDeath` switches on the
-  stat and fires the `game_on_death_*` sequences), so it works by accident at
-  XPOnly, but an operator cannot change it and zdtd enforces nothing.
-  *Anchors:* `src/wire/packages.zig:1908`, `:2003`,
-  `src/server/game.zig:6222-6239`, `src/server/config.zig:110-130`,
-  `asm.il:507993`, `asm.il:1904133`, `Data/Config/gameevents.xml:57-110`
+- **DeathPenalty server option** `WORKS`
+  `DeathPenalty` (0 nothing / 1 XPOnly / 2 Backpack / 3 Delete) is now a
+  first-class serverconfig property: parsed + sandbox-wired (`SandboxOptions`
+  option 26), passed into the Game, emitted in the GameStats blob
+  (`gameStatsValues.death_penalty`), settable at runtime via `setoptions`,
+  ranged in the mode packs and documented in `serverconfig.example.xml`.
+  The behaviour itself is client-side in stock (`EntityPlayer::HandleClientDeath`
+  switches on the stat and fires the `game_on_death_*` sequences), so an
+  operator can now change the client's death flow and the server advertises
+  the effective value.
+  *Anchors:* `src/server/config.zig` (`death_penalty`),
+  `src/server/game.zig:2148` (`gameStatsValues`),
+  `src/server/admin_console.zig:748,905`, `src/server/mode.zig`,
+  `src/assets/sandbox_data.zig:126`, `serverconfig.example.xml`
 
 - **XP deficit death penalty on the server** `PARTIAL (waived)`
   `AddXPDeficit` (`ExpDeficitPerDeathPercentage`/`MaxPercentage` on

@@ -51,6 +51,7 @@
   <property name="BlockDamageAIBM" value="100"/>
   <property name="AirDropFrequency" value="72"/>
   <property name="DropOnDeath" value="1"/>
+  <property name="DeathPenalty" value="1"/>
   <property name="LandClaimSize" value="41"/>
   <property name="LandClaimOnlineDurabilityModifier" value="4"/>
   <property name="LandClaimOfflineDurabilityModifier" value="4"/>

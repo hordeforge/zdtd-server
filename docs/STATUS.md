@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 246 `WORKS`,
-49 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 247 `WORKS`,
+48 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -441,6 +441,12 @@ real inventory range per DropOnDeath and marking the backpack map pin; the
 scenario pins the content), so the "single scrap" placeholder the row
 described is gone - the client's RequestToSpawnEntity ECD stays refused as
 redundant. Player progression 13/9/15 -> **14/8/15**; total **246/49/38**.
+Then the DeathPenalty-option row went WORKS: DeathPenalty (0-3) is now a
+real serverconfig property - parsed, sandbox-wired (option 26), passed into
+the Game, emitted in the GameStats blob, settable via setoptions, ranged in
+the mode packs and in serverconfig.example.xml; the client-side death flow
+switches on the stat, so an operator can now change it. Player progression
+14/8/15 -> **15/7/15**; total **247/48/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

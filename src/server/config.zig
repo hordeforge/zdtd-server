@@ -98,6 +98,9 @@ pub const Config = struct {
     max_spawned_animals: u16 = 50, // MaxSpawnedAnimals server-wide cap
     air_drop_frequency: u16 = 72, // AirDropFrequency in game hours (0 = off)
     drop_on_death: u8 = 1, // DropOnDeath 0=nothing 1=all 2=toolbelt 3=backpack 4=delete
+    /// DeathPenalty 0=nothing 1=XPOnly 2=Backpack 3=Delete (stock
+    /// GameStat.DeathPenalty; the behaviour runs client-side on the stat).
+    death_penalty: u8 = 1,
     land_claim_size: u16 = 41, // LandClaimSize (blocks per side, must be odd)
     land_claim_online_durability_modifier: u16 = 4, // LandClaimOnlineDurabilityModifier
     land_claim_offline_durability_modifier: u16 = 4, // LandClaimOfflineDurabilityModifier
@@ -341,6 +344,8 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.air_drop_frequency = sandboxIntU16(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "DropOnDeath")) {
             cfg.drop_on_death = sandboxIntU8(sandbox.valueI(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "DeathPenalty")) {
+            cfg.death_penalty = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "ZombieMove")) {
             cfg.zombie_move = sandboxIntU8(sandbox.valueI(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "ZombieMoveNight")) {
@@ -469,6 +474,7 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     if (prop(raw, "MaxSpawnedAnimals")) |v| cfg.max_spawned_animals = clampRangeNamed("MaxSpawnedAnimals", v, 0, 2048, cfg.max_spawned_animals);
     if (prop(raw, "AirDropFrequency")) |v| cfg.air_drop_frequency = clampRangeNamed("AirDropFrequency", v, 0, 8760, cfg.air_drop_frequency);
     if (prop(raw, "DropOnDeath")) |v| cfg.drop_on_death = clampU8Named("DropOnDeath", v, 0, 4, cfg.drop_on_death);
+    if (prop(raw, "DeathPenalty")) |v| cfg.death_penalty = clampU8Named("DeathPenalty", v, 0, 3, cfg.death_penalty);
     if (prop(raw, "LandClaimSize")) |v| {
         // Stock keystone area is odd (centered on block); force odd after clamp.
         var sz = clampRangeNamed("LandClaimSize", v, 1, 255, cfg.land_claim_size);
@@ -681,6 +687,7 @@ test "parse gameplay options with clamping" {
         \\  <property name="MaxSpawnedAnimals" value="20"/>
         \\  <property name="AirDropFrequency" value="24"/>
         \\  <property name="DropOnDeath" value="2"/>
+        \\  <property name="DeathPenalty" value="2"/>
         \\  <property name="LandClaimSize" value="31"/>
         \\  <property name="LandClaimOnlineDurabilityModifier" value="8"/>
         \\</ServerSettings>
@@ -712,6 +719,7 @@ test "parse gameplay options with clamping" {
     try std.testing.expectEqual(@as(u16, 20), cfg.max_spawned_animals);
     try std.testing.expectEqual(@as(u16, 24), cfg.air_drop_frequency);
     try std.testing.expectEqual(@as(u8, 2), cfg.drop_on_death);
+    try std.testing.expectEqual(@as(u8, 2), cfg.death_penalty);
     try std.testing.expectEqual(@as(u16, 31), cfg.land_claim_size);
     try std.testing.expectEqual(@as(u16, 8), cfg.land_claim_online_durability_modifier);
     try std.testing.expectEqual(AuthorityMode.correct, cfg.authority_mode);

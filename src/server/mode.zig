@@ -48,6 +48,7 @@ pub const Pack = struct {
         .max_spawned_animals = .{ 0, 2048 },
         .air_drop_frequency = .{ 0, 8760 },
         .drop_on_death = .{ 0, 4 },
+        .death_penalty = .{ 0, 3 },
         // 255 max and even sizes forced odd: zdtd_config.sanitizeInitOptions
         // normalizes the merged value (a keystone area is centered on a block).
         .land_claim_size = .{ 1, 255 },
