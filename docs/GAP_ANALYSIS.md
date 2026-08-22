@@ -3888,12 +3888,16 @@ persists so little that a restart visibly damages a built base.
   `src/server/admin_console.zig` (`handleConsoleCmd` admin route), scenario
   `in-game player console`
 
-- **Web dashboard** `PARTIAL`
+- **Web dashboard** `PARTIAL` `(non-client-visible, 2026-08-22)`
   zdtd ships its own web UI with a required shared secret (min 8 chars,
   charset-validated), HMAC session token for cookie and CSRF, and a lockout after
   repeated bad tokens, loopback by default. It is not the stock WebDashboard:
   WebDashboardEnabled / WebDashboardPort / WebDashboardUrl are ignored and there is
-  no webtokens / webpermission / createwebuser surface.
+  no webtokens / webpermission / createwebuser surface. Documented per the parity
+  rules as **non-client-visible**: the stock WebDashboard is an operator-side
+  admin surface the stock client never contacts (it is not a game wire path),
+  so this residual does not block client-visible parity; it stays PARTIAL
+  rather than WORKS because the operator-facing surface genuinely differs.
   *Anchors:* `src/server/webui.zig:1-40`, `:134-220`, `serverconfig.xml`
 
 - **GameServerInfo TCP provider (direct connect)** `WORKS`

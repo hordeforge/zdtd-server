@@ -215,6 +215,28 @@ no-handler names are all non-stock-play scope (mod API, EAC waiver, creative
 editor, Twitch, headless mesh, drone cosmetics) - nothing a stock client
 sends in normal play is dropped unhandled. Net 52/4/0 -> **53/3/0**; total
 **211/84/38**.
+Then the S2C package-emission row went WORKS on re-audit: every never-sent
+name is a documented non-goal under the parity rules (skill sync tracked by
+the progression area; WallVolume not loaded; Light/TreeFade/AudioPlayInHead/
+WaterSimChunkUpdate cosmetic; AuthState EAC-scope authorizer UX), and turret
+animation is client-driven from the TurretSync aim/on state - no package a
+stock client needs for stock play is left unsent. Net 53/3/0 -> **54/2/0**;
+total **212/83/38**.
+Then the in-game player console row went WORKS: NetPackageConsoleCmdServer
+is answered with ConsoleCmdClient, players get the read-only allowlist
+(deny otherwise), and an admin (permission list entry) routes
+non-allowlisted verbs through the full admin surface with the reply
+captured, gated by the per-command permission levels. Scenario
+in-game-player-console drives the wire: help answers, a player's kick is
+denied, an admin's kick routes and replies. Net 54/2/0 -> **55/1/0**; total
+**213/82/38**.
+Then the web-dashboard row was documented as **non-client-visible** under
+the parity rules: the stock WebDashboard is an operator-side admin surface
+the stock client never contacts (not a game wire path), so its residual
+(WebDashboardEnabled/Port/Url ignored, no webtokens/webpermission/
+createwebuser) does not block client-visible parity and it stays PARTIAL
+with the note. Net/ops is now at client-visible parity: 55 WORKS / 1
+non-client-visible PARTIAL / 0 MISSING.
 The dashboard
 (docs/provenance.html) is synced.
 
