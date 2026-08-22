@@ -3062,3 +3062,34 @@ test "POI difficulty tier scales the loot stage (POITierMod/Bonus)" {
     g.sim.poi_tier_fn = &Tier.tier;
     try std.testing.expectEqual(@as(i32, 17), g.lootStageOf(cl.slot));
 }
+
+test "quest reward stage scales by quest tier (GetTraderStage)" {
+    // Stock GetRewardItem rolls quest rewards with gameStage =
+    // GetTraderStage(tier) = Level*(1+quest_tier_mod[tier-1]) (RE
+    // progression.md GetTraderStage IL=46): level 10 at tier 3 with the
+    // stock root quest_tier_mod="0,0.05,0.1,..." -> 10*(1.1) = 11.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const mods = [_]f32{ 0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3 };
+    g.traders.quest_tier_mod = &mods;
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    cl.level = 10;
+    const def = ecs.quest.QuestDef{ .id = 1, .kind = .kill_zombies, .name = "r", .title = "R", .difficulty_tier = 3 };
+    try std.testing.expectEqual(@as(i32, 11), g.questRewardStage(def, cl.slot));
+    // Tier 6 clamps to mods[5]=0.25: 10*(1.25) = 12.5 -> 12.
+    var def6 = def;
+    def6.difficulty_tier = 6;
+    try std.testing.expectEqual(@as(i32, 12), g.questRewardStage(def6, cl.slot));
+    // No tier -> the party loot stage fallback (level = 10).
+    var def0 = def;
+    def0.difficulty_tier = 0;
+    try std.testing.expectEqual(@as(i32, 10), g.questRewardStage(def0, cl.slot));
+}

@@ -150,7 +150,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 33 | 1 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
-| [Traders](#5-traders) | 18 | 2 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
+| [Traders](#5-traders) | 19 | 1 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 26 | 4 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
@@ -158,7 +158,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 38 | 6 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **262** | **29** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **263** | **28** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -995,7 +995,7 @@ parsed, and quest offering is unwired.
   `src/server/game.zig:8345+`, `Data/Config/traders.xml:1240-1280`,
   `:1469`, `:1472`, `:1488`
 
-- **traders.xml root economy attributes** `PARTIAL` (2026-08-07, RE'd 2026-08-08):
+- **traders.xml root economy attributes** `WORKS` (2026-08-07, RE'd 2026-08-08):
   `buy_markup` / `sell_markdown` were already parsed; `currency_item` is now
   parsed too and `Game.coinItemId` pays trade/rent in that item instead of a
   hardcoded "casinoCoin" name (falling back to the stock name when unset).
@@ -1008,10 +1008,13 @@ parsed, and quest offering is unwired.
   prices lerp by the item quality at fill and on the non-stocked sell hook,
   so the transaction matches the client display; see the pricing row).
   `PercentUsesLeft` (EffectManager MaxUseTimes) stays RE-blocked.
-  `quest_tier_mod`
-  (stock root `0,0.05,...,0.3`) is quest-reward tier scaling
-  (asm.il 504145-504157) and stays open with the quest reward economy.
-  *Anchors:* `src/assets/traders.zig` root row, `src/server/game.zig`
+  2026-08-22: `quest_tier_mod` (stock root `0,0.05,...,0.3`) parses and
+  feeds the quest reward roll - GetRewardItem rolls with gameStage =
+  GetTraderStage(tier) = Level*(1+quest_tier_mod[tier-1]) (RE progression.md
+  GetTraderStage IL=46, loot-economy.md 8.4; test quest reward stage scales
+  by quest tier).
+  *Anchors:* `src/assets/traders.zig` root row, `src/server/game/step.zig`
+  questRewardStage, `src/server/game.zig`
   `coinItemId`, `Data/Config/traders.xml:3`, `asm.il:1397236-1397257`,
   `asm.il:1830625-1830948`
 

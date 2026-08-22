@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 262 `WORKS`,
-29 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 263 `WORKS`,
+28 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -522,6 +522,11 @@ scorecard counts recount per category, every GAP feature row embeds under
 its category (click a row to expand), a search box filters categories and
 features, state chips toggle WORKS/PARTIAL/waived rows, and the numeric
 headers sort. Regenerate with `python3 scripts/gen_provenance.py`.
+Then traders.xml root economy went WORKS: quest_tier_mod parses (stock
+root 0,0.05,...,0.3) and feeds the quest reward roll - GetRewardItem rolls
+with gameStage = GetTraderStage(tier) = Level*(1+mod[tier-1]) (RE
+progression.md GetTraderStage IL=46; test quest reward stage scales by
+quest tier). Traders 19/1/0; total **263/28/0**.
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the

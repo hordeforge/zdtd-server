@@ -1264,6 +1264,11 @@ pub const Game = struct {
         return game_player.partyLootStage(self);
     }
 
+    /// Stock GetRewardItem gameStage = GetTraderStage(quest tier).
+    pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i32 {
+        return @import("game/step.zig").questRewardStage(self, d, peer);
+    }
+
     pub fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
         return game_player.lootStageForPlayer(self, peer_slot);
     }

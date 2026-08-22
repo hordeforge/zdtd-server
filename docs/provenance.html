@@ -49,7 +49,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <main id="main-content">
 <section id="scorecard" aria-labelledby="scorecard-heading">
 <h2 id="scorecard-heading">Stock game systems · GAP_ANALYSIS scorecard</h2>
-<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">262</b> WORKS / <b class="num">29</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">291</b> scored features = <b>90%</b> fully ported, <b>100%</b> at least partial (recount 2026-08-22 from the live markers; GAP_ANALYSIS scorecard wins on conflict).</p>
+<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">263</b> WORKS / <b class="num">28</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">291</b> scored features = <b>90%</b> fully ported, <b>100%</b> at least partial (recount 2026-08-22 from the live markers; GAP_ANALYSIS scorecard wins on conflict).</p>
 <div class="toolbar">
 <label class="sr-only" for="filter">Filter categories and features</label>
 <input id="filter" type="search" placeholder="Filter categories and features… (e.g. sleeper, trader, ZPV, quest)" autocomplete="off">
@@ -108,8 +108,8 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 </tbody></table></div></td></tr>
 <tr class="cat" data-name="Traders" tabindex="0" aria-expanded="false">
 <th scope="row">Traders</th>
-<td><span class="pbar" role="progressbar" aria-valuenow="90" aria-valuemin="0" aria-valuemax="100" style="--p:90%"><span class="sr-only">90% ported</span></span> 90%</td>
-<td class="num">18</td><td class="num">2</td><td class="num">0</td>
+<td><span class="pbar" role="progressbar" aria-valuenow="95" aria-valuemin="0" aria-valuemax="100" style="--p:95%"><span class="sr-only">95% ported</span></span> 95%</td>
+<td class="num">19</td><td class="num">1</td><td class="num">0</td>
 <td>Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, turn-in on open and the WorldAreas compound package land; quest offers (NPCQuestList exchange complete); sell any item at EconomicValue x markdown (quality lerp from the root quality_mod); POI placement open</td><td>A: traders.xml, npc.xml, items.xml EconomicValue · R: npc-dialog.md · Z: TraderInfo roll, wallet, quest offers</td></tr>
 <tr class="feat-row" hidden><td colspan="7"><div class="feat-wrap"><table class="feat"><caption class="sr-only">Traders GAP features</caption><tbody>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Trader placement in POIs</td></tr>
@@ -121,7 +121,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>C2S NetPackageTraderData handling</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>traders.xml trader_item_group parsing with nested group refs</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>traders.xml `&lt;trader_info&gt;` elements</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>traders.xml root economy attributes</td></tr>
+<tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>traders.xml root economy attributes</td></tr>
 <tr class="feat" data-state="ad-hoc"><td class="st ad-hoc">ROLLED (2026-08-08)</td><td>Inventory roll (count ranges, prob, unique_only, quality, RNG)</td></tr>
 <tr class="feat" data-state="ad-hoc"><td class="st ad-hoc">50-ENTRY (2026-08-08)</td><td>Inventory depth and ordering</td></tr>
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>Buy/sell pricing from items.xml EconomicValue</td></tr>

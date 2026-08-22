@@ -102,6 +102,10 @@ pub const TraderTable = struct {
     /// no quality effect.
     quality_min_mod: f32 = 1,
     quality_max_mod: f32 = 1,
+    /// Root `quest_tier_mod="0,0.05,…,0.3"` (stock): GetTraderStage scales
+    /// the quest-reward loot stage by the quest tier, Level*(1+mod[tier-1])
+    /// (RE progression.md GetTraderStage IL=46).
+    quest_tier_mod: []const f32 = &.{},
     /// Root `currency_item` name (stock traders.xml: "casinoCoin"). Game pays
     /// trade/rent in this item; empty = the stock-name fallback.
     currency_item: []const u8 = "",
@@ -388,11 +392,23 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
     var root_sell_markdown: f32 = 0;
     var root_quality_min: f32 = 1;
     var root_quality_max: f32 = 1;
+    var root_quest_tier_mod: []const f32 = &.{};
     var root_currency: []const u8 = "";
     if (std.mem.findPos(u8, clean, 0, "<traders")) |tr| {
         if (xml.attr(clean, tr, "buy_markup")) |v| root_buy_markup = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, tr, "sell_markdown")) |v| root_sell_markdown = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, tr, "currency_item")) |v| root_currency = try arena.dupe(u8, v);
+        if (xml.attr(clean, tr, "quest_tier_mod")) |v| {
+            var qtm: std.ArrayList(f32) = .empty;
+            defer qtm.deinit(allocator);
+            var it = std.mem.splitScalar(u8, v, ',');
+            while (it.next()) |tok| {
+                const t = std.mem.trim(u8, tok, " \t");
+                if (t.len == 0) continue;
+                qtm.append(allocator, std.fmt.parseFloat(f32, t) catch 0) catch break;
+            }
+            root_quest_tier_mod = try arena.dupe(f32, qtm.items);
+        }
         if (xml.attr(clean, tr, "quality_mod")) |qm| {
             if (std.mem.findScalar(u8, qm, ',')) |comma| {
                 root_quality_min = std.fmt.parseFloat(f32, std.mem.trim(u8, qm[0..comma], " \t")) catch 1;
@@ -468,6 +484,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !TraderTable
         .buy_markup = root_buy_markup,
         .quality_min_mod = root_quality_min,
         .quality_max_mod = root_quality_max,
+        .quest_tier_mod = root_quest_tier_mod,
         .sell_markdown = root_sell_markdown,
         .currency_item = root_currency,
         .arena_ptr = arena_holder,

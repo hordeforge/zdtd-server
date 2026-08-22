@@ -335,7 +335,12 @@ pub fn step(self: *Game) !void {
                             const picks: u8 = @intCast(@min(spec.value, 8));
                             const want = if (picks == 0) 1 else picks;
                             const seed: u32 = @truncate(self.sim.director.clock.worldTimeBits() ^ @as(u64, @intCast(cq.def_id)));
-                            const n = self.loot.rollGroupPicks(spec.item_name, self.partyLootStage(), seed, want, spec.is_fixed, &stacks);
+                            // Stock GetRewardItem rolls with gameStage =
+                            // GetTraderStage(quest tier) = Level*(1+mod) (RE
+                            // loot-economy.md 8.4, progression.md
+                            // GetTraderStage IL=46); the tier mod comes from
+                            // the traders.xml root quest_tier_mod.
+                            const n = self.loot.rollGroupPicks(spec.item_name, self.questRewardStage(d, peer), seed, want, spec.is_fixed, &stacks);
                             var si: usize = 0;
                             while (si < n) : (si += 1) {
                                 const eid = self.items.ecsIdByName(stacks[si].item_name);
@@ -424,4 +429,20 @@ pub fn step(self: *Game) !void {
         }
     }
     completed = true;
+}
+
+/// Stock GetRewardItem rolls quest rewards with gameStage =
+/// GetTraderStage(quest tier) = Level*(1+quest_tier_mod[tier-1]) (RE
+/// loot-economy.md 8.4, progression.md GetTraderStage IL=46; the tier mod
+/// is the traders.xml root quest_tier_mod). Falls back to the party loot
+/// stage when the def has no tier or the table no quest_tier_mod.
+pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i32 {
+    if (d.difficulty_tier < 1 or peer >= self.clients.len) return self.partyLootStage();
+    const mods = self.traders.quest_tier_mod;
+    if (mods.len == 0) return self.partyLootStage();
+    const idx: usize = @min(@as(usize, d.difficulty_tier - 1), mods.len - 1);
+    const level: f32 = @floatFromInt(self.clients[peer].level);
+    const base = level * (1.0 + mods[idx]);
+    if (!std.math.isFinite(base)) return 1;
+    return @max(1, @as(i32, @intFromFloat(@floor(base))));
 }
