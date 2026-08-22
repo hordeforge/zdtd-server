@@ -2403,6 +2403,15 @@ pub const Game = struct {
             .sight_range = d.sight_range,
             .is_enemy = d.is_enemy,
             .xp_gain = d.xp_gain,
+            .explode_threshold = d.explode_threshold,
+            .explode_delay_s = d.explode_delay_s,
+            .explosion_radius = d.explosion.radius_blocks,
+            .explosion_radius_e = d.explosion.radius_entities,
+            .explosion_block_dmg = d.explosion.block_damage,
+            .explosion_entity_dmg = d.explosion.entity_damage,
+            .explosion_bonus_cat = d.explosion.bonus_cat,
+            .explosion_bonus_mult = d.explosion.bonus_mult,
+            .explosion_bonus_n = d.explosion.bonus_n,
         };
     }
 

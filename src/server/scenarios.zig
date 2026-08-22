@@ -997,6 +997,92 @@ test "scenario hammer upgrade validates the UpgradeBlock target" {
     std.debug.print("PASS upgrade: woodMaster -> cobblestoneMaster accepted, forged swap rejected\n", .{});
 }
 
+test "scenario demolish blast uses per-class ExplosionData and the earth DamageBonus" {
+    // drainExplosions: the blast params come from the class's <property
+    // class="Explosion"> block carried per entity (spawnZombie copies it from
+    // class_table), with the Rules values as floor; the DamageBonus earth -> 0
+    // keeps terrain (materials.xml damage_category) intact while stone breaks.
+    freshScenarioDir("worlds/zdtd_sc_explode");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_explode", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var peer_cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&peer_cap);
+    // Stock blocks.xml + materials.xml so block -> Material -> damage_category
+    // resolves (offline builtin table has no material chain).
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
+    mt.tryMergeBundledAssignIds(gpa);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+    const stone_id = g.maxdamage.idByName("terrStone") orelse return error.SkipZigTest;
+    const dirt_id = g.maxdamage.idByName("terrDirt") orelse return error.SkipZigTest;
+
+    const pushBlast = struct {
+        fn push(g2: *game_mod.Game, s: u16) !void {
+            const cap = @import("../ecs/components.zig").explode_cap;
+            if (g2.sim.explode_n >= cap) return error.TestUnexpectedResult;
+            g2.sim.explode_reqs[g2.sim.explode_n] = .{ .slot = s };
+            g2.sim.explode_n += 1;
+            try g2.step(); // drains the ring (Game.step -> drainExplosions)
+        }
+    }.push;
+
+    // Blast centre at the joined client so the cop never despawns during the
+    // tick that precedes the drain (despawn_dist_sq is 200 m). Spawn the cop
+    // at the terrain FEET level (the player's transform Y is its centre, ~6
+    // blocks up; an airborne cop falls and dies before the drain) and offset
+    // the whole blast a bit from the player so the entity AoE spares them.
+    const px = g.sim.transform[c.slot];
+    const gx: i32 = @as(i32, @intFromFloat(px.x)) + 10;
+    const gz: i32 = @as(i32, @intFromFloat(px.z)) + 10;
+    const gy: i32 = @intFromFloat(g.groundHeight(gx, gz));
+    // Cop A: radius 5, block damage 5000 (overrides the 1000 floor), entity
+    // damage 800, DamageBonus earth -> 0.
+    g.sim.setClassDef(1, .{
+        .name = "zombieCop",
+        .kind = .zombie,
+        .hash = 7,
+        .explosion_radius = 5,
+        .explosion_radius_e = 6,
+        .explosion_block_dmg = 5000,
+        .explosion_entity_dmg = 800,
+        .explosion_bonus_cat = .{ "earth", "", "", "" },
+        .explosion_bonus_mult = .{ 0, 1, 1, 1 },
+        .explosion_bonus_n = 1,
+    });
+    const zid_a = g.sim.spawnZombie(@floatFromInt(gx), @floatFromInt(gy), @floatFromInt(gz), 100).?;
+    const sa = g.sim.slotOfNetId(zid_a).?;
+    try g.setBlock(gx + 3, gy, gz + 3, stone_id); // dist 4.24: 5000*0.152=760 >= 500 HP
+    try g.setBlock(gx + 2, gy, gz + 2, dirt_id); // earth category -> bonus 0 -> survives
+    try pushBlast(g, sa);
+    try std.testing.expect((try g.world.blockWorld(gx + 3, gy, gz + 3)) == 0); // stone broken
+    try std.testing.expect((try g.world.blockWorld(gx + 2, gy, gz + 2)) != 0); // dirt survived
+    try std.testing.expect(!g.sim.alive[sa]); // the cop died with the blast
+
+    // Cop B: radius 1 (per-entity wins over the rules floor 4): the same stone
+    // cell at distance 1.414 is outside the blast and survives.
+    g.sim.setClassDef(1, .{
+        .name = "zombieCop",
+        .kind = .zombie,
+        .hash = 7,
+        .explosion_radius = 1,
+        .explosion_block_dmg = 5000,
+    });
+    const zid_b = g.sim.spawnZombie(@floatFromInt(gx), @floatFromInt(gy), @floatFromInt(gz), 100).?;
+    const sb = g.sim.slotOfNetId(zid_b).?;
+    try g.setBlock(gx + 1, gy, gz + 1, stone_id);
+    try pushBlast(g, sb);
+    try std.testing.expect((try g.world.blockWorld(gx + 1, gy, gz + 1)) != 0); // outside radius 1
+
+    std.debug.print("PASS explode: per-class ExplosionData radius/damage + earth bonus\n", .{});
+}
+
 test "scenario stability collapse spawns one singular fallingBlock per qualifying cell" {
     // RE entity-ai.md LetBlocksFall 1256-1262: the default path (group mode
     // EntityFallingBlocks.Enabled is false) spawns one fallingBlock entity

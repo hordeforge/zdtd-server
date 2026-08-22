@@ -194,20 +194,51 @@ pub fn drainExplosions(self: *Game) void {
     const ecs_components = @import("../../ecs/components.zig");
     const n = @min(self.sim.explode_n, ecs_components.explode_cap);
     self.sim.explode_n = 0;
-    const radius = self.sim.rules.ai.explosion_radius;
-    const ent_dmg = self.sim.rules.ai.explosion_entity_damage;
-    const block_dmg = self.sim.rules.ai.explosion_block_damage;
-    const r2 = radius * radius;
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const s: u16 = self.sim.explode_reqs[i].slot; // Slot = u16
         if (!self.sim.alive[s] or !self.sim.mask[s].transform or !self.sim.mask[s].network_id) continue;
         const ex = self.sim.transform[s];
         const nid = self.sim.network_id[s].id;
+        // Per-entity blast params (spawnZombieDef copies the class's
+        // <property class="Explosion"> block onto class_id so the kind-default
+        // table row never hides it), then the preloaded class_table row, then
+        // the Rules floor. Read before destroy.
+        const ci = self.sim.class_id[s];
+        const ct = self.sim.class_table[ci.id];
+        const radius: f32 = if (ci.explosion_radius > 0)
+            ci.explosion_radius
+        else if (ct.explosion_radius > 0)
+            ct.explosion_radius
+        else
+            self.sim.rules.ai.explosion_radius;
+        const radius_e: f32 = if (ci.explosion_radius_e > 0)
+            ci.explosion_radius_e
+        else if (ct.explosion_radius_e > 0)
+            ct.explosion_radius_e
+        else
+            radius;
+        const ent_dmg: f32 = if (ci.explosion_entity_dmg > 0)
+            ci.explosion_entity_dmg
+        else if (ct.explosion_entity_dmg > 0)
+            ct.explosion_entity_dmg
+        else
+            self.sim.rules.ai.explosion_entity_damage;
+        const block_dmg: f32 = if (ci.explosion_block_dmg > 0)
+            ci.explosion_block_dmg
+        else if (ct.explosion_block_dmg > 0)
+            ct.explosion_block_dmg
+        else
+            self.sim.rules.ai.explosion_block_damage;
+        const bonus_cat = if (ci.explosion_bonus_n > 0) ci.explosion_bonus_cat else ct.explosion_bonus_cat;
+        const bonus_mult = if (ci.explosion_bonus_n > 0) ci.explosion_bonus_mult else ct.explosion_bonus_mult;
+        const bonus_n: u8 = if (ci.explosion_bonus_n > 0) ci.explosion_bonus_n else ct.explosion_bonus_n;
+        const r2 = radius * radius;
         // The cop dies with the blast (RE: SetDead after ExplosionServer).
         self.sim.destroy(s);
         // Entity AoE: linear falloff from the epicentre (players, zombies,
         // animals; falling blocks and vehicles are not damaged).
+        const r2e = radius_e * radius_e;
         const kinds = [_]ecs_components.Kind{ .player, .zombie, .animal };
         for (kinds) |kind| {
             for (self.sim.kind_groups.slice(kind)) |t| {
@@ -216,13 +247,15 @@ pub fn drainExplosions(self: *Game) void {
                 const dz = self.sim.transform[t].z - ex.z;
                 const dy = self.sim.transform[t].y - ex.y;
                 const d2 = dx * dx + dy * dy + dz * dz;
-                if (d2 > r2) continue;
-                const falloff: f32 = 1.0 - @sqrt(d2) / radius;
+                if (d2 > r2e) continue;
+                const falloff: f32 = 1.0 - @sqrt(d2) / radius_e;
                 _ = self.sim.damageFrom(self.sim.network_id[t].id, ent_dmg * falloff, nid);
             }
         }
         // Block AoE: blocks in the sphere (bounded by the radius) take
-        // falloff block damage through the choke point; break like the chew.
+        // falloff block damage through the choke point, scaled by the class's
+        // DamageBonus material multipliers (stock cop: earth category → 0, so
+        // terrain survives the blast); break like the chew.
         const ir: i32 = @intFromFloat(@ceil(radius));
         const bx: i32 = @intFromFloat(@floor(ex.x));
         const by: i32 = @intFromFloat(@floor(ex.y));
@@ -240,8 +273,19 @@ pub fn drainExplosions(self: *Game) void {
                     const wz = bz + dz2;
                     const id = self.blockIdAtWorld(wx, wy, wz);
                     if (id == 0) continue;
+                    var mult: f32 = 1;
+                    if (self.maxdamage.categoryForBlock(id)) |cat| {
+                        var bi: u8 = 0;
+                        while (bi < bonus_n) : (bi += 1) {
+                            if (std.mem.eql(u8, cat, bonus_cat[bi])) {
+                                mult = bonus_mult[bi];
+                                break;
+                            }
+                        }
+                    }
+                    if (mult == 0) continue; // category immune to this blast
                     const falloff: f32 = 1.0 - @sqrt(d2f) / radius;
-                    const dmg: u16 = @intFromFloat(@as(f32, @floatFromInt(block_dmg)) * falloff);
+                    const dmg: u16 = @intFromFloat(block_dmg * falloff * mult);
                     if (dmg == 0) continue;
                     const max_hp = self.maxDamageForBlock(id);
                     const total = self.addBlockDamage(wx, wy, wz, dmg) catch continue;

@@ -9,6 +9,23 @@ const components = @import("../ecs/components.zig");
 
 pub const max_entities_defs: usize = 512;
 
+/// Stock `<property class="Explosion">` blast params (RE entity-ai.md §9.x):
+/// RadiusBlocks / RadiusEntities / BlockDamage / EntityDamage plus the
+/// DamageBonus material multipliers (materials.xml damage_category keys, e.g.
+/// `earth → 0`: terrain survives the cop blast). 0 = unset, which leaves the
+/// blast on the Rules floor (rule 11: per-entity stock data wins where present).
+pub const ExplosionDef = struct {
+    radius_blocks: f32 = 0,
+    radius_entities: f32 = 0,
+    block_damage: f32 = 0,
+    entity_damage: f32 = 0,
+    /// DamageBonus category multipliers; parallel arrays, first body carrying
+    /// a DamageBonus wins (stock ships it on the base class only).
+    bonus_cat: [4][]const u8 = .{ "", "", "", "" },
+    bonus_mult: [4]f32 = .{ 1, 1, 1, 1 },
+    bonus_n: u8 = 0,
+};
+
 pub const EntityDef = struct {
     name: []const u8 = "",
     /// Unity Mono string.GetHashCode (EntityClass.list key).
@@ -53,6 +70,9 @@ pub const EntityDef = struct {
     /// entityclasses ExplodeDelay seconds (Demolition prime-to-explode
     /// delay). 0.5 stock default when unset.
     explode_delay_s: f32 = 0.5,
+    /// <property class="Explosion"> blast params (radius/damages/bonuses),
+    /// Extends-resolved per field. Unset fields stay 0 -> Rules floor.
+    explosion: ExplosionDef = .{},
     /// ExperienceGain kill XP (stock ships 130 rabbit .. 2500 zombieBear;
     /// most zombies resolve through the `^xpNormal01`-style replace_properties
     /// ladder). 0 = unset, which leaves the award at the caller's flat floor.
@@ -154,6 +174,10 @@ const RawClass = struct {
     name: []const u8,
     extends: ?[]const u8,
     props: std.StringHashMapUnmanaged([]const u8),
+    /// Inner rows of the nested `<property class="Explosion">` block
+    /// (arena-owned; captured whole so Extends resolution can read per-field
+    /// overrides). Null = the class never explodes.
+    explosion: ?[]const u8 = null,
 };
 
 fn resolveProp(
@@ -167,6 +191,90 @@ fn resolveProp(
     if (rc.props.get(key)) |v| return v;
     if (rc.extends) |ex| return resolveProp(classes, ex, key, depth + 1);
     return null;
+}
+
+/// Inner `<property name=K value=V>` lookup inside a captured Explosion body.
+fn explosionField(body: []const u8, key: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (std.mem.findPos(u8, body, i, "<property")) |ptag| {
+        i = ptag + 9;
+        const pname = xml.attr(body, ptag, "name") orelse continue;
+        if (!std.mem.eql(u8, pname, key)) continue;
+        return xml.attr(body, ptag, "value");
+    }
+    return null;
+}
+
+/// DamageBonus children of an Explosion body (`<property class="DamageBonus">`
+/// with `<property name="<category>" value="<mult>">` rows; categories are
+/// materials.xml damage_category keys). Stock ships at most one entry.
+fn explosionBonuses(body: []const u8, out: *ExplosionDef) void {
+    const bt = std.mem.findPos(u8, body, 0, "<property class=\"DamageBonus\"") orelse return;
+    const gt = std.mem.findPos(u8, body, bt, ">") orelse return;
+    const close = std.mem.findPos(u8, body, gt, "</property>") orelse return;
+    const bbody = body[gt + 1 .. close];
+    var i: usize = 0;
+    while (std.mem.findPos(u8, bbody, i, "<property")) |ptag| {
+        i = ptag + 9;
+        const pname = xml.attr(bbody, ptag, "name") orelse continue;
+        const pval = xml.attr(bbody, ptag, "value") orelse continue;
+        if (out.bonus_n >= out.bonus_cat.len) break;
+        if (xml.parseF32(pval)) |f| {
+            // A crafted negative/oversized value must not heal blocks or
+            // insta-clear the map; clamp to [0, 100].
+            if (f >= 0 and f <= 100) {
+                out.bonus_cat[out.bonus_n] = pname;
+                out.bonus_mult[out.bonus_n] = f;
+                out.bonus_n += 1;
+            }
+        }
+    }
+}
+
+/// Extends-resolved `<property class="Explosion">` block: walk the chain from
+/// the class up, first non-empty per field wins (the feral/radiated/infernal
+/// tiers override only BlockDamage/EntityDamage). Bonuses come from the first
+/// body carrying a DamageBonus. Null when no class in the chain explodes.
+fn resolveExplosion(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) ?ExplosionDef {
+    var out: ExplosionDef = .{};
+    var found = false;
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        const eb = rc.explosion orelse {
+            cur = rc.extends;
+            continue;
+        };
+        found = true;
+        if (out.radius_blocks == 0) if (explosionField(eb, "RadiusBlocks")) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f > 0 and f <= 64) out.radius_blocks = f;
+            }
+        };
+        if (out.radius_entities == 0) if (explosionField(eb, "RadiusEntities")) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f > 0 and f <= 64) out.radius_entities = f;
+            }
+        };
+        if (out.block_damage == 0) if (explosionField(eb, "BlockDamage")) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f > 0 and f <= 1_000_000) out.block_damage = f;
+            }
+        };
+        if (out.entity_damage == 0) if (explosionField(eb, "EntityDamage")) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f > 0 and f <= 1_000_000) out.entity_damage = f;
+            }
+        };
+        if (out.bonus_n == 0) explosionBonuses(eb, &out);
+        cur = rc.extends;
+    }
+    return if (found) out else null;
 }
 
 fn parseBoolLoose(s: []const u8) bool {
@@ -333,10 +441,41 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
 
         const name_owned = try arena.dupe(u8, name);
         const ext_owned: ?[]const u8 = if (extends) |e| try arena.dupe(u8, e) else null;
+        // Nested <property class="Explosion"> block (RE entity-ai.md §9.x):
+        // the Demolition blast data. Captured whole (arena-owned inner rows)
+        // so Extends resolution reads per-field overrides; a class without
+        // it never explodes (fail closed). The block can itself nest a
+        // <property class="DamageBonus"> child, so the matching close is the
+        // </property> that returns the property depth to 0.
+        var explosion_body: ?[]const u8 = null;
+        if (std.mem.findPos(u8, body, 0, "<property class=\"Explosion\"")) |etag| {
+            const egt = std.mem.findPos(u8, body, etag, ">") orelse break;
+            if (!(egt > etag and body[egt - 1] == '/')) {
+                var depth: usize = 1;
+                var scan: usize = egt + 1;
+                while (scan < body.len) {
+                    const pc = std.mem.findPos(u8, body, scan, "</property>") orelse break;
+                    var oi: usize = scan;
+                    while (std.mem.findPos(u8, body, oi, "<property")) |pt3| {
+                        if (pt3 >= pc) break;
+                        const pgt3 = std.mem.findPos(u8, body, pt3, ">") orelse break;
+                        if (!(pgt3 > pt3 and body[pgt3 - 1] == '/')) depth += 1;
+                        oi = pgt3 + 1;
+                    }
+                    depth -= 1;
+                    if (depth == 0) {
+                        explosion_body = try arena.dupe(u8, body[egt + 1 .. pc]);
+                        break;
+                    }
+                    scan = pc + 11;
+                }
+            }
+        }
         try classes.put(allocator, name_owned, .{
             .name = name_owned,
             .extends = ext_owned,
             .props = props,
+            .explosion = explosion_body,
         });
         i = if (body_end > gt) body_end + 15 else gt + 1;
         if (classes.count() >= max_entities_defs) break;
@@ -425,14 +564,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         }
         // Demolition (RE entity-ai.md EntityZombieCop): the cop primes when
         // health drops below max*ExplodeHealthThreshold and explodes after
-        // ExplodeDelay. Only classes carrying an ExplosionData property
-        // explode (threshold stays 0 otherwise - fail closed). The
-        // ExplosionData value string (radius/damages) is data-driven and not
-        // parsed; rules floors cover the effect.
+        // ExplodeDelay. Only classes carrying an <property class="Explosion">
+        // block explode (threshold stays 0 otherwise - fail closed). Blast
+        // params (radius/damages/bonuses) resolve per field through Extends.
+        const expl = resolveExplosion(&classes, name);
         var explode_threshold: f32 = 0;
         var explode_delay: f32 = 0.5;
-        const has_explosion = resolveProp(&classes, name, "ExplosionData", 0) != null;
-        if (has_explosion) {
+        if (expl != null) {
             if (resolveProp(&classes, name, "ExplodeHealthThreshold", 0)) |t| {
                 if (xml.parseF32(t)) |f| {
                     if (f > 0 and f <= 1) explode_threshold = f;
@@ -484,6 +622,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .view_angle_deg = view_angle,
             .explode_threshold = explode_threshold,
             .explode_delay_s = explode_delay,
+            .explosion = expl orelse .{},
             .xp_gain = xp_gain,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
@@ -606,4 +745,98 @@ test "AITask attack gating parses from entityclasses XML" {
     try std.testing.expect(!t.byName("animalDeer").?.ai_attack); // inherited timid list
     try std.testing.expect(t.byName("animalWolf").?.ai_attack); // hostile template
     try std.testing.expect(t.byName("mysteryNoTasks").?.ai_attack); // no list -> default
+}
+
+test "stock Demolition Explosion class parses (zombieFatCop tiers)" {
+    // Ground truth = the V3.1.0 b14 stock file: the cop's <property
+    // class="Explosion"> ships RadiusBlocks 5 / RadiusEntities 6 / BlockDamage
+    // 500 / EntityDamage 150 with DamageBonus earth -> 0; the feral and
+    // radiated tiers override only the damages.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entityclasses.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const cop = t.byName("zombieFatCop") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 5), cop.explosion.radius_blocks);
+    try std.testing.expectEqual(@as(f32, 6), cop.explosion.radius_entities);
+    try std.testing.expectEqual(@as(f32, 500), cop.explosion.block_damage);
+    try std.testing.expectEqual(@as(f32, 150), cop.explosion.entity_damage);
+    try std.testing.expect(cop.explosion.bonus_n >= 1);
+    var earth_mult: f32 = 1;
+    var bi: u8 = 0;
+    while (bi < cop.explosion.bonus_n) : (bi += 1) {
+        if (std.mem.eql(u8, cop.explosion.bonus_cat[bi], "earth")) earth_mult = cop.explosion.bonus_mult[bi];
+    }
+    try std.testing.expectEqual(@as(f32, 0), earth_mult);
+    const feral = t.byName("zombieFatCopFeral") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 5), feral.explosion.radius_blocks);
+    try std.testing.expectEqual(@as(f32, 650), feral.explosion.block_damage);
+    try std.testing.expectEqual(@as(f32, 200), feral.explosion.entity_damage);
+}
+
+test "Explosion class resolves per field through Extends with DamageBonus" {
+    // RE entity-ai.md §9.x: the Demolition blast comes from the nested
+    // <property class="Explosion"> block; feral/radiated tiers override only
+    // the damages and inherit radius + DamageBonus from the base class.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="zombieFatCop">
+        \\    <property name="ExplodeHealthThreshold" value=".5"/>
+        \\    <property class="Explosion">
+        \\      <property name="RadiusBlocks" value="5"/>
+        \\      <property name="RadiusEntities" value="6"/>
+        \\      <property name="BlockDamage" value="500"/>
+        \\      <property name="EntityDamage" value="150"/>
+        \\      <property class="DamageBonus">
+        \\        <property name="earth" value="0"/>
+        \\        <property name="stone" value=".5"/>
+        \\      </property>
+        \\    </property>
+        \\  </entity_class>
+        \\  <entity_class name="zombieFatCopFeral" extends="zombieFatCop">
+        \\    <property class="Explosion">
+        \\      <property name="BlockDamage" value="650"/>
+        \\      <property name="EntityDamage" value="200"/>
+        \\    </property>
+        \\  </entity_class>
+        \\  <entity_class name="plainWalker">
+        \\    <property name="MaxHealth" value="50"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+
+    const base = t.byName("zombieFatCop").?;
+    try std.testing.expectEqual(@as(f32, 0.5), base.explode_threshold);
+    try std.testing.expectEqual(@as(f32, 5), base.explosion.radius_blocks);
+    try std.testing.expectEqual(@as(f32, 6), base.explosion.radius_entities);
+    try std.testing.expectEqual(@as(f32, 500), base.explosion.block_damage);
+    try std.testing.expectEqual(@as(f32, 150), base.explosion.entity_damage);
+    try std.testing.expectEqual(@as(u8, 2), base.explosion.bonus_n);
+    try std.testing.expectEqualStrings("earth", base.explosion.bonus_cat[0]);
+    try std.testing.expectEqual(@as(f32, 0), base.explosion.bonus_mult[0]);
+    try std.testing.expectEqualStrings("stone", base.explosion.bonus_cat[1]);
+    try std.testing.expectEqual(@as(f32, 0.5), base.explosion.bonus_mult[1]);
+
+    // Feral overrides the damages; radius and bonuses inherit from the base.
+    const feral = t.byName("zombieFatCopFeral").?;
+    try std.testing.expectEqual(@as(f32, 5), feral.explosion.radius_blocks);
+    try std.testing.expectEqual(@as(f32, 650), feral.explosion.block_damage);
+    try std.testing.expectEqual(@as(f32, 200), feral.explosion.entity_damage);
+    try std.testing.expectEqual(@as(u8, 2), feral.explosion.bonus_n);
+    try std.testing.expectEqualStrings("earth", feral.explosion.bonus_cat[0]);
+
+    // A class without the Explosion block never explodes (threshold stays 0)
+    // and its blast params stay unset (Rules floor applies).
+    const plain = t.byName("plainWalker").?;
+    try std.testing.expectEqual(@as(f32, 0), plain.explode_threshold);
+    try std.testing.expectEqual(@as(f32, 0), plain.explosion.radius_blocks);
+    try std.testing.expectEqual(@as(f32, 0), plain.explosion.block_damage);
 }

@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 231 `WORKS`,
-64 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 232 `WORKS`,
+63 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -334,6 +334,16 @@ persisted by ZCH3 (hdr flag 15), so any number of damaged blocks keeps its
 value, survives eviction and restart, and the chunk wire damage channel reads
 the plane directly; blockmeta.zbm (ZBM2) persists only the raw mirror now.
 World 29/13/6 -> **30/12/6**; total **231/64/38**.
+Then the explosion-block-damage row went WORKS: Demolition blasts now carry
+per-entity ExplosionData from entityclasses.xml (the nested `<property
+class="Explosion">` block, Extends-resolved - stock zombieFatCop ships radius
+5/6 and 500/150 block/entity damage, the feral/radiated/infernal tiers
+override the damages), the Rules values stay the floor for classes without
+it, and the class's DamageBonus material multipliers apply per block through
+the materials.xml damage_category chain (stock cop: earth -> 0, terrain
+survives the blast); falloff + MaxDamage break already ran through the
+addBlockDamage choke point. World 30/12/6 -> **31/11/6**; total
+**232/63/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

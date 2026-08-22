@@ -88,6 +88,18 @@ pub const ClassId = struct {
     /// explode delay seconds; 0 = class_table[id].
     explode_threshold: f32 = 0,
     explode_delay_s: f32 = 0,
+    /// <property class="Explosion"> blast params (radius/damages) and the
+    /// DamageBonus material multipliers; 0 / empty = class_table[id], then
+    /// the Rules floor (drainExplosions reads these so a cop spawned through
+    /// spawnZombieDef - whose class_table index stays the kind default -
+    /// still blasts with its own ExplosionData).
+    explosion_radius: f32 = 0,
+    explosion_radius_e: f32 = 0,
+    explosion_block_dmg: f32 = 0,
+    explosion_entity_dmg: f32 = 0,
+    explosion_bonus_cat: [4][]const u8 = .{ "", "", "", "" },
+    explosion_bonus_mult: [4]f32 = .{ 1, 1, 1, 1 },
+    explosion_bonus_n: u8 = 0,
     /// IsEnemyEntity: false on passive wildlife, so only predators chase.
     is_enemy: bool = true,
     /// Inherited AITask-* list contains an attack task (ApproachAndAttackTarget

@@ -255,6 +255,13 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .view_angle_deg = def.view_angle_deg,
                 .explode_threshold = def.explode_threshold,
                 .explode_delay_s = def.explode_delay_s,
+                .explosion_radius = def.explosion.radius_blocks,
+                .explosion_radius_e = def.explosion.radius_entities,
+                .explosion_block_dmg = def.explosion.block_damage,
+                .explosion_entity_dmg = def.explosion.entity_damage,
+                .explosion_bonus_cat = def.explosion.bonus_cat,
+                .explosion_bonus_mult = def.explosion.bonus_mult,
+                .explosion_bonus_n = def.explosion.bonus_n,
             });
             zslot = if (zslot == 1) 8 else zslot + 1;
             if (pick_seed > 32) break;

@@ -152,6 +152,17 @@ pub const EntityClass = struct {
     /// explosion. ExplodeDelay seconds (0.5 default).
     explode_threshold: f32 = 0,
     explode_delay_s: f32 = 0.5,
+    /// <property class="Explosion"> blast params, Extends-resolved (RE
+    /// entity-ai.md §9.x): per-entity radius/damages; 0 = Rules floor. The
+    /// DamageBonus category multipliers (parallel arrays) scale block damage
+    /// by the block's materials.xml damage_category (stock cop: earth → 0).
+    explosion_radius: f32 = 0,
+    explosion_radius_e: f32 = 0,
+    explosion_block_dmg: f32 = 0,
+    explosion_entity_dmg: f32 = 0,
+    explosion_bonus_cat: [4][]const u8 = .{ "", "", "", "" },
+    explosion_bonus_mult: [4]f32 = .{ 1, 1, 1, 1 },
+    explosion_bonus_n: u8 = 0,
     /// IsEnemyEntity (wolf/bear/coyote hunt; stag/rabbit flee). Defaults true
     /// for zombies; passive animals carry false.
     is_enemy: bool = true,
@@ -801,6 +812,15 @@ pub const World = struct {
             .loot_list = ct.loot_list,
             .drop_prob = ct.drop_prob,
             .time_stay = ct.time_stay,
+            .explode_threshold = ct.explode_threshold,
+            .explode_delay_s = ct.explode_delay_s,
+            .explosion_radius = ct.explosion_radius,
+            .explosion_radius_e = ct.explosion_radius_e,
+            .explosion_block_dmg = ct.explosion_block_dmg,
+            .explosion_entity_dmg = ct.explosion_entity_dmg,
+            .explosion_bonus_cat = ct.explosion_bonus_cat,
+            .explosion_bonus_mult = ct.explosion_bonus_mult,
+            .explosion_bonus_n = ct.explosion_bonus_n,
         };
         self.registerNet(s, nid);
         return s;
@@ -840,6 +860,15 @@ pub const World = struct {
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
             self.class_id[s].xp_gain = def.xp_gain;
+            self.class_id[s].explode_threshold = def.explode_threshold;
+            self.class_id[s].explode_delay_s = def.explode_delay_s;
+            self.class_id[s].explosion_radius = def.explosion_radius;
+            self.class_id[s].explosion_radius_e = def.explosion_radius_e;
+            self.class_id[s].explosion_block_dmg = def.explosion_block_dmg;
+            self.class_id[s].explosion_entity_dmg = def.explosion_entity_dmg;
+            self.class_id[s].explosion_bonus_cat = def.explosion_bonus_cat;
+            self.class_id[s].explosion_bonus_mult = def.explosion_bonus_mult;
+            self.class_id[s].explosion_bonus_n = def.explosion_bonus_n;
         }
         return id;
     }

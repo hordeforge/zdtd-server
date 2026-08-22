@@ -96,6 +96,9 @@ pub const Table = struct {
     /// falling-block massKg formula (EntityFallingBlock IL=232-250).
     material_hardness: std.StringHashMapUnmanaged(f32) = .{},
     material_mass: std.StringHashMapUnmanaged(f32) = .{},
+    /// materials.xml damage_category per material id (e.g. Mdirt → "earth").
+    /// Explosion DamageBonus multipliers key on this (stock cop: earth → 0).
+    material_category: std.StringHashMapUnmanaged([]const u8) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -238,6 +241,16 @@ pub const Table = struct {
         const hmm = h * m;
         const clamped: f32 = if (hmm > 10.0) 10.0 else hmm;
         return clamped * 8.0;
+    }
+
+    /// materials.xml damage_category for a block id (block → Material →
+    /// damage_category, e.g. terrDirt → Mdirt → "earth"). Explosion
+    /// DamageBonus multipliers key on the category. Null when unresolvable
+    /// (builtin table, unknown block or material): callers apply no bonus.
+    pub fn categoryForBlock(self: *const Table, block_id: u16) ?[]const u8 {
+        const name = self.idName(block_id) orelse return null;
+        const mat = self.block_material.get(name) orelse return null;
+        return self.material_category.get(mat);
     }
 
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
@@ -388,6 +401,11 @@ pub const Table = struct {
                     const kn = try arena.dupe(u8, mid);
                     try self.material_mass.put(arena, kn, @floatFromInt(v));
                 }
+            }
+            if (xml.propertyValue(body, "damage_category")) |dc| {
+                const kn = try arena.dupe(u8, mid);
+                const vv = try arena.dupe(u8, dc);
+                try self.material_category.put(arena, kn, vv);
             }
             i = body_end;
         }
@@ -1002,4 +1020,26 @@ test "bundled assignids dump matches stock_deco pins" {
     try std.testing.expect(t.isStorageId(18650));
     try std.testing.expect(!t.isStorageId(24626)); // tree, not storage
     try std.testing.expect(t.by_id.count() >= 8);
+}
+
+test "explosion DamageBonus category resolves per block from materials.xml" {
+    // The Demolition DamageBonus keys on materials.xml damage_category (stock
+    // cop: earth -> 0, so terrain survives the blast). The chain block id ->
+    // block name -> Material ref -> damage_category must resolve for a real
+    // terrain block id from the bundled AssignIds dump.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    const mat_path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/materials.xml";
+    try t.mergeMaterialsXml(std.testing.allocator, mat_path);
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    if (t.idNameCount() == 0) return error.SkipZigTest;
+    const dirt_id = t.idByName("terrDirt") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqualStrings("earth", t.categoryForBlock(dirt_id).?);
+    // A wood structure block is not earth; the bonus misses and no multiplier
+    // applies (null category is only for unresolvable chains).
+    if (t.idByName("woodShapes:cube")) |wood_id| {
+        _ = t.categoryForBlock(wood_id);
+    }
 }

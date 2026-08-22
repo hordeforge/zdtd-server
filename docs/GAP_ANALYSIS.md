@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 30 | 12 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3 |
+| [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **231** | **64** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **232** | **63** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3364,12 +3364,22 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   id-band guesses when no catalog was loaded at all.
   *Anchors:* `src/server/game.zig:3235-3245`, `src/assets/maxdamage.zig`
 
-- **Explosion block damage** `PARTIAL`
-  Applies a uniform sphere dig (radius clamped 1..6) that deletes every non-bedrock
-  block inside it regardless of material or MaxDamage, then broadcasts
-  ExplosionClient. No falloff, no per-block resistance, no partial damage, no
-  per-item block-damage multiplier.
-  *Anchors:* `src/server/game.zig:5243-5310`
+- **Explosion block damage** `WORKS`
+  Demolition blasts carry per-entity ExplosionData from entityclasses.xml
+  (`<property class="Explosion">`, Extends-resolved: the stock cop ships
+  RadiusBlocks 5 / RadiusEntities 6 / BlockDamage 500 / EntityDamage 150,
+  feral/radiated/infernal tiers override the damages), with the Rules values
+  as the floor; blocks in the sphere take linear distance falloff damage
+  through the addBlockDamage choke point, scaled by the class's DamageBonus
+  material multipliers (materials.xml damage_category; stock cop: earth → 0,
+  so terrain survives the blast), break at blocks.xml MaxDamage, and partial
+  damage persists in the chunk damage plane (GAP "Player block damage").
+  The falloff formula itself is not tabulated in the RE corpus (approximation:
+  linear 1 - d/radius).
+  *Anchors:* `src/assets/entities.zig` (`ExplosionDef`, `resolveExplosion`),
+  `src/assets/maxdamage.zig` (`material_category`, `categoryForBlock`),
+  `src/server/game/world.zig` (`drainExplosions`),
+  `src/ecs/world.zig` (`EntityClass.explosion_*`)
 
 - **Land claim keystone registration, edit deny, durability modifier** `WORKS`
   Placing a keystoneBlock registers a claim; `claimCovering` does a Chebyshev test
