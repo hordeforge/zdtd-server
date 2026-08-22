@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 264 `WORKS`,
-27 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 292 features: 264 `WORKS`,
+28 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -577,6 +577,15 @@ tag and World.destroy releases it on death/despawn). Rows spawning.xml
 parsing, MaxSpawnedZombies caps and Night horde updated; unit test
 "ambient rule budget caps the drip and releases on destroy". All 1262
 tests pass. Total **264/27/0**.
+Then the POI-tag spawn gate landed: spawning.xml rule tags/notags parse
+into Rule, the prefab XML Tags property feeds QuestData.poi_tags +
+Index.poiTagsAt, and the ambient group/budget resolvers skip rules whose
+required/forbidden tags fail the POI set under the spawn point (stock
+POITags/noPOITags Test_AnySet) - city rules fire in the matching POIs, the
+notags wilderness rules stay active outside them. The row un-waived to a
+counted PARTIAL (the residual is the stock 80 m-area tag union + random
+group scan vs zdtd's per-position first-match). Test spawning.xml rule
+tags/notags parse. Total **264/28/0** (292 rows).
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the
@@ -760,10 +769,10 @@ Advertised ServerVersion row was stale - the GSI text already emits the strict
 Login version gate shipped 2026-08-21 (Net and ops 29/22/5 -> 30/21/5): the
 full NetPackagePlayerLogin body was already parsed (identities wired to
 puid_primary/puid_native); the VersionAuthorizer gate is now live - a client
-whose compVersion differs from LongStringNoBuild (raw-Minor "V 3.10" for
-V3.1.0 b14, asm.il VersionAuthorizer) is rejected with
+whose compVersion differs from the stock display form ("V 3.1.0" for
+V3.1.0 b14, network.md EMPIRICAL CORRECTION) is rejected with
 EKickReason.VersionMismatch(4) instead of joining and desyncing silently.
-The loadgen harness now sends the stock LongStringNoBuild form
+The loadgen harness now sends the stock compVersion form
 (7dtd-loadgen b5c3069). Total 168/121/44 -> **169/120/44**.
 
 Kick wire + connect rate limiting shipped 2026-08-21 (Net and ops 30/21/5 ->

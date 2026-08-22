@@ -213,6 +213,21 @@ fn bloodMoonDayFor(clk: ecs.aidirector.WorldClock) i32 {
     return game_stability.bloodMoonDayFor(clk);
 }
 
+/// Any comma-list tag of `needle` present in `hay` (stock FastTags
+/// Test_AnySet; the POI tags and the spawning.xml tags/notags lists).
+fn tagsAnySet(needle: []const u8, hay: []const u8) bool {
+    var it = std.mem.splitScalar(u8, needle, ',');
+    while (it.next()) |tag| {
+        const t = std.mem.trim(u8, tag, " \t");
+        if (t.len == 0) continue;
+        var h = std.mem.splitScalar(u8, hay, ',');
+        while (h.next()) |ht| {
+            if (std.mem.eql(u8, t, std.mem.trim(u8, ht, " \t"))) return true;
+        }
+    }
+    return false;
+}
+
 pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, new_id: u16) usize {
     return game_stability.stabilityAfterSetBlock(self, x, y, z, old_id, new_id);
 }
@@ -2530,6 +2545,11 @@ pub const Game = struct {
         var ri: usize = 0;
         while (ri < n) : (ri += 1) {
             const r = buf[ri];
+            // POI-tag gate (spawning.md §2): tagged rules only fire where the
+            // area's POI tags match; the stock random-start scan over up to
+            // min(5, count) groups is approximated by the deterministic
+            // first-matching-rule walk.
+            if (!self.ruleTagsAllow(&r, x, z)) continue;
             switch (kind) {
                 .night => if (r.kind == .zombie and r.time == .night) return r.entitygroup,
                 .day => if (r.kind == .zombie and (r.time == .any or r.time == .day)) return r.entitygroup,
@@ -2575,6 +2595,9 @@ pub const Game = struct {
         while (ri < self.spawning.rules.len) : (ri += 1) {
             const r = &self.spawning.rules[ri];
             if (!std.mem.eql(u8, r.biome, bname)) continue;
+            // POI-tag gate: the budget follows the same rule the group pick
+            // chose, so a tagged rule's cap applies only where it fires.
+            if (!self.ruleTagsAllow(r, x, z)) continue;
             const match = switch (kind) {
                 .night => r.kind == .zombie and r.time == .night,
                 .day => r.kind == .zombie and (r.time == .any or r.time == .day),
@@ -2591,6 +2614,19 @@ pub const Game = struct {
             };
         }
         return .{};
+    }
+
+    /// POI-tag gate for a spawning.xml rule at a world position (stock
+    /// POITags/noPOITags Test_AnySet against the FastTags<Poi> union,
+    /// spawning.md §2): no tags = always enabled; any required tag present
+    /// = enabled; any forbidden tag present = disabled.
+    fn ruleTagsAllow(self: *Game, r: *const assets_spawning.Rule, x: f32, z: f32) bool {
+        if (r.tags.len == 0 and r.notags.len == 0) return true;
+        const pf = if (self.world.prefabs) |*p| p else return r.tags.len == 0;
+        const poi = pf.poiTagsAt(x, z);
+        if (r.notags.len > 0 and tagsAnySet(r.notags, poi)) return false;
+        if (r.tags.len > 0 and !tagsAnySet(r.tags, poi)) return false;
+        return true;
     }
 
     /// gamestages.xml spawner ladder → the stage's first <spawn> row.

@@ -18,6 +18,10 @@ const assignids = @import("../assets/assignids_comptime.zig");
 pub const QuestData = struct {
     /// Stock QuestTags value ("clear, fetch, infested"), "" when absent.
     tags: []const u8 = "",
+    /// Stock `Tags` property (the PoiTags list, e.g. "wilderness",
+    /// "commercial,industrial"): the FastTags<Poi> set the biome spawner
+    /// tests against spawning.xml rule tags/notags (spawning.md §2).
+    poi_tags: []const u8 = "",
     /// Stock DifficultyTier (1..6), 0 when absent.
     tier: u8 = 0,
     /// True when the prefab XML defines at least one sleeper volume (the
@@ -178,6 +182,7 @@ pub const Index = struct {
         var qit = self.quest_cache.iterator();
         while (qit.next()) |e| {
             if (e.value_ptr.tags.len != 0) self.allocator.free(e.value_ptr.tags);
+            if (e.value_ptr.poi_tags.len != 0) self.allocator.free(e.value_ptr.poi_tags);
             if (e.value_ptr.trader_tag.len != 0) self.allocator.free(e.value_ptr.trader_tag);
         }
         self.quest_cache.deinit();
@@ -198,6 +203,25 @@ pub const Index = struct {
             sz = t;
         }
         return .{ .x0 = d.x, .z0 = d.z, .x1 = d.x + sx, .z1 = d.z + sz };
+    }
+
+    /// PoiTags under a world position (the first POI whose AABB contains it,
+    /// stock World.GetPOIsAtXZ union for the biome spawner; parts excluded).
+    /// Returns "" when no POI covers the position.
+    pub fn poiTagsAt(self: *Index, x: f32, z: f32) []const u8 {
+        for (self.items, 0..) |_, i| {
+            const d = self.items[i];
+            if (isPart(d.name)) continue;
+            const b = self.boundsXZ(i);
+            const bx: f32 = @floatFromInt(b.x0);
+            const bz: f32 = @floatFromInt(b.z0);
+            const bx1: f32 = @floatFromInt(b.x1);
+            const bz1: f32 = @floatFromInt(b.z1);
+            if (x < bx or x >= bx1 or z < bz or z >= bz1) continue;
+            const qd = self.questData(d.name) orelse continue;
+            return qd.poi_tags;
+        }
+        return "";
     }
 
     /// Apply footprint flattening into a 16×16 height plane for chunk (cx,cz).
@@ -414,6 +438,14 @@ pub const Index = struct {
             if (xml_util.propertyValue(raw, "DifficultyTier")) |v| {
                 qd.tier = std.fmt.parseInt(u8, v, 10) catch 0;
             }
+            // PoiTags: the prefab `Tags` property (stock FastTags<Poi> for the
+            // biome spawner's POITags/noPOITags test, spawning.md §2).
+            if (xml_util.propertyValue(raw, "Tags")) |v| {
+                qd.poi_tags = self.allocator.dupe(u8, v) catch |err| {
+                    std.debug.print("zdtd: prefab poi tags allocation failed {s}: {s}\n", .{ path, @errorName(err) });
+                    return null;
+                };
+            }
             // Stock PrefabSleeperVolumeList.ReadFromProperties calls
             // Volume.Use per parsed volume, so AnyUsedEntry (the quest POI
             // gate) is true exactly when the XML defines sleeper volumes.
@@ -432,6 +464,7 @@ pub const Index = struct {
                 if (std.mem.startsWith(u8, v, "trader") and v.len > 6) {
                     qd.trader_tag = self.allocator.dupe(u8, v) catch |err| {
                         if (qd.tags.len != 0) self.allocator.free(qd.tags);
+                        if (qd.poi_tags.len != 0) self.allocator.free(qd.poi_tags);
                         std.debug.print("zdtd: prefab trader tag allocation failed {s}: {s}\n", .{ path, @errorName(err) });
                         return null;
                     };
@@ -458,6 +491,7 @@ pub const Index = struct {
         }
         self.quest_cache.put(name, qd) catch {
             if (qd.tags.len != 0) self.allocator.free(qd.tags);
+            if (qd.poi_tags.len != 0) self.allocator.free(qd.poi_tags);
             if (qd.trader_tag.len != 0) self.allocator.free(qd.trader_tag);
             std.debug.print("zdtd: prefab quest metadata cache allocation failed for {s}\n", .{name});
             return null;

@@ -20,6 +20,12 @@ pub const Rule = struct {
     kind: SpawnKind = .zombie,
     /// Default sandbox column of respawndelay (game days), low bound.
     respawn_days: f32 = 1.0,
+    /// Comma list of POI tags: the rule only fires where the area's POI tags
+    /// contain any of these (stock POITags.Test_AnySet, spawning.md §2).
+    tags: []const u8 = "",
+    /// Comma list of POI tags that disable the rule where present
+    /// (stock noPOITags.Test_AnySet).
+    notags: []const u8 = "",
 };
 
 /// `<entityspawner name=…>` with its `EntityGroupName` property. Stock's
@@ -138,6 +144,10 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
             const type_s = xml.attr(body, si, "type");
             const rd_s = xml.attr(body, si, "respawndelay") orelse "1";
             const mc = std.fmt.parseInt(u8, mc_s, 10) catch 1;
+            // POI-tag gating (spawning.md §2): tags = required (any-set),
+            // notags = forbidden (none-set), both comma lists.
+            const tags_s = xml.attr(body, si, "tags") orelse "";
+            const notags_s = xml.attr(body, si, "notags") orelse "";
             try list.append(allocator, .{
                 .biome = bn,
                 .entitygroup = try arena.dupe(u8, eg),
@@ -240,4 +250,22 @@ test "entityspawner parse tolerates malformed rows" {
     try std.testing.expectEqual(@as(usize, 1), t.spawners.len);
     try std.testing.expectEqualStrings("G", t.spawnerByName("ok").?.entitygroup);
     try std.testing.expectEqual(@as(u8, 0), t.spawnerByName("ok").?.total_alive);
+}
+
+test "spawning.xml rule tags/notags parse" {
+    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
+    defer t.deinit();
+    // Stock pine_forest dz02 carries tags="commercial,industrial" notags="downtown".
+    var saw_tags = false;
+    var saw_notags = false;
+    for (t.rules) |r| {
+        if (std.mem.eql(u8, r.biome, "pine_forest") and std.mem.eql(u8, r.entitygroup, "ZombiesAll")) {
+            if (r.tags.len > 0) saw_tags = true;
+            if (r.notags.len > 0) saw_notags = true;
+        }
+    }
+    try std.testing.expect(saw_tags);
+    try std.testing.expect(saw_notags);
 }

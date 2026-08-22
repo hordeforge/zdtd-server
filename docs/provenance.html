@@ -49,7 +49,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <main id="main-content">
 <section id="scorecard" aria-labelledby="scorecard-heading">
 <h2 id="scorecard-heading">Stock game systems · GAP_ANALYSIS scorecard</h2>
-<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">264</b> WORKS / <b class="num">27</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">291</b> scored features = <b>90%</b> fully ported, <b>100%</b> at least partial (recount 2026-08-22 from the live markers; GAP_ANALYSIS scorecard wins on conflict).</p>
+<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">264</b> WORKS / <b class="num">28</b> PARTIAL / <b class="num">0</b> MISSING of <b class="num">292</b> scored features = <b>90%</b> fully ported, <b>100%</b> at least partial (recount 2026-08-22 from the live markers; GAP_ANALYSIS scorecard wins on conflict).</p>
 <div class="toolbar">
 <label class="sr-only" for="filter">Filter categories and features</label>
 <input id="filter" type="search" placeholder="Filter categories and features… (e.g. sleeper, trader, ZPV, quest)" autocomplete="off">
@@ -214,8 +214,8 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 </tbody></table></div></td></tr>
 <tr class="cat" data-name="Entities and AI" tabindex="0" aria-expanded="false">
 <th scope="row">Entities and AI</th>
-<td><span class="pbar" role="progressbar" aria-valuenow="82" aria-valuemin="0" aria-valuemax="100" style="--p:82%"><span class="sr-only">82% ported</span></span> 82%</td>
-<td class="num">32</td><td class="num">7</td><td class="num">0</td>
+<td><span class="pbar" role="progressbar" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100" style="--p:80%"><span class="sr-only">80% ported</span></span> 80%</td>
+<td class="num">32</td><td class="num">8</td><td class="num">0</td>
 <td>Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; zombie block probe chews feet-to-head cover; doors open on both halves; population is still thin</td><td>A: entityclasses/entitygroups/gamestages/buffs.xml · R: entity-ai.md, entity-movement.md, combat-damage.md, aidirector.md · Z: ECS SoA sim, path, interest</td></tr>
 <tr class="feat-row" hidden><td colspan="7"><div class="feat-wrap"><table class="feat"><caption class="sr-only">Entities and AI GAP features</caption><tbody>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>AIDirector world clock, day/night, blood-moon night detection</td></tr>
@@ -225,7 +225,7 @@ footer{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>GameDifficulty HP scaling</td></tr>
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>spawning.xml parsing</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>Biome-aware spawn group selection at runtime</td></tr>
-<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>POI-tag spawn filtering</td></tr>
+<tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL</td><td>POI-tag spawn filtering</td></tr>
 <tr class="feat" data-state="PARTIAL"><td class="st PARTIAL">PARTIAL (waived)</td><td>Chunk-area spawn ledger</td></tr>
 <tr class="feat" data-state="WORKS"><td class="st WORKS">WORKS</td><td>entitygroups.xml weighted group table</td></tr>
 <tr class="feat" data-state="ad-hoc"><td class="st ad-hoc">RESOLVED (2026-08-08)</td><td>Entity class variety actually reachable at spawn</td></tr>

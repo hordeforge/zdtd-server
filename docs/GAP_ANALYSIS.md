@@ -2030,13 +2030,18 @@ gamestage, no wandering hordes, and no screamers.
   with a respawn-delay roll (stock ChunkAreaBiomeSpawnData CanSpawn +
   ResetRespawn, spawning.md §3; spawned zombies carry the rule tag and
   `World.destroy` releases it on death/despawn; unit test `ambient rule
-  budget caps the drip and releases on destroy`). Never parses the stock
-  `tags` / `notags` POI-type attributes (the chunk-area POI-tag scan, row
-  "POI-tag spawn filtering"). Live: `spawning rules=57`.
+  budget caps the drip and releases on destroy`). **The `tags` / `notags`
+  POI-type attributes now parse and gate too** (2026-08-23): each rule's
+  comma lists land on `Rule.tags/notags`, the prefab XML `Tags` property
+  feeds `QuestData.poi_tags`, and the group/budget resolvers skip rules
+  whose tags fail the position's POI set (stock POITags/noPOITags
+  Test_AnySet, spawning.md §2; see "POI-tag spawn filtering"). Live:
+  `spawning rules=57`.
   *Anchors:* `src/assets/spawning.zig:14-22`, `:104-127`,
-  `src/server/game.zig` biomeRuleBudget, `src/ecs/aidirector.zig`
+  `src/server/game.zig` biomeRuleBudget/biomeGroupName/ruleTagsAllow,
+  `src/ecs/aidirector.zig`
   rule_budgets/budgetAllows/budgetConsume/releaseRule, `src/ecs/world.zig:554-557`,
-  `Data/Config/spawning.xml:22-33`
+  `src/world/prefabs.zig` poi_tags/poiTagsAt, `Data/Config/spawning.xml:22-33`
 
 - **Biome-aware spawn group selection at runtime** `WORKS`
   The director's night/day/animal group names are resolved per spawn point: the
@@ -2052,12 +2057,22 @@ gamestage, no wandering hordes, and no screamers.
   test `server.game.test.biome spawn groups resolve per-biome spawning.xml rules
   on a stock map` + `assets.biome_layers.test.load stock biomes.xml`
 
-- **POI-tag spawn filtering** `PARTIAL (waived)`
-  Stock tests `POITags`/`noPOITags` against the chunk's `FastTags<Poi>` set
-  (`PrefabInstance.Prefab.Tags` OR'd over area); zdtd's POI-tag parser is not yet
-  wired to the spawn enable. City-vs-forest variety is polish gated on full
-  `spawning.xml` + prefab-tag loader — waived vs faking groups.
-  *Anchors:* `asm.il:1094100-1094300`, `src/assets/spawning.zig:104-127`
+- **POI-tag spawn filtering** `PARTIAL` `(2026-08-23, un-waived)`
+  The gate is now wired: `spawning.xml` rule `tags`/`notags` parse into
+  `Rule`, the prefab XML `Tags` property (the FastTags<Poi> set) feeds
+  `QuestData.poi_tags` + `Index.poiTagsAt`, and the ambient group/budget
+  resolvers skip rules whose required/forbidden tags fail the position's POI
+  set (stock POITags/noPOITags Test_AnySet, spawning.md §2 + IL
+  1094100-1094300) - city rules (`tags="commercial,industrial"`) now fire
+  inside the matching POIs and the `notags="commercial,industrial,downtown"`
+  wilderness rules stay active outside them. Approximation: the stock
+  unions the tags over an 80 m area (GetPOIsAtXZ +80/16 chunk expansion,
+  once per area, cached in checkedPOITags) and scans up to min(5, count)
+  groups from a random start; zdtd tests the single POI under the spawn
+  point with the deterministic first-matching-rule walk.
+  *Anchors:* `asm.il:1094100-1094300`, `src/assets/spawning.zig` Rule.tags/
+  notags, `src/world/prefabs.zig` poi_tags/poiTagsAt, `src/server/game.zig`
+  ruleTagsAllow/tagsAnySet, `Data/Config/spawning.xml:22-33`
 
 - **Chunk-area spawn ledger** `PARTIAL (waived)`
   Stock keeps per-group counts, DecMaxCount/IncCount and `OnEntityUnloaded`
@@ -4012,7 +4027,9 @@ persists so little that a restart visibly damages a built base.
   `ClientInfo.PlatformId/CrossplatformId` (puid_primary/puid_native, keying
   saves, bans and admin by the stock `get_InternalId` rule), and the
   VersionAuthorizer gate is live: a client whose compVersion differs from
-  LongStringNoBuild (`V 3.10` for V3.1.0 b14, raw-Minor `{0} {1}.{2}`) is
+  the stock display form (`V 3.1.0` for V3.1.0 b14, network.md EMPIRICAL
+  CORRECTION; the IL-only raw-Minor "V 3.10" reading was disproved by the
+  live stock authorizer) is
   rejected with NetPackagePlayerDenied EKickReason.VersionMismatch(4) instead
   of joining and desyncing silently (ordinal-ignore-case equals, asm.il
   VersionAuthorizer). The auth tokens are walked past (no authorizer chain,
