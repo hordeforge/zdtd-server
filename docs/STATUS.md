@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 249 `WORKS`,
-46 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 251 `WORKS`,
+44 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -459,6 +459,14 @@ Then the curve-only-loader row went WORKS on re-audit: loadFromPath is a
 clean single parse and tryLoad routes through it; the old double-parse-
 with-leak (a discarded loadTableFromPath result) is gone. Player
 progression 16/6/15 -> **17/5/15**; total **249/46/38**.
+Then two Entities rows went WORKS: spawn placement validity (every
+player-adjacent spawner - night drip, wildlife, blood-moon parties, the
+wandering horde - now ground-snaps through the world ground hook, so zombies
+no longer materialise embedded in hillsides or floating on slopes; the
+4x2.5x4 box and out-of-view tests stay documented residuals) and quest-driven
+enemy spawn (the SpawnGSEnemy action resolves the group through the
+gamestage spawner at the party stage, rolls the count and ground-snaps the
+ring). Entities and AI 30/14/4 -> **32/12/4**; total **251/44/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

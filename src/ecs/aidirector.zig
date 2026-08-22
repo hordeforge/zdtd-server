@@ -470,7 +470,7 @@ pub const Director = struct {
             const r = min_r + (max_r - min_r) * @mod(ang, 1.0);
             const x = w.transform[p].x + @cos(ang) * r;
             const z = w.transform[p].z + @sin(ang) * r;
-            const y = w.transform[p].y;
+            const y = w.groundY(x, z) orelse w.transform[p].y;
             // Wildlife group per player biome (fallback = the single group).
             var animal_ct: ?ecs_world.EntityClass = null;
             var agroup = self.animal_group;
@@ -557,7 +557,11 @@ pub const Director = struct {
                 const r = min_r + (max_r - min_r) * (@mod(ang, 1.0));
                 const x = w.transform[p].x + @cos(ang) * r;
                 const z = w.transform[p].z + @sin(ang) * r;
-                const y = w.transform[p].y;
+                // Ground snap (RE spawn placement): the player's transform Y is
+                // its centre, ~1.7 m above the surface, so spawning at that Y
+                // embeds zombies in hillsides or leaves them floating on
+                // slopes; the world ground hook gives the surface at (x,z).
+                const y = w.groundY(x, z) orelse w.transform[p].y;
                 const slot = self.spawnOneZombie(w, x, y, z, group_override, self.total_spawned +% n, false) orelse break;
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
@@ -676,7 +680,7 @@ pub const Director = struct {
                 const r = rules.party_spawn_dist + @mod(ang, 1.0) * 10.0;
                 const x = party.focus_x + @cos(ang) * r;
                 const z = party.focus_z + @sin(ang) * r;
-                const y = nearestPlayerY(w, x, z) orelse continue;
+                const y = w.groundY(x, z) orelse (nearestPlayerY(w, x, z) orelse continue);
                 const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, true) orelse continue;
                 if (nearestPlayerSlot(w, x, z)) |ps| {
                     w.zombie_ai[slot].state = .chase;
@@ -783,7 +787,7 @@ pub const Director = struct {
                 const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 1.7 + @as(f32, @floatFromInt(n)) * 1.0472;
                 const x = w.transform[p].x + @cos(ang) * w.rules.director.wandering_spawn_dist;
                 const z = w.transform[p].z + @sin(ang) * w.rules.director.wandering_spawn_dist;
-                const y = w.transform[p].y;
+                const y = w.groundY(x, z) orelse w.transform[p].y;
                 const slot = self.spawnOneZombie(w, x, y, z, "", self.total_spawned +% n, true) orelse continue;
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
@@ -1449,4 +1453,36 @@ test "blood moon kills the horde when the party is wiped" {
         if (w.alive[s] and w.zombie_ai[s].is_horde) horde_left += 1;
     }
     try std.testing.expectEqual(@as(u32, 0), horde_left);
+}
+
+test "night spawns ground-snap through the world ground hook" {
+    // Spawn placement: the drip used the player's centre Y (~1.7 m up), so
+    // zombies materialised embedded in hillsides or floating on slopes. With
+    // the ground hook set, the spawn Y is the surface at (x,z).
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    w.ground_ctx = null;
+    w.ground_fn = struct {
+        fn f(_: ?*anyopaque, _: i32, _: i32) f32 {
+            return 50.0;
+        }
+    }.f;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .bloodmoon_enemy_count = 8,
+        .horde_cd = 0,
+    };
+    // A night non-blood-moon day: the drip spawns from spawnNearPlayers.
+    dir.clock.day = 3;
+    dir.bloodmoon_active = false;
+    const r = dir.tick(&w, 0.1);
+    try std.testing.expect(r.spawned > 0);
+    var saw_ground = false;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (!w.alive[s] or !w.mask[s].transform or w.kind[s] != .zombie) continue;
+        if (w.transform[s].y == 50.0) saw_ground = true;
+    }
+    try std.testing.expect(saw_ground);
 }
