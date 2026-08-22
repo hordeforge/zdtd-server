@@ -510,6 +510,12 @@ survives a relog; v2-6 files still read and upgrade in place (slots widened
 with zero use_times, journals re-encoded as before). Round-trip + v6->v7
 migration tests; the inventory-persistence row stays PARTIAL for mods,
 cosmetics and seed.
+Then players.zsv went ZPV8: the progression tail now carries the player's
+current `hp` (0..max), restored on the post-spawn restore pass, so a relog
+keeps wounds instead of granting a free full heal; v2-7 records migrate with
+a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
+v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
+hasEntityStats block.
 Then the health/damage row went WORKS on re-audit: the C2S DamageEntity path
 (c2s/misc.zig) implements everything the row claims (validated apply, PvP
 gate, armour mitigation, capped strength, NPC-only fatal) plus plugin damage

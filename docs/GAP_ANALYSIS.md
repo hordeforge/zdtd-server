@@ -3061,10 +3061,15 @@ and server-to-client XP/level pushes do not exist.
 
 - **Vitals persistence (health, food, water)** `PARTIAL`
   Food/water (and maxes) are in the ZPV3 progression tail and restored into
-  `sim.health`. HP is not in the players.zsv record (spawn/heal path still owns
-  it). Join PDF `hasEntityStats` residual may still omit a full PlayerEntityStats
-  block; survival stats are also pushed on other S2C paths after join.
-  *Anchors:* `src/server/game.zig` (ZPV3 food/water tail), spawn/heal path
+  `sim.health`. `(2026-08-22)` ZPV8 adds the player's current `hp` to the
+  tail: the post-spawn restore pass applies it, so a relog keeps the player's
+  wounds instead of granting a free full heal (v2-7 files migrate with a -1
+  sentinel that keeps the spawn path's full health; round-trip + migration
+  tests). Join PDF `hasEntityStats` residual may still omit a full
+  PlayerEntityStats block; survival stats are also pushed on other S2C paths
+  after join.
+  *Anchors:* `src/server/persist.zig` ZPV8 tail, `src/server/c2s/join.zig:203,230`
+  (restore before/after spawn), spawn/heal path
 
 - **progression.zig curve-only loader** `WORKS` `(2026-08-22 re-audit)`
   `loadFromPath` is a clean single parse (`readCleanFile` + `parseCurve`, no

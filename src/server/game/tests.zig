@@ -132,6 +132,119 @@ test "players zpv7 round-trips use_times (tool durability) across restart" {
     }
 }
 
+test "players zpv8 round-trips hp (relog keeps wounds) across restart" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        // Wounded, not dead (hp scale is 0..max, players max 100): the
+        // record must carry the 37.5 across a restart instead of the
+        // fresh-full spawn the pre-ZPV8 path granted.
+        g.sim.health[ps].hp = 37.5;
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        try std.testing.expectEqual(@as(f32, 37.5), g.sim.health[ps].hp);
+    }
+}
+
+test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
+    // Hand-built ZPV7 file with a progression tail but no hp field. The save
+    // must insert hp=1.0 (full, the pre-ZPV8 relog behavior) so the v8 tail
+    // walk stays aligned, and a restart must still see a live player.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var buf: [512]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[o..][0..4], "ZPV7");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
+    o += 4;
+    buf[o] = 3; // name_len "Bot"
+    o += 1;
+    @memcpy(buf[o..][0..3], "Bot");
+    o += 3;
+    @memset(buf[o..][0..16], 0); // xyz + coins
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 1; // prog: tail present
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // level
+    o += 2;
+    std.mem.writeInt(u64, buf[o..][0..8], 1000, .little); // xp
+    o += 8;
+    inline for ([_]f32{ 60, 100, 70, 100 }) |f| {
+        std.mem.writeInt(u32, buf[o..][0..4], @bitCast(f), .little);
+        o += 4;
+    }
+    buf[o] = 0; // buff_n
+    o += 1;
+    buf[o] = 0; // bed_present (v4+ tail layout)
+    o += 1;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        _ = try g.attachJoinedClient(&capture);
+        try g.savePlayers();
+    }
+    {
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        try std.testing.expectEqualStrings("ZPV8", data[0..4]);
+    }
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        // Migrated hp = full: the player is alive and at the full-health mark
+        // the pre-ZPV8 code granted on relog.
+        try std.testing.expect(g.sim.alive[ps]);
+        // Migrated hp = -1 sentinel: the restore keeps the spawn path's full
+        // health (the pre-ZPV8 relog behavior), and the tail values land.
+        try std.testing.expectEqual(g.sim.health[ps].max_hp, g.sim.health[ps].hp);
+        try std.testing.expectEqual(@as(u16, 5), cl.level);
+        std.debug.print("PASS zpv7->zpv8: carried tail gains full hp on save\n", .{});
+    }
+}
+
 test "players zpv6 inventory migrates to zpv7 slots on save" {
     // Hand-built ZPV6 file with one 7-byte inventory slot (no use_times).
     // savePlayers must widen the slot record to 11 bytes (zero use_times)
@@ -191,7 +304,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV7", data[0..4]);
+        try std.testing.expectEqualStrings("ZPV8", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -495,7 +608,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV7", data[0..4]);
+        try std.testing.expectEqualStrings("ZPV8", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.
