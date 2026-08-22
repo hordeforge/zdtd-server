@@ -32,6 +32,7 @@ Status is one of: **proposed**, **accepted**, **superseded**, **deprecated**.
 | [0025](0025-gameevent-scoped-interpreter.md) | GameEvent sequence engine: a scoped, bounded dispatch table, not the full 132-verb VM | accepted |
 | [0026](0026-fps-bot-wasm-module.md) | FPS bots as a Wasm module: host sense/act boundary, not a core bot brain | accepted (amended 2026-08-12: bots are not ECS entities) |
 | [0030](0030-plugin-spatiotemporal-composability.md) | Plugin spatiotemporal composability: reload (HMR), effect withdrawal, declarative `_zdtd_requires` dependencies | accepted |
+| [0031](0031-mcp-wasm-module.md) | MCP server as a Wasm module: guest protocol, host transport | accepted |
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),
