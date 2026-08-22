@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 26 | 16 | 6 | 48 | Walk, dig, build, persist; POIs and parts (roads/driveways) place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [World systems](#11-world-systems) | 27 | 15 | 6 | 48 | Walk, dig, build, persist; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **227** | **68** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **228** | **67** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3083,13 +3083,19 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/world/prefabs.zig:49-66` (isPart / isPaintablePart), `:216-235`
   (part flatten), `:487` (paint gate), `src/world/tts.zig:1-200`
 
-- **Player-placed block rotation / meta in the chunk plane** `PARTIAL`
-  `setBlockWorld` writes only the bare u16 id into `Chunk.blocks`, so rotation and
-  meta live only in a 128-entry FIFO sparse cache the chunk encoder never consults.
-  Place 129 rotated blocks, or walk out of stream range and back, and wedges, doors
-  and shapes re-render unrotated on the chunk resend.
-  *Anchors:* `src/world/store.zig:260-262`, `src/server/game.zig:465`,
-  `:3305-3336`, `:7310-7314`
+- **Player-placed block rotation / meta in the chunk plane** `WORKS` `(2026-08-22 re-audit)`
+  The placement paths write the full 32-bit BlockValue (`setBlockRawWorld`,
+  type low 16 + rotation/meta upper bits) into the chunk's raw plane
+  (`src/world/store.zig:779-783`, GAP 13 fix); the chunk wire encoder's
+  rawData provider reads that plane (`src/wire/stock_chunk.zig:44`), and ZCH3
+  persists the u32 plane so a second client or a relog re-renders the
+  rotation. Test `rotation raw lives in the chunk plane and survives
+  save/reload` (store.zig:1570) pins the round trip. The bare-u16
+  `setBlockWorld` remains for air/terrain edits where rotation does not
+  apply.
+  *Anchors:* `src/world/store.zig:779-783` setBlockRawWorld,
+  `src/server/c2s/blocks.zig:68,160` (placement), `src/wire/stock_chunk.zig:44`,
+  test `rotation raw lives in the chunk plane and survives save/reload`
 
 - **Block damage in the chunk wire** `WORKS`
   `writeDamageChannel` encodes the per-cell u16 damage via the `dmg_at` hook

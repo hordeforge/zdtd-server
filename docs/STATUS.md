@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 227 `WORKS`,
-68 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 228 `WORKS`,
+67 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -308,6 +308,12 @@ cap, and Navezgane's 72 parts (driveways, town signs, the pedestrian bridge)
 all fit, so roads and driveways are present on stock maps; the huge RWG
 clutter parts skip painting as a documented perf choice. World 25/17/6 ->
 **26/16/6**; total **227/68/38**.
+Then the placed-block rotation row went WORKS on re-audit: placement paths
+write the full 32-bit BlockValue (rotation/meta upper bits) into the chunk
+raw plane, the wire encoder's rawData provider reads it, and ZCH3 persists
+the u32 plane, so a second client or a relog re-renders rotated wedges,
+doors and shapes (test pins the round trip). World 26/16/6 -> **27/15/6**;
+total **228/67/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
