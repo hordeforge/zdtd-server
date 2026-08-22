@@ -392,6 +392,11 @@ is uncapped beyond the max_volumes budget (8192) - pass 2 previously broke at
 authored volumes load (stock ships ~887 POI + 51 part volumes, comfortably
 inside the budget), so a building anywhere on the map wakes its sleepers.
 POIs 23/7/0 -> **24/6/0**; total **240/55/38**.
+The sleeper wake/trigger row stays PARTIAL but its count item is now stock-
+shaped: volume spawn counts roll position-seeded between the group's
+min/max (RE entity-ai.md AddSpawnCount RandomRange) instead of the fixed
+min + (vi % span) cycle; the sight/light wake thresholds, pose and
+respawn map remain open.
 The dashboard
 (docs/provenance.html) is synced.
 

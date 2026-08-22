@@ -108,11 +108,16 @@ fn triggerVolume(self: *Game, vi: usize) void {
     const vol_stage: i32 = @max(0, self.partyStageAround(cx, cz, self.sleeper_party_radius));
     const stage_spawn = self.gamestages.sleeperEntityGroup(grp.class_name, vol_stage);
     const def = self.resolveSleeperClass(grp.class_name, stage_spawn, seed);
+    // Stock AddSpawnCount samples RandomRange(min, max) with a position-seeded
+    // random (RE entity-ai.md AddSpawnCount IL=50: fractional ceil, min>0 forces
+    // at least 1), not a fixed min + (vi % span) cycle. Separate rng instance so
+    // the spawn-position stream below stays unchanged.
+    var count_prng = rng_util.XorShift32.init(seed +% 0x9E3779B9);
     const count: u8 = if (stage_spawn) |sg|
         @intCast(@max(1, @min(sg.num, @as(u16, 255))))
     else if (grp.max_count <= grp.min_count) grp.min_count else blk: {
         const span = grp.max_count - grp.min_count + 1;
-        break :blk grp.min_count + @as(u8, @intCast((vi) % span));
+        break :blk grp.min_count + @as(u8, @intCast(count_prng.nextBounded(span)));
     };
     const alive_cap: u8 = if (stage_spawn) |sg|
         @intCast(@max(1, @min(sg.max_alive, @as(u16, 255))))

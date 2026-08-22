@@ -1830,13 +1830,17 @@ can walk into every POI but none of them is the building TFP authored.
   `src/world/sleepers.zig:394-396` (`max_volumes`)
 
 - **Sleeper wake / trigger** `PARTIAL`
-  Pure player-inside-AABB test, one-shot (`volume.triggered` latches forever).
-  Missing: the `SleeperVolumeTriggeredBy` cascade, sight/sound/light triggers,
-  priority volumes, boss/loot/quest-exclude flags, spawn pose (the marker block
-  name encodes Sit/Back/SideLeft/Stomach/Idle and is discarded), gamestage-scaled
-  counts, spawnMode, respawnMap/respawnTime. The count is `min + (vi % span)`, not
-  a roll.
-  *Anchors:* `src/server/game.zig:6995`, `:7030`, `src/world/sleepers.zig:26`
+  Wakes on player-inside-AABB and on combat noise inside the AABB +0.9 pad
+  (stock CheckSleeperVolumeNoise; one-shot `triggered` latch), with
+  gamestage-resolved spawn classes and position-seeded count rolls (stock
+  AddSpawnCount RandomRange, RE entity-ai.md IL=50). Missing: the
+  `SleeperVolumeTriggeredBy` cascade, sight/sound/light wake thresholds
+  (crouch/darkness do nothing - walking within 20 m always wakes), priority
+  volumes, boss/loot/quest-exclude flags, spawn pose (the marker block name
+  encodes Sit/Back/SideLeft/Stomach/Idle and is discarded), spawnMode,
+  respawnMap/respawnTime.
+  *Anchors:* `src/server/game/sleeper.zig:90-147,154-174`,
+  `src/world/sleepers.zig:26`
 
 - **Prefab TE scan as a container source** `WORKS` `(2026-08-22 re-audit)`
   Runs after the block scan, capped at 48 per chunk, and seeds world
