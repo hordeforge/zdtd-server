@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV5), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV7), entities.zen
 //! (ZENT1), claims.zlc (ZCL1), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -62,19 +62,43 @@ pub const Zpv2Drop = struct {
 /// `version`: 2 (ZPV2, no progression tail), 3 (ZPV3, tail but no bedroll
 /// field), 4 (ZPV4, tail's buff list followed unconditionally by a
 /// bedroll presence byte), or 5 (ZPV5, journal entries additionally carry
-/// the quest name + POI rect). The bedroll field is **not** detected by "more
+/// the quest name + POI rect). 7 (ZPV7) widens the inventory slot record
+/// from 7 to 11 bytes by appending `use_times` (f32, tool durability). The
+/// bedroll field is **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
 /// misread as this record's bed_present. Only the file's own magic decides
 /// whether a bedroll field is present, the same way `prog` already gates the
 /// rest of the v3 tail.
+
+/// Inventory slot-record stride in bytes: 7 through v6
+/// (item:u16, count:u16, quality:u8, meta:u16), 11 from v7 (those plus
+/// use_times: f32).
+pub fn zpvSlotStride(version: u8) usize {
+    return if (version >= 7) 11 else 7;
+}
+
+/// Convert a legacy 7-byte inventory slot block to the v7 11-byte shape:
+/// each slot keeps (item, count, quality, meta) and appends a zero
+/// `use_times` (f32) - carried old records have no known durability.
+fn emitZpv7Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize) !void {
+    try out.append(allocator, old[inv_n_pos]); // inv_n byte
+    var p = inv_n_pos + 1;
+    var k: usize = 0;
+    while (k < inv_n) : (k += 1) {
+        try out.appendSlice(allocator, old[p .. p + 7]);
+        try out.appendNTimes(allocator, 0, 4);
+        p += 7;
+    }
+}
+
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
     if (off >= data.len) return error.CorruptPlayersFile;
     const nl: usize = data[off];
     if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
     var p = off + 1 + nl + 16;
     const inv_n: usize = data[p];
-    p += 1 + inv_n * 7;
+    p += 1 + inv_n * zpvSlotStride(version);
     if (p >= data.len) return error.CorruptPlayersFile;
     const jn: usize = data[p];
     p = try journalSectionEnd(data, p + 1, jn, version);
@@ -148,7 +172,7 @@ fn zpvRecordHasProgTail(data: []const u8, off: usize, version: u8) bool {
     const nl: usize = data[off];
     var p = off + 1 + nl + 16;
     const inv_n: usize = data[p];
-    p += 1 + inv_n * 7;
+    p += 1 + inv_n * zpvSlotStride(version);
     const jn: usize = data[p];
     p = journalSectionEnd(data, p + 1, jn, version) catch return false;
     return data[p] == 1;
@@ -158,9 +182,9 @@ pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
     return try std.fmt.bufPrint(buf, "{s}/players.zsv", .{self.world.world_dir});
 }
 
-/// Record layout (v5): magic ZPV5 | n:u32 | records…
+/// Record layout (v5+): magic ZPVN | n:u32 | records…
 /// each: name_len:u8 | name | x,y,z:f32 | coins:u32 |
-///   inv_n:u8 | inv_n×(item:u16, count:u16, quality:u8, meta:u16) |
+///   inv_n:u8 | inv_n×(item:u16, count:u16, quality:u8, meta:u16[, use_times:f32 from v7]) |
 ///   jn:u8 | jn×(def_id:u16, quest_code:i32, flags:u8, progress:u16, phase:u8,
 ///     name_len:u8, name, poi_valid:u8, poi rect:f32×6)
 ///   prog:u8 (1 = present) | level:u16 | xp:u64 | food/max/water/max:f32×4 |
@@ -190,11 +214,11 @@ pub fn savePlayers(self: *Game) !void {
     defer self.allocator.free(old_file);
     var old_recs: []const u8 = &.{};
     var old_count: u32 = 0;
-    var old_version: u8 = 6;
+    var old_version: u8 = 7;
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7'))
             return error.CorruptPlayersFile;
         old_version = old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
@@ -209,7 +233,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '6', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '7', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -237,25 +261,44 @@ pub fn savePlayers(self: *Game) !void {
                 break;
             }
             if (rewritten) continue;
-            if (old_version == 6) {
+            if (old_version == 7) {
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
                 written += 1;
                 continue;
             }
-            // v<6 records are re-encoded into the v6 layout: the journal
-            // section grows per quest (v5 added name + POI rect; v6 adds
-            // per-objective progress), so the record cannot be carried
-            // byte-for-byte. Header + inventory copy verbatim; the journal is
-            // rewritten (names resolved from the stored name when present,
-            // else from the catalog by the stored def_id; legacy entries carry
-            // no rect → poi_valid=0; per-objective progress unknown → zeros);
-            // the tail copies verbatim, still with the v2->v3 / v3->v4 upgrade
-            // bytes so the progression/bedroll fields parse under v6.
+            if (old_version == 6) {
+                // v6 records are v7-shaped except the 7-byte inventory slots:
+                // widen them to 11 (appending a zero use_times) and carry the
+                // rest byte-for-byte, so the v6 journal keeps its per-objective
+                // progress verbatim.
+                const inv_pos: usize = rec_start + 1 + nl + 16;
+                const inv_n: usize = old_recs[inv_pos];
+                const slots_end = inv_pos + 1 + inv_n * 7;
+                try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+                try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try out.appendSlice(self.allocator, old_recs[slots_end..off]);
+                written += 1;
+                continue;
+            }
+            // v<6 records are re-encoded into the v7 layout: the inventory
+            // slot block widens 7 -> 11 bytes (use_times f32 appended) and the
+            // journal section grows per quest (v5 added name + POI rect; v6
+            // adds per-objective progress), so the record cannot be carried
+            // byte-for-byte. Header copies verbatim; slots are widened with a
+            // zero use_times; the journal is rewritten (names resolved from
+            // the stored name when present, else from the catalog by the
+            // stored def_id; legacy entries carry no rect → poi_valid=0;
+            // per-objective progress unknown → zeros); the tail copies
+            // verbatim, still with the v2->v3 / v3->v4 upgrade bytes so the
+            // progression/bedroll fields parse under v7.
             var jp: usize = rec_start + 1 + nl + 16; // inv_n byte
             const inv_n: usize = old_recs[jp];
+            const inv_pos = jp;
             jp += 1 + inv_n * 7;
             const jn: usize = old_recs[jp];
-            try out.appendSlice(self.allocator, old_recs[rec_start .. jp + 1]);
+            try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+            try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+            try out.appendSlice(self.allocator, old_recs[jp .. jp + 1]); // jn byte
             var qp: usize = jp + 1;
             {
                 var qi: usize = 0;
@@ -327,7 +370,7 @@ pub fn savePlayers(self: *Game) !void {
     for (&self.clients) |*cl| {
         if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
         const ps = self.sim.playerByPeer(cl.slot) orelse continue;
-        var rec: [1536]u8 = undefined;
+        var rec: [2048]u8 = undefined;
         var o: usize = 0;
         rec[o] = @intCast(cl.name_len);
         o += 1;
@@ -348,12 +391,15 @@ pub fn savePlayers(self: *Game) !void {
         var inv_n: u8 = 0;
         if (self.sim.mask[ps].inventory) {
             for (self.sim.inventory[ps].slots) |s| {
-                if (o + 7 > rec.len) break;
+                // ZPV7 slot record: item:u16, count:u16, quality:u8, meta:u16,
+                // use_times:f32 (stock ItemValue.UseTimes, tool durability).
+                if (o + 11 > rec.len) break;
                 std.mem.writeInt(u16, rec[o..][0..2], s.item_id, .little);
                 std.mem.writeInt(u16, rec[o + 2 ..][0..2], s.count, .little);
                 rec[o + 4] = s.quality;
                 std.mem.writeInt(u16, rec[o + 5 ..][0..2], s.meta, .little);
-                o += 7;
+                std.mem.writeInt(u32, rec[o + 7 ..][0..4], @as(u32, @bitCast(s.use_times)), .little);
+                o += 11;
                 inv_n += 1;
             }
         }
@@ -500,13 +546,14 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
     const version: u8 = data[3] - '0';
     const v3 = version >= 3;
+    const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
     var off: usize = 8;
     var i: u32 = 0;
@@ -528,20 +575,21 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         off += 16;
         const inv_n: usize = data[off];
         off += 1;
-        if (off + inv_n * 7 + 1 > data.len) {
+        if (off + inv_n * slot_stride + 1 > data.len) {
             std.debug.print("zdtd: restore player: truncated inventory at record {d}/{d}\n", .{ i, n });
             return;
         }
         var inv: [ecs.components.max_inv_slots]ecs.components.InvSlot = undefined;
         var k: usize = 0;
         while (k < inv_n) : (k += 1) {
-            const ib = data[off..][0..7];
-            off += 7;
+            const ib = data[off..][0..slot_stride];
+            off += slot_stride;
             if (k < inv.len) inv[k] = .{
                 .item_id = std.mem.readInt(u16, ib[0..2], .little),
                 .count = std.mem.readInt(u16, ib[2..4], .little),
                 .quality = ib[4],
                 .meta = std.mem.readInt(u16, ib[5..7], .little),
+                .use_times = if (slot_stride >= 11) @as(f32, @bitCast(std.mem.readInt(u32, ib[7..11], .little))) else 0,
             };
         }
         const jn: usize = data[off];
@@ -1140,7 +1188,7 @@ pub fn loadTraders(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7'))
         return error.CorruptPlayersFile;
     const version: u8 = data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);

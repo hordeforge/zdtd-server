@@ -504,6 +504,12 @@ duplicate POI instances never cross-wake; the multi-group question was closed
 by data (all 887 stock prefabs carry exactly one group per volume), and the
 `sleeper-cascade` scenario + a parse unit test prove it. Sleeper wake rows
 stay PARTIAL (light/sight thresholds RE-blocked, pose, re-arm, passive flags).
+Then players.zsv went ZPV7: the inventory slot record widened 7 -> 11 bytes by
+appending `use_times` (stock ItemValue.UseTimes, f32), so tool durability now
+survives a relog; v2-6 files still read and upgrade in place (slots widened
+with zero use_times, journals re-encoded as before). Round-trip + v6->v7
+migration tests; the inventory-persistence row stays PARTIAL for mods,
+cosmetics and seed.
 The dashboard
 (docs/provenance.html) is synced.
 

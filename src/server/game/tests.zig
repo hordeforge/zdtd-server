@@ -94,6 +94,123 @@ test "zpv2DropName removes matching player record only" {
     try std.testing.expect(none.blob == null);
 }
 
+test "players zpv7 round-trips use_times (tool durability) across restart" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        g.sim.inventory[ps] = .{};
+        const last = ecs.components.max_inv_slots - 1;
+        g.sim.inventory[ps].slots[last] = .{ .item_id = 2, .count = 1, .quality = 4, .meta = 0, .use_times = 42.5 };
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        const last = ecs.components.max_inv_slots - 1;
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[last].item_id);
+        try std.testing.expectEqual(@as(f32, 42.5), g.sim.inventory[ps].slots[last].use_times);
+        // A fresh slot has no phantom durability.
+        try std.testing.expectEqual(@as(f32, 0), g.sim.inventory[ps].slots[0].use_times);
+    }
+}
+
+test "players zpv6 inventory migrates to zpv7 slots on save" {
+    // Hand-built ZPV6 file with one 7-byte inventory slot (no use_times).
+    // savePlayers must widen the slot record to 11 bytes (zero use_times)
+    // and a restart must restore the item.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var buf: [256]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[o..][0..4], "ZPV6");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
+    o += 4;
+    buf[o] = 3; // name_len "Bot"
+    o += 1;
+    @memcpy(buf[o..][0..3], "Bot");
+    o += 3;
+    @memset(buf[o..][0..16], 0); // xyz + coins
+    o += 16;
+    buf[o] = 1; // inv_n
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 7, .little); // item
+    o += 2;
+    std.mem.writeInt(u16, buf[o..][0..2], 3, .little); // count
+    o += 2;
+    buf[o] = 4; // quality
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // meta
+    o += 2;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 0; // prog: no tail (so no v4 bed byte either)
+    o += 1;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        // Restored from the v6 record: item 7, count 3, quality 4, meta 5.
+        var found = false;
+        for (&g.sim.inventory[ps].slots) |*s| {
+            if (s.item_id == 7 and s.count == 3 and s.quality == 4 and s.meta == 5) found = true;
+        }
+        try std.testing.expect(found);
+        try g.savePlayers();
+    }
+    {
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        try std.testing.expectEqualStrings("ZPV7", data[0..4]);
+    }
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        var found = false;
+        for (&g.sim.inventory[ps].slots) |*s| {
+            if (s.item_id == 7 and s.count == 3 and s.quality == 4 and s.meta == 5) found = true;
+        }
+        try std.testing.expect(found);
+        std.debug.print("PASS zpv6->zpv7: legacy 7-byte inventory slots widened on save\n", .{});
+    }
+}
+
 test "players zpv3 preserves every inventory slot across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -378,7 +495,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV6", data[0..4]);
+        try std.testing.expectEqualStrings("ZPV7", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.
