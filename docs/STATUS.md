@@ -497,6 +497,13 @@ recount from the live markers corrected the scorecard: the running totals had
 drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
 MISSING" was an older inventory projection). Recount: 291 canonical features,
 total **250/41/0**.
+Then the sleeper group-id cascade landed: a volume with a nonzero
+`SleeperVolumeGroupId` wakes every other volume of the same prefab placement
+sharing the id (stock TouchGroup IL=52), gated on the placement origin so
+duplicate POI instances never cross-wake; the multi-group question was closed
+by data (all 887 stock prefabs carry exactly one group per volume), and the
+`sleeper-cascade` scenario + a parse unit test prove it. Sleeper wake rows
+stay PARTIAL (light/sight thresholds RE-blocked, pose, re-arm, passive flags).
 The dashboard
 (docs/provenance.html) is synced.
 

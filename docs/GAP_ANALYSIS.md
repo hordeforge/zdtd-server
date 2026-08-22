@@ -1842,11 +1842,15 @@ can walk into every POI but none of them is the building TFP authored.
   Wakes on player-inside-AABB and on combat noise inside the AABB +0.9 pad
   (stock CheckSleeperVolumeNoise; one-shot `triggered` latch), with
   gamestage-resolved spawn classes and position-seeded count rolls (stock
-  AddSpawnCount RandomRange, RE entity-ai.md IL=50). Missing: the
-  `SleeperVolumeTriggeredBy` cascade, sight/sound/light wake thresholds
-  (crouch/darkness do nothing - walking within 20 m always wakes), priority
-  volumes, boss/loot/quest-exclude flags, spawn pose (the marker block name
-  encodes Sit/Back/SideLeft/Stomach/Idle and is discarded), spawnMode,
+  AddSpawnCount RandomRange, RE entity-ai.md IL=50). 2026-08-22: the
+  `SleeperVolumeGroupId` cascade is in (stock TouchGroup IL=52): a volume with
+  a nonzero id wakes every other volume of the same prefab placement sharing
+  the id, gated on placement origin so duplicate POI instances never
+  cross-wake; scenario `sleeper-cascade`, unit `sleeper volume group ids parse
+  per volume`. Missing: sight/sound/light wake thresholds (crouch/darkness do
+  nothing - walking within 20 m always wakes), priority volumes,
+  boss/loot/quest-exclude flags, spawn pose (the marker block name encodes
+  Sit/Back/SideLeft/Stomach/Idle and is discarded), spawnMode,
   respawnMap/respawnTime.
   *Anchors:* `src/server/game/sleeper.zig:90-147,154-174`,
   `src/world/sleepers.zig:26`
@@ -2018,11 +2022,16 @@ gamestage, no wandering hordes, and no screamers.
 - **POI sleeper volumes: parse, trigger, spawn at authored markers** `PARTIAL`
   3124 volumes load from stock Navezgane prefabs; volumes are AABB-tested in
   parallel then spawned serially at authored marker cells. `combat/sleeper_wake`
-  PASS on the real client. Gaps: only `vol.groups[0]` is used, `triggered` is
-  one-shot and never persists or re-arms, no `TriggeredByIndices` cascade, no
-  sleeper pose, no `is_sleeper_passive`, no gamestage count scaling.
-  *Anchors:* `src/server/game.zig:6995-7074`, `src/world/sleepers.zig:246-380`,
-  `asm.il:197877`, `server-orch.log`
+  PASS on the real client. 2026-08-22: the `TriggeredByIndices` cascade is in
+  (`SleeperVolumeGroupId`, stock TouchGroup IL=52, same placement only;
+  scenario `sleeper-cascade`), and the "only groups[0] used" gap is resolved
+  by data: all 887 stock prefabs carry exactly one (name,min,max) group per
+  volume (nvol names or nvol*3 triples, zero mismatches), so `groups[0]` is
+  the volume's group. Remaining gaps: `triggered` is one-shot and never
+  persists or re-arms, no sleeper pose, no `is_sleeper_passive`, no gamestage
+  count scaling.
+  *Anchors:* `src/server/game.zig:6995-7074`, `src/server/game/sleeper.zig:90-147`,
+  `src/world/sleepers.zig:246-380`, `asm.il:197877`, `server-orch.log`
 
 - **Sleeper group name to entity class resolution** `WORKS` `(2026-08-22 re-audit)`
   The `GroupGenericZombie` indirection resolves through gamestages: the sleeper

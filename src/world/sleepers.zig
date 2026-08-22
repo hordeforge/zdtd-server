@@ -37,6 +37,16 @@ pub const Volume = struct {
     group_n: u8 = 0,
     /// Once players trigger, stay triggered (no re-spawn spam).
     triggered: bool = false,
+    /// SleeperVolumeGroupId: a nonzero id links volumes of the same prefab
+    /// placement - triggering one wakes the others (stock TouchGroup cascade,
+    /// entity-ai.md TouchGroup IL=52). 0 = standalone.
+    group_id: u8 = 0,
+    /// Prefab placement origin (world). Two placements of the same prefab
+    /// have different origins, which distinguishes the instances for the
+    /// group-id cascade (stock cascades within `prefabInstance.sleeperVolumes`).
+    origin_x: i32 = 0,
+    origin_y: i32 = 0,
+    origin_z: i32 = 0,
     /// A completed ClearSleepers quest suppressed this volume (stock
     /// QuestEventManager removes the POI's sleeper data on
     /// QuestEvent_SleepersCleared): it never re-arms, even across a restart
@@ -212,6 +222,19 @@ fn parseCount(s: []const u8) u8 {
     return @intCast(@min(v, 255));
 }
 
+/// SleeperVolumeGroupId: per-volume comma list (0 = standalone, stock
+/// default). Missing, short or unparsable entries stay 0.
+fn parseGroupId(s: []const u8, idx: usize) u8 {
+    if (s.len == 0) return 0;
+    var it = std.mem.splitScalar(u8, s, ',');
+    var i: usize = 0;
+    while (it.next()) |t| : (i += 1) {
+        if (i != idx) continue;
+        return std.fmt.parseInt(u8, std.mem.trim(u8, t, " \t"), 10) catch 0;
+    }
+    return 0;
+}
+
 /// Find `<prefabs_root>/<sub>/<name><ext>` across POIs/Parts/RWGTiles.
 fn findPrefabFile(prefabs_root: []const u8, name: []const u8, ext: []const u8, buf: []u8) ?[]const u8 {
     const subdirs = [_][]const u8{ "POIs", "Parts", "RWGTiles" };
@@ -322,6 +345,10 @@ pub fn loadFromPrefabs(
         const size_s = xml.propertyValue(body, "SleeperVolumeSize") orelse continue;
         const start_s = xml.propertyValue(body, "SleeperVolumeStart") orelse continue;
         const group_s = xml.propertyValue(body, "SleeperVolumeGroup") orelse continue;
+        // SleeperVolumeGroupId: per-volume comma list, 0 = standalone (stock
+        // default). Touching a volume with a nonzero id cascades to the other
+        // volumes of the same prefab placement with the same id (TouchGroup).
+        const group_id_s = xml.propertyValue(body, "SleeperVolumeGroupId") orelse "";
 
         // Prefab size for rotation (from decoration or PrefabSize prop).
         var psx = d.size_x;
@@ -428,6 +455,10 @@ pub fn loadFromPrefabs(
                 .y1 = d.y + st.y + sz.y,
                 .z1 = d.z + lz1,
                 .prefab = d.name,
+                .group_id = parseGroupId(group_id_s, cur_vol),
+                .origin_x = d.x,
+                .origin_y = d.y,
+                .origin_z = d.z,
             };
             // Resolve this volume's group by form (one group per volume).
             vol.groups[0] = if (name_only and cur_vol < g_toks.items.len) VolumeGroup{
@@ -608,4 +639,33 @@ test "part_ ambulance wreck carries its authored sleeper volume" {
     // The ambulance volume sits inside the part AABB (start 0,0,0 size 5,3,8).
     try std.testing.expect(store.contains(0, 501, 61, 502));
     try std.testing.expectEqualStrings("S_-_Group_Hospital", store.volumes[0].groups[0].class_name);
+}
+
+test "sleeper volume group ids parse per volume (TouchGroup cascade)" {
+    // AAA_utility_waterworks: 10 volumes, group ids 0,0,0,0,0,1,1,0,0,0 and
+    // origins from the placement ref. Volumes 5 and 6 share id 1, so waking
+    // one must cascade to the other (TouchGroup IL=52).
+    const root = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs";
+    if (!io_fs.fileExists(root ++ "/POIs/AAA_utility_waterworks.xml")) return error.SkipZigTest;
+    const decos = [_]PrefabRef{.{
+        .name = "AAA_utility_waterworks",
+        .x = 500,
+        .y = 60,
+        .z = 500,
+        .rot = 0,
+        .size_x = 0,
+        .size_y = 0,
+        .size_z = 0,
+    }};
+    var store = try loadFromPrefabs(std.testing.allocator, root, &decos, null, null);
+    defer store.deinit();
+    try std.testing.expectEqual(@as(usize, 10), store.volumes.len);
+    try std.testing.expectEqual(@as(u8, 0), store.volumes[0].group_id);
+    try std.testing.expectEqual(@as(u8, 1), store.volumes[5].group_id);
+    try std.testing.expectEqual(@as(u8, 1), store.volumes[6].group_id);
+    try std.testing.expectEqual(@as(u8, 0), store.volumes[9].group_id);
+    // Origin = the placement ref, so duplicate placements never cross-wake.
+    try std.testing.expectEqual(@as(i32, 500), store.volumes[5].origin_x);
+    try std.testing.expectEqual(@as(i32, 60), store.volumes[5].origin_y);
+    try std.testing.expectEqual(@as(i32, 500), store.volumes[5].origin_z);
 }

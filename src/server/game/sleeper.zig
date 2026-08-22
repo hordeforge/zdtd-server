@@ -1,5 +1,6 @@
 //! Sleeper-volume scan + spawn extracted from game.zig.
 
+const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const apm = @import("../../apm/root.zig");
@@ -100,6 +101,24 @@ fn triggerVolume(self: *Game, vi: usize) void {
     // AIDirector.CanSpawn(2.1f) (EnemyCount < MaxSpawnedZombies * 2.1,
     // spawning.md); zdtd spawns regardless of the global zombie cap - the
     // volume count is group/255-capped only (ledger sleeper row).
+
+    // Stock TouchGroup cascade (entity-ai.md TouchGroup IL=52): a volume with
+    // a nonzero SleeperVolumeGroupId wakes every other volume of the same
+    // prefab placement sharing that id. Origin equality keeps duplicate
+    // placements of the same prefab from waking each other across the map;
+    // the `triggered` latch terminates the recursion.
+    if (vol.group_id != 0) {
+        var vj: usize = 0;
+        while (vj < self.sleepers.volumes.len) : (vj += 1) {
+            if (vj == vi) continue;
+            const other = &self.sleepers.volumes[vj];
+            if (other.group_id != vol.group_id) continue;
+            if (other.triggered or other.quest_cleared) continue;
+            if (other.origin_x != vol.origin_x or other.origin_y != vol.origin_y or other.origin_z != vol.origin_z) continue;
+            if (!std.mem.eql(u8, other.prefab, vol.prefab)) continue;
+            triggerVolume(self, vj);
+        }
+    }
 
     const grp = vol.groups[0];
     const seed: u32 = @intCast((vi + 1) *% 2654435761 % 0xffffffff);

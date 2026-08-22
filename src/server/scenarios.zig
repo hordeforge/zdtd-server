@@ -1481,6 +1481,64 @@ test "scenario combat noise wakes a sleeper volume before player entry" {
     std.debug.print("PASS sleeper-noise: volume woken by combat noise, spawned {d} sleepers\n", .{near});
 }
 
+test "scenario group-id sleeper volumes cascade within one placement only" {
+    // RE entity-ai.md TouchGroup (IL=52): a volume with a nonzero
+    // SleeperVolumeGroupId wakes every other volume of the same prefab
+    // placement sharing the id; group id 0 = standalone. A duplicate
+    // placement of the same prefab (different origin) must NOT wake.
+    freshScenarioDir("worlds/zdtd_sc_sleepercascade");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_sleepercascade", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const vols = try gpa.alloc(sleepers_mod.Volume, 4);
+    defer gpa.free(vols);
+    vols[0] = .{
+        .x0 = 100, .y0 = 70, .z0 = 100, .x1 = 108, .y1 = 76, .z1 = 108,
+        .group_id = 1, .group_n = 1,
+        .prefab = "AAA_utility_waterworks",
+        .origin_x = 500, .origin_y = 60, .origin_z = 500,
+    };
+    vols[1] = .{
+        .x0 = 200, .y0 = 70, .z0 = 200, .x1 = 208, .y1 = 76, .z1 = 208,
+        .group_id = 1, .group_n = 1,
+        .prefab = "AAA_utility_waterworks",
+        .origin_x = 500, .origin_y = 60, .origin_z = 500,
+    };
+    // Duplicate placement of the same prefab: same id, different origin.
+    vols[2] = .{
+        .x0 = 300, .y0 = 70, .z0 = 300, .x1 = 308, .y1 = 76, .z1 = 308,
+        .group_id = 1, .group_n = 1,
+        .prefab = "AAA_utility_waterworks",
+        .origin_x = 9000, .origin_y = 60, .origin_z = 9000,
+    };
+    // Same placement, standalone id 0.
+    vols[3] = .{
+        .x0 = 400, .y0 = 70, .z0 = 400, .x1 = 408, .y1 = 76, .z1 = 408,
+        .group_id = 0, .group_n = 1,
+        .prefab = "AAA_utility_waterworks",
+        .origin_x = 500, .origin_y = 60, .origin_z = 500,
+    };
+    for (vols) |*v| v.groups[0] = .{ .class_name = "GroupGenericZombie", .min_count = 1, .max_count = 2 };
+    g.sleepers.volumes = vols;
+    g.sleepers.trigger_count = 0;
+    // Combat noise inside volume 0 only.
+    g.sim.pushNoise(104, 72, 104, 10);
+    try g.step();
+    try std.testing.expect(g.sleepers.volumes[0].triggered);
+    try std.testing.expect(g.sleepers.volumes[1].triggered);
+    try std.testing.expect(!g.sleepers.volumes[2].triggered);
+    try std.testing.expect(!g.sleepers.volumes[3].triggered);
+    try std.testing.expectEqual(@as(u32, 2), g.sleepers.trigger_count);
+    std.debug.print("PASS sleeper-cascade: group-id volumes wake together in one placement only\n", .{});
+}
+
 test "scenario persist with stock map: edit survives restart under same --map" {
     if (!stockMapPresent()) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
