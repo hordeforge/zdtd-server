@@ -208,12 +208,12 @@ Coverage targets, all enforced by the scan:
 | `src/server/root.zig` | Z | Server process layer: Game orchestration, config, admin/GSI TCP, scenarios. |
 | `src/server/scenarios.zig` | Z | Integration scenarios: two-peer motion, damage wire kill, setblock replicate, persist restart. These call shipped Game handlers (onData/handlePackage/ |
 | `src/server/serverinfo_tcp.zig` | R | Stock ServerInformationTcpProvider: TCP on ServerPort serves GameServerInfo text. |
-| `src/server/webui.zig` | Z | Operator web UI HTTP listener (WU0–WU2: dashboard + console cmds). Loopback by default; shared secret required when enabled |
+| `src/server/webui.zig` | Z | Operator web UI HTTP listener (WU0–WU2: dashboard + console cmds + /api/logs.json log console). Loopback by default; shared secret required when enabled |
 | `src/server/zdtd_config.zig` | Z | zdtd.toml: operator tunables (Bucket B), not stock serverconfig. Precedence (applied by caller): CLI > env (webui secret) > world/zdtd.toml > |
 | `src/util/arena.zig` | Z | Lazy/eager scratch-arena helpers shared by asset table loaders. |
 | `src/util/clock.zig` | Z | Monotonic nanoseconds and best-effort sleep. |
 | `src/util/io_fs.zig` | Z | Thin wrappers around Zig 0.16 `std.Io` for one-shot FS ops. Ordinary file/dir work goes through here or `std.Io` directly, never |
-| `src/util/log.zig` | Z | Logging for the zdtd process: boot banners, warnings and errors. |
+| `src/util/log.zig` | Z | Leveled logging (debug/info/warn/err/crit on the stock Log.Level 0..4 ladder) plus a fixed ring of recent lines served to the webui log console (/api/logs.json). |
 | `src/util/parallel.zig` | Z | Parallel-for over dense slot ranges with a persistent worker pool. Uses Zig 0.16 `std.Io` mutex/condition (no raw syscalls, no spawn-per-call) |
 | `src/util/rng.zig` | Z | Seeded deterministic PRNG for sim paths (loot, AI wander, director picks). |
 | `src/util/root.zig` | Z | Shared process utilities (no game domain). |
@@ -256,6 +256,7 @@ Coverage targets, all enforced by the scan:
 | `src/world/terrain_snapshot.zig` | R | Read-mostly terrain footing snapshot for the A* inner loop. |
 | `src/world/tts.zig` | R | Stock prefab `.tts` block paint (Prefab.readBlockData, V3.x file version 19). |
 | `src/world/vending.zig` | Z | World-position keyed vending machine tile entities (TileEntityVendingMachine). |
+| `src/world/light_te.zig` | R | Prefab `.tts` Light (18) TE persistency payloads (RE TileEntityLight.read IL=68 + TileEntity.il base read): parsed intensity/range/Color32/type/angle/shadows into a world store; the network body lives in `wire/stock_te.zig` (tile-entities-power.md TileEntityLight.write). |
 | `src/world/water.zig` | R | Stock water_info.xml point sources (used as local water-table hints); the leveling queue backing the dig-leveling pour (zdtd-owned, GAP water flow PARTIAL) |
 | `src/world/weather.zig` | R | Stock WeatherManager storm / bloodMoon state machine, server side. Live-verified 2026-08-12: stock `weather` telnet dump shows the 5-slot param vector (Temperature/Precipitation/CloudThickness/Wind/Fog) per biome, `default` group, no storms in the day-1 grace (worldTime < 22000), and `weather clouds N` drives forceClouds (value/100) -> GetCloudThickness. |
 | `src/world/weather.zig` storm schedule | R | `update_interval_ticks = 5` matches stock `BiomeWeather.ServerTimeUpdate` cadence; storm_state 0/1/2 (clear/stormbuild/storm) matches stock `BiomeWeather.stormState`. |

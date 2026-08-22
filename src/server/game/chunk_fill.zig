@@ -14,6 +14,7 @@ const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
 const containers_mod = @import("../../world/containers.zig");
+const light_te_mod = @import("../../world/light_te.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const replicate_te = @import("../replicate_te.zig");
@@ -245,11 +246,22 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
         const TeCtx = struct {
             g: *Game,
             found: *u32,
-            fn onTe(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, te_type: u8) void {
+            fn onTe(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, te_type: u8, payload: []const u8) void {
                 const tc: *@This() = @ptrCast(@alignCast(ctx.?));
                 if (tc.found.* >= tc.g.te_scan_te_cap) return;
+                // Authored Light TEs (type 18): store the parsed
+                // intensity/range/colour so the chunk stream emits the light.
+                if (te_type == te_types.light) {
+                    const lpos = light_te_mod.PosKey{ .x = wx, .y = wy, .z = wz };
+                    if (tc.g.light_te.get(lpos) == null) {
+                        if (tc.g.light_te.getOrCreate(lpos)) |lt| {
+                            _ = light_te_mod.parsePayload(payload, lt);
+                        }
+                    }
+                    return;
+                }
                 // Loot-like types only.
-                if (!(te_types.isStorageLike(te_type) or te_type == te_types.powered or te_types.isSignLike(te_type) or te_type == te_types.light)) return;
+                if (!(te_types.isStorageLike(te_type) or te_type == te_types.powered or te_types.isSignLike(te_type))) return;
                 const pos = containers_mod.PosKey{ .x = wx, .y = wy, .z = wz };
                 if (tc.g.containers.get(pos) != null) return;
                 const block_id: u16 = tc.g.world.blockWorld(wx, wy, wz) catch 0;

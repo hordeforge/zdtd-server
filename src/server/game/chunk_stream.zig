@@ -13,6 +13,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const containers_mod = @import("../../world/containers.zig");
 const vending_mod = @import("../../world/vending.zig");
+const light_te_mod = @import("../../world/light_te.zig");
 const world_store = @import("../../world/store.zig");
 const replicate_te = @import("../replicate_te.zig");
 const game_join = @import("join.zig");
@@ -38,6 +39,13 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
         if (v.pos.x < x0 or v.pos.x >= x1 or v.pos.z < z0 or v.pos.z >= z1) continue;
         try replicate_te.sendVendingTe(self, peer, v.pos.x, v.pos.y, v.pos.z);
     }
+    var li: usize = 0;
+    while (li < light_te_mod.max_lights) : (li += 1) {
+        if (!self.light_te.used[li]) continue;
+        const l = &self.light_te.items[li];
+        if (l.x < x0 or l.x >= x1 or l.z < z0 or l.z >= z1) continue;
+        try replicate_te.sendLightTe(self, peer, l.x, l.y, l.z);
+    }
 }
 
 pub fn clientHasStreamed(c: *const Client, key: i64) bool {
@@ -62,7 +70,7 @@ pub fn clientAddStreamed(self: *Game, c: *Client, key: i64) void {
     if (!c.stream_cap_warned and c.streamed_n >= warn_at) {
         c.stream_cap_warned = true;
         std.debug.print(
-            "zdtd: peer {d} stream queue near capacity n={d}/{d} (warn>={d})\n",
+            "peer {d} stream queue near capacity n={d}/{d} (warn>={d})\n",
             .{ c.slot, c.streamed_n, self.max_streamed_chunks, warn_at },
         );
     }

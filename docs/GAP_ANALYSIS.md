@@ -1756,12 +1756,21 @@ can walk into every POI but none of them is the building TFP authored.
   the TE lists hold Light (18) and Sleeper (20) markers plus oddments, so
   there is no authored loot/lock/sign payload to decode (POI safes fill from
   their block LootList; POI signs carry no authored text in the data). The
-  remaining payload is the **Light** TE (18): colour/intensity per light
-  marker (269 across Navezgane), which needs the server light model
-  (RE-blocked, "server light model" row) before the wire can carry it.
-  *Anchors:* `src/world/prefabs.zig:495-525` (`foreachTeInChunk`),
-  `src/world/tts.zig:247-292` (payload capture), `src/server/game/chunk_fill.zig:246-267`,
-  `src/wire/te_types.zig`, full-prefab TE scan (2026-08-23, types 5/10/13 = 0)
+  **The Light TE (18) now emits too** (2026-08-23): the persistency payload
+  (RE TileEntityLight.read IL=68: version u16, chunkPos, base-TE tail, then
+  LightIntensity/Range f32 + Color32 + v>4 type/angle/shadows) parses into
+  a world light store (`world/light_te.zig`), seeded from the .tts markers
+  (269 across Navezgane) on chunk fill, and the chunk stream sends the stock
+  TileEntityLight network body (tile-entities-power.md TileEntityLight.write
+  IL=48) - POI lights render with their authored colour/intensity/range.
+  The "server light model" residual is the chunk light-level propagation
+  (daylight/night lighting), RE-blocked separately.
+  *Anchors:* `src/world/prefabs.zig:534-560` (`foreachTeInChunk` payload),
+  `src/world/tts.zig:247-292` (payload capture), `src/world/light_te.zig`
+  (store + parsePayload), `src/server/game/chunk_fill.zig:246-270`,
+  `src/server/game/chunk_stream.zig` (light TE send), `src/wire/stock_te.zig`
+  `buildLightTeBody`, `src/wire/te_types.zig`,
+  full-prefab TE scan (2026-08-23, types 5/10/13 = 0)
 
 - **TileEntityType constants** `WORKS`
   `src/wire/te_types.zig` now matches the stock enum exactly (RE IL
@@ -5386,7 +5395,7 @@ Grounded in the decompiled V3.1.0 b14 client IL (`asm.il`).
 no Steam group concept). Landed 2026-08-21: `commandpermission`/`cp` (per-command
 required permission level, enforced at the in-game console boundary; levels run
 0 = highest, matching the stock direction), `loglevel` (stock Log.Level 0..4
-gating `info`/`warn`/`err`), `listthreads`/`lt`, `getoptions` (all known
+gating `debug`/`info`/`warn`/`err`/`crit`), `listthreads`/`lt`, `getoptions` (all known
 serverconfig names with their current values, preferring the GameStats-backed
 runtime prefs), `exportcurrentconfigs` (`<world_dir>/exported_config.txt`), and
 `help <command>` detail pages. `setgamepref`

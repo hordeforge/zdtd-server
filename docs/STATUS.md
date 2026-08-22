@@ -145,7 +145,7 @@ dispatch). Counts unchanged (the row was outside the scored set).
 Then the Net/ops MISSING admin verbs went WORKS: `getoptions` (all known
 serverconfig names with current values, GameStats-backed prefs preferred),
 `exportcurrentconfigs` (`<world_dir>/exported_config.txt`),
-`loglevel` (stock Log.Level 0..4 gating info/warn/err), `listthreads`/`lt`,
+`loglevel` (stock Log.Level 0..4 gating debug/info/warn/err/crit), `listthreads`/`lt`,
 and `commandpermission`/`cp` (per-command required level, enforced at the
 in-game console boundary; levels run 0 = highest like stock). The Steam-group
 verbs stay a documented hard gap. Net and ops 47/4/5 -> **52/4/0**; total
@@ -586,6 +586,14 @@ notags wilderness rules stay active outside them. The row un-waived to a
 counted PARTIAL (the residual is the stock 80 m-area tag union + random
 group scan vs zdtd's per-position first-match). Test spawning.xml rule
 tags/notags parse. Total **264/28/0** (292 rows).
+Then the POI Light TEs shipped: the .tts Light (18) marker persistency
+payloads (RE TileEntityLight.read) parse into a world light store and the
+chunk stream emits the stock TileEntityLight network body, so the 269
+Navezgane POI lights render with their authored colour/intensity/range
+(row prefab tile-entity list updated; the "server light model" residual is
+the chunk light-level propagation, RE-blocked). Tests light payload parse +
+wire round-trip. Full suite 1274 pass, 1 fail (the concurrent agent's
+in-flight webui log-console test). Total **264/28/0** (292 rows).
 Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
 selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
 lockout filters, distance bands / closest with the RE'd constants) - the

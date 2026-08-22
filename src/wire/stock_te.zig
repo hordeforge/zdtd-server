@@ -1366,3 +1366,69 @@ test "vending TE body matches TileEntityVendingMachine::write layout" {
     try std.testing.expectEqual(@as(u64, 999), try pr.readU64());
     try std.testing.expectEqual(@as(usize, 0), pr.remaining());
 }
+
+/// TileEntityLight network body (RE tile-entities-power.md 3.x
+/// TileEntityLight.write IL=48): TileEntity.write network (chunkPos local
+/// Vector3i + version u16 18) then LightIntensity f32, LightRange f32,
+/// Color32, LightType u8, LightAngle f32, LightShadows u8.
+pub const LightTeInfo = struct {
+    intensity: f32 = 1.0,
+    range: f32 = 10.0,
+    /// RGBA (Color32).
+    color: u32 = 0xffffffff,
+    light_type: u8 = 1,
+    angle: f32 = 0,
+    shadows: u8 = 1,
+};
+
+pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world_z: i32, info: LightTeInfo) ![]u8 {
+    var payload: [64]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    const lp = localChunkPos(world_x, world_y, world_z);
+    try pw.writeI32(lp.x);
+    try pw.writeI32(lp.y);
+    try pw.writeI32(lp.z);
+    try pw.writeU16(18); // network write version constant (IL_000B)
+    try pw.writeF32(info.intensity);
+    try pw.writeF32(info.range);
+    try pw.writeU32(info.color);
+    try pw.writeByte(info.light_type);
+    try pw.writeF32(info.angle);
+    try pw.writeByte(info.shadows);
+
+    var w: binary.Writer = .{ .buf = buf };
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, 0, pw.written().len);
+    try w.writeBytes(pw.written());
+    return w.written();
+}
+
+test "light TE body round-trips the stock network layout" {
+    var buf: [128]u8 = undefined;
+    const body = try buildLightTeBody(&buf, 255, 10, 70, 20, .{
+        .intensity = 1.3,
+        .range = 3.0,
+        .color = 0xff2993ff,
+        .light_type = 2,
+        .angle = 0.5,
+        .shadows = 1,
+    });
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(u8, 255), try r.readByte()); // handle
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32()); // world pos
+    try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 20), try r.readI32());
+    _ = try r.readI32(); // block id (0)
+    const pay_len = try r.readI32();
+    try std.testing.expect(pay_len == 3 * 4 + 2 + 4 + 4 + 4 + 1 + 4 + 1);
+    // payload: local chunkPos + version 18 + fields
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 4), try r.readI32()); // local z = mod(20,16)
+    try std.testing.expectEqual(@as(u16, 18), try r.readU16());
+    try std.testing.expectApproxEqAbs(@as(f32, 1.3), try r.readF32(), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), try r.readF32(), 0.001);
+    try std.testing.expectEqual(@as(u32, 0xff2993ff), try r.readU32());
+    try std.testing.expectEqual(@as(u8, 2), try r.readByte());
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), try r.readF32(), 0.001);
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+}

@@ -366,7 +366,7 @@ pub const Index = struct {
             // OOM here would silently drop every multi-block child for the POI.
             var dim_table = self.allocator.alloc(maxdamage.Dim, map.names.len) catch |err| {
                 std.debug.print(
-                    "zdtd: multiblock dim table alloc failed names={d}: {s}\n",
+                    "multiblock dim table alloc failed names={d}: {s}\n",
                     .{ map.names.len, @errorName(err) },
                 );
                 return;
@@ -534,7 +534,7 @@ pub const Index = struct {
         self: *Index,
         cx: i32,
         cz: i32,
-        cb: *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, te_type: u8) void,
+        cb: *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, te_type: u8, payload: []const u8) void,
         ctx: ?*anyopaque,
     ) void {
         const base_x = cx * 16;
@@ -552,7 +552,7 @@ pub const Index = struct {
                 const wy = origin_y + te.ly;
                 const wz = d.z + r.z;
                 if (wx < base_x or wx >= base_x + 16 or wz < base_z or wz >= base_z + 16) continue;
-                cb(ctx, wx, wy, wz, te.te_type);
+                cb(ctx, wx, wy, wz, te.te_type, te.payload);
             }
         }
     }

@@ -76,8 +76,8 @@ pub fn broadcastDirtyWorkstations(self: *Game) !void {
         // Keep dirty until encode+broadcast succeed so a failed send retries next tick.
         const body = buildWorkstationBody(self, w, self.body_buf[8192..16384]) catch |err| {
             self.harness.counters.inc(.encode_errors);
-            std.debug.print(
-                "zdtd: workstation TE encode failed at ({d},{d},{d}): {s}\n",
+            std.debug.print("zdtd: 
+                "workstation TE encode failed at ({d},{d},{d}): {s}\n",
                 .{ w.x, w.y, w.z, @errorName(err) },
             );
             continue;
@@ -90,8 +90,8 @@ pub fn broadcastDirtyWorkstations(self: *Game) !void {
             self.interest_range,
         ) catch |err| {
             self.harness.counters.inc(.net_send_errors);
-            std.debug.print(
-                "zdtd: workstation TE broadcast failed at ({d},{d},{d}): {s}\n",
+            std.debug.print("zdtd: 
+                "workstation TE broadcast failed at ({d},{d},{d}): {s}\n",
                 .{ w.x, w.y, w.z, @errorName(err) },
             );
             continue;
@@ -136,7 +136,7 @@ pub fn seedChestBlockId(self: *Game) u16 {
     const slice = io_fs.readFileInto(path, &buf) catch |err| {
         if (err != error.FileNotFound) {
             std.debug.print(
-                "zdtd: seed_chest_block_id read failed: {s}; using AssignIds/default\n",
+                "seed_chest_block_id read failed: {s}; using AssignIds/default\n",
                 .{@errorName(err)},
             );
         }
@@ -365,4 +365,27 @@ pub fn broadcastVendingTe(self: *Game, x: i32, y: i32, z: i32) !void {
         if (!self.clientObserves(cl, @floatFromInt(x), @floatFromInt(z))) continue;
         try sendVendingTe(self, cl.peer.?, x, y, z);
     }
+}
+
+/// Send a POI light TE (TileEntityLight, type 18) to one peer: the authored
+/// intensity/range/colour from the prefab .tts marker, in the stock network
+/// body (stock_te.buildLightTeBody).
+pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
+    const l = self.light_te.get(.{ .x = x, .y = y, .z = z }) orelse return;
+    const body = try stock_te.buildLightTeBody(
+        self.body_buf[0..4096],
+        255,
+        x,
+        y,
+        z,
+        .{
+            .intensity = l.intensity,
+            .range = l.range,
+            .color = l.color,
+            .light_type = l.light_type,
+            .angle = l.angle,
+            .shadows = l.shadows,
+        },
+    );
+    try self.sendGame(peer, "NetPackageTileEntity", body);
 }

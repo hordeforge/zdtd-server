@@ -90,6 +90,7 @@ const webui_mod = @import("webui.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
+const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
 const sleepers_mod = @import("../world/sleepers.zig");
 const server_config = @import("config.zig");
@@ -401,6 +402,10 @@ pub const Game = struct {
     /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
     /// store keyed by world pos. Created on place, cleared on removal.
     vending: vending_mod.VendingStore = .{},
+    /// POI light TEs (TileEntityLight, type 18): authored intensity/range/
+    /// colour from the prefab .tts markers, keyed by world pos. Regenerated
+    /// from the prefab scan on chunk fill; no persistence file.
+    light_te: light_te_mod.Store = .{},
     /// Lock table: channel → holder peer slot (-1 free).
     lock_channel: [16]i32 = .{-1} ** 16,
     lock_holder_entity: [16]i32 = .{-1} ** 16,
