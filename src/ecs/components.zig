@@ -90,6 +90,12 @@ pub const ClassId = struct {
     explode_delay_s: f32 = 0,
     /// IsEnemyEntity: false on passive wildlife, so only predators chase.
     is_enemy: bool = true,
+    /// Inherited AITask-* list contains an attack task (ApproachAndAttackTarget
+    /// in V3.1.0 b14): timid animals (stag/doe/rabbit/chicken/pig) carry
+    /// RunawayWhenHurt/RunawayFromEntity/Look/Wander only and never attack;
+    /// predators and zombies carry the attack task. Defaults true so classes
+    /// without a task list keep the zombie-brain behavior.
+    ai_attack: bool = true,
     /// entityclasses ExperienceGain kill XP; 0 = fall back to class_table[id]
     /// then the caller's flat floor.
     xp_gain: f32 = 0,

@@ -149,12 +149,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 15 | 5 | 3 | 23 | Per-trader stock (direct + group rolls), hours, wallet, restock, quest offers and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
-| [Entities and AI](#8-entities-and-ai) | 22 | 22 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 23 | 21 | 4 | 48 | Real fights with real stakes and real A*; timid animals flee instead of sprinting at you (AITask-gated); population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **206** | **89** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **207** | **88** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2016,14 +2016,21 @@ gamestage, no wandering hordes, and no screamers.
   `entityclasses.xml` task-graph loader — waived as EAI completeness vs wire.
   *Anchors:* `src/assets/entities.zig:230-272`, `src/ecs/systems.zig:731-750`
 
-- **Timid animals run the zombie task table** `PARTIAL`
-  `spawnAnimal` sets `mask.zombie_ai` and the AI loop has no kind gate;
-  `canExecute` dispatches `.approach_attack` to `approachCanExecute`, which only
-  tests "a player is within 48 m". Only `.runaway` is kind-gated. Stock
-  `animalTemplateTimid` is RunawayWhenHurt, RunawayFromEntity, Look, Wander with no
-  attack task at all. An unprovoked stag sprints at you and melees.
-  *Anchors:* `src/ecs/world.zig:509-521`, `src/ecs/systems.zig:815-818`,
-  `:1019-1031`, `:1140-1144`, `Data/Config/entityclasses.xml:4754-4757`
+- **Timid animals run the zombie task table** `WORKS` `(2026-08-22)`
+  `approach_attack` is now gated by the class's inherited AITask-* list:
+  `ai_attack` is parsed from `entityclasses.xml` (an attack task =
+  `ApproachAndAttackTarget`, the only attack task in V3.1.0 b14; the name set
+  is a stock-AI RE constant), so timid animals (stag/doe/rabbit/chicken/pig,
+  whose `animalTemplateTimid` is RunawayWhenHurt, RunawayFromEntity, Look,
+  Wander) never pick the attack task, while predators (wolf/bear/coyote/boar,
+  `animalTemplateHostile` with ApproachAndAttackTarget) and zombies keep
+  hunting. The boar case proves the discriminator is the task list, not
+  `IsEnemyEntity` (it overrides that to false for safe-zone spawning but keeps
+  its attack task). The field rides the per-entity class copy on every spawn
+  path; unprovoked, a timid animal flees or wanders instead of sprinting in.
+  *Anchors:* `src/assets/entities.zig` resolvedAiAttacks,
+  `src/ecs/systems.zig:1743`, `src/ecs/world.zig:875-905`,
+  `Data/Config/entityclasses.xml:4724-4800`
 
 - **Target sensing** `PARTIAL`
   Only `EAISetAsTargetIfHurt` is modelled, as a revenge-target override on top of

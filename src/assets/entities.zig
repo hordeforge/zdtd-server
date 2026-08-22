@@ -25,6 +25,10 @@ pub const EntityDef = struct {
     /// UserSpawnType != None (Menu/Console).
     spawnable: bool = false,
     is_enemy: bool = true,
+    /// Inherited AITask-* list contains an attack task (see resolvedAiAttacks):
+    /// false only for classes whose task list exists without one (timid
+    /// animals), true otherwise so brainless classes keep the zombie default.
+    ai_attack: bool = true,
     /// entityclasses MoveSpeedAggro max (chase speed, m/s scale). 0 = unset.
     chase_speed: f32 = 0,
     /// MoveSpeed (wander shamble). 0 = unset.
@@ -167,6 +171,41 @@ fn resolveProp(
 
 fn parseBoolLoose(s: []const u8) bool {
     return std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "True") or std.mem.eql(u8, s, "1");
+}
+
+/// Stock AITask-* task names that make an entity attack. V3.1.0 b14
+/// entityclasses.xml ships only ApproachAndAttackTarget (the AI task enum's
+/// attack-capable task; every hostile animal and zombie template carries it,
+/// timid animals never do). A new attack task name lands here as RE evidence,
+/// not in per-class data.
+const attack_task_names = [_][]const u8{"ApproachAndAttackTarget"};
+
+/// Does the class's inherited AITask-* list contain an attack task? Walks the
+/// extends chain like resolveProp. A class with no AITask-* at all reports
+/// true (the sim drives those with the zombie brain and they keep attacking);
+/// a class whose list exists without an attack task (timid animal template)
+/// reports false, so it never picks approach_attack.
+fn resolvedAiAttacks(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) bool {
+    var has_any_task = false;
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            if (!std.mem.startsWith(u8, e.key_ptr.*, "AITask-")) continue;
+            has_any_task = true;
+            for (attack_task_names) |att| {
+                if (std.mem.eql(u8, e.value_ptr.*, att)) return true;
+            }
+        }
+        cur = rc.extends;
+    }
+    return !has_any_task;
 }
 
 fn inferKind(name: []const u8, tags: []const u8, is_animal: bool) components.Kind {
@@ -312,6 +351,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const tags = resolveProp(&classes, name, "Tags", 0) orelse "";
         const is_animal = if (resolveProp(&classes, name, "IsAnimalEntity", 0)) |v| parseBoolLoose(v) else false;
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
+        const ai_attack = resolvedAiAttacks(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
         const spawnable = !(std.mem.eql(u8, ust, "None") or std.mem.eql(u8, ust, "none"));
@@ -436,6 +476,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .loot_drop_prob = drop_prob,
             .spawnable = spawnable,
             .is_enemy = is_enemy,
+            .ai_attack = ai_attack,
             .chase_speed = chase,
             .wander_speed = wander,
             .time_stay = time_stay,
@@ -514,4 +555,55 @@ test "load stock entityclasses when present" {
     // A34 on the feral ladder: zombieBoeFeral overrides zombieBoe's HealthMax
     // with ^healthNormalFeral = 550 (Extends-chain override + variable lookup).
     try std.testing.expectEqual(@as(f32, 550), fer.max_hp);
+    // AITask-* attack gating (timid animals never attack): the stag's inherited
+    // task list is RunawayWhenHurt/RunawayFromEntity/Look/Wander (no attack
+    // task), wolves carry ApproachAndAttackTarget, and the boar keeps its
+    // hostile template's attack task even though it overrides IsEnemyEntity
+    // to false for safe-zone spawning.
+    const stag2 = t.byName("animalStag").?;
+    try std.testing.expect(!stag2.ai_attack);
+    const rabbit = t.byName("animalRabbit").?;
+    try std.testing.expect(!rabbit.ai_attack);
+    const wolf = t.byName("animalWolf").?;
+    try std.testing.expect(wolf.ai_attack);
+    const boar = t.byName("animalBoar").?;
+    try std.testing.expect(boar.ai_attack);
+    try std.testing.expect(boe.ai_attack); // zombieTemplate has the attack task
+}
+
+test "AITask attack gating parses from entityclasses XML" {
+    // Offline parse: attack-task presence is inherited through extends, and a
+    // class with no AITask-* at all keeps the zombie-brain default (true).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="TimidBase">
+        \\    <property name="AITask-1" value="RunawayWhenHurt"/>
+        \\    <property name="AITask-2" value="Look"/>
+        \\  </entity_class>
+        \\  <entity_class name="animalDeer" extends="TimidBase">
+        \\    <property name="AITask-3" value="Wander"/>
+        \\  </entity_class>
+        \\  <entity_class name="animalTemplateHostile">
+        \\    <property name="AITask-1" value="BreakBlock"/>
+        \\    <property name="AITask-2" value="ApproachAndAttackTarget"/>
+        \\  </entity_class>
+        \\  <entity_class name="animalWolf" extends="animalTemplateHostile">
+        \\    <property name="MaxHealth" value="200"/>
+        \\  </entity_class>
+        \\  <entity_class name="mysteryNoTasks">
+        \\    <property name="MaxHealth" value="50"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(!t.byName("animalDeer").?.ai_attack); // inherited timid list
+    try std.testing.expect(t.byName("animalWolf").?.ai_attack); // hostile template
+    try std.testing.expect(t.byName("mysteryNoTasks").?.ai_attack); // no list -> default
 }

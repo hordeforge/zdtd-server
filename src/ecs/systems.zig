@@ -1740,7 +1740,7 @@ fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np:
         .break_block => breakBlockCanExecute(w, ai, np.id, np.d2, sense_d2),
         .destroy_area => destroyAreaCanExecute(w, ai, np.id, np.d2, sense_d2),
         .runaway => runawayCanExecute(w, s, ai),
-        .approach_attack => approachCanExecute(w, ai, np.id, np.d2, sense_d2),
+        .approach_attack => w.class_id[s].ai_attack and approachCanExecute(w, ai, np.id, np.d2, sense_d2),
         .territorial => territorialCanExecute(w, s, ai, np.id, np.d2, sense_d2),
         .approach_distraction => approachDistractionCanExecute(w, ai, np.id, np.d2, sense_d2),
         .approach_spot => approachSpotCanExecute(ai),
@@ -3529,6 +3529,32 @@ test "passive animal does not flee an entity beyond fleeDistance" {
     while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expectEqual(@as(i32, -1), w.zombie_ai[as].fear_target);
     try std.testing.expect(w.zombie_ai[as].active_task != c.TaskId.runaway);
+}
+
+test "timid animal near a player never attacks; a predator does" {
+    // GAP timid-animals row: stock animalTemplateTimid carries no attack task
+    // (RunawayWhenHurt/RunawayFromEntity/Look/Wander), so an unprovoked stag
+    // near a player must not sprint at it and melee. The class task list gates
+    // approach_attack via ai_attack (parsed from entityclasses AITask-*); the
+    // predator keeps its ApproachAndAttackTarget task.
+    var w: World = .{};
+    defer w.deinit();
+    const stag = w.spawnAnimal(0, 70, 2, 100, 0, "").?;
+    const ss = w.slotOfNetId(stag).?;
+    w.class_id[ss].is_enemy = false; // passive wildlife
+    w.class_id[ss].ai_attack = false; // timid template: no attack task
+    const wolf = w.spawnAnimal(0, 70, -2, 100, 0, "").?;
+    const ws = w.slotOfNetId(wolf).?;
+    w.class_id[ws].is_enemy = true; // predator hunts
+    w.class_id[ws].ai_attack = true; // hostile template: ApproachAndAttackTarget
+    _ = w.spawnPlayer(0, 70, 10, 0).?; // 8-12 m from both, inside sense
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    // The timid animal flees (player is a RunawayFromEntity fear source) or
+    // wanders, but never picks the attack task.
+    try std.testing.expect(w.zombie_ai[ss].active_task != c.TaskId.approach_attack);
+    // The predator, same distance, picks approach_attack and moves in.
+    try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[ws].active_task);
 }
 
 /// Stock decoy distraction state (items.xml resourceRockDecoy): tags

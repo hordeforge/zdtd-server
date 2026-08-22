@@ -155,6 +155,10 @@ pub const EntityClass = struct {
     /// IsEnemyEntity (wolf/bear/coyote hunt; stag/rabbit flee). Defaults true
     /// for zombies; passive animals carry false.
     is_enemy: bool = true,
+    /// Inherited AITask-* list contains an attack task (see assets/entities.zig
+    /// resolvedAiAttacks): timid animals never attack even when a player is
+    /// close. Defaults true (brainless classes keep the zombie behavior).
+    ai_attack: bool = true,
     /// entityclasses ExperienceGain kill XP; 0 = use the caller's flat floor.
     xp_gain: f32 = 0,
 };
@@ -834,6 +838,7 @@ pub const World = struct {
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
+            self.class_id[s].ai_attack = def.ai_attack;
             self.class_id[s].xp_gain = def.xp_gain;
         }
         return id;
@@ -861,6 +866,7 @@ pub const World = struct {
                 .id = class_id,
                 .hash = ct.hash,
                 .loot_list = ct.loot_list,
+                .ai_attack = ct.ai_attack,
             };
         }
         return id;
@@ -899,6 +905,7 @@ pub const World = struct {
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
+            self.class_id[s].ai_attack = def.ai_attack;
             self.class_id[s].xp_gain = def.xp_gain;
         }
         return id;

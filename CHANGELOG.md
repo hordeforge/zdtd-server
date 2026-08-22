@@ -16,6 +16,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Timid animals no longer attack: `approach_attack` is gated by the class's
+  inherited AITask-* list parsed from `entityclasses.xml` (stock timid
+  templates carry RunawayWhenHurt/RunawayFromEntity/Look/Wander, no attack
+  task), so a stag or rabbit near a player flees or wanders instead of
+  sprinting at it and meleeing, while wolves, bears, boars and zombies keep
+  hunting. New attack task names land in one RE constant, not per-class data.
 - Treasure-dig ambushes now fire like stock: each `treasure_radius_break`
   objective update rolls the quest's TreasureRadiusReduction event `chance`
   (quests.xml: 0.25) and spawns the nested SpawnGSEnemy ambush (1-3

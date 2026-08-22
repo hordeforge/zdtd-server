@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 206 `WORKS`,
-89 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 207 `WORKS`,
+88 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -175,6 +175,15 @@ zero-prob never picked; tested at ~90/10), on top of the existing
 lootstage templates + gamestage-derived stage + force_prob gates. The row
 stays PARTIAL for <requirement> filtering (85 stock uses) and per-entry
 abundance_type (68).
+Then the timid-animals row went WORKS: `approach_attack` is gated by the
+class's inherited AITask-* list (`ai_attack` parsed from entityclasses.xml;
+`ApproachAndAttackTarget` is the only attack task in V3.1.0 b14), so a stag
+or rabbit near a player flees or wanders instead of sprinting at it and
+meleeing, while wolves/bears/boars and zombies keep hunting - the boar
+proves the discriminator is the task list, not IsEnemyEntity (it overrides
+that to false for safe-zone spawning but keeps its attack task). The field
+rides the per-entity class copy on every spawn path; unit test + systems
+test. Entities 22/22/4 -> **23/21/4**; total **207/88/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

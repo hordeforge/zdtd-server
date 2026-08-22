@@ -76,7 +76,7 @@ Coverage targets, all enforced by the scan:
 | `src/assets/blocks.zig` | A | blocks.xml solid/name table. Wire ids come only from AssignIds (idByName), never sequential XML declaration order. `pickup_source` reads the PickupSource property (XML.txt:908 declares it; V3.1.0 b14 sets it on no block, so stock pickups leave Air) |
 | `src/assets/blocks_nim.zig` | A | Prefab `.blocks.nim` local-id → block name table (Prefab name mapping). Catalog/asset parse (not world store). Use when TTS types are local indices |
 | `src/assets/buffs.zig` | A | buffs.xml: metadata + passive_effect rows. Full triggered_effect VM is later |
-| `src/assets/entities.zig` | A | entityclasses.xml loader: name → Unity Mono hash, kind, HP, death loot list |
+| `src/assets/entities.zig` | A | entityclasses.xml loader: name → Unity Mono hash, kind, HP, death loot list. Also resolves the inherited AITask-* list into `ai_attack` (timid animals carry no attack task and never pick approach_attack; the attack-task name set is a stock-AI RE constant) |
 | `src/assets/entitygroups.zig` | A | entitygroups.xml: named weighted spawn lists (`<e n="…" p="…"/>`) |
 | `src/assets/gamestages.zig` | A | gamestages.xml: per-spawner stage ladders plus the player/party stage math. |
 | `src/assets/items.zig` | A | items.xml loader + builtin sim ids with stock name/type resolution for client UI |
@@ -354,6 +354,7 @@ field-by-field provenance.
 | `ecs/party.zig max_party_members` | 8 | R | Stock party cap (RE: parties-factions.md §2) |
 | `world/weather.zig blood_moon_storm_push` | 5000 | R | Blood-moon storm push ticks (RE: weather-environment.md storm state machine) |
 | `world/weather.zig update_interval_ticks` | 5 | R | Weather update cadence (RE: weather-environment.md) |
+| `assets/entities.zig attack_task_names` | 1 name | A | Stock AI task enum attack-capable tasks (V3.1.0 b14 entityclasses.xml ships only ApproachAndAttackTarget; timid animals carry no attack task, so ai_attack gates approach_attack off for them) |
 | `ecs/quest.zig max_phases` / `max_reward_flags` / `max_actions` / `max_quest_events` | 32 / 16 / 8 / 4 | Z | Quest array caps (audit B34; stock quests.xml data is loaded, these bound the sim tables; the stock file carries one `<event>` block) |
 | `ecs/quest.zig builtin_objective_kinds` | 23 rows | A | The stock objective `type=` family (RallyPoint, ClearSleepers, EntityKill, AnimalKill, Fetch\*, TreasureChest, InteractWithNPC, ReturnToNPC, RandomGotoNPC, Craft\*, StayWithin\*, POIStayWithin, \*BlockActivate, Goto\*) -> executable PhaseKind, mirrored from stock BaseObjective; overridable/extendable via `[quests] objective_kinds` (assets/quests.zig parseObjectiveKinds) so a new stock type is config, not code (ADR 0021). `Goto id="trader"` special case is a hardcoded game fact |
 | `ecs/quest.zig QuestPolicy` default_kill_count / kill_per_tier | 3 / 2 | Z | **zdtd-owned** approximation for kill objectives with no explicit count (stock ClearSleepers counts the POI sleeper volume at runtime, audit B25); phase target = `default + tier*kill_per_tier`. Config: `[quests]` |
