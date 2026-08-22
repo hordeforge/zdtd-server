@@ -151,10 +151,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
-| [Player progression](#10-player-progression) | 12 | 10 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); eating caps like stock; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **225** | **70** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **226** | **69** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2688,21 +2688,22 @@ and server-to-client XP/level pushes do not exist.
   *Anchors:* `src/assets/progression.zig:92-106`, `:123-130`,
   `src/server/game.zig:834-845`, `server-orch.log:14`
 
-- **Server-side XP ledger and level-up loop** `PARTIAL`
-  `awardXp` levels correctly against its own curve, but it is a write-only
-  counter: the value lives on the per-peer `Client` struct (never on the ECS
-  entity), is never sent to the client, never saved, and is zeroed by
-  `clients[slot] = .{}` on any disconnect. Award amount now resolves
-  `entityclasses.xml` `ExperienceGain` per victim class (including the
-  `^xpNormal01`-style `<replace_properties>` ladder) instead of a flat 100; a
-  turret/trap kill additionally scales by `Rules.progression.trap_kill_xp_frac`
-  (0.0 default, matching stock's unperked default) since stock's own
-  `ElectricalTrapXP` scaling needs a per-player perk level zdtd does not yet
-  have. See [HARDCODE_AUDIT A34](reviews/HARDCODE_AUDIT.md) and
-  [ADR 0023](adr/0023-perk-attribute-system.md) for the full per-player fix.
+- **Server-side XP ledger and level-up loop** `WORKS` `(2026-08-22 re-audit)`
+  `awardXp` levels correctly against the stock curve, and the ledger is
+  **persisted**: level/xp ride the ZPV3 progression tail (`players.zsv`,
+  `persist.zig`), restored on login, and saved on the hard-disconnect reap
+  **before** the slot clears (net.zig:369-372), on shutdown (lifecycle) and on
+  the periodic autosave (step.zig) - a disconnect does not lose XP. Award
+  amount resolves `entityclasses.xml` `ExperienceGain` per victim class
+  (including the `^xpNormal01`-style `<replace_properties>` ladder); a
+  turret/trap kill scales by `Rules.progression.trap_kill_xp_frac` (0.0
+  default, stock's unperked default) since stock's `ElectricalTrapXP` needs a
+  per-player perk level zdtd does not yet have (ADR 0023). The client XP push
+  is owned by the (waived) server-to-client XP/level row; the ledger lives on
+  the per-peer Client as its persistence key.
   *Anchors:* `src/server/game/player.zig` `killXpAward`/`xpGainFor`,
-  `src/server/game/step.zig` (turret path), `src/assets/entities.zig`
-  (`ExperienceGain` parse)
+  `src/server/persist.zig:407-414,709` (ZPV3), `src/server/game/net.zig:369-372`
+  (reap save), `src/assets/entities.zig` (`ExperienceGain` parse)
 
 - **XP curve numeric parity with stock** `WORKS`
   `expForLevel` now mirrors `Progression.GetExpForNextLevel` bit-for-bit:

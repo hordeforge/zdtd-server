@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 225 `WORKS`,
-70 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 226 `WORKS`,
+69 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -296,6 +296,12 @@ adds and caps at max like stock buffProcessConsumables, so a nearly-full
 stomach no longer drops the food bar to half before adding (the old 85%
 drain lowered 100 food to 65); unit test pins the no-drain cap. Progression
 11/11/15 -> **12/10/15**; total **225/70/38**.
+Then the XP-ledger row went WORKS on re-audit: level/xp ride the ZPV3
+progression tail and are saved on the hard-disconnect reap before the slot
+clears (plus shutdown and the periodic autosave), so XP survives restarts
+and disconnects; awards resolve per-class ExperienceGain. The client XP
+push stays the waived server-to-client row. Progression 12/10/15 ->
+**13/9/15**; total **226/69/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
