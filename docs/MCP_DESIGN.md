@@ -10,8 +10,9 @@ flow, caps, tests.
 ## 1. Goal and inputs
 
 Ship an MCP server as a drop-in Wasm plugin: guest owns protocol, host owns
-transport (ADR 0031 D1/D2). One `.wasm` in `[plugin] modules` plus one new host
-file, one new guest export (`on_mcp_frame`), and an `[mcp]` config section.
+transport and JSON parsing (ADR 0031 D1/D3). One `.wasm` in `[plugin] modules`
+plus one new host file, one new guest export (`on_mcp_frame`), the host
+std.json capability (`json_*` imports), and an `[mcp]` config section.
 Nothing on the tick path except one hook call per pending frame, no hot-path
 heap, and no stock wire involvement.
 
