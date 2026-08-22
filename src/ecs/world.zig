@@ -409,6 +409,12 @@ pub const World = struct {
     /// suppression (test worlds without sleeper data).
     quest_clear_ctx: ?*anyopaque = null,
     quest_clear_fn: ?*const fn (?*anyopaque, c.PoiRect) void = null,
+    /// ObjectiveClearSleepers target: the POI's live sleeper population
+    /// (stock counts the volume spawns at quest start). The Game hook sums
+    /// the sleeper volumes intersecting the bound rect; unset/0 falls back to
+    /// the def's required count (audit B25).
+    quest_sleeper_count_ctx: ?*anyopaque = null,
+    quest_sleeper_count_fn: ?*const fn (?*anyopaque, c.PoiRect) u16 = null,
     /// QuestActionSpawnGSEnemy: the Game spawns `count` gamestage-scaled
     /// enemies around the player on phase entry (stock SpawnQuestEntity:
     /// player position + random direction × (12 + rand*12) metres). Unset =

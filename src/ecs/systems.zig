@@ -709,7 +709,18 @@ fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: 
             if (o.kind != kind) continue;
             if (o.phase != s.phase and o.phase != 0) continue;
             if (i >= s.obj_progress.len) continue;
-            const req: u16 = @max(1, o.required);
+            // ClearSleepers (poi_gated kill): the target is the bound POI's
+            // live sleeper population, not the def's policy floor (stock
+            // ObjectiveClearSleepers counts the volume spawns; audit B25).
+            // The Game hook sums the volumes in the rect; 0/unset keeps the
+            // def required.
+            var req: u16 = @max(1, o.required);
+            if (o.poi_gated and s.poi.valid()) {
+                if (w.quest_sleeper_count_fn) |f| {
+                    const live = f(w.quest_sleeper_count_ctx, s.poi);
+                    if (live > 0) req = live;
+                }
+            }
             s.obj_progress[i] = @min(@as(u16, s.obj_progress[i]) +| n, req);
             advanced = true;
         }
@@ -722,7 +733,7 @@ fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: 
             if (i < s.obj_progress.len and s.obj_progress[i] > max_p) max_p = s.obj_progress[i];
         }
         if (max_p > 0) s.progress = max_p;
-        const phase_done = phaseObjectivesComplete(d, s);
+        const phase_done = phaseObjectivesComplete(w, d, s);
         if (phase_done) {
             advancePhaseGraph(w, ps, s, d);
             return;
@@ -750,11 +761,20 @@ fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: 
 /// of the current phase (plus always-active phase-0 objectives) is complete.
 /// `.auto` scaffolding objectives never block (unmodelled objective types
 /// auto-complete on entry).
-fn phaseObjectivesComplete(d: quest.QuestDef, s: *const c.QuestProgress) bool {
+fn phaseObjectivesComplete(w: *World, d: quest.QuestDef, s: *const c.QuestProgress) bool {
     for (d.objectives, 0..) |o, i| {
         if (o.optional or o.kind == .auto) continue;
         if (o.phase != s.phase and o.phase != 0) continue;
-        if (i >= s.obj_progress.len or s.obj_progress[i] < @max(1, o.required)) return false;
+        if (i >= s.obj_progress.len) return false;
+        // Same live-sleeper override as bumpPhase (audit B25).
+        var req: u16 = @max(1, o.required);
+        if (o.poi_gated and s.poi.valid()) {
+            if (w.quest_sleeper_count_fn) |f| {
+                const live = f(w.quest_sleeper_count_ctx, s.poi);
+                if (live > 0) req = live;
+            }
+        }
+        if (s.obj_progress[i] < req) return false;
     }
     return true;
 }
@@ -4271,6 +4291,59 @@ test "ClearSleepers kills gate to the bound POI and suppress its sleepers" {
     questOnZombieKilled(&w, 0, 20, 20);
     try std.testing.expect(!questHasActive(&w, 0, 50));
     try std.testing.expectEqual(@as(u32, 1), cleared_n);
+}
+
+test "ClearSleepers target uses the POI's live sleeper count (B25)" {
+    // Stock ObjectiveClearSleepers counts the bound POI's sleeper volume
+    // spawns as the kill target; the Game hook supplies that count and the
+    // def's policy floor is not used (audit B25).
+    var w: World = .{};
+    defer w.deinit();
+    const objs = [_]quest.FlatObjective{.{
+        .phase = 1,
+        .kind = .kill_zombies,
+        .required = 1, // policy floor; the hook overrides it to 4
+        .poi_gated = true,
+    }};
+    const phases = [_]quest.PhaseSpec{.{ .kind = .kill_zombies, .required = 1, .poi_gated = true }};
+    const defs = [_]quest.QuestDef{.{
+        .id = 51,
+        .kind = .kill_zombies,
+        .name = "cs_live",
+        .title = "CS live",
+        .target_count = 1,
+        .reward_coin = 10,
+        .objective_count = 1,
+        .phases = &phases,
+        .highest_phase = 1,
+        .objective_phases = &[_]u8{1},
+        .objectives = &objs,
+    }};
+    w.catalog = .{ .defs = &defs, .starter_id = 51, .source = .builtin };
+    w.poi_fn = &testPoiRect; // POI covering (0,0)..(64,64)
+    const Spy = struct {
+        fn f(_: ?*anyopaque, _: c.PoiRect) u16 {
+            return 4; // the POI holds 4 sleepers
+        }
+    };
+    w.quest_sleeper_count_ctx = null;
+    w.quest_sleeper_count_fn = &Spy.f;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    try std.testing.expect(questAccept(&w, 0, 51));
+    try std.testing.expect(questFindActive(&w, 0, 51).?.poi.valid());
+    // 1-3 kills: still active (target 4, not the def floor of 1).
+    questOnZombieKilled(&w, 0, 10, 10);
+    questOnZombieKilled(&w, 0, 20, 20);
+    questOnZombieKilled(&w, 0, 30, 30);
+    try std.testing.expect(questHasActive(&w, 0, 51));
+    // The 4th kill completes the phase.
+    questOnZombieKilled(&w, 0, 40, 40);
+    try std.testing.expect(!questHasActive(&w, 0, 51));
+    // Unset hook keeps the def floor.
+    w.quest_sleeper_count_fn = null;
+    try std.testing.expect(questAccept(&w, 0, 51));
+    questOnZombieKilled(&w, 0, 10, 10);
+    try std.testing.expect(!questHasActive(&w, 0, 51));
 }
 
 test "phase advances only when all its objectives complete (shared phase)" {

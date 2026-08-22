@@ -341,6 +341,9 @@ pub const FlatObjective = struct {
     required: u16 = 1,
     optional: bool = false,
     force: bool = false,
+    /// ClearSleepers objectives gate kills to the bound POI (stock
+    /// ObjectiveClearSleepers counts the volume spawns as the target).
+    poi_gated: bool = false,
 };
 
 /// Objective Write subclass (Quest.Write CreateQuest): BaseObjective writes

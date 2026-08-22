@@ -149,7 +149,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 32 | 2 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
+| [Quests](#4-quests) | 33 | 1 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 18 | 2 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 25 | 5 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
@@ -158,7 +158,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 21 | 4 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 38 | 6 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **259** | **32** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **260** | **31** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -791,7 +791,7 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/ecs/systems.zig:458`, `:234`, `:298`,
   `src/assets/quests.zig` scanObjectiveMeta, `src/ecs/quest.zig` PoiSelectKind
 
-- **Kill / fetch / goto / stay-within / craft progress hooks** `PARTIAL`
+- **Kill / fetch / goto / stay-within / craft progress hooks** `WORKS` `(2026-08-22)`
   All five are wired. 2026-08-19: fetch quests now complete through **real
   triggers** — the client's `treasure_complete` QuestObjectiveUpdate event
   (treasure digs) and a container-loot hook (FetchFromContainer), and the old
@@ -808,8 +808,12 @@ not a sleeper-volume clear), not completion blockers.
   the kill event; `PhaseSpec.poi_gated` from the ClearSleepers objective
   type), and completing the phase suppresses the POI's sleeper volumes
   (persistent `sleepers_cleared.zsc`, so a cleared POI does not re-arm on
-  re-trigger or restart). The required count is still the `[quests]` policy
-  floor rather than the POI's live non-excluded volume count (audit B25).
+  re-trigger or restart). 2026-08-22 (audit B25 closed): the required kill
+  count is the bound POI's live sleeper population - the Game hook sums the
+  sleeper volumes intersecting the quest rect (the stock
+  ObjectiveClearSleepers target), used by both the bump and the completion
+  check; the `[quests]` policy floor is only the no-hook fallback (test
+  `ClearSleepers target uses the POI's live sleeper count`).
   *Anchors:* `src/server/c2s/quest.zig` NetPackageQuestObjectiveUpdate,
   `src/server/c2s/inv.zig` container branch, `src/ecs/systems.zig`
   questTickGoto/questTickStayWithin/questOnZombieKilled/advancePhaseGraph,

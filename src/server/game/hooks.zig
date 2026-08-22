@@ -453,6 +453,30 @@ pub fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
     g.sleepers.markClearedRect(rect.x, rect.y, rect.z, rect.size_x, rect.size_y, rect.size_z);
 }
 
+/// ObjectiveClearSleepers target (audit B25): the bound POI's live sleeper
+/// population. Stock counts the volume spawns at quest start; sum the
+/// authored group population of every volume whose AABB intersects the quest
+/// rect (falls back to the def required when the hook returns 0).
+pub fn questSleeperCount(ctx: ?*anyopaque, rect: ecs.components.PoiRect) u16 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const r0x = rect.x;
+    const r0z = rect.z;
+    const r1x = rect.x + rect.size_x;
+    const r1z = rect.z + rect.size_z;
+    var total: u16 = 0;
+    for (g.sleepers.volumes) |vol| {
+        if (vol.quest_cleared) continue;
+        if (@as(f32, @floatFromInt(vol.x1)) <= r0x or @as(f32, @floatFromInt(vol.x0)) >= r1x) continue;
+        if (@as(f32, @floatFromInt(vol.z1)) <= r0z or @as(f32, @floatFromInt(vol.z0)) >= r1z) continue;
+        const pop: u16 = if (vol.group_n > 0 and vol.groups[0].max_count > 0)
+            vol.groups[0].max_count
+        else
+            @intCast(@min(vol.spawns.len, 255));
+        total = @min(@as(u16, @intCast(@as(u32, total) + @as(u32, pop))), 4096);
+    }
+    return total;
+}
+
 /// QuestActionSpawnGSEnemy (il/full-v3.1.0/_global/QuestActionSpawnGSEnemy):
 /// spawn `count_min..count_max` gamestage-scaled enemies around the player —
 /// stock SpawnQuestEntity places them at player.position + random unit

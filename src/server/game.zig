@@ -738,6 +738,8 @@ pub const Game = struct {
         // (persistent across restart).
         self.sim.quest_clear_ctx = self;
         self.sim.quest_clear_fn = &questClearSleepers;
+        self.sim.quest_sleeper_count_ctx = self;
+        self.sim.quest_sleeper_count_fn = &questSleeperCount;
         // QuestActionSpawnGSEnemy spawns gamestage-scaled enemies on phase
         // entry (stock SpawnQuestEntity placement).
         self.sim.quest_spawn_ctx = self;
@@ -896,6 +898,10 @@ pub const Game = struct {
 
     fn questClearSleepers(ctx: ?*anyopaque, rect: ecs.components.PoiRect) void {
         return game_hooks.questClearSleepers(ctx, rect);
+    }
+
+    fn questSleeperCount(ctx: ?*anyopaque, rect: ecs.components.PoiRect) u16 {
+        return game_hooks.questSleeperCount(ctx, rect);
     }
 
     fn questSpawnGsEnemy(ctx: ?*anyopaque, rect: ecs.components.PoiRect, list: []const u8, min: u8, max: u8, px: f32, pz: f32) void {

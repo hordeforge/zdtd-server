@@ -326,6 +326,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
             .required = if (objectiveIsArrival(o.kind)) 1 else if (o.target == 0) 1 else o.target,
             .optional = o.optional,
             .force = o.force,
+            .poi_gated = o.poi_gated,
         };
     }
     return .{ .phases = specs, .highest_phase = highest, .objective_phases = obj_phases, .objective_kinds = obj_kinds, .objectives = flat };

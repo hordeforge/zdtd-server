@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 259 `WORKS`,
-32 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 260 `WORKS`,
+31 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -516,6 +516,12 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then ClearSleepers went WORKS (audit B25 closed): the required kill count
+is the bound POI's live sleeper population - a Game hook sums the sleeper
+volumes intersecting the quest rect (the stock ObjectiveClearSleepers
+target), used by both the bump and the completion check; the [quests]
+policy floor is only the no-hook fallback. Test ClearSleepers target uses
+the POI's live sleeper count. Quests 33/1/0; total **260/31/0**.
 Then zombie block damage improved its probe: the front-column scan runs
 feet to head and chews the first solid cell, so a zombie pressed against a
 1-block-tall wall chews it instead of getting stuck forever (the old
