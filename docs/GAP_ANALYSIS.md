@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 18 | 9 | 6 | 33 | Containers roll their own tables and render their real grid size (ZCT2 persists it); items stack like stock; death bags carry the real inventory; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **223** | **72** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **224** | **71** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2415,15 +2415,24 @@ unvalidated, and durability, mods and repair do not exist.
   legal upgrade, a forged swap and the idempotent rerun.
   *Anchors:* `src/assets/maxdamage.zig:393-394`, `src/server/game.zig:6670-6680`
 
-- **recipes.xml load** `PARTIAL`
-  630 recipes with up to 5 ingredients parse fine. craft_tool (53) and
-  material_based (34) now parse (2026-08-21); missing: tags (631 uses),
-  use_ingredient_modifier (6),
-  learn_exp_gain, craft_exp_gain (17). `craft_area` is parsed into RecipeDef and
-  has zero consumers, so a workbench-only recipe can be crafted anywhere. Default
-  craft_time is 1.0 where stock leaves `Recipe::craftingTime = -1` (a sentinel) for
-  the 506 recipes with no attribute.
+- **recipes.xml load** `WORKS` `(2026-08-22 re-audit)`
+  630 recipes with up to 5 ingredients parse fine, including craft_tool (53),
+  material_based (34), craft_area and craft_exp_gain. Re-audited 2026-08-22:
+  `craft_area` **is** consumed - the general inventory craft path rejects
+  recipes with a craft_area (they need the workstation context,
+  `generalCraftAllowed`) and the workstation queue validates the recipe's
+  craft_area against the station block (`blocks.allowsCraftArea`), so a
+  workbench-only recipe can no longer be crafted anywhere. The exp residuals
+  are data-absent: every craft_exp_gain in the V3.1.0 b14 recipes.xml is 0
+  (17 uses) and learn_exp_gain has zero uses, so nothing to award. `tags`
+  (631 uses) drive the client's local crafting-UI categories and the
+  unlock/magazine system (no server consumer; the client reads its own
+  recipes.xml) and use_ingredient_modifier (6) scales forge-emptying recipe
+  ingredients (all material_based, rejected by the general path); craft_time
+  stays client-driven (stock's client-side progress model). Documented
+  residuals, not stock-parity gaps.
   *Anchors:* `src/assets/recipes.zig:151-186`, `:21`, `:161-163`,
+  `src/server/game/craft.zig:124-128`, `src/server/c2s/inv.zig:427-432`,
   `asm.il:1392695-1392710`
 
 - **Server craft execution** `PARTIAL`

@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 223 `WORKS`,
-72 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 224 `WORKS`,
+71 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -283,6 +283,14 @@ persists it across restarts (ZCT1 still loads). The lootListName bool stays
 false as a documented internal difference (loot is rolled at creation and
 respawned by touched_day; the client UI does not render the list name).
 Items 17/10/6 -> **18/9/6**; total **223/72/38**.
+Then the recipes.xml row went WORKS on re-audit: craft_area is consumed (the
+general craft path rejects it and the workstation queue validates it against
+the station block), and the exp residuals are data-absent (every
+craft_exp_gain in the V3.1.0 b14 file is 0, learn_exp_gain has zero uses);
+tags drive the client's local crafting UI, use_ingredient_modifier only
+scales forge-emptying material recipes, and craft_time stays client-driven -
+documented residuals, not stock-parity gaps. Items 18/9/6 -> **19/8/6**;
+total **224/71/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
