@@ -723,6 +723,8 @@ pub const Game = struct {
         // Quest POI placement: rally objectives need a real prefab footprint.
         self.sim.poi_ctx = self;
         self.sim.poi_fn = &poiRectAtWorld;
+        self.sim.poi_tier_ctx = self;
+        self.sim.poi_tier_fn = &poiTierAtWorld;
         self.sim.nearest_poi_ctx = self;
         self.sim.nearest_poi_fn = &nearestPoiAtWorld;
         // Stock quest-POI selection (tags/tier/biome/distance + lockouts).
@@ -886,6 +888,10 @@ pub const Game = struct {
 
     fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
         return game_hooks.poiRectAtWorld(ctx, x, z);
+    }
+
+    fn poiTierAtWorld(ctx: ?*anyopaque, x: f32, z: f32) u8 {
+        return game_hooks.poiTierAtWorld(ctx, x, z);
     }
 
     fn partySame(ctx: ?*anyopaque, a: i32, b: i32) bool {

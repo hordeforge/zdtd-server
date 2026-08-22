@@ -49,6 +49,24 @@ pub fn spawnPoiTraders(self: *Game) void {
     }
 }
 
+/// DifficultyTier (1..6) of the POI at a world XZ, from the prefab's
+/// quest metadata cache (0 = no POI or no tier). Feeds GetLootStage's
+/// POITierMod/Bonus (loot_settings, indexed tier-1).
+pub fn poiTierAtWorld(ctx: ?*anyopaque, x: f32, z: f32) u8 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const pf = if (g.world.prefabs) |*p| p else return 0;
+    const wx: i32 = @floor(x);
+    const wz: i32 = @floor(z);
+    for (pf.items, 0..) |d, i| {
+        if (world_store.prefabs.isPart(d.name)) continue;
+        const b = pf.boundsXZ(i);
+        if (wx < b.x0 or wx >= b.x1 or wz < b.z0 or wz >= b.z1) continue;
+        const qd = pf.questData(d.name) orelse return 0;
+        return qd.tier;
+    }
+    return 0;
+}
+
 pub fn poiRectAtWorld(ctx: ?*anyopaque, x: f32, z: f32) ?ecs.components.PoiRect {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const pf = if (g.world.prefabs) |*p| p else return null;

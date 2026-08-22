@@ -380,6 +380,11 @@ pub const World = struct {
     /// their rally objectives stay scaffolding instead of stalling.
     poi_ctx: ?*anyopaque = null,
     poi_fn: ?*const fn (?*anyopaque, f32, f32) ?c.PoiRect = null,
+    /// Optional DifficultyTier (1..6) of the POI at a world XZ (Game wires
+    /// the prefabs index + its quest metadata cache). 0 = no POI / no tier;
+    /// feeds GetLootStage's POITierMod/Bonus.
+    poi_tier_ctx: ?*anyopaque = null,
+    poi_tier_fn: ?*const fn (?*anyopaque, f32, f32) u8 = null,
     /// Nearest quest-eligible POI to a world XZ (Game wires the prefabs index).
     /// Used to place goto/POI quests that have no static def position (stock
     /// RandomPOIGoto picks the POI when the quest is handed out). Unset → no

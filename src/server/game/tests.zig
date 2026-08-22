@@ -3028,3 +3028,37 @@ test "active quest stage modifiers scale the player gamestage" {
     // With the infested quest active: (10 * (1 + 0.6) + 5 + 30) = 51.
     try std.testing.expectEqual(@as(i32, 51), g.gameStageOf(cl.slot));
 }
+
+test "POI difficulty tier scales the loot stage (POITierMod/Bonus)" {
+    // GetLootStage applies loot_settings POITierMod/Bonus indexed by the
+    // DifficultyTier-1 of the POI the player stands in. A tier-2 POI (mod
+    // 0.1, bonus 6) pushes a level-10 player's loot stage to 10*(1.1)+6 = 17.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const mods = [_]f32{ 0.05, 0.1, 0.15, 0.2, 0.25 };
+    const bonus = [_]f32{ 3, 6, 9, 12, 15 };
+    g.loot.poi_tier_mod = &mods;
+    g.loot.poi_tier_bonus = &bonus;
+    const Tier = struct {
+        fn tier(_: ?*anyopaque, _: f32, _: f32) u8 {
+            return 2;
+        }
+    };
+    g.sim.poi_tier_ctx = null;
+    g.sim.poi_tier_fn = &Tier.tier;
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    cl.level = 10;
+    // No POI tier hook -> 10; with the tier-2 stub -> 10*(1+0.1)+6 = 17.
+    g.sim.poi_tier_fn = null;
+    try std.testing.expectEqual(@as(i32, 10), g.lootStageOf(cl.slot));
+    g.sim.poi_tier_fn = &Tier.tier;
+    try std.testing.expectEqual(@as(i32, 17), g.lootStageOf(cl.slot));
+}

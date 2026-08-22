@@ -522,6 +522,11 @@ scorecard counts recount per category, every GAP feature row embeds under
 its category (click a row to expand), a search box filters categories and
 features, state chips toggle WORKS/PARTIAL/waived rows, and the numeric
 headers sort. Regenerate with `python3 scripts/gen_provenance.py`.
+Then the prefab DifficultyTier leg landed: lootStageOf now applies
+loot_settings POITierMod/Bonus indexed by the tier of the POI the player
+stands in (a tier-2 POI pushes a level-10 player's loot stage to 17; test
+POI difficulty tier scales the loot stage). Gamestage row stays PARTIAL
+for the EffectManager passive modifiers only.
 Then vitals persistence went WORKS on re-audit: the join hasEntityStats
 residual is non-visible - the join EntitySpawn omits the stats block, but
 the survival loop's first tick pushes HP/food/water and stamina via

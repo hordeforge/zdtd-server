@@ -206,8 +206,28 @@ fn biomeStageMods(self: *const Game, slot: usize) assets_biome_layers.BiomeMods 
 pub fn lootStageOf(self: *const Game, slot: usize) i32 {
     if (slot >= self.clients.len) return 1;
     const bmods = biomeStageMods(self, slot);
+    // POITierMod/Bonus (loot_settings, indexed DifficultyTier-1): the tier of
+    // the POI the player stands in scales the loot stage (RE GetLootStage,
+    // asm.il ~504240). Clamped to the settings array; no POI/tier = 0.
+    var poi_mod: f32 = 0;
+    var poi_bonus: f32 = 0;
+    if (self.sim.poi_tier_fn) |f| {
+        if (self.sim.playerByPeer(self.clients[slot].slot)) |ps| {
+            if (self.sim.mask[ps].transform) {
+                const t = self.sim.transform[ps];
+                const tier = f(self.sim.poi_tier_ctx, t.x, t.z);
+                if (tier >= 1) {
+                    const idx: usize = @intCast(tier - 1);
+                    if (idx < self.loot.poi_tier_mod.len) poi_mod = self.loot.poi_tier_mod[idx];
+                    if (idx < self.loot.poi_tier_bonus.len) poi_bonus = self.loot.poi_tier_bonus[idx];
+                }
+            }
+        }
+    }
     return assets_gamestages.lootStage(.{
         .level = self.clients[slot].level,
+        .poi_tier_mod = poi_mod,
+        .poi_tier_bonus = poi_bonus,
         .biome_mod = bmods.loot_mod,
         .biome_bonus = bmods.loot_bonus,
     });

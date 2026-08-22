@@ -2040,8 +2040,11 @@ gamestage, no wandering hordes, and no screamers.
   parse per quest def; the active quest's terms feed gameStageOf - test
   active quest stage modifiers scale the player gamestage; 7 stock quests
   carry the terms, e.g. the infested clears).
-  Still missing: prefab DifficultyTier (loot
-  poi_tier_mod / bonus), EffectManager passive modifiers.
+  2026-08-22: the prefab DifficultyTier leg is in - the loot stage now
+  applies loot_settings POITierMod/Bonus indexed by the tier of the POI the
+  player stands in (a tier-2 POI pushes a level-10 player to
+  10*(1.1)+6 = 17; test POI difficulty tier scales the loot stage).
+  Still missing: EffectManager passive modifiers.
   Full split: [gamestage subsection](#gamestage-what-is-in-and-what-is-still-missing).
   *Anchors:* `src/assets/gamestages.zig`, `src/server/game/sleeper.zig`,
   `asm.il:955240-955270`, `asm.il:416434`
