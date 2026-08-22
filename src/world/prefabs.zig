@@ -215,8 +215,13 @@ pub const Index = struct {
             // stamped 30+ blocks below it (caves, mines, bunkers).
             const ground: u8 = @intCast(@min(255, @max(0, d.y)));
             const is_part = isPart(d.name);
-            // Full POIs get a 1-block pad above listed ground; parts only flatten to ground.
-            const target: u8 = if (is_part) ground else @intCast(@min(255, @as(u16, ground) + 1));
+            // The stock dtm_processed.raw carries the pad one block BELOW the
+            // declared ground (deco.y-1 for 1272 of 1487 Navezgane POIs), so
+            // the runtime flatten must target that level: forcing deco.y+1 put
+            // the height plane 2 blocks above the floor, and teleports,
+            // respawns and heightWorld placement landed 2 blocks up. Parts
+            // (driveways, signs) flatten to ground level itself.
+            const target: u8 = if (is_part) ground else @intCast(@min(255, @max(0, @as(i32, ground) - 1)));
             var lz: i32 = 0;
             while (lz < 16) : (lz += 1) {
                 var lx: i32 = 0;
@@ -770,12 +775,12 @@ test "parse decoration line" {
     const cx = @divFloor(@as(i32, -872), 16);
     const cz = @divFloor(@as(i32, 612), 16);
     idx.applyToChunkHeights(cx, cz, &h);
-    // some cell should be raised toward 61/62
+    // some cell should be raised toward the pad level (deco.y-1 = 60)
     var max_h: u8 = 0;
     for (h) |v| {
         if (v > max_h) max_h = v;
     }
-    try std.testing.expect(max_h >= 61);
+    try std.testing.expect(max_h >= 60);
 }
 
 test "tts size read abandoned_house if present" {
@@ -847,11 +852,13 @@ test "YOffset applies to the stamp origin but not to the terrain pad" {
     try std.testing.expectEqual(@as(i32, -7), idx.items[1].y_offset);
     try std.testing.expectEqual(@as(i32, 60), idx.items[1].stampY());
 
-    // The pad stays at the declared ground level: the height plane must not
-    // follow a cave 30 blocks down and punch a pit through the terrain.
+    // The pad stays at the declared ground level minus one (stock
+    // dtm_processed carries the pad at deco.y-1): the height plane must not
+    // follow a cave 30 blocks down and punch a pit through the terrain, nor
+    // sit 2 blocks above the floor like the old deco.y+1 flatten.
     var h: [256]u8 = @splat(50);
     idx.applyToChunkHeights(0, 0, &h);
-    try std.testing.expectEqual(@as(u8, 61), h[4 + 4 * 16]);
+    try std.testing.expectEqual(@as(u8, 59), h[4 + 4 * 16]);
 }
 
 test "stock cave_07 stamps its body below the declared ground" {

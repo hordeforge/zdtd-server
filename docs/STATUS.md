@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 233 `WORKS`,
-62 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 234 `WORKS`,
+61 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -351,6 +351,13 @@ materialization PaintCtx and the POI reset), so POIs stock ships pre-damaged
 arrive with their ruined look and weak spots; the wire damage channel reads
 the plane and ZCH3 persists it. POIs 16/14/0 -> **17/13/0**; total
 **233/62/38**.
+Then the POI terrain-flatten row went WORKS: the runtime flatten now targets
+the stock pad level - dtm_processed.raw carries the pad at deco.y-1 for 1272
+of 1487 Navezgane POIs, so the old forced deco.y+1 put the height plane 2
+blocks above the floor and teleports/respawns landed 2 blocks up; the
+flatten now writes deco.y-1 (parts stay at ground), matching the DTM pad
+while still leveling slopes and never punching pits under caves. POIs
+17/13/0 -> **18/12/0**; total **234/61/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
