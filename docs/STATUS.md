@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 234 `WORKS`,
-61 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 235 `WORKS`,
+60 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -358,6 +358,14 @@ blocks above the floor and teleports/respawns landed 2 blocks up; the
 flatten now writes deco.y-1 (parts stay at ground), matching the DTM pad
 while still leveling slopes and never punching pits under caves. POIs
 17/13/0 -> **18/12/0**; total **234/61/38**.
+Then the TileEntityType constants row went WORKS: te_types.zig now carries
+the stock enum exactly (RE IL 1311761-1311788: Loot=5, SecureLoot=0x0A,
+Workstation=0x0C, Sign=0x0D, Powered=0x0F, Light=0x12, Sleeper=0x14,
+SecureLootSigned=0x16, Composite=0x19, plus the rest of the table), so the
+prefab TE scan classifies the real .tts TE bytes correctly (Light 18 /
+Composite 25 seed storage; Sleeper 20 does not) instead of accepting
+Composite only through the mislabeled light constant. POIs 18/12/0 ->
+**19/11/0**; total **235/60/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

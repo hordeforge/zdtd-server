@@ -148,13 +148,13 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
-| [POIs and prefabs](#7-pois-and-prefabs) | 18 | 12 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level |
+| [POIs and prefabs](#7-pois-and-prefabs) | 19 | 11 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **234** | **61** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **235** | **60** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1694,17 +1694,20 @@ can walk into every POI but none of them is the building TFP authored.
   so POI safes and lockers arrive empty and unlocked and POI signs blank.
   *Anchors:* `src/world/prefabs.zig:243`, `:261`, `src/world/tts.zig:22`, `:228`
 
-- **TileEntityType constants** `PARTIAL`
-  `src/wire/te_types.zig` does not match the stock enum. Stock: Collector=3,
-  LandClaim=4, Loot=5, Trader=6, SecureLoot=0x0A, Workstation=0x0C, Sign=0x0D,
-  Powered=0x0F, Light=0x12, Trigger=0x13, Sleeper=0x14, SecureLootSigned=0x16,
-  Composite=0x19. zdtd has loot=1, trader=2, composite=5, secure_loot=6,
-  powered=10, sign=0x16, light=0x19; only none=0 and workstation=12 are right. The
-  `.tts` TE list really does use the stock enum (real prefabs contain only 18, 20
-  and 25), so the prefab TE filter accepts real Composite TEs only by accident
-  (zdtd's `light` = 0x19 equals stock Composite) and would misclassify a real
-  Loot, Trader or SecureLoot TE.
-  *Anchors:* `src/wire/te_types.zig:5`, `:19`, `src/server/game.zig:7423`,
+- **TileEntityType constants** `WORKS`
+  `src/wire/te_types.zig` now matches the stock enum exactly (RE IL
+  1311761-1311788, tabulated in 7dtd-research world-generation.md): None=0,
+  Collector=3, LandClaim=4, Loot=5, Trader=6, VendingMachine=7, Forge=8,
+  Campfire=9, SecureLoot=0x0A, SecureDoor=0x0B, Workstation=0x0C, Sign=0x0D,
+  GoreBlock=0x0E, Powered=0x0F, PowerSource=0x10, PowerRangeTrap=0x11,
+  Light=0x12, Trigger=0x13, Sleeper=0x14, PowerMeleeTrap=0x15,
+  SecureLootSigned=0x16, Composite=0x19, Taskboard=0x1B. The old table
+  (loot=1, composite=5, sign=0x16, light=0x19, powered=10) classified the
+  real prefab TE bytes wrongly - Composite(25) was only accepted through the
+  mislabeled `light` constant and a real Loot(5)/SecureLoot(10) TE would be
+  dropped; the TE scan now classifies Light(18)/Composite(25) as storage
+  seeding sources and Sleeper(20) as not, per the real values.
+  *Anchors:* `src/wire/te_types.zig`, `src/server/game/chunk_fill.zig:248-252`,
   `asm.il:1311761-1311788`
 
 - **Loot container discovery in a POI chunk** `WORKS` `(2026-08-21)`
