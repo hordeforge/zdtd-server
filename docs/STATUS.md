@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 248 `WORKS`,
-47 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 249 `WORKS`,
+46 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -455,6 +455,10 @@ redundant world-spawn teleport that flashed the client to spawn before the
 bed was removed and the stat now follows the confirm so it cannot be
 discarded in the death state. Player progression 15/7/15 -> **16/6/15**;
 total **248/47/38**.
+Then the curve-only-loader row went WORKS on re-audit: loadFromPath is a
+clean single parse and tryLoad routes through it; the old double-parse-
+with-leak (a discarded loadTableFromPath result) is gone. Player
+progression 16/6/15 -> **17/5/15**; total **249/46/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

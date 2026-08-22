@@ -151,10 +151,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 20 | 7 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction |
-| [Player progression](#10-player-progression) | 16 | 6 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 17 | 5 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **248** | **47** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **249** | **46** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3026,14 +3026,13 @@ and server-to-client XP/level pushes do not exist.
   block; survival stats are also pushed on other S2C paths after join.
   *Anchors:* `src/server/game.zig` (ZPV3 food/water tail), spawn/heal path
 
-- **progression.zig curve-only loader** `PARTIAL`
-  `loadFromPath` calls `loadTableFromPath`, discards the result with `_ = t`
-  without ever calling deinit, then re-parses the file with `loadCurveOnly`. The
-  table's ArenaAllocator plus its heap-allocated holder leaks on every call.
-  Reachable only via the `tryLoad` fallback, which in practice runs only when the
-  file is missing, so it is close to dead code, but it is a real leak and a double
-  parse.
-  *Anchors:* `src/assets/progression.zig:84-90`, `src/server/game.zig:846-850`
+- **progression.zig curve-only loader** `WORKS` `(2026-08-22 re-audit)`
+  `loadFromPath` is a clean single parse (`readCleanFile` + `parseCurve`, no
+  arena); `tryLoad` routes through it and `tryLoadTable` is the separate
+  table loader. The old double-parse-with-leak (`loadTableFromPath` result
+  discarded via `_ = t` without deinit) is gone.
+  *Anchors:* `src/assets/progression.zig:87-90` (`loadFromPath`), `:191-197`
+  (`tryLoad` / `tryLoadTable`)
 
 ---
 
