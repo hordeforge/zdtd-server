@@ -1142,6 +1142,19 @@ them to LockReason.bedroll / .land_claim, alongside the existing
 QuestLock, PlayerInside and the stock party-member exemption. Quests
 25/6/1 -> 26/5/1, total 191/98/44 -> **192/97/44**.
 
+## Batch K 2026-08-22 (seed persistence, players.zsv ZPV10)
+
+The inventory slot record widens 11 -> 13 bytes to persist `seed` (stock
+ItemValue.Seed, u16): a plantable's per-item seed now survives a restart,
+closing the last "remaining per-item state" item on the inventory
+persistence row short of mods/cosmetics (which ride the wire but have no
+stock ECS equivalent to persist). The fresh-save magic becomes `ZPV A`
+(version decode: 'A' -> 10); the v9/v8/v7 migration legs widen slots and
+zero the seed (carried records predate seed persistence). New
+`zpvSlotStride(10) = 13`, fresh restore reads the seed back; the round-trip
+test now pins it (777) and the header gates accept 'A'. Row 2889 updated;
+counts unchanged (row stays PARTIAL for mods/cosmetics).
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

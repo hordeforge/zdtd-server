@@ -67,7 +67,9 @@ pub const Zpv2Drop = struct {
 /// from 7 to 11 bytes by appending `use_times` (f32, tool durability);
 /// 8 (ZPV8) adds `hp` (normalized f32) to the progression tail so a relog
 /// keeps the player's wounds; 9 (ZPV9) adds `born_world_time` (u64) so
-/// days-alive (and the gamestage) survives a restart. The bedroll field is
+/// days-alive (and the gamestage) survives a restart. 10 (ZPV10) appends
+/// `seed` (u16) to each inventory slot record so a plantable's seed
+/// survives a restart (magic byte 'A' after "ZPV"). The bedroll field is
 /// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
@@ -76,8 +78,10 @@ pub const Zpv2Drop = struct {
 /// rest of the v3 tail.
 /// Inventory slot-record stride in bytes: 7 through v6
 /// (item:u16, count:u16, quality:u8, meta:u16), 11 from v7 (those plus
-/// use_times: f32).
+/// use_times: f32), 13 from v10 (plus seed:u16 - the stock ItemValue.Seed,
+/// so a plantable's per-item seed survives a restart).
 pub fn zpvSlotStride(version: u8) usize {
+    if (version >= 10) return 13;
     return if (version >= 7) 11 else 7;
 }
 
@@ -85,13 +89,29 @@ pub fn zpvSlotStride(version: u8) usize {
 /// each slot keeps (item, count, quality, meta) and appends a zero
 /// `use_times` (f32) - carried old records have no known durability.
 fn emitZpv7Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize) !void {
+    // Legacy 7-byte slots widen straight to the current 13-byte shape: six
+    // zero bytes (use_times f32 + seed u16) - carried records have no known
+    // durability or seed.
     try out.append(allocator, old[inv_n_pos]); // inv_n byte
     var p = inv_n_pos + 1;
     var k: usize = 0;
     while (k < inv_n) : (k += 1) {
         try out.appendSlice(allocator, old[p .. p + 7]);
-        try out.appendNTimes(allocator, 0, 4);
+        try out.appendNTimes(allocator, 0, 6);
         p += 7;
+    }
+}
+
+/// Widen a v7-9 (11-byte) slot block to the v10 13-byte shape: each slot
+/// appends a zero `seed` (carried records predate seed persistence).
+fn emitZpv10Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize, stride: usize) !void {
+    try out.append(allocator, old[inv_n_pos]); // inv_n byte
+    var p = inv_n_pos + 1;
+    var k: usize = 0;
+    while (k < inv_n) : (k += 1) {
+        try out.appendSlice(allocator, old[p .. p + stride]);
+        try out.appendNTimes(allocator, 0, 2);
+        p += stride;
     }
 }
 
@@ -288,9 +308,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A'))
             return error.CorruptPlayersFile;
-        old_version = old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -303,7 +323,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', '9', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'A', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -331,9 +351,20 @@ pub fn savePlayers(self: *Game) !void {
                 break;
             }
             if (rewritten) continue;
-            if (old_version == 9) {
-                // v9 records are already the current shape: carry verbatim.
+            if (old_version == 10) {
+                // v10 records are the current shape: carry verbatim.
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                written += 1;
+                continue;
+            }
+            if (old_version == 9) {
+                // v9 records need only the slot widen 11 -> 13 (seed).
+                const inv_pos: usize = rec_start + 1 + nl + 16;
+                const inv_n: usize = old_recs[inv_pos];
+                const slots_end = inv_pos + 1 + inv_n * 11;
+                try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+                try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
+                try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 written += 1;
                 continue;
             }
@@ -341,15 +372,21 @@ pub fn savePlayers(self: *Game) !void {
                 // v8 records are v9-shaped except the tail born_world_time:
                 // insert a zero (the pre-ZPV9 behavior for carried records).
                 const tail_start = tailStartOf(old_recs, rec_start, nl, 8) catch return error.CorruptPlayersFile;
-                try out.appendSlice(self.allocator, old_recs[rec_start..tail_start]);
+                const inv_pos: usize = rec_start + 1 + nl + 16;
+                const inv_n: usize = old_recs[inv_pos];
+                const slots_end = inv_pos + 1 + inv_n * 11;
+                try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+                try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
+                try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 8);
                 written += 1;
                 continue;
             }
             if (old_version == 7) {
-                // v7 records need the slot widen (7 -> 11, appending a zero
-                // use_times) AND the tail hp + born fields: split at the slot
-                // block, widen, carry the journal verbatim, emit the tail.
+                // v7 records need the slot widen (7 -> 13, appending zero
+                // use_times + seed) AND the tail hp + born fields: split at
+                // the slot block, widen, carry the journal verbatim, emit the
+                // tail.
                 const inv_pos: usize = rec_start + 1 + nl + 16;
                 const inv_n: usize = old_recs[inv_pos];
                 const slots_end = inv_pos + 1 + inv_n * 7;
@@ -486,15 +523,17 @@ pub fn savePlayers(self: *Game) !void {
         var inv_n: u8 = 0;
         if (self.sim.mask[ps].inventory) {
             for (self.sim.inventory[ps].slots) |s| {
-                // ZPV7 slot record: item:u16, count:u16, quality:u8, meta:u16,
-                // use_times:f32 (stock ItemValue.UseTimes, tool durability).
-                if (o + 11 > rec.len) break;
+                // ZPV10 slot record: item:u16, count:u16, quality:u8, meta:u16,
+                // use_times:f32 (stock ItemValue.UseTimes), seed:u16 (stock
+                // ItemValue.Seed, so a plantable's seed survives a restart).
+                if (o + 13 > rec.len) break;
                 std.mem.writeInt(u16, rec[o..][0..2], s.item_id, .little);
                 std.mem.writeInt(u16, rec[o + 2 ..][0..2], s.count, .little);
                 rec[o + 4] = s.quality;
                 std.mem.writeInt(u16, rec[o + 5 ..][0..2], s.meta, .little);
                 std.mem.writeInt(u32, rec[o + 7 ..][0..4], @as(u32, @bitCast(s.use_times)), .little);
-                o += 11;
+                std.mem.writeInt(u16, rec[o + 11 ..][0..2], s.seed, .little);
+                o += 13;
                 inv_n += 1;
             }
         }
@@ -655,12 +694,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -699,6 +738,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 .quality = ib[4],
                 .meta = std.mem.readInt(u16, ib[5..7], .little),
                 .use_times = if (slot_stride >= 11) @as(f32, @bitCast(std.mem.readInt(u32, ib[7..11], .little))) else 0,
+                .seed = if (slot_stride >= 13) std.mem.readInt(u16, ib[11..13], .little) else 0,
             };
         }
         const jn: usize = data[off];
@@ -1316,9 +1356,9 @@ pub fn loadTraders(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A'))
         return error.CorruptPlayersFile;
-    const version: u8 = data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);

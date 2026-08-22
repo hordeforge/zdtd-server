@@ -111,7 +111,7 @@ test "players zpv7 round-trips use_times (tool durability) across restart" {
         const ps = g.sim.playerByPeer(cl.slot).?;
         g.sim.inventory[ps] = .{};
         const last = ecs.components.max_inv_slots - 1;
-        g.sim.inventory[ps].slots[last] = .{ .item_id = 2, .count = 1, .quality = 4, .meta = 0, .use_times = 42.5 };
+        g.sim.inventory[ps].slots[last] = .{ .item_id = 2, .count = 1, .quality = 4, .meta = 0, .use_times = 42.5, .seed = 777 };
         try g.savePlayers();
     }
 
@@ -127,6 +127,8 @@ test "players zpv7 round-trips use_times (tool durability) across restart" {
         const last = ecs.components.max_inv_slots - 1;
         try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[last].item_id);
         try std.testing.expectEqual(@as(f32, 42.5), g.sim.inventory[ps].slots[last].use_times);
+        // ZPV10: the plantable's seed survives a restart too.
+        try std.testing.expectEqual(@as(u16, 777), g.sim.inventory[ps].slots[last].seed);
         // A fresh slot has no phantom durability.
         try std.testing.expectEqual(@as(f32, 0), g.sim.inventory[ps].slots[0].use_times);
     }
@@ -223,7 +225,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -346,7 +348,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -432,7 +434,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -518,7 +520,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -822,7 +824,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPV9", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.

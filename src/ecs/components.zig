@@ -556,11 +556,15 @@ pub const InvSlot = struct {
     item_id: u16 = 0,
     count: u16 = 0,
     quality: u8 = 0,
-    meta: u16 = 0, // durability / seed / etc.
+    meta: u16 = 0, // durability / flags
     /// Stock ItemValue.UseTimes (remaining uses; f32 on the wire). Tools wear
-    /// down to 0 and stay present (broken) until repaired; players.zsv does not
-    /// persist this yet (GAP: durability is dropped on save/restore).
+    /// down to 0 and stay present (broken) until repaired; persisted since
+    /// players.zsv ZPV7.
     use_times: f32 = 0,
+    /// Stock ItemValue.Seed (u16): the per-item random seed seed-items carry
+    /// so the same planted seed grows the same way (meta is durability/flags,
+    /// not the seed).
+    seed: u16 = 0,
 };
 
 /// Offline stack caps when `World.stack_fn` is null. Must match

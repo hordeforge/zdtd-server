@@ -250,14 +250,13 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
     if (s.count == 0 or s.item_id == 0) return .{};
     const type_id: i32 = if (resolve) |r| r(ctx, s.item_id) else typeFromBuiltinId(s.item_id);
     if (type_id == 0) return .{};
-    // InvSlot stores a single meta field (durability / flags); stock seed is not
-    // tracked separately, so leave seed at default 0 (do not mirror meta into seed).
     return .{
         .type_id = type_id,
         .count = s.count,
         .quality = s.quality,
         .meta = s.meta,
         .use_times = s.use_times,
+        .seed = s.seed,
     };
 }
 
@@ -785,6 +784,7 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
         .quality = @min(s.quality, 255),
         .meta = s.meta,
         .use_times = s.use_times,
+        .seed = s.seed,
     };
 }
 
