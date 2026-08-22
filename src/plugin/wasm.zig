@@ -29,13 +29,14 @@ pub const Hook = enum(u8) {
     on_craft_request = 14,
     on_loot_roll = 15,
     on_trader_event = 16,
+    on_mcp_frame = 17,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage",  "on_quest_complete",
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
-        "on_trader_event",
+        "on_trader_event",  "on_mcp_frame",
     };
 };
 
@@ -67,6 +68,12 @@ pub const host_sense_max: usize = 2048;
 /// Ceiling on one `zdtd.query` response (BOTS_SPEC §3). The host never writes
 /// past this into the guest.
 pub const query_resp_max: usize = 64;
+/// Fixed buffer per plugin for the std.json capability (ADR 0031): one parsed
+/// JSON-RPC frame per plugin at a time, lazily allocated, reset per frame, so
+/// the tick path never touches the heap. Fail closed at the cap. The buffer
+/// also bounds nesting: std.json's parse allocates O(depth) and an extremely
+/// nested doc exhausts the fixed buffer (parse error) instead of growing.
+pub const json_buf_max: usize = 64 * 1024;
 
 pub const HostCtx = struct {
     /// Owner state (a *Game in the server); cast by the callbacks the owner
@@ -91,6 +98,9 @@ pub const HostCtx = struct {
     /// queue import matches Caller.rt against this table to attribute a queued
     /// command to its plugin (slot index + 1; 0 = unattributed).
     rt_slot: [max_wasm_plugins]?*anyopaque = .{null} ** max_wasm_plugins,
+    /// Plugin pointers, 1:1 with rt_slot: lets the host imports (std.json
+    /// capability) reach a loaded plugin's per-instance state from a Caller.
+    plugin_slot: [max_wasm_plugins]?*anyopaque = .{null} ** max_wasm_plugins,
 };
 
 pub const LoadError = error{
@@ -127,6 +137,14 @@ pub const Plugin = struct {
     /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
     scratch_off: u32 = 0,
     scratch_len: usize = 0,
+    /// std.json capability (ADR 0031, MCP_DESIGN.md §5): the host parses the
+    /// guest's JSON-RPC frame with std.json once into a lazily allocated fixed
+    /// buffer (json_buf_max), so the tick path never allocates. One parsed doc
+    /// per plugin at a time (frames are processed one at a time); a new
+    /// json_parse replaces the previous doc.
+    json_buf: ?[]u8 = null,
+    json_fba: std.heap.FixedBufferAllocator = undefined,
+    json_value: ?std.json.Value = null,
 
     pub fn load(
         allocator: std.mem.Allocator,
@@ -170,6 +188,7 @@ pub const Plugin = struct {
         self.linker.deinit();
         self.module.deinit();
         self.engine.deinit();
+        if (self.json_buf) |b| self.allocator.free(b);
         self.allocator.destroy(self.engine);
         self.allocator.free(self.name);
         self.* = undefined;
@@ -213,7 +232,9 @@ pub const Plugin = struct {
             if (cap.len == 0) continue;
             if (std.mem.eql(u8, cap, "log") or std.mem.eql(u8, cap, "tick") or
                 std.mem.eql(u8, cap, "queue") or std.mem.eql(u8, cap, "sense") or
-                std.mem.eql(u8, cap, "query")) continue;
+                std.mem.eql(u8, cap, "query") or std.mem.eql(u8, cap, "json_parse") or
+                std.mem.eql(u8, cap, "json_str") or std.mem.eql(u8, cap, "json_raw") or
+                std.mem.eql(u8, cap, "json_obj")) continue;
             var found = false;
             for (Hook.names, 0..) |hname, i| {
                 if (std.mem.eql(u8, cap, hname)) {
@@ -538,6 +559,112 @@ pub const Plugin = struct {
         return out[0..n];
     }
 
+    /// on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i32) -> i32:
+    /// MCP transport bridge (ADR 0031): the host copies one client JSON-RPC
+    /// frame into guest memory; the guest writes its response back and returns
+    /// the bytes written (0 = nothing to send: notification, closed session, or
+    /// overflowed response). Traps disable only that module.
+    pub fn callMcpFrame(self: *Plugin, frame: []const u8, out: []u8) ?[]const u8 {
+        if (self.disabled) return null;
+        if (!self.hook_present[@intFromEnum(Hook.on_mcp_frame)]) return null;
+        const mem = self.instance.memory() orelse return null;
+        const frame_off = self.reserveScratch(mem, frame.len + out.len) orelse return null;
+        const out_off: u32 = frame_off + @as(u32, @intCast(frame.len));
+        @memcpy(mem.slice()[frame_off..][0..frame.len], frame);
+        const written: i32 = self.instance.call(
+            fn (i32, i32, i32, i32) i32,
+            "on_mcp_frame",
+            .{ @intCast(frame_off), @intCast(frame.len), @intCast(out_off), @intCast(out.len) },
+        ) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_mcp_frame disabled: {s}\n", .{ self.name, @errorName(err) });
+            return null;
+        };
+        if (written <= 0) return null;
+        const n: usize = @intCast(@min(@as(i32, @intCast(out.len)), written));
+        // Re-fetch slice in case the call grew memory.
+        const cur = mem.slice();
+        @memcpy(out[0..n], cur[out_off..][0..n]);
+        return out[0..n];
+    }
+
+    /// std.json capability (ADR 0031). Parse the JSON doc `doc` (guest memory)
+    /// with std.json; 0 = ok and the doc is now current for this plugin,
+    /// -1 = parse error (invalid JSON, or the fixed buffer exhausted). The
+    /// parse replaces any previous doc; allocations come from a lazily
+    /// allocated fixed buffer reset per frame, so the tick path never allocs.
+    pub fn jsonParse(self: *Plugin, doc: []const u8) i32 {
+        if (self.json_buf == null) {
+            const b = self.allocator.alloc(u8, json_buf_max) catch return -1;
+            self.json_buf = b;
+            self.json_fba = std.heap.FixedBufferAllocator.init(b);
+        }
+        self.json_fba.reset();
+        self.json_value = null;
+        const v = std.json.parseFromSliceLeaky(std.json.Value, self.json_fba.allocator(), doc, .{
+            .allocate = .alloc_always,
+            .duplicate_field_behavior = .use_last,
+        }) catch return -1;
+        self.json_value = v;
+        return 0;
+    }
+
+    /// Walk a dot-separated key path from the parsed root; null on a missing
+    /// key, a non-object mid-path, or an empty/leading/trailing segment.
+    fn jsonWalk(v: std.json.Value, path: []const u8) ?std.json.Value {
+        if (path.len == 0) return v;
+        var it = std.mem.splitScalar(u8, path, '.');
+        var cur = v;
+        while (it.next()) |key| {
+            if (key.len == 0) return null;
+            cur = switch (cur) {
+                .object => |o| o.get(key) orelse return null,
+                else => return null,
+            };
+        }
+        return cur;
+    }
+
+    /// Copy the decoded string at `path` into guest memory; returns the full
+    /// length (0 = path missing or not a string, -1 = no parsed doc or bad
+    /// path). The guest compares the length against its buffer cap.
+    pub fn jsonStr(self: *Plugin, path: []const u8, out: []u8) i32 {
+        const v = self.json_value orelse return -1;
+        const target = jsonWalk(v, path) orelse return 0;
+        const s = switch (target) {
+            .string => |s| s,
+            else => return 0,
+        };
+        const n = @min(out.len, s.len);
+        @memcpy(out[0..n], s[0..n]);
+        return @intCast(s.len);
+    }
+
+    /// Serialize the value at `path` as raw JSON into guest memory; returns
+    /// the full length (0 = path missing, -1 = no parsed doc / bad path /
+    /// serialize error). Used to echo the JSON-RPC `id` verbatim. The
+    /// serialization allocates from the same fixed per-plugin buffer (bounded
+    /// by json_buf_max, fail closed), never the heap.
+    pub fn jsonRaw(self: *Plugin, path: []const u8, out: []u8) i32 {
+        const v = self.json_value orelse return -1;
+        const target = jsonWalk(v, path) orelse return 0;
+        const bytes = std.json.Stringify.valueAlloc(self.json_fba.allocator(), target, .{}) catch return -1;
+        const n = @min(out.len, bytes.len);
+        @memcpy(out[0..n], bytes[0..n]);
+        return @intCast(bytes.len);
+    }
+
+    /// 1 when the value at `path` is an object, 0 when absent or not an
+    /// object, -1 on no parsed doc or a bad path.
+    pub fn jsonObj(self: *Plugin, path: []const u8) i32 {
+        const v = self.json_value orelse return -1;
+        const target = jsonWalk(v, path) orelse return 0;
+        return switch (target) {
+            .object => 1,
+            else => 0,
+        };
+    }
+
     /// Export the remaining fuel (diagnostics; the runtime enforces the budget).
     pub fn fuelRemaining(self: *Plugin) ?u64 {
         return self.instance.fuelRemaining();
@@ -606,6 +733,7 @@ pub const WasmHost = struct {
             return error.RequiresUnmet;
         }
         if (p2.instance.handle.runtime) |rt| ctx.rt_slot[idx] = @ptrCast(rt);
+        ctx.plugin_slot[idx] = @ptrCast(&self.slots[idx]);
         self.slots[idx] = p2;
         self.withdrawn[idx] = false;
     }
@@ -621,7 +749,10 @@ pub const WasmHost = struct {
         defer self.allocator.free(path_owned);
         _ = self.slots[idx].callHook(.on_shutdown);
         self.slots[idx].deinit();
-        if (self.ctx) |ctx| ctx.rt_slot[idx] = null;
+        if (self.ctx) |ctx| {
+            ctx.rt_slot[idx] = null;
+            ctx.plugin_slot[idx] = null;
+        }
         self.loadInto(idx, path_owned) catch |err| {
             std.debug.print("zdtd: wasm plugin reload '{s}' failed: {s}\n", .{ path_owned, @errorName(err) });
             return false;
@@ -797,6 +928,18 @@ pub const WasmHost = struct {
     }
 };
 
+/// Map a calling instance's runtime pointer to its loaded Plugin (per-plugin
+/// state for the json capability). Mirrors the queue import's attribution loop.
+fn pluginForCaller(hc: *HostCtx, rt: *anyopaque) ?*Plugin {
+    for (hc.rt_slot, 0..) |r, i| {
+        if (r == rt) {
+            const p: *Plugin = @ptrCast(@alignCast(hc.plugin_slot[i] orelse return null));
+            return p;
+        }
+    }
+    return null;
+}
+
 /// Host import table, all under the "zdtd" module namespace. The import field
 /// names are bare: "log" (level, ptr, len), "tick" () -> i64 and "queue"
 /// (ptr, len) -> i32, so a guest imports zdtd.log, not zdtd.zdtd_log.
@@ -861,12 +1004,56 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             @memcpy(dst, resp[0..copy]);
             return @intCast(copy);
         }
+        // std.json capability (ADR 0031, MCP_DESIGN.md §5): parse the JSON
+        // doc at guest memory (ptr, len) with std.json; 0 = ok, -1 = parse
+        // error. The parsed doc is per-plugin state, replaced on the next
+        // call. Conventions for all json_* imports: path is a dot-separated
+        // key chain, and string/raw returns give the FULL length so the guest
+        // can detect truncation against its own buffer cap.
+        fn jsonParse(caller: *zwasm.Caller, ptr: i32, len: i32) anyerror!i32 {
+            const hc = caller.data(HostCtx);
+            const mem = caller.memory() orelse return -1;
+            if (ptr < 0 or len < 0) return -1;
+            const p = pluginForCaller(hc, @ptrCast(caller.rt)) orelse return -1;
+            const doc = mem.sliceAt(@intCast(ptr), @intCast(len)) catch return -1;
+            return p.jsonParse(doc);
+        }
+        fn jsonStr(caller: *zwasm.Caller, path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) anyerror!i32 {
+            const hc = caller.data(HostCtx);
+            const mem = caller.memory() orelse return -1;
+            if (path_ptr < 0 or path_len < 0 or out_ptr < 0 or out_cap < 0) return -1;
+            const p = pluginForCaller(hc, @ptrCast(caller.rt)) orelse return -1;
+            const path = mem.sliceAt(@intCast(path_ptr), @intCast(path_len)) catch return -1;
+            const dst = mem.sliceAt(@intCast(out_ptr), @intCast(out_cap)) catch return -1;
+            return p.jsonStr(path, dst);
+        }
+        fn jsonRaw(caller: *zwasm.Caller, path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) anyerror!i32 {
+            const hc = caller.data(HostCtx);
+            const mem = caller.memory() orelse return -1;
+            if (path_ptr < 0 or path_len < 0 or out_ptr < 0 or out_cap < 0) return -1;
+            const p = pluginForCaller(hc, @ptrCast(caller.rt)) orelse return -1;
+            const path = mem.sliceAt(@intCast(path_ptr), @intCast(path_len)) catch return -1;
+            const dst = mem.sliceAt(@intCast(out_ptr), @intCast(out_cap)) catch return -1;
+            return p.jsonRaw(path, dst);
+        }
+        fn jsonObj(caller: *zwasm.Caller, path_ptr: i32, path_len: i32) anyerror!i32 {
+            const hc = caller.data(HostCtx);
+            const mem = caller.memory() orelse return -1;
+            if (path_ptr < 0 or path_len < 0) return -1;
+            const p = pluginForCaller(hc, @ptrCast(caller.rt)) orelse return -1;
+            const path = mem.sliceAt(@intCast(path_ptr), @intCast(path_len)) catch return -1;
+            return p.jsonObj(path);
+        }
     };
     try linker.defineFuncCtx("zdtd", "log", ctx, fn (*zwasm.Caller, i32, i32, i32) anyerror!void, H.log);
     try linker.defineFuncCtx("zdtd", "tick", ctx, fn (*zwasm.Caller) anyerror!i64, H.tick);
     try linker.defineFuncCtx("zdtd", "queue", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.queue);
     try linker.defineFuncCtx("zdtd", "sense", ctx, fn (*zwasm.Caller, i32, i32, i32) anyerror!i32, H.sense);
     try linker.defineFuncCtx("zdtd", "query", ctx, fn (*zwasm.Caller, i32, i32, i32, i32) anyerror!i32, H.query);
+    try linker.defineFuncCtx("zdtd", "json_parse", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.jsonParse);
+    try linker.defineFuncCtx("zdtd", "json_str", ctx, fn (*zwasm.Caller, i32, i32, i32, i32) anyerror!i32, H.jsonStr);
+    try linker.defineFuncCtx("zdtd", "json_raw", ctx, fn (*zwasm.Caller, i32, i32, i32, i32) anyerror!i32, H.jsonRaw);
+    try linker.defineFuncCtx("zdtd", "json_obj", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.jsonObj);
 }
 
 test "wasm runtime instantiates a trivial module and calls on_enable" { // Hand-built minimal wasm: (module (func (export "on_enable"))) — a no-op
@@ -1690,5 +1877,200 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expect(max_gap >= 45);
 
     // No module exhausted fuel or trapped through the whole sequence.
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
+    // The MCP addon guest (ADR 0031, docs/MCP_DESIGN.md M1): the host feeds a
+    // client JSON-RPC frame through the on_mcp_frame hook and gets the guest's
+    // response back. The guest owns protocol logic; JSON parsing is the host
+    // std.json capability; the sense/query surfaces here stand in for the real
+    // transport bridge.
+    const Cap = struct {
+        var sense_enabled: bool = false;
+        var queued: [4][64]u8 = undefined;
+        var queued_len: [4]usize = undefined;
+        var queued_n: usize = 0;
+
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
+            if (queued_n >= queued.len) return;
+            const n = @min(cmd.len, queued[queued_n].len);
+            @memcpy(queued[queued_n][0..n], cmd[0..n]);
+            queued_len[queued_n] = n;
+            queued_n += 1;
+        }
+        fn writeRec(b: []u8, base: usize, net: i32, kind: u8, x: f32, y: f32, z: f32, hp: f32) void {
+            const r = b[base .. base + 32];
+            std.mem.writeInt(i32, r[0..4], net, .little);
+            r[4] = kind;
+            r[5] = 0; // is_self
+            r[6] = 1; // alive
+            r[7] = 0; // pad
+            std.mem.writeInt(u32, r[8..12], @bitCast(x), .little);
+            std.mem.writeInt(u32, r[12..16], @bitCast(y), .little);
+            std.mem.writeInt(u32, r[16..20], @bitCast(z), .little);
+            std.mem.writeInt(u32, r[20..24], @bitCast(hp), .little);
+            std.mem.writeInt(u32, r[24..28], @bitCast(@as(f32, 0.0)), .little);
+            std.mem.writeInt(i32, r[28..32], -1, .little);
+        }
+        fn senseFn(_: *HostCtx, out: []u8) usize {
+            if (!sense_enabled) return 0;
+            // header: magic 'ZBS2', 2 records, tick 42, self -1
+            std.mem.writeInt(u32, out[0..4], 0x3253425a, .little);
+            std.mem.writeInt(u32, out[4..8], 2, .little);
+            std.mem.writeInt(u32, out[8..12], 42, .little);
+            std.mem.writeInt(i32, out[12..16], -1, .little);
+            writeRec(out, 16, 2000, 0, 10.0, 0.0, 10.0, 100.0); // player
+            writeRec(out, 48, 3000, 1, 9.0, 0.0, 10.0, 100.0); // zombie
+            return 16 + 64;
+        }
+        fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
+            if (!std.mem.eql(u8, req, "mcp.allowlist")) return 0;
+            const allow = "bot count\nsay";
+            const n = @min(out.len, allow.len);
+            @memcpy(out[0..n], allow[0..n]);
+            return n;
+        }
+    };
+    Cap.queued_n = 0;
+    Cap.sense_enabled = false;
+
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+        .query_fn = &Cap.queryFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_mcp/zdtd_mcp.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    const p = &host.slots[0];
+    try std.testing.expect(p.hook_present[@intFromEnum(Hook.on_enable)]);
+    try std.testing.expect(p.hook_present[@intFromEnum(Hook.on_mcp_frame)]);
+    try std.testing.expect(!p.requires_failed);
+
+    var out: [8192]u8 = undefined;
+
+    // Malformed JSON is a parse error, not a crash.
+    {
+        const rep = p.callMcpFrame("{nope", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32700") != null);
+    }
+    // Batches are refused with Invalid Request.
+    {
+        const rep = p.callMcpFrame("[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}]", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32600") != null);
+    }
+    // tools/list before initialize is not allowed (spec -32002).
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32002") != null);
+    }
+    // ping is allowed pre-initialize and echoes the id.
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}", rep.?);
+    }
+    // initialize negotiates the pinned spec version and capabilities.
+    {
+        const rep = p.callMcpFrame(
+            "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\",\"params\":" ++
+                "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"t\",\"version\":\"1\"}}}",
+            &out,
+        );
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"id\":7") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"protocolVersion\":\"2025-06-18\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"serverInfo\"") != null);
+    }
+    // Re-initialize is refused.
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"initialize\"}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32600") != null);
+    }
+    // The initialized notification gets no response and unlocks the tools.
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}", &out);
+        try std.testing.expect(rep == null);
+    }
+    // tools/list now lists the registry.
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"tools\":[") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"name\":\"server_status\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"name\":\"admin_command\"") != null);
+    }
+    // Unknown tool and missing name are Invalid Params.
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"nope\"}}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32602") != null);
+    }
+    // Read tool without a sense surface fails closed (isError, not fake data).
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"server_status\"}}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "no world data available") != null);
+    }
+    // With a snapshot the same tool reports real host data.
+    Cap.sense_enabled = true;
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"server_status\"}}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "ticks=42") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "players=1") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "zombies=1") != null);
+    }
+    {
+        const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"player_list\"}}", &out);
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "id=2000") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "x=10.0") != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "hp=100.0") != null);
+    }
+    // admin_command: allowlisted verb queues through the plugin boundary...
+    Cap.queued_n = 0;
+    {
+        const rep = p.callMcpFrame(
+            "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"admin_command\",\"arguments\":{\"verb\":\"bot count 6\"}}}",
+            &out,
+        );
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"result\"") != null);
+        try std.testing.expectEqual(@as(usize, 1), Cap.queued_n);
+        try std.testing.expect(std.mem.eql(u8, Cap.queued[0][0..Cap.queued_len[0]], "bot count 6"));
+    }
+    // ...an unlisted verb is denied by the allowlist policy.
+    {
+        const rep = p.callMcpFrame(
+            "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"admin_command\",\"arguments\":{\"verb\":\"kick Bob\"}}}",
+            &out,
+        );
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "verb not in allowlist") != null);
+    }
+    // admin_command without a verb is Invalid Params.
+    {
+        const rep = p.callMcpFrame(
+            "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"admin_command\",\"arguments\":{}}}",
+            &out,
+        );
+        try std.testing.expect(rep != null);
+        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32602") != null);
+    }
+    // No module trapped or exhausted fuel through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }

@@ -30,20 +30,24 @@ of ADR 0030 stay intact.
 
 ## Decisions
 
-### D1. Guest owns protocol; host owns transport
+### D1. Guest owns protocol; host owns transport and JSON parsing
 
 The guest module (`mods/zdtd_mcp`) owns everything that is MCP semantics:
-JSON-RPC 2.0 framing and validation, session state (`initialize`,
-`initialized`), capabilities, the tool registry (name / description /
-JSON-Schema input), `ping`, `tools/list`, `tools/call`, and the spec error
-table (parse -32700, invalid request -32600, method not found -32601, invalid
-params -32602, internal error -32603).
+JSON-RPC 2.0 framing and validation over the parsed view, session state
+(`initialize`, `notifications/initialized`), capabilities, the tool registry
+(name / description / JSON-Schema input), `ping`, `tools/list`, `tools/call`,
+and the spec error table (parse -32700, invalid request -32600, method not
+found -32601, invalid params -32602, internal error -32603).
 
-The host owns everything that is bytes on a wire: the listener, HTTP/SSE
-framing, per-session queues, auth, and the bounded copy of frames into and out
-of guest memory. The guest never sees a socket, never parses HTTP, and never
-touches the game wire. This is the same guest/host split ADR 0026 made for
-bots: the guest is the brain, the host is the body.
+The host owns everything that is bytes on a wire or a parser: the listener,
+HTTP/SSE framing, per-session queues, auth, the bounded copy of frames into and
+out of guest memory, **and the JSON parsing itself** — the host parses each
+frame with Zig's `std.json` and exposes the parsed document to the guest
+through the `zdtd.json_*` imports (D3). The guest never parses JSON, never sees
+a socket, never parses HTTP, and never touches the game wire. This is the same
+guest/host split ADR 0026 made for bots: the guest is the brain, the host is
+the body — plus the parser, because hand-rolling JSON in a freestanding guest
+is exactly the kind of correctness risk the boundary exists to absorb.
 
 ### D2. Transport: MCP Streamable HTTP on a dedicated listener
 
@@ -69,10 +73,10 @@ Rejected alternatives:
 - **WebUI `/mcp` endpoint** - couples tooling traffic to the dashboard port and
   its session model; rejected on config/ops separation, not on feasibility.
 
-### D3. New affordance: one guest export, `on_mcp_frame`
+### D3. New affordance: one guest export and four std.json imports
 
-The boundary grows by exactly one guest export, following the existing
-`on_chat` idiom (host fills guest memory, guest writes an answer):
+The boundary grows by one guest export, following the existing `on_chat`
+idiom (host fills guest memory, guest writes an answer):
 
 - Export: `on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i32) -> i32`
   - the host copies the next pending client frame into guest memory at
@@ -83,13 +87,31 @@ The boundary grows by exactly one guest export, following the existing
     forwarded; a guest that traps on the frame disables only itself
     (ADR 0020).
 
-No new imports are needed: reads already exist (`sense`, `query`), actions
-already exist (`queue`), and clock/tick already exists. The transport bridge is
-the only new host surface, and it is a bounded frame queue plus the copy
-outlined above, not a new authority.
+And four imports that expose Zig's `std.json` to the sandbox, all in the
+`zdtd` module namespace (capability-gated like `sense`/`query`):
 
-Per ADR 0030, the module declares `_zdtd_requires` with `on_mcp_frame` (plus
-the imports it uses); a typo'd hook fails load loudly instead of never firing.
+| Import | Signature | Notes |
+|---|---|---|
+| `json_parse` | `(ptr: i32, len: i32) -> i32` | Parse the JSON doc at guest memory (ptr, len) with std.json into a per-plugin fixed buffer; 0 = ok, <0 = parse error (invalid JSON, or the fixed buffer cap exhausted, which also bounds nesting) |
+| `json_str` | `(path_ptr, path_len, out_ptr, out_cap) -> i32` | Decoded string at a dot-separated key path; returns the FULL length, 0 = missing/not a string, <0 = error. The guest compares the length against its buffer cap |
+| `json_raw` | `(path_ptr, path_len, out_ptr, out_cap) -> i32` | Raw JSON of the value at a path (used to echo the JSON-RPC `id` verbatim); full length, 0 = missing, <0 = error |
+| `json_obj` | `(path_ptr, path_len) -> i32` | 1 = value at path is an object, 0 = absent/other, <0 = error |
+
+The parsed document is per-plugin state, one frame at a time (frames are
+processed one at a time on the tick), stored in a lazily allocated fixed
+buffer (`json_buf_max`, 64 KiB) reset per frame, so the tick path never
+touches the heap and a pathological document fails closed instead of growing
+(ADR rule 20). The capability is generic: any plugin may parse JSON this way,
+and the guest never needs a JSON parser.
+
+The rest of the boundary is unchanged: reads already exist (`sense`,
+`query`), actions already exist (`queue`), clock already exists (`tick`).
+The transport bridge remains the only new socket-facing host surface, and it
+is a bounded frame queue plus the copy outlined above, not a new authority.
+
+Per ADR 0030, the module declares `_zdtd_requires` with `on_mcp_frame` and the
+imports it uses; a typo'd hook or verb fails load loudly instead of silently
+never-firing.
 
 ### D4. Tool surface: reads from sense/query, actions through existing authority
 
@@ -140,8 +162,8 @@ Positive:
 - The authority model is untouched: the guest can only read what `sense`/
   `query` show and request what the host already validates.
 - The host surface is minimal and auditable: a listener, bounded frame queues,
-  one hook invocation. No new imports, no wire changes, nothing on the tick
-  path beyond one hook call per pending frame.
+  one hook invocation plus the std.json imports. No wire changes, nothing on
+  the tick path beyond one hook call per pending frame.
 - Clean-room is trivially satisfied: MCP is a public spec, the module is
   zdtd-owned (provenance bucket Z).
 
@@ -149,11 +171,12 @@ Negative:
 
 - The transport (listener + HTTP/SSE + session queues) is permanent host
   surface once shipped; it is kept minimal and versioned.
-- The guest must parse JSON in freestanding wasm32 with no libc; mitigated by
-  a small bounded parser, frame caps, and golden tests (design doc M1).
+- The std.json capability adds four permanent imports and per-plugin parse
+  state (a lazily allocated fixed buffer); both are generic and audited, and
+  the buffer is bounded and fail-closed (D3).
 - MCP sessions are host-side state and do not survive module reload; accepted
   as normal MCP behavior.
 
-Not decided here: exact config keys, buffer sizes, the JSON parser layout, and
+Not decided here: exact config keys, buffer sizes, the JSON path schema, and
 the per-verb action mapping - these are design-doc details
 (`docs/MCP_DESIGN.md`).

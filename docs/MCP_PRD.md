@@ -27,10 +27,11 @@ The plugin boundary (ADR 0020) already has the verbs an MCP server would need:
 `zdtd.sense` / `zdtd.query` for reads, `zdtd.queue` for actions, all host
 validated and server-authoritative. What is missing is a **transport** a client
 can connect to. So this addon implements the MCP server as a Wasm plugin, with
-the protocol logic in the guest and only the transport bridged by the host.
-This keeps ADR 0020 intact: the guest never touches the wire, never invents
-state, and every action it requests goes through the same authority rules as a
-console command.
+the protocol logic in the guest, the transport bridged by the host, and JSON
+parsing done host-side with std.json (exposed as `json_*` imports, ADR 0031
+D3). This keeps ADR 0020 intact: the guest never touches the wire, never
+invents state, never parses JSON, and every action it requests goes through
+the same authority rules as a console command.
 
 ## 2. Personas
 
@@ -47,9 +48,10 @@ console command.
 
 1. MCP server as a drop-in addon (one `.wasm` in `[plugin] modules`), no host
    fork, no client mod.
-2. Protocol logic lives in the **guest** (JSON-RPC framing, session lifecycle,
-   tool registry, spec error responses); the host provides only a minimal
-   transport bridge.
+2. Protocol logic lives in the **guest** (session lifecycle, tool registry,
+   spec error responses over a parsed view); the host provides the transport
+   bridge **and the JSON parsing** (Zig std.json exposed as `json_*` imports,
+   ADR 0031 D3) — the guest never parses JSON itself.
 3. Tools map 1:1 onto the existing plugin boundary: reads via `sense`/`query`,
    actions via `queue` verbs with a config allowlist. No new authority model.
 4. Fail closed: malformed frames get spec JSON-RPC errors, unknown tools error,
@@ -112,10 +114,11 @@ console command.
   methods and notifications error or no-op per the spec.
 - **FR-2 (methods):** `ping`, `tools/list`, `tools/call` in both request and
   notification forms where the spec allows.
-- **FR-3 (framing):** JSON-RPC 2.0 frames parsed and validated; error responses
-  for parse (-32700), invalid request (-32600), method not found (-32601),
-  invalid params (-32602), internal error (-32603); fail closed on encode (ADR
-  rule 24).
+- **FR-3 (framing):** JSON-RPC 2.0 frames are parsed by the host std.json
+  capability (`json_*` imports, ADR 0031 D3) and validated in the guest; error
+  responses for parse (-32700), invalid request (-32600), method not found
+  (-32601), invalid params (-32602), internal error (-32603); fail closed on
+  encode (ADR rule 24).
 - **FR-4 (tool registry):** bounded table of name / description / JSON-Schema
   input; `tools/call` validates arguments before any side effect.
 - **FR-5 (reads):** read tools fill from bounded `sense`/`query` snapshots;

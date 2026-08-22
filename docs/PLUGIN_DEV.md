@@ -59,10 +59,11 @@ game events (death, kill, block damage, quest completion).
 
 A module may export `_zdtd_requires() -> (ptr, len)` returning a comma-
 separated list of capabilities it needs (hook names + the host verbs
-`log` / `tick` / `queue` / `sense` / `query`). The host validates the list at
-load and **rejects the module loudly** when a capability is unknown or a
-declared hook is not actually exported. This is fail-closed at load: a typo'd
-hook name cannot silently never fire.
+`log` / `tick` / `queue` / `sense` / `query` / `json_parse` / `json_str` /
+`json_raw` / `json_obj`). The host validates the list at load and **rejects
+the module loudly** when a capability is unknown or a declared hook is not
+actually exported. This is fail-closed at load: a typo'd hook name cannot
+silently never fire.
 
 ```c
 long long _zdtd_requires(void) {
@@ -97,7 +98,7 @@ module cannot leave side effects behind. Re-enabling requires a reload.
 
 ## Host imports
 
-The host provides five functions, all in the `zdtd` module namespace. The
+The host provides these functions, all in the `zdtd` module namespace. The
 import **field** names are bare (`log`, not `zdtd_log`); importing
 `zdtd.zdtd_log` fails to instantiate.
 
@@ -108,6 +109,10 @@ import **field** names are bare (`log`, not `zdtd_log`); importing
 | `zdtd` . `queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 when the bytes were read, 1 when `ptr`/`len` is out of bounds |
 | `zdtd` . `sense` | `(ptr: i32, len: i32, token: i32) -> i32` | Read-only world snapshot into the guest's memory at `ptr` (BOTS_SPEC §3); returns bytes written (0 = no sense surface) |
 | `zdtd` . `query` | `(req_ptr: i32, req_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Reverse-direction point query (BOTS_SPEC §3): write a text request at `req_ptr`, the host answers at `out_ptr`; returns response bytes (0 = no answer) |
+| `zdtd` . `json_parse` | `(ptr: i32, len: i32) -> i32` | Parse the JSON doc at guest memory `(ptr, len)` with Zig's `std.json` (ADR 0031 D3); 0 = ok, <0 = parse error. The parsed doc is per-plugin state, replaced on the next call, stored in a lazily allocated fixed buffer (`json_buf_max`, 64 KiB) reset per frame — no heap on the tick path, and the cap also bounds nesting. One doc at a time: frames must be processed before the next parse |
+| `zdtd` . `json_str` | `(path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Decoded string at a dot-separated key path (`method`, `params.name`, ...); returns the FULL length, 0 = missing or not a string, <0 = no parsed doc / bad path. Compare the length against your buffer cap to detect truncation |
+| `zdtd` . `json_raw` | `(path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Raw JSON bytes of the value at a path (for echoing an id verbatim); FULL length, 0 = missing, <0 = error |
+| `zdtd` . `json_obj` | `(path_ptr: i32, path_len: i32) -> i32` | 1 = the value at the path is an object, 0 = absent or another type, <0 = error |
 
 You choose the local symbol name; only the module and field names have to
 match. In C:
@@ -314,10 +319,12 @@ reply back out of it):
 | `on_admin_command` | `(cmd_ptr, cmd_len, out_ptr, out_cap: i32) -> i32` | `>0` bytes of reply written at `out_ptr` (handled); `<=0` not handled, so the next plugin, then core's `unknown`, gets a turn |
 | `on_chat` | `(sender, msg_ptr, msg_len, out_ptr, out_cap: i32) -> i32` | `<0` deny the message; `0` keep it unchanged; `>0` bytes of the rewritten body at `out_ptr`. A rewrite that is not valid chat text is treated as deny |
 | `on_player_login` | `(peer_slot, name_ptr, name_len, out_ptr, out_cap: i32) -> i32` | `0` allow; non-zero deny, where the magnitude is the number of reason bytes written at `out_ptr` (`-4` and `4` both mean "deny, 4 bytes of reason"). A deny with 0 bytes reads back as "denied" |
+| `on_mcp_frame` | `(frame_ptr, frame_len, out_ptr, out_cap: i32) -> i32` | MCP transport bridge (ADR 0031): the host copies one client JSON-RPC frame into your memory, you write your response back; return the bytes written (`0` = nothing to send: a notification, a closed session, or an overflowed response). JSON is parsed by the host (`json_*` imports) — the guest never parses JSON. A trap disables only that module |
 
-For all three the first plugin that responds wins, and a trap or fuel
-exhaustion disables that module while the request proceeds as if it had not
-been exported (login stays open, chat is kept, the command falls through).
+For these request/reply hooks the first plugin that responds wins, and a trap
+or fuel exhaustion disables that module while the request proceeds as if it
+had not been exported (login stays open, chat is kept, the command falls
+through, the MCP frame gets no reply).
 `on_player_login` runs after the name is sanitized and before the identity ban
 check.
 

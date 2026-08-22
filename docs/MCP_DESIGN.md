@@ -27,17 +27,21 @@ src/server/mcp_transport.zig   host: listener + sessions + frame rings + auth
                                (new; registered beside webui.zig, gated by [mcp])
 ```
 
-Guest build (mirrors `mods/zdtd_bot/`; the `.wasm` is committed):
+Guest build (mirrors `mods/zdtd_bot/`; the `.wasm` is committed). `-fno-builtin`
+keeps clang from lowering the guest's small loops into libc calls (strlen,
+memcmp) that freestanding wasm32 has no definitions for:
 
 ```bash
-clang --target=wasm32 -nostdlib -O2 -Wl,--no-entry -Wl,--export-all \
+clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry -Wl,--export-all \
   -o mods/zdtd_mcp/zdtd_mcp.wasm mods/zdtd_mcp/zdtd_mcp.c
 ```
 
 Guest exports: `on_enable`, `on_shutdown`, `on_mcp_frame`, `_zdtd_requires`
 (all hooks listed in `_zdtd_requires` so a typo fails load, ADR 0030).
-Guest imports (all existing, PLUGIN_DEV.md): `zdtd` . `log`, `tick`, `sense`,
-`query`, `queue`. No new imports, no WASI, no libc.
+Guest imports (PLUGIN_DEV.md + the std.json capability, ADR 0031 D3):
+`zdtd` . `log`, `tick`, `sense`, `query`, `queue`, `json_parse`, `json_str`,
+`json_raw`, `json_obj`. No WASI, no libc, no socket, no JSON parser in the
+guest.
 
 ## 3. Host transport bridge (`src/server/mcp_transport.zig`)
 
@@ -90,18 +94,26 @@ max_inbound = 32
 Static memory only (no heap, no libc):
 
 - `frame_buf[16 KiB]` (copied in by the host), `out_buf[8 KiB]` (copied out),
-  `result_buf[8 KiB]` for tool results.
-- A small bounded JSON parser: one pass over the frame, keyed fields for the
-  subset the module needs (`jsonrpc`, `method`, `params`, `id`), lengths
-  checked, no nesting recursion beyond a fixed depth (3). Unparseable input ->
-  `-32700 Parse error`; wrong shape -> `-32600 Invalid request`. Batches are
-  not supported and are answered with `-32600` (JSON-RPC 2.0 allows refusing
-  batches).
+  `result_buf[8 KiB]` for tool results, small static strings for the
+  `json_*` lookups (`sbuf`/`rbuf`/`vbuf`, 96/96/128 bytes).
+- **JSON access:** the guest calls `zdtd.json_parse(frame_ptr, frame_len)`
+  once per frame; the host parses with `std.json` into the plugin's fixed
+  buffer (`json_buf_max`, 64 KiB, reset per frame — also the nesting bound).
+  Fields are then read by dot-path: `json_str("method")`,
+  `json_str("params.name")`, `json_obj("params.arguments")`,
+  `json_str("params.arguments.verb")`, and `json_raw("id")` for the verbatim
+  id echo. `json_str`/`json_raw` return the FULL length so the guest detects
+  truncation against its buffer caps and refuses (fail closed).
+  Unparseable input -> `-32700 Parse error`; a non-object frame (batch array,
+  scalar) -> `-32600 Invalid request`. Batches are not supported and are
+  answered with `-32600` (JSON-RPC 2.0 allows refusing batches).
 
 Session state machine (in guest):
 
 ```
 idle -> awaiting_initialize (only initialize and ping accepted)
+     -> init_sent (initialize answered; only the initialized notification is
+        accepted, other methods answer -32002)
      -> ready (initialized notification accepted; all methods live)
      -> closed (on_shutdown / reload)
 ```
@@ -126,9 +138,10 @@ input):
 - `player_list` - connected players (name, entity id, position). Same source.
 - `admin_command` - args `{ verb: string }`. The verb is checked against the
   allowlist obtained from the host via `zdtd.query` (new query key
-  `mcp.allowlist`); allowed verbs are issued as SimCommands via `zdtd.queue`
-  and the result returned. The allowlist is host policy read through the
-  boundary; the transport token is the security boundary (see §8).
+  `mcp.allowlist`; newline-separated verb prefixes, so `bot count` also allows
+  `bot count 6`); allowed verbs are issued as SimCommands via `zdtd.queue` and
+  the result returned. The allowlist is host policy read through the boundary;
+  the transport token is the security boundary (see §8).
 
 No tool may produce a result over `out_buf` cap; oversized results are
 truncated to a spec error or an omitted field, never a partial frame
@@ -141,8 +154,9 @@ truncated to a spec error or an omitted field, never a partial frame
 2. Listener thread verifies auth, copies the body into the session inbound
    ring, signals the tick.
 3. Next tick: host drain copies the frame into `frame_buf`, calls
-   `on_mcp_frame`; the guest parses, reads its snapshot via `sense`/`query`,
-   renders the result into `out_buf`, returns the length.
+   `on_mcp_frame`; the guest parses via `json_parse` + `json_str`/`json_obj`,
+   reads its snapshot via `sense`/`query`, renders the result into `out_buf`,
+   returns the length.
 4. Host stores the bytes as the session response, signals the listener thread.
 5. Listener serves them as the HTTP 200 JSON body. Notifications (no `id`) are
    answered `202 Accepted` immediately with no round trip.
@@ -156,11 +170,11 @@ and a slow client only fills a bounded ring.
 |---|---|---|
 | `max_frame_kib` | 16 | inbound JSON-RPC frame |
 | `out_buf` | 8 KiB | guest response + tool result |
+| `json_buf_max` | 64 KiB | host std.json fixed buffer per plugin (also the nesting bound) |
 | `max_sessions` | 16 | fixed session array |
 | `max_inbound` | 32 | frames per session ring |
 | `max_drain_per_tick` | 4 | frames drained per tick across sessions |
 | `response_wait_ms` | 1000 | listener wait for the tick-thread response |
-| JSON nesting depth | 3 | guest parser bound |
 
 All named module consts, no magic numbers on the path.
 
