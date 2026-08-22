@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 261 `WORKS`,
-30 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 262 `WORKS`,
+29 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -522,6 +522,12 @@ scorecard counts recount per category, every GAP feature row embeds under
 its category (click a row to expand), a search box filters categories and
 features, state chips toggle WORKS/PARTIAL/waived rows, and the numeric
 headers sort. Regenerate with `python3 scripts/gen_provenance.py`.
+Then the POI-rect-for-quests row went WORKS on re-audit: the quest POI is
+selected by the stock selector (questPoiSelectAt: tier pool, tag/biome/
+lockout filters, distance bands / closest with the RE'd constants) - the
+"fabricated quests.xml coordinates" note was stale; the remaining linear
+scan is non-client-visible at quest-accept frequency. POIs 26/4/0; total
+**262/29/0**.
 Then the prefab DifficultyTier leg landed: lootStageOf now applies
 loot_settings POITierMod/Bonus indexed by the tier of the POI the player
 stands in (a tier-2 POI pushes a level-10 player's loot stage to 17; test

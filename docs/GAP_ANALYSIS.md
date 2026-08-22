@@ -152,13 +152,13 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Quests](#4-quests) | 33 | 1 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 18 | 2 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
-| [POIs and prefabs](#7-pois-and-prefabs) | 25 | 5 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
+| [POIs and prefabs](#7-pois-and-prefabs) | 26 | 4 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 23 | 5 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 38 | 6 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **261** | **30** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **262** | **29** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1808,16 +1808,21 @@ can walk into every POI but none of them is the building TFP authored.
   three unit tests.
   *Anchors:* `src/ecs/poi_lock.zig:19`, `:90`, `:115`, `asm.il:1001892-1002045`
 
-- **POI rect lookup for quests** `PARTIAL`
+- **POI rect lookup for quests** `WORKS` `(2026-08-22 re-audit)`
   Returns the prefab AABB (correct and rotation-independent); `part_*` city
-  parts are now excluded, so a driveway or sign can no longer be the POI a
+  parts are excluded, so a driveway or sign can no longer be the POI a
   quest anchors to. The prefab Index also parses each POI's `QuestTags` +
-  `DifficultyTier` (`questData`). Still linear over all decorations per query,
-  and the POI a quest lands in is chosen from the fabricated `quests.xml`
-  coordinates, not stock's tag/tier/biome selection: QuestPrefabManager
-  (`PoiTag`, `QuestTags` filter, tier range) is not yet reversed in
-  `../../7dtd-research/docs/quests-challenges.md`.
-  *Anchors:* `src/server/game.zig:1738`, `src/world/prefabs.zig:66`, `:224`,
+  `DifficultyTier` (`questData`). Re-audit 2026-08-22: the quest POI is
+  selected by the stock selector - `questPoiSelectAt` builds the tier pool
+  (GetPrefabsByDifficultyTier), filters tags/biome/lockouts, and picks by
+  distance bands / closest with the RE'd constants (min/max distance,
+  max 50 attempts, same-biome retry; DynamicPrefabDecorator
+  GetRandomPOINearWorldPos / GetClosestPOIToWorldPos) - the "fabricated
+  quests.xml coordinates" note was stale. Residual: the tier-pool scan is
+  linear over decorations per query (non-client-visible at quest-accept
+  frequency, ~1.5k prefabs).
+  *Anchors:* `src/server/game/hooks.zig` questPoiSelectAt/selectQuestPoi,
+  `src/world/prefabs.zig:66`, `:224`,
   `Data/Prefabs/POIs/AAA_utility_waterworks.xml`
 
 - **Sleeper volume parse** `WORKS`
