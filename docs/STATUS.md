@@ -516,6 +516,14 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then the biomes.xml stage modifiers landed: gamestage_modifier/bonus and
+lootstage_modifier/bonus parse into the biome table and feed
+gameStageOf/lootStageOf by the player's current biome (stock
+get_gameStage / GetLootStage, progression.md 5) - a level-10 player reads
+stage 90 in snow vs 18 in pine_forest on Navezgane, matching the stock
+formula incl. the 1.2 difficultyBonus. Gamestage row stays PARTIAL for
+the quests.xml stage modifiers, prefab DifficultyTier and the
+EffectManager passives.
 Then the land-claim knobs went config-driven: LandClaimCount (3),
 LandClaimDeadZone (60), LandClaimOfflineDelay (3) and LandClaimDecayMode (0)
 parse from serverconfig with stock defaults and feed the GameStats blob the

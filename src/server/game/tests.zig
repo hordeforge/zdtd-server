@@ -2158,6 +2158,75 @@ test "per-trader stock and hours come from trader_info + npc.xml" {
     try std.testing.expect(g.traderIsOpen(uslot));
 }
 
+test "biome gamestage and lootstage modifiers apply from biomes.xml" {
+    // Stock get_gameStage / GetLootStage scale by the biome under the player
+    // (progression.md 5): snow has gamestage_modifier=3 / bonus=30 and
+    // lootstage_modifier=1.5 / bonus=15, pine_forest 0/0. The same player in
+    // the snow biome must read a higher stage than in the forest.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/biome_stage_mods", 0, .{
+        .map_dir = map,
+        .game_dir = game_dir,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const bm = g.world.biomes orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.world.biome_layers_table.loaded);
+    // snow biomemap id 1, pine_forest id 3.
+    var snow: ?[2]i32 = null;
+    var pine: ?[2]i32 = null;
+    var wx: i32 = -1600;
+    while (wx <= 1600 and (snow == null or pine == null)) : (wx += 32) {
+        var wz: i32 = -1600;
+        while (wz <= 1600) : (wz += 32) {
+            const bid = bm.atWorld(wx, wz) orelse continue;
+            if (bid == 1 and snow == null) snow = .{ wx, wz };
+            if (bid == 3 and pine == null) pine = .{ wx, wz };
+        }
+    }
+    const s = snow orelse return error.TestUnexpectedResult;
+    const p = pine orelse return error.TestUnexpectedResult;
+    const snow_mods = g.world.biome_layers_table.biomeMods("snow");
+    try std.testing.expectEqual(@as(f32, 3), snow_mods.game_mod);
+    try std.testing.expectEqual(@as(f32, 30), snow_mods.game_bonus);
+    try std.testing.expectEqual(@as(f32, 1.5), snow_mods.loot_mod);
+    try std.testing.expectEqual(@as(f32, 15), snow_mods.loot_bonus);
+    const pine_mods = g.world.biome_layers_table.biomeMods("pine_forest");
+    try std.testing.expectEqual(@as(f32, 0), pine_mods.game_mod);
+    try std.testing.expectEqual(@as(f32, 0), pine_mods.game_bonus);
+
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.director.clock.day = 10;
+    cl.game_stage_born_world_time = g.sim.director.clock.worldTimeBits() - 5 * assets_gamestages.ticks_per_day;
+    cl.level = 10;
+    // Move the player into each biome and compare the stages.
+    g.sim.transform[ps].x = @floatFromInt(p[0]);
+    g.sim.transform[ps].z = @floatFromInt(p[1]);
+    const pine_stage = g.gameStageOf(cl.slot);
+    const pine_loot = g.lootStageOf(cl.slot);
+    g.sim.transform[ps].x = @floatFromInt(s[0]);
+    g.sim.transform[ps].z = @floatFromInt(s[1]);
+    const snow_stage = g.gameStageOf(cl.slot);
+    const snow_loot = g.lootStageOf(cl.slot);
+    try std.testing.expect(snow_stage > pine_stage);
+    try std.testing.expect(snow_loot > pine_loot);
+    // Sanity: forest stage = (level + days) x stock difficultyBonus 1.2 =
+    // 15 x 1.2 = 18; forest loot stage = level = 10 (no biome terms).
+    try std.testing.expectEqual(@as(i32, 18), pine_stage);
+    try std.testing.expectEqual(@as(i32, 10), pine_loot);
+    // Snow: (10 x (1 + 3) + 5 + 30) x 1.2 = 90; loot (10 x 2.5 + 15) = 40.
+    try std.testing.expectEqual(@as(i32, 90), snow_stage);
+    try std.testing.expectEqual(@as(i32, 40), snow_loot);
+    std.debug.print("PASS biome-stage-mods: snow {d}/{d} > pine {d}/{d}\n", .{ snow_stage, snow_loot, pine_stage, pine_loot });
+}
+
 test "enter bundle ships ChunkClusterInfo before spawn points (infinite world)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -2022,9 +2022,13 @@ gamestage, no wandering hordes, and no screamers.
   ladders) and resolves sleeper volume groups, the blood-moon spawner stage,
   daytime scout tiers and the `gamestage [slot]` admin command against the party
   stage; `gameStageBornAtWorldTime` rides the PlayerId PDF so the client's own
-  `gamestage` readout agrees with the server. Still missing: biomes.xml /
-  quests.xml stage modifiers, prefab DifficultyTier (loot poi_tier_mod / bonus),
-  EffectManager passive modifiers, (2026-08-22) cross-session days-alive persistence is closed: ZPV9 carries the game-stage born world time, so a restart keeps the player's days-alive instead of snapping to the level cap (round-trip test).
+  `gamestage` readout agrees with the server. (2026-08-22) cross-session
+  days-alive persistence is closed (ZPV9 born time) and the biomes.xml stage
+  modifiers are in (gamestage_modifier/bonus + lootstage_modifier/bonus parse
+  into biome_layers and feed gameStageOf/lootStageOf by the player's biome,
+  RE progression.md 5; Navezgane test asserts snow 90/40 vs pine 18/10).
+  Still missing: quests.xml stage modifiers, prefab DifficultyTier (loot
+  poi_tier_mod / bonus), EffectManager passive modifiers.
   Full split: [gamestage subsection](#gamestage-what-is-in-and-what-is-still-missing).
   *Anchors:* `src/assets/gamestages.zig`, `src/server/game/sleeper.zig`,
   `asm.il:955240-955270`, `asm.il:416434`

@@ -12,6 +12,22 @@ const assignids = @import("assignids_comptime.zig");
 
 pub const max_layers: usize = 8;
 pub const max_biomemap_id: usize = 50;
+pub const max_biome_mod_rows: usize = 16;
+
+/// biomes.xml per-biome stage modifiers (stock `get_gameStage` /
+/// GetLootStage, RE progression.md 5): gamestage_modifier/bonus and
+/// lootstage_modifier/bonus on the `<biome>` row.
+pub const BiomeMods = struct {
+    game_mod: f32 = 0,
+    game_bonus: f32 = 0,
+    loot_mod: f32 = 0,
+    loot_bonus: f32 = 0,
+};
+
+pub const BiomeModRow = struct {
+    name: []const u8 = "",
+    mods: BiomeMods = .{},
+};
 
 /// One stock layer: depth blocks from the top of the remaining column, or fill
 /// (`depth == 0`) until lower fixed depths need the rest.
@@ -169,6 +185,9 @@ pub const Table = struct {
     /// biomemap id → biome name ("pine_forest", "wasteland", …), for the spawn
     /// system's per-biome entitygroup resolution.
     names: [max_biomemap_id]?[]const u8 = .{null} ** max_biomemap_id,
+    /// biome name → gamestage/lootstage modifier row (biomes.xml attrs).
+    mods: [max_biome_mod_rows]BiomeModRow = [_]BiomeModRow{.{}} ** max_biome_mod_rows,
+    mod_n: u8 = 0,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     loaded: bool = false,
 
@@ -185,6 +204,15 @@ pub const Table = struct {
     pub fn nameById(self: *const Table, id: u8) ?[]const u8 {
         if (id >= max_biomemap_id) return null;
         return self.names[id];
+    }
+
+    /// Stage modifiers for a biome name (biomes.xml gamestage/lootstage
+    /// modifier + bonus). Missing rows return the zero default.
+    pub fn biomeMods(self: *const Table, name: []const u8) BiomeMods {
+        for (self.mods[0..self.mod_n]) |row| {
+            if (std.mem.eql(u8, row.name, name)) return row.mods;
+        }
+        return .{};
     }
 
     /// Number of biomes that resolved names (biomes.xml `<biomemap>` rows).
@@ -659,6 +687,8 @@ pub fn loadFromPath(
     defer decos_by_name.deinit(allocator);
     var subs_by_name: std.StringHashMapUnmanaged([]SubBiome) = .{};
     defer subs_by_name.deinit(allocator);
+    var mods_by_name: std.StringHashMapUnmanaged(BiomeMods) = .{};
+    defer mods_by_name.deinit(allocator);
     const deco_ok = is_distant_deco orelse noDistantDeco;
     i = 0;
     while (i < clean.len) {
@@ -667,6 +697,15 @@ pub fn loadFromPath(
             i = bi + 7;
             continue;
         };
+        // Stage modifiers ride the <biome> tag (gamestage/lootstage modifier
+        // + bonus); stock applies them in get_gameStage / GetLootStage
+        // (progression.md 5).
+        var biome_mods: BiomeMods = .{};
+        if (xml.attr(clean, bi, "gamestage_modifier")) |v| biome_mods.game_mod = std.fmt.parseFloat(f32, v) catch 0;
+        if (xml.attr(clean, bi, "gamestage_bonus")) |v| biome_mods.game_bonus = std.fmt.parseFloat(f32, v) catch 0;
+        if (xml.attr(clean, bi, "lootstage_modifier")) |v| biome_mods.loot_mod = std.fmt.parseFloat(f32, v) catch 0;
+        if (xml.attr(clean, bi, "lootstage_bonus")) |v| biome_mods.loot_bonus = std.fmt.parseFloat(f32, v) catch 0;
+        try mods_by_name.put(allocator, bname, biome_mods);
         const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
         const close = std.mem.findPos(u8, clean, gt, "</biome>") orelse break;
         const body = clean[gt + 1 .. close];
@@ -723,6 +762,12 @@ pub fn loadFromPath(
     // water / underwater: keep default (no land layers); surface gen still uses heights.
     for (name_by_id, 0..) |nm, idx| {
         table.names[idx] = if (nm) |n| try arena.dupe(u8, n) else null;
+    }
+    var mod_it = mods_by_name.iterator();
+    while (mod_it.next()) |e| {
+        if (table.mod_n >= max_biome_mod_rows) break;
+        table.mods[table.mod_n] = .{ .name = try arena.dupe(u8, e.key_ptr.*), .mods = e.value_ptr.* };
+        table.mod_n += 1;
     }
     table.loaded = true;
     return table;

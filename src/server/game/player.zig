@@ -11,6 +11,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
+const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const ecs_party = @import("../../ecs/party.zig");
 
 const max_clients = game_mod.max_clients;
@@ -147,24 +148,48 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
     }
 }
 
-/// EntityPlayer::get_gameStage for one client (asm.il ~503972). Biome and
-/// quest modifiers are zero: biomes.xml GameStageMod/Bonus and quests.xml
-/// GameStageMod/Bonus are not parsed yet (docs/GAP_ANALYSIS.md).
+/// EntityPlayer::get_gameStage for one client (asm.il ~503972). The biome
+/// terms come from the player's current biome (biomes.xml gamestage_modifier
+/// / gamestage_bonus, progression.md 5); quest modifiers are still zero
+/// (quests.xml GameStageMod/Bonus not parsed yet, docs/GAP_ANALYSIS.md).
 pub fn gameStageOf(self: *const Game, slot: usize) i32 {
     if (slot >= self.clients.len) return 1;
     const c = &self.clients[slot];
     const now = self.sim.director.clock.worldTimeBits();
+    const bmods = biomeStageMods(self, slot);
     return assets_gamestages.playerStage(self.gamestages.config, .{
         .level = c.level,
         .days_alive = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level),
+        .biome_mod = bmods.game_mod,
+        .biome_bonus = bmods.game_bonus,
     });
 }
 
+/// The player's biome stage modifiers (biomes.xml), resolved from the biome
+/// map under the client's sim position. Zero default when no biome data.
+fn biomeStageMods(self: *const Game, slot: usize) assets_biome_layers.BiomeMods {
+    if (slot >= self.clients.len) return .{};
+    const c = &self.clients[slot];
+    const ps = self.sim.playerByPeer(c.slot) orelse return .{};
+    if (!self.sim.mask[ps].transform) return .{};
+    const t = self.sim.transform[ps];
+    const bm = self.world.biomes orelse return .{};
+    const id = bm.atWorld(@floor(t.x), @floor(t.z)) orelse return .{};
+    const name = self.world.biome_layers_table.nameById(id) orelse return .{};
+    return self.world.biome_layers_table.biomeMods(name);
+}
+
 /// EntityPlayer::GetLootStage for one client (asm.il ~504215): level driven,
-/// with no POI tier or biome terms until those tables are parsed.
+/// with the biome lootstage terms and no POI tier terms until those tables
+/// are parsed.
 pub fn lootStageOf(self: *const Game, slot: usize) i32 {
     if (slot >= self.clients.len) return 1;
-    return assets_gamestages.lootStage(.{ .level = self.clients[slot].level });
+    const bmods = biomeStageMods(self, slot);
+    return assets_gamestages.lootStage(.{
+        .level = self.clients[slot].level,
+        .biome_mod = bmods.loot_mod,
+        .biome_bonus = bmods.loot_bonus,
+    });
 }
 
 /// GameStageDefinition::CalcGameStageAround (asm.il ~1093351): party stage
