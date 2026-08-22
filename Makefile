@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check check-clean-build lint fmt release-check release repro smoke clean need-zig need-release-tools need-python3
+.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke clean need-zig need-release-tools need-python3 need-oxlint need-java
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -35,6 +35,33 @@ need-python3:
 	  echo "zdtd: missing required tool: python3 (for tools/provenance_scan.py)" >&2; \
 	  exit 127; \
 	}
+
+# Webui JS gate: tsc type-check + oxlint over src/server/webui/ts, then page
+# freshness (scripts/lint-webui.sh). tsc/oxlint run through npx (version pins:
+# scripts/lint-webui.sh, scripts/build-webui-ts.sh).
+need-oxlint:
+	@command -v npx >/dev/null || { \
+	  echo "zdtd: missing required tool: npx (Node.js; for the webui TS/JS lint)" >&2; \
+	  exit 127; \
+	}
+
+lint-webui: need-oxlint need-python3
+	bash scripts/lint-webui.sh
+
+# Regenerate the committed webui pages from the TS sources (tsc + marker
+# splice); `make lint` fails when the committed pages are stale.
+webui-ts: need-oxlint need-python3
+	bash scripts/build-webui-ts.sh
+
+# vnu (Nu HTML Checker) over all repo HTML + embedded CSS (version pin: scripts/lint-html.sh).
+need-java:
+	@command -v java >/dev/null || { \
+	  echo "zdtd: missing required tool: java (JRE; for the vnu HTML checker)" >&2; \
+	  exit 127; \
+	}
+
+lint-html: need-oxlint need-java
+	bash scripts/lint-html.sh
 
 all: build
 
@@ -105,7 +132,7 @@ release: release-check need-zig need-release-tools
 	  rm -rf zig-out/bin/modes && cp -r modes zig-out/bin/modes; \
 	  echo "zdtd: release ok $$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)  $$bin"
 
-lint: need-zig
+lint: need-zig lint-webui lint-html
 	@command -v rg >/dev/null || { \
 	  echo "zdtd: missing required tool: rg (ripgrep); apt/brew/cargo install ripgrep" >&2; \
 	  exit 127; \

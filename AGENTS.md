@@ -53,7 +53,7 @@ Governs every rule below. When in doubt, these decide.
 9. **Server owns missing features.** Fix stock-client gaps (chunks, deco, signs, inv direction, spawn/UI unlock, entity state) here with correct wire/sim. Never make `7dtd-connect`/client mods invent world data, skip server steps, or suppress protocol errors. Client tooling is join/automation only. Workspace rule 10.
 10. **Stock fidelity: missing > fake.** No invented terrain shells, fake FX, or incomplete journal blobs failing stock `Read`.
 11. **New tunable = struct field, not parse arm.** `util/toml_bind.zig` binds `zdtd.toml`/mode packs by walking the dest struct — adding a field auto-configures/validates/documents it. Never hand-write `std.mem.eql(u8, key, ...)` chains (ADR 0021). Sim params live in `ecs/rules.zig`; a `Rules` value is a **floor** — per-entity stock data wins where present.
-12. **Markup is not a string literal.** Webui pages are `.html` under `src/server/webui/` (CSS/JS inline) embedded via `@embedFile`. Nothing read from disk at runtime.
+12. **Markup is not a string literal.** Webui pages are `.html` under `src/server/webui/` (CSS inline, JS compiled from TypeScript) embedded via `@embedFile`. Nothing read from disk at runtime. JS is authored as TypeScript in `src/server/webui/ts/` and compiled into the committed pages by `scripts/build-webui-ts.sh` (tsc, version-pinned; `make webui-ts`); `scripts/lint-webui.sh` (tsc `--noEmit` + oxlint, `.oxlintrc.jsonc`, + a page-freshness gate) and `scripts/lint-html.sh` (vnu, `vnu-filter.txt`) are both part of `make lint`.
 13. **Name for what it does.** Don't call a streaming throttle `world_enabled`. Confusing names are defects.
 14. **One stock package shape → one builder.** No second "almost stock" encoder.
 15. **Don't hardcode game asset data.** Full policy: [`docs/ASSETS.md`](docs/ASSETS.md). Every src file needs a provenance row in [`docs/PROVENANCE.md`](docs/PROVENANCE.md) (bucket A stock-data / R RE-cited / Z zdtd-owned + source); `tools/provenance_scan.py` in `make check` fails new files without one — add the row with the change. Stock `Data/Config`, prefabs, DTM, TTS, XML catalogs, etc. must be **read from assets** (runtime `game-dir`/`assets/*` or **comptime** embed/parse generating tables).
@@ -132,7 +132,7 @@ src/plugin/*           Wasm plugin host, hook table, budgets (ADR 0020)
 src/util/parallel.zig  optional range split (AI, turrets, chunk save)
 src/util/toml_bind.zig comptime-reflected TOML binder (ADR 0021)
 src/ecs/rules.zig      sim rule params, overlaid by mode packs (ADR 0021)
-src/server/webui/      webui markup, @embedFile'd (never Zig string literal)
+src/server/webui/      webui markup, @embedFile'd (never Zig string literal); linted by scripts/lint-webui.sh (JS) + lint-html.sh (HTML/CSS)
 assets/fixtures/       offline XML and .wasm fixtures for tests
 modes/                 gamemode packs (`--mode <name>`)
 scripts/               release, lint and smoke gates called by Makefile

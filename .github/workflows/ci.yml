@@ -39,6 +39,10 @@ jobs:
           missing=()
           command -v rg >/dev/null 2>&1 || missing+=(ripgrep)
           command -v shellcheck >/dev/null 2>&1 || missing+=(shellcheck)
+          # lint-webui runs oxlint via npx; lint-html runs vnu via npx + java.
+          # ubuntu runners preinstall node and java, but do not assume it.
+          command -v node >/dev/null 2>&1 || missing+=(nodejs npm)
+          command -v java >/dev/null 2>&1 || missing+=(openjdk-21-jre-headless)
           if ((${#missing[@]})); then
             export DEBIAN_FRONTEND=noninteractive
             sudo apt-get update -qq

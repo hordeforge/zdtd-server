@@ -1,0 +1,230 @@
+{
+  // oxlint config for the webui TypeScript sources (src/server/webui/ts,
+  // scripts/lint-webui.sh, `make lint`).
+  //
+  // Target: the .ts sources in src/server/webui/ts/, compiled by
+  // scripts/build-webui-ts.sh (tsc --strict, pinned TSC_VERSION) into classic
+  // non-module browser scripts that are spliced into the @embedFile'd pages,
+  // hence env browser + es2024. The rule set is deliberately "anti-slop": it
+  // catches AI-generation tells (debug leftovers, dead code, loose equality,
+  // magic numbers, `var`, string concatenation, nested ternaries, runaway
+  // complexity). Warnings and errors are both enforced because lint-webui.sh
+  // runs with --deny-warnings.
+  //
+  // Provenance: rules added 2026-08-22 from Rika-Labs/oxlint-standards v0.8.1,
+  // the strict baseline chain strict -> strict-ts -> {strict-core, anti-slop,
+  // naming-discipline, promise-safety, imports-hygiene}, restricted to the
+  // subset applicable to browser classic scripts. The @rikalabs/* custom rules
+  // come from that package's plugin via jsPlugins; scripts/lint-webui.sh
+  // installs it into a cache dir (version pinned there) and runs oxlint
+  // against a copy of this config sitting next to the plugin, because oxlint
+  // resolves jsPlugins relative to the config file's directory.
+  //
+  // Type-aware: options.typeAware enables the typescript/* rules that need
+  // real type info (no-floating-promises, no-misused-promises,
+  // no-unsafe-type-assertion, prefer-includes, ...). oxlint runs those through
+  // the separate `oxlint-tsgolint` binary, which lint-webui.sh installs
+  // alongside the plugin (version pinned there) and puts on PATH. The tsconfig
+  // must be parseable by tsgolint: module "es2022", not "none" (see the
+  // tsconfig.json comment).
+  //
+  // Deliberate deviations from the baseline (kept, each with reason):
+  //   * stricter thresholds the baseline leaves off: complexity (max 15),
+  //     max-params (4), max-depth (4), no-negated-condition, no-magic-numbers,
+  //     max-nested-callbacks (3 vs the baseline's 4), no-implicit-coercion
+  //     with only `!!` allowed.
+  //   * eslint/no-underscore-dangle off: shell.html hangs _hxStart/_hxStop/
+  //     _hxOnce poller handles off elements by design.
+  // Baseline entries intentionally absent (not applicable here):
+  //   * strict-runtime: node/no-process-env, node/no-path-concat,
+  //     node/handle-callback-err (browser env, no node runtime).
+  //   * strict-tests: vitest/*, jsdoc/*, @rikalabs/no-placeholder-tests,
+  //     @rikalabs/no-mock-only-tests (no tests under src/server/webui/ts).
+  //   * strict-ts offs are moot because they are never enabled here:
+  //     typescript/explicit-function-return-type, explicit-module-boundary-
+  //     types, eslint/no-void, unicorn/no-useless-undefined (all off in the
+  //     baseline; source code declares return types anyway).
+  //   * strict-core offs never enabled by these categories and therefore not
+  //     repeated: eslint/no-await-in-loop, no-continue, no-ternary, id-length,
+  //     max-statements, new-cap, prefer-object-spread, oxc/no-optional-
+  //     chaining, no-rest-spread-properties, no-map-spread.
+  //   * oxlint 1.79.0 does not implement import/no-reexport,
+  //     import/no-extraneous-dependencies, import/no-unresolved (baseline
+  //     entries; the import plugin is loaded for the rest of imports-hygiene).
+  //   * Framework presets (strict-drizzle/-web/-effect/-zustand/-bun) do not
+  //     apply to these pages.
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "options": { "typeAware": true },
+  "env": { "browser": true, "es2024": true },
+  // Placeholders substituted by the server before serving; not real JS bindings.
+  "globals": { "__ZDTD_RETRY_S__": "readonly" },
+  // @rikalabs/oxlint-standards plugin (anti-slop custom rules). Loaded by
+  // lint-webui.sh from a cached install; see the provenance note above.
+  "jsPlugins": ["@rikalabs/oxlint-standards/plugin"],
+  // Declaring `plugins` replaces oxlint's default-on set, so list every plugin
+  // the rules below reference (same list as the baseline's strict-core preset);
+  // import + promise are the two that would otherwise not be loaded.
+  "plugins": ["typescript", "import", "promise", "unicorn", "oxc", "eslint"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    // ---- dead / debug code ----
+    "no-debugger": "error",
+    "no-console": "error", // browser dashboard: console is debug leftover, never intended output
+    "no-unused-vars": "error",
+    "no-empty": "error",
+    "no-empty-function": "error",
+    "no-unreachable": "error",
+    "no-useless-catch": "error",
+    "no-self-compare": "error",
+    "no-constant-condition": "error",
+    "no-sequences": "error", // comma-operator chains
+    "no-alert": "error", // shell.html's destructive-cmd window.confirm is a documented inline exception
+    // ---- correctness of intent ----
+    "eqeqeq": ["error", "always"], // no loose ==
+    "no-cond-assign": "error",
+    "no-fallthrough": "error",
+    "no-implicit-coercion": ["error", { "allow": ["!!"] }],
+    "radix": "error",
+    "no-eval": "error",
+    "no-new-func": "error",
+    "no-new-wrappers": "error",
+    "no-script-url": "error",
+    "no-throw-literal": "error",
+    "no-param-reassign": "error",
+    "no-async-promise-executor": "error",
+    "no-promise-executor-return": "error",
+    "no-undef": "error",
+    // ---- magic numbers: name them ----
+    "no-magic-numbers": ["error", { "ignore": [0, 1, 2], "ignoreDefaultValues": true, "ignoreArrayIndexes": true }],
+    // ---- idiomatic modern JS ----
+    "no-var": "error",
+    "prefer-const": "error",
+    "prefer-template": "error",
+    "no-useless-concat": "error",
+    "object-shorthand": "error",
+    // ---- complexity (slop soup): keep functions small and flat ----
+    "complexity": ["error", { "max": 15 }],
+    "max-depth": ["error", { "max": 4 }],
+    "max-nested-callbacks": ["error", { "max": 3 }],
+    "max-params": ["error", { "max": 4 }],
+    // Baseline cap (strict-core default is 60, not the previous 120).
+    "max-lines-per-function": ["error", { "max": 60, "skipBlankLines": true, "skipComments": true }],
+    "no-nested-ternary": "error",
+    "no-lonely-if": "error",
+    "no-negated-condition": "error",
+    "no-else-return": "error",
+    "no-useless-return": "error",
+    "default-case": "error",
+    // ---- oxlint-standards v0.8.1 native rules: strict-core subset applicable to browser JS ----
+    "no-warning-comments": "error", // TODO/FIXME/XXX residue; pairs with @rikalabs/no-todo-without-issue
+    "no-shadow": ["error", { "hoist": "functions" }],
+    "no-return-assign": "error",
+    "no-loop-func": "error",
+    "no-constructor-return": "error",
+    "curly": ["error", "all"], // brace every block; no dangling-else / accidental multi-statement
+    "no-multi-assign": "error",
+    "no-template-curly-in-string": "error",
+    "no-labels": "error",
+    "no-lone-blocks": "error",
+    "prefer-object-has-own": "error",
+    "no-implied-eval": "error", // setTimeout/setInterval with string code
+    "prefer-promise-reject-errors": "error", // reject(new Error(...)), never bare reject()
+    "max-classes-per-file": ["error", 1],
+    "max-lines": ["error", { "max": 1500, "skipBlankLines": true, "skipComments": true }],
+    "array-callback-return": "error",
+    // ---- strict-core baseline offs that these categories would otherwise auto-enable ----
+    "promise/always-return": "off", // baseline: off (each then() returning a value is noise here)
+    "typescript/no-unnecessary-boolean-literal-compare": "off", // baseline: off
+    "require-yield": "off", // baseline: off
+    // ---- strict-core typescript/* (type-aware entries need options.typeAware + tsgolint) ----
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "typescript/no-unsafe-type-assertion": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/no-deprecated": "error",
+    "typescript/ban-ts-comment": [
+      "error",
+      {
+        "ts-ignore": true,
+        "ts-nocheck": true,
+        "ts-expect-error": { "descriptionFormat": "^: .+" }
+      }
+    ],
+    "typescript/restrict-plus-operands": "error",
+    "typescript/no-confusing-void-expression": ["error", { "ignoreArrowShorthand": true }],
+    "typescript/no-confusing-non-null-assertion": "error",
+    "typescript/no-unnecessary-type-arguments": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/prefer-for-of": "error",
+    "typescript/prefer-includes": "error",
+    "typescript/consistent-type-assertions": ["error", { "assertionStyle": "as" }],
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-require-imports": "error",
+    "typescript/no-namespace": "error",
+    "typescript/array-type": ["error", { "default": "generic" }],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/consistent-type-definitions": ["error", "type"], // type aliases over interfaces
+    "unicorn/no-static-only-class": "error",
+    "unicorn/no-useless-promise-resolve-reject": "error",
+    // ---- strict-core @rikalabs/* runtime/fallback heuristics ----
+    "@rikalabs/no-silent-catch-fallback": "error", // shell.html cmd-form catch is a documented directive exception
+    "@rikalabs/no-runtime-compat-fallbacks": "error",
+    "@rikalabs/no-catch-return-error-object": "error",
+    "@rikalabs/no-unlisted-external-imports": "error",
+    "@rikalabs/no-double-type-assertion": "error", // shell.ts URLSearchParams cast is a documented directive exception
+    "@rikalabs/no-json-parse-default-fallback": "error",
+    "@rikalabs/no-json-stringify-default-fallback": "error",
+    // ---- promise-safety (promise plugin) ----
+    "typescript/no-floating-promises": "error",
+    "promise/no-nesting": "error",
+    "promise/no-new-statics": "error",
+    "promise/param-names": "error",
+    "promise/valid-params": "error",
+    "promise/catch-or-return": "error",
+    "promise/no-return-wrap": "error",
+    // ---- imports-hygiene (import plugin; classic scripts have no imports, so
+    //      these are guards against regressing to imports/require) ----
+    "import/first": "error",
+    "import/no-absolute-path": "error",
+    "import/no-mutable-exports": "error",
+    "import/no-commonjs": "error",
+    "import/no-dynamic-require": "error",
+    "import/max-dependencies": ["error", { "max": 35 }],
+    "import/no-anonymous-default-export": "error",
+    "@rikalabs/no-import-then-reexport": "error",
+    // ---- oxlint-standards v0.8.1 custom plugin (@rikalabs/*): anti-slop heuristics ----
+    "@rikalabs/no-commented-out-code": "error",
+    "@rikalabs/no-identical-branches": "error",
+    "@rikalabs/no-tutorial-comments": "error",
+    "@rikalabs/no-ai-debt-comments": "error",
+    "@rikalabs/no-placeholder-implementation": "error",
+    "@rikalabs/no-disable-without-rationale": "error",
+    "@rikalabs/no-todo-without-issue": "error",
+    "@rikalabs/no-low-signal-variable-names": "error",
+    "@rikalabs/no-low-signal-public-names": "error",
+    "@rikalabs/no-generic-module-names": "error",
+    "@rikalabs/no-vague-verbs": "error",
+    "@rikalabs/no-bare-wrapper-functions": "error",
+    "@rikalabs/no-trivial-property-helpers": "error",
+    "@rikalabs/no-pass-through-intermediate-vars": "error",
+    "@rikalabs/no-redundant-const-assertion": "error",
+    "@rikalabs/no-as-never": "error",
+    "@rikalabs/no-anemic-errors": "error",
+    "@rikalabs/no-standalone-classes": "error",
+    "@rikalabs/no-duplicate-context": "error",
+    "@rikalabs/no-is-record-helpers": "error",
+    "@rikalabs/no-trivial-runtime-guard-helpers": "error",
+    "@rikalabs/no-copy-paste-exports": "error",
+    "@rikalabs/no-debug-residue-filenames": "error",
+    "@rikalabs/no-hardcoded-secrets": "error",
+    "@rikalabs/no-sql-string-concat": "error",
+    // ---- off, with reason ----
+    "no-underscore-dangle": "off" // shell.html hangs _hxStart/_hxStop/_hxOnce poller handles off elements by design
+  }
+}

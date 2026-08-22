@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    // module: none would be the literal "classic script" setting, but oxlint's
+    // type-aware loader (tsgolint, see lint-webui.sh) rejects "none". es2022
+    // with default moduleDetection "auto" still treats these import/export-free
+    // files as scripts: tsc emit is byte-identical (verified).
+    "module": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "strict": true,
+    "noEmitOnError": true,
+    "types": []
+  },
+  "files": ["login.ts", "lockout.ts", "shell.ts"]
+}

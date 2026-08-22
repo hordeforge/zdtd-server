@@ -20,4 +20,26 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(-
 <button type="submit">Sign in</button>
 </form>
 <p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
-<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>const token=document.getElementById('login-token');const toggle=document.getElementById('toggle-secret');toggle.addEventListener('click',()=>{const shown=token.type==='text';token.type=shown?'password':'text';toggle.textContent=shown?'Show':'Hide';toggle.setAttribute('aria-pressed',String(!shown));token.focus();});</script></body></html>
+<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
+/* zdtd-ts:login */
+"use strict";
+//! Webui login form: show/hide the shared secret.
+//! Shared by login.html and login_failed.html (same markup, different error
+//! state). Compiled by scripts/build-webui-ts.sh and injected into both pages.
+const token = document.querySelector('#login-token');
+if (token === null) {
+    throw new Error('webui: missing element #login-token');
+}
+const toggle = document.querySelector('#toggle-secret');
+if (toggle === null) {
+    throw new Error('webui: missing element #toggle-secret');
+}
+toggle.addEventListener('click', () => {
+    const shown = token.type === 'text';
+    token.type = shown ? 'password' : 'text';
+    toggle.textContent = shown ? 'Show' : 'Hide';
+    toggle.setAttribute('aria-pressed', String(!shown));
+    token.focus();
+});
+/* /zdtd-ts:login */
+</script></body></html>

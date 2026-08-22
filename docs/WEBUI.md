@@ -285,6 +285,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 
 ```text
 src/server/webui.zig          # listener, router, auth, snapshot, cmd queue, fragments
+src/server/webui/ts/*.ts      # page JS authored as TypeScript (strict; tsc-pinned)
 src/server/webui/shell.html   # page markup, @embedFile'd (AGENTS rule 12)
 src/server/webui/login.html
 src/server/webui/login_failed.html
@@ -294,6 +295,20 @@ src/server/webui/login_lockout.html
 Markup is `@embedFile`d at comptime and templated by `__ZDTD_*__` placeholder
 substitution; nothing is read from disk at runtime. Vendor JS/CSS under
 `web/static/` stays a WU3 item (see the roadmap above), not a current path.
+
+The page JS is authored as TypeScript in `src/server/webui/ts/` (one source per
+page; `login.ts` is shared by `login.html` and `login_failed.html`).
+`scripts/build-webui-ts.sh` compiles it with tsc (pinned `TSC_VERSION`) and
+splices the emitted classic script into each committed page between
+`/* zdtd-ts:<page> */` markers; `zig build` never runs tsc, so the Zig build
+stays pure and offline. `scripts/lint-webui.sh` (part of `make lint`)
+type-checks with `tsc --noEmit`, lints the `.ts` sources with oxlint
+(`.oxlintrc.jsonc`, anti-slop rule set, `--deny-warnings`), and fails when the
+committed pages are stale (`make webui-ts` regenerates them). The HTML itself
+plus the embedded CSS is checked by vnu, the Nu HTML Checker
+(`scripts/lint-html.sh` with `vnu-filter.txt`, part of `make lint`); the
+`hx-*` poller attributes are the one deliberate deviation from stock HTML and
+are filtered there.
 
 Facades: `server/root.zig` exports webui init. **No** import of webui from
 `wire/` or `ecs/` (only `game.zig` fills snapshot + drains cmds).
@@ -322,6 +337,8 @@ Precedence: CLI > env > defaults.
 | Unit | cmd queue bounds; snapshot copy; HTML escape; auth HMAC |
 | Unit | parse same strings as admin.zig |
 | Integration | start Game with webui port on 127.0.0.1; HTTP GET status; POST give |
+| Lint | Page JS (TypeScript in `src/server/webui/ts/`) is type-checked (tsc) and linted by oxlint (`scripts/lint-webui.sh`, wired into `make lint`) with the anti-slop rule set in `.oxlintrc.jsonc`; a freshness gate fails when the committed pages were not regenerated (`make webui-ts`) |
+| Lint | All repo HTML + embedded CSS is checked by vnu (`scripts/lint-html.sh`, `vnu-filter.txt`, wired into `make lint`); the deliberate `hx-*` poller attributes are filtered there |
 | Manual | browser checklist in docs |
 | Load | webui poll must not move tick_overruns under loadgen |
 

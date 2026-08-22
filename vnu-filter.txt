@@ -1,0 +1,8 @@
+# vnu (Nu HTML Checker) message filters, one regex per line (full-match
+# semantics). Used by scripts/lint-html.sh. Deliberate non-standard constructs
+# get a documented filter here; everything else is an error and fails the gate.
+#
+# The webui shell implements a minimal htmx-style poller with hx-* attributes
+# read by its inline JS (src/server/webui/shell.html); stock HTML has no such
+# attributes.
+.*Attribute .hx-(get|trigger|swap). not allowed on element.*
