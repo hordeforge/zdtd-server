@@ -3,7 +3,7 @@
 Consumer-visible changes are recorded here. The project follows the release
 and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
-## [Unreleased]
+## [0.1.0] - 2026-08-22
 
 ### Breaking changes
 
@@ -339,5 +339,4 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   unmetered bandwidth-amplification path where one client packet fanned out
   to every nearby or connected peer.
 
-No zdtd version has been tagged or published yet. These entries describe the
-upcoming 0.1.0 development release.
+## [Unreleased]
