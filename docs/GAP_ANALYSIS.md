@@ -145,7 +145,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
+| [Quests](#4-quests) | 32 | 0 | 0 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 20 | 0 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 17 | 5 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **254** | **41** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **255** | **40** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -530,15 +530,15 @@ not a sleeper-volume clear), not completion blockers.
   questSpawnGsEnemy, `asm.il:1390421-1390429`,
   il QuestActionSpawnGSEnemy
 
-- **Objective `value` / `count` / `item_count` to required count** `PARTIAL`
-  (1) `ParseObjective` reads only id, value, optional and phase; zdtd honours a
-  `count=` attribute stock ignores. (2) 2026-08-19: for the Goto family stock
-  parses `Value` as a float **distance in metres** into `ObjectiveGoto::distance`,
-  and zdtd now carries that as `PhaseSpec.radius` (required stays 1; the goto
-  check uses the radius), instead of turning `value="5"` into a `required=5`
-  count that was masked by `bumpPhase(n=required)`.
-  *Anchors:* `src/assets/quests.zig:123`, `src/ecs/quest.zig` PhaseSpec,
-  `src/ecs/systems.zig:516`, `asm.il:1391090-1391107`, `asm.il:966955-966966`
+- **Objective `value` / `count` / `item_count` to required count** `WORKS`
+  `objectiveTarget` reads `value`, `count=` and the stock `item_count`
+  spelling (first present wins, fail-closed 1), and the Goto family carries
+  `Value` as a float distance in metres into `PhaseSpec.radius` (required
+  stays 1; the goto check uses the radius) instead of turning a distance into
+  a count masked by `bumpPhase(n=required)`.
+  *Anchors:* `src/assets/quests.zig:137-145` (`objectiveTarget`),
+  `src/ecs/quest.zig` PhaseSpec, `asm.il:1391090-1391107`,
+  `asm.il:966955-966966`
 
 - **Phase graph construction** `WORKS` `(2026-08-21)`
   `buildPhaseGraph` mirrors `QuestClass.HighestPhase` and emits a flat
