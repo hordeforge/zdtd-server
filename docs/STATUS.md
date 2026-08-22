@@ -160,6 +160,12 @@ collision + gravity rewrite. Test proves the wall detour. Entities 21/23/4
 ((day-1)*24000 + hours*1000) with the day-1-as-zero pinning test; no
 day-off-by-one remains in the clock path. World 24/18/6 -> **25/17/6**;
 total **206/89/38**.
+Then the loot probability row's headline gap closed: rollGroup picks are
+prob-weighted like stock (stage-resolved prob as the relative weight;
+zero-prob never picked; tested at ~90/10), on top of the existing
+lootstage templates + gamestage-derived stage + force_prob gates. The row
+stays PARTIAL for <requirement> filtering (85 stock uses) and per-entry
+abundance_type (68).
 The dashboard
 (docs/provenance.html) is synced.
 

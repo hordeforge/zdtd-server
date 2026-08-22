@@ -2475,11 +2475,18 @@ unvalidated, and durability, mods and repair do not exist.
   `Data/Config/loot.xml:9656`
 
 - **Loot roll probability model** `PARTIAL`
-  `rollContainer` applies a milli-prob gate only to container-level entries at
-  index > 0. `rollGroup` picks a uniform random index with no prob weighting at
-  all, so within a group every item is equally likely. No lootstage, no gamestage,
-  no biome/quest requirement filtering, no per-entry abundance_type.
-  *Anchors:* `src/assets/loot.zig:92-125`, `:127-154`
+  2026-08-21: `rollGroup` picks are now **prob-weighted** like stock
+  (LootContainer probability): each entry's stage-resolved prob is its weight
+  relative to the group sum, so a 0.9 item drops ~9x as often as a 0.1 one and
+  a 0-prob item never drops (test `container group rolls are prob-weighted,
+  not uniform`); `lootstage` templates (42 lootprobtemplate in stock) resolve
+  per stage through `entryProb`, the loot stage itself derives from the party
+  gamestage, and force_prob entries gate independently. Remaining:
+  `rollContainer` still includes a plain index-0 entry without a gate,
+  `<requirement>` filtering (85 stock uses) and per-entry `abundance_type`
+  (68 stock uses) are unparsed.
+  *Anchors:* `src/assets/loot.zig` rollGroup + groupEntryWeight,
+  test `container group rolls are prob-weighted, not uniform`
 
 - **LootAbundance server setting** `WORKS`
   Clamped 1..1000, scales every rolled stack count with a floor of 1; unit test

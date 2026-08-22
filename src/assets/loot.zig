@@ -351,27 +351,56 @@ pub const LootTable = struct {
         var p: u8 = 0;
         while (p < picks and n < out.len) : (p += 1) {
             s = s *% 1103515245 +% 12345;
-            const idx: usize = s % g.entry_n;
-            const e = g.entries[idx];
+            // Prob-weighted pick (stock LootContainer probability): each
+            // entry's stage-resolved prob is its weight relative to the group
+            // sum, so a 0.9 item drops ~9x as often as a 0.1 one. A zero-prob
+            // plain entry gets weight 0 (never picked); force_prob entries
+            // keep weight 1 and gate independently (their prob is a per-pick
+            // chance, not a relative weight, stock force_prob semantics).
+            var total: u32 = 0;
+            var e: u8 = 0;
+            while (e < g.entry_n) : (e += 1) {
+                total +|= self.groupEntryWeight(g.entries[e], loot_stage);
+            }
+            if (total == 0) break;
+            const roll = s % total;
+            var chosen: u8 = 0;
+            var acc: u32 = 0;
+            while (chosen < g.entry_n) : (chosen += 1) {
+                acc +|= self.groupEntryWeight(g.entries[chosen], loot_stage);
+                if (roll < acc) break;
+            }
+            if (chosen >= g.entry_n) chosen = g.entry_n - 1;
+            const picked_e = g.entries[chosen];
             // A picked entry still has to clear its loot stage band, so a
             // low-stage player cannot pull a top-tier item out of a group.
             // A force_prob entry rolls its prob independently.
-            if (e.force_prob) {
-                if (!self.probGate(e, loot_stage, s)) continue;
-            } else if (e.prob_template != 0 and !self.probGate(e, loot_stage, s)) continue;
-            if (e.is_group) {
-                n += self.rollGroup(e.name, loot_stage, s, out[n..], depth + 1, qt);
+            if (picked_e.force_prob) {
+                if (!self.probGate(picked_e, loot_stage, s)) continue;
+            } else if (picked_e.prob_template != 0 and !self.probGate(picked_e, loot_stage, s)) continue;
+            if (picked_e.is_group) {
+                n += self.rollGroup(picked_e.name, loot_stage, s, out[n..], depth + 1, qt);
             } else {
-                const cmin = e.count_min;
-                const cmax = if (e.count_max >= cmin) e.count_max else cmin;
+                const cmin = picked_e.count_min;
+                const cmax = if (picked_e.count_max >= cmin) picked_e.count_max else cmin;
                 // Same span widening as rollContainer (count="0,65535").
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                out[n] = .{ .item_name = e.name, .count = self.scaleCount(cnt), .quality = self.resolveQuality(qt, loot_stage, s) };
+                out[n] = .{ .item_name = picked_e.name, .count = self.scaleCount(cnt), .quality = self.resolveQuality(qt, loot_stage, s) };
                 n += 1;
             }
         }
         return n;
+    }
+
+    /// Prob weight of one group entry for a weighted pick: force_prob entries
+    /// weigh 1 (their prob is a per-pick gate), plain/template entries weigh
+    /// their stage-resolved prob (prob <= 0 = weight 0, unpickable).
+    fn groupEntryWeight(self: *const LootTable, e: LootEntry, loot_stage: i32) u32 {
+        if (e.force_prob) return 1;
+        const ep = self.entryProb(e, loot_stage);
+        if (!(ep > 0)) return 0;
+        return @intFromFloat(@min(ep, 10.0) * 1000.0);
     }
 };
 
@@ -1004,4 +1033,46 @@ test "reward group rolls fixed first picks or prob-weighted choices" {
     }
     // Unknown group returns nothing (fail closed).
     try std.testing.expectEqual(@as(usize, 0), lt.rollGroupPicks("noSuchGroup", 1, 1, 1, false, &stacks));
+}
+
+test "container group rolls are prob-weighted, not uniform" {
+    // Stock LootContainer probability: an entry's prob weights it relative
+    // to the group sum, so a 0.9 item drops ~9x as often as a 0.1 one and a
+    // 0-prob item never drops. The old rollGroup picked a uniform index.
+    const xml_text =
+        \\<loot>
+        \\  <lootgroup name="gWeighted">
+        \\    <item name="commonItem" count="1" prob="0.9"/>
+        \\    <item name="rareItem" count="1" prob="0.1"/>
+        \\    <item name="neverItem" count="1" prob="0"/>
+        \\  </lootgroup>
+        \\  <lootcontainer name="cWeighted" count="1" loot_quality_template="qualityNoTier">
+        \\    <item group="gWeighted"/>
+        \\  </lootcontainer>
+        \\</loot>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, xml_text);
+    defer lt.deinit();
+    var stacks: [8]Stack = undefined;
+    var common: usize = 0;
+    var rare: usize = 0;
+    var never: usize = 0;
+    var s: u32 = 1;
+    var i: usize = 0;
+    while (i < 4000) : (i += 1) {
+        s = s *% 1103515245 +% 12345;
+        const n = lt.rollContainer("cWeighted", 1, s, &stacks);
+        try std.testing.expectEqual(@as(usize, 1), n);
+        if (std.mem.eql(u8, stacks[0].item_name, "commonItem")) {
+            common += 1;
+        } else if (std.mem.eql(u8, stacks[0].item_name, "rareItem")) {
+            rare += 1;
+        } else {
+            never += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), never);
+    // ~90/10 split with a wide tolerance band (no flaky seed edge).
+    try std.testing.expect(common > rare * 4);
+    try std.testing.expect(common + rare == 4000);
 }

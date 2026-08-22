@@ -16,6 +16,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Loot container group rolls are prob-weighted like stock: an entry's
+  stage-resolved prob is its weight relative to the group sum (a 0.9 item
+  drops ~9x as often as a 0.1 one, zero-prob entries never drop), replacing
+  the uniform pick that made every item in a group equally likely.
 - Wandering zombies now path on the A* navmesh like the chase: `wanderUpdate`
   routes the same replan + waypoint machinery as `chaseAlongPath`, so a
   wanderer detours around obstacles instead of sliding straight into them
