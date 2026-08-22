@@ -1189,6 +1189,24 @@ neighbor pass, and the wire carries the bitfield while the rest of the
 payload stays byte-identical. Row 3359 updated; client render not yet
 verified live (the playtest ground case gates it); counts unchanged.
 
+## Batch N 2026-08-23 (surface density re-audit: binary is stock)
+
+Dumped `TerrainGeneratorWithBiomeResource.fillDensityInBlock` (IL=16) from
+the stock DLL: surface density is binary `IsTerrain() ? DensityTerrain :
+DensityAir`, and `GenerateTerrain` stamps the surface cell with it and the
+cell above with DensityAir. The wire heightmaps are byte[256] and the
+density channel is binary, so the 1/256 DTM height fraction is not
+wire-representable and no stock server encodes it; the client's smooth
+rolling surface comes from the meshers interpolating the byte heightmap
+across columns (`MeshGenerator.CreateMesh` 5-column heights array IL=1083;
+`MeshGeneratorMC2.build` terrainHeightsCache + topSoilCache IL=1662).
+zdtd's binary density + byte heightmaps are therefore stock-faithful, and
+the DTM sub-block row's "voxel stairs from binary density" premise was
+stale - the row is re-corrected (stays PARTIAL only for the live-client
+rendering check). Research corpus gained the dump + the narrative
+(chunk-providers.md, world-chunks.md §5.2 was added with the wire layout
+this turn's earlier slice); counts unchanged.
+
 ## Wave 2026-08-20 (config + provenance pass)
 
 Hardcode audit closure (docs/archive/HARDCODE_AUDIT_2026-08-08.md): the

@@ -3298,12 +3298,26 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/world/dtm.zig:12-49`, `Data/Worlds/Navezgane/dtm.raw`,
   `map_info.xml`
 
-- **DTM sub-block precision** `PARTIAL`
-  `heightAtWorld` does `samples[idx] >> 8`, discarding the 1/256-block fractional
-  height, and the chunk density channel then emits only binary extremes (terrain
-  -128, air 127). Hard voxel stairs on every slope where stock renders a smooth
-  marching-cubes surface. Only TTS-painted POI cells carry real density.
-  *Anchors:* `src/world/dtm.zig:33`, `src/wire/stock_chunk.zig:28-33`, `:430-435`
+- **DTM sub-block precision** `PARTIAL → RE-CORRECTED (2026-08-23)`
+  The row's premise was stale: stock's surface density is **binary** too -
+  `fillDensityInBlock` (IL=16, dumped 2026-08-23) sets `IsTerrain() ?
+  DensityTerrain : DensityAir` and `GenerateTerrain` stamps the surface cell
+  with it. The wire heightmaps are byte[256] and the density channel is
+  binary, so the 1/256 DTM height fraction is not wire-representable and no
+  stock server encodes it. The client's smooth rolling surface comes from
+  the meshers interpolating the byte heightmap across columns
+  (`MeshGenerator.CreateMesh` 5-column heights array, IL=1083;
+  `MeshGeneratorMC2.build` terrainHeightsCache + topSoilCache, IL=1662;
+  research: chunk-providers.md "Surface density is binary"). zdtd emits the
+  same binary density + byte heightmaps, so the wire is stock-faithful;
+  `heightAtWorld` keeping the fraction would have no wire consumer.
+  Remaining: live-client confirmation that the cross-column smoothing reads
+  zdtd's heightmap identically to stock's (playtest ground case); the
+  sub-block fraction stays used only where stock uses it (none on the
+  server surface).
+  *Anchors:* `src/world/dtm.zig:33`, `src/wire/stock_chunk.zig:28-33`,
+  `:430-435`, `7dtd-research docs/chunk-providers.md` + `il/terrain-v3.1.0/
+  TerrainGeneratorWithBiomeResource_fillDensityInBlock_*_il.txt`
 
 - **Biome-driven terrain columns** `WORKS`
   `getOrCreate` fills the column from the dominant biome's layer stack before POI
