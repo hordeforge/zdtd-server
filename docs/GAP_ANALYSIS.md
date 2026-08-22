@@ -153,8 +153,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
-| [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **210** | **85** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 53 | 3 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S coverage complete (the remaining names are mod/EAC/editor/Twitch/drone scope); invisible to browsers, thin persistence; the ops verb set is complete |
+| **Total** | **211** | **84** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3385,7 +3385,7 @@ persists so little that a restart visibly damages a built base.
   a typo.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
-- **C2S handler coverage** `PARTIAL` `(2026-08-21 recount)`
+- **C2S handler coverage** `WORKS` `(2026-08-22 re-audit)`
   86 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
   SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
   EntityStatChanged, Waypoint, GameMessage, SoundAtPosition,
@@ -3423,15 +3423,22 @@ persists so little that a restart visibly damages a built base.
   TwitchAccess, TwitchVoteScheduling, PlayerLaserSight), headless mesh
   (DynamicMesh), deferred cosmetic/depth (DroneDataSync,
   DroneParticleEffect junk-drone state).
-  Player-visible: vending machines are inert, ragdolls are not
-  relayed. (Goto/treasure quest markers register through the server's
-  objective wire; the client's reach/dig reports are redundant with the
-  server's proximity completion and QuestObjectiveUpdate events. Local map
-  waypoints stay
-  client-local as in stock; only the party waypoint invite traverses the
-  server, and it now relays.)
+  Re-audited 2026-08-22: ragdolls **do** relay - the owner's client forces
+  its local ragdoll and the server re-broadcasts the verbatim body to the
+  entity's other tracked players (stock SendPacketToTrackedPlayersAndTracked
+  Entity; `src/server/c2s/misc.zig` NetPackageEntityRagdoll), and the 16
+  no-handler names above are all non-stock-play scope (mod API, EAC waiver,
+  creative editor, Twitch, headless mesh, drone cosmetic state), so nothing
+  a stock client sends in normal play is dropped unhandled. (Goto/treasure
+  quest markers register through the server's objective wire; the client's
+  reach/dig reports are redundant with the server's proximity completion and
+  QuestObjectiveUpdate events. Local map waypoints stay client-local as in
+  stock; only the party waypoint invite traverses the server, and it now
+  relays. The vending C2S buy residual is tracked by the Vending machines
+  row.)
   *Anchors:* `src/server/game.zig:3771-5480`, `src/server/c2s/quest.zig`
-  (NetPackageWaypoint), `asm.il:791490-791510`,
+  (NetPackageWaypoint), `src/server/c2s/misc.zig:205` (EntityRagdoll relay),
+  `asm.il:791490-791510`,
   `asm.il:793038-793060`
 
 - **Wrench pickup (NetPackagePickupBlock handling)** `WORKS` `(2026-08-21)`
