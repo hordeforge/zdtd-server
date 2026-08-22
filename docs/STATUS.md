@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 232 `WORKS`,
-63 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 233 `WORKS`,
+62 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -344,6 +344,13 @@ the materials.xml damage_category chain (stock cop: earth -> 0, terrain
 survives the blast); falloff + MaxDamage break already ran through the
 addBlockDamage choke point. World 30/12/6 -> **31/11/6**; total
 **232/63/38**.
+Then the prefab-authored-block-damage row went WORKS: the TTS damage plane
+(u16 absolute HP per cell, v>8) is no longer decoded-and-dropped - the paint
+path passes it through set_block into the chunk damage plane (both the world
+materialization PaintCtx and the POI reset), so POIs stock ships pre-damaged
+arrive with their ruined look and weak spots; the wire damage channel reads
+the plane and ZCH3 persists it. POIs 16/14/0 -> **17/13/0**; total
+**233/62/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

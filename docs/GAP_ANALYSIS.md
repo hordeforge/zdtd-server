@@ -148,13 +148,13 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
 | [Traders](#5-traders) | 18 | 2 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; POI placement open |
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
-| [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
+| [POIs and prefabs](#7-pois-and-prefabs) | 17 | 13 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate; authored block damage lands in the chunk plane |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **232** | **63** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **233** | **62** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1651,11 +1651,17 @@ can walk into every POI but none of them is the building TFP authored.
   `src/world/deco_mirror.zig` (`childRaw`), `asm.il:918950-919033`,
   `asm.il:921630`
 
-- **Prefab authored block damage plane** `PARTIAL`
-  Decoded into `TtsBlocks.damage` but nothing consumes it; the chunk encoder
-  writes the damage channel as all-zero. POIs that should arrive pre-damaged
-  arrive pristine, losing both the ruined look and the intended weak spots.
-  *Anchors:* `src/world/tts.zig:136`, `:358`, `src/wire/stock_chunk.zig:383`
+- **Prefab authored block damage plane** `WORKS`
+  The TTS damage plane (u16 absolute HP per cell, v>8) now lands in the chunk
+  damage plane at paint time (`paintDecoration` passes it through `set_block`;
+  both the world-materialization and the POI-reset paths write it via
+  `Chunk.setDmg`), so POIs stock ships pre-damaged arrive with their ruined
+  look and intended weak spots: the wire damage channel reads the plane
+  (GAP "Player block damage") and ZCH3 persists it. POI reset restores the
+  authored damage and clears wear on pristine cells.
+  *Anchors:* `src/world/tts.zig` (`paintDecoration` dmg pass-through),
+  `src/world/store.zig:756-775` (`PaintCtx.put`),
+  `src/server/game.zig:1634-1651` (`resetPoiBlocks`)
 
 - **Prefab water plane** `WORKS` (2026-08-07)
   The v>=17 sparse water channel is decoded into a dense per-cell `u16` mass

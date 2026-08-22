@@ -753,7 +753,7 @@ pub const World = struct {
                         base_x: i32,
                         base_z: i32,
                         failed: u32 = 0,
-                        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+                        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
                             const pc: *@This() = @ptrCast(@alignCast(ctx.?));
                             const lx = wx - pc.base_x;
                             const lz = wz - pc.base_z;
@@ -762,6 +762,15 @@ pub const World = struct {
                             pc.c.setBlockTexDens(pc.a, lx, wy, lz, raw, tex, dens) catch {
                                 pc.failed +%= 1;
                             };
+                            // Authored pre-damage (GAP "Prefab authored block
+                            // damage plane"): the TTS damage value lands in the
+                            // chunk damage plane, so the wire damage channel and
+                            // ZCH3 persist carry the ruined/weak-spot cells.
+                            if (dmg != 0) {
+                                pc.c.setDmg(pc.a, lx, wy, lz, dmg) catch {
+                                    pc.failed +%= 1;
+                                };
+                            }
                         }
                     };
                     var pc: PaintCtx = .{

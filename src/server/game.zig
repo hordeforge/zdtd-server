@@ -1630,10 +1630,16 @@ pub const Game = struct {
         const tb = pf.getTtsBlocks(d.name) orelse return;
         const Ctx = struct {
             g: *Game,
-            fn put(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32, raw: u32, tex: u64, dens: ?u8) void {
+            fn put(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
                 const g: *Game = @ptrCast(@alignCast(ctx.?));
                 g.world.setBlockTexDensWorld(bx, by, bz, raw, tex, dens) catch return;
-                g.clearBlockHp(bx, by, bz);
+                // POI reset restores the authored state: pre-damaged cells get
+                // their TTS damage back, pristine cells clear any wear.
+                if (dmg > 0) {
+                    g.setBlockHp(bx, by, bz, dmg) catch return;
+                } else {
+                    g.clearBlockHp(bx, by, bz);
+                }
                 if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
                     // Best-effort visual broadcast: the world store is already
                     // authoritative; a dropped SetBlock only delays the paint.

@@ -380,7 +380,7 @@ pub fn rotateRawY(raw: u32, steps: u8) u32 {
 }
 
 /// dens: TTS density sbyte as u8 when plane present; null when unknown.
-pub const SetBlockFn = *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void;
+pub const SetBlockFn = *const fn (ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void;
 
 /// Stamp non-air TTS cells into the world at decoration origin.
 /// `origin_y` is ground (y_is_ground) or prefab base Y.
@@ -416,7 +416,7 @@ pub fn paintDecoration(
         // so the chunk wire's water-mass channel derives the cell (stock pools,
         // flooded basements, water towers) at full static mass.
         if (water_id != 0 and tts.water.len > @as(usize, @intCast(i)) and tts.water[@intCast(i)] > 0) {
-            set_block(ctx, wx, wy, wz, water_id, 0, null);
+            set_block(ctx, wx, wy, wz, water_id, 0, null, 0);
             continue;
         }
         const raw = tts.types[@intCast(i)];
@@ -425,11 +425,15 @@ pub fn paintDecoration(
         if (typ == filler_id or typ == filler_adaptive_id) continue;
         const tex: u64 = if (tts.textures.len > @as(usize, @intCast(i))) tts.textures[@intCast(i)] else 0;
         const dens: ?u8 = if (tts.density.len > @as(usize, @intCast(i))) tts.density[@intCast(i)] else null;
+        // Authored block damage (u16 absolute HP, v>8 plane): POIs that stock
+        // ships pre-damaged arrive with their cracks and weak spots. 0 when
+        // the plane is absent.
+        const dmg: u16 = if (tts.damage.len > @as(usize, @intCast(i))) tts.damage[@intCast(i)] else 0;
         // Stock rotates a block by CalcRotation(rot, 4 - r): BlockShapeNew::RotateY
         // replaces _rotCount with 4 - _rotCount on the left-turn path
         // (asm.il ~181926). Using r directly leaves the building internally
         // coherent but 180 degrees off stock at r=1 and r=3.
-        set_block(ctx, wx, wy, wz, rotateRawY(raw, 4 -% (rot & 3)), tex, dens);
+        set_block(ctx, wx, wy, wz, rotateRawY(raw, 4 -% (rot & 3)), tex, dens, dmg);
     }
 }
 
@@ -600,10 +604,12 @@ test "prefab water channel decodes and paints water blocks" {
     const Paint = struct {
         water: ?struct { wx: i32, wy: i32, wz: i32 } = null,
         blocks: usize = 0,
-        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+        dmg_seen: u16 = 0,
+        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
             _ = tex;
             _ = dens;
             const p: *@This() = @ptrCast(@alignCast(ctx.?));
+            p.dmg_seen = dmg;
             if (raw == 0) return;
             p.blocks += 1;
             if (raw == 240) p.water = .{ .wx = wx, .wy = wy, .wz = wz };
@@ -621,4 +627,53 @@ test "prefab water channel decodes and paints water blocks" {
     var p0: Paint = .{};
     paintDecoration(&t, 100, 60, 100, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, Paint.put, &p0);
     try std.testing.expectEqual(@as(usize, 0), p0.blocks);
+}
+
+test "paintDecoration carries authored damage to the set callback" {
+    // GAP "Prefab authored block damage plane": the TTS damage plane (u16
+    // absolute HP per cell) must reach the set callback so POIs arrive with
+    // their ruined/weak-spot cells. Air cells never reach the callback.
+    const allocator = std.testing.allocator;
+    const count: usize = 4; // 2 x 1 x 2
+    const types = try allocator.alloc(u32, count);
+    const damages = try allocator.alloc(u16, count);
+    types[0] = 0x1001; // type 1, rotation 1
+    damages[0] = 250;
+    types[1] = 0x1002;
+    damages[1] = 0;
+    types[2] = 0; // air
+    damages[2] = 99; // skipped: raw == 0
+    types[3] = 0x1003;
+    damages[3] = 7;
+    var t: TtsBlocks = .{
+        .sx = 2,
+        .sy = 1,
+        .sz = 2,
+        .types = types,
+        .damage = damages,
+        .allocator = allocator,
+    };
+    defer t.deinit();
+
+    const Capture = struct {
+        hits: [4]struct { wx: i32, wy: i32, wz: i32, dmg: u16 } = undefined,
+        n: usize = 0,
+        fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, _: u32, _: u64, _: ?u8, dmg: u16) void {
+            const c: *@This() = @ptrCast(@alignCast(ctx.?));
+            c.hits[c.n] = .{ .wx = wx, .wy = wy, .wz = wz, .dmg = dmg };
+            c.n += 1;
+        }
+    };
+    var cap = Capture{};
+    paintDecoration(&t, 10, 50, 20, 0, 0, 0, 0, Capture.put, &cap);
+    try std.testing.expectEqual(@as(usize, 3), cap.n); // air cell skipped
+    try std.testing.expectEqual(@as(i32, 10), cap.hits[0].wx);
+    try std.testing.expectEqual(@as(i32, 50), cap.hits[0].wy);
+    try std.testing.expectEqual(@as(i32, 20), cap.hits[0].wz);
+    try std.testing.expectEqual(@as(u16, 250), cap.hits[0].dmg);
+    try std.testing.expectEqual(@as(u16, 0), cap.hits[1].dmg);
+    try std.testing.expectEqual(@as(u16, 7), cap.hits[2].dmg);
+    try std.testing.expectEqual(@as(i32, 11), cap.hits[2].wx); // cell 3 at (1,0,1)
+    try std.testing.expectEqual(@as(i32, 50), cap.hits[2].wy);
+    try std.testing.expectEqual(@as(i32, 21), cap.hits[2].wz);
 }

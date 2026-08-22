@@ -731,12 +731,13 @@ const stock_prefab_root = "/home/maci/.local/share/Steam/steamapps/common/7 Days
 /// Test-only paint callback counting non-zero blocks written to a chunk.
 const TestPaintCount = struct {
     n: usize = 0,
-    fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
+    fn put(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
         _ = wx;
         _ = wy;
         _ = wz;
         _ = tex;
         _ = dens;
+        _ = dmg;
         if (raw == 0) return;
         const c: *@This() = @ptrCast(@alignCast(ctx.?));
         c.n += 1;
@@ -872,8 +873,8 @@ test "stock cave_07 stamps its body below the declared ground" {
 
     const Rec = struct {
         min_wy: i32 = std.math.maxInt(i32),
-        fn onBlock(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8) void {
-            _ = .{ wx, wz, raw, tex, dens };
+        fn onBlock(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
+            _ = .{ wx, wz, raw, tex, dens, dmg };
             const r: *@This() = @ptrCast(@alignCast(ctx.?));
             if (wy < r.min_wy) r.min_wy = wy;
         }
