@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 22 | 22 | 4 | 48 | Real fights with real stakes and real A*; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 15 | 12 | 6 | 33 | Containers roll their own tables; items stack like stock; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 24 | 18 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
+| [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 52 | 4 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; invisible to browsers, thin persistence; the ops verb set is complete (getoptions/exportcurrentconfigs/loglevel/listthreads/cp) |
-| **Total** | **205** | **90** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **206** | **89** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2895,7 +2895,7 @@ expire, repair heals and supports collapse, but the world is visually bald (3
 deco objects per join), terrain is stepped rather than smooth, and block-rotation
 persistence and the HUD day counter each have specific, noticeable gaps.
 
-**24 WORKS · 18 PARTIAL · 6 MISSING**
+**25 WORKS · 17 PARTIAL · 6 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
@@ -3120,13 +3120,17 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/ecs/aidirector.zig:6-68`, `src/server/game.zig:8101-8103`,
   `:6204-6205`
 
-- **World time day number** `PARTIAL`
-  `worldTimeBits` returns `day*24000 + hours*1000` with day starting at 1, but
-  stock encodes `(day-1)*24000` and decodes `worldTime/24000 + 1`. The client HUD
-  shows one day more than the server believes: server day 1 08:00 renders as
-  "Day 2 08:00", and the day-7 blood moon lands on the client's displayed day 8.
-  *Anchors:* `src/ecs/aidirector.zig:63-67`, `asm.il:1926175-1926208`,
-  `asm.il:1925943-1925956`
+- **World time day number** `WORKS` `(2026-08-21 re-audit)`
+  `worldTimeBits` is the stock `DayTimeToWorldTime` exactly:
+  `(day-1)*24000 + hours*1000`, with `WorldTimeToDays(wt) = wt/24000 + 1`
+  (day 1 spans [0, 24000); a day-0 test clock encodes as 0 without
+  underflow). The client HUD and the day-7 blood moon both decode the same
+  wire day; the pinning test asserts day 1 08:00 = 8000 and day 7 12:00 =
+  6*24000 + 12000 round-trips to day 7. No residual day-off-by-one encoding
+  remains anywhere in the clock path.
+  *Anchors:* `src/ecs/aidirector.zig` `worldTimeBits` +
+  test `worldTimeBits encodes stock day 1 as zero offset`,
+  `asm.il:1926175-1926208`, `asm.il:1925943-1925956`
 
 - **World clock persistence across restart** `WORKS`
   `clock.zcl` (magic ZCL1, stock-shaped `worldTime` u64) is saved on the periodic

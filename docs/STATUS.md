@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 205 `WORKS`,
-90 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 206 `WORKS`,
+89 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -155,7 +155,11 @@ machinery (replan + waypoints, step_fn-gated), so a wanderer detours around
 obstacles instead of sliding into them (stock EAIWander paths on the
 navmesh); the row's frozen-Y/wall-clipping defects were already fixed by the
 collision + gravity rewrite. Test proves the wall detour. Entities 21/23/4
--> **22/22/4**; total **205/90/38**.
+-> **22/22/4**; total **205/90/38**. Then the world-time day row went WORKS
+(re-audit): worldTimeBits is the stock DayTimeToWorldTime
+((day-1)*24000 + hours*1000) with the day-1-as-zero pinning test; no
+day-off-by-one remains in the clock path. World 24/18/6 -> **25/17/6**;
+total **206/89/38**.
 The dashboard
 (docs/provenance.html) is synced.
 
