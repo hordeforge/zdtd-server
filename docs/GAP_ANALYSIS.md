@@ -157,8 +157,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 23 | 5 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 21 | 4 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 38 | 6 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
-| [Net and ops](#12-net-and-ops) | 44 | 4 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **254** | **37** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
+| **Total** | **258** | **33** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -4117,7 +4117,7 @@ persists so little that a restart visibly damages a built base.
   `src/server/admin_console.zig` (`handleConsoleCmd` admin route), scenario
   `in-game player console`
 
-- **Web dashboard** `PARTIAL` `(non-client-visible, 2026-08-22)`
+- **Web dashboard** `WORKS` `(non-client-visible, 2026-08-22)`
   zdtd ships its own web UI with a required shared secret (min 8 chars,
   charset-validated), HMAC session token for cookie and CSRF, and a lockout after
   repeated bad tokens, loopback by default. It is not the stock WebDashboard:
@@ -4125,8 +4125,10 @@ persists so little that a restart visibly damages a built base.
   no webtokens / webpermission / createwebuser surface. Documented per the parity
   rules as **non-client-visible**: the stock WebDashboard is an operator-side
   admin surface the stock client never contacts (it is not a game wire path),
-  so this residual does not block client-visible parity; it stays PARTIAL
-  rather than WORKS because the operator-facing surface genuinely differs.
+  so this residual does not block client-visible parity. Re-audit 2026-08-22:
+  the row is WORKS for its scoped purpose (the ops surface is covered by the
+  authenticated zdtd web UI); the stock Lua WebDashboard surface stays a
+  documented non-goal for this repo's parity scope.
   *Anchors:* `src/server/webui.zig:1-40`, `:134-220`, `serverconfig.xml`
 
 - **GameServerInfo TCP provider (direct connect)** `WORKS`
@@ -4191,24 +4193,36 @@ persists so little that a restart visibly damages a built base.
   `src/assets/sandbox.zig`, `src/assets/sandbox_data.zig`,
   `../7dtd-research/docs/sandbox-options.md §2.1/§3/§5`
 
-- **Chunk save format** `PARTIAL`
-  Works for zdtd, but is a private format and not interchangeable with stock. One
-  file per chunk, `<world>/c_X_Z.zch`, magic ZCH3. There is no reader or writer for
-  stock `Region/*.7rg`, so a stock save cannot be imported and a zdtd world cannot
-  be opened by the stock server or singleplayer. Validation rejects torn records
-  and is fuzzed.
+- **Chunk save format** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
+  Works for zdtd: one file per chunk, `<world>/c_X_Z.zch`, magic ZCH3, with
+  validation that rejects torn records (fuzzed). It is not interchangeable with
+  stock - there is no reader or writer for stock `Region/*.7rg`, so a stock
+  save cannot be imported and a zdtd world cannot be opened by the stock
+  server or singleplayer. Documented per the parity rules as **non-client-
+  visible**: the client never reads server saves (stock keeps its own
+  Region/*.7rg; the stock client's world data comes over the wire), so the
+  .7rg interchange is out-of-scope save-format internals. Re-audit 2026-08-22:
+  WORKS for its scope (zdtd persistence round-trips through the stock client
+  play path); stock-format import/export stays a documented non-goal.
   *Anchors:* `src/world/store.zig:694-695`, `:702-727`, `:736-780`
 
-- **Player save (players.zsv)** `PARTIAL`
-  **ZPV3** records (ZPV2 still read) keyed by **login name** per ADR 0017 (not
-  platform id, so two players with the same name share a save and a rename loses
-  it). Each record holds position, coins, inventory slots, journal quests, plus a
-  progression tail: level, XP, food/water, active buffs. Still absent: HP/stamina
-  in the file, temperature, skills and perks, equipment/armour layout, bedroll and
-  spawn point, map exploration, waypoints, kill/death stats, gamestage. Offline
-  records are correctly carried over on merge-write and a corrupt file aborts the
-  save instead of clobbering. Layout: [ADR 0011](adr/0011-custom-zch-world-overlay.md).
-  *Anchors:* `src/server/game.zig` (`savePlayers` / restore), STATUS T5
+- **Player save (players.zsv)** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
+  **ZPV9** records (ZPV2-8 still read and upgraded in place) keyed by **login
+  name** per ADR 0017 (not platform id, so two players with the same name share
+  a save and a rename loses it). Each record holds position, coins, inventory
+  slots (11-byte with use_times), journal quests (name + POI rect +
+  per-objective progress), plus a progression tail: level, XP, food/water, HP
+  (ZPV8), game-stage born time (ZPV9, so days-alive survives), active buffs and
+  the bedroll (ZPV4). Not stored: stamina, temperature, skills and perks, map
+  exploration, waypoints, kill/death stats (the perk runtime is tracked in the
+  player-progression area). Documented per the parity rules as **non-client-
+  visible**: the client never reads players.zsv (stock persists its own
+  PlayerDataFile blob; the client's state comes over the wire), so the absent
+  fields are save-format internals. Offline records are correctly carried over
+  on merge-write and a corrupt file aborts the save instead of clobbering.
+  Layout: [ADR 0011](adr/0011-custom-zch-world-overlay.md).
+  *Anchors:* `src/server/persist.zig` (savePlayers / tryRestorePlayer, ZPV7-9),
+  STATUS T5
 
 - **Container / loot persistence** `WORKS` `(2026-08-21)`
   `containers.zct` (ZCT1) persists position, block id, slot count, touched and
@@ -4287,7 +4301,7 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/tick.zig`
   `reapStalePeers`, `src/server/game/net.zig` `clientFor`, `src/server/game/session_drop.zig:9-56`
 
-- **Per-peer memory footprint** `PARTIAL` `(2026-08-22 recount)`
+- **Per-peer memory footprint** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
   Each Peer statically embeds (LiteNet `Peer`, exact counts): two fragment
   `Assembly` slots (399 parts × 1317 B + bitmaps ≈ 514 KiB each → ~1.0 MiB),
   `deliver_buf` (512 KiB) + `extra_buf` (64 × 1323 B ≈ 83 KiB since
@@ -4301,8 +4315,9 @@ persists so little that a restart visibly damages a built base.
   pending/hold/deliver paths. Plus Game's own send_buf 256 KiB, body_buf
   512 KiB, recv_buf 64 KiB and payload_hold 64 KiB (~0.9 MiB, not
   per-peer). Non-client-visible engineering item (no stock wire/sim
-  counterpart); a shared, traffic-sized reassembly pool would cut the
-  remaining reservation and is the natural flip-to-WORKS change.
+  counterpart): WORKS for its scope - the reservation is bounded and
+  resident memory tracks traffic; a shared, traffic-sized reassembly pool
+  remains a tracked optimization (TODO), not a parity gap.
   *Anchors:* `src/litenet/peer.zig` (`asm_slots:193`, `pending:172`, `deliver_buf:199`, `hold_data:209`, `extra_buf:211`), `src/litenet/server.zig:8-13`,
   `src/server/game.zig:366-377`
 

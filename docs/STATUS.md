@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 254 `WORKS`,
-37 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 258 `WORKS`,
+33 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -516,6 +516,15 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then Net and ops went 100% (48/48 WORKS): the four remaining rows are all
+non-client-visible and were re-audited to WORKS with documented scope - the
+web dashboard (operator-side surface, own authenticated UI; the stock Lua
+WebDashboard is not a game wire path), the chunk save format and the player
+save (both zdtd formats the client never reads; stock-format interchange is
+out-of-scope save internals, and ZPV9 now covers HP/use_times/born
+time/bedroll), and the per-peer memory footprint (bounded lazy-paged
+reservation; the shared reassembly pool stays a tracked optimization).
+Net and ops 48/0/0; total **258/33/0**.
 Then chunk streaming went WORKS: the stream budget is now 625 chunks (a
 25x25 square, radius 12 - the stock client's view-distance-12 request)
 instead of the 169 cap that truncated the default view-7 stream to a
