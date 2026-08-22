@@ -529,23 +529,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // sent from the hp-replicate pass on any player death (C2S and
                 // AI kills alike); the client runs its own death screen.
                 // DropOnDeath: 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete.
-                // Modes 1..3 drop a loot bag at the death position; 0/4 drop nothing.
+                // Modes 1..3 drop a loot bag at the death position holding the
+                // victim's real inventory range; 0/4 drop nothing.
                 if (self.drop_on_death >= 1 and self.drop_on_death <= 3) {
                     if (self.sim.slotOfNetId(d.entity_id)) |ti| {
-                        const t = self.sim.transform[ti];
-                        if (self.sim.spawnLootBag(t.x, t.y, t.z, 1, 1)) |bag_nid| {
-                            self.broadcastLootSpawn(bag_nid) catch {};
-                            // Dropped-backpack marker (RE EntityBackpack
-                            // SetDroppedBackpackPositions): the death screen
-                            // and map show the bag position.
-                            if (self.clientByEntityId(d.entity_id)) |vic| {
-                                vic.has_backpack = true;
-                                vic.backpack_x = @intFromFloat(@trunc(t.x));
-                                vic.backpack_y = @intFromFloat(@trunc(t.y));
-                                vic.backpack_z = @intFromFloat(@trunc(t.z));
-                                self.broadcastPlayerBackpack(vic) catch {};
-                            }
-                        }
+                        self.spawnDeathBag(ti);
                     }
                 }
             }

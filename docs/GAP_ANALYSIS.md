@@ -150,11 +150,11 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Blood moon](#6-blood-moon) | 19 | 4 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings |
 | [POIs and prefabs](#7-pois-and-prefabs) | 16 | 14 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint; multi-block children regenerate |
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 16 | 11 | 6 | 33 | Containers roll their own tables; items stack like stock; Extends inheritance complete (stock data never needs it beyond Stacknumber); tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 17 | 10 | 6 | 33 | Containers roll their own tables; items stack like stock; death bags carry the real inventory (DropOnDeath modes); Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 11 | 11 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3); perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 25 | 17 | 6 | 48 | Walk, dig, build, persist; lakes and POI pools wet, claims expire, repair heals, supports collapse |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **221** | **74** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **222** | **73** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2584,11 +2584,19 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/assets/entities.zig:326-332`, `src/ecs/world.zig:856-880`,
   `src/ecs/systems.zig:2107-2127`, `Data/Config/entityclasses.xml:689`
 
-- **Player death loot bag (DropOnDeath)** `PARTIAL`
-  Modes 1..3 spawn a bag but `spawnLootBag(t.x, t.y, t.z, 1, 1)` puts a single unit
-  of item 1 in it: the dead player's inventory is never transferred, and modes 2
-  (toolbelt only) and 3 (backpack only) are not distinguished from mode 1.
-  *Anchors:* `src/server/game.zig:4949-4959`, `src/ecs/world.zig:595-604`
+- **Player death loot bag (DropOnDeath)** `WORKS` `(2026-08-22)`
+  Modes 1..3 drop a bag holding the victim's **real inventory range**:
+  `spawnDeathBag` (Game) selects the range by mode (1 = toolbelt + backpack,
+  2 = toolbelt only, 3 = backpack only) and `spawnLootBagFrom` copies the
+  source slots into the bag at preserved offsets instead of a single
+  placeholder unit, then latches the dropped-backpack marker. Both kill paths
+  bag: the C2S damage kill and the hp-replicate AI-kill detector (coordinated
+  through `Client.has_backpack` so a death is never bagged twice). Scenario
+  `AI kill drops the player's real inventory` proves the AI path; unit test
+  pins the range copy.
+  *Anchors:* `src/server/game.zig` spawnDeathBag,
+  `src/server/game/replicate_health.zig:26`, `src/server/c2s/misc.zig:529`,
+  `src/ecs/world.zig:1000` spawnLootBagFrom
 
 - **Storage TileEntity S2C** `PARTIAL`
   Composite TE with one Storage feature is built and pushed on chunk stream and

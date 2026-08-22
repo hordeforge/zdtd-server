@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 221 `WORKS`,
-74 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 222 `WORKS`,
+73 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -270,6 +270,12 @@ DamageEntity, FuelValue or the eat cvars (full-file scan of the 1413
 items), so the direct reads never miss stock data - the inherited-value gap
 was data-absent (Stacknumber already resolves through Extends). Items
 15/12/6 -> **16/11/6**; total **221/74/38**.
+Then the DropOnDeath row went WORKS: death bags carry the victim's real
+inventory range by mode (1 all, 2 toolbelt, 3 backpack) at preserved
+offsets instead of a placeholder unit, on both kill paths (C2S damage and
+the hp-replicate AI-kill detector, coordinated through has_backpack so a
+death is never bagged twice); scenario + unit test. Items 16/11/6 ->
+**17/10/6**; total **222/73/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

@@ -23,6 +23,11 @@ pub fn replicatePlayerHealth(self: *Game) void {
             const owner_slot = self.sim.player[i].peer_slot;
             if (owner_slot >= 0 and @as(usize, @intCast(owner_slot)) < self.clients.len) {
                 const oc = &self.clients[@intCast(owner_slot)];
+                // AI-inflicted deaths land here (the C2S kill path bags its own
+                // victims and latches has_backpack, so a death is never bagged
+                // twice): DropOnDeath modes 1..3 drop the victim's real
+                // inventory range as a bag at the death position.
+                if (!oc.has_backpack) self.spawnDeathBag(i);
                 if (oc.peer) |op| {
                     const wsp = self.world.primarySpawn();
                     var entries: [2]packages.stock_entity.SpawnPointEntry = undefined;

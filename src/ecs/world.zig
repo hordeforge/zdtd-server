@@ -1000,6 +1000,30 @@ pub const World = struct {
         return self.network_id[s].id;
     }
 
+    /// Death bag (stock DropOnDeath): spawn a loot bag holding a slot range of
+    /// a source inventory (mode 1 = toolbelt+backpack, 2 = toolbelt, 3 =
+    /// backpack). The range is capped to max_inv_slots and copied into the bag
+    /// so the dead player's actual inventory rides the death bag instead of a
+    /// single placeholder unit.
+    pub fn spawnLootBagFrom(self: *World, x: f32, y: f32, z: f32, src: *const c.Inventory, start: usize, end: usize) ?NetId {
+        const s = self.spawnBase(.loot_bag, x, y, z, 1) orelse return null;
+        self.mask[s].loot_bag = true;
+        self.mask[s].inventory = true;
+        self.loot_bag[s] = .{};
+        var inv: c.Inventory = .{};
+        const lo = @min(start, c.max_inv_slots);
+        const hi = @min(end, c.max_inv_slots);
+        var i: usize = lo;
+        var out: usize = 0;
+        while (i < hi and out < c.max_inv_slots) : (i += 1) {
+            inv.slots[out] = src.slots[i];
+            out += 1;
+        }
+        self.inventory[s] = inv;
+        self.notifySpawn(s);
+        return self.network_id[s].id;
+    }
+
     /// Spawn one falling-blocks group entity at the cells' centroid (RE
     /// entity-ai.md CreateFallingBlockGroup): the cells keep their world
     /// positions and raw block values; the group falls as a unit and dies on
@@ -1399,6 +1423,32 @@ test "loot bag drops only on LootDropProb" {
     try std.testing.expect(r2.killed);
     try std.testing.expect(r2.loot_bag_id > 0);
     try std.testing.expectEqual(@as(u32, 1), w.countKind(.loot_bag));
+}
+
+test "spawnLootBagFrom copies a slot range into the death bag" {
+    // DropOnDeath: the bag carries the victim's real inventory range (mode 1
+    // toolbelt+backpack, 2 toolbelt, 3 backpack), not a placeholder unit.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Seed the toolbelt and the backpack with distinct items.
+    w.inventory[ps].slots[3] = .{ .item_id = 7, .count = 5 };
+    w.inventory[ps].slots[10 + 4] = .{ .item_id = 9, .count = 2 };
+    // Mode 2 (toolbelt only): the bag holds slot 3, not the backpack slot.
+    const b2 = w.spawnLootBagFrom(0, 70, 2, &w.inventory[ps], 0, c.inv_toolbelt).?;
+    const bs2 = w.slotOfNetId(b2).?;
+    // Offsets are preserved (bag slot 3 = source slot 3).
+    try std.testing.expectEqual(@as(u16, 7), w.inventory[bs2].slots[3].item_id);
+    try std.testing.expectEqual(@as(u16, 5), w.inventory[bs2].slots[3].count);
+    // The backpack item is outside the toolbelt range: not in the mode-2 bag.
+    try std.testing.expectEqual(@as(u16, 0), w.inventory[bs2].slots[10 + 4].item_id);
+    // Mode 3 (backpack only): the bag holds the backpack slot.
+    const b3 = w.spawnLootBagFrom(0, 70, 3, &w.inventory[ps], c.inv_bag_start, c.inv_equip_start).?;
+    const bs3 = w.slotOfNetId(b3).?;
+    try std.testing.expectEqual(@as(u16, 9), w.inventory[bs3].slots[4].item_id); // 14-10
+    try std.testing.expectEqual(@as(u16, 2), w.inventory[bs3].slots[4].count);
 }
 
 test "per-tick path budget stride is derived from last tick demand" {

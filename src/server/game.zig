@@ -2646,6 +2646,38 @@ pub const Game = struct {
         try game_loot.broadcastLootSpawn(self, net_id);
     }
 
+    /// Stock DropOnDeath (0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete):
+    /// spawn the victim's death bag at their position holding the real
+    /// inventory range (not a placeholder unit) and mark the dropped-backpack
+    /// marker for the death screen / map. Called from the C2S kill path and the
+    /// hp-replicate AI-kill detector; the callers coordinate through
+    /// `Client.has_backpack` so a death is never bagged twice.
+    pub fn spawnDeathBag(self: *Game, victim_slot: ecs.Slot) void {
+        const dod = self.drop_on_death;
+        if (dod < 1 or dod > 3) return;
+        if (!self.sim.alive[victim_slot] or !self.sim.mask[victim_slot].inventory) return;
+        const t = self.sim.transform[victim_slot];
+        const start: usize = switch (dod) {
+            2 => 0, // toolbelt only
+            3 => ecs.components.inv_bag_start, // backpack only
+            else => 0, // all (toolbelt + backpack)
+        };
+        const end: usize = switch (dod) {
+            2 => ecs.components.inv_toolbelt,
+            else => ecs.components.inv_equip_start,
+        };
+        if (self.sim.spawnLootBagFrom(t.x, t.y, t.z, &self.sim.inventory[victim_slot], start, end)) |bag_nid| {
+            self.broadcastLootSpawn(bag_nid) catch {};
+            if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
+                vic.has_backpack = true;
+                vic.backpack_x = @intFromFloat(@trunc(t.x));
+                vic.backpack_y = @intFromFloat(@trunc(t.y));
+                vic.backpack_z = @intFromFloat(@trunc(t.z));
+                self.broadcastPlayerBackpack(vic) catch {};
+            }
+        }
+    }
+
     /// Stock ItemDropServer path: EntityItem (class "item") with itemClass ECD.
     pub fn broadcastItemDropSpawn(
         self: *Game,

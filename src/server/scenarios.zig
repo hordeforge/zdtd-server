@@ -1874,6 +1874,48 @@ test "scenario in-game player console: allowlist, deny, and admin routing" {
     std.debug.print("PASS player-console: allowlist + deny + admin routing with captured reply\n", .{});
 }
 
+test "scenario AI kill drops the player's real inventory as a death bag" {
+    // GAP DropOnDeath row: an AI kill (hp drains server-side) must drop the
+    // victim's actual inventory range as a loot bag at the death position, not
+    // a placeholder unit - the C2S kill path bags its own victims, this is the
+    // hp-replicate AI path (drop_on_death 1 = toolbelt + backpack).
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_deathbag");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_deathbag", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.inventory[ps].slots[2] = .{ .item_id = 7, .count = 5 };
+    g.sim.inventory[ps].slots[10 + 4] = .{ .item_id = 9, .count = 2 };
+    // Kill the player through the server-side damage path (AI-style: no C2S
+    // damage claim).
+    _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+    try std.testing.expectEqual(@as(f32, 0), g.sim.health[ps].hp);
+    // replicatePlayerHealth detects the death and drops the bag (mode 1 all).
+    g.replicatePlayerHealth();
+    var bag_slot: ?usize = null;
+    var s: usize = 0;
+    while (s < ecs.max_entities) : (s += 1) {
+        if (g.sim.alive[s] and g.sim.mask[s].loot_bag) {
+            bag_slot = s;
+            break;
+        }
+    }
+    const bs = bag_slot orelse return error.TestUnexpectedResult;
+    // The bag carries the real inventory range at the same offsets.
+    try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[bs].slots[2].item_id);
+    try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[bs].slots[2].count);
+    try std.testing.expectEqual(@as(u16, 9), g.sim.inventory[bs].slots[10 + 4].item_id);
+    std.debug.print("PASS death-bag: AI kill drops the player's real inventory range\n", .{});
+}
+
 test "scenario vending machine opens via LockRequest with TraderData" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_vending");
