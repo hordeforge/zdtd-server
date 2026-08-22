@@ -46,7 +46,7 @@ const countdown = setInterval(() => {
     seconds.textContent = String(remaining);
     if (remaining <= 0) {
         clearInterval(countdown);
-        window.location.replace('/login');
+        globalThis.location.replace('/login');
     }
 }, COUNTDOWN_TICK_MS);
 /* /zdtd-ts:lockout */

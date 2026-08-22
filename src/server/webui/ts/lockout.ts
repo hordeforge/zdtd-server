@@ -4,6 +4,7 @@
 //! browser. Compiled by scripts/build-webui-ts.sh and injected into
 //! login_lockout.html.
 
+// oxlint-disable-next-line no-redeclare -- deliberate: __ZDTD_RETRY_S__ is a server-injected global; the declare types it for the classic script, so the config has no globals entry
 declare const __ZDTD_RETRY_S__: number;
 
 const message = document.querySelector<HTMLElement>('#login-err');
@@ -23,6 +24,6 @@ const countdown = setInterval(() => {
     seconds.textContent = String(remaining);
     if (remaining <= 0) {
         clearInterval(countdown);
-        window.location.replace('/login');
+        globalThis.location.replace('/login');
     }
 }, COUNTDOWN_TICK_MS);

@@ -30,6 +30,10 @@ function queryEl<T extends HTMLElement>(selector: string): T {
     return el;
 }
 
+// Poller swap factory: one closure per polled region, created here so hxPoll
+// stays a thin wiring function. Inlining it would push hxPoll past the
+// 60-line function cap the strict preset enforces; the
+// @rikalabs/no-single-use-trivial-helpers off entry covers this.
 function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promise<unknown> {
     let inFlight = false;
     // Force=true skips the focus guard: Refresh now and post-command refreshes
@@ -46,7 +50,7 @@ function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promis
         return fetchWithTimeout(u, { credentials: 'same-origin' })
             .then((r) => {
                 if (r.status === HTTP_UNAUTHORIZED) {
-                    window.location.assign('/login');
+                    globalThis.location.assign('/login');
                     return null;
                 }
                 return r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`));
@@ -56,7 +60,7 @@ function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promis
                     return;
                 }
                 el.innerHTML = t;
-                el.removeAttribute('data-load-error');
+                delete el.dataset.loadError;
                 el.scrollLeft = regionScroll;
                 const npre = el.querySelector('pre');
                 if (npre) {
@@ -64,10 +68,10 @@ function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promis
                 }
             })
             .catch(() => {
-                if (!el.hasAttribute('data-load-error')) {
+                if (!('loadError' in el.dataset)) {
                     el.innerHTML = '<p class="err" role="alert">Live data is unavailable. Check the connection; retrying automatically.</p>';
                 }
-                el.setAttribute('data-load-error', 'true');
+                el.dataset.loadError = 'true';
             })
             .finally(() => {
                 inFlight = false;
@@ -85,27 +89,31 @@ function hxPoll(el: HxPollerElement): void {
     const trigger = el.getAttribute('hx-trigger');
     const ms = trigger && trigger.includes('5s') ? POLL_SLOW_MS : POLL_FAST_MS;
     let timer: ReturnType<typeof setInterval> | null = null;
-    el._hxStart = () => {
+    el._hxStart = (): void => {
         if (timer) {
             return;
         }
         void swap();
         timer = setInterval(() => void swap(), ms);
     };
-    el._hxStop = () => {
+    el._hxStop = (): void => {
         if (timer) {
             clearInterval(timer);
             timer = null;
         }
     };
-    el._hxOnce = () => swap(true);
+    el._hxOnce = (): Promise<unknown> => swap(true);
 }
 
-const polls = Array.from(document.querySelectorAll<HxPollerElement>('[hx-get]'));
-polls.forEach(hxPoll);
+const polls = [...document.querySelectorAll<HxPollerElement>('[hx-get]')];
+for (const pollEl of polls) {
+    hxPoll(pollEl);
+}
 
 const autoEl = queryEl<HTMLInputElement>('#auto-refresh');
-const refreshState = document.getElementById('refresh-state');
+const refreshState = document.querySelector<HTMLElement>('#refresh-state');
+const refreshNowButton = queryEl<HTMLButtonElement>('#refresh-now');
+const cmdForm = queryEl<HTMLFormElement>('#cmd-form');
 
 function applyRefresh(): void {
     const on = autoEl.checked;
@@ -116,26 +124,17 @@ function applyRefresh(): void {
     } else if (on) {
         stateLabel = 'Auto-refresh paused while tab is hidden';
     }
-    polls.forEach((el) => {
+    for (const pollEl of polls) {
         if (active) {
-            el._hxStart?.();
+            pollEl._hxStart?.();
         } else {
-            el._hxStop?.();
+            pollEl._hxStop?.();
         }
-    });
+    }
     if (refreshState) {
         refreshState.textContent = stateLabel;
     }
 }
-
-autoEl.addEventListener('change', applyRefresh);
-document.addEventListener('visibilitychange', applyRefresh);
-applyRefresh();
-
-const refreshNowButton = queryEl<HTMLButtonElement>('#refresh-now');
-refreshNowButton.addEventListener('click', () => {
-    void refreshNow();
-});
 
 async function refreshNow(): Promise<void> {
     refreshNowButton.disabled = true;
@@ -150,12 +149,6 @@ async function refreshNow(): Promise<void> {
     }
 }
 
-const cmdForm = queryEl<HTMLFormElement>('#cmd-form');
-cmdForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    void submitCommand();
-});
-
 async function submitCommand(): Promise<void> {
     const button = queryEl<HTMLButtonElement>('#cmd-form button');
     const input = queryEl<HTMLInputElement>('#cmd-line');
@@ -169,10 +162,10 @@ async function submitCommand(): Promise<void> {
         return;
     }
     input.setCustomValidity('');
-    const verb = line.split(/\s+/, 1)[0].toLowerCase();
+    const verb = line.split(/\s+/u, 1)[0].toLowerCase();
     const destructive = new Set(['shutdown', 'killall', 'ka', 'kick', 'kickall', 'ban', 'wipeplayer']);
     // oxlint-disable-next-line no-alert -- deliberate: destructive admin commands use a native confirm
-    if (destructive.has(verb) && !window.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`)) {
+    if (destructive.has(verb) && !globalThis.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`)) {
         return;
     }
     button.disabled = true;
@@ -189,7 +182,7 @@ async function submitCommand(): Promise<void> {
             body: new URLSearchParams(fd as unknown as URLSearchParams),
         });
         if (r.status === HTTP_UNAUTHORIZED) {
-            window.location.assign('/login');
+            globalThis.location.assign('/login');
             return;
         }
         const response = await r.text();
@@ -215,3 +208,14 @@ async function submitCommand(): Promise<void> {
         input.focus();
     }
 }
+
+refreshNowButton.addEventListener('click', () => {
+    void refreshNow();
+});
+autoEl.addEventListener('change', applyRefresh);
+document.addEventListener('visibilitychange', applyRefresh);
+cmdForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitCommand();
+});
+applyRefresh();

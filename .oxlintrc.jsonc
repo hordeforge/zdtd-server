@@ -56,8 +56,6 @@
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
   "options": { "typeAware": true },
   "env": { "browser": true, "es2024": true },
-  // Placeholders substituted by the server before serving; not real JS bindings.
-  "globals": { "__ZDTD_RETRY_S__": "readonly" },
   // @rikalabs/oxlint-standards plugin (anti-slop custom rules). Loaded by
   // lint-webui.sh from a cached install; see the provenance note above.
   "jsPlugins": ["@rikalabs/oxlint-standards/plugin"],
@@ -135,6 +133,8 @@
     "max-classes-per-file": ["error", 1],
     "max-lines": ["error", { "max": 1500, "skipBlankLines": true, "skipComments": true }],
     "array-callback-return": "error",
+    "no-use-before-define": "error", // hoisting-dependent calls are ordered defs-first in shell.ts
+    "require-unicode-regexp": "error", // /u flag on every regex literal
     // ---- strict-core baseline offs that these categories would otherwise auto-enable ----
     "promise/always-return": "off", // baseline: off (each then() returning a value is noise here)
     "typescript/no-unnecessary-boolean-literal-compare": "off", // baseline: off
@@ -172,6 +172,12 @@
     "typescript/consistent-type-definitions": ["error", "type"], // type aliases over interfaces
     "unicorn/no-static-only-class": "error",
     "unicorn/no-useless-promise-resolve-reject": "error",
+    // ---- unicorn DOM/data rules the webui sources pass (2026-08-22) ----
+    "unicorn/prefer-query-selector": "error", // querySelector over getElementById
+    "unicorn/prefer-dom-node-dataset": "error", // el.dataset over data-* attribute API
+    "unicorn/prefer-global-this": "error", // globalThis over window
+    "unicorn/no-array-for-each": "error", // for...of over forEach
+    "unicorn/no-array-callback-reference": "error", // no bare function refs in callbacks
     // ---- strict-core @rikalabs/* runtime/fallback heuristics ----
     "@rikalabs/no-silent-catch-fallback": "error", // shell.html cmd-form catch is a documented directive exception
     "@rikalabs/no-runtime-compat-fallbacks": "error",
@@ -225,6 +231,9 @@
     "@rikalabs/no-hardcoded-secrets": "error",
     "@rikalabs/no-sql-string-concat": "error",
     // ---- off, with reason ----
-    "no-underscore-dangle": "off" // shell.html hangs _hxStart/_hxStop/_hxOnce poller handles off elements by design
+    "no-underscore-dangle": "off", // shell.html hangs _hxStart/_hxStop/_hxOnce poller handles off elements by design
+    "no-void": "off", // typescript/no-floating-promises (enforced above) requires the void operator to mark fire-and-forget promises; eslint/no-void would ban it
+    "no-implicit-globals": "off", // classic-script pages: top-level functions are the page contract, not accidental globals
+    "@rikalabs/no-single-use-trivial-helpers": "off" // shell.ts createSwap is a 40-line factory; inlining it would blow the 60-line function cap
   }
 }

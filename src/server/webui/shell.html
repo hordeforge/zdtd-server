@@ -99,6 +99,10 @@ function queryEl(selector) {
     }
     return el;
 }
+// Poller swap factory: one closure per polled region, created here so hxPoll
+// stays a thin wiring function. Inlining it would push hxPoll past the
+// 60-line function cap the strict preset enforces; the
+// @rikalabs/no-single-use-trivial-helpers off entry covers this.
 function createSwap(el, u) {
     let inFlight = false;
     // Force=true skips the focus guard: Refresh now and post-command refreshes
@@ -115,7 +119,7 @@ function createSwap(el, u) {
         return fetchWithTimeout(u, { credentials: 'same-origin' })
             .then((r) => {
             if (r.status === HTTP_UNAUTHORIZED) {
-                window.location.assign('/login');
+                globalThis.location.assign('/login');
                 return null;
             }
             return r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`));
@@ -125,7 +129,7 @@ function createSwap(el, u) {
                 return;
             }
             el.innerHTML = t;
-            el.removeAttribute('data-load-error');
+            delete el.dataset.loadError;
             el.scrollLeft = regionScroll;
             const npre = el.querySelector('pre');
             if (npre) {
@@ -133,10 +137,10 @@ function createSwap(el, u) {
             }
         })
             .catch(() => {
-            if (!el.hasAttribute('data-load-error')) {
+            if (!('loadError' in el.dataset)) {
                 el.innerHTML = '<p class="err" role="alert">Live data is unavailable. Check the connection; retrying automatically.</p>';
             }
-            el.setAttribute('data-load-error', 'true');
+            el.dataset.loadError = 'true';
         })
             .finally(() => {
             inFlight = false;
@@ -168,10 +172,14 @@ function hxPoll(el) {
     };
     el._hxOnce = () => swap(true);
 }
-const polls = Array.from(document.querySelectorAll('[hx-get]'));
-polls.forEach(hxPoll);
+const polls = [...document.querySelectorAll('[hx-get]')];
+for (const pollEl of polls) {
+    hxPoll(pollEl);
+}
 const autoEl = queryEl('#auto-refresh');
-const refreshState = document.getElementById('refresh-state');
+const refreshState = document.querySelector('#refresh-state');
+const refreshNowButton = queryEl('#refresh-now');
+const cmdForm = queryEl('#cmd-form');
 function applyRefresh() {
     const on = autoEl.checked;
     const active = on && !document.hidden;
@@ -182,25 +190,18 @@ function applyRefresh() {
     else if (on) {
         stateLabel = 'Auto-refresh paused while tab is hidden';
     }
-    polls.forEach((el) => {
+    for (const pollEl of polls) {
         if (active) {
-            el._hxStart?.();
+            pollEl._hxStart?.();
         }
         else {
-            el._hxStop?.();
+            pollEl._hxStop?.();
         }
-    });
+    }
     if (refreshState) {
         refreshState.textContent = stateLabel;
     }
 }
-autoEl.addEventListener('change', applyRefresh);
-document.addEventListener('visibilitychange', applyRefresh);
-applyRefresh();
-const refreshNowButton = queryEl('#refresh-now');
-refreshNowButton.addEventListener('click', () => {
-    void refreshNow();
-});
 async function refreshNow() {
     refreshNowButton.disabled = true;
     if (refreshState) {
@@ -213,11 +214,6 @@ async function refreshNow() {
         refreshState.textContent = autoEl.checked ? 'Refreshed (auto-refresh on)' : 'Refreshed (auto-refresh paused)';
     }
 }
-const cmdForm = queryEl('#cmd-form');
-cmdForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    void submitCommand();
-});
 async function submitCommand() {
     const button = queryEl('#cmd-form button');
     const input = queryEl('#cmd-line');
@@ -231,10 +227,10 @@ async function submitCommand() {
         return;
     }
     input.setCustomValidity('');
-    const verb = line.split(/\s+/, 1)[0].toLowerCase();
+    const verb = line.split(/\s+/u, 1)[0].toLowerCase();
     const destructive = new Set(['shutdown', 'killall', 'ka', 'kick', 'kickall', 'ban', 'wipeplayer']);
     // oxlint-disable-next-line no-alert -- deliberate: destructive admin commands use a native confirm
-    if (destructive.has(verb) && !window.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`)) {
+    if (destructive.has(verb) && !globalThis.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`)) {
         return;
     }
     button.disabled = true;
@@ -251,7 +247,7 @@ async function submitCommand() {
             body: new URLSearchParams(fd),
         });
         if (r.status === HTTP_UNAUTHORIZED) {
-            window.location.assign('/login');
+            globalThis.location.assign('/login');
             return;
         }
         const response = await r.text();
@@ -279,6 +275,16 @@ async function submitCommand() {
         input.focus();
     }
 }
+refreshNowButton.addEventListener('click', () => {
+    void refreshNow();
+});
+autoEl.addEventListener('change', applyRefresh);
+document.addEventListener('visibilitychange', applyRefresh);
+cmdForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitCommand();
+});
+applyRefresh();
 /* /zdtd-ts:shell */
 </script>
 </body></html>
