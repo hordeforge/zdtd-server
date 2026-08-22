@@ -417,16 +417,16 @@ pub const max_journal: usize = 8;
 pub const max_quest_objectives: usize = 32;
 /// Stock TraderInfo.MaxItems (50): the trader window holds up to 50 stacks.
 pub const max_stock: usize = 50;
-/// Toolbelt 0..9, bag 10..41, equipment 42..46 (armor slots), total 47.
-/// Deliberate subset of stock layout (toolbelt 10, bag 45, equip 12 on wire).
-/// C2S apply truncates bag indices ≥ inv_bag_count; encode pads empties to stock
-/// bag_slots. See docs/adr/0007-player-inventory-c2s-trust.md.
+/// Toolbelt 0..9, bag 10..54, equipment 55..66 (armor slots), total 67 -
+/// the full stock wire layout (toolbelt 10, bag 45, equip 12). The earlier
+/// 32-bag subset (ADR 0007) dropped client bag slots 33..45 and equipment
+/// 5..11 on the C2S apply, losing items on relog; resolved 2026-08-22.
 pub const inv_toolbelt: usize = 10;
 pub const inv_bag_start: usize = 10;
-pub const inv_bag_count: usize = 32;
-pub const inv_equip_start: usize = 42;
-pub const inv_equip_count: usize = 5;
-pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 47
+pub const inv_bag_count: usize = 45;
+pub const inv_equip_start: usize = 55;
+pub const inv_equip_count: usize = 12;
+pub const max_inv_slots: usize = inv_equip_start + inv_equip_count; // 67
 pub const inv_no_holding: u16 = 0xFFFF;
 
 // Layout invariants: bag contiguous after toolbelt; equip starts after bag.

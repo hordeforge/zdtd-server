@@ -49,3 +49,15 @@ server persist; after enter, the client's hold is what survives rejoin.
 | Server invent S2C PlayerInventory | Stock direction rejects; wedge risk |
 | Expand ECS bag to 45 now | Correct model later; not needed for current playtest |
 | Full InvTx-only model | Loadgen bots; vanilla client still uses PlayerInventory |
+
+## Amendment (2026-08-22)
+
+Decision point 4 is **resolved**: the ECS inventory now uses the full stock
+wire width (toolbelt 10, bag 45, equip 12 = 67 slots). The C2S apply keeps
+every client slot (bag 33..45 and equipment 6..11 no longer drop), the
+ZPV3/5 persist buffer and wire encoders scale off the same constants, and
+the stock bag width invariant (`inv_bag_count == stock_inv.bag_slots`) is
+compile-checked. Client-visible: items in the last 13 bag slots and the
+extra equipment slots survive a relog. The remaining persist gap is the
+per-item state beyond id/count/quality/meta (UseTimes, mods, cosmetics,
+seed), which stays on the GAP "Player inventory persistence" row.

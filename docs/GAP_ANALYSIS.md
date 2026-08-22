@@ -2699,8 +2699,15 @@ unvalidated, and durability, mods and repair do not exist.
   read buffer, while the ECS inventory is 47 slots against the stock wire layout of
   10 + 45 + 12. UseTimes, mods, cosmetics and seed are not stored at all. Slots
   beyond bag index 32 and equipment index 5 are dropped on the C2S apply.
+  `(2026-08-22)` the slot-width leg is resolved: the ECS inventory is the full
+  stock 10 + 45 + 12 = 67 slots (ADR 0007 amendment), the C2S apply keeps every
+  client slot and the persist buffer/wire encoders scale off the same constants;
+  remaining is the per-item state beyond id/count/quality/meta (UseTimes -
+  tool durability resets on relog - plus mods, cosmetics and seed), which needs
+  a versioned ZPV slot-record extension.
   *Anchors:* `src/server/game.zig:1910-1913`, `:2094-2103`,
-  `src/ecs/components.zig:200-220`, `src/wire/stock_inv.zig:627-681`
+  `src/ecs/components.zig:200-220`, `src/wire/stock_inv.zig:627-681`,
+  `docs/adr/0007-player-inventory-c2s-trust.md`
 
 - **Scrapping (material_based recipes / CraftCompleteData.scrapped)** `PARTIAL (waived)`
   Scrap path is client-driven; server exposes material-based recipes as regular

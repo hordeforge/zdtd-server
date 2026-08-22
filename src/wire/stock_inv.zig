@@ -1368,3 +1368,21 @@ test "use_times round-trips through the wire slot conversion" {
     const empty = slotFromEcs(components.InvSlot{ .item_id = 0, .count = 0 }, null, null);
     try std.testing.expectEqual(@as(f32, 0), empty.use_times);
 }
+
+test "C2S apply keeps bag slots past the old 32-slot subset" {
+    // The ECS bag is the full stock 45 (was 32): a client bag item at index
+    // 40 (slots[50]) must survive the apply, not be dropped (ADR 0007
+    // resolved 2026-08-22).
+    var buf: [8192]u8 = undefined;
+    var inv: components.Inventory = .{};
+    inv.slots[components.inv_bag_start + 40] = .{ .item_id = 7, .count = 20, .quality = 1 };
+    const body = try buildFromEcs(&buf, &inv);
+    var applied: components.Inventory = .{};
+    try applyPlayerInventoryBody(body, &applied, null, null);
+    try std.testing.expectEqual(@as(u16, 7), applied.slots[components.inv_bag_start + 40].item_id);
+    try std.testing.expectEqual(@as(u16, 20), applied.slots[components.inv_bag_start + 40].count);
+    // The stock bag width is 45 and the ECS bag matches it now.
+    try std.testing.expectEqual(bag_slots, components.inv_bag_count);
+    // Equip is the stock 12-wide too.
+    try std.testing.expectEqual(@as(usize, 12), components.inv_equip_count);
+}

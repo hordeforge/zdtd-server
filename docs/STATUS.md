@@ -427,6 +427,13 @@ container store is 4096 entries with world eviction (the row described the
 old 256 cap), and the per-chunk prefab TE scan budgets ([sim] te_scan_*)
 are configurable and retry on truncation instead of silently dropping.
 Items 19/8/6 -> **20/7/6**; total **245/50/38**.
+The inventory slot-width leg of the persistence row is resolved: the ECS
+inventory is now the full stock wire layout (toolbelt 10, bag 45, equip 12 =
+67 slots; was a 32-bag subset that dropped client bag slots 33..45 and
+equipment 6..11 on the C2S apply, losing items on relog), the apply keeps
+every slot and the persist buffer/wire encoders scale off the same
+constants (ADR 0007 amended); the row stays PARTIAL for the per-item state
+beyond id/count/quality/meta (UseTimes durability resets on relog).
 The dashboard
 (docs/provenance.html) is synced.
 
