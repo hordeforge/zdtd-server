@@ -254,7 +254,7 @@ pub fn tickZombieBlockDamage(self: *Game) void {
         }
         const dmg: u16 = @intCast(@min(base_bite * mult / 100, 65535));
         const max_hp = self.maxDamageForBlock(id);
-        const total = self.addBlockDamage(bx, by, bz, dmg);
+        const total = self.addBlockDamage(bx, by, bz, dmg) catch continue;
         if (total >= max_hp) {
             self.world.setBlockWorld(bx, by, bz, 0) catch continue;
             self.clearBlockHp(bx, by, bz);
@@ -362,7 +362,7 @@ pub fn drainDigRequests(self: *Game) void {
         if (id == 0) continue;
         const dmg: u16 = @intCast(@min(base_bite * mult / 100, 65535));
         const max_hp = self.maxDamageForBlock(id);
-        const total = self.addBlockDamage(d.x, d.y, d.z, dmg);
+        const total = self.addBlockDamage(d.x, d.y, d.z, dmg) catch continue;
         if (total >= max_hp) {
             self.world.setBlockWorld(d.x, d.y, d.z, 0) catch continue;
             self.clearBlockHp(d.x, d.y, d.z);

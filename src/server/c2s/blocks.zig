@@ -132,7 +132,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                     place_id = if (cur_id != 0) cur_id else b.block_id;
                     out_dmg = abs;
-                    self.setBlockHp(b.x, b.y, b.z, abs);
+                    try self.setBlockHp(b.x, b.y, b.z, abs);
                 }
                 mutated = true;
                 // Item durability (GAP "Item durability"): the held tool wears

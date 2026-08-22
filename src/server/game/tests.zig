@@ -485,10 +485,11 @@ test "land claims hold past the old 256 cap and survive restart (GAP 12)" {
     std.debug.print("PASS claims-cap: 300 claims round-trip (cap was 256)\n", .{});
 }
 
-test "block durability holds past the old 64 cap (GAP 12)" {
-    // The sparse damage table was 64: the 65th damaged block silently lost its
-    // damage (FIFO eviction). Then 256; now max_block_hp_entries (1024).
-    // Damage 300 distinct blocks and verify every one keeps its absolute value.
+test "block durability has no eviction cap (GAP 12)" {
+    // The damage store was a global FIFO: past the cap the oldest damaged
+    // block's damage reverted mid-fight. Damage now lives in the chunk damage
+    // plane (per-chunk, persisted by ZCH3), so any number of distinct damaged
+    // blocks keeps its absolute value.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -500,22 +501,21 @@ test "block durability holds past the old 64 cap (GAP 12)" {
     }
     var i: usize = 0;
     while (i < 300) : (i += 1) {
-        _ = g.addBlockDamage(@intCast(200 + i), 70, 300, 5);
+        _ = try g.addBlockDamage(@intCast(200 + i), 70, 300, 5);
     }
-    try std.testing.expectEqual(@as(usize, 300), g.block_hp_n);
     var ok = true;
     i = 0;
     while (i < 300) : (i += 1) {
         if (g.getBlockHp(@intCast(200 + i), 70, 300) != 5) ok = false;
     }
     try std.testing.expect(ok);
-    try std.testing.expectEqual(@as(u64, 0), g.harness.counters.get(.block_hp_evictions));
-    std.debug.print("PASS blockhp-cap: 300 damaged blocks retain damage (cap was 64)\n", .{});
+    std.debug.print("PASS blockhp-nocap: 300 damaged blocks retain damage\n", .{});
 }
 
-test "block durability eviction past the cap is loud, not silent" {
-    // At max_block_hp_entries the oldest damaged block is evicted and its
-    // damage reverts; that must be counted and warn-once, never silent.
+test "block durability survives far past the old 1024 cap" {
+    // Regression for the GAP 12 eviction flaw: 2000 distinct damaged blocks
+    // all keep their absolute damage (the old table capped at 1024 and reset
+    // the oldest entry mid-fight).
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -526,13 +526,16 @@ test "block durability eviction past the cap is loud, not silent" {
         std.testing.allocator.destroy(g);
     }
     var i: usize = 0;
-    while (i < game_mod.max_block_hp_entries + 5) : (i += 1) {
-        _ = g.addBlockDamage(@intCast(500 + i), 70, 400, 3);
+    while (i < 2000) : (i += 1) {
+        _ = try g.addBlockDamage(@intCast(500 + i), 70, 400, 3);
     }
-    try std.testing.expectEqual(game_mod.max_block_hp_entries, g.block_hp_n);
-    try std.testing.expect(g.block_hp_evict_warned);
-    try std.testing.expectEqual(@as(u64, 5), g.harness.counters.get(.block_hp_evictions));
-    std.debug.print("PASS blockhp-evict: cap eviction counted + warn-once\n", .{});
+    var ok = true;
+    i = 0;
+    while (i < 2000) : (i += 1) {
+        if (g.getBlockHp(@intCast(500 + i), 70, 400) != 3) ok = false;
+    }
+    try std.testing.expect(ok);
+    std.debug.print("PASS blockhp-nocap: 2000 damaged blocks retain damage\n", .{});
 }
 
 test "evidence JSONL flush writes the ring to a file (P4)" {

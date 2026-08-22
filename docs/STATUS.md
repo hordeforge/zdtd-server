@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 230 `WORKS`,
-65 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 231 `WORKS`,
+64 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -327,6 +327,13 @@ DominantBiome/AreaMasterDominantBiome follow stock CalcDominantBiome (modal
 cell, first maximum); transitions follow biomes.png per cell on stock maps
 and the proc biome field on RWG. World 28/14/6 -> **29/13/6**; total
 **230/65/38**.
+Then the player-block-damage row went WORKS: partial block damage moved from
+the game-level FIFO table (64 entries, then 1024, evicting the oldest
+mid-fight) into a per-chunk damage plane (Chunk.damages, u16 absolute HP)
+persisted by ZCH3 (hdr flag 15), so any number of damaged blocks keeps its
+value, survives eviction and restart, and the chunk wire damage channel reads
+the plane directly; blockmeta.zbm (ZBM2) persists only the raw mirror now.
+World 29/13/6 -> **30/12/6**; total **231/64/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

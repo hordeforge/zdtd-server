@@ -144,51 +144,24 @@ pub fn packBlockKey(x: i32, y: i32, z: i32) u64 {
 }
 
 pub fn getBlockHp(self: *const Game, x: i32, y: i32, z: i32) u16 {
-    const key = packBlockKey(x, y, z);
-    var i: usize = 0;
-    while (i < self.block_hp_n) : (i += 1) {
-        if (self.block_hp_key[i] == key) return self.block_hp[i];
-    }
-    return 0;
+    const t = world_store.World.worldToChunk(x, z);
+    const c = self.world.chunkAt(t.pos) orelse return 0;
+    return c.dmgAt(t.lx, y, t.lz);
 }
 
-/// Store absolute BlockValue.damage (stock DamageBlock number line).
-pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) void {
-    const key = packBlockKey(x, y, z);
-    var i: usize = 0;
-    while (i < self.block_hp_n) : (i += 1) {
-        if (self.block_hp_key[i] != key) continue;
-        self.block_hp[i] = abs;
-        return;
-    }
-    if (self.block_hp_n >= self.block_hp_key.len) {
-        // The cap is a documented bound: the oldest damaged block's damage
-        // reverts here. Loud, not silent (counter + warn-once) so an operator
-        // sees the bound was hit.
-        self.harness.counters.inc(.block_hp_evictions);
-        if (!self.block_hp_evict_warned) {
-            self.block_hp_evict_warned = true;
-            std.debug.print(
-                "zdtd: block_hp table full ({d}), evicting oldest damaged block; partial damage past the cap is not persisted\n",
-                .{self.block_hp_key.len},
-            );
-        }
-        var j: usize = 1;
-        while (j < self.block_hp_n) : (j += 1) {
-            self.block_hp_key[j - 1] = self.block_hp_key[j];
-            self.block_hp[j - 1] = self.block_hp[j];
-        }
-        self.block_hp_n -= 1;
-    }
-    self.block_hp_key[self.block_hp_n] = key;
-    self.block_hp[self.block_hp_n] = abs;
-    self.block_hp_n += 1;
+/// Store absolute BlockValue.damage (stock DamageBlock number line) in the
+/// owning chunk's damage plane. The chunk must be materialized (getOrCreate);
+/// damage only originates on blocks near players/zombies, i.e. resident chunks.
+pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) !void {
+    const t = world_store.World.worldToChunk(x, z);
+    const c = try self.world.getOrCreate(t.pos);
+    try c.setDmg(self.world.allocator, t.lx, y, t.lz, abs);
 }
 
 /// Apply damage to a block (the single choke point for player dig, zombie
 /// chew and admin edits). pub so scenarios can drive the on_block_damage
 /// plugin verdict through the real path.
-pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) u16 {
+pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
     // on_block_damage verdict (T15): <0 denies the damage, >0 applies that
     // percent. No plugin exports the hook -> 0 -> today's behaviour.
     var applied = dmg;
@@ -201,20 +174,14 @@ pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) u16 {
     const cur = self.getBlockHp(x, y, z);
     const sum: u32 = @as(u32, cur) + applied;
     const abs: u16 = @intCast(@min(sum, 65535));
-    self.setBlockHp(x, y, z, abs);
+    try self.setBlockHp(x, y, z, abs);
     return abs;
 }
 
 pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
-    const key = packBlockKey(x, y, z);
-    var i: usize = 0;
-    while (i < self.block_hp_n) : (i += 1) {
-        if (self.block_hp_key[i] != key) continue;
-        self.block_hp_n -= 1;
-        self.block_hp_key[i] = self.block_hp_key[self.block_hp_n];
-        self.block_hp[i] = self.block_hp[self.block_hp_n];
-        return;
-    }
+    const t = world_store.World.worldToChunk(x, z);
+    const c = self.world.chunkAt(t.pos) orelse return;
+    c.clearDmg(t.lx, y, t.lz);
 }
 
 /// Drain this tick's Demolition explode requests (RE entity-ai.md
@@ -277,7 +244,7 @@ pub fn drainExplosions(self: *Game) void {
                     const dmg: u16 = @intFromFloat(@as(f32, @floatFromInt(block_dmg)) * falloff);
                     if (dmg == 0) continue;
                     const max_hp = self.maxDamageForBlock(id);
-                    const total = self.addBlockDamage(wx, wy, wz, dmg);
+                    const total = self.addBlockDamage(wx, wy, wz, dmg) catch continue;
                     if (total >= max_hp) {
                         self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
                         self.clearBlockHp(wx, wy, wz);

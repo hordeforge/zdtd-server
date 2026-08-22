@@ -75,14 +75,10 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
     };
     var tex_ctx: TexCtx = .{ .t = &self.block_textures };
     const DmgCtx = struct {
-        g: *Game,
-        cx: i32,
-        cz: i32,
+        ch: *const world_store.Chunk,
         fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u16 {
             const d: *const @This() = @ptrCast(@alignCast(ctx.?));
-            const wx = d.cx * 16 + lx;
-            const wz = d.cz * 16 + lz;
-            return d.g.getBlockHp(wx, y, wz);
+            return d.ch.dmgAt(lx, y, lz);
         }
     };
     // Per-cell biome provider (GAP per-chunk-biome row): same sources as the
@@ -103,7 +99,7 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         }
     };
     var biome_ctx: BiomeCtx = .{ .g = self, .fallback = biome_id };
-    var dmg_ctx: DmgCtx = .{ .g = self, .cx = cx, .cz = cz };
+    var dmg_ctx: DmgCtx = .{ .ch = ch };
     // Stock Chunk.write payload inside NetPackageChunk (overwrite=false first delivery).
     const body = try packages.stock_chunk.buildNetPackageChunkNew(&self.body_buf, .{
         .cx = cx,

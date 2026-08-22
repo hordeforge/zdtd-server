@@ -161,11 +161,10 @@ pub const default_max_claimed_damage = game_types.default_max_claimed_damage;
 pub const default_max_edit_range = game_types.default_max_edit_range;
 pub const default_interest_range = game_types.default_interest_range;
 /// Sparse block-meta caps: `block_raw` mirrors the chunk raw plane (its
-/// eviction is a cache miss - the chunk is the source of truth, GAP 13);
-/// `block_hp` is the only store of partial block damage, so 1024 is a
-/// documented bound (eviction logs via the block_hp_evictions counter).
+/// eviction is a cache miss - the chunk is the source of truth, GAP 13).
+/// Partial block damage lives in the chunk damage plane (world/store.zig),
+/// persisted by ZCH3, so it has no game-level cap.
 pub const max_block_raw_entries: usize = 256;
-pub const max_block_hp_entries: usize = 1024;
 pub const max_chat_msg_len = game_types.max_chat_msg_len;
 pub const default_min_chat_gap_ns = game_types.default_min_chat_gap_ns;
 pub const default_inv_bucket_cap = game_types.default_inv_bucket_cap;
@@ -395,14 +394,6 @@ pub const Game = struct {
     /// players without silently forgetting the tail.
     ban_ip: [128]u32 = .{0} ** 128,
     ban_n: usize = 0,
-    /// Sparse block durability: absolute BlockValue.damage at (x,y,z).
-    /// This table is the only store of partial block damage, so its cap is a
-    /// documented bound: at max_block_hp_entries the oldest damaged block is
-    /// evicted and its damage reverts (counter + warn-once, not silent).
-    block_hp_key: [max_block_hp_entries]u64 = .{0} ** max_block_hp_entries,
-    block_hp: [max_block_hp_entries]u16 = .{0} ** max_block_hp_entries,
-    block_hp_n: usize = 0,
-    block_hp_evict_warned: bool = false,
     /// Sparse BlockValue.rawData (rotation/meta bits) for door/shape fidelity.
     /// The chunk plane is the source of truth (GAP 13); this cache mirrors the
     /// hot path and its eviction is a cache miss, not content loss.
@@ -1444,11 +1435,11 @@ pub const Game = struct {
         return game_world.groundHeight(self, x, z);
     }
 
-    pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) void {
+    pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) !void {
         return game_world.setBlockHp(self, x, y, z, abs);
     }
 
-    pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) u16 {
+    pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
         return game_world.addBlockDamage(self, x, y, z, dmg);
     }
 

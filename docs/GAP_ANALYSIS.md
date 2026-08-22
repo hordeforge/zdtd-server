@@ -152,9 +152,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 30 | 14 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 19 | 8 | 6 | 33 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue |
 | [Player progression](#10-player-progression) | 13 | 9 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 29 | 13 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map |
+| [World systems](#11-world-systems) | 30 | 12 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3 |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **230** | **65** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **231** | **64** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -300,11 +300,11 @@ area and the concrete work.
     5 quests proven). entitygroups were already flat-arena (no group-count
     cap) and sleeper volumes are 8192. Each raise carries an overflow test
     (300 claims / containers round-trip, 100 workstations, 100 damaged
-    blocks). Residuals: block_hp / block_raw remain FIFO sparse caches (the
-    raw plane is persisted per GAP 13; block durability is recovered from the
-    client's absolute wire damage after an eviction, so the larger table just
-    widens the window - persisting hp to ZCH3/blockmeta is the proper fix),
-    and container/workstation tables are fixed arrays sized at the cap.
+    blocks). Residuals: block_raw remains a FIFO sparse cache (the raw plane
+    is persisted per GAP 13, so its eviction is a cache miss, never a revert);
+    block damage now lives per-chunk in the ZCH3 damage plane (GAP
+    "Player block damage"), and container/workstation tables are fixed arrays
+    sized at the cap.
 
 13. **DONE 2026-08-07.** World: store block rotation in the chunk plane.
     The SetBlock path writes the client's full `BlockValue.rawData` (rotation /
@@ -3305,14 +3305,18 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `asm.il:1095889-1095893`, `asm.il:1239718`, `asm.il:1239773`,
   `asm.il:1240000`, `asm.il:1881963`, `src/wire/stock_entity.zig:121`
 
-- **Player block damage (C2S SetBlock, BlockDamagePlayer, break)** `PARTIAL`
+- **Player block damage (C2S SetBlock, BlockDamagePlayer, break)** `WORKS`
   Reach-gated, land-claim-gated, throttled, scaled by BlockDamagePlayer, broken
   when absolute damage reaches blocks.xml MaxDamage, with an authoritative S2C
-  echo. But the damage store is a 64-entry global FIFO array with a linear scan:
-  the 65th distinct damaged block in the whole world silently evicts the oldest,
-  resetting that block to full HP mid-fight.
-  *Anchors:* `src/server/game.zig:5057-5241`, `:461-463`, `:3268-3283`,
-  `:3235-3245`
+  echo. Damage is stored per-cell in the chunk damage plane (`Chunk.damages`,
+  u16 absolute HP) and persisted by ZCH3, so the old global FIFO cap (64, then
+  1024) is gone: any number of distinct damaged blocks keeps its absolute value
+  mid-fight, survives chunk eviction and restarts, and the chunk wire damage
+  channel reads the plane directly (no store scan per cell).
+  *Anchors:* `src/server/c2s/blocks.zig:63-135`, `src/server/game/world.zig`
+  (`setBlockHp`/`getBlockHp`/`clearBlockHp`), `src/world/store.zig`
+  (`Chunk.damages`, `setDmg`/`dmgAt`), `src/server/game/chunk_fill.zig`
+  (`DmgCtx`)
 
 - **Block repair (ItemActionRepair)** `WORKS`
   Stock repair calls `Block::DamageBlock` with a **negated** repair amount and
@@ -3350,8 +3354,9 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Zombies in chase/attack within 3 blocks chew the cell in front at head height, 10
   damage per 2 Hz bite scaled by BlockDamageAI (AIBM on blood moon), broadcast on
   break. Simplified: a single ray-less cell probe rather than real AI block-target
-  selection, and it shares the same 64-slot damage cap.
-  *Anchors:* `src/server/game.zig:3094-3134`
+  selection (the damage store now shares the exact per-chunk plane as player
+  damage, so no cap or eviction remains).
+  *Anchors:* `src/server/game/tick.zig:246-267`, `:355-376`
 
 - **Block max HP from blocks.xml MaxDamage** `WORKS`
   Resolved per block id from the parsed table with Extends resolution; fails closed
@@ -4076,17 +4081,16 @@ persists so little that a restart visibly damages a built base.
   losing contents silently.
   *Anchors:* `src/world/containers.zig:10-13`, `:111-112`, `:147-181`
 
-- **Block rotation and damage persistence** `WORKS` `(2026-08-21)`
+- **Block rotation and damage persistence** `WORKS` `(2026-08-22)`
   Rotation/meta (`block_raw`, 256) mirrors the chunk raw plane - the chunk is
   the source of truth (GAP 13), so the sparse cache's eviction is a cache miss,
-  never a rotation revert. Partial block damage (`block_hp`) is the only store
-  of damage: 1024 entries (was 64), and eviction at the cap is counted
-  (`block_hp_evictions` counter) and warn-once, never silent. `saveBlockMeta`
-  writes into a buffer sized for the full tables with bounds asserts (the old
-  4096-byte `break` is gone).
-  *Anchors:* `src/server/game.zig` (`max_block_hp_entries`,
-  `max_block_raw_entries`), `src/server/game/world.zig` (`setBlockHp`/`setBlockRaw`),
-  `src/server/game/blockmeta.zig:9-17`
+  never a rotation revert. Partial block damage lives in the chunk damage plane
+  (`damages: ?[]u16` per chunk), persisted by ZCH3 (hdr flag 15), so damage
+  survives eviction, autosave and restart with no global cap and no mid-fight
+  reset; `saveBlockMeta` (ZBM2) persists only the raw mirror now.
+  *Anchors:* `src/world/store.zig` (`Chunk.damages`, `setDmg`/`dmgAt`),
+  `src/server/game/world.zig` (`setBlockHp`/`getBlockHp`/`clearBlockHp`),
+  `src/server/game/blockmeta.zig:9-13`
 
 - **Block rotation in streamed chunks** `WORKS` `(2026-08-21)`
   Stale row (fixed by the chunk raw plane, GAP 13 DONE 2026-08-07): the SetBlock

@@ -1,7 +1,7 @@
 //! Authoritative block world: 16×256×16 columns, DTM heights, ZCH3 disk (.zch).
-//! v3 magic ZCH3: heights + optional u32 rawData + optional texture/density
-//! channels (flags in header). ZCH2 u16 type-only is accepted on load for
-//! heights only (blocks regenerate from DTM+TTS). See ADR 0011.
+//! v3 magic ZCH3: heights + optional u32 rawData + optional texture/density/
+//! damage channels (flags in header). ZCH2 u16 type-only is accepted on load
+//! for heights only (blocks regenerate from DTM+TTS). See ADR 0011.
 
 const std = @import("std");
 const dtm = @import("dtm.zig");
@@ -109,6 +109,10 @@ pub const Chunk = struct {
     /// Per-block density (stock sbyte as u8). Lazy; only cells with dens_set bit.
     densities: ?[]u8 = null,
     dens_set: ?[]u8 = null, // bitset: 1 = densities[i] is valid TTS paint
+    /// Per-block absolute damage (u16 HP; the chunk wire damage channel and the
+    /// C2S SetBlock number line). Lazy; null = no cell damaged. Persisted in
+    /// ZCH3 (hdr flag 15) so damage survives chunk eviction and restarts.
+    damages: ?[]u16 = null,
     /// Per-block stability byte plane (0..15; see world/stability.zig). Lazy
     /// derived state, never persisted: computed once on first touch with
     /// reset + spread semantics (stock ResetStability + DistributeStability).
@@ -154,6 +158,10 @@ pub const Chunk = struct {
             if (self.allocator) |a| a.free(d);
             self.dens_set = null;
         }
+        if (self.damages) |d| {
+            if (self.allocator) |a| a.free(d);
+            self.damages = null;
+        }
         if (self.stability) |s| {
             if (self.allocator) |a| a.free(s);
             self.stability = null;
@@ -174,6 +182,38 @@ pub const Chunk = struct {
         const bit: u8 = @as(u8, 1) << @intCast(idx % 8);
         if (set[idx / 8] & bit == 0) return null;
         return dens[idx];
+    }
+
+    /// Absolute damage (u16) at a cell; 0 when the plane is absent (no cell in
+    /// this chunk is damaged). Read path for the chunk wire damage channel.
+    pub fn dmgAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u16 {
+        if (y < 0 or y >= y_dim) return 0;
+        const d = self.damages orelse return 0;
+        return d[blockIndex(lx, y, lz)];
+    }
+
+    /// Write absolute damage (lazy plane alloc, marks the chunk dirty so ZCH3
+    /// persists it). Init/load/admin + per-edit paths; the wire encoder only
+    /// reads the plane, never allocates.
+    pub fn setDmg(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, abs: u16) !void {
+        if (y < 0 or y >= y_dim) return;
+        const d = self.damages orelse blk: {
+            const p = try allocator.alloc(u16, blocks_per_chunk);
+            @memset(p, 0);
+            self.damages = p;
+            if (self.allocator == null) self.allocator = allocator;
+            break :blk p;
+        };
+        d[blockIndex(lx, y, lz)] = abs;
+        self.dirty = true;
+    }
+
+    /// Clear damage at a cell. No-op when the plane is absent.
+    pub fn clearDmg(self: *Chunk, lx: i32, y: i32, lz: i32) void {
+        if (y < 0 or y >= y_dim) return;
+        const d = self.damages orelse return;
+        d[blockIndex(lx, y, lz)] = 0;
+        self.dirty = true;
     }
 
     /// Stability byte plane (see world/stability.zig); 0 when not computed.
@@ -769,6 +809,12 @@ pub const World = struct {
         return .{ .pos = .{ .x = cx, .z = cz }, .lx = lx, .lz = lz };
     }
 
+    /// Non-materializing resident-chunk lookup (read/write paths: damage, meta).
+    /// Null when the chunk is not resident; callers fall back to defaults.
+    pub fn chunkAt(self: *const World, pos: ChunkPos) ?*Chunk {
+        return self.chunks.getPtr(pos.hash());
+    }
+
     pub fn setBlockWorld(self: *World, x: i32, y: i32, z: i32, id: u16) !void {
         const t = worldToChunk(x, z);
         const c = try self.getOrCreate(t.pos);
@@ -1034,7 +1080,9 @@ pub const World = struct {
 
     /// Serialize one chunk into a fresh `a`-owned buffer (the whole file image).
     /// v3: magic ZCH3 | pos | flags | heights | optional channels.
-    /// flags: [12]=blocks u32, [13]=textures u64, [14]=densities+bitset.
+    /// flags: [12]=blocks u32, [13]=textures u64, [14]=densities+bitset,
+    /// [15]=damages u16 plane (added 2026-08-22; 0 on older v3 files, loaded
+    /// with an absent plane = no damage).
     /// (v2 ZCH2 was u16 type-only; discarded on load so rotation/meta is not lost.)
     /// Callers pass `std.heap.page_allocator`: this runs from parallel workers
     /// and World.allocator is a DebugAllocator/GPA, which is not thread-safe.
@@ -1042,6 +1090,7 @@ pub const World = struct {
         const has_blocks = c.blocks != null;
         const has_textures = c.textures != null;
         const has_densities = c.densities != null and c.dens_set != null;
+        const has_damages = c.damages != null;
         var hdr: [16]u8 = undefined;
         hdr[0] = 'Z';
         hdr[1] = 'C';
@@ -1052,11 +1101,12 @@ pub const World = struct {
         hdr[12] = @intFromBool(has_blocks);
         hdr[13] = @intFromBool(has_textures);
         hdr[14] = @intFromBool(has_densities);
-        hdr[15] = 0;
+        hdr[15] = @intFromBool(has_damages);
         var total: usize = hdr.len + c.heights.len;
         if (has_blocks) total += blocks_per_chunk * @sizeOf(u32);
         if (has_textures) total += blocks_per_chunk * @sizeOf(u64);
         if (has_densities) total += blocks_per_chunk + dens_set_bytes;
+        if (has_damages) total += blocks_per_chunk * @sizeOf(u16);
         const payload = try a.alloc(u8, total);
         errdefer a.free(payload);
         var o: usize = 0;
@@ -1079,6 +1129,11 @@ pub const World = struct {
             o += blocks_per_chunk;
             @memcpy(payload[o..][0..dens_set_bytes], c.dens_set.?[0..dens_set_bytes]);
             o += dens_set_bytes;
+        }
+        if (has_damages) {
+            const bytes = std.mem.sliceAsBytes(c.damages.?);
+            @memcpy(payload[o..][0..bytes.len], bytes);
+            o += bytes.len;
         }
         std.debug.assert(o == total);
         return payload;
@@ -1146,15 +1201,17 @@ pub const World = struct {
             const stored_x = std.mem.readInt(i32, data[4..8], .little);
             const stored_z = std.mem.readInt(i32, data[8..12], .little);
             if (stored_x != c.pos.x or stored_z != c.pos.z) return error.ReadFailed;
-            if (data[12] > 1 or data[13] > 1 or data[14] > 1) return error.ReadFailed;
+            if (data[12] > 1 or data[13] > 1 or data[14] > 1 or data[15] > 1) return error.ReadFailed;
             const has_blocks = data[12] == 1;
-            // hdr[13]/[14] are 0 on pre-paint ZCH3 files (backward compatible).
+            // hdr[13]/[14]/[15] are 0 on pre-paint ZCH3 files (backward compatible).
             const has_textures = data[3] == '3' and data[13] == 1;
             const has_densities = data[3] == '3' and data[14] == 1;
+            const has_damages = data[3] == '3' and data[15] == 1;
             var required: usize = 16 + c.heights.len;
             if (data[3] == '3' and has_blocks) required += blocks_per_chunk * @sizeOf(u32);
             if (has_textures) required += blocks_per_chunk * @sizeOf(u64);
             if (has_densities) required += blocks_per_chunk + dens_set_bytes;
+            if (has_damages) required += blocks_per_chunk * @sizeOf(u16);
             // Validate the complete record before mutating the resident chunk.
             // A torn save must regenerate, never leave a half-loaded plane that
             // suppresses terrain materialization.
@@ -1203,6 +1260,18 @@ pub const World = struct {
                 @memcpy(c.densities.?[0..blocks_per_chunk], data[o..][0..blocks_per_chunk]);
                 o += blocks_per_chunk;
                 @memcpy(c.dens_set.?[0..dens_set_bytes], data[o..][0..dens_set_bytes]);
+                o += dens_set_bytes;
+            }
+            if (has_damages) {
+                const dmg_bytes = blocks_per_chunk * @sizeOf(u16);
+                if (data.len < o + dmg_bytes) return error.ReadFailed;
+                if (c.damages == null) {
+                    const d = try self.allocator.alloc(u16, blocks_per_chunk);
+                    c.damages = d;
+                    c.allocator = self.allocator;
+                }
+                const dest = std.mem.sliceAsBytes(c.damages.?);
+                @memcpy(dest, data[o..][0..dmg_bytes]);
             }
         } else if (data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and data[3] == '1') {
             // v1: 12-byte hdr then heights.
@@ -1484,6 +1553,37 @@ test "paint clear on setBlock and ZCH3 texture density roundtrip" {
     try std.testing.expectEqual(block_dirt, c2.blockAt(1, 10, 2));
     try std.testing.expectEqual(@as(u64, 0x22), c2.texAt(1, 10, 2));
     try std.testing.expectEqual(@as(?u8, 3), c2.densAt(1, 10, 2));
+}
+
+test "ZCH3 damage plane roundtrips and stays per-cell" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const c = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    try c.setDmg(w.allocator, 3, 40, 4, 250);
+    try c.setDmg(w.allocator, 1, 10, 2, 7);
+    try std.testing.expectEqual(@as(u16, 250), c.dmgAt(3, 40, 4));
+    try std.testing.expectEqual(@as(u16, 0), c.dmgAt(5, 5, 5));
+    try w.saveAll();
+
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    const c2 = try w2.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(@as(u16, 250), c2.dmgAt(3, 40, 4));
+    try std.testing.expectEqual(@as(u16, 7), c2.dmgAt(1, 10, 2));
+    try std.testing.expectEqual(@as(u16, 0), c2.dmgAt(5, 5, 5));
+    // Clear persists too: a repaired block must not re-damage after reload.
+    c2.clearDmg(3, 40, 4);
+    try w2.saveAll();
+    var w3 = try World.init(std.testing.allocator, dir);
+    defer w3.deinit();
+    const c3 = try w3.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(@as(u16, 0), c3.dmgAt(3, 40, 4));
+    try std.testing.expectEqual(@as(u16, 7), c3.dmgAt(1, 10, 2));
 }
 
 test "torn or misplaced chunk save cannot partially replace generated state" {

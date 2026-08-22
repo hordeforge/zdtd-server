@@ -4556,7 +4556,7 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
     try std.testing.expect(hp0 > 1);
 
     // --- on_block_damage doubles: 100 proposed -> 200 applied ---
-    const applied = g.addBlockDamage(10, 70, 10, 100);
+    const applied = try g.addBlockDamage(10, 70, 10, 100);
     try std.testing.expectEqual(@as(u16, 200), applied);
 
     // --- on_quest_complete doubles: tier1_clear pays 1000 exp -> 2000 ---

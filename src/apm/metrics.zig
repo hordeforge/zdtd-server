@@ -36,9 +36,6 @@ pub const CounterId = enum(u16) {
     movement_rejects,
     /// C2S dropped by decode validation (NaN/Inf, coord range).
     decode_rejects,
-    /// Sparse block_hp table evicted an entry (partial block damage dropped;
-    /// the cap is a documented bound - see max_block_hp_entries).
-    block_hp_evictions,
     /// P4 inv cause ledger appends (observe / evidence).
     inv_ledger_events,
     /// Privileged commands accepted from admin TCP or the web UI.

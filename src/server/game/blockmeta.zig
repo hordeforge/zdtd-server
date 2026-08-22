@@ -1,4 +1,6 @@
-//! Sparse block meta + damage persist extracted from game.zig.
+//! Sparse block meta persist extracted from game.zig. Partial block damage
+//! moved into the chunk damage plane (ZCH3, GAP "Player block damage"), so
+//! this file persists only the `block_raw` rotation/meta cache mirror.
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -8,18 +10,15 @@ const util_log = @import("../../util/log.zig");
 
 const block_meta_header_len = 4 + @sizeOf(u16);
 const block_raw_record_len = @sizeOf(u64) + @sizeOf(u32);
-const block_hp_count_len = @sizeOf(u16);
-const block_hp_record_len = @sizeOf(u64) + @sizeOf(u16);
 const block_meta_max_len = block_meta_header_len +
-    game_mod.max_block_raw_entries * block_raw_record_len + block_hp_count_len +
-    game_mod.max_block_hp_entries * block_hp_record_len;
+    game_mod.max_block_raw_entries * block_raw_record_len;
 
 pub fn saveBlockMeta(self: *const Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/blockmeta.zbm", .{self.world.world_dir});
     var buf: [block_meta_max_len]u8 = undefined;
     var o: usize = 0;
-    @memcpy(buf[0..4], "ZBM1");
+    @memcpy(buf[0..4], "ZBM2");
     o = 4;
     var raw_ord: [self.block_raw_key.len]u16 = undefined;
     const raw_n = self.block_raw_n;
@@ -38,24 +37,6 @@ pub fn saveBlockMeta(self: *const Game) !void {
         std.mem.writeInt(u32, buf[o + 8 ..][0..4], self.block_raw[idx], .little);
         o += block_raw_record_len;
     }
-    if (o + 2 > buf.len) return error.WriteFailed;
-    var hp_ord: [self.block_hp_key.len]u16 = undefined;
-    const hp_n = self.block_hp_n;
-    var hi: usize = 0;
-    while (hi < hp_n) : (hi += 1) hp_ord[hi] = @intCast(hi);
-    std.mem.sort(u16, hp_ord[0..hp_n], self, struct {
-        fn less(g: *const Game, a: u16, b: u16) bool {
-            return g.block_hp_key[a] < g.block_hp_key[b];
-        }
-    }.less);
-    std.mem.writeInt(u16, buf[o..][0..2], @intCast(hp_n), .little);
-    o += 2;
-    for (hp_ord[0..hp_n]) |idx| {
-        std.debug.assert(o + block_hp_record_len <= buf.len);
-        std.mem.writeInt(u64, buf[o..][0..8], self.block_hp_key[idx], .little);
-        std.mem.writeInt(u16, buf[o + 8 ..][0..2], self.block_hp[idx], .little);
-        o += block_hp_record_len;
-    }
     try io_fs.writeFile(p, buf[0..o]);
 }
 
@@ -67,7 +48,10 @@ pub fn loadBlockMeta(self: *Game) !void {
         else => return err,
     };
     defer self.allocator.free(data);
-    if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZBM1")) return error.ReadFailed;
+    if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZBM2")) {
+        if (std.mem.eql(u8, data[0..4], "ZBM1")) return; // pre-damage-plane: HP lived here
+        return error.ReadFailed;
+    }
     var o: usize = 4;
     const rn = std.mem.readInt(u16, data[o..][0..2], .little);
     o += 2;
@@ -82,18 +66,6 @@ pub fn loadBlockMeta(self: *Game) !void {
             self.block_raw[i] = std.mem.readInt(u32, data[o + 8 ..][0..4], .little);
         }
         o += 12;
-    }
-    if (o + 2 > data.len) return error.ReadFailed;
-    const hn = std.mem.readInt(u16, data[o..][0..2], .little);
-    o += 2;
-    if (o + @as(usize, hn) * 10 > data.len) return error.ReadFailed;
-    self.block_hp_n = @min(@as(usize, hn), self.block_hp_key.len);
-    for (0..hn) |i| {
-        if (i < self.block_hp_n) {
-            self.block_hp_key[i] = std.mem.readInt(u64, data[o..][0..8], .little);
-            self.block_hp[i] = std.mem.readInt(u16, data[o + 8 ..][0..2], .little);
-        }
-        o += 10;
     }
 }
 
@@ -126,7 +98,7 @@ pub fn restoreWeather(self: *Game) void {
 }
 
 test "block metadata buffer holds both stores at capacity" {
-    // 6 header + 256 raw records (u64 key + u32 raw) + 2 count +
-    // 1024 hp records (u64 key + u16 hp).
-    try std.testing.expectEqual(@as(usize, 13320), block_meta_max_len);
+    // 6 header + 256 raw records (u64 key + u32 raw). The HP section moved to
+    // the chunk damage plane (ZCH3) and is no longer part of this file.
+    try std.testing.expectEqual(@as(usize, 3078), block_meta_max_len);
 }
