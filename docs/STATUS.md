@@ -5,8 +5,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 42 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 252 `WORKS`,
-43 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 333 features: 253 `WORKS`,
+42 `PARTIAL`, 38 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 
 This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
@@ -476,6 +476,13 @@ and would misread stock traffic), and the Guid registry path stays unpinned
 RE - the player's own transactions accept without key validation, the same
 client-trust model as the C2S PlayerInventory push. Scenario pins the apply
 + ack. Items 20/7/6 -> **21/6/6**; total **252/43/38**.
+Then the NPCQuestList offering row went WORKS on re-audit: trader entities
+replicate (the client's ProcessPackage resolves the npc id as EntityTrader,
+so the old "no trader entity on the client" premise is stale), and the
+exchange is complete - FetchList answers with the trader's quest_list,
+RemoveQuest accepts the picked offer into the journal with the giver
+position and re-sends the list without it. Traders 19/1/3 ->
+**20/0/3**; total **253/42/38**.
 The dashboard
 (docs/provenance.html) is synced.
 

@@ -146,7 +146,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 31 | 0 | 1 | 32 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete |
-| [Traders](#5-traders) | 19 | 1 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers, turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
+| [Traders](#5-traders) | 20 | 0 | 3 | 23 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 3 | 26 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 24 | 6 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 32 | 12 | 4 | 48 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
@@ -154,7 +154,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 17 | 5 | 15 | 37 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 31 | 11 | 6 | 48 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 55 | 1 | 0 | 56 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **252** | **43** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **253** | **42** | **38** | **333** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1207,16 +1207,18 @@ parsed, and quest offering is unwired.
   (Class/TraderID + Extends), `asm.il:440486` (`TileEntityVendingMachine::write`),
   `Data/Config/blocks.xml:51104`, `Data/Config/traders.xml:1472`
 
-- **Quest offering via NetPackageNPCQuestList** `PARTIAL`
-  The reply is legal (base direction Both) and the bodies are right, but the
-  client's `ProcessPackage` resolves the npc id with `GetEntity(id) as
-  EntityTrader` before doing anything, and zdtd has no trader entity on the
-  client, so the offers are silently discarded. The list id per trader is no
-  longer hardcoded: npc.xml is parsed and drives each trader's quest_list via
-  its trader_info id (fallback is the stock class-hash map).
-  *Anchors:* `src/server/game.zig:6434-6462`, `:5345`, `:5364`, `:5383`,
-  `src/assets/npc.zig`, `asm.il:827745-827765`, `asm.il:804011-804018`,
-  `Data/Config/npc.xml:19-31`
+- **Quest offering via NetPackageNPCQuestList** `WORKS` `(2026-08-22 re-audit)`
+  The reply is legal (base direction Both) and the bodies are right; the
+  trader entities replicate (replicate.zig kind-groups + trader data), so the
+  client's ProcessPackage `GetEntity(id) as EntityTrader` resolves and the
+  offers land - the "no trader entity on the client" premise is stale. The
+  exchange is complete: FetchList answers with the trader's quest_list (npc.xml
+  per trader_info id, fallback class-hash map), RemoveQuest accepts the picked
+  offer into the journal (tier-filtered, giver position = the offering trader)
+  and re-sends the list without it. Scenario `trader-quest-open` drives the
+  open → accept → turn-in loop.
+  *Anchors:* `src/server/c2s/quest.zig:250-330`, `src/server/game/replicate.zig:80-155`,
+  `src/assets/npc.zig`, `asm.il:827745-827765`
 
 - **Quest turn-in / phase advance on trader open** `WORKS` `(2026-08-22)`
   `questOnTraderOpen` advances trader_interact phases and completes
