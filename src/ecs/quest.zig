@@ -304,6 +304,11 @@ pub const QuestDef = struct {
     /// fires server-side on phase entry; the rest are recorded for the client.
     actions: [max_actions]QuestActionSpec = [_]QuestActionSpec{.{}} ** max_actions,
     action_n: u8 = 0,
+    /// Parsed `<event>` blocks (stock QuestClass events; only
+    /// TreasureRadiusReduction exists in the stock file). The client triggers
+    /// them mid-quest; the server rolls chance and fires the nested spawn.
+    events: [max_quest_events]QuestEventSpec = [_]QuestEventSpec{.{}} ** max_quest_events,
+    event_n: u8 = 0,
     /// Ordered phase graph (index i == phase i+1). Empty = legacy single-kind path
     /// keyed on `kind`/`target_count`. Grounded in Quest.AdvancePhase (asm.il 982816).
     phases: []const PhaseSpec = &.{},
@@ -404,6 +409,22 @@ pub const QuestActionSpec = struct {
     count_min: u8 = 1,
     count_max: u8 = 1,
 };
+
+/// A quest `<event>` block (stock QuestClass events): the client triggers it
+/// mid-quest (e.g. TreasureRadiusReduction on each treasure dig step) and the
+/// server rolls the event's `chance` and fires the nested actions. Stock
+/// quests.xml uses only TreasureRadiusReduction with a SpawnGSEnemy action.
+pub const QuestEventSpec = struct {
+    /// Stock `chance` (0..1) the event fires per trigger; 0 = always.
+    chance: f32 = 0,
+    /// The nested SpawnGSEnemy action (gamestage list + count range); empty =
+    /// no spawn (the event only relays).
+    spawn_list: []const u8 = "",
+    spawn_min: u8 = 1,
+    spawn_max: u8 = 1,
+};
+
+pub const max_quest_events: usize = 4;
 
 pub const QuestList = struct {
     id: []const u8,

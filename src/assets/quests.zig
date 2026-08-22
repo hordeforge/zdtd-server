@@ -72,6 +72,47 @@ fn objectiveElementEnd(body: []const u8, oi: usize) usize {
 /// Resolve an objective's 1-based phase: `phase="N"` attribute or nested
 /// `<property name="phase" value="N"/>`. Missing phase defaults to 1
 /// (BaseObjective keeps Phase 0 = always-active; we approximate as phase 1).
+/// Parse `<event type="...">` blocks (stock QuestClass events). Only
+/// TreasureRadiusReduction exists in the stock file: a `chance` (0..1) and a
+/// nested SpawnGSEnemy action (gamestage list + count range). The client
+/// triggers the event mid-quest (treasure dig steps); the server rolls chance
+/// and fires the spawn.
+fn parseQuestEvents(arena: std.mem.Allocator, body: []const u8, out: *[quest.max_quest_events]quest.QuestEventSpec) u8 {
+    var n: u8 = 0;
+    var i: usize = 0;
+    while (i < body.len and n < quest.max_quest_events) {
+        const at = std.mem.findPos(u8, body, i, "<event") orelse break;
+        const gt = std.mem.findPos(u8, body, at, ">") orelse break;
+        const close = std.mem.findPos(u8, body, gt, "</event>") orelse break;
+        const inner = body[gt + 1 .. close];
+        const typ = xml.attr(body, at, "type") orelse "";
+        if (std.mem.eql(u8, typ, "TreasureRadiusReduction")) {
+            var spec: quest.QuestEventSpec = .{};
+            if (xml.propertyValue(inner, "chance")) |ch| {
+                spec.chance = std.fmt.parseFloat(f32, ch) catch 0;
+            }
+            // Nested SpawnGSEnemy action (the only action the stock event has).
+            if (xml.propertyValue(inner, "gamestage_list")) |g| {
+                spec.spawn_list = arena.dupe(u8, g) catch "";
+            }
+            if (xml.propertyValue(inner, "count")) |c| {
+                if (std.mem.findScalar(u8, c, '-')) |dash| {
+                    spec.spawn_min = xml.parseU8(c[0..dash]) orelse 1;
+                    spec.spawn_max = xml.parseU8(c[dash + 1 ..]) orelse spec.spawn_min;
+                } else {
+                    spec.spawn_min = xml.parseU8(c) orelse 1;
+                    spec.spawn_max = spec.spawn_min;
+                }
+                if (spec.spawn_max < spec.spawn_min) spec.spawn_max = spec.spawn_min;
+            }
+            out[n] = spec;
+            n += 1;
+        }
+        i = close + "</event>".len;
+    }
+    return n;
+}
+
 fn objectivePhase(body: []const u8, oi: usize, elem_end: usize) u8 {
     if (xml.attr(body, oi, "phase")) |a| {
         if (xml.parseU8(a)) |p| if (p != 0) return p;
@@ -443,6 +484,8 @@ fn parseQuestDefBody(
     const rew_count = parseRewardKinds(arena, body, &reward_has_item, &reward_specs);
     var action_specs: [quest.max_actions]quest.QuestActionSpec = [_]quest.QuestActionSpec{.{}} ** quest.max_actions;
     const act_count = parseActions(arena, body, &action_specs);
+    var event_specs: [quest.max_quest_events]quest.QuestEventSpec = [_]quest.QuestEventSpec{.{}} ** quest.max_quest_events;
+    const ev_count = parseQuestEvents(arena, body, &event_specs);
 
     const graph = try buildPhaseGraph(arena, body, tier, kinds, policy);
     const meta = try scanObjectiveMeta(arena, body);
@@ -472,6 +515,8 @@ fn parseQuestDefBody(
         .reward_n = rew_count,
         .actions = action_specs,
         .action_n = act_count,
+        .events = event_specs,
+        .event_n = ev_count,
         .phases = graph.phases,
         .highest_phase = graph.highest_phase,
         .objective_phases = graph.objective_phases,
@@ -1484,4 +1529,46 @@ test "SpawnGSEnemy action parses count range and gamestage list" {
     // A bare count means exactly that many.
     try std.testing.expectEqual(@as(u8, 3), specs[1].count_min);
     try std.testing.expectEqual(@as(u8, 3), specs[1].count_max);
+}
+
+test "TreasureRadiusReduction event parses chance, gamestage list and count range" {
+    // Stock block (quests.xml: chance 0.25, 1-3 SleeperGSList, mirroring the
+    // tier1_buried_supplies treasure dig) plus an unknown event type that must
+    // be skipped and a second radius event with a bare count (no chance = 0 =
+    // always fires).
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const body =
+        \\<quest id="q">
+        \\  <event type="TreasureRadiusReduction">
+        \\    <property name="chance" value="0.25"/>
+        \\    <action type="SpawnGSEnemy">
+        \\      <property name="gamestage_list" value="SleeperGSList"/>
+        \\      <property name="count" value="1-3"/>
+        \\    </action>
+        \\  </event>
+        \\  <event type="SomeFutureEvent">
+        \\    <property name="chance" value="1"/>
+        \\  </event>
+        \\  <event type="TreasureRadiusReduction">
+        \\    <action type="SpawnGSEnemy">
+        \\      <property name="gamestage_list" value="ZombieWastelandGS"/>
+        \\      <property name="count" value="2"/>
+        \\    </action>
+        \\  </event>
+        \\</quest>
+    ;
+    var specs: [quest.max_quest_events]quest.QuestEventSpec = undefined;
+    const n = parseQuestEvents(arena, body, &specs);
+    try std.testing.expectEqual(@as(u8, 2), n); // unknown type skipped
+    try std.testing.expectEqual(@as(f32, 0.25), specs[0].chance);
+    try std.testing.expectEqualStrings("SleeperGSList", specs[0].spawn_list);
+    try std.testing.expectEqual(@as(u8, 1), specs[0].spawn_min);
+    try std.testing.expectEqual(@as(u8, 3), specs[0].spawn_max);
+    // No chance attribute → 0 = always fires.
+    try std.testing.expectEqual(@as(f32, 0), specs[1].chance);
+    try std.testing.expectEqualStrings("ZombieWastelandGS", specs[1].spawn_list);
+    try std.testing.expectEqual(@as(u8, 2), specs[1].spawn_min);
+    try std.testing.expectEqual(@as(u8, 2), specs[1].spawn_max);
 }

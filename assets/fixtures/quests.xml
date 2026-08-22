@@ -32,6 +32,13 @@
     <property name="item_count" value="1"/>
   </objective>
   <objective type="ReturnToNPC" phase="4"/>
+  <event type="TreasureRadiusReduction">
+    <property name="chance" value="1"/>
+    <action type="SpawnGSEnemy">
+      <property name="gamestage_list" value="SleeperGSList"/>
+      <property name="count" value="1-3"/>
+    </action>
+  </event>
   <reward type="Exp" value="400"/>
 </quest>
 

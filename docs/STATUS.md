@@ -133,6 +133,15 @@ placement 12-24 m; count range parsed from the action's `count` property);
 SetCVar/ShowMessageWindow stay recorded-unfired as stock runs them on the
 owning client, and GameEvent actions have no stock quest uses. Counts
 unchanged (the action row was outside the scored set).
+Then the treasure-dig ambush fired: `treasure_radius_break` (each buried-
+supplies radius step) rolls the quest's TreasureRadiusReduction event chance
+and spawns the nested SpawnGSEnemy ambush around the player, deterministic
+per (world time, quest code); the event block is parsed from quests.xml
+(stock: chance 0.25, 1-3 SleeperGSList on tier1_buried_supplies), so new
+event types need no code, and the spawn reuses the phase-entry gamestage
+hook. The row stays PARTIAL with a RE-blocked note (the event-type-0 server
+path is only pinned as party-fan + distance-15 HandlePlayer, not the ambush
+dispatch). Counts unchanged (the row was outside the scored set).
 Then the Net/ops MISSING admin verbs went WORKS: `getoptions` (all known
 serverconfig names with current values, GameStats-backed prefs preferred),
 `exportcurrentconfigs` (`<world_dir>/exported_config.txt`),

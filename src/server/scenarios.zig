@@ -4704,6 +4704,78 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     std.debug.print("PASS all-quest-kinds: kill/goto/fetch/trader/craft/stay/block/rally completed, coins +{d}\n", .{g.sim.wallet[ps].coins - coins0});
 }
 
+test "scenario treasure radius break fires the quest TreasureRadiusReduction ambush" {
+    // GAP quest-events row: the client's NetPackageQuestObjectiveUpdate
+    // treasure_radius_break (each buried-supplies dig radius step) triggers
+    // the quest's TreasureRadiusReduction event: stock rolls its `chance`
+    // and fires the nested SpawnGSEnemy ambush around the player
+    // (stock quests.xml: chance 0.25, 1-3 SleeperGSList; the fixture pins
+    // chance=1 so the roll always fires). The event must NOT advance a phase.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Spy on the Game spawn hook (same shape as the phase-entry SpawnGSEnemy).
+    const Call = struct { fired: bool = false, list: []const u8 = "", min: u8 = 0, max: u8 = 0, px: f32 = 0, pz: f32 = 0 };
+    var call = Call{};
+    const spy = struct {
+        fn f(ctx: ?*anyopaque, _: quest_mod_components.PoiRect, list: []const u8, min: u8, max: u8, px: f32, pz: f32) void {
+            const c: *Call = @ptrCast(@alignCast(ctx.?));
+            c.fired = true;
+            c.list = list;
+            c.min = min;
+            c.max = max;
+            c.px = px;
+            c.pz = pz;
+        }
+    }.f;
+    g.sim.quest_spawn_ctx = &call;
+    g.sim.quest_spawn_fn = spy;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // Anchor the player somewhere observable; the ambush spawns around it.
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.transform[ps].x = 42;
+    g.sim.transform[ps].z = 33;
+
+    const d = g.sim.catalog.byName("tier1_fetch") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(systems.questAccept(&g.sim, c.slot, d.id));
+    const fq = systems.questFindActive(&g.sim, c.slot, d.id).?;
+
+    var body: [64]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    const ub = try packages.buildQuestObjectiveUpdate(&body, .{
+        .sender_entity_id = c.entity_id,
+        .quest_code = fq.quest_code,
+        .event_type = .treasure_radius_break,
+    });
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", ub));
+
+    try std.testing.expect(call.fired);
+    try std.testing.expectEqualStrings("SleeperGSList", call.list);
+    try std.testing.expectEqual(@as(u8, 1), call.min);
+    try std.testing.expectEqual(@as(u8, 3), call.max);
+    // Ambush anchors on the player's current position.
+    try std.testing.expectEqual(@as(f32, 42), call.px);
+    try std.testing.expectEqual(@as(f32, 33), call.pz);
+    // The event is an ambush, not a phase advance: quest stays active.
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, d.id));
+    std.debug.print("PASS treasure-radius-break: TreasureRadiusReduction ambush fired 1-3 SleeperGSList at ({d},{d})\n", .{ call.px, call.pz });
+}
+
 test "scenario every stock quest def completes (99-def sweep over real quests.xml)" {
     // Load the real dedicated-server quests.xml and drive EVERY def to
     // completion: accept, then apply each phase kind's real trigger until the

@@ -740,11 +740,15 @@ not a sleeper-volume clear), not completion blockers.
   is real work, no longer auto scaffolding; scenario `block-obj` proves the phase
   waits for the event and advances on it). 2026-08-19: `treasure_complete` now
   advances the fetch phase, so treasure/fetch quests reach turn-in through their
-  real event (the kill-loot hack is gone); `treasure_radius_break` is
-  mid-dig progress and stays recorded-not-applied. Matching the client's
-  treasure dig to the server journal phase still needs the same quest-sync RE
-  as the S2C row.
-  *Anchors:* `src/server/c2s/quest.zig`, `src/wire/packages.zig:2742`
+  real event (the kill-loot hack is gone). 2026-08-22: `treasure_radius_break`
+  now fires the quest's TreasureRadiusReduction event: the server rolls the
+  parsed `chance` and spawns the nested SpawnGSEnemy ambush around the player
+  (stock quests.xml: chance 0.25, 1-3 SleeperGSList on tier1_buried_supplies),
+  deterministic per (world time, quest code); scenario `treasure-radius-break`.
+  Open: the event-type-0 server path is documented as party-fan + distance-15
+  HandlePlayer, so whether stock fires the radius-reduction ambush server-side
+  with these chance semantics needs IL (RE-blocked note, not faked).
+  *Anchors:* `src/server/c2s/quest.zig`, `src/wire/packages.zig:3350`
 
 - **S2C quest progress updates during a session** `WORKS` `(2026-08-22)`
   The client owns its quest object: it reports its own objective events via

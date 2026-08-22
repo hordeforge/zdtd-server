@@ -16,6 +16,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Treasure-dig ambushes now fire like stock: each `treasure_radius_break`
+  objective update rolls the quest's TreasureRadiusReduction event `chance`
+  (quests.xml: 0.25) and spawns the nested SpawnGSEnemy ambush (1-3
+  SleeperGSList) around the player. The event block is parsed from the quest
+  data (not hardcoded), the roll is deterministic per (world time, quest
+  code), and the spawn reuses the phase-entry gamestage spawn hook.
 - Loot container group rolls are prob-weighted like stock: an entry's
   stage-resolved prob is its weight relative to the group sum (a 0.9 item
   drops ~9x as often as a 0.1 one, zero-prob entries never drop), replacing

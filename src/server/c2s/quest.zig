@@ -14,6 +14,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
+const rng_util = @import("../../util/rng.zig");
 const c2s_text = @import("../c2s_text.zig");
 const replicate_te = @import("../replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
@@ -205,13 +206,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // phase; treasure_complete advances the fetch phase (the client dug
         // the chest / finished the fetch), so a treasure/fetch quest reaches
         // turn-in through its real event instead of the old kill-loot hack.
-        // treasure_radius_break is mid-dig progress — recorded, not applied.
+        // treasure_radius_break is mid-dig progress: the client shrank the
+        // dig radius, which triggers the quest's TreasureRadiusReduction
+        // event: roll its chance and fire the nested SpawnGSEnemy ambush
+        // (stock QuestClass TreasureRadiusReduction event; quests.xml
+        // `chance 0.25` with 1-3 SleeperGSList enemies per radius step).
         // Also accept legacy zdtd-native {def_id u16, op u8} for unit fixtures.
         if (packages.parseQuestObjectiveUpdate(body)) |u| {
             switch (u.event_type) {
                 .block_activated => _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .block_activate),
                 .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .fetch_item),
-                .treasure_radius_break => {},
+                .treasure_radius_break => questTreasureRadiusBreak(self, c.slot, u.quest_code),
             }
             // Stock mirrors the objective event to the sender's party
             // (NetPackageQuestObjectiveUpdate.ProcessPackage IL=180: the
@@ -432,4 +437,38 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     return false;
+}
+
+/// TreasureRadiusReduction quest event (stock QuestClass events): each
+/// treasure-dig radius step the client reports (`treasure_radius_break`)
+/// rolls the quest's event `chance` and fires the nested SpawnGSEnemy ambush
+/// around the player (quests.xml: chance 0.25, 1-3 SleeperGSList enemies).
+/// Deterministic per (world time, quest code, step); the Game spawn hook owns
+/// the gamestage resolution.
+fn questTreasureRadiusBreak(self: *Game, peer_slot: usize, quest_code: i32) void {
+    const s = systems.questFindByCode(&self.sim, peer_slot, quest_code) orelse return;
+    const d = self.sim.catalog.byId(s.def_id) orelse return;
+    var i: usize = 0;
+    while (i < @min(@as(usize, d.event_n), ecs.quest.max_quest_events)) : (i += 1) {
+        const ev = d.events[i];
+        if (ev.spawn_list.len == 0) continue;
+        var rng = rng_util.XorShift32.initFromNetId(
+            @bitCast(@as(u32, @truncate(self.sim.director.clock.worldTimeBits())) ^ @as(u32, @bitCast(quest_code))),
+        );
+        const roll = @as(f32, @floatFromInt(rng.nextBounded(1000))) / 1000.0;
+        if (ev.chance > 0 and roll >= ev.chance) continue;
+        if (self.sim.quest_spawn_fn) |f| {
+            const ps = self.sim.playerByPeer(peer_slot) orelse return;
+            f(
+                self.sim.quest_spawn_ctx,
+                s.poi,
+                ev.spawn_list,
+                ev.spawn_min,
+                ev.spawn_max,
+                self.sim.transform[ps].x,
+                self.sim.transform[ps].z,
+            );
+        }
+        return; // one event fires per radius step
+    }
 }
