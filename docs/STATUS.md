@@ -516,6 +516,14 @@ keeps wounds instead of granting a free full heal; v2-7 records migrate with
 a -1 sentinel that leaves the spawn path's full health in place. Round-trip +
 v7->v8 migration tests; the vitals-persistence row stays PARTIAL for the join
 hasEntityStats block.
+Then the land-claim knobs went config-driven: LandClaimCount (3),
+LandClaimDeadZone (60), LandClaimOfflineDelay (3) and LandClaimDecayMode (0)
+parse from serverconfig with stock defaults and feed the GameStats blob the
+client displays; Count and DeadZone are enforced at claim registration
+(claimAllowed refuses claims past the owner's count or inside another
+claim's dead zone; test land claim count and dead-zone gates). The
+DecayMode/OfflineDelay keystone-damage rate stays RE-blocked (not documented
+in 7dtd-research), so the row remains PARTIAL.
 Then players.zsv went ZPV9: the progression tail now carries the game-stage
 born world time, so days-alive (and the gamestage the client reads) survives
 a server restart instead of snapping to the level cap; v2-8 records migrate

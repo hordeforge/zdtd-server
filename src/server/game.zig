@@ -331,6 +331,10 @@ pub const Game = struct {
     land_claim_online_dur: u16 = 4,
     land_claim_offline_dur: u16 = 4,
     land_claim_expiry_days: u16 = 3,
+    land_claim_count: u16 = 3,
+    land_claim_dead_zone: u16 = 60,
+    land_claim_offline_delay: u16 = 3,
+    land_claim_decay_mode: u8 = 0,
     /// LootRespawnDays: world containers re-roll loot this many in-game days
     /// after being touched (0 disables; echoed in the GameStats blob).
     loot_respawn_days: u16 = 7,
@@ -570,6 +574,10 @@ pub const Game = struct {
             .land_claim_online_dur = opts.land_claim_online_durability_modifier,
             .land_claim_offline_dur = opts.land_claim_offline_durability_modifier,
             .land_claim_expiry_days = opts.land_claim_expiry_days,
+            .land_claim_count = opts.land_claim_count,
+            .land_claim_dead_zone = opts.land_claim_dead_zone,
+            .land_claim_offline_delay = opts.land_claim_offline_delay,
+            .land_claim_decay_mode = opts.land_claim_decay_mode,
             .loot_respawn_days = opts.loot_respawn_days,
             .air_drop_interval_hours = opts.air_drop_frequency,
             .authority_mode = opts.authority_mode,
@@ -1340,6 +1348,10 @@ pub const Game = struct {
 
     pub fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) void {
         return game_world.registerClaim(self, x, y, z, owner_entity);
+    }
+
+    pub fn claimAllowed(self: *Game, owner_entity: i32, x: i32, y: i32, z: i32) bool {
+        return game_world.claimAllowed(self, owner_entity, x, y, z);
     }
 
     pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
@@ -2157,6 +2169,10 @@ pub const Game = struct {
             .land_claim_offline_dur = self.land_claim_offline_dur,
             .loot_respawn_days = self.loot_respawn_days,
             .land_claim_expiry_time = self.land_claim_expiry_days,
+            .land_claim_count = self.land_claim_count,
+            .land_claim_dead_zone = self.land_claim_dead_zone,
+            .land_claim_decay_mode = self.land_claim_decay_mode,
+            .land_claim_offline_delay = self.land_claim_offline_delay,
             // Stock GameStat.AirDropFrequency is in DAYS (default 3/3 days;
             // aidirector.md airdrop schedule); the config key + sim interval
             // are in game hours (config.zig), so convert for the wire.

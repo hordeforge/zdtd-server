@@ -105,6 +105,10 @@ pub const Config = struct {
     land_claim_online_durability_modifier: u16 = 4, // LandClaimOnlineDurabilityModifier
     land_claim_offline_durability_modifier: u16 = 4, // LandClaimOfflineDurabilityModifier
     land_claim_expiry_days: u16 = 3, // LandClaimExpiryDays (0 = never)
+    land_claim_count: u16 = 3, // LandClaimCount (max claims per player)
+    land_claim_dead_zone: u16 = 60, // LandClaimDeadZone (min blocks between claims)
+    land_claim_offline_delay: u16 = 3, // LandClaimOfflineDelay (decay grace days)
+    land_claim_decay_mode: u8 = 0, // LandClaimDecayMode (0 = none, stock default)
     loot_respawn_days: u16 = 7, // LootRespawnDays (0 = never respawn)
 
     /// Owned storage when loaded from file.
@@ -487,6 +491,14 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
         cfg.land_claim_offline_durability_modifier = clampRangeNamed("LandClaimOfflineDurabilityModifier", v, 0, 64, cfg.land_claim_offline_durability_modifier);
     if (prop(raw, "LandClaimExpiryDays")) |v|
         cfg.land_claim_expiry_days = clampRangeNamed("LandClaimExpiryDays", v, 0, 365, cfg.land_claim_expiry_days);
+    if (prop(raw, "LandClaimCount")) |v|
+        cfg.land_claim_count = clampRangeNamed("LandClaimCount", v, 0, 64, cfg.land_claim_count);
+    if (prop(raw, "LandClaimDeadZone")) |v|
+        cfg.land_claim_dead_zone = clampRangeNamed("LandClaimDeadZone", v, 0, 4096, cfg.land_claim_dead_zone);
+    if (prop(raw, "LandClaimOfflineDelay")) |v|
+        cfg.land_claim_offline_delay = clampRangeNamed("LandClaimOfflineDelay", v, 0, 365, cfg.land_claim_offline_delay);
+    if (prop(raw, "LandClaimDecayMode")) |v|
+        cfg.land_claim_decay_mode = clampU8Named("LandClaimDecayMode", v, 0, 2, cfg.land_claim_decay_mode);
     if (prop(raw, "LootRespawnDays")) |v|
         cfg.loot_respawn_days = clampRangeNamed("LootRespawnDays", v, 0, 365, cfg.loot_respawn_days);
     if (prop(raw, "ZdtdAuthorityMode")) |v| {

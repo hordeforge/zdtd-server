@@ -3530,9 +3530,16 @@ persistence and the HUD day counter each have specific, noticeable gaps.
 - **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `PARTIAL`
   ExpiryTime is enforced (`expireClaims` on the day roll, offline only); the other
   four (claim Count, DeadZone, DecayMode, OfflineDelay) are written into the
-  GameStats blob so the client displays them, but are not enforced.
+  GameStats blob so the client displays them. `(2026-08-22)` all four parse from
+  serverconfig with stock defaults (Count 3, DeadZone 60, OfflineDelay 3,
+  DecayMode 0) and feed the blob; Count and DeadZone are now enforced at
+  registration (`claimAllowed`: refuse claims past the owner's count or inside
+  another claim's dead zone; test `land claim count and dead-zone gates`).
+  Residual: the DecayMode/OfflineDelay keystone-damage rate is not documented
+  in 7dtd-research (RE-blocked), so offline decay beyond expiry is not modeled.
   *Anchors:* `src/wire/packages.zig:1916-1920`, `:1984-1991`,
-  `src/server/game.zig` expireClaims
+  `src/server/game/world.zig` claimAllowed + expireClaims,
+  `src/server/c2s/blocks.zig:157` (placement gate), `src/server/config.zig`
 
 - **Land claim owner_online tracking** `WORKS`
   `markClaimsForEntity` sets `owner_online` false on disconnect and true on join,

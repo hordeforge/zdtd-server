@@ -24,6 +24,28 @@ fn blockDamageVerdict(self: *Game, x: i32, y: i32, z: i32, dmg: i32) i32 {
 }
 
 /// Register (or replace) a land claim owned by `owner_entity` at a keystone.
+/// Stock placement gates (LandClaimCount / LandClaimDeadZone): a new claim is
+/// allowed only when the owner is under the claim count and the keystone is
+/// outside the dead zone of every existing claim. Enforcement is refusal to
+/// register (the block may still place; the client's own count check usually
+/// stops the placement first). DecayMode/OfflineDelay decay amounts stay
+/// RE-blocked (GAP row "Land claim rules").
+pub fn claimAllowed(self: *Game, owner_entity: i32, x: i32, y: i32, z: i32) bool {
+    _ = y; // keystone y does not participate in the 2D dead-zone check
+    const dz = self.land_claim_dead_zone;
+    var owner_claims: u16 = 0;
+    for (self.land_claims[0..self.land_claims_n]) |claim| {
+        if (claim.owner_entity == owner_entity) owner_claims += 1;
+        if (dz > 0) {
+            const dx: i64 = @as(i64, x) - claim.x;
+            const ddz: i64 = @as(i64, z) - claim.z;
+            if (dx * dx + ddz * ddz < @as(i64, dz) * @as(i64, dz)) return false;
+        }
+    }
+    if (self.land_claim_count > 0 and owner_claims >= self.land_claim_count) return false;
+    return true;
+}
+
 pub fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) void {
     // Capture the stable owner key (login name) so the claim survives a
     // restart; entity ids are reassigned and cannot be persisted.

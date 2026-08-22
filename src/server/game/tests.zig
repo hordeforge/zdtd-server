@@ -899,6 +899,47 @@ test "land claim removed when keystone breaks and expires offline" {
     try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
 }
 
+test "land claim count and dead-zone gates refuse over-limit and adjacent claims" {
+    // Stock LandClaimCount / LandClaimDeadZone: a claim past the owner's
+    // count or inside another claim's dead zone is not registered.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    g.land_claim_count = 2;
+    g.land_claim_dead_zone = 60;
+    // First claim: allowed.
+    try std.testing.expect(g.claimAllowed(cl.entity_id, 100, 70, 100));
+    g.registerClaim(100, 70, 100, cl.entity_id);
+    // Second, far away: allowed (under the count, outside the dead zone).
+    try std.testing.expect(g.claimAllowed(cl.entity_id, 400, 70, 400));
+    g.registerClaim(400, 70, 400, cl.entity_id);
+    try std.testing.expectEqual(@as(usize, 2), g.land_claims_n);
+    // Over the count: refused.
+    try std.testing.expect(!g.claimAllowed(cl.entity_id, 700, 70, 700));
+    // Inside the dead zone of claim (100,100): refused.
+    try std.testing.expect(!g.claimAllowed(cl.entity_id, 130, 70, 100));
+    // A different owner is not counted against this one.
+    g.registerClaim(700, 70, 700, cl.entity_id + 1000);
+    try std.testing.expectEqual(@as(usize, 3), g.land_claims_n);
+    // With count headroom, a far claim passes the dead-zone gate.
+    g.land_claim_count = 5;
+    try std.testing.expect(g.claimAllowed(cl.entity_id, 900, 70, 900));
+    // Dead zone 0 disables the adjacency check.
+    g.land_claim_dead_zone = 0;
+    try std.testing.expect(g.claimAllowed(cl.entity_id, 105, 70, 105));
+    // Count 0 disables the count check.
+    g.land_claim_count = 0;
+    try std.testing.expect(g.claimAllowed(cl.entity_id, 105, 70, 105));
+}
+
 test "land claims hold past the old 256 cap and survive restart (GAP 12)" {
     // The claim table was 256: the 257th register silently vanished. Now 1024;
     // register 300 and prove the save/restart round trip keeps every claim.

@@ -154,7 +154,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 mutated = true;
             }
             if (place_id != 0 and self.landClaimBlockId() == place_id) {
-                self.registerClaim(b.x, b.y, b.z, editor_ent);
+                // Stock LandClaimCount / LandClaimDeadZone gates: refuse to
+                // register a claim past the owner's count or inside another
+                // claim's dead zone (the client's own count check usually
+                // stops the placement first).
+                if (self.claimAllowed(editor_ent, b.x, b.y, b.z)) {
+                    self.registerClaim(b.x, b.y, b.z, editor_ent);
+                }
             }
             const place_raw: u32 = if (b.raw != 0 and (b.raw & 0xffff) == place_id) b.raw else place_id;
             try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
