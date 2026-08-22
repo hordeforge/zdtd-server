@@ -110,7 +110,7 @@ Log lines: `[7dtd-playtest] PASS|FAIL <name> …` then `SUMMARY` / `DONE`.
                 ▼                              ▼
 ┌───────────────────────────┐     ┌──────────────────────────────┐
 │ Stock client (Proton)     │     │ zdtd --admin-port            │
-│  Mods/zdtd-connect        │     │  fixtures world / map        │
+│  Mods/7dtd-connect        │     │  fixtures world / map        │
 │  Mods/7dtd-playtest  ◄────┼─────┤  give/tele/kill/spawn/inv    │
 │   scenario runner         │     │  optional playtest probes    │
 │   client oracles          │     └──────────────────────────────┘
@@ -136,7 +136,7 @@ and reimplement on the runner). Connect AGENTS stays honest: no gameplay.
 Install both mods under the client `Mods/`:
 
 ```text
-$GAME/Mods/zdtd-connect/     # join
+$GAME/Mods/7dtd-connect/     # join
 $GAME/Mods/7dtd-playtest/    # scenarios when env armed
 ```
 
@@ -444,7 +444,7 @@ uv run playtest report path/to/client.log
 3. start zdtd: --admin-port, fixture world, map Navezgane, log path
 4. wait: server "tick=20Hz" or listen ready
 5. admin setup: settime day; optional tele pad prep
-6. launch client: ZDTD_CONNECT + PLAYTEST_SUITE=… via launch_client.sh
+6. launch client: 7DTD_CONNECT + PLAYTEST_SUITE=… via launch_client.sh
 7. watch: tail client log for JSONL / DONE; enforce suite timeout
 8. score: parse results; optional server log NRE/WRN scan; admin post-checks
 9. teardown: shutdown admin or kill; kill Proton stack; write report.json
