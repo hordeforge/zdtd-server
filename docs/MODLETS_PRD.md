@@ -337,6 +337,11 @@ in the PRD/plan as documented limitations, not silently implemented.
   dir; `--join --count 2`; patched ids visible on the wire; no frame desync.
 - Stock client (EAC off) smoke when practical: join, confirm new block/ item
   render and ids match; otherwise documented (AGENTS rule: "when practical").
+  **Status:** not practical in this environment - no client-join automation
+  harness exists (7dtd-playtest ships analysis tooling, not a driver); the
+  automated client stand-in (loadgen) is additionally blocked by the sibling
+  handshake drift (V 3.1.0 vs V 3.10, see smoke-modlet.sh). Follow-up: run the
+  stock-client smoke once loadgen or a client driver is available.
 - `make check` green (build, unit+scenario tests, lint incl. provenance scan).
 
 ## 10. Documentation and process
