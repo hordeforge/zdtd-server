@@ -183,10 +183,48 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
 ///                                 PvP/friendly-fire policies).
 ///   "quest <def_id>"           -> the quest def's name (stable key), or ""
 ///                                 when unknown (lets plugins gate by name).
+/// MCP frame handler (mcp_transport.FrameFn): route one client JSON-RPC
+/// frame to the first plugin that exports on_mcp_frame; returns the guest's
+/// response bytes (0 = no MCP module / nothing to send). The transport owns
+/// the HTTP; this is the boundary crossing (ADR 0031 D3).
+pub fn mcpFrameThunk(ctx: *anyopaque, frame: []const u8, out: []u8) usize {
+    const g: *Game = @ptrCast(@alignCast(ctx));
+    for (g.wasm_plugins.slots[0..g.wasm_plugins.n]) |*p| {
+        if (p.hook_present[@intFromEnum(plugin_mod.wasm.Hook.on_mcp_frame)]) {
+            const rep = p.callMcpFrame(frame, out) orelse return 0;
+            return rep.len;
+        }
+    }
+    return 0;
+}
+
 pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usize {
     const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
     var it = std.mem.tokenizeScalar(u8, req, ' ');
     const verb = it.next() orelse return 0;
+    if (std.mem.eql(u8, verb, "mcp.allowlist")) {
+        if (it.next() != null) return 0;
+        // Comma-separated verb prefixes from [mcp] config, served one per
+        // line (the MCP guest matches verb prefixes against these lines).
+        var src = g.mcp_allowlist;
+        var n: usize = 0;
+        while (src.len > 0) {
+            const comma = std.mem.indexOfScalar(u8, src, ',') orelse src.len;
+            const piece = std.mem.trim(u8, src[0..comma], " \t");
+            if (piece.len > 0) {
+                if (n > 0 and n < out.len) {
+                    out[n] = '\n';
+                    n += 1;
+                }
+                const m = @min(piece.len, out.len - n);
+                @memcpy(out[n..][0..m], piece[0..m]);
+                n += m;
+            }
+            if (comma >= src.len) break;
+            src = src[comma + 1 ..];
+        }
+        return n;
+    }
     if (std.mem.eql(u8, verb, "quest")) {
         const id_s = it.next() orelse return 0;
         if (it.next() != null) return 0;

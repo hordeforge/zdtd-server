@@ -75,6 +75,7 @@ pub fn step(self: *Game) !void {
         self.pollAdmin();
         var web_n: u32 = 0;
         while (web_n < 4) : (web_n += 1) self.pollWebui();
+        self.mcp.poll();
     }
 
     const dt: f32 = 1.0 / @as(f32, @floatFromInt(protocol.ticks_per_second));

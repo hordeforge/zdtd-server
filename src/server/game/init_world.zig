@@ -212,6 +212,31 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             self.webui.port,
         });
     }
+    if (opts.mcp_port != 0) {
+        // Fail closed: operator requested mcp; a silent disabled listener is a
+        // misconfig incident (same policy as the webui block above).
+        self.mcp.listen(.{
+            .port = opts.mcp_port,
+            .bind_host = opts.mcp_bind,
+            .token = opts.mcp_token,
+        }) catch |err| {
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} mcp on {s}:{d} failed: {s}\n", .{
+                clock.wallStamp(&ts),
+                opts.mcp_bind,
+                opts.mcp_port,
+                @errorName(err),
+            });
+            return err;
+        };
+        self.mcp.setFrameHandler(self, Game.mcpFrameThunk);
+        self.mcp_allowlist = opts.mcp_allowlist;
+        util_log.info("zdtd: mcp http://{s}:{d}/mcp ({s})\n", .{
+            opts.mcp_bind,
+            self.mcp.port,
+            if (opts.mcp_token.len > 0) "token auth" else "loopback only, no token",
+        });
+    }
     if (opts.world_name) |wn| self.world_name = wn;
 
     const sp = self.world.primarySpawn();

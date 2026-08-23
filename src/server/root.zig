@@ -15,6 +15,7 @@ pub const admin_cmds = @import("admin_cmds.zig");
 pub const admin_console = @import("admin_console.zig");
 pub const admin_xml = @import("admin_xml.zig");
 pub const webui = @import("webui.zig");
+pub const mcp_transport = @import("mcp_transport.zig");
 pub const serverinfo_tcp = @import("serverinfo_tcp.zig");
 pub const scenarios = @import("scenarios.zig");
 pub const phase_gate = @import("phase_gate.zig");
@@ -92,6 +93,7 @@ test {
     _ = admin_console;
     _ = admin_xml;
     _ = webui;
+    _ = mcp_transport;
     _ = serverinfo_tcp;
     _ = scenarios;
     _ = phase_gate;

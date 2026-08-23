@@ -36,6 +36,10 @@ const help_text =
     \\  --webui-port N        HTTP ops UI (0 = off; requires secret; see docs/WEBUI.md)
     \\  --webui-bind ADDR     webui bind, loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
     \\  --webui-secret STR    shared secret, min 8 chars (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
+    \\  --mcp-port N          MCP streamable-HTTP endpoint (0 = off; needs an MCP wasm plugin; docs/MCP_DESIGN.md)
+    \\  --mcp-bind ADDR       mcp bind, loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
+    \\  --mcp-token STR       shared token for /mcp (empty = loopback only, no token)
+    \\  --mcp-allowlist LIST  comma-separated SimCommand prefixes the admin_command tool may queue (default: none)
     \\  --quests PATH         explicit quests.xml (file must exist)
     \\  --config-dir DIR      stock Data/Config dir (XML assets; dir must exist)
     \\  --config-overrides DIR
@@ -204,6 +208,7 @@ const known_flags = [_][]const u8{
     "--port",       "--world",            "--map",           "--game-dir",
     "--world-name", "--serverconfig",     "--mode",          "--admin-port",
     "--webui-port", "--webui-bind",       "--webui-secret",  "--quests",
+    "--mcp-port",   "--mcp-bind",         "--mcp-token",     "--mcp-allowlist",
     "--config-dir", "--config-overrides", "--worldgen-seed", "--ticks",
     "--once",       "--quiet",            "--version",       "--help",
     "-V",           "-v",                 "-q",              "-h",
@@ -312,6 +317,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var webui_bind: []const u8 = "127.0.0.1";
     var webui_secret: []const u8 = "";
     var webui_secret_cli = false;
+    var mcp_port: u16 = 0;
+    var mcp_bind: []const u8 = "127.0.0.1";
+    var mcp_token: []const u8 = "";
+    var mcp_allowlist: []const u8 = "";
     var max_ticks: u64 = 0;
     var once = false;
     var ticks_cli = false;
@@ -369,6 +378,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
         } else if (std.mem.eql(u8, name, "--webui-secret")) {
             webui_secret = flagValue(&it, name, inline_val);
             webui_secret_cli = true;
+        } else if (std.mem.eql(u8, name, "--mcp-port")) {
+            mcp_port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
+        } else if (std.mem.eql(u8, name, "--mcp-bind")) {
+            mcp_bind = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--mcp-token")) {
+            mcp_token = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--mcp-allowlist")) {
+            mcp_allowlist = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--worldgen-seed")) {
             worldgen_seed = flagInt(u64, name, flagValue(&it, name, inline_val), 0);
         } else if (std.mem.eql(u8, name, "--ticks")) {
@@ -594,6 +611,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (webui_port != 0 and admin_port != 0 and webui_port == admin_port) {
         fatal("webui port {d} collides with AdminPort/TelnetPort", .{webui_port});
     }
+    if (mcp_port != 0 and !isLoopbackBind(mcp_bind)) {
+        usageError("--mcp-bind must be loopback (127.0.0.1 or localhost); use a TLS reverse proxy for remote access", .{});
+    }
+    if (mcp_port != 0 and mcp_port == port) {
+        fatal("mcp port {d} collides with ServerPort (TCP GameServerInfo)", .{mcp_port});
+    }
+    if (mcp_port != 0 and admin_port != 0 and mcp_port == admin_port) {
+        fatal("mcp port {d} collides with AdminPort/TelnetPort", .{mcp_port});
+    }
+    if (mcp_port != 0 and webui_port != 0 and mcp_port == webui_port) {
+        fatal("mcp port {d} collides with webui port", .{mcp_port});
+    }
 
     // InitOptions: serverconfig → optional mode pack → zdtd.toml stream/authority.
     // CLI-resolved fields (paths, ports, seed) are already set on the struct.
@@ -608,6 +637,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .webui_port = webui_port,
         .webui_bind = webui_bind,
         .webui_secret = webui_secret,
+        .mcp_port = mcp_port,
+        .mcp_bind = mcp_bind,
+        .mcp_token = mcp_token,
+        .mcp_allowlist = mcp_allowlist,
         .world_name = resolved_world_name,
         .server_description = cfg.server_description,
         .server_website_url = cfg.server_website_url,

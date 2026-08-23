@@ -87,6 +87,7 @@ const party = @import("../ecs/party.zig");
 const admin_mod = @import("admin.zig");
 const admin_cmds = @import("admin_cmds.zig");
 const webui_mod = @import("webui.zig");
+const mcp_mod = @import("mcp_transport.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
@@ -478,6 +479,10 @@ pub const Game = struct {
     admin_reply_sink: ?[]u8 = null,
     admin_reply_len: usize = 0,
     webui: webui_mod.Server = .{},
+    /// MCP transport bridge (ADR 0031); polled from step like webui/admin.
+    mcp: mcp_mod.Transport = .{},
+    /// Comma-separated admin_command allowlist (from InitOptions.mcp_allowlist).
+    mcp_allowlist: []const u8 = "",
     /// Stock ServerPort: TCP GameServerInfo. LiteNet listens on info_port+2.
     info_port: u16 = 0,
     info_tcp: serverinfo_tcp.Provider = .{},
@@ -1153,6 +1158,17 @@ pub const Game = struct {
 
     pub fn webuiAdminThunk(ctx: *anyopaque, line: []const u8, out: []u8) usize {
         return admin_console.webuiAdminThunk(ctx, line, out);
+    }
+
+    pub fn pollMcp(self: *Game) void {
+        self.mcp.poll();
+    }
+
+    /// MCP frame handler (mcp_transport.FrameFn): route one client JSON-RPC
+    /// frame to the plugin that exports on_mcp_frame; returns the guest's
+    /// response bytes (0 = nothing to send).
+    pub fn mcpFrameThunk(ctx: *anyopaque, frame: []const u8, out: []u8) usize {
+        return game_wasm_host.mcpFrameThunk(ctx, frame, out);
     }
 
     pub fn runBanCommand(self: *Game, sub: admin_mod.BanSub) void {

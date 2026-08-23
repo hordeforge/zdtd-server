@@ -202,6 +202,14 @@ pub const InitOptions = struct {
     webui_port: u16 = 0,
     webui_bind: []const u8 = "127.0.0.1",
     webui_secret: []const u8 = "",
+    /// MCP transport (ADR 0031, docs/MCP_DESIGN.md). 0 = disabled. Default
+    /// bind is loopback; token empty = loopback only, no token.
+    mcp_port: u16 = 0,
+    mcp_bind: []const u8 = "127.0.0.1",
+    mcp_token: []const u8 = "",
+    /// Comma-separated SimCommand verb prefixes the MCP `admin_command` tool
+    /// may trigger (served to the guest as `mcp.allowlist`; empty = deny all).
+    mcp_allowlist: []const u8 = "",
     world_name: ?[]const u8 = null,
     /// Browser fields (GameInfoString 3/4/12/13/17); empty = client default.
     server_description: []const u8 = "",

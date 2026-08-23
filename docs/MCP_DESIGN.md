@@ -45,49 +45,52 @@ guest.
 
 ## 3. Host transport bridge (`src/server/mcp_transport.zig`)
 
-One `Transport` struct, constructed when `[mcp] port != 0`, in the same style
-as `webui.zig`:
+One `Transport` struct, constructed when `--mcp-port != 0`, in the same style
+as `webui.zig`. **Polled from the main loop like webui/admin (ADR 0012
+single-threaded tick) — there are no transport threads, queues, or condvars:**
+one connection and one complete request per `poll()` call, processed
+synchronously through the frame handler.
 
-- **Listener:** `util/tcp_listen` + `std.http.Server` on its own thread
-  (webui precedent). Accepts, reads the request, extracts the JSON-RPC body.
-- **Sessions:** fixed array (`max_sessions = 16`), keyed by connection; each
-  has an inbound ring (`max_inbound = 32` frames) and an outbound slot for the
-  pending response, plus the SSE state.
-- **Tick drain:** once per tick (inside the existing plugin step), the host
-  drains up to `max_drain_per_tick = 4` frames across sessions, copies each
-  frame into guest memory, calls `on_mcp_frame(frame_ptr, frame_len, out_ptr,
-  out_cap)`, and stores the returned bytes as that session's response. The
-  drain budget stops one client from stalling the tick (ADR rule 20).
-- **Response:** the listener thread waits on a per-session signal (condvar,
-  timeout `response_wait_ms = 1000`); on signal it serves the response bytes as
-  the HTTP reply. Timeout -> HTTP 500 with a JSON-RPC internal error; a guest
-  that trapped is already disabled (ADR 0020) and every pending response is
-  dropped.
-- **SSE:** when a client connects with `Accept: text/event-stream`, the host
-  holds the connection and sends the spec's `endpoint` event; MVP has no
-  server-initiated messages, so the stream then stays idle (no notifications,
-  no `listChanged`).
-- **Auth:** if `[mcp] token` is non-empty, every request must carry it
-  (constant-time compare, `util/secret.zig`); default bind is `127.0.0.1`.
-  No new trust boundary (ADR 0031 D2).
-- **Allocation:** all rings/sessions pre-allocated at construction; frame
-  copies use a shared `frame_buf`; nothing allocated per request.
+- **Listener:** `util/tcp_listen` + `std.http.Server`; only `POST /mcp` is
+  served. Wrong path/method, transfer encoding, an oversized frame
+  (`max_frame_kib`), and a missing token are HTTP errors, never a half-read
+  frame.
+- **Auth:** `--mcp-token` (empty = loopback only, no token) is checked against
+  `Authorization: Bearer` and `X-Zdtd-Secret` in constant time
+  (`util/secret.zig`); default bind is `127.0.0.1`. No new trust boundary
+  (ADR 0031 D2).
+- **Frame handling:** the poll reads a full request, then calls the Game's
+  frame handler (`mcpFrameThunk` -> the plugin exporting `on_mcp_frame`):
+  `on_mcp_frame(frame_ptr, frame_len, out_ptr, out_cap)`. The guest's response
+  bytes are served as `application/json`; zero bytes (a notification, a closed
+  session, an overflowed response) are served as `202 Accepted` with no body
+  (MCP notification semantics). A guest that trapped is already disabled
+  (ADR 0020) and replies nothing.
+- **SSE:** not held open in MVP. The transport always answers POSTs with
+  `application/json` (the spec permits this when the server has nothing to
+  push); there are no server-initiated messages in MVP (no notifications, no
+  `listChanged`).
+- **Allocation:** recv/response buffers are fixed module consts; nothing is
+  allocated per request.
 
-## 4. Config (`[mcp]`)
+Frame/response caps live in `mcp_transport.zig` (`max_frame`, `max_resp`).
 
-New struct `McpConfig` bound by `util/toml_bind.zig` (ADR 0021: a new tunable
-is a struct field, not a parse arm). Defaults:
+## 4. Config (CLI flags, mirroring the webui precedent)
 
-```toml
-[mcp]
-port = 0            # 0 = disabled
-bind = "127.0.0.1"  # no new trust boundary by default
-token = ""          # empty = loopback only, no token; else constant-time compare
-allowlist = []      # SimCommand verbs admin_command may trigger, e.g. ["bot count", "say"]
-max_frame_kib = 16
-max_sessions = 16
-max_inbound = 32
+The transport is configured with CLI flags in `main.zig`, the same way the
+operator WebUI is (webui is the HTTP-listener precedent in this codebase; a
+toml section can follow later if operators ask):
+
 ```
+--mcp-port N          MCP streamable-HTTP endpoint (0 = off; needs an MCP wasm plugin)
+--mcp-bind ADDR       loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
+--mcp-token STR       shared token for /mcp (empty = loopback only, no token)
+--mcp-allowlist LIST  comma-separated SimCommand prefixes the admin_command
+                      tool may queue, e.g. "bot count,say" (default: none)
+```
+
+The allowlist is served to the guest as the `mcp.allowlist` query
+(newline-separated prefixes) and enforced in the guest before `zdtd.queue`.
 
 ## 5. Guest design (`mods/zdtd_mcp/zdtd_mcp.c`)
 
@@ -157,32 +160,31 @@ truncated to a spec error or an omitted field, never a partial frame
    `on_mcp_frame`; the guest parses via `json_parse` + `json_str`/`json_obj`,
    reads its snapshot via `sense`/`query`, renders the result into `out_buf`,
    returns the length.
-4. Host stores the bytes as the session response, signals the listener thread.
-5. Listener serves them as the HTTP 200 JSON body. Notifications (no `id`) are
-   answered `202 Accepted` immediately with no round trip.
+4. The transport serves the response as the HTTP 200 JSON body; a zero-byte
+   reply (notification, closed session, overflow) is served as `202 Accepted`
+   with no body.
 
-Latency is one tick (50 ms) plus transport; the guest never blocks the tick,
-and a slow client only fills a bounded ring.
+Latency is one poll plus the hook call; the guest never blocks the tick, and
+each `poll()` serves at most one request so a flooding client is bounded by
+the per-request caps, not a queue.
 
 ## 7. Buffers and caps
 
 | Cap | Value | Note |
 |---|---|---|
-| `max_frame_kib` | 16 | inbound JSON-RPC frame |
-| `out_buf` | 8 KiB | guest response + tool result |
+| `max_frame` | 16 KiB | inbound JSON-RPC body (MCP_DESIGN `max_frame_kib`) |
+| `max_resp` | 8 KiB | guest response + tool result |
+| `max_req` | 20 KiB | full HTTP request (frame + headers) |
 | `json_buf_max` | 64 KiB | host std.json fixed buffer per plugin (also the nesting bound) |
-| `max_sessions` | 16 | fixed session array |
-| `max_inbound` | 32 | frames per session ring |
-| `max_drain_per_tick` | 4 | frames drained per tick across sessions |
-| `response_wait_ms` | 1000 | listener wait for the tick-thread response |
+| `max_client_polls` | 800 | incomplete-request drop (~10 s at 4 polls per tick) |
 
 All named module consts, no magic numbers on the path.
 
 ## 8. Security
 
-- Default `bind = 127.0.0.1`, `port = 0` (off). A non-loopback bind is an
+- Default `bind = 127.0.0.1`, `--mcp-port 0` (off). A non-loopback bind is an
   explicit operator choice.
-- `token` uses `util/secret.zig` constant-time compare; no token logging.
+- `--mcp-token` uses `util/secret.zig` constant-time compare; no token logging.
 - `admin_command` defaults to an empty allowlist: reads are on by default,
   actions are explicit opt-in. The allowlist is host policy delivered through
   `zdtd.query`; a buggy guest is a trusted-module failure mode, and the token
@@ -193,37 +195,39 @@ All named module consts, no magic numbers on the path.
 - `_zdtd_requires` declares `on_mcp_frame` + used imports; load fails loudly on
   typos.
 - `on_shutdown` runs on dispose/reload: guest closes sessions.
-- Host side of reload: drop all sessions, frames, and pending responses; a
-  disabled module's queued SimCommands are already withdrawn by slot
-  attribution before drain.
+- Host side of reload: the transport keeps listening but the frame handler
+  finds no plugin exporting `on_mcp_frame` and answers 503 until a module is
+  (re)loaded; a disabled module's queued SimCommands are already withdrawn by
+  slot attribution before drain.
 - Re-enable re-arms the budget and re-runs `on_enable`; clients reconnect.
 
 ## 10. Test plan
 
 1. **Guest protocol unit tests** (host-side harness loading the committed
-   `mods/zdtd_mcp/zdtd_mcp.wasm` through `WasmHost`, or in-tree static-host
-   tests where the hook shape allows): initialize/ping/tools/list/tools/call
-   golden responses; error table (-32700/-32600/-32601/-32602); batch
-   rejection; oversize frame drop; bad response length dropped.
+   `mods/zdtd_mcp/zdtd_mcp.wasm` through `WasmHost`): initialize/ping/
+   tools/list/tools/call golden responses; error table (-32700/-32600/-32601/
+   -32602); batch rejection; allowlist prefix matching; queue attribution.
 2. **Transport unit tests** (`src/server/mcp_transport.zig`): auth accept/
-   reject, ring caps (inbound full -> drop), drain budget, response timeout
-   path, session cap.
-3. **Harness e2e** (scenario in `src/server/scenarios.zig`): start the
-   listener on an ephemeral port with the fixture `.wasm`, run an in-process
-   MCP client (plain HTTP POST via `std.http.Client`) through
-   initialize -> tools/list -> tools/call(server_status) and assert responses;
-   token path included.
+   reject, path/method gates, frame cap (413), transfer-encoding rejection,
+   notification 202, loopback-only binding.
+3. **Harness e2e** (`mcp_transport.zig` test, server side — the transport is
+   top-of-stack and may load the plugin runtime): the real
+   `mods/zdtd_mcp/zdtd_mcp.wasm` behind the transport's test-mode HTTP framing
+   (same pattern as webui's testServeHttp — raw requests in, captured
+   responses out, no kernel socket), driven through initialize ->
+   notifications/initialized -> tools/list -> tools/call(server_status) ->
+   tools/call(admin_command) with a sense/query Cap standing in for Game.
 4. Gates: `zig build test` and `make check` stay green. No loadgen/stock
    client leg (no stock wire; MCP_PRD NFR-5, ADR 0031 D7).
 
 ## 11. Milestones
 
-- **M1** - guest protocol core: framing, session, error table, `ping`,
-  `tools/list`; protocol unit tests green.
+- **M1** - guest protocol core: session, error table, `ping`, `tools/list`;
+  protocol unit tests green. **Done.**
 - **M2** - host transport bridge + read tools (`server_status`,
-  `player_list`); transport unit tests + harness e2e green.
-- **M3** - `admin_command` allowlist via `mcp.allowlist` query; docs final
-  pass; PROVENANCE/index rows; `make check` green.
+  `player_list`) + `admin_command` allowlist wiring; transport unit tests +
+  harness e2e green. **This milestone.**
+- **M3** - docs final pass; PROVENANCE/index rows; `make check` green.
 
 ## 12. Doc updates shipped with the code
 
