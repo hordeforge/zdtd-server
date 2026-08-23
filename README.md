@@ -1,7 +1,8 @@
-# zdtd
+# ⚡ BloodWire (ZDTD Server)
 
-**Zeven Days to Die** (or just **ZDTD**): a from-scratch dedicated server in Zig,
-aimed at the stock 7 Days to Die **client wire** (EAC off).
+> **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
+
+**Zeven Days to Die** (or **ZDTD**): a zero-allocation, high-throughput dedicated server written from scratch in Zig, targeting the stock 7 Days to Die **client wire** (EAC off).
 
 ```text
 7 Days to Die  →  ZDTD  →  Zeven Days to Die
@@ -13,7 +14,7 @@ existing mods. Sibling of this workspace only for **RE docs** and **loadgen**
 wire tests.
 
 **Profiling:** built-in harness under `src/apm/` ([docs/APM.md](docs/APM.md)).  
-That is **not** sibling `7dtd-apm` (stock Mono dedi).
+That is **not** sibling `7dtd-server-apm` (stock Mono dedi).
 
 ## Status
 
@@ -56,7 +57,7 @@ Milestones / architecture: [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md).
 | Not supported | Why |
 |---|---|
 | **Mods** (Harmony, ModAPI, XML-only mods, EfficientServer, RealEarth) | Clean-room Zig process; no managed game assembly |
-| **7dtd-apm as a dependency** | Different process; use **zdtd `src/apm/`** instead |
+| **7dtd-server-apm as a dependency** | Different process; use **zdtd `src/apm/`** instead |
 | **EAC-on clients** | Custom server path |
 
 Validation is **loadgen bots** + stock clients + **zdtd apm** dumps.
@@ -73,7 +74,7 @@ Validation is **loadgen bots** + stock clients + **zdtd apm** dumps.
 | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | M7–M16 post-playable stack |
 | [`docs/ECS_SYSTEMS.md`](docs/ECS_SYSTEMS.md) / [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) | Sim + architecture |
-| [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) | Envelope, join, goldens |
+| [`../7dtd-engine-research/docs/protocol.md`](../7dtd-engine-research/docs/protocol.md) | Envelope, join, goldens |
 
 Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).
 
@@ -96,7 +97,7 @@ operator-supplied Tracy checkout (`-Dtracy-src=PATH`); it is opt-in, never
 fetched, and outside `make check` ([`docs/APM.md`](docs/APM.md)).
 
 ```bash
-cd zdtd
+cd zdtd-server
 make                 # Debug binary → zig-out/bin/zdtd
 make test
 make check           # pin + lint + build + test + fuzz (serial; safe under -j)
