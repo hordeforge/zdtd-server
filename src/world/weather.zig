@@ -21,8 +21,8 @@ pub const max_biomes = biome_layers.max_weather_biomes;
 pub const update_interval_ticks: i64 = 5;
 
 /// CalcGlobalWeatherType pushes every storm at least this far out while a blood
-/// moon is up, so no storm can start inside the horde night.
-pub const blood_moon_storm_push: i64 = 5000;
+/// moon is up, so no storm can start inside the horde night. Value is
+/// `[sim] storm_bm_push_ticks` (Manager field; default 5000).
 
 /// One `WeatherManager/BiomeWeather`. `group_index` is the wire groupIndex and is
 /// always a valid ordinal into that biome's group set.
@@ -54,6 +54,9 @@ pub const Config = struct {
     /// GameStats.TimeOfDayIncPerSec, the divisor turning remaining ticks into the
     /// client's storm warning countdown. Must match the GameStats blob we send.
     time_of_day_inc_per_sec: u8 = 20,
+    /// Storms are pushed this many world ticks past a horde night
+    /// (`[sim] storm_bm_push_ticks`; stock ~5 in-game hours).
+    blood_moon_storm_push: i64 = 5000,
 };
 
 pub const Manager = struct {
@@ -63,6 +66,7 @@ pub const Manager = struct {
     storm_frequency: f32 = 1,
     day_night_length: u16 = 60,
     time_of_day_inc_per_sec: u8 = 20,
+    blood_moon_storm_push: i64 = 5000,
     last_update_world_time: i64 = 0,
     /// WeatherManager::weatherAllName != null: a global type overrides every biome.
     blood_moon_forced: bool = false,
@@ -78,6 +82,7 @@ pub const Manager = struct {
                 0,
             .day_night_length = @max(cfg.day_night_length, 1),
             .time_of_day_inc_per_sec = cfg.time_of_day_inc_per_sec,
+            .blood_moon_storm_push = cfg.blood_moon_storm_push,
         };
         var i: usize = 0;
         while (i < table.weather_n and i < max_biomes) : (i += 1) {
@@ -166,8 +171,8 @@ pub const Manager = struct {
         while (i < self.n) : (i += 1) {
             const st = &self.states[i];
             if (st.storm_world_time) |swt| {
-                if (swt -| world_time < blood_moon_storm_push)
-                    st.storm_world_time = world_time +| blood_moon_storm_push;
+                if (swt -| world_time < self.blood_moon_storm_push)
+                    st.storm_world_time = world_time +| self.blood_moon_storm_push;
             }
         }
         if (self.blood_moon_forced) return;
@@ -541,7 +546,7 @@ test "blood moon forces every biome to its bloodMoon group" {
         try std.testing.expectEqual(expect, m.states[i].group_index);
         // Storms are pushed clear of the horde night.
         const swt = m.states[i].storm_world_time orelse return error.TestUnexpectedResult;
-        try std.testing.expect(swt >= 24_100 + blood_moon_storm_push);
+        try std.testing.expect(swt >= 24_100 + 5000); // [sim] storm_bm_push_ticks default
     }
     // Leaving the blood moon releases the global override.
     m.tick(&t, 30_000, false);

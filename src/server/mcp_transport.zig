@@ -1,4 +1,4 @@
-//! MCP transport bridge (ADR 0031, MCP_DESIGN.md §3): a dedicated HTTP
+//! MCP transport bridge (ADR 0031, RFC 0002 §3): a dedicated HTTP
 //! listener that carries MCP JSON-RPC frames between clients and the MCP
 //! plugin guest. The guest owns protocol; this file owns the bytes on the
 //! wire: listener, HTTP framing, token auth, and the bounded copy of each
@@ -19,9 +19,9 @@ const tcp = @import("../util/tcp_listen.zig");
 const http = std.http;
 const secret_mod = @import("../util/secret.zig");
 
-/// Inbound JSON-RPC frame cap (MCP_DESIGN.md §7 `max_frame_kib`).
+/// Inbound JSON-RPC frame cap (RFC 0002 §7 `max_frame_kib`).
 pub const max_frame: usize = 16 * 1024;
-/// Guest response cap (MCP_DESIGN.md §7 `out_buf`).
+/// Guest response cap (RFC 0002 §7 `out_buf`).
 pub const max_resp: usize = 8 * 1024;
 /// Full HTTP request cap: frame plus headers.
 const max_req: usize = max_frame + 4096;
@@ -530,13 +530,15 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
             std.mem.writeInt(i32, r[28..32], -1, .little);
         }
         fn senseFn(_: *plugin_mod.HostCtx, out: []u8) usize {
-            // header: magic 'ZBS2', 1 record (player 2000), tick 42, self -1
-            std.mem.writeInt(u32, out[0..4], 0x3253425a, .little);
+            // header: magic 'ZBS3' (24 bytes), 1 record (player 2000), tick 42, self -1
+            std.mem.writeInt(u32, out[0..4], 0x3353425a, .little);
             std.mem.writeInt(u32, out[4..8], 1, .little);
             std.mem.writeInt(u32, out[8..12], 42, .little);
             std.mem.writeInt(i32, out[12..16], -1, .little);
-            writeRec(out, 16, 2000, 0, 10.0, 0.0, 10.0, 100.0);
-            return 16 + 32;
+            std.mem.writeInt(u32, out[16..20], 0, .little); // world_time
+            std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon
+            writeRec(out, 24, 2000, 0, 10.0, 0.0, 10.0, 100.0);
+            return 24 + 32;
         }
         fn queryFn(_: *plugin_mod.HostCtx, req: []const u8, out: []u8) usize {
             if (!std.mem.eql(u8, req, "mcp.allowlist")) return 0;

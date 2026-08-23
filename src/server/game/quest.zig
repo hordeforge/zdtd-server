@@ -278,7 +278,7 @@ pub fn buildTraderQuestOffers(
         if (tier != 0 and d.difficulty_tier != tier) continue;
         if (self.sim.mask[ps].journal and (self.sim.journal[ps].hasActive(qid) or self.sim.journal[ps].hasFailed(qid))) continue;
         // Stock pre-positions every offer (EntityTrader offer loop →
-        // Quest.SetupPosition; RE: 7dtd-research docs/quests-challenges.md
+        // Quest.SetupPosition; RE: 7dtd-engine-research docs/quests-challenges.md
         // "Quest POI selection"): the entry carries the real QuestLocation
         // (POI center at terrain height), QuestSize (bbox size) and POIName.
         // Selector miss (POI-less test world) keeps the catalog fallback so

@@ -1,4 +1,4 @@
-# 0022. Anti-cheat architecture
+# ADR 0022: Anti-cheat architecture
 
 - **Status:** accepted
 - **Date:** 2026-08-10

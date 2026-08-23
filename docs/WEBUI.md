@@ -83,7 +83,7 @@ Same rule as admin TCP: loopback-first; give/kick are privileged.
 | Control | Default |
 |---|---|
 | Bind | IPv4 loopback only; remote access requires a TLS reverse proxy |
-| Auth | Shared secret header or POST `/login` form; cookie is HMAC session token (not the secret) |
+| Auth | Shared secret header or POST `/login` form; cookie is HMAC session token (not the secret). Token is deterministic per secret, so a valid cookie survives a server restart (browser Max-Age and logout still bound it) |
 | CSRF | SameSite cookie + form field = HMAC session token (secret also accepted for API tools on POST `/api/cmd` and `/logout`) |
 | TLS | Optional reverse proxy (Caddy/nginx); v1 plain HTTP on loopback only |
 | Rate limit | Single concurrent HTTP client slot + short request timeout; 8 bad auth/login tokens → 30 s lockout, **429** + `Retry-After: 30`; no multi-IP quota yet |
@@ -101,13 +101,15 @@ Shell: top nav + Alpine tabs or HTMX boosted links. Partial updates via
 | Route | Purpose | Data source |
 |---|---|---|
 | `GET /` | Dashboard shell | static + first partials |
-| `GET /partials/status` | Day/time, BM, players, zombies, chunks, tick overrun | snapshot |
+| `GET /partials/status` | Day/time, BM, players, zombies, chunks, tick overrun, host OS gauges | snapshot |
 | `GET /partials/players` | Table: slot, name, entity, pos, ping proxy | clients[] |
 | `GET /partials/apm` | Counters + section p50/p99 | apm harness |
+| `GET /partials/settings` | Read-only effective server settings (world, limits, ports, auth) | snapshot |
+| `GET /partials/modules` | Loaded wasm plugin modules (name, enabled/disabled) | wasm host roster |
 | `GET /partials/console` | Last N audit log lines (command form lives in the shell) | ops log ring |
 | `GET /partials/world` | World name, seed/mode, stream caps (read-only; not implemented, shown in `/partials/status`) | Game opts |
 | `POST /api/cmd` | Run one admin command; HTML fragment by default, `text/plain` when `Accept: text/plain` or `application/json` | inline → admin parser (same request) |
-| `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools) | snapshot |
+| `GET /api/apm.json` | Machine-readable apm + world + player roster (loadgen/tools); feeds the dashboard latency chart series | snapshot |
 | `GET /login` | Sign-in form (200; **429** during lockout) | static HTML |
 | `POST /login` | Form body `token=` → **303** + session cookie (missing token **400**, wrong secret **401**, non-form content type **415**, lockout **429**) | config secret |
 | `POST /logout` | Clear session cookie (CSRF: session token or secret) | session |
@@ -266,6 +268,7 @@ curl -sS -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/api/apm.json
 
 ### WU3: UX polish
 
+- [x] Live latency chart on the Performance tab: tick mean/p99 + stacked section means, log-style compressed timescale (toggle) with a faint grid visualizing the compression
 - [ ] Alpine modals for destructive cmds
 - [ ] Player row actions
 - [ ] Item name typeahead (from ItemTable)
@@ -352,7 +355,7 @@ against the operator session.
 | Admin TCP | Keep; webui shares command backend |
 | In-game console packages | Unchanged; webui is out-of-band |
 | apm text/JSON dump | webui displays live; dumps remain for CI |
-| 7dtd-apm | Never integrate |
+| 7dtd-server-apm | Never integrate |
 | Playtest orchestrator | May use `/api/apm.json` or keep TCP |
 
 ## Risks and mitigations

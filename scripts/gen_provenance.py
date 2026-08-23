@@ -266,8 +266,8 @@ footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}}
 <tr><th scope="row">Persistence</th><td>ZPV9 players, claims.zlc, containers.zct, blockmeta.zbm, entities.zen, weather.zwt, workstations.zws, allies.zal</td><td>R: save-persistence.md · Z: world/store + persist.zig (ZCH3/ZPV9, zdtd-owned layouts)</td></tr>
 <tr><th scope="row">Wasm plugin surface</th><td>16 verdict/event hooks + sense/queue/query; 6 reference modules</td><td>Z: ADR 0020, PLUGIN_DEV.md expressibility audit · mods/ (zdtd_bot, zdtd_killfeed, zdtd_pvp, zdtd_questgate, zdtd_craftgate, zdtd_lootgate)</td></tr>
 <tr><th scope="row">Config-driven policy</th><td>Rules + mode packs + serverconfig through one toml_bind; no hand-written key chains</td><td>Z: ADR 0021, GAME_OPTIONS.md, src/util/toml_bind.zig</td></tr>
-<tr><th scope="row">Bots</th><td>Wasm-only brains; host BotManager is a servant</td><td>Z: ADR 0026, BOTS_PRD.md, BOTS_SPEC.md, mods/zdtd_bot</td></tr>
-<tr><th scope="row">Native metrics</th><td>apm sections + counters + webui snapshot; 7dtd-apm not required</td><td>Z: docs/APM.md, src/apm/*</td></tr>
+<tr><th scope="row">Bots</th><td>Wasm-only brains; host BotManager is a servant</td><td>Z: ADR 0026, PRD 0001, RFC 0001, mods/zdtd_bot</td></tr>
+<tr><th scope="row">Native metrics</th><td>apm sections + counters + webui snapshot; 7dtd-server-apm not required</td><td>Z: docs/APM.md, src/apm/*</td></tr>
 </tbody></table>
 </section>
 <p style="margin:0;color:var(--muted);font-size:var(--fs-micro)">Counts: docs/GAP_ANALYSIS.md scorecard (recounted from the per-feature markers by scripts/gen_provenance.py). Provenance buckets: docs/PROVENANCE.md (A stock data / R RE-cited / Z zdtd-owned). Status details: docs/STATUS.md, docs/WORK_PLAN.md.</p>

@@ -17,9 +17,8 @@ const replicate_te = @import("../replicate_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
 const game_social = @import("social.zig");
 
-/// Vehicle tank cap (blocks/s drain scale) and the InvTx refuel pickup reach.
-pub const vehicle_fuel_max: f32 = 100;
-const vehicle_refuel_reach: f32 = 3.0;
+/// Vehicle tank cap and the InvTx refuel pickup reach are
+/// rules.vehicle (fuel_cap / refuel_reach).
 
 /// ECS armor hook: stock/builtin name starts with "armor".
 pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
@@ -56,7 +55,8 @@ pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, a
     const t = self.sim.transform[ps];
     if (!self.withinEditReach(t.x, t.y, t.z, @floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) return false;
     var best: ?ecs.Slot = null;
-    var best_d = vehicle_refuel_reach * vehicle_refuel_reach;
+    const reach = self.sim.rules.vehicle.refuel_reach;
+    var best_d = reach * reach;
     for (ecs.groupSlice(&self.sim, .vehicle)) |vs| {
         if (!self.sim.mask[vs].transform) continue;
         const vx = self.sim.transform[vs].x - @as(f32, @floatFromInt(x));
@@ -69,8 +69,9 @@ pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, a
     }
     const vs = best orelse return false;
     const v = &self.sim.vehicle[vs];
-    if (v.fuel >= vehicle_fuel_max) return false;
-    v.fuel = @min(vehicle_fuel_max, v.fuel + amount);
+    const fuel_cap = self.sim.rules.vehicle.fuel_cap;
+    if (v.fuel >= fuel_cap) return false;
+    v.fuel = @min(fuel_cap, v.fuel + amount);
     // Fuel is a vehicle payload; pos flags the vehicle for the periodic
     // position broadcast without forcing a motion relay.
     self.sim.markDirty(vs, .{ .pos = true });
@@ -233,7 +234,7 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
         if (!u or !w.is_burning) continue;
         const strength = self.blocks.heatStrength(@intCast(w.block_id));
         if (strength > 0) {
-            self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, 720.0);
+            self.sim.director.notifyActivity(@floatFromInt(w.x), @floatFromInt(w.z), strength, self.sim.rules.director.heat_event_ticks);
         }
     }
     try replicate_te.broadcastDirtyWorkstations(self);

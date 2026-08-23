@@ -373,7 +373,7 @@ pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
 }
 
 /// Voxel line-of-sight between two world points, used to gate `bot shoot`
-/// (BOTS_SPEC §4: the host rejects an LOS-blocked shot). Samples
+/// (RFC 0001 §4: the host rejects an LOS-blocked shot). Samples
 /// `World.isSolidWorld` every 0.5 blocks along the line; returns false when a
 /// solid block intersects. Chunk-probe errors (unloaded / I/O) fail OPEN
 /// (treated as clear) so a bot is not permanently silenced across a chunk
@@ -424,7 +424,7 @@ fn coverSolidAt(self: *Game, p: [3]f32) bool {
 
 /// A nearby point that is not visible from `threat` — Doom 3 idAASFindCover /
 /// clanker `BotBrain.FindCover` port for the `zdtd.query` "cover" verb
-/// (BOTS_SPEC §3). Samples 8 directions at `dist` (default 10 m), grounds each
+/// (RFC 0001 §3). Samples 8 directions at `dist` (default 10 m), grounds each
 /// candidate, keeps the ones that are reachable (not solid at body height) and
 /// NOT LOS-clear from the threat's eye, and returns the valid candidate
 /// nearest to `from` (prefer nearer cover). Null when nothing qualifies.

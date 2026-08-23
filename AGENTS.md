@@ -1,12 +1,14 @@
-# AGENTS.md - zdtd
+# AGENTS.md - zdtd-server
 
 **Zeven Days to Die**: clean-room Zig dedi for stock 7DTD **client wire** (EAC off). Research clone, not a Unity mod host.
+
+Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)
 
 | | |
 |---|---|
 | Workspace | [`../AGENTS.md`](../AGENTS.md) |
 | Architecture | [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) |
-| Wire | [`../7dtd-research/docs/protocol.md`](../7dtd-research/docs/protocol.md) |
+| Wire | [`../7dtd-engine-research/docs/protocol.md`](../7dtd-engine-research/docs/protocol.md) |
 | **Status hub** | [`docs/STATUS.md`](docs/STATUS.md) |
 | Gaps / plan | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md), [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) |
 | Backlog | [`TODO.md`](TODO.md) |
@@ -22,8 +24,8 @@ Governs every rule below. When in doubt, these decide.
 1. **Clean-room.** Only stock client wire/sim. Never ship, embed, or depend on TFP DLLs, decompiled C#, or runtime assets. Stock content loads as data from operator install.
 2. **Stock wire/sim only.** No invented terrain, packages, FX, or journal blobs. One stock shape → one builder the client `Read`s.
 3. **Missing beats fake.** Prefer documented gaps over fabrication. A partial failing stock `Read` is worse than nothing.
-4. **Ground truth is RE.** Wire/sim derive from decompiled `Assembly-CSharp.dll` (IL) and real prefabs/saves, cited (`../7dtd-research/docs`, loadgen goldens). Fix code to RE, not the reverse; update RE only with evidence. **RE tooling/artifacts** (IL dumps, DLL-surface parity, format probes) live in `../7dtd-research`, not zdtd.
-5. **Not a mod host.** Research clone, not Unity host. No IModApi, Harmony, or `Mods/` code loading. Pure XML/assetbundle modlets (`Mods/<name>/Config` XPath patches, `Bundles/`, `Localization.csv`) are stock **data** and load as such (`docs/MODLETS_PRD.md`): patched catalogs + join-phase config sync; DLLs are never hosted. Connect mod is test harness only; client tooling is join/automation only. **Hardcoding (ADR 0010):** stock content → game data (XML/AssignIds); server policy → config (`serverconfig`/`zdtd.toml`); sim/wire → Zig systems with data params + sandboxed Wasm plugins (ADR 0020).
+4. **Ground truth is RE.** Wire/sim derive from decompiled `Assembly-CSharp.dll` (IL) and real prefabs/saves, cited (`../7dtd-engine-research/docs`, loadgen goldens). Fix code to RE, not the reverse; update RE only with evidence. **RE tooling/artifacts** (IL dumps, DLL-surface parity, format probes) live in `../7dtd-engine-research`, not zdtd.
+5. **Not a mod host.** Research clone, not Unity host. No IModApi, Harmony, or `Mods/` code loading. Pure XML/assetbundle modlets (`Mods/<name>/Config` XPath patches, `Bundles/`, `Localization.csv`) are stock **data** and load as such ([PRD 0003](docs/prd/0003-modlets.md)): patched catalogs + join-phase config sync; DLLs are never hosted. Connect mod is test harness only; client tooling is join/automation only. **Hardcoding (ADR 0010):** stock content → game data (XML/AssignIds); server policy → config (`serverconfig`/`zdtd.toml`); sim/wire → Zig systems with data params + sandboxed Wasm plugins (ADR 0020).
 6. **Correctness/security > minimalism > style.** Server authoritative, validates at trust boundaries; illegal states unrepresentable; YAGNI + **Zig Zen** (intent, edge cases, one obvious way, memory is a resource). Prefer idiomatic Zig **stdlib abstractions** (`std.Io`, …) over shelling/OS syscall glue (rule 26).
 7. **Hold the 20 TPS budget.** 50 ms tick is the constraint. Validate via loadgen + stock client (EAC off) + zdtd apm dumps, not unit tests alone.
 8. **Wire is contract; internals are not.** Client sees only binary wire. Never copy Mono per-entity heaps, Unity field order, or GC layouts into sim — prefer idiomatic measurable Zig (SoA, pools, serialize-once) judged by `apm` dumps, not RE visual similarity.
@@ -34,24 +36,24 @@ Governs every rule below. When in doubt, these decide.
 |---|---|
 | Zig dedi process, wire, sim, world store | Stock Unity dedicated process |
 | Protocol from RE + golden/loadgen tests | **Code mods** (Harmony, ModAPI, DLL modlets, EfficientServer, RealEarth) |
-| XML/assetbundle modlet data loading: `Mods/` Config XPath patches → patched catalogs + `NetPackageConfigFile` join sync (MODLETS_PRD) | Code mod hosting / IModApi |
+| XML/assetbundle modlet data loading: `Mods/` Config XPath patches → patched catalogs + `NetPackageConfigFile` join sync (PRD 0003) | Code mod hosting / IModApi |
 | Join / spawn / chunk / inv play path for stock client + bots | Shipping TFP content/assets (load from user `game-dir`) |
-| Native metrics (`src/apm/`) | **7dtd-apm** (Mono bridge; different process) |
+| Native metrics (`src/apm/`) | **7dtd-server-apm** (Mono bridge; different process) |
 | SoA ECS + serialize-once interest | Copying stock Mono architecture line-for-line |
 | Bot brains = **Wasm plugins only** (ADR 0026): target selection, aim, movement and combat decisions live in `mods/zdtd_bot` (the `.wasm` guest); the host `BotManager` is a servant (spawn/replicate/move/LOS gate/sense fill/`bot` verbs) and must not grow native decision logic | Native bot AI in Zig |
 | Behavioral/policy add-ons = **Wasm plugins by default** (ADR 0020): bots, chat commands/filters, announcements/kill-feeds, event observers, custom verdicts | Native Zig for discretionary gameplay behavior that belongs in a plugin |
 
 ## Critical rules
 
-1. **Zig only** for server code. Wire facts from `../7dtd-research/docs` + loadgen goldens.
+1. **Zig only** for server code. Wire facts from `../7dtd-engine-research/docs` + loadgen goldens.
 2. **No game DLL or bulk IL** in this repo.
 3. **Milestones** follow ZIG_CLONE then `IMPLEMENTATION_PLAN` (M7+). Don't skip join/terrain/inv fidelity for AI/scale.
 4. **Package IDs dynamic.** Resolve via negotiated name→id map. Never treat numeric id as stable across versions (fixtures may pin maps for tests).
-5. **Validate with loadgen + stock client + zdtd apm.** Never require 7dtd-apm.
+5. **Validate with loadgen + stock client + zdtd apm.** Never require 7dtd-server-apm.
 6. **Instrument hot paths** (net, sim, interest, chunk stream) with `apm` as they land.
 7. **No em dashes. No AI attribution** in commits, docs, comments, or PRs.
 8. Prefer **SoA + serialize-once interest** over stock Mono shapes.
-9. **Server owns missing features.** Fix stock-client gaps (chunks, deco, signs, inv direction, spawn/UI unlock, entity state) here with correct wire/sim. Never make `7dtd-connect`/client mods invent world data, skip server steps, or suppress protocol errors. Client tooling is join/automation only. Workspace rule 10.
+9. **Server owns missing features.** Fix stock-client gaps (chunks, deco, signs, inv direction, spawn/UI unlock, entity state) here with correct wire/sim. Never make `7dtd-fastconnect`/client mods invent world data, skip server steps, or suppress protocol errors. Client tooling is join/automation only. Workspace rule 10.
 10. **Stock fidelity: missing > fake.** No invented terrain shells, fake FX, or incomplete journal blobs failing stock `Read`.
 11. **New tunable = struct field, not parse arm.** `util/toml_bind.zig` binds `zdtd.toml`/mode packs by walking the dest struct — adding a field auto-configures/validates/documents it. Never hand-write `std.mem.eql(u8, key, ...)` chains (ADR 0021). Sim params live in `ecs/rules.zig`; a `Rules` value is a **floor** — per-entity stock data wins where present.
 12. **Markup is not a string literal.** Webui pages are `.html` under `src/server/webui/` (CSS inline, JS compiled from TypeScript) embedded via `@embedFile`. Nothing read from disk at runtime. JS is authored as TypeScript in `src/server/webui/ts/` and compiled into the committed pages by `scripts/build-webui-ts.sh` (tsc, version-pinned; `make webui-ts`); `scripts/lint-webui.sh` (tsc `--noEmit` + oxlint with the anti-slop + strict rule set in `.oxlintrc.jsonc`, the dmmulroy/anti-slop plugin vendored as source at a pinned SHA fetched into the cache, plus a page-freshness gate) and `scripts/lint-html.sh` (vnu, `vnu-filter.txt`) are both part of `make lint`.
@@ -64,7 +66,7 @@ Governs every rule below. When in doubt, these decide.
     - **Fail closed:** missing name → omit / not placeable / skip deco. Wrong id worse than missing.
     - **Fixtures** under `assets/fixtures/` are offline tests only.
     - **OK hardcodes:** wire RE constants, Unity hashes from stock **names**, ConfigFile LoadLocal name list (protocol).
-16. **RE before wire.** Field order, types, lengths, and join sequence come from `../7dtd-research/docs`, loadgen goldens, or verified stock `Read`/`Write`. Don't guess layouts. If RE and code disagree, fix code (or update RE with evidence), not the client.
+16. **RE before wire.** Field order, types, lengths, and join sequence come from `../7dtd-engine-research/docs`, loadgen goldens, or verified stock `Read`/`Write`. Don't guess layouts. If RE and code disagree, fix code (or update RE with evidence), not the client.
 17. **Server authoritative.** Sim owns blocks, inv, TE, entity HP/alive, quests, locks, time. C2S is a request: validate (bounds, ownership, phase, rates), apply/reject, broadcast **resulting** state. Never blindly apply client world/inv blobs; never let C2S overwrite another player's slots or distant chunks without stock-legal path.
 18. **Join/channel phase gates.** Accept only packages legal for peer's SM state (challenge → ids → login → enter → spawn → playing). Drop/disconnect illegal early/late C2S. Don't send play-world packages before client is ready per stock order.
 19. **Interest, no self-echo.** Entity/chunk/TE/stream updates only to observing peers. Don't echo own movement or redundant full state unless stock does. Serialize-once per tick where interest already does.
@@ -109,7 +111,7 @@ zig-out/bin/zdtd --port 27002 --game-dir "$GAME" --world-name Navezgane --world 
   --join --host 127.0.0.1 --port 27004 --count 2 --actions 20
 # LiteNet is ServerPort+2 (zdtd --port 27002 → loadgen --port 27004)
 
-# Metrics: zdtd text/JSON snapshot (docs/APM.md), not 7dtd-apm sessions
+# Metrics: zdtd text/JSON snapshot (docs/APM.md), not 7dtd-server-apm sessions
 ```
 
 Join/spawn/chunk/inv changes: loadgen smoke **and** stock client (EAC off) when practical. Unit green alone insufficient.
@@ -128,7 +130,7 @@ src/world/*            chunks, TTS, prefabs, sleepers, containers, DTM, biomes
 src/wire/*             package bodies (stock_*), binary LE, frames
 src/litenet/*          LiteNet framing, peers, std.Io.net UDP
 src/assets/*           blocks/items/recipes/loot/quests/entities XML tables
-src/apm/*              counters, section timers, dumps (not 7dtd-apm)
+src/apm/*              counters, section timers, dumps (not 7dtd-server-apm)
 src/plugin/*           Wasm plugin host, hook table, budgets (ADR 0020)
 src/util/parallel.zig  optional range split (AI, turrets, chunk save)
 src/util/toml_bind.zig comptime-reflected TOML binder (ADR 0021)
@@ -137,7 +139,7 @@ src/server/webui/      webui markup, @embedFile'd (never Zig string literal); li
 assets/fixtures/       offline XML and .wasm fixtures for tests
 modes/                 gamemode packs (`--mode <name>`)
 scripts/               release, lint and smoke gates called by Makefile
-docs/                  STATUS, gaps, plan, APM, wire/map/system notes
+docs/                  STATUS, gaps, plan, APM, wire/map notes; numbered PRD/RFC/ADR series in docs/{prd,rfc,adr}
 worlds/                local save overlays (ZCH3 `.zch`, player data)
 ```
 
@@ -149,12 +151,43 @@ worlds/                local save overlays (ZCH3 `.zch`, player data)
 | Block/world mutation | `world/*`, `ecs` | LiteNet / package id tables |
 | Syscalls / sockets | `litenet/udp_socket.zig`, `util/tcp_listen.zig` (Io.net + thin posix) | package builders, ECS systems |
 | XML / config load | `assets/*`, `server/config.zig` | tick path |
-| Metrics | `apm/*` via `Game.harness` | 7dtd-apm bridge |
+| Metrics | `apm/*` via `Game.harness` | 7dtd-server-apm bridge |
 
 - Import **facades** when they exist: `*/root.zig` per package (`util`, `apm`, `litenet`, `wire`, `assets`, `ecs`, `world`, `server`) and `wire/packages.zig` for stock bodies. Leaf files stay importable. Avoid cycles; world must not import wire (TE domain types in world, wire re-exports).
 - `src/server/c2s/` and `src/server/game/` are subfolders of `server`; every file there is aggregated via `src/server/root.zig` (lint recurses one level, so new helpers must be added there or tests silently drop).
 - `pub` only for intended API. Helpers file-private by default.
 - Dependency edges **enforced**: `scripts/lint-architecture.sh` (`make check`) fails on forbidden `@import`. Adding one requires changing the lint and justifying the edge.
+
+## Docs: PRD / RFC / ADR series
+
+Numbered doc series under `docs/`, one directory per series; the registry for
+each series is its README. Numbers are 4-digit zero-padded and never reused;
+PRD and RFC numbers pair by addon (the design answering PRD NNNN lives in
+RFC NNNN).
+
+| Series | Lives in | Registry |
+|---|---|---|
+| ADR (architecture decision) | `docs/adr/NNNN-slug.md` | `docs/adr/README.md` |
+| PRD (product requirements) | `docs/prd/NNNN-slug.md` | `docs/prd/README.md` |
+| RFC (request for comments: proposal / design) | `docs/rfc/NNNN-slug.md` | `docs/rfc/README.md` |
+
+How to use:
+
+- **ADR** records a decision that has been made (context → decision →
+  consequences); a later reversal supersedes, never edits. A decision still
+  being made is an RFC, not a proposed ADR.
+- **PRD** says what a feature or addon must do and why (problem, requirements
+  R1…, acceptance). New feature with a spec-able product intent: PRD, then
+  RFC, then ADRs for the architecture calls it forces.
+- **RFC** (request for comments) proposes the how — the technical
+  spec/design/plan answering the PRD — for review; the decision it forces is
+  recorded in an ADR. Carries the same number as its PRD.
+- Adding a doc: start from the series' `TEMPLATE.md`, take the next free
+  number from the series README, name the file `NNNN-kebab-slug.md`, put
+  `**Number:** <SERIES> NNNN` in the header block, and add a row to the series
+  README plus the `docs/INDEX.md` document series section.
+- Referencing: cite by number (`PRD 0003 §8`, `RFC 0001 §3`, `ADR 0026`), and
+  keep links and cross-references in sync when a doc moves or renumbers.
 
 ## Zig style
 
@@ -171,7 +204,7 @@ Zig **0.16**. Shaped by wire fidelity, 20 TPS, SoA sim, and loadgen/stock-client
 | Constants | `snake_case` module `const` | `max_streamed_chunks`, `pending_cap` |
 | Stock type / package names | Match TFP strings | `NetPackagePlayerId`, `PackageName` cases |
 
-**No magic numbers** on wire/tick paths. Field sizes, AssignIds/mapping captures, bit masks, buffer caps, RE version pins are named module `const` (often with one-line RE comment or `../7dtd-research/docs` path).
+**No magic numbers** on wire/tick paths. Field sizes, AssignIds/mapping captures, bit masks, buffer caps, RE version pins are named module `const` (often with one-line RE comment or `../7dtd-engine-research/docs` path).
 
 ### Wire and packages
 
@@ -197,7 +230,7 @@ Main sim + net loop is effectively single-threaded for game rules.
 - No new threads per tick (`util/parallel` pool only).
 - Syscalls on existing poll/`recv`/`sendto` batch path (LiteNet + GSI). No file opens or XML re-read mid-tick.
 - Parallelism only via `util/parallel.zig`, never ad-hoc `std.Thread.spawn` in builders/join SM.
-- New cost on net/sim/interest/chunk stream: `apm` sections/counters. Judge regressions from **zdtd** dumps, not 7dtd-apm.
+- New cost on net/sim/interest/chunk stream: `apm` sections/counters. Judge regressions from **zdtd** dumps, not 7dtd-server-apm.
 
 Init, map load, admin commands may take longer; amortize into caches.
 
@@ -244,6 +277,6 @@ When two correct approaches exist, pick the [Zig Zen](https://ziglang.org/docume
 - **Tests never write into repo.** Use `std.testing.tmpDir` (self-cleaning) and pass path in. Writing to working dir (= repo root) has produced accidental committed scratch files and dirty `git status` depending on whether a scenario ran. `.zdtd_test_*` is gitignored as backstop, not licence.
 - Tests leaving state fail on second `make check`. If a scenario needs a world, give it one it removes.
 
-## Stock-game research -> 7dtd-research
+## Stock-game research -> 7dtd-engine-research
 
-Stock dedi research belongs in [`../7dtd-research/`](../7dtd-research/), not here: RE narratives (`docs/`), Mono.Cecil dump tooling (`tools/`), wire/protocol analysis, engine cost/loop RE. This repo is the Zig reimplementation; it doesn't host RE docs/dumpers. When RE is needed, add it under `../7dtd-research/` and link back. How to RE: [`../7dtd-research/docs/re-methodology.md`](../7dtd-research/docs/re-methodology.md).
+Stock dedi research belongs in [`../7dtd-engine-research/`](../7dtd-engine-research/), not here: RE narratives (`docs/`), Mono.Cecil dump tooling (`tools/`), wire/protocol analysis, engine cost/loop RE. This repo is the Zig reimplementation; it doesn't host RE docs/dumpers. When RE is needed, add it under `../7dtd-engine-research/` and link back. How to RE: [`../7dtd-engine-research/docs/re-methodology.md`](../7dtd-engine-research/docs/re-methodology.md).

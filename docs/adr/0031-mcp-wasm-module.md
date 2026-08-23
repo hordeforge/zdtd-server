@@ -1,4 +1,4 @@
-# 0031. MCP server as a Wasm module: guest protocol, host transport
+# ADR 0031: MCP server as a Wasm module: guest protocol, host transport
 
 - **Status:** accepted
 - **Date:** 2026-08-22
@@ -8,7 +8,7 @@
   (server is authoritative), [ADR 0026](0026-fps-bot-wasm-module.md) (guest
   owns decisions, host owns the body), [ADR 0014](0014-missing-beats-fake.md)
   (missing beats fake), [ADR 0019](0019-validation-triad.md) (validation
-  triad). Product context: [MCP_PRD.md](../MCP_PRD.md).
+  triad). Product context: [PRD 0002](../prd/0002-mcp-server.md).
 
 ## Context
 
@@ -52,7 +52,7 @@ is exactly the kind of correctness risk the boundary exists to absorb.
 ### D2. Transport: MCP Streamable HTTP on a dedicated listener
 
 The transport is MCP **Streamable HTTP** (spec version pinned in
-`MCP_DESIGN.md`; baseline 2025-06-18): client to server is JSON-RPC over HTTP
+[RFC 0002](../rfc/0002-mcp-server-design.md); baseline 2025-06-18): client to server is JSON-RPC over HTTP
 POST; server to client messages would go over SSE when the client requests
 it, but the MVP has no server-initiated messages, so every POST is answered
 with `application/json` (the spec permits this when the server has nothing to
@@ -154,7 +154,7 @@ for MCP.
   `tools/call` including an allowlisted `admin_command`.
 - `zig build test` and `make check` stay green. No loadgen/stock-client leg:
   this addon never touches stock wire or the client (ADR 0019 applies to wire
-  changes; this is an internal-boundary addon, per MCP_PRD.md NFR-5).
+  changes; this is an internal-boundary addon, per PRD 0002 NFR-5).
 
 ## Consequences
 
@@ -182,4 +182,4 @@ Negative:
 
 Not decided here: exact config keys, buffer sizes, the JSON path schema, and
 the per-verb action mapping - these are design-doc details
-(`docs/MCP_DESIGN.md`).
+([RFC 0002](../rfc/0002-mcp-server-design.md)).

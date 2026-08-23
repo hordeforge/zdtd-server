@@ -165,31 +165,53 @@ pub fn worldHour(self: *const Game) u64 {
     return @as(u64, clk.day) * 24 + @as(u64, @trunc(clk.hours));
 }
 
+/// Next scheduled airdrop as a world-hour. "interval" (default): every
+/// `AirDropFrequency` game-hours from the last drop (the pre-config behavior).
+/// "days" (`[sim] airdrop_schedule = "days"`): the stock-like day-count + TOD
+/// schedule - `SandboxOptions.SetupAirDropTimeRanges` (IL=124) maps options
+/// 52/54 to Min/MaxDayCount + Min/MaxTimeOfDay (default 3/3 days, 12:00), and
+/// `calcNextAirdrop` (IL=39) picks `day + RandomRange(Min, Max+1) - 1` at that
+/// TOD; zdtd replays that deterministically (same seed → same schedule) by
+/// scheduling at day_min + k*(day_max - day_min + 1) days at the drop hour.
+pub fn nextAirdropHour(self: *const Game, now: u64) u64 {
+    if (self.airdrop_schedule == .days) {
+        const span: u64 = @max(1, @as(u64, self.airdrop_day_max) -| self.airdrop_day_min + 1);
+        const start: u64 = @as(u64, self.airdrop_day_min) * 24 + self.airdrop_drop_hour;
+        if (now < start) return start;
+        return start + ((now - start) / (span * 24) + 1) * (span * 24);
+    }
+    return now + self.air_drop_interval_hours;
+}
+
 /// AirDropFrequency: spawn a supply crate near a player every N game-hours.
 /// DIVERGENCE (RE: aidirector.md airdrop schedule): stock schedules by
-/// DAY-COUNT + fixed time-of-day - `SandboxOptions.SetupAirDropTimeRanges`
-/// (IL=124) maps options 52/54 to Min/MaxDayCount + Min/MaxTimeOfDay (default
-/// 3/3 days, 12:00), and `calcNextAirdrop` (IL=39) picks
-/// `day + RandomRange(Min, Max+1) - 1` at that TOD. zdtd's "every N game-hours
-/// from the last drop" is a simplification. Also: stock AirDropFrequency=0 does
-/// NOT disable (the sandbox option default overrides the 0 pref; live
+/// DAY-COUNT + fixed time-of-day - see nextAirdropHour above; `[sim]
+/// airdrop_schedule = "days"` restores that. Also: stock AirDropFrequency=0
+/// does NOT disable (the sandbox option default overrides the 0 pref; live
 /// getgamestat reads 3); zdtd's 0 = off is a deliberate policy difference.
 pub fn tickAirDrop(self: *Game) void {
-    if (self.air_drop_interval_hours == 0) return;
+    const enabled = if (self.airdrop_schedule == .days)
+        self.airdrop_day_max > 0
+    else
+        self.air_drop_interval_hours > 0;
+    if (!enabled) return;
     const now = self.worldHour();
     if (self.next_air_drop_hour == 0) {
-        self.next_air_drop_hour = now + self.air_drop_interval_hours;
+        self.next_air_drop_hour = nextAirdropHour(self, now);
         return;
     }
     if (now < self.next_air_drop_hour) return;
-    self.next_air_drop_hour = now + self.air_drop_interval_hours;
+    self.next_air_drop_hour = nextAirdropHour(self, now);
     // Drop above the first joined player.
     for (&self.clients) |*cl| {
         if (!cl.joined) continue;
         const ps = self.sim.playerByPeer(cl.slot) orelse continue;
         const t = self.sim.transform[ps];
         if (self.sim.spawnLootBag(t.x, t.y + 2, t.z, 1, 1)) |bag_nid| {
-            self.fillLootBagFromTable(bag_nid, "supplyCrate", @intCast(bag_nid), self.lootStageForPlayer(cl.slot));
+            // `[sim] airdrop_loot_list` (default stock "airDrop"; the old
+            // "supplyCrate" name does not exist in stock loot.xml and rolled
+            // empty crates - fixed here).
+            self.fillLootBagFromTable(bag_nid, self.airdrop_loot_list, @intCast(bag_nid), self.lootStageForPlayer(cl.slot));
             self.broadcastLootSpawn(bag_nid) catch {};
             // AIDirectorAirDropComponent.RefreshCrates (map-objects.md section
             // 8): the one server-push nav marker case, everything else is

@@ -293,7 +293,7 @@ pub const Peer = struct {
             const n = @min(part_max, user.len - off);
             // Per-part WindowFull retry: this is LiteNet-level fragmentation,
             // not the Game-layer send path. No Game budget_ns/clock is
-            // available here (and per AGENTS.md + ../7dtd-research policy this
+            // available here (and per AGENTS.md + ../7dtd-engine-research policy this
             // is liteNet native: black box, residual - by design not wire
             // correctness). The loop pumps until the outer send deadline
             // (always armed by sendReliablePumped around this call), so a

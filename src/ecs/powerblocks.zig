@@ -18,12 +18,6 @@ pub const TriggerType = enum(u8) {
 
 /// Registry column sentinel for "this block is not a PowerTrigger tile entity".
 const trigger_type_none: u8 = 0xff;
-/// Battery capacity/energy proxies (zdtd power sim, R8): stock battery energy
-/// is per-stack OutputPerCharge when present; these are the fallback scale and
-/// the initial charge fraction when the block only exposes MaxPower. Real
-/// battery tuning is a power-feature milestone; the values are named + cited.
-const battery_capacity_fallback_scale: f32 = 10.0;
-const battery_initial_charge_frac: f32 = 0.5;
 
 /// Stock PowerItem/PowerItemTypes byte for a trigger's PowerItem. PowerTrigger
 /// reports Trigger=3 (asm.il:900326), PowerPressurePlate 11 (asm.il:901440) and
@@ -56,6 +50,14 @@ pub const Resolved = struct {
     /// Stock TriggerTypes for the TE payload; null when the block has no
     /// TileEntityPoweredTrigger (generators, relays, plain consumers).
     trigger_type: ?TriggerType = null,
+    /// Battery capacity/energy proxies (zdtd power sim, R8): stock battery
+    /// energy is per-stack OutputPerCharge when present; these are the
+    /// fallback scale and the initial charge fraction when the block only
+    /// exposes MaxPower. Copied from the Registry at lookup; the Registry is
+    /// synced from `[rules.power]` (battery_capacity_scale /
+    /// battery_initial_charge_frac).
+    battery_capacity_scale: f32 = 10.0,
+    battery_initial_charge_frac: f32 = 0.5,
 
     /// Fill PowerNode capacity/burn/energy from stock props. watts already on node.
     pub fn applyToNode(self: Resolved, node: *electric.PowerNode) void {
@@ -99,11 +101,11 @@ pub const Resolved = struct {
                 const cap = if (self.output_per_charge > 0 and self.watts > 0)
                     self.watts * self.output_per_charge
                 else if (self.watts > 0)
-                    self.watts * battery_capacity_fallback_scale
+                    self.watts * self.battery_capacity_scale
                 else
                     0;
                 node.capacity = cap;
-                node.fuel_or_energy = cap * battery_initial_charge_frac;
+                node.fuel_or_energy = cap * self.battery_initial_charge_frac;
                 node.burn_rate = 0;
             },
             else => {
@@ -185,6 +187,10 @@ pub const Registry = struct {
     is_switch: [max_power_entries]bool = undefined,
     trigger_type: [max_power_entries]u8 = undefined,
     n: usize = 0,
+    /// Battery fallback proxies, synced from `[rules.power]` at init (the
+    /// build() result is copied onto Game.power_registry then adjusted).
+    battery_capacity_scale: f32 = 10.0,
+    battery_initial_charge_frac: f32 = 0.5,
 
     fn push(
         r: *Registry,
@@ -332,6 +338,8 @@ pub const Registry = struct {
                         null
                     else
                         @enumFromInt(self.trigger_type[i]),
+                    .battery_capacity_scale = self.battery_capacity_scale,
+                    .battery_initial_charge_frac = self.battery_initial_charge_frac,
                 };
             }
         }

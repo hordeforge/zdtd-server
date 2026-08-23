@@ -73,6 +73,18 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void 
 fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
     var it = std.mem.tokenizeScalar(u8, cmd, ' ');
     const verb = it.next() orelse return null;
+    if (std.mem.eql(u8, verb, "say")) {
+        // The rest of the line (after the first space) is the message; the
+        // tokenizer would split it, so slice the raw remainder.
+        const sp = std.mem.findScalar(u8, cmd, ' ') orelse return null;
+        const msg = std.mem.trim(u8, cmd[sp + 1 ..], " \t\r\n");
+        if (msg.len == 0) return null;
+        var op = ecs.command.Op{ .say = .{ .text = undefined, .len = 0 } };
+        const n = @min(msg.len, op.say.text.len);
+        @memcpy(op.say.text[0..n], msg[0..n]);
+        op.say.len = @intCast(n);
+        return op;
+    }
     if (std.mem.eql(u8, verb, "spawn")) {
         const x = it.next() orelse return null;
         const y = it.next() orelse return null;
@@ -103,24 +115,31 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
     return null;
 }
 
-/// Build a fixed-layout world snapshot for a `zdtd.sense` call (BOTS_SPEC §3).
-/// Header (16 bytes) then fixed 32-byte entity records, then an optional
-/// 16-byte event trailer (bot-info records kind 4, then damage events kind 3);
-/// all little-endian. Returns bytes written; 0 when `out` cannot fit a header.
+/// Build a fixed-layout world snapshot for a `zdtd.sense` call (RFC 0001 §3).
+/// Header (24 bytes: magic/count/tick/self_net_id/world_time/blood_moon)
+/// then fixed 32-byte entity records, then an optional 16-byte event trailer
+/// (bot-info records kind 4, then damage events kind 3); all little-endian.
+/// Returns bytes written; 0 when `out` cannot fit a header.
 /// No heap on the tick path.
+pub const sense_header_len: usize = 24;
+
 pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
-    if (out.len < 16) return 0;
+    if (out.len < sense_header_len) return 0;
     // Reserve room for the event trailer up front so a full record set still
     // leaves space for it (the guest parses the trailer after the records; a
     // truncated tail would desync its offsets).
     const bot_mod = @import("bot.zig");
     const trailer_cap = (bot_mod.max_sense_info + bot_mod.max_sense_events) * bot_mod.sense_event_len;
-    const max_records = if (out.len >= 16 + trailer_cap) (out.len - 16 - trailer_cap) / 32 else (out.len - 16) / 32;
-    std.mem.writeInt(u32, out[0..4], 0x3253425a, .little); // 'ZBS2' (v2: event trailer)
+    const max_records = if (out.len >= sense_header_len + trailer_cap) (out.len - sense_header_len - trailer_cap) / 32 else (out.len - sense_header_len) / 32;
+    std.mem.writeInt(u32, out[0..4], 0x3353425a, .little); // 'ZBS3' (v3: world_time + blood_moon in the header)
     std.mem.writeInt(u32, out[4..8], 0, .little); // count, filled below
     std.mem.writeInt(u32, out[8..12], @truncate(g.tick_n), .little);
     std.mem.writeInt(i32, out[12..16], 0, .little); // self_net_id
+    // v3: world ticks (low 32) + blood-moon flag, so announcement/clock
+    // modules can schedule from the header without a separate query.
+    std.mem.writeInt(u32, out[16..20], @truncate(g.sim.director.clock.worldTimeBits()), .little);
+    std.mem.writeInt(u32, out[20..24], if (g.sim.director.bloodmoon_active) 1 else 0, .little);
     var n: usize = 0;
     var s: ecs.Slot = 0;
     while (s < ecs.max_entities and n < max_records) : (s += 1) {
@@ -132,7 +151,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
             // Non-combat world objects are not combat candidates; omit.
             .trader, .vehicle, .turret, .loot_bag, .falling_block => continue,
         };
-        const base = 16 + n * 32;
+        const base = sense_header_len + n * 32;
         const r = out[base .. base + 32];
         std.mem.writeInt(i32, r[0..4], g.sim.network_id[s].id, .little);
         r[4] = k;
@@ -153,12 +172,12 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     // fillSense offsets by its own running `n` (which already counts the ECS
     // actor records), so base must be the header end (16), NOT 16 + n*32 —
     // the latter double-offsets the bot records past the copied region.
-    g.bots.fillSense(out, 16, max_records, &n);
-    // Event trailer (BOTS_SPEC §3): kind-4 bot-info records first (the guest's
+    g.bots.fillSense(out, sense_header_len, max_records, &n);
+    // Event trailer (RFC 0001 §3): kind-4 bot-info records first (the guest's
     // weapon map), then kind-3 damage events (attributed hits since the last
     // sense pass — the guest keys on victim == its own bot net id to
     // retaliate).
-    const ev_base = 16 + n * 32;
+    const ev_base = sense_header_len + n * 32;
     const info_n = g.bots.fillSenseBotInfo(out, ev_base, bot_mod.max_sense_info);
     var ev_n: usize = 0;
     const ev_base2 = ev_base + info_n * bot_mod.sense_event_len;
@@ -166,11 +185,11 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
         ev_n = g.bots.drainSenseEvents(out, ev_base2, bot_mod.max_sense_events);
     }
     std.mem.writeInt(u32, out[4..8], @intCast(n), .little);
-    return 16 + n * 32 + (info_n + ev_n) * bot_mod.sense_event_len;
+    return sense_header_len + n * 32 + (info_n + ev_n) * bot_mod.sense_event_len;
 }
 
 /// `zdtd.query(req_ptr, req_len, out_ptr, out_cap)` — reverse-direction point
-/// query (BOTS_SPEC §3; the sense `token` stays reserved). The guest writes a
+/// query (RFC 0001 §3; the sense `token` stays reserved). The guest writes a
 /// text request, the host writes a text response into the guest's out buffer
 /// and returns bytes written (0 = no answer). Requests are host-budgeted
 /// (small, text-parsed) and never mutate the sim.

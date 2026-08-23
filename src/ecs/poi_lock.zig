@@ -16,7 +16,8 @@ pub const LockReason = enum(u8) {
 };
 
 /// QuestLockInstance.SetUnlocked: LockedOutUntil = worldTime + 0x7d0 (asm.il 1002020).
-pub const unlock_grace: u64 = 2000;
+/// The grace is `rules.world.poi_unlock_grace_ticks` (Table field, synced at
+/// init; 2000 = 100 s at 20 TPS).
 
 /// Fixed capacity: the table is grown from client packets, so it must not be
 /// an unbounded allocation a peer can drive.
@@ -33,6 +34,9 @@ pub const Lock = struct {
     locked: bool = false,
     /// QuestLockInstance.LockedOutUntil (0 while questers are inside).
     locked_out_until: u64 = 0,
+    /// Grace applied on last-quester-out (copied from Table.grace_ticks at
+    /// lock creation; `rules.world.poi_unlock_grace_ticks`).
+    grace_ticks: u64 = 2000,
 
     fn hasQuester(self: *const Lock, entity_id: i32) bool {
         for (self.questers[0..self.quester_n]) |q| {
@@ -59,7 +63,7 @@ pub const Lock = struct {
         // QuestLockInstance.RemoveQuester: last quester out starts the grace.
         if (self.quester_n == 0 and self.locked) {
             self.locked = false;
-            self.locked_out_until = world_time +| unlock_grace;
+            self.locked_out_until = world_time +| self.grace_ticks;
         }
     }
 
@@ -72,6 +76,8 @@ pub const Lock = struct {
 pub const Table = struct {
     entries: [max_locks]Lock = [_]Lock{.{}} ** max_locks,
     n: usize = 0,
+    /// POI unlock grace (`rules.world.poi_unlock_grace_ticks`, synced at init).
+    grace_ticks: u64 = 2000,
 
     fn indexAt(self: *Table, x: f32, z: f32) ?usize {
         for (self.entries[0..self.n], 0..) |*e, i| {
@@ -111,7 +117,7 @@ pub const Table = struct {
             }
             if (!reclaimed) return false;
         }
-        self.entries[self.n] = .{ .rect = rect, .locked = true };
+        self.entries[self.n] = .{ .rect = rect, .locked = true, .grace_ticks = self.grace_ticks };
         self.entries[self.n].addQuester(entity_id);
         self.n += 1;
         return true;
@@ -148,8 +154,8 @@ test "poi lock blocks until the last quester leaves and the grace expires" {
     try std.testing.expectEqual(@as(?u64, 0), t.check(110, 210, 100));
     t.unlock(110, 210, 172, 100);
     // Grace window still reports locked, extraData = LockedOutUntil.
-    try std.testing.expectEqual(@as(?u64, 100 + unlock_grace), t.check(110, 210, 500));
-    try std.testing.expect(t.check(110, 210, 100 + unlock_grace + 1) == null);
+    try std.testing.expectEqual(@as(?u64, 100 + 2000), t.check(110, 210, 500));
+    try std.testing.expect(t.check(110, 210, 100 + 2000 + 1) == null);
     try std.testing.expectEqual(@as(usize, 0), t.n);
 }
 
@@ -183,7 +189,7 @@ test "unlocking an unknown poi is a no-op" {
     const rect: c.PoiRect = .{ .x = 0, .z = 0, .size_x = 8, .size_y = 8, .size_z = 8 };
     try std.testing.expect(t.lock(rect, 1, 0));
     t.unlock(1, 1, 1, 0);
-    try std.testing.expect(t.lock(rect, 2, unlock_grace + 1));
+    try std.testing.expect(t.lock(rect, 2, 2000 + 1));
     try std.testing.expectEqual(@as(usize, 1), t.n);
     try std.testing.expectEqual(@as(u8, 1), t.entries[0].quester_n);
 }

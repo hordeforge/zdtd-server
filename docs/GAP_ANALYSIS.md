@@ -167,7 +167,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 Do not plan these as product features of zdtd:
 
 1. Loading `Mods/`, Harmony, ModAPI, EfficientServer, RealEarth as runtime.  
-2. Integrating **7dtd-apm** Mono bridge / bpftrace into the Zig process.  
+2. Integrating **7dtd-server-apm** Mono bridge / bpftrace into the Zig process.  
 3. EAC-signed multiplayer.  
 4. Shipping TFP DLLs, prefab binaries, or bulk decompiled C#.  
 5. Bit-identical blood-moon festivities / full Unity FX parity.  
@@ -363,7 +363,7 @@ area and the concrete work.
     literal (`<PrivateImplementationDetails> 04715D0F...`); zdtd uses the
     classic Ken Perlin table, so banding is stock-shaped (same FBM structure +
     XML frequencies/offsets/windows) but not byte-identical to the stock
-    boundaries. Extracting the literal is a `../7dtd-research` task.
+    boundaries. Extracting the literal is a `../7dtd-engine-research` task.
 
 19. **DONE (version) 2026-08-07.** Net: fix `ServerVersion` and register
     with a master server. The GSI `ServerVersion` is now the stock four-field
@@ -431,7 +431,7 @@ area and the concrete work.
     **Shipped** (`src/world/stability.zig`, commits 6daf9ca + 02a373a): the
     per-block byte plane (15 full / 1 non-support cap / 0 falls), reset +
     distribute on first touch, and the incremental removal/placement paths
-    from `StabilityCalculator`/`ChannelCalculator` (RE: `../../7dtd-research/docs/stability.md`).
+    from `StabilityCalculator`/`ChannelCalculator` (RE: `../../7dtd-engine-research/docs/stability.md`).
     A C2S SetBlock that removes a support block fells the dependency chain and
     broadcasts the collapse; placing re-spreads from supported neighbours.
     Support/ignore membership resolves from the block tables, not hardcoded.
@@ -600,7 +600,7 @@ not a sleeper-volume clear), not completion blockers.
   prob-weighted picks (`ischosen`, uniform when weights are equal) or the
   first `value` entries (`isfixed`), each stack granted, and `RewardQuest`
   entries chain: the turn-in grants the named quest to the journal. RE pin:
-  7dtd-research quests-challenges.md.
+  7dtd-engine-research quests-challenges.md.
   *Anchors:* `src/assets/quests.zig` (reward parse), `src/assets/loot.zig`
   (`rollGroupPicks`), `src/server/game/step.zig` (payout drain)
   `:6356`
@@ -692,7 +692,7 @@ not a sleeper-volume clear), not completion blockers.
   each QuestPacketEntry carries the real QuestLocation (POI center at terrain
   height), QuestSize (bbox size) and POIName, selected by the stock
   tag/tier/biome/band engine (DynamicPrefabDecorator.GetRandomPOINearTrader;
-  RE: 7dtd-research docs/quests-challenges.md "Quest POI selection").
+  RE: 7dtd-engine-research docs/quests-challenges.md "Quest POI selection").
   Scenario `quest-poi-select` proves a clear-tag tier-1 quest selects the
   matching POI (not the fabricated catalog spot) and feeds the offer wire.
   *Anchors:* `src/server/game/quest.zig` buildTraderQuestOffers,
@@ -771,10 +771,10 @@ not a sleeper-volume clear), not completion blockers.
   advance the journal server-side and surface on the next journal write /
   objective update, matching the client-owned-quest model.
   *Anchors:* `src/server/c2s/quest.zig` (QuestObjectiveUpdate handler +
-  party mirror), `7dtd-research docs/protocol-packages.md`
+  party mirror), `7dtd-engine-research docs/protocol-packages.md`
   (NetPackageQuestObjectiveUpdate)
   *Anchors:* `src/server/game.zig:6088`, `:6121`, `:6185`,
-  `../../7dtd-research/docs/quests-challenges.md` §5 (client owns the quest)
+  `../../7dtd-engine-research/docs/quests-challenges.md` §5 (client owns the quest)
 
 - **Server-side journal: accept, phase advance, turn-in, coins** `WORKS`
   `questAccept` allocates a slot, assigns a monotonic quest_code, resolves a POI
@@ -1205,7 +1205,7 @@ parsed, and quest offering is unwired.
   against the IL.
   *Anchors:* `src/wire/packages.zig` (`buildWorldAreasBody`),
   `src/server/game.zig` (`sendWorldAreas`), `src/world/prefabs.zig`
-  (`QuestData.is_trader_area`), `../7dtd-research il dump` `TraderArea.il.txt:721`
+  (`QuestData.is_trader_area`), `../7dtd-engine-research il dump` `TraderArea.il.txt:721`
 
 - **Vending machines** `WORKS`
   The vending TE (TileEntityVendingMachine, type 7) is now emitted: a
@@ -1790,7 +1790,7 @@ can walk into every POI but none of them is the building TFP authored.
 
 - **TileEntityType constants** `WORKS`
   `src/wire/te_types.zig` now matches the stock enum exactly (RE IL
-  1311761-1311788, tabulated in 7dtd-research world-generation.md): None=0,
+  1311761-1311788, tabulated in 7dtd-engine-research world-generation.md): None=0,
   Collector=3, LandClaim=4, Loot=5, Trader=6, VendingMachine=7, Forge=8,
   Campfire=9, SecureLoot=0x0A, SecureDoor=0x0B, Workstation=0x0C, Sign=0x0D,
   GoreBlock=0x0E, Powered=0x0F, PowerSource=0x10, PowerRangeTrap=0x11,
@@ -2044,8 +2044,8 @@ gamestage, no wandering hordes, and no screamers.
   RE-blocked and the R9 value-level hpScale stays as the documented
   approximation.
   *Anchors:* `src/ecs/aidirector.zig:109-118`, `:216-218`, `:266-267`,
-  `asm.il:220834`, `../7dtd-research/docs/combat-damage.md:491-494`,
-  `../7dtd-research/docs/sandbox-options.md:305`
+  `asm.il:220834`, `../7dtd-engine-research/docs/combat-damage.md:491-494`,
+  `../7dtd-engine-research/docs/sandbox-options.md:305`
 
 - **spawning.xml parsing** `PARTIAL` `(2026-08-23)`
   Parses biome name, entitygroup, maxcount, time, type and respawndelay.
@@ -2888,7 +2888,7 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/server/game/chunk_fill.zig:293-322,363-415`,
   `src/server/c2s/misc.zig:568` (LockRequest), `src/assets/loot.zig` parse,
   `src/world/containers.zig` loot_list,
-  `../../7dtd-research/docs/loot-economy.md:454-456,458-465`
+  `../../7dtd-engine-research/docs/loot-economy.md:454-456,458-465`
 
 - **Container capacity limits** `WORKS` `(2026-08-22 re-audit)`
   The world container store is 4096 entries (GAP 12 raised it from 256, and
@@ -3147,8 +3147,8 @@ and server-to-client XP/level pushes do not exist.
   system - eating quality food/drink raises wellness toward a cap, feeding
   `PlayerEntityStats.MaxHealth`; no consumer today).
   *Anchors:* `src/server/game/tick.zig:78-107`, `src/server/game/weather.zig:23-69`,
-  `src/wire/packages.zig:2251-2295`, `../7dtd-research/docs/entity-stats.md:141-166`,
-  `../7dtd-research/docs/weather-environment.md:257-300`,
+  `src/wire/packages.zig:2251-2295`, `../7dtd-engine-research/docs/entity-stats.md:141-166`,
+  `../7dtd-engine-research/docs/weather-environment.md:257-300`,
   `Data/Config/weathersurvival.xml`
 
 - **Death detection and the dead-player entity** `WORKS`
@@ -3316,7 +3316,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   sub-block fraction stays used only where stock uses it (none on the
   server surface).
   *Anchors:* `src/world/dtm.zig:33`, `src/wire/stock_chunk.zig:28-33`,
-  `:430-435`, `7dtd-research docs/chunk-providers.md` + `il/terrain-v3.1.0/
+  `:430-435`, `7dtd-engine-research docs/chunk-providers.md` + `il/terrain-v3.1.0/
   TerrainGeneratorWithBiomeResource_fillDensityInBlock_*_il.txt`
 
 - **Biome-driven terrain columns** `WORKS`
@@ -3547,7 +3547,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/config.zig` SandboxCode/SandboxPreset,
   `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig` `gameStatsValues`,
   `src/wire/packages.zig:2039-2040`,
-  `../../7dtd-research/docs/weather-environment.md` §4, `sandbox-options.md` §8
+  `../../7dtd-engine-research/docs/weather-environment.md` §4, `sandbox-options.md` §8
 
 - **Day/night clock and NetPackageWorldTime broadcast** `WORKS`
   WorldClock advances hours from real dt scaled by DayNightLength, dawn fixed at
@@ -3615,7 +3615,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Known gaps: a placed block that would fall instantly still stands until a
   support change under it (stock seeds 15 everywhere too, so this matches stock);
   no `EntityFallingBlock` visual entity (the client collapses locally).
-  *Anchors:* `src/world/stability.zig`, `../../7dtd-research/docs/stability.md`
+  *Anchors:* `src/world/stability.zig`, `../../7dtd-engine-research/docs/stability.md`
 
 - **Structural collapse / falling blocks** `BLOCKED (2026-08-07)`
   The stability plane and collapse removal are shipped (the server removes
@@ -3741,7 +3741,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   MISSING would invent the `List<Vector3i>` wire shape without the RE dump for
   `PersistentPlayerData::Write` count-vs-list layout, so waived per stop rule.
   *Anchors:* `src/server/c2s/blocks.zig:claimCovering`, `src/wire/stock_inv.zig:846-885`,
-  `../7dtd-research/il/realearth-surfaces-v3.1.0/PersistentPlayerData_Write_BinaryWriter_il.txt:IL_008E-00D7`
+  `../7dtd-engine-research/il/realearth-surfaces-v3.1.0/PersistentPlayerData_Write_BinaryWriter_il.txt:IL_008E-00D7`
 
 - **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `PARTIAL`
   ExpiryTime is enforced (`expireClaims` on the day roll, offline only); the other
@@ -3752,7 +3752,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   registration (`claimAllowed`: refuse claims past the owner's count or inside
   another claim's dead zone; test `land claim count and dead-zone gates`).
   Residual: the DecayMode/OfflineDelay keystone-damage rate is not documented
-  in 7dtd-research (RE-blocked), so offline decay beyond expiry is not modeled.
+  in 7dtd-engine-research (RE-blocked), so offline decay beyond expiry is not modeled.
   *Anchors:* `src/wire/packages.zig:1916-1920`, `:1984-1991`,
   `src/server/game/world.zig` claimAllowed + expireClaims,
   `src/server/c2s/blocks.zig:157` (placement gate), `src/server/config.zig`
@@ -4157,7 +4157,7 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
   `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
   `src/server/game/tick.zig` (`tickServerAdminReload`),
-  `../7dtd-research/docs/dedicated-misc-systems.md` (AdminBlacklist)
+  `../7dtd-engine-research/docs/dedicated-misc-systems.md` (AdminBlacklist)
 
 - **Admin permission levels** `PARTIAL (waived: loopback-only admin)`
   In-game console is intentionally allowlisted read-only; mutating commands stay on
@@ -4400,7 +4400,7 @@ persists so little that a restart visibly damages a built base.
   default. Dropping a real stock serverconfig.xml onto zdtd now tunes the sim.
   *Anchors:* `src/server/config.zig` (`applySandboxCode`),
   `src/assets/sandbox.zig`, `src/assets/sandbox_data.zig`,
-  `../7dtd-research/docs/sandbox-options.md §2.1/§3/§5`
+  `../7dtd-engine-research/docs/sandbox-options.md §2.1/§3/§5`
 
 - **Chunk save format** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
   Works for zdtd: one file per chunk, `<world>/c_X_Z.zch`, magic ZCH3, with
@@ -4735,7 +4735,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 #### Entity lifecycle
 | Package | Priority |
 |---|---|
-| `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; **all six branches now implemented**: zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player, plus the junk-drone tail; missing payload for a branch returns an error rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../../7dtd-research/docs/protocol-packages.md` 5.1 |
+| `NetPackageEntitySpawn` stock body + class id | PARTIAL (`stock_entity.zig` ECD networkWrite; Unity Mono class hashes; **zombie/NPC, item-drop, falling-tree, player (male/female), and the junk-drone tail** all implemented + tested; **all six branches now implemented**: zombie/NPC, item-drop, fallingBlock, fallingBlocks, fallingTree, player, plus the junk-drone tail; missing payload for a branch returns an error rather than a short body). ECD `write` is header + `entityClass` switch + networkWrite tail, verified against IL, see `../../7dtd-engine-research/docs/protocol-packages.md` 5.1 |
 | `NetPackageEntitySpawnResponse` | SHIPPED (2026-08-09): the ItemDrop handler answers the thrower with success + the dropped ItemValue so the client DecItems its bag (the drop commit); empty ItemValue would NRE the client, so it is only sent on place/throw, never on join |
 | `NetPackageEntityTeleport` | HAVE (respawn at world spawn, admin teleportplayer/goto, void-fall recovery all send the stock body; `World.teleportTo` sim funnel) |
 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | PARTIAL (2026-08-09): hit knockback shoves zombies/animals (8 blocks/s, 0.3 s, away from the attacker) and broadcasts `NetPackageEntityVelocity` (bAdd=true); `EntitySpeeds` ships in the motion frames (movementState + fwd/strafe). Open: `EntityPhysics` and momentum-driven ragdoll remain |
@@ -4920,11 +4920,11 @@ client join + play path; remaining unnamed types are editor/EAC/platform.
 | RegionFileRaw headers / sectors | PARTIAL - non-client-visible (documented 2026-08-21: save-format internal, RE partial, out of scope per the parity objective; ZCH3 `.zch` persists the sim-visible state) |
 | Chunk unload / streaming policy | PARTIAL | join r≤4 stream + resident cap 4096 LRU |
 | Multi-block entities (doors) | PARTIAL | storage open pair; generic door meta shallow |
-| Water flow / physics | PARTIAL (2026-08-21: bounded leveling - digging beside an existing water column pours the connected open basin up to the column's surface, and placed water now cascades: the air column below the placed cell fills down to the first solid (stock gravity flow), then the landing cell puddles into up to rules.water.puddle_cap air cells that rest on solid, so a bucket falls and makes a small puddle instead of sitting where placed or flooding a whole floor. Budgeted per tick (rules.water edits_per_tick/spread_cap). No mass-flow engine: no per-cell levels/flow directions, no evaporation, no draining - the jobified WaterSimulationNative sim (7dtd-research light-mesh-water.md §4) is not ported) |
+| Water flow / physics | PARTIAL (2026-08-21: bounded leveling - digging beside an existing water column pours the connected open basin up to the column's surface, and placed water now cascades: the air column below the placed cell fills down to the first solid (stock gravity flow), then the landing cell puddles into up to rules.water.puddle_cap air cells that rest on solid, so a bucket falls and makes a small puddle instead of sitting where placed or flooding a whole floor. Budgeted per tick (rules.water edits_per_tick/spread_cap). No mass-flow engine: no per-cell levels/flow directions, no evaporation, no draining - the jobified WaterSimulationNative sim (7dtd-engine-research light-mesh-water.md §4) is not ported) |
 | Falling blocks | PARTIAL (2026-08-21: the stock default path is per-cell singular `fallingBlock` entities - group mode EntityFallingBlocks.Enabled is false by default - so stabilityAfterSetBlock spawns one singular entity per collapsed cell whose block `ShowModelOnFall` resolves true (blocks.xml property, default true per Block.il.txt 1876-18A2), each at its cell center with the stock -0.1..0.1 Y offset and a deterministic position-seeded horizontal impulse; full BlockValue rawData (rotation/meta) rides the ECD; replicate branches class fallingBlock (n=1) vs fallingBlocks (n>1). Crush damage shipped (RE entity-ai.md EntityFallingBlock.OnUpdateEntity IL=344): massKg = FastMin(MaterialBlock.Hardness*Mass, 10)*8 via materials.xml (goldens: cobblestoneMaster 80, cntAmmoPileSmall 40); every other tick a box-overlap scan damages entities under the faller - skips at 3 hits/entity (cMaxHitsPerEntity), faller below the target's head, |vy| < 0.8; raw FastMin(massKg*|vy|*0.05, 40) int-truncated then armor-reduced (passive 164 analog); the singular cell now tracks the transform exactly so the fall pace matches gravity (fixes a pre-existing floor-offset bug that landed blocks in 4 ticks). Remaining: Fall-event item drops (prefs OptionsStabSpawnBlocksOnGround 148, default off), landing audio/particles, opt-in group mode + BFS grouping, group-size IL pin. RE entity-ai.md LetBlocksFall / EntityFallingBlock.OnUpdateEntity) |
 | POI sleeper volumes from prefab | PARTIAL | AABBs + group/count + authored sleeper* markers + gamestage group→spawner→stage→entitygroup chain. Gaps: respawn, trigger cascade, quest/boss flags, pose, per-volume stage adjust |
 | Land claim / bedroll spawn | WORKS (2026-08-20: LandClaim options + keystone deny + bedroll respawn point) |
-| World borders / difficulty tiers | RE-BLOCKED (2026-08-21: the world border is client-side - the client clamps at the WorldInfo size zdtd sends; the difficulty damage table (GameDifficulty -> damage multipliers applied in the stock damage paths) needs IL not in the corpus: the dump set covers EnumEnemyDifficulty and ModifySpawnCountByGameDifficulty but no difficulty-affected DamageEntity lookup. 7dtd-research needs a dump of that path before implementation; zdtd's game_difficulty/enemy_difficulty currently drive spawn scaling only) | |
+| World borders / difficulty tiers | RE-BLOCKED (2026-08-21: the world border is client-side - the client clamps at the WorldInfo size zdtd sends; the difficulty damage table (GameDifficulty -> damage multipliers applied in the stock damage paths) needs IL not in the corpus: the dump set covers EnumEnemyDifficulty and ModifySpawnCountByGameDifficulty but no difficulty-affected DamageEntity lookup. 7dtd-engine-research needs a dump of that path before implementation; zdtd's game_difficulty/enemy_difficulty currently drive spawn scaling only) | |
 
 ---
 
@@ -4946,7 +4946,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Pathfinding (grid A* / navmesh) | PARTIAL (grid A* + BFS + greedy over a body-aware step predicate: step-up 1, drop 3, 2-cell headroom; 8-cell waypoint buffer + per-tick replan budget; no navmesh, no jump/climb) |
 | MoveHelper physics / collision | WORKS (2026-08-21: collide-and-slide against the block grid (body ~0.35×1.8, axis-separated like the stock CC Move), step-up of 1 block, gravity per the stock formula (World.Gravity 0.08/tick with the 0.98 y-drag, ~1.6 blocks/s²), the stock jump (a blocked grounded AI hops when the obstacle's full height fits under the jump apex, probing at its actual height; jumpDelay 1 s gate), door-opening (zombies open unlocked doors on their path; open doors are passable), dig-through (obstacles too tall to hop are dug with the stock windup/attack cadence), swim physics (submerged bodies float - cSwimGravityPer 0.025 / cSwimDragY 0.91 - and move at the swim speed fraction), and entity push (blocked zombies shove blockers so crowds part). The stock elevator has no platform block (elevatorDoor handled as a door; the call-panel buttons are client UI; SetInElevator rides entity-driven platforms, none exist as blocks) - documented non-issue on stock maps. Bots keep their own stepMoveCollide (host affordances, deferred). RE entity-movement.md) |
 | Gravity / swimming / climbing | PARTIAL (AI bodies fall under stock gravity and land - entity-movement.md; vehicle gravity; void rescue teleport; swimming/climbing MISSING) |
-| Line of sight / hearing / smell | WORKS (2026-08-20: sense gate ships - per-class view cone (entityclasses MaxViewAngle, stock cctor default 180 halved like IsInFrontOfMe), block-LOS sight via Voxel.Raycast-equivalent, hearing within hear_range that passes walls, and a smell radius that passes walls with a bleeding-player extension (buffInjuryBleeding → cSmellRadiusBleed 25, else cSmellRadiusMin 10), RE entity-ai.md CanEntityBeSeen + PlayerStealth + EntityAlive/EntityClass cctor defaults. Sub-note: CanSeeStealth's light-level leg needs the client's light channel and is not evaluated server-side; sub-note documented in 7dtd-research/docs/entity-ai.md) |
+| Line of sight / hearing / smell | WORKS (2026-08-20: sense gate ships - per-class view cone (entityclasses MaxViewAngle, stock cctor default 180 halved like IsInFrontOfMe), block-LOS sight via Voxel.Raycast-equivalent, hearing within hear_range that passes walls, and a smell radius that passes walls with a bleeding-player extension (buffInjuryBleeding → cSmellRadiusBleed 25, else cSmellRadiusMin 10), RE entity-ai.md CanEntityBeSeen + PlayerStealth + EntityAlive/EntityClass cctor defaults. Sub-note: CanSeeStealth's light-level leg needs the client's light channel and is not evaluated server-side; sub-note documented in 7dtd-engine-research/docs/entity-ai.md) |
 | Stealth / crouch | PARTIAL (2026-08-20: crouch replicates via NetPackageEntityAliveFlags bit 512 (IsCrouching); a crouched player's hearing gate muffles by crouch_hear_scale (0.5; stock per-clip muffledWhenCrouched from noisysounds.xml is data-driven) and sleepers only detect crouched players within crouch_sleeper_detect_range (5; stock light-based FastLerp(3,15,light) leg is RE-blocked - no server light channel), RE entity-ai.md PlayerStealth + protocol-packages.md 5.5.6. Missing: the light-level CanSeeStealth leg, movement-noise volume model, smoke/smell stealth) |
 | Group AI / pack behavior | PARTIAL (2026-08-20: combat-noise alerts - a landed melee hit or ranged damage pushes a noise event (ring, atomic from parallel AI + net thread) that alerts zombies within combat_noise_radius to investigate the spot and wakes sleepers, budgeted per tick (noise_events_per_tick), RE entity-ai.md NotifyNoise; per-clip noisysounds.xml volumes are data-driven, not ported. Missing: true pack hunting/coordination, horde group directives) |
 | Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24; leaving a client's interest box now sends that client `EntityRemove(Unloaded)` and drops the `known_entities` bit, matching `NetEntityDistributionEntry::updatePlayerEntity`) |
@@ -5842,7 +5842,7 @@ HONEST GAPS:
 ### V3.1.0 wire note (2026-08-02)
 
 `NetPackageTileEntity` now writes `teBlockId:i32` after world pos and uses **i32**
-payload length (was u16). Stock RE: `../../7dtd-research/docs/protocol-packages.md` §6.12
+payload length (was u16). Stock RE: `../../7dtd-engine-research/docs/protocol-packages.md` §6.12
 and the research topic docs.
 
 **Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /

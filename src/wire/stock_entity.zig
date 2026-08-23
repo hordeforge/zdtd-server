@@ -1,7 +1,7 @@
 //! Stock EntityCreationData + NetPackageEntitySpawn (networkWrite=true).
 //!
 //! ECD is header + entityClass switch + networkWrite tail (see
-//! ../../../7dtd-research/docs/protocol-packages.md 5.1). Implemented branches:
+//! ../../../7dtd-engine-research/docs/protocol-packages.md 5.1). Implemented branches:
 //! zombie/NPC/animal (empty middle), itemClass, fallingBlock, fallingBlocks,
 //! fallingTree, and player (male/female), plus the junk-drone tail. A class whose
 //! branch needs data the caller did not supply returns an error rather than a
@@ -691,7 +691,7 @@ test "trader ECD emits hasTraderData + TraderData::Write" {
 }
 
 /// NetPackageWorldSpawnPoints body: SpawnPointList (RE
-/// ../7dtd-research/il/full-v3.1.0/_global/SpawnPointList.il.txt write IL=25
+/// ../7dtd-engine-research/il/full-v3.1.0/_global/SpawnPointList.il.txt write IL=25
 /// + SpawnPoint/SpawnPosition). Sent on death so the client's respawn screen
 /// lists the available spawn points. Layout: version u8 (2) + count i32 +
 /// per point: SpawnPosition (version u16 0 + position xyz f32 + heading f32)

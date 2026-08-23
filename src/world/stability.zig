@@ -1,5 +1,5 @@
 //! Stock block stability plane and falling-block trigger (RE:
-//! `../7dtd-research/docs/stability.md`, dumps 2026-08-06).
+//! `../7dtd-engine-research/docs/stability.md`, dumps 2026-08-06).
 //!
 //! Port of `StabilityCalculator` + `StabilityInitializer` + `ChannelCalculator`
 //! to the SoA chunk store. The plane is a per-block byte (0..15): 15 full

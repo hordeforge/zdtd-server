@@ -134,7 +134,7 @@ pub fn pathStepAt(ctx: ?*anyopaque, _: i32, _: i32, from_y: i32, tx: i32, tz: i3
 }
 
 /// Stock DynamicPrefabDecorator quest-POI selection
-/// (il/full-v3.1.0/_global/DynamicPrefabDecorator.il.txt; RE: 7dtd-research
+/// (il/full-v3.1.0/_global/DynamicPrefabDecorator.il.txt; RE: 7dtd-engine-research
 /// docs/quests-challenges.md "Quest POI selection"). `.random` mirrors
 /// GetRandomPOINearWorldPos / GetRandomPOINearTrader; `.closest` mirrors
 /// GetClosestPOIToWorldPos. No heap: fixed stack pools + a per-call XorShift
@@ -170,7 +170,7 @@ pub fn questPoiSelectAt(ctx: ?*anyopaque, p: ecs.quest.QuestPoiParams) ?ecs.ques
         while (band_attempt < 3) : (band_attempt += 1) {
             const band: u8 = @intCast(@mod(@as(u32, start_band) + @as(u32, @intCast(band_attempt)), 3));
             var attempt: usize = 0;
-            while (attempt < max_poi_attempts) : (attempt += 1) {
+            while (attempt < @as(usize, g.quest_policy.max_poi_attempts)) : (attempt += 1) {
                 const i = candidates[rng.nextBounded(@intCast(n))];
                 if (selectQuestPoi(g, pf, p, i, false, band)) |sel| return sel;
             }
@@ -211,11 +211,9 @@ pub fn questPoiSelectAt(ctx: ?*anyopaque, p: ecs.quest.QuestPoiParams) ?ecs.ques
     return best;
 }
 
-/// Stock selector constants (ObjectiveRandomPOIGoto.GetPosition IL_019C-01A1).
-const poi_min_dist_sq: f32 = 1000.0;
-const poi_max_dist_sq: f32 = 4000000.0;
-/// GetRandomPOINearWorldPos loop bound (DynamicPrefabDecorator IL_0202).
-const max_poi_attempts: usize = 50;
+/// Stock selector constants (ObjectiveRandomPOIGoto.GetPosition IL_019C-01A1):
+/// the distance band is `[quests]` (QuestPolicy.poi_min_dist / poi_max_dist),
+/// the search loop bound is `[quests] max_poi_attempts`.
 /// Tier pool cap for a single selection (stack, no heap; a world has at most
 /// a few hundred POIs per tier, so truncation only affects huge maps).
 const max_poi_candidates: usize = 4096;
@@ -293,21 +291,24 @@ fn selectQuestPoi(
     }
     // 7. distance (GetRandomPOINearWorldPos only): the trader path skips it
     //    (band lists), the closest path is unbounded (maxSearchDistance -1).
-    //    Squared center distance must be strictly inside (1000, 4000000).
+    //    Squared center distance must be strictly inside the [quests] band.
     if (p.kind == .random and !p.is_trader) {
         const dx = p.anchor_x - cx;
         const dz = p.anchor_z - cz;
         const d2 = dx * dx + dz * dz;
-        if (!(d2 > poi_min_dist_sq and d2 < poi_max_dist_sq)) return null;
+        const min_d = g.quest_policy.poi_min_dist;
+        const max_d = g.quest_policy.poi_max_dist;
+        if (!(d2 > min_d * min_d and d2 < max_d * max_d)) return null;
     }
     // Trader path band order: GetRandomPOINearTrader (random kind only) tries
     // the trader's preferred distance band first (0 = ≤500 m, 1 = ≤1500 m,
-    // 2 = beyond). The closest path (ObjectiveGoto) never uses bands.
+    // 2 = beyond). The closest path (ObjectiveGoto) never uses bands. The
+    // band boundaries are `[quests] trader_band_1` / `trader_band_2`.
     if (p.is_trader and p.kind == .random) {
         const dx = p.anchor_x - bbox_x;
         const dz = p.anchor_z - bbox_z;
         const dist = @sqrt(dx * dx + dz * dz);
-        const band: u8 = if (dist <= 500) 0 else if (dist <= 1500) 1 else 2;
+        const band: u8 = if (dist <= g.quest_policy.trader_band_1) 0 else if (dist <= g.quest_policy.trader_band_2) 1 else 2;
         if (band != trader_band) return null;
     }
     const cy = g.sim.groundY(cx, cz) orelse @as(f32, @floatFromInt(d.y));
@@ -554,9 +555,11 @@ pub fn homeLockout(ctx: ?*anyopaque, entity_id: i32, px: f32, pz: f32) u8 {
         if (cl.has_bed) {
             const dx = @as(f32, @floatFromInt(cl.bed_x)) - px;
             const dz = @as(f32, @floatFromInt(cl.bed_z)) - pz;
-            // A bed within 32 m of the POI center counts as inside the POI
-            // footprint (the quest cannot reset the POI you respawn in).
-            if (dx * dx + dz * dz < 32.0 * 32.0) bits |= 1;
+            // A bed within `[quests] poi_bed_lockout_radius` of the POI center
+            // counts as inside the POI footprint (the quest cannot reset the
+            // POI you respawn in).
+            const r = g.quest_policy.poi_bed_lockout_radius;
+            if (dx * dx + dz * dz < r * r) bits |= 1;
         }
         break;
     }

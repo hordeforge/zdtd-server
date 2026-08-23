@@ -1,5 +1,5 @@
 //! NetPackagePartyActions (ToServer) + NetPackagePartyData (ToClient) bodies
-//! (RE ../7dtd-research/docs/parties-factions.md §3).
+//! (RE ../7dtd-engine-research/docs/parties-factions.md §3).
 //!
 //! `NetPackagePartyActions.write` order: currentOperation u8, invitedByEntityID
 //! i32, invitedEntityID i32, voiceLobbyId string (empty when null). The

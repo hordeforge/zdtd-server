@@ -7,7 +7,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
-- MCP server addon (docs/MCP_PRD.md, docs/MCP_DESIGN.md, ADR 0031): a Model
+- MCP server addon (docs/prd/0002-mcp-server.md, docs/rfc/0002-mcp-server-design.md, ADR 0031): a Model
   Context Protocol server shipped as a Wasm plugin (`mods/zdtd_mcp`). Protocol
   logic lives in the guest; the host provides a streamable-HTTP endpoint
   (`--mcp-port`, loopback + optional `--mcp-token`) and std.json parsing
@@ -116,7 +116,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   objectives select the POI by prefab quest tags, difficulty tier, biome
   filter and distance (with bedroll/land-claim/quest lockouts), and trader
   offers carry the real QuestLocation / QuestSize / POIName instead of a
-  fabricated catalog spot (RE: 7dtd-research docs/quests-challenges.md).
+  fabricated catalog spot (RE: 7dtd-engine-research docs/quests-challenges.md).
 - Core stock-client play now covers join, terrain streaming, inventory, combat,
   death and respawn, loot, crafting, trading, and persistence with EAC off.
 - `--version` reports the zdtd product version and the supported stock client
@@ -202,7 +202,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   removes and broadcasts the fallen blocks, while a placement takes support
   from its neighbours and re-spreads. Support and ignore membership resolve
   from the block tables, not a hardcoded list. See
-  `../7dtd-research/docs/stability.md` for the RE ground.
+  `../7dtd-engine-research/docs/stability.md` for the RE ground.
 - Land claims persist across restarts: keystone claims write to `claims.zlc`
   and re-map to the owner on login (entity ids are per-session), and the
   preserved seen-day keeps offline expiry past `LandClaimExpiryDays` honest.
@@ -369,8 +369,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
-- Pure XML/assetbundle modlet support (docs/MODLETS_PRD.md,
-  docs/MODLETS_PLAN.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
+- Pure XML/assetbundle modlet support (docs/prd/0003-modlets.md,
+  docs/rfc/0003-modlets-plan.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
   `XmlPatcher` op catalog (append/prepend/insert/remove/set/csv/include,
   `@modfolder:` tokens; `conditional` fails closed until RE pins the grammar),
   patched catalogs feeding every XML loader (`--mods-dir` override), and the

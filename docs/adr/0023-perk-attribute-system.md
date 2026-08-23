@@ -1,4 +1,4 @@
-# 0023. Perk and attribute progression system
+# ADR 0023: Perk and attribute progression system
 
 - **Status:** accepted
 - **Date:** 2026-08-10

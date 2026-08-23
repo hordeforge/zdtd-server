@@ -1,6 +1,6 @@
 # Parity tooling: keep zdtd in sync with stock 7DTD
 
-Scripts live in the reversing project: `../../7dtd-research/tools/parity/`
+Scripts live in the reversing project: `../../7dtd-engine-research/tools/parity/`
 (reversing tooling does not live in zdtd; see AGENTS.md principle 4).
 
 When The Fun Pimps ship a new dedicated-server build, the wire can change.
@@ -9,7 +9,7 @@ so updating is mechanical instead of a re-RE from scratch.
 
 ## What it captures
 
-`../../7dtd-research/tools/parity/ParitySurface.cs` extracts a stable JSON snapshot from any
+`../../7dtd-engine-research/tools/parity/ParitySurface.cs` extracts a stable JSON snapshot from any
 `Assembly-CSharp.dll`:
 
 - Every `NetPackage*` with its `read`/`write` **wire call sequence** (the
@@ -28,28 +28,28 @@ mono ParitySurface.exe \
   ".../7DaysToDieServer_Data/Managed/Assembly-CSharp.dll" > parity_new.json
 
 # 2a) diff two versions → what TFP changed
-python3 ../7dtd-research/tools/parity/parity_diff.py parity_old.json parity_new.json
+python3 ../7dtd-engine-research/tools/parity/parity_diff.py parity_old.json parity_new.json
 #   → added / removed packages, changed wire (old vs new call seq), enum drift
 #   exit code 1 if anything changed (CI-friendly)
 
 # 2b) coverage → what zdtd handles vs stock
-python3 ../7dtd-research/tools/parity/parity_diff.py --coverage parity_new.json <zdtd_repo>
+python3 ../7dtd-engine-research/tools/parity/parity_diff.py --coverage parity_new.json <zdtd_repo>
 #   → stock package count, handled-in-game.zig count,
 #     UNHANDLED client->server (dir=1) list with read layouts
 ```
 
 ## Fetch old versions to validate (steamcmd)
 
-`../7dtd-research/tools/parity/fetch_version.sh <branch|manifestid> [label]` downloads a
+`../7dtd-engine-research/tools/parity/fetch_version.sh <branch|manifestid> [label]` downloads a
 specific dedicated-server build (app 294420, depot 294422) via steamcmd
 (installed under scratch, never the host) and writes its parity snapshot:
 
 ```bash
-../7dtd-research/tools/parity/fetch_version.sh public        stable
-../7dtd-research/tools/parity/fetch_version.sh latest_experimental exp
-../7dtd-research/tools/parity/fetch_version.sh 1234567890123 v3.0   # pinned depot manifest
+../7dtd-engine-research/tools/parity/fetch_version.sh public        stable
+../7dtd-engine-research/tools/parity/fetch_version.sh latest_experimental exp
+../7dtd-engine-research/tools/parity/fetch_version.sh 1234567890123 v3.0   # pinned depot manifest
 # then diff:
-python3 ../7dtd-research/tools/parity/parity_diff.py parity_v3.0.json parity_stable.json
+python3 ../7dtd-engine-research/tools/parity/parity_diff.py parity_v3.0.json parity_stable.json
 ```
 
 Anonymous login works for the dedicated server. Pinned manifest ids come from

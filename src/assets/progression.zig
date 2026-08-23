@@ -23,7 +23,7 @@ pub const LevelCurve = struct {
     loaded: bool = false,
 
     /// XP required to go from `level` to level+1. Stock
-    /// Progression.GetExpForNextLevel (7dtd-research docs/progression.md XP
+    /// Progression.GetExpForNextLevel (7dtd-engine-research docs/progression.md XP
     /// curve, Progression.il.txt 1083482/1083513): conv.r4 BaseExpToLevel *
     /// Mathf.Pow(ExpMultiplier, Clamp(level+1, 0, ClampExpCostAtLevel)).
     /// Mathf.Pow computes in double and casts to float, so the multiply is

@@ -91,7 +91,7 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 
 ### zdtd.toml (operator tunables)
 
-Template: [`zdtd.toml.example`](../zdtd.toml.example). Loaded from
+Template: [`zdtd.toml.example`](../zdtd-server.toml.example). Loaded from
 `<world>/zdtd.toml` if present, else CWD `zdtd.toml`. Parser:
 `src/server/zdtd_config.zig`. Unknown keys and malformed assignments abort
 startup so misspelled operator settings cannot silently use defaults.
@@ -103,12 +103,12 @@ startup so misspelled operator settings cannot silently use defaults.
 | `[feature]` | `wire_chunks`, `deco_trees`, `deco_mirror`, `deco_objects_per_join`, `block_id_mapping` | `wire_chunks`: stream NetPackageChunk (default true). `deco_trees`: join-time deco burst (default true); false sends the empty firstPackage only. `deco_mirror`: write placed deco into the block store so collision and harvest match the client (default true). `deco_objects_per_join` (default 8192): cap on join-time deco objects sent in the burst. `block_id_mapping`: send the full `blocks` NameIdMapping before the config files so block ids are negotiated instead of trusted (default true); false for a modded client whose block set differs from ours |
 | `[perf]` | `async_chunk_flush`, `terrain_snapshot`, `job_batches` | Performance switches, all default false. Each ships with an always-on apm section/counter that must show the cost before it is worth enabling; see `docs/SCALE.md` |
 | `[apm]` | `dump_every_s` | Periodic apm snapshot dump cadence in seconds (default 60 = the historic `apm_report_period_ticks`; 0 disables the periodic dump). See `docs/APM.md` |
-| `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill`, `craft_max_times`, `sleeper_party_radius`, `storm_frequency`, `te_scan_block_cap`, `te_scan_te_cap`, `workstation_crafts_per_tick`, `workstation_craft_backlog` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). `craft_max_times` (default 20) bounds a single InvTx craft batch request. `sleeper_party_radius` (default 100 m) is the sleeper wake/stage radius (`CalcGameStageAround`, asm.il ~1093363; stock uses the volume box + party stage, provenance PROVENANCE.md §3.7). `storm_frequency`: `World::StormFrequency` percent (default 100 = 1.0x; 0 disables storms). V3.1.0 ships no serverconfig key for it (world state in the GameStats blob), so this is the zdtd.toml surface; it feeds both the weather scheduler divisor and the wire value the client is told. `te_scan_block_cap`/`te_scan_te_cap` (default 32/48) bound the per-chunk storage/prefab TE scan. `workstation_crafts_per_tick` (default 64) and `workstation_craft_backlog` (default 60 s) bound the workstation craft catch-up. Defaults match the previous code constants |
+| `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill`, `craft_max_times`, `sleeper_party_radius`, `storm_frequency`, `te_scan_block_cap`, `te_scan_te_cap`, `workstation_crafts_per_tick`, `workstation_craft_backlog`, `trader_use_range`, `party_shared_kill_range`, `storm_bm_push_ticks`, `sleeper_cap_gate_enabled`, `airdrop_schedule`, `airdrop_day_min`, `airdrop_day_max`, `airdrop_drop_hour`, `airdrop_loot_list` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). `craft_max_times` (default 20) bounds a single InvTx craft batch request. `sleeper_party_radius` (default 100 m) is the sleeper wake/stage radius (`CalcGameStageAround`, asm.il ~1093363; stock uses the volume box + party stage, provenance PROVENANCE.md §3.7). `storm_frequency`: `World::StormFrequency` percent (default 100 = 1.0x; 0 disables storms). V3.1.0 ships no serverconfig key for it (world state in the GameStats blob), so this is the zdtd.toml surface; it feeds both the weather scheduler divisor and the wire value the client is told. `te_scan_block_cap`/`te_scan_te_cap` (default 32/48) bound the per-chunk storage/prefab TE scan. `workstation_crafts_per_tick` (default 64) and `workstation_craft_backlog` (default 60 s) bound the workstation craft catch-up.  `trader_use_range` (default 32) is the trader/vending open-and-echo reach gate (`trader_wire.zig`; closes the rewrite-a-trader-from-anywhere vector). `party_shared_kill_range` (default 100) is the party shared-kill XP credit range (stock GameStats[54] default, no serverconfig key). `storm_bm_push_ticks` (default 5000) pushes storms past a horde night (weather.zig). `sleeper_cap_gate_enabled` (default false) restores the stock sleeper global spawn gate (CanSpawn 2.1x MaxSpawnedZombies) instead of the documented zdtd divergence. `airdrop_schedule` = "interval" (default; every `AirDropFrequency` game-hours) or "days" (stock-like day-count + TOD: every `airdrop_day_min..airdrop_day_max` days at `airdrop_drop_hour`, defaults 3/3/12); `airdrop_loot_list` (default "airDrop") is the loot.xml container for the crate. Defaults match the previous code constants |
 | `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
 | `[rules.combat]` / `[rules.ai]` / `[rules.bloodmoon]` / `[rules.director]` | any `Rules` field | Sim-rule overlay (ADR 0021), merged over the mode pack so `zdtd.toml` wins; see the `[rules]` section below |
 | `[plugin]` | `modules`, `fuel`, `max_pages` | Comma-separated `.wasm` paths for the Wasm plugin runtime (ADR 0020, [PLUGIN_DEV.md](PLUGIN_DEV.md)); empty default = no Wasm plugins. `fuel` (default 100000000) is the per-instance fuel budget, armed once at instantiate and never re-armed (a module spending ~10k/tick silently disables after minutes; lower to bound a hostile guest). `max_pages` (default 1024) caps linear memory per instance |
-| `[quests]` | `objective_kinds`, `default_kill_count`, `kill_per_tier`, `goto_radius`, `stay_radius` | Quest data policy (ADR 0021): the objective `type=` → phase-kind mapping (comma-separated `Type=PhaseKind`, config rows win over the builtin stock table; a new stock objective type is a row here, not a code change), the kill-count default for objectives with no explicit `value` (`default + tier * per_tier`), and the goto/stay radius fallbacks when an objective omits its distance (the parsed `value` still wins). Provenance: PROVENANCE.md §3.7 |
-| `[bots]` | `shoot_damage`, `headshot_multiplier`, `spawn_spread`, `spawn_y`, `max_step_up` | Host-side FPS bot policy (ADR 0026): the `bot shoot` damage floor, the headshot multiplier (clanker parity), the `bot count`/`bot spawn` spawn spread + default Y, and the move step-up cap. `bot_max_hp` is fixed at 100 (wasm guest contract). Defaults match the pre-config constants |
+| `[quests]` | `objective_kinds`, `default_kill_count`, `kill_per_tier`, `goto_radius`, `stay_radius`, `poi_min_dist`, `poi_max_dist`, `max_poi_attempts`, `poi_bed_lockout_radius`, `trader_band_1`, `trader_band_2` | Quest data policy (ADR 0021): the objective `type=` → phase-kind mapping (comma-separated `Type=PhaseKind`, config rows win over the builtin stock table; a new stock objective type is a row here, not a code change), the kill-count default for objectives with no explicit `value` (`default + tier * per_tier`), and the goto/stay radius fallbacks when an objective omits its distance (the parsed `value` still wins). `poi_min_dist`/`poi_max_dist` (default 32/2000) set the POI selection distance band for random-POI-goto objectives and `max_poi_attempts` (default 50) bounds the search loop (RE ObjectiveRandomPOIGoto). `poi_bed_lockout_radius` (default 32) is the respawn-bed lockout radius around a POI center; `trader_band_1`/`trader_band_2` (default 500/1500) are the GetRandomPOINearTrader distance band boundaries. Provenance: PROVENANCE.md §3.7 |
+| `[bots]` | `shoot_damage`, `headshot_multiplier`, `spawn_spread`, `spawn_y`, `max_step_up`, `weapon_profiles` | Host-side FPS bot policy (ADR 0026): the `bot shoot` damage floor, the headshot multiplier (clanker parity), the `bot count`/`bot spawn` spawn spread + default Y, and the move step-up cap. `weapon_profiles` (empty = builtin pool) is the host loadout as `tag:damage:range:pellets,...` (up to 8 guns). `bot_max_hp` is fixed at 100 (wasm guest contract). Defaults match the pre-config constants |
 
 ### `[rules]` sim rules (mode packs and zdtd.toml)
 
@@ -139,6 +139,7 @@ test, so a retune cannot land silently).
 | `attack_range_sq` | 4.0 | Policy (no per-entity stock equivalent) |
 | `attack_cooldown_s` | 1.2 | Policy (no entityclasses field) |
 | `armor_mitigation_per_piece` / `armor_mitigation_cap` | 0.1 / 0.5 | Flat armor mitigation per worn armor piece + cap (zdtd approximation, R3). Stock mitigation is the passive-effects damage/armor modifier chain (items.md ModifyValue IL=304) - an engine feature, RE-blocked; these numbers make the approximation operator-tunable |
+| `knockback_speed` / `knockback_seconds` | 8.0 / 0.3 | Melee knockback impulse: shove speed (blocks/s) and hit window (s); 0.3 s at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark) |
 | `[rules.ai]` | | |
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |
 | `mid_dist_sq` | 225.0 | Policy (AI LOD step) |
@@ -191,12 +192,23 @@ test, so a retune cannot land silently).
 | `mount_range_sq` | 64.0 | Policy (vehicle mount 8 m squared) |
 | `destroy_area_rng_mod` | 16 | Policy (DestroyArea gate) |
 | `revenge_window_s` | 20.0 | Policy (EAISetAsTargetIfHurt 400 ticks) |
+| `no_target_scale` | 0.1 | AI scale when no player is sensed at all (LOD) |
+| `sleep_dist_mult` | 4.0 | Ultra-far gate: player beyond `full_dist_sq` × this → slow wander only |
+| `sleep_decision_scale` | 0.05 | Ultra-far decision-cooldown drain scale |
+| `sleep_wander_interval_s` | 1.0 | Ultra-far re-decide cadence (s) |
+| `sleep_wander_speed_frac` | 0.5 | Ultra-far wander speed fraction |
+| `fear_scan_cd_s` | 0.5 | Passive-animal fear-source scan cadence (s) |
+| `move_arrive` | 0.2 | stepToward arrive threshold, blocks (compared squared) |
+| `push_range` / `push_y_tol` / `push_shove` | 0.7 / 1.5 / 0.15 | Entity-push (AttackPush) proximity box (x/z), vertical tolerance, shove per step |
+| `dig_windup_ticks` / `dig_budget_ticks` | 18 / 90 | Zombie dig windup before a bite (ticks, stock) and the DigStop budget (ticks) |
 | `[rules.bloodmoon]` | | |
 | `party_join_dist` | 80.0 | Policy (AIDirectorBloodMoonParty constant) |
 | `party_teleport_dist` | 150.0 | Policy (AIDirectorBloodMoonParty constant) |
 | `party_spawn_dist` | 40.0 | Policy (AIDirectorBloodMoonParty constant) |
 | `party_enemy_max` | 30 | Policy (cPartyEnemyMax) |
 | `max_parties` | 8 | Policy; clamped to the storage array bound at use |
+| `budget_scale` | 1.9 | Blood-moon spawn ceiling multiplier over the world MaxSpawnedZombies (RE `AIDirector::CanSpawn(1.9f)`, asm.il:413528) |
+| `wave_frac` | 0.5 | Per-party horde wave size as a fraction of the blood-moon enemy count |
 | `[rules.progression]` | | |
 | `food_depletion_per_hour` | 2.0 | Policy (GAP 22 survival): Food units lost per in-game hour; stock applies FoodChangeOT through Stat.Tick whose per-effect default is not in the V3.1.0 IL corpus, so the rate is operator-tunable |
 | `water_depletion_per_hour` | 2.5 | Policy (GAP 22 survival): Water units lost per in-game hour |
@@ -212,7 +224,8 @@ test, so a retune cannot land silently).
 | `drowning_damage_per_second` | 2.0 | HP lost per real second while the head block is water (drowning, after the client's local O2 bar empties; stock ~2 hp/s) |
 | `radiation_damage_per_second` | 8.0 | HP lost per real second inside a radiated biome (biomes.xml `<biomemap name="radiated"/>`; stock BiomeType.Radiated is deadly) |
 | `trap_kill_xp_frac` | 0.0 | **Floor**: fraction of a turret/trap kill's XP the owner is credited. Stock reads `PassiveEffects.ElectricalTrapXP` (default 0, unlocked by `perkAdvancedEngineering` levels 1-5 at .15/.3/.45/.6/.75); zdtd has no per-player perk level yet (planned: ADR 0023/0024), so this is a flat floor rather than a per-player lookup. 0.0 matches stock's unperked default |
-| `[rules.world]` | (empty) | Added as constants move; no fields invented |
+| `[rules.world]` | | |
+| `poi_unlock_grace_ticks` | 2000 | POI quest-lock release grace after unlock (ticks; 100 s at 20 TPS; RE QuestLockInstance.SetUnlocked 0x7d0) |
 | `[rules.director]` | | AIDirector policy (RE: aidirector.md; provenance PROVENANCE.md §3.7) |
 | `wander_start_after` | 28000 | World tick after which wandering hordes can start (day 1 end) |
 | `wander_min_gap` / `wander_max_gap` | 12000 / 24000 | Horde schedule gap in world ticks (stock 12-24 in-game hours) |
@@ -223,6 +236,10 @@ test, so a retune cannot land silently).
 | `heat_cooldown_seconds` | 240.0 | Region cooldown after a heat spawn. Stock `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44; the long form 1320 is the feral 2x approximation). Aligned from 120 (A41) |
 | `heat_neighbor_cooldown_seconds` | 180.0 | Shorter cooldown applied to the eight surrounding regions. Stock `StartNeighborCooldown` short = 180 s (720 long). Aligned from 60 (A41) |
 | `heat_scout_dist` | 10.0 | Scout-party spawn distance from the hot region center (chunk-heat spawner 0/8/10 constants) |
+| `heat_scout_count` | 2 | Scouts spawned per heat event |
+| `heat_feral_chance` | 0.2 | Feral roll chance per heat event (one in five); doubles the region cooldown when it lands |
+| `heat_feral_cd_mult` | 2.0 | Cooldown multiplier applied when the feral roll lands |
+| `heat_event_ticks` | 720.0 | Heat-event duration (world ticks) stamped on heat sources (forge runs, campfire activity, craft.zig notifyActivity) |
 | `enemy_spawn_ring_min` / `enemy_spawn_ring_max` | 28.0 / 54.0 | Enemy spawn ring around players. Stock `cEnemyMin/MaxDistance` (spawning.md); was 18..28 (on-camera) before the R4 alignment |
 | `animal_spawn_ring_min` / `animal_spawn_ring_max` | 48.0 / 70.0 | Animal spawn ring. Stock `cAnimalMin/MaxDistance` (spawning.md); was 20..45 before the R4 alignment |
 | `horde_drip_cd` / `bloodmoon_horde_drip_cd` | 45.0 / 8.0 | Night horde drip cadence (zdtd population mechanic; stock has no periodic drip, GAP 2011-2017) |
@@ -230,6 +247,8 @@ test, so a retune cannot land silently).
 | `animal_drip_cd` | 60.0 | Daytime wildlife drip cadence (zdtd mechanic) |
 | `bloodmoon_wave_cd` | 6.0 | Blood-moon wave cadence (zdtd approximation of the stock wave system) |
 | `bloodmoon_hp_mult` | 1.5 | Blood-moon HP floor for classes the gamestage ladder cannot resolve (offline/builtin data). Stock has no flat multiplier: with stock data the ladder's feral/radiated classes carry their own HP |
+| `difficulty_hp_0`, `difficulty_hp_1`, `difficulty_hp_2`, `difficulty_hp_3`, `difficulty_hp_4`, `difficulty_hp_5` | 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 | GameDifficulty 0..5 → zombie HP multiplier (Scavenger..Insane). Stock tier semantic; numbers zdtd-tuned (R9, no RE pin) — operator policy |
+| `move_scale_0`, `move_scale_1`, `move_scale_2`, `move_scale_3`, `move_scale_4` | 0.5 / 0.75 / 1.0 / 1.4 / 1.7 | ZombieMove 0..4 → speed multiplier (walk/jog/run/sprint/nightmare). Stock tier semantic; numbers zdtd-tuned (R9) |
 
 `[rules.world]` / `[rules.vehicle]` (ADR 0021):
 
@@ -243,6 +262,17 @@ test, so a retune cannot land silently).
 | `steer_deg_per_s` | 100.0 | Vehicle yaw rate (deg/s) per steer unit at speed |
 | `min_turn_speed_frac` | 0.15 | Vehicle minimum turn-speed fraction (steering near standstill) |
 | `fuel_per_m` | 0.02 | Vehicle fuel consumed per block travelled (non-bicycle) |
+| `fuel_cap` | 100 | Flat fuel-tank capacity on spawn (no vehicles.xml FuelMax in the port) |
+| `refuel_reach` | 3.0 | Refuel pickup reach, blocks (InvTx) |
+| `gravity` | -9.81 | Vehicle vertical gravity, blocks/s² (RE EntityVehicle::cGravity, asm.il:536018; distinct from zombie `ai.gravity`) |
+
+`[rules.power]` (zdtd power grid, R8):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `battery_capacity_scale` | 10.0 | Battery capacity fallback scale (× MaxPower) when a battery block only exposes MaxPower |
+| `battery_initial_charge_frac` | 0.5 | Initial battery charge as a fraction of capacity on fresh placement |
+| `trigger_pulse_s` | 0.5 | Trigger-plate / tripwire pulse duration (s) when the block sets duration=Triggered |
 
 `[rules.water]` (water-leveling budgets, GAP "Water flow / physics" PARTIAL;
 the stock sim is a jobified mass-flow engine, light-mesh-water.md §4):

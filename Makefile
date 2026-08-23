@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke clean need-zig need-release-tools need-python3 need-oxlint need-java
+.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -165,13 +165,27 @@ check:
 	$(MAKE) lint
 	$(MAKE) need-python3
 	python3 tools/provenance_scan.py
+	$(MAKE) check-xml-audit
 	$(MAKE) build
 	$(MAKE) test
 	$(MAKE) fuzz
 
+# Deterministic XML-data hardcode audit (docs/XML_DATA_AUDIT.md): every
+# Data/Config/*.xml must be covered by the audit doc, and no stock-name literal
+# may appear in non-loader/non-wire/non-test code outside the script allowlist.
+# Skips with a notice when the operator's game dir is absent (CI without a
+# 7DTD install).
+check-xml-audit: need-python3
+	python3 tools/check_xml_audit.py
+
 # Operator-binary smoke (CI after `make release`; also local release verification).
 smoke: release
 	bash scripts/smoke-release.sh
+
+# Modlet smoke: boot on a scratch game-dir with the fixture modlet, verify the
+# modlet scan + patched-config S2C cache, then the loadgen join when available.
+smoke-modlet: build
+	bash scripts/smoke-modlet.sh
 
 # Reproducibility gate (docs/RELEASES.md step 6): build the release config
 # twice in independent cache trees and require byte-identical binaries.

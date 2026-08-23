@@ -21,7 +21,7 @@ through the research corpus. Reach 100% coverage, then keep improving the
 research itself (new IL pins, live verification, tooling) as the loop.
 
 # Layout (siblings under the workspace root)
-- RESEARCH: 7dtd-research/  - stock-engine RE corpus (docs/, tools/, il/)
+- RESEARCH: 7dtd-engine-research/  - stock-engine RE corpus (docs/, tools/, il/)
 - ZDTD:     zdtd/          - this repo (src/, docs/PROVENANCE.md)
 - LOADGEN:  7dtd-loadgen/  - bot load + LIVE-VERIFICATION RIG (boots the stock
   dedicated server for observing real behavior)
@@ -34,7 +34,7 @@ research itself (new IL pins, live verification, tooling) as the loop.
 # What "provenance" means here (docs/PROVENANCE.md)
 Three buckets per file/constant:
   A = stock DATA (must be read from the operator install, never hand-copied)
-  R = stock behavior reproduced from RE (cite ../7dtd-research/docs/<doc>.md
+  R = stock behavior reproduced from RE (cite ../7dtd-engine-research/docs/<doc>.md
       section, or asm.il offset; fix code to match RE, never the reverse)
   Z = zdtd-owned policy (explicitly not a provenance claim)
 The gate is tools/provenance_scan.py: 188/188 files + every file-scope typed

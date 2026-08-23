@@ -1,5 +1,5 @@
 //! zdtd-native metrics + profiling harness.
-//! Not 7dtd-apm (stock Mono). This is first-class instrumentation inside the Zig process.
+//! Not 7dtd-server-apm (stock Mono). This is first-class instrumentation inside the Zig process.
 //!
 //! Dependency direction: metrics on util/clock only (no clock re-export). Must not
 //! import server, wire, ecs, world, assets, or litenet. Time: `util/clock`.

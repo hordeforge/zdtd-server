@@ -10,7 +10,7 @@ const ecs = @import("../../ecs/root.zig");
 const bot_mod = @import("bot.zig");
 const guard_policy = @import("../guard_policy.zig");
 const server_config = @import("../config.zig");
-const zdtd_config = @import("../zdtd_config.zig");
+const zdtd_config = @import("../zdtd-server_config.zig");
 const c2s_text = @import("../c2s_text.zig");
 const movement = @import("../movement.zig");
 const plugin_mod = @import("../../plugin/root.zig");
@@ -205,7 +205,7 @@ pub const InitOptions = struct {
     webui_port: u16 = 0,
     webui_bind: []const u8 = "127.0.0.1",
     webui_secret: []const u8 = "",
-    /// MCP transport (ADR 0031, docs/MCP_DESIGN.md). 0 = disabled. Default
+    /// MCP transport (ADR 0031, docs/rfc/0002-mcp-server-design.md). 0 = disabled. Default
     /// bind is loopback; token empty = loopback only, no token.
     mcp_port: u16 = 0,
     mcp_bind: []const u8 = "127.0.0.1",
@@ -350,6 +350,15 @@ pub const InitOptions = struct {
     /// `[sim] sleeper_cap_gate_enabled`: restore the stock sleeper global
     /// spawn gate (default false = the documented zdtd divergence).
     sleeper_cap_gate_enabled: bool = false,
+    /// `[sim] airdrop_*`: airdrop schedule policy. "interval" (default) =
+    /// every `air_drop_frequency` game-hours; "days" = every
+    /// `airdrop_day_min..airdrop_day_max` days at `airdrop_drop_hour` TOD.
+    /// `airdrop_loot_list` is the loot.xml container (default stock "airDrop").
+    airdrop_schedule: []const u8 = "interval",
+    airdrop_day_min: u32 = 3,
+    airdrop_day_max: u32 = 3,
+    airdrop_drop_hour: u32 = 12,
+    airdrop_loot_list: []const u8 = "airDrop",
     /// Periodic apm snapshot dump period in seconds (zdtd.toml [apm]
     /// dump_every_s; null = the 60 s default). Converted to ticks at create.
     apm_dump_every_s: ?u64 = null,

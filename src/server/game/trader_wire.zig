@@ -16,8 +16,7 @@ const vending_mod = @import("../../world/vending.zig");
 /// beyond this distance is dropped. Stock trusts the echo blindly
 /// (TraderData.CopyFrom on the raw key, loot-economy.md 5); this gate closes
 /// the "rewrite any trader from anywhere" vector without affecting a
-/// legitimate trade.
-const trade_use_range: f32 = 32;
+/// legitimate trade. Reach is `[sim] trader_use_range` (Game.trade_use_range).
 
 pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
     const stock = self.sim.trader_stock[s];
@@ -194,5 +193,5 @@ fn inTradeReach(self: *const Game, c: *const Client, bx: f32, by: f32, bz: f32) 
     const dx = p.x - bx;
     const dy = p.y - by;
     const dz = p.z - bz;
-    return dx * dx + dy * dy + dz * dz <= trade_use_range * trade_use_range;
+    return dx * dx + dy * dy + dz * dz <= self.trade_use_range * self.trade_use_range;
 }

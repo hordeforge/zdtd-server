@@ -1,4 +1,4 @@
-# 0024. Passive-effect stack: name the layers, stop reinventing them per gap
+# ADR 0024: Passive-effect stack: name the layers, stop reinventing them per gap
 
 - **Status:** accepted
 - **Date:** 2026-08-10
@@ -19,7 +19,7 @@ slice of what turns out to be a single stock mechanism:
 | A35 (armor mitigation, open) | equipped-item passives (`PhysicalDamageResist`) | not yet built |
 | T26 (planned) | perk-level passives, generically | `resolvePassiveEffect` |
 
-`../../../7dtd-research/docs/minevents.md` section 7.0 documents the stock
+`../../../7dtd-engine-research/docs/minevents.md` section 7.0 documents the stock
 function all four are slices of: `EffectManager.GetValue(PassiveEffects,
 ItemValue, float originalValue, EntityAlive, Recipe, FastTags, calcEquipment,
 calcHoldingItem, calcProgression, calcBuffs, calcChallenges, craftingTier,

@@ -313,7 +313,7 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     const dx = tx - t.x;
     const dz = tz - t.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 < 0.04) return;
+    if (d2 < w.rules.ai.move_arrive * w.rules.ai.move_arrive) return;
     const inv = 1.0 / @sqrt(d2);
     // Swimming halves the horizontal speed (stock swimSpeed < moveSpeed).
     const swim = w.water_fn != null and
@@ -375,8 +375,8 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
             for (w.kind_groups.slice(kind)) |t2| {
                 if (t2 == s or !w.alive[t2] or !w.mask[t2].transform) continue;
                 const e = &w.transform[t2];
-                if (@abs(e.x - dest_x) > 0.7 or @abs(e.z - dest_z) > 0.7) continue;
-                if (@abs(e.y - dest_y) > 1.5) continue;
+                if (@abs(e.x - dest_x) > w.rules.ai.push_range or @abs(e.z - dest_z) > w.rules.ai.push_range) continue;
+                if (@abs(e.y - dest_y) > w.rules.ai.push_y_tol) continue;
                 // Do not step into the entity; shove it along the push dir.
                 t.x = ox;
                 t.z = oz;
@@ -390,8 +390,8 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
                     pdx /= plen;
                     pdz /= plen;
                 }
-                const target_x = e.x + pdx * 0.15;
-                const target_z = e.z + pdz * 0.15;
+                const target_x = e.x + pdx * w.rules.ai.push_shove;
+                const target_z = e.z + pdz * w.rules.ai.push_shove;
                 if (bodyClearAt(ctx, solid_fn, target_x, target_z, e.y, h, r)) {
                     e.x = target_x;
                     e.z = target_z;
@@ -433,7 +433,7 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
                 ai.dig_x = bx;
                 ai.dig_y = by;
                 ai.dig_z = bz;
-                ai.dig_for_ticks = dig_budget_ticks;
+                ai.dig_for_ticks = w.rules.ai.dig_budget_ticks;
                 ai.dig_ticks = 0;
             }
         }
@@ -444,9 +444,8 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
 /// counts windup/attack ticks and pushes a DigRequest every `dig_windup_ticks`
 /// (stock fires the attack after the 18-tick windup, then every 4+14 = 18);
 /// the budget runs down to DigStop. A dug block that is already gone ends the
-/// dig so the zombie walks on.
-const dig_windup_ticks: u8 = 18;
-const dig_budget_ticks: u8 = 90;
+/// dig so the zombie walks on. Both values are `rules.ai` (dig_windup_ticks /
+/// dig_budget_ticks) so a mode can pace zombie block-chew.
 
 pub fn systemDigUpdate(w: *World) void {
     const solid_fn = w.solid_fn;
@@ -466,7 +465,7 @@ pub fn systemDigUpdate(w: *World) void {
         }
         ai.dig_for_ticks -= 1;
         ai.dig_ticks +%= 1;
-        if (ai.dig_ticks >= dig_windup_ticks) {
+        if (ai.dig_ticks >= w.rules.ai.dig_windup_ticks) {
             ai.dig_ticks = 0;
             w.pushDig(s, ai.dig_x, ai.dig_y, ai.dig_z);
         }
@@ -527,7 +526,19 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         if (w.health[i].hp <= 0) continue;
         const amount = fpDamage(fp);
         if (!(amount > 0)) continue;
-        w.health[i].hp -= amount;
+        // on_player_damage verdict (T15) for the ECS path (zombie melee /
+        // deferred accumulator): <0 denies the hit, >0 scales by percent.
+        // The attacker is not tracked here, so it reads -1 (unknown).
+        var dmg = amount;
+        if (w.kind[i] == .player) {
+            if (w.player_damage_verdict_fn) |vdf| {
+                const v = vdf(w.player_damage_verdict_ctx, w.network_id[i].id, dmg);
+                if (v < 0) continue;
+                if (v > 0) dmg = dmg * @as(f32, @floatFromInt(v)) / 100.0;
+            }
+        }
+        if (!(dmg > 0)) continue;
+        w.health[i].hp -= dmg;
         applied += 1;
         // Stock's Stat setter raises Stat.Changed and EntityStats::TickWait
         // turns that into a stat-change package (asm.il:199393). dirty.hp is
@@ -834,7 +845,7 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
     // have a real rect. Stock picks the POI when the quest is handed out
     // (Quest.SetupPosition → ObjectiveRandomPOIGoto/ObjectiveGoto.GetPosition):
     // RandomPOIGoto selects a random tier/tag/biome/distance-qualified POI
-    // near the player, Goto/ClosestPOIGoto the closest one (RE: 7dtd-research
+    // near the player, Goto/ClosestPOIGoto the closest one (RE: 7dtd-engine-research
     // docs/quests-challenges.md "Quest POI selection"). The Game hook does the
     // selection (prefab index + biome map + lockouts); unset (test worlds) or
     // nothing qualified → fall back to static def position / nearest POI.
@@ -1248,7 +1259,18 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         // Buy: the item must be stocked.
         const en = entry orelse return false;
         if (en.count < qty) return false;
-        const unit: u32 = @max(1, @as(u32, en.price));
+        // Pre-trade price verdict (on_trade_price): <0 denies the trade, 0
+        // keeps the price, >0 scales the unit price by percent. The attacker
+        // (buyer) is the player's net id; `item` is the ECS item id.
+        var unit: u32 = @max(1, @as(u32, en.price));
+        if (w.trade_price_verdict_fn) |vf| {
+            const v = vf(w.trade_price_verdict_ctx, w.network_id[ps].id, item, unit);
+            if (v < 0) return false;
+            if (v > 0) {
+                const scaled: u64 = @as(u64, unit) * @as(u64, @intCast(v)) / 100;
+                unit = @intCast(@max(1, @min(scaled, std.math.maxInt(u32))));
+            }
+        }
         const cost: u32 = unit * qty;
         if (cost > std.math.maxInt(u16)) return false;
         if (w.wallet[ps].coins < cost) return false;
@@ -1587,8 +1609,8 @@ const AiCtx = struct {
             // the tick and the entity re-approaches from the pushed spot.
             if (ai.kb_time > 0) {
                 const w2 = ctx.w;
-                w2.transform[s].x += ai.kb_dx * c.kb_speed * ctx.dt;
-                w2.transform[s].z += ai.kb_dz * c.kb_speed * ctx.dt;
+                w2.transform[s].x += ai.kb_dx * ctx.w.rules.combat.knockback_speed * ctx.dt;
+                w2.transform[s].z += ai.kb_dz * ctx.w.rules.combat.knockback_speed * ctx.dt;
                 ai.kb_time -= ctx.dt;
                 if (ai.kb_time <= 0) {
                     ai.kb_time = 0;
@@ -1681,24 +1703,24 @@ const AiCtx = struct {
             if (np.id < 0) {
                 np = nearestBotSnap(ctx.w, ctx.w.transform[s].x, ctx.w.transform[s].z, senseDistSq(ctx.w, s), -1);
             }
-            ai.active_scale = if (np.id >= 0) lodScale(ctx.w, np.d2) else 0.1;
+            ai.active_scale = if (np.id >= 0) lodScale(ctx.w, np.d2) else ctx.w.rules.ai.no_target_scale;
 
-            // Ultra-far sleep: player exists but beyond 4× full AI range → slow wander
-            // only (no A*/task scan) unless chewing a blocked path. No-player still
-            // runs the normal table (wander / territorial / spot).
-            if (np.id >= 0 and np.d2 > ctx.w.rules.ai.full_dist_sq * 4.0 and !ai.path_blocked and
+            // Ultra-far sleep: player exists but beyond `sleep_dist_mult` x full
+            // AI range → slow wander only (no A*/task scan) unless chewing a
+            // blocked path. No-player still runs the normal table.
+            if (np.id >= 0 and np.d2 > ctx.w.rules.ai.full_dist_sq * ctx.w.rules.ai.sleep_dist_mult and !ai.path_blocked and
                 ai.active_task != .break_block and ai.active_task != .destroy_area)
             {
                 if (ai.attack_cd > 0) ai.attack_cd -= ctx.dt;
-                ai.decision_cd -= ctx.dt * 0.05;
+                ai.decision_cd -= ctx.dt * ctx.w.rules.ai.sleep_decision_scale;
                 if (ai.decision_cd > 0) continue;
                 const sscale = ctx.zombie_speed_scale;
                 const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
                 const pws = ctx.w.class_id[s].wander_speed;
                 const wspd: f32 = (if (pws > 0) pws * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
                 ai.active_task = .wander;
-                ai.decision_cd = 1.0;
-                wanderUpdate(ctx.w, s, ai, wspd * 0.5, ctx.dt);
+                ai.decision_cd = ctx.w.rules.ai.sleep_wander_interval_s;
+                wanderUpdate(ctx.w, s, ai, wspd * ctx.w.rules.ai.sleep_wander_speed_frac, ctx.dt);
                 applyGravity(ctx.w, s, ctx.dt);
                 continue;
             }
@@ -1948,7 +1970,7 @@ fn refreshFearSource(w: *World, pos: *const [max_entities]c.Transform, s: Slot, 
         ai.fear_cd -= dt;
         return;
     }
-    ai.fear_cd = 0.5;
+    ai.fear_cd = w.rules.ai.fear_scan_cd_s;
     const x = w.transform[s].x;
     const z = w.transform[s].z;
     var best: i32 = -1;
@@ -2597,7 +2619,7 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
             continue;
         }
         f.vy = (f.vy + g * dt) * 0.98;
-        if (f.vy < -30.0) f.vy = -30.0;
+        if (f.vy < w.rules.ai.fall_max_vy) f.vy = w.rules.ai.fall_max_vy;
         const t = &w.transform[s];
         const dy: f32 = f.vy * dt;
         t.y += dy;
@@ -5756,9 +5778,9 @@ test "move helper: a blocked grounded zombie digs the blocking block" {
     try std.testing.expect(w.zombie_ai[s].digging);
     try std.testing.expectEqual(@as(i32, 10), w.zombie_ai[s].dig_x);
     try std.testing.expectEqual(@as(i32, 71), w.zombie_ai[s].dig_y);
-    // The cadence pushes a DigRequest after the windup.
+    // The cadence pushes a DigRequest after the windup (rules.ai default 18).
     var pushed = false;
-    for (0..@as(usize, dig_windup_ticks) + 4) |_| {
+    for (0..@as(usize, 18) + 4) |_| {
         systemDigUpdate(&w);
         if (w.dig_n > 0) {
             pushed = true;

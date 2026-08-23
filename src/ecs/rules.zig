@@ -60,6 +60,11 @@ pub const Combat = struct {
     /// approximation made operator-tunable.
     armor_mitigation_per_piece: f32 = 0.1,
     armor_mitigation_cap: f32 = 0.5,
+    /// Melee knockback impulse: shove speed (blocks/s) and the hit window (s).
+    /// 0.3 s at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark;
+    /// components.zig kb_speed/kb_seconds).
+    knockback_speed: f32 = 8.0,
+    knockback_seconds: f32 = 0.3,
 };
 
 /// Zombie AI tuning read by the systems.zig task table and the despawn pass.
@@ -224,6 +229,34 @@ pub const Ai = struct {
     destroy_area_rng_mod: u32 = 16,
     /// Revenge target window (s = 400 ticks at 20 Hz).
     revenge_window_s: f32 = 20.0,
+    // -------------------------------------------------------------------------
+    // LOD / pacing knobs (systems.zig "ultra-far sleep" block + stragglers).
+    // -------------------------------------------------------------------------
+    /// AI scale when no player is sensed at all (systems.zig active_scale).
+    no_target_scale: f32 = 0.1,
+    /// Ultra-far gate: a player beyond `full_dist_sq * sleep_dist_mult` puts
+    /// the zombie into slow-wander only (no A*/task scan) unless it is chewing
+    /// a blocked path.
+    sleep_dist_mult: f32 = 4.0,
+    /// Decision-cooldown drain scale in the ultra-far state (dt * this).
+    sleep_decision_scale: f32 = 0.05,
+    /// Ultra-far re-decide cadence (s).
+    sleep_wander_interval_s: f32 = 1.0,
+    /// Ultra-far wander speed fraction of the normal wander speed.
+    sleep_wander_speed_frac: f32 = 0.5,
+    /// Passive-animal fear-source scan cadence (s).
+    fear_scan_cd_s: f32 = 0.5,
+    /// stepToward arrive threshold, blocks (compared squared).
+    move_arrive: f32 = 0.2,
+    /// Entity-push (AttackPush) proximity box half-extent (x/z, blocks), the
+    /// vertical tolerance, and the shove displacement per step.
+    push_range: f32 = 0.7,
+    push_y_tol: f32 = 1.5,
+    push_shove: f32 = 0.15,
+    /// Zombie dig: windup before a bite lands (ticks, stock 18) and how long a
+    /// zombie chews a block before DigStop (ticks, zdtd budget).
+    dig_windup_ticks: u8 = 18,
+    dig_budget_ticks: u8 = 90,
 };
 
 /// AIDirectorBloodMoonParty tuning (asm.il 413090-413140): players within
@@ -238,6 +271,11 @@ pub const Bloodmoon = struct {
     /// Concurrent blood-moon parties. The storage array is a compile-time cap
     /// (aidirector.bm_parties_cap); the rule is clamped to it at use.
     max_parties: u32 = 8,
+    /// Blood-moon spawn ceiling multiplier over the world MaxSpawnedZombies
+    /// (RE `AIDirector::CanSpawn(1.9f)`, asm.il:413528).
+    budget_scale: f32 = 1.9,
+    /// Per-party horde wave size as a fraction of the blood-moon enemy count.
+    wave_frac: f32 = 0.5,
 };
 
 /// Survival simulation tuning (GAP 22).
@@ -312,6 +350,8 @@ pub const WorldGroup = struct {
     /// marks the disturbed columns. Worlds without splat maps (the flat demo
     /// world) may render grey with the stock mode; set true for them.
     topsoil_all_broken: bool = false,
+    /// POI quest-lock release grace after unlock (ticks; 2000 = 100 s).
+    poi_unlock_grace_ticks: u32 = 2000,
 };
 
 /// Vehicle sim tuning (zdtd-owned: the stock dedicated server has no vehicle
@@ -330,15 +370,22 @@ pub const Vehicle = struct {
     min_turn_speed_frac: f32 = 0.15,
     /// Fuel consumed per block travelled (non-bicycle kinds).
     fuel_per_m: f32 = 0.02,
+    /// Flat fuel-tank capacity on spawn (no vehicles.xml FuelMax in the port).
+    fuel_cap: f32 = 100,
+    /// Refuel pickup reach, blocks.
+    refuel_reach: f32 = 3.0,
+    /// Vehicle vertical gravity, blocks/s² (RE EntityVehicle::cGravity,
+    /// asm.il:536018; distinct from the zombie ai.gravity).
+    gravity: f32 = -9.81,
 };
 
 /// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
 /// horde schedule (start tick + min/max gap in world ticks) and spawn
 /// distance/size, plus the chunk-heat spawner constants (heat threshold,
-/// check/cooldown cadence, scout distance). Only constants the code actually
-/// reads are surfaced (YAGNI; `heat_feral_chance` and `heat_event_ticks` stay
-/// doc-only module consts in aidirector.zig until the feral roll / event
-/// duration are modelled). Provenance: PROVENANCE.md §3.7.
+/// check/cooldown cadence, scout distance/count, feral roll). Only constants
+/// the code actually reads are surfaced (YAGNI; `heat_event_ticks` was doc-only
+/// until craft.zig started stamping it — it now is a rule). Provenance:
+/// PROVENANCE.md §3.7.
 pub const Director = struct {
     /// Wandering hordes only start after this world tick (day 1 end ~28000).
     wander_start_after: u64 = 28_000,
@@ -359,6 +406,17 @@ pub const Director = struct {
     /// (aidirector.md verified literals). Was 60 before the A41 alignment.
     heat_neighbor_cooldown_seconds: f32 = 180.0,
     heat_scout_dist: f32 = 10.0,
+    /// Scouts spawned per heat event (sibling of heat_scout_dist).
+    heat_scout_count: u32 = 2,
+    /// Feral roll chance per heat event (0.2 = one in five); doubles the
+    /// region cooldown when it lands. Now wired to the actual roll in
+    /// aidirector.zig (the old note said "doc-only until modelled" - it is).
+    heat_feral_chance: f32 = 0.2,
+    /// Cooldown multiplier applied when the feral roll lands.
+    heat_feral_cd_mult: f32 = 2.0,
+    /// Heat-event duration (world ticks) stamped on heat sources (forge runs,
+    /// campfire activity, ...) and by craft.zig notifyActivity.
+    heat_event_ticks: f32 = 720.0,
     /// Enemy spawn ring around players. Stock `GetRandomSpawnPositionInAreaMinMaxToPlayers`
     /// cEnemyMin/MaxDistance = 28..54 m (spawning.md; was 18..28, on-camera).
     enemy_spawn_ring_min: f32 = 28.0,
@@ -380,6 +438,22 @@ pub const Director = struct {
     bloodmoon_wave_cd: f32 = 6.0,
     /// Blood-moon zombie HP multiplier (zdtd policy; 1.5x).
     bloodmoon_hp_mult: f32 = 1.5,
+    /// GameDifficulty 0..5 → zombie HP multiplier (Scavenger..Insane). Stock
+    /// tier semantic; numbers zdtd-tuned (R9, no RE pin) — operator policy.
+    /// Per-tier scalars because toml_bind is scalar-only.
+    difficulty_hp_0: f32 = 0.5,
+    difficulty_hp_1: f32 = 0.75,
+    difficulty_hp_2: f32 = 1.0,
+    difficulty_hp_3: f32 = 1.25,
+    difficulty_hp_4: f32 = 1.5,
+    difficulty_hp_5: f32 = 2.0,
+    /// ZombieMove 0..4 → speed multiplier (walk/jog/run/sprint/nightmare).
+    /// Stock tier semantic; numbers zdtd-tuned (R9).
+    move_scale_0: f32 = 0.5,
+    move_scale_1: f32 = 0.75,
+    move_scale_2: f32 = 1.0,
+    move_scale_3: f32 = 1.4,
+    move_scale_4: f32 = 1.7,
 };
 
 /// Water leveling budgets (zdtd policy, GAP "Water flow / physics" PARTIAL):
@@ -397,6 +471,19 @@ pub const Water = struct {
     puddle_cap: u8 = 8,
 };
 
+/// Power-sim tuning (zdtd power grid, R8): fallbacks and cadences where the
+/// stock block data or wire facts do not pin a value.
+pub const Power = struct {
+    /// Battery capacity fallback scale (×MaxPower) when a battery block only
+    /// exposes MaxPower.
+    battery_capacity_scale: f32 = 10.0,
+    /// Initial battery charge as a fraction of capacity on fresh placement.
+    battery_initial_charge_frac: f32 = 0.5,
+    /// Trigger-plate / tripwire pulse duration (s) when the block sets
+    /// duration=Triggered.
+    trigger_pulse_s: f32 = 0.5,
+};
+
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
 /// field (RulesOverlay) and mergeOverlay applies the non-null subset.
 pub const Rules = struct {
@@ -409,6 +496,7 @@ pub const Rules = struct {
     vehicle: Vehicle = .{},
     director: Director = .{},
     water: Water = .{},
+    power: Power = .{},
 };
 
 pub const CombatOverlay = struct {
@@ -417,6 +505,8 @@ pub const CombatOverlay = struct {
     attack_cooldown_s: ?f32 = null,
     armor_mitigation_per_piece: ?f32 = null,
     armor_mitigation_cap: ?f32 = null,
+    knockback_speed: ?f32 = null,
+    knockback_seconds: ?f32 = null,
 };
 
 pub const AiOverlay = struct {
@@ -474,6 +564,18 @@ pub const AiOverlay = struct {
     mount_range_sq: ?f32 = null,
     destroy_area_rng_mod: ?u32 = null,
     revenge_window_s: ?f32 = null,
+    no_target_scale: ?f32 = null,
+    sleep_dist_mult: ?f32 = null,
+    sleep_decision_scale: ?f32 = null,
+    sleep_wander_interval_s: ?f32 = null,
+    sleep_wander_speed_frac: ?f32 = null,
+    fear_scan_cd_s: ?f32 = null,
+    move_arrive: ?f32 = null,
+    push_range: ?f32 = null,
+    push_y_tol: ?f32 = null,
+    push_shove: ?f32 = null,
+    dig_windup_ticks: ?u8 = null,
+    dig_budget_ticks: ?u8 = null,
 };
 
 pub const BloodmoonOverlay = struct {
@@ -482,6 +584,8 @@ pub const BloodmoonOverlay = struct {
     party_spawn_dist: ?f32 = null,
     party_enemy_max: ?u32 = null,
     max_parties: ?u32 = null,
+    budget_scale: ?f32 = null,
+    wave_frac: ?f32 = null,
 };
 
 pub const ProgressionOverlay = struct {
@@ -504,6 +608,7 @@ pub const ProgressionOverlay = struct {
 pub const WorldGroupOverlay = struct {
     container_open_range: ?f32 = null,
     topsoil_all_broken: ?bool = null,
+    poi_unlock_grace_ticks: ?u32 = null,
 };
 
 pub const VehicleOverlay = struct {
@@ -513,6 +618,9 @@ pub const VehicleOverlay = struct {
     steer_deg_per_s: ?f32 = null,
     min_turn_speed_frac: ?f32 = null,
     fuel_per_m: ?f32 = null,
+    fuel_cap: ?f32 = null,
+    refuel_reach: ?f32 = null,
+    gravity: ?f32 = null,
 };
 
 /// AIDirector overlay: `[rules.director]` binds these (binder-reflected).
@@ -527,6 +635,10 @@ pub const DirectorOverlay = struct {
     heat_cooldown_seconds: ?f32 = null,
     heat_neighbor_cooldown_seconds: ?f32 = null,
     heat_scout_dist: ?f32 = null,
+    heat_scout_count: ?u32 = null,
+    heat_feral_chance: ?f32 = null,
+    heat_feral_cd_mult: ?f32 = null,
+    heat_event_ticks: ?f32 = null,
     enemy_spawn_ring_min: ?f32 = null,
     enemy_spawn_ring_max: ?f32 = null,
     animal_spawn_ring_min: ?f32 = null,
@@ -537,6 +649,17 @@ pub const DirectorOverlay = struct {
     animal_drip_cd: ?f32 = null,
     bloodmoon_wave_cd: ?f32 = null,
     bloodmoon_hp_mult: ?f32 = null,
+    difficulty_hp_0: ?f32 = null,
+    difficulty_hp_1: ?f32 = null,
+    difficulty_hp_2: ?f32 = null,
+    difficulty_hp_3: ?f32 = null,
+    difficulty_hp_4: ?f32 = null,
+    difficulty_hp_5: ?f32 = null,
+    move_scale_0: ?f32 = null,
+    move_scale_1: ?f32 = null,
+    move_scale_2: ?f32 = null,
+    move_scale_3: ?f32 = null,
+    move_scale_4: ?f32 = null,
 };
 
 pub const SystemsOverlay = struct {
@@ -557,6 +680,13 @@ pub const WaterOverlay = struct {
     puddle_cap: ?u8 = null,
 };
 
+/// Power-sim overlay: `[rules.power]` binds these (binder-reflected).
+pub const PowerOverlay = struct {
+    battery_capacity_scale: ?f32 = null,
+    battery_initial_charge_frac: ?f32 = null,
+    trigger_pulse_s: ?f32 = null,
+};
+
 /// All-optional mirror of Rules for mode-pack / zdtd.toml `[rules.*]` sections
 /// (ADR 0021 decision 3). Hand-written next to Rules because Zig 0.16's
 /// `@Struct` cannot lay out a recursive anonymous overlay type; the parity test
@@ -571,6 +701,7 @@ pub const RulesOverlay = struct {
     vehicle: VehicleOverlay = .{},
     director: DirectorOverlay = .{},
     water: WaterOverlay = .{},
+    power: PowerOverlay = .{},
 };
 
 /// Apply a RulesOverlay onto a concrete Rules: only non-null fields override.

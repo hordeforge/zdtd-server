@@ -3,7 +3,7 @@
 //! `decoSpeciesAt` resolves each cell the way stock's `decorateChunkRandom`
 //! does instead of sampling only the biome's top-level `<decorations>` list.
 //!
-//! IL anchors (V3.1.0 b14, `../7dtd-research`):
+//! IL anchors (V3.1.0 b14, `../7dtd-engine-research`):
 //! - `PerlinNoise.ctor` (asm.il 2198696-2198801): 256 Box-Muller gradient
 //!   triples from a `.NET Random` seeded with the ctor seed.
 //! - `PerlinNoise.Noise` 2198860-2198966, `FBM` 2199260-2199321,
@@ -21,7 +21,7 @@
 //! Perlin permutation table instead, so the banding is stock-shaped (same FBM
 //! structure, same per-subbiome frequency/offset/min/max from biomes.xml) but
 //! not byte-identical to the stock boundaries. Extracting the stock literal is
-//! a `../7dtd-research` task; the residual is recorded in GAP_ANALYSIS 18.
+//! a `../7dtd-engine-research` task; the residual is recorded in GAP_ANALYSIS 18.
 
 const std = @import("std");
 

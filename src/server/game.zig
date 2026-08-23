@@ -205,6 +205,44 @@ const wasmTick = game_wasm_host.wasmTick;
 const wasmQueue = game_wasm_host.wasmQueue;
 const wasmSense = game_wasm_host.wasmSense;
 const wasmQuery = game_wasm_host.wasmQuery;
+
+/// on_player_damage verdict for the ECS damage path (zombie melee / deferred
+/// accumulator): routes to the plugin host + wasm host like the C2S path, with
+/// attacker unknown (-1). <0 deny, 0 keep, >0 scale by percent.
+pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const sv = g.plugins.playerDamage(-1, victim, @intFromFloat(amount));
+    return if (sv != 0) sv else g.wasm_plugins.playerDamage(-1, victim, @intFromFloat(amount));
+}
+
+/// Server chat broadcast for plugin announcements (`zdtd.queue say`): builds
+/// the stock chat body (sender 0 = server, global chat) and broadcasts it to
+/// every client. Guest-controlled bytes are sanitized to one printable line.
+pub fn announceChat(ctx: ?*anyopaque, msg: []const u8) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    var clean_buf: [128]u8 = undefined;
+    const n = @min(msg.len, clean_buf.len);
+    var m: usize = 0;
+    for (msg[0..n]) |b| {
+        clean_buf[m] = if (b == '\r' or b == '\n' or b == '\t') ' ' else b;
+        m += 1;
+    }
+    const clean = std.mem.trim(u8, clean_buf[0..m], " \t");
+    if (clean.len == 0) return;
+    var body_buf: [512]u8 = undefined;
+    const body = packages.buildStockChat(&body_buf, 0, 0, clean, &.{}) catch return;
+    g.broadcast("NetPackageChat", body) catch {};
+}
+
+/// Pre-trade price verdict (on_trade_price) for the sim trade path: routes to
+/// the plugin host + wasm host; <0 deny, 0 keep, >0 scale unit price by
+/// percent. `item` is the ECS item id.
+pub fn tradePriceVerdict(ctx: ?*anyopaque, player: i32, item: u16, unit_price: u32) i32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const p: i32 = @intCast(unit_price);
+    const sv = g.plugins.tradePrice(player, item, p);
+    return if (sv != 0) sv else g.wasm_plugins.tradePrice(player, item, p);
+}
 const max_plugin_cmd_len = game_wasm_host.max_plugin_cmd_len;
 
 fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
@@ -530,12 +568,28 @@ pub const Game = struct {
     trader_restock_refill: u16 = default_trader_restock_refill,
     trader_wallet_dukes: i32 = default_trader_wallet_dukes,
     storm_frequency: i32 = default_storm_frequency,
+    /// `[sim] trader_use_range` (blocks): trader/vending open-and-echo reach.
+    trade_use_range: f32 = 32,
+    /// `[sim] party_shared_kill_range` (blocks; stock GameStats[54] default).
+    party_shared_kill_range: f32 = 100,
+    /// `[quests]` policy (mode pack < zdtd.toml): POI selection band etc.
+    quest_policy: ecs.quest.QuestPolicy = .{},
     /// Per-chunk storage/prefab TE scan caps (zdtd.toml [sim] te_scan_*).
     te_scan_block_cap: u32 = game_types.default_te_scan_block_cap,
     te_scan_te_cap: u32 = game_types.default_te_scan_te_cap,
     /// Workstation craft budgets (zdtd.toml [sim] workstation_*).
     workstation_crafts_per_tick: u16 = game_types.default_workstation_crafts_per_tick,
     workstation_craft_backlog: f32 = game_types.default_workstation_craft_backlog,
+    /// `[sim] sleeper_cap_gate_enabled`: restore the stock sleeper global
+    /// spawn gate (default false = the documented zdtd divergence).
+    sleeper_cap_gate_enabled: bool = false,
+    /// `[sim] airdrop_*`: airdrop schedule policy (parsed at init; "days"
+    /// switches tickAirDrop to the stock-like day-count + TOD schedule).
+    airdrop_schedule: enum { interval, days } = .interval,
+    airdrop_day_min: u32 = 3,
+    airdrop_day_max: u32 = 3,
+    airdrop_drop_hour: u32 = 12,
+    airdrop_loot_list: []const u8 = "airDrop",
     /// Periodic apm snapshot dump period in ticks (zdtd.toml [apm] dump_every_s).
     apm_report_period_ticks: u64 = game_types.default_apm_report_period_ticks,
     /// Stock ConsoleCmdCommandPermission: per-command required permission
@@ -646,10 +700,19 @@ pub const Game = struct {
             .trader_restock_refill = opts.trader_restock_refill,
             .trader_wallet_dukes = opts.trader_wallet_dukes,
             .storm_frequency = opts.storm_frequency,
+            .trade_use_range = opts.trade_use_range,
+            .party_shared_kill_range = opts.party_shared_kill_range,
+            .quest_policy = opts.quest_policy,
             .te_scan_block_cap = opts.te_scan_block_cap,
             .te_scan_te_cap = opts.te_scan_te_cap,
             .workstation_crafts_per_tick = opts.workstation_crafts_per_tick,
             .workstation_craft_backlog = opts.workstation_craft_backlog,
+            .sleeper_cap_gate_enabled = opts.sleeper_cap_gate_enabled,
+            .airdrop_schedule = if (std.mem.eql(u8, opts.airdrop_schedule, "days")) .days else .interval,
+            .airdrop_day_min = opts.airdrop_day_min,
+            .airdrop_day_max = opts.airdrop_day_max,
+            .airdrop_drop_hour = opts.airdrop_drop_hour,
+            .airdrop_loot_list = opts.airdrop_loot_list,
             .apm_report_period_ticks = if (opts.apm_dump_every_s) |s|
                 // 0 disables the periodic dump (mod-by-zero guard; maxInt never fires).
                 if (s == 0) std.math.maxInt(u64) else s * protocol.ticks_per_second
@@ -694,8 +757,13 @@ pub const Game = struct {
         // Sim rules (ADR 0021): defaults overlaid by the mode pack then
         // zdtd.toml in main.zig; this is the single install point.
         self.sim.rules = opts.rules;
+        // [rules.world] POI unlock grace onto the lock table (rules install
+        // once here; lock() copies it onto new entries).
+        self.sim.poi_locks.grace_ticks = opts.rules.world.poi_unlock_grace_ticks;
         // Bot host policy (ADR 0026 / ADR 0021): `[bots]` from mode/toml.
         self.bots.cfg = opts.bot_config;
+        // `[bots] weapon_profiles` loadout pool (empty = builtin pool).
+        self.bots.parseLoadout();
         // Sleeper wake/stage radius (`[sim] sleeper_party_radius`).
         self.sleeper_party_radius = opts.sleeper_party_radius;
         errdefer {
@@ -1506,12 +1574,12 @@ pub const Game = struct {
         return game_world.getBlockHp(self, x, y, z);
     }
 
-    /// Voxel line-of-sight gate for `bot shoot` (BOTS_SPEC §4 host-LOS).
+    /// Voxel line-of-sight gate for `bot shoot` (RFC 0001 §4 host-LOS).
     pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
         return game_world.botLosClear(self, from, to);
     }
 
-    /// Cover point not visible from `threat` (BOTS_SPEC §3 `zdtd.query`
+    /// Cover point not visible from `threat` (RFC 0001 §3 `zdtd.query`
     /// "cover"); Doom 3 idAASFindCover / clanker `BotBrain.FindCover` port.
     pub fn findCover(self: *Game, from: [3]f32, threat: [3]f32, dist: f32) ?[3]f32 {
         return game_world.findCover(self, from, threat, dist);

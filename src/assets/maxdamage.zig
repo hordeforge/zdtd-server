@@ -16,10 +16,10 @@ pub const bundled_assignids_name = "assignids_v314.embed.txt";
 pub const bundled_assignids_rel_paths = [_][]const u8{
     "src/assets/assignids_v314.embed.txt",
     "assets/fixtures/assignids_v314.txt",
-    "zdtd/src/assets/assignids_v314.embed.txt",
+    "zdtd-server/src/assets/assignids_v314.embed.txt",
     "zdtd/assets/fixtures/assignids_v314.txt",
-    "../zdtd/src/assets/assignids_v314.embed.txt",
-    "../zdtd/assets/fixtures/assignids_v314.txt",
+    "../zdtd-server/src/assets/assignids_v314.embed.txt",
+    "../zdtd-server/assets/fixtures/assignids_v314.txt",
     "../src/assets/assignids_v314.embed.txt",
     "../assets/fixtures/assignids_v314.txt",
 };

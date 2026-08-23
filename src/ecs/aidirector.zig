@@ -210,22 +210,16 @@ pub const wander_start_after: u64 = director_defaults.wander_start_after;
 /// distance are `[rules.director]` tunables; the aliases are the defaults.
 pub const heat_region_world: i32 = 16 * 5; // 5 chunks x 16 blocks
 pub const heat_spawn_threshold: f32 = director_defaults.heat_spawn_threshold;
-pub const heat_event_ticks: f32 = 720.0; // TileEntity heat event duration (doc-only; not modelled)
 pub const heat_check_seconds: f32 = director_defaults.heat_check_seconds;
 pub const heat_cooldown_seconds: f32 = director_defaults.heat_cooldown_seconds;
 pub const heat_neighbor_cooldown_seconds: f32 = director_defaults.heat_neighbor_cooldown_seconds;
-pub const heat_feral_chance: f32 = 0.2; // doc-only; the feral roll is not modelled
-/// GameDifficulty 0..5 -> zombie HP multiplier (Scavenger..Insane). Stock tier
-/// semantic; numbers zdtd-tuned (no pinned RE table, R9).
-pub const hp_scale_by_difficulty = [_]f32{ 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
-/// ZombieMove 0..4 -> speed multiplier (walk/jog/run/sprint/nightmare). Stock
-/// tier semantic; numbers zdtd-tuned (R9).
-pub const move_scale_by_mode = [_]f32{ 0.5, 0.75, 1.0, 1.4, 1.7 };
+/// GameDifficulty / ZombieMove tier multipliers are `[rules.director]`
+/// per-tier scalars (difficulty_hp_0..5, move_scale_0..4); the const arrays
+/// moved there (numbers zdtd-tuned R9, operator policy).
 pub const max_heat_regions: usize = 32;
 /// Ambient spawn rule budget slots (spawning.xml rules are 57 in stock; the
 /// array is a bound, not a cap on the parsed table).
 pub const rule_budget_cap: usize = 64;
-pub const heat_scout_count: u32 = 2;
 pub const heat_scout_dist: f32 = director_defaults.heat_scout_dist; // chunk-heat spawner 0/8/10 constants
 
 pub const HeatRegion = struct {
@@ -350,30 +344,38 @@ pub const Director = struct {
     /// Alive-zombie ceiling: stock MaxSpawnedZombies default is 64; we keep a
     /// smaller dev cap so long soaks do not accrete entities without despawn.
     pub const default_max_alive_zombies: u32 = 24;
-    /// Blood-moon spawn ceiling multiplier. RE: the stock blood-moon party
-    /// spawner calls `AIDirector::CanSpawn(1.9f)` (asm.il:413528) - a 1.9x
-    /// budget over the world MaxSpawnedZombies cap.
-    pub const bloodmoon_budget_scale: f32 = 1.9;
 
     /// Zombie hp multiplier from GameDifficulty (0=Scavenger .. 5=Insane).
     /// The tier semantic is stock serverconfig GameDifficulty; the exact
-    /// numbers are zdtd-tuned (no pinned RE table in the research corpus,
-    /// R9 value-level disposition).
-    pub fn hpScale(self: *const Director) f32 {
-        return hp_scale_by_difficulty[@min(self.difficulty, 5)];
+    /// numbers are `[rules.director] difficulty_hp_0..5` (zdtd-tuned R9).
+    pub fn hpScale(self: *const Director, r: *const rules_mod.Director) f32 {
+        return switch (@min(self.difficulty, 5)) {
+            0 => r.difficulty_hp_0,
+            1 => r.difficulty_hp_1,
+            2 => r.difficulty_hp_2,
+            3 => r.difficulty_hp_3,
+            4 => r.difficulty_hp_4,
+            else => r.difficulty_hp_5,
+        };
     }
 
     /// ZombieMove index 0..4 → speed multiplier (walk/jog/run/sprint/nightmare).
-    /// Tier semantic stock; numbers zdtd-tuned (R9).
-    fn moveScale(idx: u8) f32 {
-        return move_scale_by_mode[@min(idx, 4)];
+    /// Values from `[rules.director] move_scale_0..4` (zdtd-tuned R9).
+    fn moveScale(idx: u8, r: *const rules_mod.Director) f32 {
+        return switch (@min(idx, 4)) {
+            0 => r.move_scale_0,
+            1 => r.move_scale_1,
+            2 => r.move_scale_2,
+            3 => r.move_scale_3,
+            else => r.move_scale_4,
+        };
     }
 
     /// Current zombie speed multiplier for the active day/night/blood-moon state.
-    pub fn zombieSpeedScale(self: *const Director) f32 {
-        if (self.bloodmoon_active) return moveScale(self.zombie_move_bm);
-        if (self.enemy_difficulty >= 1) return moveScale(self.zombie_move_feral);
-        return moveScale(if (self.clock.isNight()) self.zombie_move_night else self.zombie_move_day);
+    pub fn zombieSpeedScale(self: *const Director, r: *const rules_mod.Director) f32 {
+        if (self.bloodmoon_active) return moveScale(self.zombie_move_bm, r);
+        if (self.enemy_difficulty >= 1) return moveScale(self.zombie_move_feral, r);
+        return moveScale(if (self.clock.isNight()) self.zombie_move_night else self.zombie_move_day, r);
     }
 
     pub fn tick(self: *Director, w: *ecs_world.World, dt: f32) struct { spawned: u32, world_time: u64 } {
@@ -387,7 +389,7 @@ pub const Director = struct {
         if (self.animals_cd > 0) self.animals_cd -= dt;
 
         self.bloodmoon_active = self.clock.isBloodMoonNight();
-        w.zombie_speed_scale = self.zombieSpeedScale();
+        w.zombie_speed_scale = self.zombieSpeedScale(&w.rules.director);
 
         // `[systems] director = false` means "stop zombie spawning", not "stop
         // time". The world clock, blood-moon flag and daily trader restock live
@@ -408,7 +410,7 @@ pub const Director = struct {
         // (1.9f)` (asm.il:413528), a 1.9x ceiling over the world budget, so
         // the horde does not thin at the ordinary day/night cap.
         const cap: u32 = if (self.bloodmoon_active)
-            @intFromFloat(@as(f32, @floatFromInt(self.max_alive)) * bloodmoon_budget_scale)
+            @intFromFloat(@as(f32, @floatFromInt(self.max_alive)) * w.rules.bloodmoon.budget_scale)
         else
             self.max_alive;
         if (alive_z >= cap) {
@@ -430,7 +432,7 @@ pub const Director = struct {
             self.buildBloodMoonParties(w);
             self.recountAndTeleportHorde(w);
             const bm = self.stageGroup(bloodmoon_spawner);
-            var wave: u32 = @max(1, self.bloodmoon_enemy_count / 2);
+            var wave: u32 = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(self.bloodmoon_enemy_count)) * w.rules.bloodmoon.wave_frac)));
             var bm_group: []const u8 = "";
             if (bm) |sg| {
                 wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
@@ -834,7 +836,7 @@ pub const Director = struct {
         // stays only for the unresolved class_table fallback (offline/builtin
         // data, where no ladder class exists to carry the difficulty).
         const bm_mul: f32 = if (self.bloodmoon_active and resolved == null) w.rules.director.bloodmoon_hp_mult else 1.0;
-        const hp: f32 = (if (resolved) |d| d.max_hp else ct.max_hp) * bm_mul * self.hpScale();
+        const hp: f32 = (if (resolved) |d| d.max_hp else ct.max_hp) * bm_mul * self.hpScale(&w.rules.director);
         const id = if (resolved) |d|
             w.spawnZombieDef(x, y, z, hp, d)
         else if (ct.hash != 0)
@@ -965,11 +967,21 @@ pub const Director = struct {
         while (ci < self.heat_n) : (ci += 1) {
             const r = &self.heat[ci];
             if (r.activity < w.rules.director.heat_spawn_threshold or r.cooldown > 0) continue;
-            // FindBestEventAndReset + StartCooldownOnNeighbors; the 20 % feral
-            // roll doubles the cooldown (deterministic, seeded stream).
-            const feral = (self.total_spawned +% @as(u32, @intCast(ci))) % 5 == 0;
+            // FindBestEventAndReset + StartCooldownOnNeighbors; the feral roll
+            // (rules.director.heat_feral_chance) doubles the cooldown
+            // (rules.director.heat_feral_cd_mult; deterministic, seeded stream).
+            // roll = round(1/chance): default 0.2 -> 1-in-5, exactly as before.
+            const chance = w.rules.director.heat_feral_chance;
+            const roll: u32 = if (chance > 0 and std.math.isFinite(chance))
+                @max(1, @as(u32, @intFromFloat(@round(1.0 / chance))))
+            else
+                std.math.maxInt(u32);
+            const feral = (self.total_spawned +% @as(u32, @intCast(ci))) % roll == 0;
             r.activity = 0;
-            r.cooldown = if (feral) w.rules.director.heat_cooldown_seconds * 2.0 else w.rules.director.heat_cooldown_seconds;
+            r.cooldown = if (feral)
+                w.rules.director.heat_cooldown_seconds * w.rules.director.heat_feral_cd_mult
+            else
+                w.rules.director.heat_cooldown_seconds;
             self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_cooldown_seconds);
             self.spawnHeatScouts(w, r.key);
         }
@@ -998,7 +1010,7 @@ pub const Director = struct {
         const center = heatRegionCenter(key);
         const group = self.scoutGroup();
         var n: u32 = 0;
-        while (n < heat_scout_count) : (n += 1) {
+        while (n < w.rules.director.heat_scout_count) : (n += 1) {
             const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
             const x = center.x + @cos(ang) * w.rules.director.heat_scout_dist;
             const z = center.z + @sin(ang) * w.rules.director.heat_scout_dist;
@@ -1077,15 +1089,15 @@ test "zombie speed scale follows day/night/bloodmoon config" {
         .zombie_move_feral = 2,
     };
     dir.clock.hours = 12.0; // day
-    try std.testing.expectApproxEqAbs(@as(f32, 0.5), dir.zombieSpeedScale(), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), dir.zombieSpeedScale(&director_defaults), 0.001);
     dir.clock.hours = 23.0; // night
-    try std.testing.expectApproxEqAbs(@as(f32, 1.4), dir.zombieSpeedScale(), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.4), dir.zombieSpeedScale(&director_defaults), 0.001);
     dir.bloodmoon_active = true;
-    try std.testing.expectApproxEqAbs(@as(f32, 1.7), dir.zombieSpeedScale(), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.7), dir.zombieSpeedScale(&director_defaults), 0.001);
     dir.bloodmoon_active = false;
     dir.enemy_difficulty = 1; // feral overrides day
     dir.clock.hours = 12.0;
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), dir.zombieSpeedScale(), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), dir.zombieSpeedScale(&director_defaults), 0.001);
 }
 
 test "director spawns daytime animals up to cap" {
@@ -1431,7 +1443,7 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
         if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
         scouts += 1;
     }
-    try std.testing.expect(scouts >= 1 and scouts <= heat_scout_count);
+    try std.testing.expect(scouts >= 1 and scouts <= 2); // rules.director.heat_scout_count default
     // Region was reset (activity 0) and is on cooldown. Region key of (0,0):
     // floor(0/80)=0 on both axes, packed = 0.
     var found = false;

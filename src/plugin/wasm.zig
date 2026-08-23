@@ -30,13 +30,14 @@ pub const Hook = enum(u8) {
     on_loot_roll = 15,
     on_trader_event = 16,
     on_mcp_frame = 17,
+    on_trade_price = 18,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage",  "on_quest_complete",
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
-        "on_trader_event",  "on_mcp_frame",
+        "on_trader_event",  "on_mcp_frame",     "on_trade_price",
     };
 };
 
@@ -62,10 +63,10 @@ pub const Budget = struct {
 /// only the import table; this struct is the host side of those calls.
 /// Callbacks receive the HostCtx back so the owner (game.zig) can recover its
 /// own state from `data`. This file never dereferences `data`; the owner casts.
-/// Ceiling on one `zdtd.sense` snapshot (BOTS_SPEC §3). The guest requests up
+/// Ceiling on one `zdtd.sense` snapshot (RFC 0001 §3). The guest requests up
 /// to this much; the host never writes past it into the guest.
 pub const host_sense_max: usize = 2048;
-/// Ceiling on one `zdtd.query` response (BOTS_SPEC §3). The host never writes
+/// Ceiling on one `zdtd.query` response (RFC 0001 §3). The host never writes
 /// past this into the guest.
 pub const query_resp_max: usize = 64;
 /// Fixed buffer per plugin for the std.json capability (ADR 0031): one parsed
@@ -89,7 +90,7 @@ pub const HostCtx = struct {
     /// 0 when the owner has no sense (a plain event plugin). Signature keeps
     /// this layer free of a Game dependency; the owner casts via `data`.
     sense_fn: ?*const fn (ctx: *HostCtx, out: []u8) usize = null,
-    /// Reverse-direction point query (BOTS_SPEC §3): the guest writes a text
+    /// Reverse-direction point query (RFC 0001 §3): the guest writes a text
     /// request (e.g. `cover x z tx tz`) and the host writes a text response,
     /// returning bytes written (0 = no answer / unknown query). Null when the
     /// owner has no query surface.
@@ -137,7 +138,7 @@ pub const Plugin = struct {
     /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
     scratch_off: u32 = 0,
     scratch_len: usize = 0,
-    /// std.json capability (ADR 0031, MCP_DESIGN.md §5): the host parses the
+    /// std.json capability (ADR 0031, RFC 0002 §5): the host parses the
     /// guest's JSON-RPC frame with std.json once into a lazily allocated fixed
     /// buffer (json_buf_max), so the tick path never allocates. One parsed doc
     /// per plugin at a time (frames are processed one at a time); a new
@@ -323,6 +324,21 @@ pub const Plugin = struct {
             return false;
         };
         return true;
+    }
+
+    /// on_trade_price(player: i32, item: i32, unit_price: i32) -> i32
+    /// (pre-trade verdict: <0 deny the trade, 0 keep the price, >0 scale the
+    /// unit price by percent). Fired on every buy against trader stock so
+    /// plugins express price/tax policy (ADR-worthy extension; on_trader_event
+    /// fires only after the trade).
+    pub fn callTradePrice(self: *Plugin, player: i32, item: i32, unit_price: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_trade_price)]) return verdict_keep;
+        return self.instance.call(fn (i32, i32, i32) i32, "on_trade_price", .{ player, item, unit_price }) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_trade_price disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
     }
 
     /// on_player_death(victim: i32) -> i32 (verdict convention: <0 deny,
@@ -867,6 +883,16 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Pre-trade price verdict: first non-zero adjustment wins (like the
+    /// other verdicts); 0 keeps the stock price.
+    pub fn tradePrice(self: *WasmHost, player: i32, item: i32, unit_price: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callTradePrice(player, item, unit_price);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
     pub fn questComplete(self: *WasmHost, player: i32, quest_def: i32) i32 {
         for (0..self.n) |i| {
             const v = self.slots[i].callQuestComplete(player, quest_def);
@@ -1004,7 +1030,7 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             @memcpy(dst, resp[0..copy]);
             return @intCast(copy);
         }
-        // std.json capability (ADR 0031, MCP_DESIGN.md §5): parse the JSON
+        // std.json capability (ADR 0031, RFC 0002 §5): parse the JSON
         // doc at guest memory (ptr, len) with std.json; 0 = ok, -1 = parse
         // error. The parsed doc is per-plugin state, replaced on the next
         // call. Conventions for all json_* imports: path is a dot-separated
@@ -1565,7 +1591,7 @@ test "queue import attributes commands to the calling plugin slot" {
 test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
     // Loads the real committed bot brain and drives it through the host sense
     // import with a canned snapshot, proving the end-to-end sense→brain→queue
-    // pipe (BOTS_SPEC §3 / ADR 0026). The brain must NOT be modified; this is
+    // pipe (RFC 0001 §3 / ADR 0026). The brain must NOT be modified; this is
     // the host-side regression the uncommitted work dropped.
     const Cap = struct {
         // queueFn COPIES each command into owned bytes — the guest reuses one
@@ -1604,7 +1630,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
             std.mem.writeInt(u32, r[24..28], @bitCast(yaw), .little);
             std.mem.writeInt(i32, r[28..32], target, .little);
         }
-        // One 16-byte trailer record (BOTS_SPEC §3 event layout).
+        // One 16-byte trailer record (RFC 0001 §3 event layout).
         fn writeEv(b: []u8, base: usize, kind: u8, a: i32, c: i32, amount: f32) void {
             const r = b[base .. base + 16];
             @memset(r, 0);
@@ -1614,8 +1640,9 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
             std.mem.writeInt(u32, r[12..16], @bitCast(amount), .little);
         }
         fn senseFn(_: *HostCtx, out: []u8) usize {
-            // header: magic 'ZBS2', count, tick 1, self 0
-            std.mem.writeInt(u32, out[0..4], 0x3253425a, .little);
+            // header: magic 'ZBS3' (24 bytes: magic, count, tick, self,
+            // world_time, blood_moon), records at base 24.
+            std.mem.writeInt(u32, out[0..4], 0x3353425a, .little);
             const count: u32 = if (hide_player)
                 1
             else
@@ -1623,27 +1650,29 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
             std.mem.writeInt(u32, out[4..8], count, .little);
             std.mem.writeInt(u32, out[8..12], 1, .little);
             std.mem.writeInt(i32, out[12..16], 0, .little);
+            std.mem.writeInt(u32, out[16..20], 1 * 24000 + 12 * 1000, .little); // world_time: day 1, noon
+            std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon off
             var n: u32 = 0;
             // one bot at the origin (self), facing +45deg toward the visible
             // player (yaw = atan2(10,10)+90deg); hp is mutable so the dodge
             // phase can simulate the bot taking damage (100 -> 60).
-            writeRec(out, 16, 1000, 2, 1, 1, 0.0, 0.0, 0.0, bot_hp, 2.356, -1);
+            writeRec(out, 24, 1000, 2, 1, 1, 0.0, 0.0, 0.0, bot_hp, 2.356, -1);
             n += 1;
             if (!hide_player) {
                 // a player at (10, 0, 10) unless hidden (LOS pull-down)
-                writeRec(out, 16 + 32, 2000, 0, 0, 1, 10.0, 0.0, 10.0, 100.0, 0.0, -1);
+                writeRec(out, 24 + 32, 2000, 0, 0, 1, 10.0, 0.0, 10.0, 100.0, 0.0, -1);
                 n += 1;
             }
             if (show_zombie) {
                 // a zombie CLOSER to the bot (9,10) than the player (10,10);
                 // player-preference targeting must still pick the player.
-                writeRec(out, 16 + 64, 3000, 1, 0, 1, 9.0, 0.0, 10.0, 100.0, 0.0, -1);
+                writeRec(out, 24 + 64, 3000, 1, 0, 1, 9.0, 0.0, 10.0, 100.0, 0.0, -1);
                 n += 1;
             }
             if (show_flanker) {
                 // a player BEHIND the bot (facing +X, yaw 0) and closer than the
                 // visible player: the FOV cone must exclude it.
-                writeRec(out, 16 + @as(usize, n) * 32, 4000, 0, 0, 1, -12.0, 0.0, 0.0, 100.0, 0.0, -1);
+                writeRec(out, 24 + @as(usize, n) * 32, 4000, 0, 0, 1, -12.0, 0.0, 0.0, 100.0, 0.0, -1);
                 n += 1;
             }
             if (with_trailer) {
@@ -1651,13 +1680,13 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
                 // sniper, weapon_id 3) followed by a kind-3 damage event (player
                 // 2000 hit bot 1000 for 42). The guest must keep parsing records
                 // at the 32-byte stride and derive the trailer from the length.
-                const eb = 16 + @as(usize, n) * 32;
+                const eb = 24 + @as(usize, n) * 32;
                 writeEv(out, eb, 4, 1000, 0, 0);
                 out[eb + 1] = 3; // weapon_id sniper (loadout-pool index 3)
                 writeEv(out, eb + 16, 3, 2000, 1000, 42.0);
-                return 16 + @as(usize, n) * 32 + 32;
+                return 24 + @as(usize, n) * 32 + 32;
             }
-            return 16 + @as(usize, n) * 32;
+            return 24 + @as(usize, n) * 32;
         }
     };
     Cap.queued_n = 0;
@@ -1828,7 +1857,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     // and kind-3 damage-event records (player 2000 hit bot 1000 for 42) must
     // not desync the brain's record offsets — it still tracks and drives on
     // the player (the grudge keeps it locked), proving the v2 event trailer
-    // parses end-to-end (BOTS_SPEC §3).
+    // parses end-to-end (RFC 0001 §3).
     Cap.with_trailer = true;
     Cap.hide_player = false;
     Cap.bot_hp = 58;
@@ -1849,7 +1878,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     // Ammo/reload phase: the trailer gives bot 1000 a SNIPER (weapon_id 3,
     // mag 5, burst 1, ~0.6 s between shots). Firing must run the mag dry and
     // then hold fire through a reload gap (weapon_reload 2.5 s = 50 ticks)
-    // before resuming — proving ammo pacing end-to-end (BOTS_SPEC §5.1).
+    // before resuming — proving ammo pacing end-to-end (RFC 0001 §5.1).
     var shoot_ticks: [64]usize = undefined;
     var shoot_n: usize = 0;
     var t: usize = 0;
@@ -1881,7 +1910,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
 }
 
 test "zdtd_mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
-    // The MCP addon guest (ADR 0031, docs/MCP_DESIGN.md M1): the host feeds a
+    // The MCP addon guest (ADR 0031, docs/rfc/0002-mcp-server-design.md M1): the host feeds a
     // client JSON-RPC frame through the on_mcp_frame hook and gets the guest's
     // response back. The guest owns protocol logic; JSON parsing is the host
     // std.json capability; the sense/query surfaces here stand in for the real
@@ -1919,14 +1948,16 @@ test "zdtd_mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
         }
         fn senseFn(_: *HostCtx, out: []u8) usize {
             if (!sense_enabled) return 0;
-            // header: magic 'ZBS2', 2 records, tick 42, self -1
-            std.mem.writeInt(u32, out[0..4], 0x3253425a, .little);
+            // header: magic 'ZBS3' (24 bytes), 2 records, tick 42, self -1
+            std.mem.writeInt(u32, out[0..4], 0x3353425a, .little);
             std.mem.writeInt(u32, out[4..8], 2, .little);
             std.mem.writeInt(u32, out[8..12], 42, .little);
             std.mem.writeInt(i32, out[12..16], -1, .little);
-            writeRec(out, 16, 2000, 0, 10.0, 0.0, 10.0, 100.0); // player
-            writeRec(out, 48, 3000, 1, 9.0, 0.0, 10.0, 100.0); // zombie
-            return 16 + 64;
+            std.mem.writeInt(u32, out[16..20], 0, .little); // world_time
+            std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon
+            writeRec(out, 24, 2000, 0, 10.0, 0.0, 10.0, 100.0); // player
+            writeRec(out, 56, 3000, 1, 9.0, 0.0, 10.0, 100.0); // zombie
+            return 24 + 64;
         }
         fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
             if (!std.mem.eql(u8, req, "mcp.allowlist")) return 0;

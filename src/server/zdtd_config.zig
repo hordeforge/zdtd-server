@@ -120,11 +120,36 @@ pub const Sim = struct {
     /// chunk cannot stall the tick.
     te_scan_block_cap: ?u32 = null,
     te_scan_te_cap: ?u32 = null,
+    /// Trader/vending open-and-echo reach gate (blocks). Authority-adjacent:
+    /// closes the "rewrite a trader from anywhere" vector (trader_wire.zig).
+    trader_use_range: ?f32 = null,
+    /// Party shared-kill XP credit range (blocks). No V3.1.0 serverconfig key
+    /// (GameStats[54] default 100); same precedent as trader_wallet_dukes.
+    party_shared_kill_range: ?f32 = null,
+    /// Storms are pushed this many world ticks past a horde night
+    /// (weather.zig blood_moon_storm_push; 5000 = ~5 in-game hours).
+    storm_bm_push_ticks: ?i64 = null,
     /// Workstation craft budgets (zdtd.toml [sim]): max crafts advanced per
     /// tick per station and the largest client-written CraftingTimeLeft backlog
     /// (seconds) accepted before it is reset. Anti-abuse caps.
     workstation_crafts_per_tick: ?u16 = null,
     workstation_craft_backlog: ?f32 = null,
+    /// Restore the stock sleeper global spawn gate: when true, a sleeper
+    /// volume only restores while EnemyCount < MaxSpawnedZombies * 2.1 (stock
+    /// CanSpawn(2.1f), spawning.md). Default false = the documented zdtd
+    /// divergence (spawn regardless of the global cap).
+    sleeper_cap_gate_enabled: ?bool = null,
+    /// Airdrop policy (`[sim] airdrop_*`; the stock server has no key for
+    /// these — AirDropFrequency is the interval). `airdrop_schedule` is
+    /// "interval" (default: every `AirDropFrequency` game-hours, the
+    /// pre-config behavior) or "days" (stock-like day-count + TOD: every
+    /// `airdrop_day_min..airdrop_day_max` days at `airdrop_drop_hour`).
+    /// `airdrop_loot_list` is the loot.xml container for the crate.
+    airdrop_schedule: ?[]const u8 = null,
+    airdrop_day_min: ?u32 = null,
+    airdrop_day_max: ?u32 = null,
+    airdrop_drop_hour: ?u32 = null,
+    airdrop_loot_list: ?[]const u8 = null,
 };
 
 /// `[apm]` config section: operator-facing metrics cadence (docs/APM.md).
@@ -170,6 +195,18 @@ pub const Quests = struct {
     kill_per_tier: ?u8 = null,
     goto_radius: ?f32 = null,
     stay_radius: ?f32 = null,
+    /// POI selection distance band (blocks) for random-POI-goto objectives and
+    /// the max candidates/attempts searched (RE ObjectiveRandomPOIGoto).
+    poi_min_dist: ?f32 = null,
+    poi_max_dist: ?f32 = null,
+    max_poi_attempts: ?u32 = null,
+    /// Quest-POI bed lockout radius (blocks): a respawn bed within this of the
+    /// POI center counts as inside the footprint (hooks.zig homeLockout).
+    poi_bed_lockout_radius: ?f32 = null,
+    /// GetRandomPOINearTrader distance bands (blocks): band 0 = within
+    /// `trader_band_1`, band 1 = within `trader_band_2`, else band 2.
+    trader_band_1: ?f32 = null,
+    trader_band_2: ?f32 = null,
 };
 
 /// `[bots]` config section: host-side FPS bot policy (ADR 0026 / ADR 0021).
@@ -181,6 +218,10 @@ pub const Bots = struct {
     spawn_spread: ?f32 = null,
     spawn_y: ?f32 = null,
     max_step_up: ?f32 = null,
+    /// Host loadout pool as `tag:damage:range:pellets,tag:...` (up to 8 guns;
+    /// empty = the builtin pool). Binder string (table shape), like
+    /// `[quests] objective_kinds`.
+    weapon_profiles: []const u8 = "",
 };
 
 pub const File = struct {
@@ -328,8 +369,17 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.storm_frequency) |v| opts.storm_frequency = v;
     if (f.sim.te_scan_block_cap) |v| opts.te_scan_block_cap = v;
     if (f.sim.te_scan_te_cap) |v| opts.te_scan_te_cap = v;
+    if (f.sim.trader_use_range) |v| opts.trade_use_range = v;
+    if (f.sim.party_shared_kill_range) |v| opts.party_shared_kill_range = v;
+    if (f.sim.storm_bm_push_ticks) |v| opts.storm_bm_push_ticks = v;
     if (f.sim.workstation_crafts_per_tick) |v| opts.workstation_crafts_per_tick = v;
     if (f.sim.workstation_craft_backlog) |v| opts.workstation_craft_backlog = v;
+    if (f.sim.sleeper_cap_gate_enabled) |v| opts.sleeper_cap_gate_enabled = v;
+    if (f.sim.airdrop_schedule) |v| opts.airdrop_schedule = v;
+    if (f.sim.airdrop_day_min) |v| opts.airdrop_day_min = v;
+    if (f.sim.airdrop_day_max) |v| opts.airdrop_day_max = v;
+    if (f.sim.airdrop_drop_hour) |v| opts.airdrop_drop_hour = v;
+    if (f.sim.airdrop_loot_list) |v| opts.airdrop_loot_list = v;
     if (f.apm.dump_every_s) |v| {
         if (@hasField(@TypeOf(opts.*), "apm_dump_every_s")) opts.apm_dump_every_s = v;
     }
@@ -688,6 +738,15 @@ const TestOpts = struct {
     storm_frequency: i32 = 100,
     te_scan_block_cap: u32 = 32,
     te_scan_te_cap: u32 = 48,
+    trade_use_range: f32 = 32,
+    party_shared_kill_range: f32 = 100,
+    storm_bm_push_ticks: i64 = 5000,
+    sleeper_cap_gate_enabled: bool = false,
+    airdrop_schedule: []const u8 = "interval",
+    airdrop_day_min: u32 = 3,
+    airdrop_day_max: u32 = 3,
+    airdrop_drop_hour: u32 = 12,
+    airdrop_loot_list: []const u8 = "airDrop",
     workstation_crafts_per_tick: u16 = 64,
     workstation_craft_backlog: f32 = 60,
     apm_dump_every_s: ?u64 = null,

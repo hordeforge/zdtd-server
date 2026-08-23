@@ -161,6 +161,16 @@ pub const QuestPolicy = struct {
     /// Stay radius fallback for a stay-within phase/objective with no parsed
     /// distance (`max(stay_radius, required)` keeps the legacy behaviour).
     stay_radius: f32 = 8.0,
+    /// POI selection band (blocks) for random-POI-goto objectives (RE
+    /// ObjectiveRandomPOIGoto: min/max distance) and the search budget.
+    poi_min_dist: f32 = 32,
+    poi_max_dist: f32 = 2000,
+    max_poi_attempts: u32 = 50,
+    /// Quest-POI bed lockout radius (blocks; hooks.zig homeLockout 32 m).
+    poi_bed_lockout_radius: f32 = 32,
+    /// GetRandomPOINearTrader distance bands (blocks; stock 500/1500 m).
+    trader_band_1: f32 = 500,
+    trader_band_2: f32 = 1500,
 };
 
 /// Objective `type=` -> phase-kind mapping, config rows first (zdtd.toml /

@@ -14,6 +14,11 @@ pub const Op = union(enum) {
     spawn_zombie: struct { x: f32, y: f32, z: f32, hp: f32 },
     despawn: struct { net_id: NetId },
     damage: struct { net_id: NetId, amount: f32 },
+    /// Server chat broadcast (announcements): fixed inline buffer so the op
+    /// outlives the guest command buffer; longer text is truncated (fail
+    /// closed, never a dangling slice). Routed through World.say_fn (Game
+    /// wires it to the stock chat broadcast).
+    say: struct { text: [64]u8, len: u8 },
 };
 
 pub const DrainResult = struct {
@@ -21,6 +26,7 @@ pub const DrainResult = struct {
     spawned: u32 = 0,
     despawned: u32 = 0,
     damaged: u32 = 0,
+    said: u32 = 0,
     dropped_before: u32 = 0,
 };
 
@@ -114,6 +120,13 @@ pub const Buffer = struct {
                     if (w.slotOfNetId(d.net_id) != null) {
                         _ = w.damage(d.net_id, d.amount);
                         r.damaged += 1;
+                        r.applied += 1;
+                    }
+                },
+                .say => |s| {
+                    if (w.say_fn) |f| {
+                        f(w.say_ctx, s.text[0..s.len]);
+                        r.said += 1;
                         r.applied += 1;
                     }
                 },

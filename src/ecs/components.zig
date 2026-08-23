@@ -158,13 +158,9 @@ pub const PathWp = struct { x: i32 = 0, z: i32 = 0, y: i16 = 0 };
 
 /// EAISetAsTargetIfHurt::Start passes 400 ticks to SetAttackTarget
 /// (asm.il:436155, ldc.i4 0x190), i.e. 20 s at the stock 20 Hz AI tick.
-/// Read via w.rules.ai.revenge_window_s (mode/zdtd.toml overlay).
-pub const revenge_window_s: f32 = 20.0;
-
-/// Knockback impulse: displacement speed in blocks/s and the hit window. A
-/// 0.3 s shove at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark).
-pub const kb_speed: f32 = 8.0;
-pub const kb_seconds: f32 = 0.3;
+/// Read via w.rules.ai.revenge_window_s (mode/zdtd.toml overlay); the
+/// knockback impulse (rules.combat.knockback_speed / knockback_seconds) also
+/// lives on the rules surface.
 
 pub const ZombieAi = struct {
     state: AiState = .idle,
@@ -299,7 +295,7 @@ pub const ZombieAi = struct {
     }
 };
 
-/// Per-bot skill parameters, ported from the Q3 / Doom 3 / 7dtd-clanker skill model
+/// Per-bot skill parameters, ported from the Q3 / Doom 3 / 7dtd-fps-bots skill model
 /// (BotCharacter, BotAimAtEnemy, BotCheckAttack). The guest Wasm brain reads
 /// these (via the sense view where relevant) and answers back with intent; the
 /// host owns the bot. The `skill` 0..4 floor is a Rules value; per-bot

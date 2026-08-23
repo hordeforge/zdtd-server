@@ -16,10 +16,12 @@ implementation settled them.
    custom full HTTP parser beyond accept buffering.
 2. **Assets:** **inline** HTML/CSS/JS in the binary for single-binary ops. Vendor
    htmx/Alpine embed and `/static/*` are WU3 optional; not required for WU0–WU2.
-3. **Session:** process-local **HMAC session token** (not the shared secret) in a
+3. **Session:** per-secret **HMAC session token** (not the shared secret) in a
    cookie; form CSRF = same token (shared secret still accepted for API tools).
-   No multi-session server-side map (one secret → one session material per
-   process lifetime / login).
+   The token derives deterministically from the secret (`HMAC(secret, fixed
+   label)`), so a still-valid cookie survives a server restart without a
+   re-login; browser Max-Age and logout still bound it. No multi-session
+   server-side map (one secret → one session material).
 4. **Command identity:** commands run through the same admin line parser as TCP;
    audit ring labels them as webui ops (not peer game traffic).
 5. **Tick coupling:** `Game.step` polls webui non-blocking (one client slot, short

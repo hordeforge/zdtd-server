@@ -9,7 +9,7 @@
 zdtd is a clean-room stock-client wire server. Unit tests catch layout and
 logic regressions but cannot prove join/mesh/CGO, interest under multi-peer
 load, or 50 ms tick budget. Sibling tooling (loadgen, stock client EAC off,
-playtest harness) and native `src/apm/` exist for that. **7dtd-apm** targets
+playtest harness) and native `src/apm/` exist for that. **7dtd-server-apm** targets
 the stock Mono dedi process and is the wrong probe for this binary.
 
 ## Decision
@@ -21,7 +21,7 @@ the stock Mono dedi process and is the wrong probe for this binary.
    - **Stock client (EAC off):** mesh/CGO/terrain/UI evidence (manual or
      `7dtd-playtest` automation).
 2. **Metrics:** instrument and judge regressions with **zdtd `src/apm/`** dumps
-   (and WebUI snapshot when enabled). **Do not** require or wire 7dtd-apm.
+   (and WebUI snapshot when enabled). **Do not** require or wire 7dtd-server-apm.
 3. **Unit green alone is not enough** for playability claims; STATUS gates list
    which leg closed the claim.
 4. **Server owns gaps:** playtest/client harness must not invent S2C world data
@@ -39,6 +39,6 @@ the stock Mono dedi process and is the wrong probe for this binary.
 | Option | Notes |
 |---|---|
 | Unit tests only | Misses CGO, LiteNet timing, multi-peer interest |
-| 7dtd-apm on zdtd | Wrong process model; stock Mono bridge |
+| 7dtd-server-apm on zdtd | Wrong process model; stock Mono bridge |
 | Client-only golden without loadgen | Weak multi-peer and automated soak |
 | Invent client fakes for missing S2C | Violates missing-beats-fake / server-owns-gaps |

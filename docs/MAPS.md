@@ -61,7 +61,7 @@ generating chunk only** (no recursive world set during paint).
   but real elevations above ~255 (Mont Blanc 4365 m) are clamped by stock
   clients. Lifting the cap needs an opt-in client-side YDim-expand mod that
   patches only the true vertical/layer sites. MVP exists in the RealEarth
-  sister project (`../7dtd-realworld`, `tools/engine_patcher`, Mono.Cecil +
+  sister project (`../7dtd-realearth`, `tools/engine_patcher`, Mono.Cecil +
   Harmony). Opt-in scaling extension, not part of the stock-client-wire core.
   See `docs/SCALE.md`.
 - TTS: types + **texture channel** (per-block `textureFull` paint decoded from

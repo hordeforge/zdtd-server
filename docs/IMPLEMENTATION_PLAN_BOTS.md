@@ -1,6 +1,6 @@
 # FPS Bot Addon — Implementation Plan
 
-**Status:** execution plan for ADR 0026 / BOTS_SPEC / BOTS_PRD.
+**Status:** execution plan for ADR 0026 / RFC 0001 / PRD 0001.
 **Anchored in the current tree** with exact `file:line` references confirmed by
 an explore pass (2026-08-12). Milestones M0–M3. Nothing here delegates the
 brain to core; the guest owns decisions, the host owns the body and the wire.
@@ -94,7 +94,7 @@ in replication output (scenario test).
 
 ## M1 — Sense view (host -> guest) + first guest module skeleton
 
-- `sense` snapshot layout (locked in BOTS_SPEC §3): a versioned header + fixed-
+- `sense` snapshot layout (locked in RFC 0001 §3): a versioned header + fixed-
   stride records (net_id, kind, is_self, alive, x/y/z, hp, yaw, target_id),
   capped at a named count (e.g. 64). Host builds it in the `onTick` path from
   current sim state, in stable order; writes into the guest scratch region.
@@ -114,7 +114,7 @@ verb and the host drains them.
 
 - `mods/zdtd_bot/zdtd_bot.c` → `zdtd_bot.wasm` (same clang→wasm32 build path
   as `assets/fixtures/*.c`, no WASI, no libc deps).
-- Brain (ported from `../7dtd-clanker`/Q3/Doom 3, re-expressed):
+- Brain (ported from `../7dtd-fps-bots`/Q3/Doom 3, re-expressed):
   - **Target selection**: nearest hostile within vision range/angle (players,
     zombies), weighted by `aggression`/`self_preservation`.
   - **Aim**: reaction gate; aim jitter scaled by `skill`; **leading** = target
@@ -143,7 +143,7 @@ scripted scenario.
   `tools/provenance_scan.py`, AGENTS rule 15).
 - Triad validation: loadgen smoke + stock client (EAC off) + zdtd apm dumps
   (ADR 0019) — bots visible to a real client, killable, obeying move caps.
-- Final pass on BOTS_SPEC / BOTS_PRD / ADR against what was actually built;
+- Final pass on RFC 0001 / PRD 0001 / ADR 0026 against what was actually built;
   update INDEX.md.
 
 ---

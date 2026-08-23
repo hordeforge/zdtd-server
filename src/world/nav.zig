@@ -1,7 +1,7 @@
 //! nav.zig — coarse walkability grid + BFS pathfinding over loaded chunks.
 //!
 //! Borrowed in spirit from the Recast/Detour navmesh used by the Unvanquished
-//! bots (see `../7dtd-clanker/docs/oss-fps-bot-survey.md`): the host owns the
+//! bots (see `../7dtd-fps-bots/docs/oss-fps-bot-survey.md`): the host owns the
 //! navigation data (world geometry), the wasm bot guest owns the decisions
 //! (ADR 0026). This is a lightweight grid, not a full Recast tile mesh: cells
 //! are `cell_size` blocks, walkable when a body can stand there

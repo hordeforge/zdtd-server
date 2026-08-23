@@ -2,13 +2,13 @@
 
 **Purpose:** map each PARTIAL/MISSING item in [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md)
 to the reverse-engineering doc that now fully specifies it, so a gap can be closed
-against a spec instead of guesswork. The stock RE corpus at `../7dtd-research/docs/`
+against a spec instead of guesswork. The stock RE corpus at `../7dtd-engine-research/docs/`
 was expanded to cover every dedicated codepath (2026-07 pass); this bridges it to
 the clone.
 **Rule (from AGENTS):** wire/sim facts come from RE; fix zdtd to match RE, never the
 reverse. Implement missing behavior on the server, not via client workarounds.
 
-Paths below are relative to this repo: `../7dtd-research/docs/<file>`.
+Paths below are relative to this repo: `../7dtd-engine-research/docs/<file>`.
 
 ---
 
@@ -29,7 +29,7 @@ Paths below are relative to this repo: `../7dtd-research/docs/<file>`.
 ## 2. NetPackage bodies (channels + wire)
 
 The full per-package census (channel/compress/direction/before-auth) is
-`protocol-packages.md` §1; regenerate with `../7dtd-research/tools/bin/NetProtocolCensus`.
+`protocol-packages.md` §1; regenerate with `../7dtd-engine-research/tools/bin/NetProtocolCensus`.
 Key facts zdtd should honor:
 
 - **Channel 1 band** (bulk, several compressed): `NetPackageChunk`, `ChunkRemove`,
@@ -70,10 +70,10 @@ Key facts zdtd should honor:
 ## 4. Staying current
 
 The RE is pinned to stable V3.1.0 b14. After a game update, run
-`../../7dtd-research/tools/parity/drift-check.sh` (or the `drift-watch.sh` daemon): it
+`../../7dtd-engine-research/tools/parity/drift-check.sh` (or the `drift-watch.sh` daemon): it
 reports changed packages / types / enums so this table and the affected zdtd bodies
 can be revised. The experimental branch already differs (see
-`../../7dtd-research/docs/protocol-packages.md`: `NetPackageTileEntity` widened,
+`../../7dtd-engine-research/docs/protocol-packages.md`: `NetPackageTileEntity` widened,
 held-entity feature), so version-gate the wire where noted.
 
 ---
@@ -84,5 +84,5 @@ held-entity feature), so version-gate the wire where noted.
 |---|---|
 | [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | The gap inventory this closes against |
 | [PACKAGES.md](wire/PACKAGES.md) | zdtd's package implementation status |
-| `../../7dtd-research/docs/INDEX.md` | Full stock RE hub |
-| `../../7dtd-research/docs/protocol-packages.md` | Per-package wire bodies + census |
+| `../../7dtd-engine-research/docs/INDEX.md` | Full stock RE hub |
+| `../../7dtd-engine-research/docs/protocol-packages.md` | Per-package wire bodies + census |

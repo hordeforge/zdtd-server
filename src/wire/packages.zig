@@ -2878,7 +2878,7 @@ pub const TraderAreaEntry = struct {
 /// each (Position i32x3, PrefabSize i16x3, GetProtectPadding s8x3, teleport
 /// volumes u8 count + startPos s8x3 / size u8x3). Layout from
 /// NetPackageWorldAreas::write IL=31 and TraderArea::Write IL=111
-/// (../7dtd-research il dump, docs/loot-economy.md:435).
+/// (../7dtd-engine-research il dump, docs/loot-economy.md:435).
 pub fn buildWorldAreasBody(buf: []u8, areas: []const TraderAreaEntry) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(1); // cVersion
@@ -3977,7 +3977,7 @@ pub fn parseAllyRequest(body: []const u8) binary.ReadError!AllyRequest {
 /// Server relay (GameManager.WaypointInviteServer IL=164) clones the waypoint,
 /// clears bTracked, sets waypoint.inviterEntityId = inviter, and targets the
 /// inviter's allies (mode Friends) or all players (mode Everyone), skipping
-/// the inviter (7dtd-research protocol-packages.md §5.x).
+/// the inviter (7dtd-engine-research protocol-packages.md §5.x).
 pub const WaypointInvite = struct {
     pos: [3]i32,
     /// Fixed-size copies of the client strings; parse never returns slices

@@ -3,7 +3,7 @@
 //! Scans a mods root (`game-dir/Mods` or `--mods-dir`), parses each mod's
 //! `ModInfo.xml` (V2), and exposes the mods' `Config/` dirs in mod order so
 //! `xml_patch` can apply patches the way stock's `ModManager.LoadPatchStuff`
-//! does (`../7dtd-research/docs/mod-loading.md` §1-2, §5.2).
+//! does (`../7dtd-engine-research/docs/mod-loading.md` §1-2, §5.2).
 //!
 //! Non-goals: never loads DLLs, never reads `Bundles/` content, never runs
 //! `IModApi`/`ModEvents`. A code mod's XML patches still apply (stock-like for

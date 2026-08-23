@@ -13,7 +13,11 @@ Not a Harmony mod. Not RealEarth. Not EfficientServer. Not a drop-in host for
 existing mods. Sibling of this workspace only for **RE docs** and **loadgen**
 wire tests.
 
-**Profiling:** built-in harness under `src/apm/` ([docs/APM.md](docs/APM.md)).  
+**Profiling:** built-in harness under `src/apm/` ([docs/APM.md](docs/APM.md)).
+
+## 📚 Modding Best Practices
+
+See the canonical **[HordeForge 7DTD Modding Best Practices Guide](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)** for engine load order rules, EAC-off requirements, `ModInfo.xml` specifications, and V3.1.0 compatibility notes.  
 That is **not** sibling `7dtd-server-apm` (stock Mono dedi).
 
 ## Status

@@ -121,6 +121,19 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    /// Pre-trade price verdict (on_trade_price): <0 deny, 0 keep, >0 percent.
+    pub fn tradePrice(self: *PluginHost, player: i32, item: i32, unit_price: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_trade_price) |f| {
+                const v = f(&self.view, player, item, unit_price);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     pub fn questAccept(self: *PluginHost, player: i32, def_id: i32) i32 {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {

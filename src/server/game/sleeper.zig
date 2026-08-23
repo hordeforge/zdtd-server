@@ -95,6 +95,14 @@ fn triggerVolume(self: *Game, vi: usize) void {
     // A completed ClearSleepers quest suppressed this volume: it never
     // re-arms (stock removes the POI's sleeper data on SleepersCleared).
     if (vol.quest_cleared) return;
+    // `[sim] sleeper_cap_gate_enabled` (default false = the documented zdtd
+    // divergence): when enabled, restore stock's CanSpawn(2.1f) global gate
+    // (EnemyCount < MaxSpawnedZombies * 2.1, spawning.md) BEFORE waking the
+    // volume, so an over-cap world leaves it armed for a later restore.
+    if (self.sleeper_cap_gate_enabled) {
+        const cap: u32 = @intFromFloat(@as(f32, @floatFromInt(self.sim.director.max_alive)) * 2.1);
+        if (self.sim.countKind(.zombie) >= cap) return;
+    }
     vol.triggered = true;
     self.sleepers.trigger_count += 1;
     // DIVERGENCE: stock SleeperVolume.UpdateSpawn gates every restore on

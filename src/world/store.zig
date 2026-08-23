@@ -950,7 +950,7 @@ pub const World = struct {
     /// (the client-visible "dig beside a lake and the hole fills" behavior),
     /// and a placed water cell cascades down its column and puddles at the
     /// bottom (bounded by `puddle`). The stock sim is a jobified mass-flow
-    /// engine (7dtd-research light-mesh-water.md §4); this approximation has
+    /// engine (7dtd-engine-research light-mesh-water.md §4); this approximation has
     /// no per-cell levels, flow directions or evaporation, only pours (never
     /// drains). Returns cells filled. Runs after sim edits each tick
     /// (Game.step).

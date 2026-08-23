@@ -1,4 +1,4 @@
-//! Monotonic counters and latency histograms for zdtd (not 7dtd-apm).
+//! Monotonic counters and latency histograms for zdtd (not 7dtd-server-apm).
 
 const std = @import("std");
 

@@ -6124,7 +6124,7 @@ test "scenario trader quest offers follow the trader's class" {
 
 test "scenario quest POI selection matches stock tags/tier/bands and feeds offers" {
     // The stock QuestPrefabManager-equivalent selector (DynamicPrefabDecorator
-    // GetRandomPOI* / GetClosestPOIToWorldPos; RE: 7dtd-research
+    // GetRandomPOI* / GetClosestPOIToWorldPos; RE: 7dtd-engine-research
     // docs/quests-challenges.md "Quest POI selection"). A synthetic prefab
     // index proves the tag/tier/distance gating and that trader offers carry
     // the real POI location instead of the fabricated catalog spot.
@@ -7117,6 +7117,219 @@ test "scenario on_player_damage verdict denies PvP via the real zdtd_pvp module"
     std.debug.print("PASS pvp-verdict: player damage denied, zombie damage kept\n", .{});
 }
 
+test "scenario zdtd_announce broadcasts join via the say verb" {
+    // ADR 0020/0026: announcements ship as a Wasm module; the `say` queue verb
+    // (ecs/command.zig Op.say) routes through the stock chat broadcast with
+    // sender 0 = server. This is the end-to-end proof of the affordance.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_announce");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{"mods/zdtd_announce/zdtd_announce.wasm"};
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_announce", 0, .{
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+    // Let the join hook's queued `say` drain through the command buffer.
+    var t: u64 = 0;
+    while (t < 4) : (t += 1) try g.step();
+
+    const chat_id = packages.idOf("NetPackageChat").?;
+    const body = cap.findPkgId(chat_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.find(u8, body, "joined the wasteland") != null);
+    std.debug.print("PASS announce: join broadcast via the say verb\n", .{});
+
+    // v2: clock announcements from the sense header (world_time + blood_moon).
+    // The module latched the starting day on the first ticks; force a day
+    // roll and a blood-moon flip, then assert the corresponding chats landed
+    // in some captured frame. WorldClock.day is 1-based, so day 5 reads as
+    // world-time day 4 in the sense header.
+    g.sim.director.clock.day = 5;
+    g.sim.director.clock.hours = 0.0;
+    var t2: u64 = 0;
+    while (t2 < 4) : (t2 += 1) try g.step();
+    // Blood-moon night: pin the clock's schedule to today at night so the
+    // director's tick flips bloodmoon_active (it recomputes from the clock
+    // every tick, so a direct field write would be overwritten).
+    g.sim.director.clock.next_bm = g.sim.director.clock.day;
+    g.sim.director.clock.hours = 23.0;
+    while (t2 < 8) : (t2 += 1) try g.step();
+
+    var found_day = false;
+    var found_bm = false;
+    for (cap.slots[0..cap.n]) |sl| {
+        if (std.mem.find(u8, sl.data[0..sl.len], "Day 4") != null) found_day = true;
+        if (std.mem.find(u8, sl.data[0..sl.len], "The blood moon rises!") != null) found_bm = true;
+    }
+    try std.testing.expect(found_day);
+    try std.testing.expect(found_bm);
+    std.debug.print("PASS announce v2: day roll + blood-moon announcements from sense\n", .{});
+}
+
+test "scenario zdtd_rewardgate scales quest item rewards (1.5x)" {
+    // on_quest_complete verdict at the step reward payout (step.zig): <0 deny,
+    // 0 keep, >0 percent. With rewardgate's 150, the fixture starter's
+    // 100-casinoCoin Item reward pays 150; without a module it pays 100.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{"mods/zdtd_rewardgate/zdtd_rewardgate.wasm"};
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
+        .quests_path = "assets/fixtures/quests.xml",
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // Complete the starter quest (Goto -> Interact -> TurnIn).
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    systems.questOnTraderOpen(&g.sim, c.slot);
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, g.sim.catalog.starter_id));
+    // Step drains the completed-quest ring and pays item rewards through the
+    // on_quest_complete verdict (the fixture Item reward is 100 casinoCoin).
+    var t: u64 = 0;
+    while (t < 4) : (t += 1) try g.step();
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const coins = g.sim.inventory[ps].countItem(6); // casinoCoin
+    try std.testing.expect(coins >= 150);
+    std.debug.print("PASS rewardgate: item reward scaled 100 -> {d}\n", .{coins});
+}
+
+test "scenario zdtd_pricegate scales trader buy prices (1.5x)" {
+    // on_trade_price pre-trade verdict in the sim buy path (systems.trade):
+    // <0 deny, 0 keep, >0 percent. With pricegate's 150, a unit price of 100
+    // costs 150; without a module it costs 100.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_pricegate");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{"mods/zdtd_pricegate/zdtd_pricegate.wasm"};
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_pricegate", 0, .{
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // A trader with a controlled stock entry (item 2, unit price 100).
+    const tid = g.sim.spawnTrader("npcTraderJen", 50, 70, 60, 5, 5000).?;
+    const ts = g.sim.slotOfNetId(tid).?;
+    g.sim.trader_stock[ts].entries[0] = .{ .item = 2, .count = 10, .price = 100, .sell = 1, .markup = 0 };
+    g.sim.trader_stock[ts].n = 1;
+    g.sim.trader_stock[ts].wallet = 5000;
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.wallet[ps].coins = 10_000;
+    const coin_id = g.items.ecsIdByName("casinoCoin");
+
+    const before = g.sim.wallet[ps].coins;
+    try std.testing.expect(systems.trade(&g.sim, c.slot, tid, 2, 1, 0, coin_id));
+    const after = g.sim.wallet[ps].coins;
+    // 100 unit x 1.5 verdict = 150 debited.
+    try std.testing.expectEqual(before - 150, after);
+    std.debug.print("PASS pricegate: buy 100 -> 150 via on_trade_price\n", .{});
+}
+
+test "scenario zdtd_damagegate halves incoming player damage (0.5x)" {
+    // on_player_damage verdict on the C2S melee path (c2s/misc.zig): with
+    // damagegate's 50, a 50-damage hit costs the victim 25 hp.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_damagegate");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{"mods/zdtd_damagegate/zdtd_damagegate.wasm"};
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_damagegate", 0, .{
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
+
+    const id_a: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
+    const id_b: platform_user.Id = .{ .platform = "Steam", .id = "9002" };
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClientAs(&cap_a, id_a);
+    const cb = try g.attachJoinedClientAs(&cap_b, id_b);
+    const pa = g.sim.slotOfNetId(ca.entity_id).?;
+    const hp0 = g.sim.health[pa].hp;
+
+    // Player B hits player A for 50; the verdict halves it to 25.
+    var body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    const dmg = try packages.buildDamageBody(&body, ca.entity_id, 0, 0, 50, false, cb.entity_id);
+    try g.injectFramed(cb, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg));
+    try std.testing.expectEqual(hp0 - 25, g.sim.health[pa].hp);
+    std.debug.print("PASS damagegate: 50-damage hit reduced to 25\n", .{});
+}
+
+test "scenario zdtd_adminverbs wave verb spawns zombies" {
+    // on_admin_command fallthrough: an unknown console verb routes to the
+    // plugin host; the module queues spawns via zdtd.queue and replies.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_adminverbs");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{"mods/zdtd_adminverbs/zdtd_adminverbs.wasm"};
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_adminverbs", 0, .{
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
+
+    // A joined client anchors the despawn distance, so the queued spawns at
+    // the seed pad stay alive for the assertion.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+    const z0 = g.sim.countKind(.zombie);
+    g.runAdminLine("wave 3", "test");
+    var t: u64 = 0;
+    while (t < 8) : (t += 1) try g.step();
+    const z1 = g.sim.countKind(.zombie);
+    try std.testing.expect(z1 >= z0 + 3);
+    std.debug.print("PASS adminverbs: wave 3 spawned zombies ({d} -> {d})\n", .{ z0, z1 });
+}
+
 test "scenario player dig routes the on_block_damage verdict (plugin_rules doubles)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -7520,13 +7733,13 @@ test "scenario bot count floor spawns bots and fillSense emits them" {
 
     // The sense snapshot then carries both bots as kind==2 records.
     var out: [256]u8 = undefined;
-    std.mem.writeInt(u32, out[0..4], 0x3253425a, .little); // 'ZBS2'
+    std.mem.writeInt(u32, out[0..4], 0x3353425a, .little); // 'ZBS3'
     std.mem.writeInt(u32, out[4..8], 0, .little);
     var n: usize = 0;
-    g.bots.fillSense(&out, 16, 2, &n);
+    g.bots.fillSense(&out, 24, 2, &n);
     try std.testing.expectEqual(@as(usize, 2), n);
-    try std.testing.expectEqual(@as(u8, 2), out[16 + 4]); // kind bot
-    try std.testing.expectEqual(@as(u8, 2), out[48 + 4]);
+    try std.testing.expectEqual(@as(u8, 2), out[24 + 4]); // kind bot
+    try std.testing.expectEqual(@as(u8, 2), out[56 + 4]);
 }
 
 test "scenario applyCountFloor tops up across repeated calls" {

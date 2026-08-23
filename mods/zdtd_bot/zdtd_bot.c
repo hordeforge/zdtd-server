@@ -226,11 +226,13 @@ static int query_path(float bx, float bz, float tx, float tz, float *ox, float *
 // ---------------------------------------------------------------------------
 // Sense snapshot parsing.
 //
-// Layout (BOTS_SPEC §3, all little-endian): header 16 bytes, fixed-stride
+// Layout (BOTS_SPEC §3, all little-endian): header 24 bytes, fixed-stride
 // 32-byte entity records, then an optional 16-byte damage-event trailer.
 // Parsed by explicit offsets so a C struct can never drift from the Zig
 // packed records.
-//   hdr: magic u32@0 ('ZBS2'), count u32@4, tick u32@8, self_net_id i32@12
+//   hdr: magic u32@0 ('ZBS3'), count u32@4, tick u32@8, self_net_id i32@12,
+//        world_time u32@16 (world ticks, low 32), blood_moon u32@20 (0/1)
+//   (v3: header grew by 8 bytes; the record/event bases move with it)
 //   rec stride 32: net_id i32@0, kind u8@4, is_self u8@5, alive u8@6, pad@7,
 //                  x f32@8, y f32@12, z f32@16, hp f32@20, yaw f32@24,
 //                  target_id i32@28
@@ -266,7 +268,7 @@ static float sf32(int off) {
 
 // Reparse the sense buffer into hosts (preserving its first `recs` records is
 // not needed; we read offsets directly instead — see accessors below).
-#define REC_OFF(i) (16 + (i) * REC_STRIDE)
+#define REC_OFF(i) (24 + (i) * REC_STRIDE)
 static int rec_net(int i)        { return s32(REC_OFF(i) + 0); }
 static int rec_kind(int i)       { return s8(REC_OFF(i) + 4); }
 static float rec_x(int i)        { return sf32(REC_OFF(i) + 8); }
@@ -286,22 +288,22 @@ static float rec_target(int i)   { return s32(REC_OFF(i) + 28); }
 // derived from the bytes that follow the records.
 static int sense_refresh(void) {
   sense_n = zdtd_sense((int)(long)&sense[0], SENSE_CAP, 0);
-  if (sense_n < 16) { sense_n = 0; sense_recs = 0; return 0; }
-  if (s32(0) != 0x3253425a) { sense_n = 0; sense_recs = 0; return 0; } // 'ZBS2'
+  if (sense_n < 24) { sense_n = 0; sense_recs = 0; return 0; }
+  if (s32(0) != 0x3353425a) { sense_n = 0; sense_recs = 0; return 0; } // 'ZBS3'
   const int n = s32(4);
-  const int avail = (sense_n - 16) / REC_STRIDE;
+  const int avail = (sense_n - 24) / REC_STRIDE;
   if (n > avail || n < 0) { sense_n = 0; sense_recs = 0; return 0; } // lies: drop
   sense_recs = n;
   return n;
 }
 // Number of damage-event records trailing the entity records.
 static int sense_ev(void) {
-  if (sense_n < 16) return 0;
-  const int used = 16 + sense_recs * REC_STRIDE;
+  if (sense_n < 24) return 0;
+  const int used = 24 + sense_recs * REC_STRIDE;
   if (sense_n - used < 0) return 0;
   return (sense_n - used) / EV_STRIDE;
 }
-#define EV_OFF(i) (16 + sense_recs * REC_STRIDE + (i) * EV_STRIDE)
+#define EV_OFF(i) (24 + sense_recs * REC_STRIDE + (i) * EV_STRIDE)
 static int ev_kind(int i)   { return s8(EV_OFF(i) + 0); }
 static int ev_attacker(int i) { return s32(EV_OFF(i) + 4); }
 static int ev_victim(int i)   { return s32(EV_OFF(i) + 8); }

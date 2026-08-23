@@ -7,8 +7,8 @@ pub const max_nodes: usize = 256;
 pub const max_wires: usize = 512;
 /// Sanity ceiling for a wire-supplied node rating; stock generators are ~1 kW.
 pub const max_node_watts: f32 = 100_000;
-/// Pressure plate / tripwire pulse duration (seconds). ~10 ticks at 20 TPS.
-pub const default_trigger_pulse_s: f32 = 0.5;
+/// Pressure plate / tripwire pulse duration (seconds), `[rules.power]
+/// trigger_pulse_s` (PowerGrid field; ~10 ticks at 20 TPS).
 
 /// Stock PowerTrigger/TriggerPowerDelayTypes -> seconds. The enum is Instant=0
 /// then OneSecond..FiveSecond, and set_IsTriggered stores the index verbatim as
@@ -145,6 +145,9 @@ pub const PowerGrid = struct {
     next_id: u16 = 1,
     total_gen: f32 = 0,
     total_load: f32 = 0,
+    /// Trigger-plate pulse duration when the block sets duration=Triggered
+    /// (`[rules.power] trigger_pulse_s`, synced at init).
+    trigger_pulse_s: f32 = 0.5,
     /// Once: warn when addNode drops a node because the table is full.
     cap_warned: bool = false,
 
@@ -257,7 +260,7 @@ pub const PowerGrid = struct {
             n.latched = true;
             n.pulse_left = 0;
         } else {
-            n.pulse_left = if (duration > 0) duration else default_trigger_pulse_s;
+            n.pulse_left = if (duration > 0) duration else self.trigger_pulse_s;
         }
     }
 
@@ -966,7 +969,7 @@ test "trigger gate powers children only while pulsing" {
     try std.testing.expect(g.nodes[pi].pulse_left > 0);
     try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
     // After pulse expires, load drops.
-    _ = g.tick(default_trigger_pulse_s + 0.1, true);
+    _ = g.tick(0.6, true);
     try std.testing.expectEqual(@as(f32, 0), g.nodes[pi].pulse_left);
     try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);
 }
@@ -1012,7 +1015,7 @@ test "configured trigger duration and delay drive the gate" {
     // ThreeSecond duration (index 4) outlives the default 0.5s pulse.
     try std.testing.expect(g.setTriggerConfigAt(2, 70, 0, 0, 4));
     try std.testing.expect(g.activateTriggerAt(2, 70, 0));
-    _ = g.tick(default_trigger_pulse_s + 0.1, true);
+    _ = g.tick(0.6, true);
     try std.testing.expect(g.nodes[g.indexOfId(load).?].powered);
     _ = g.tick(3.0, true);
     try std.testing.expect(!g.nodes[g.indexOfId(load).?].powered);

@@ -1,4 +1,4 @@
-# 0030. Plugin spatiotemporal composability: reload, effect withdrawal, declarative dependencies
+# ADR 0030: Plugin spatiotemporal composability: reload, effect withdrawal, declarative dependencies
 
 - **Status:** accepted
 - **Date:** 2026-08-20

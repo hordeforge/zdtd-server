@@ -286,7 +286,7 @@ prefab stamps), not a DLL callout.
 **References (layout, not terrain):** Maxim Gumin WFC; Paul Merrell model
 synthesis; Oskar Stalberg (Townscaper) tile grammars; stock 7DTD RWG tile/hub
 docs in research when cited. Treat adjacency rule extraction from stock XML as
-an RE task under `../7dtd-research`, implementation under `src/world/`.
+an RE task under `../7dtd-engine-research`, implementation under `src/world/`.
 
 ## 7. Performance and architecture
 

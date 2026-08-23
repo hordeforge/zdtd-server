@@ -1,9 +1,9 @@
 //! Stock sandbox value-set and option tables, generated from
-//! `../7dtd-research/tools/sandbox/sandbox_tables.json` by
-//! `../7dtd-research/tools/sandbox/gen_zig_tables.py` (do not hand-edit).
+//! `../7dtd-engine-research/tools/sandbox/sandbox_tables.json` by
+//! `../7dtd-engine-research/tools/sandbox/gen_zig_tables.py` (do not hand-edit).
 //! Source of truth: `SandboxOptionManager.SetupOptions` IL of the stock
 //! V3.1.0 b14 dedicated server (docs/sandbox-options.md §2.1/§3 in the
-//! 7dtd-research repo). Decode contract: code := 'A' + 3-letter groups
+//! 7dtd-engine-research repo). Decode contract: code := 'A' + 3-letter groups
 //! (2-letter base-26 option id + 1-letter value-set index).
 
 pub const Kind = enum(u8) { float, int, boolean };

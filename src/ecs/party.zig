@@ -1,4 +1,4 @@
-//! Party engine (RE ../7dtd-research/docs/parties-factions.md §2).
+//! Party engine (RE ../7dtd-engine-research/docs/parties-factions.md §2).
 //!
 //! Per-session grouping of human players keyed by runtime entity id:
 //! `NetPackagePartyActions` / `NetPackagePartyData` carry no platform identity

@@ -158,9 +158,9 @@ def main():
             print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
             return 1
 
-    # 5. CROSS-REPO CITATIONS: every full-path ../7dtd-research/docs/<file>.md
+    # 5. CROSS-REPO CITATIONS: every full-path ../7dtd-engine-research/docs/<file>.md
     #    reference in zdtd docs resolves to an existing research doc.
-    research_docs = os.path.join(ROOT, "..", "7dtd-research", "docs")
+    research_docs = os.path.join(ROOT, "..", "7dtd-engine-research", "docs")
     bad_cites = []
     if os.path.isdir(research_docs):
         for sub, _dirs, names in os.walk("docs"):
@@ -168,7 +168,7 @@ def main():
                 if not name.endswith(".md"):
                     continue
                 text = open(os.path.join(sub, name), encoding="utf-8", errors="replace").read()
-                for m in re.finditer(r"(\.\./[^)\s]+?/7dtd-research/docs/[a-z0-9-]+\.md)", text):
+                for m in re.finditer(r"(\.\./[^)\s]+?/7dtd-engine-research/docs/[a-z0-9-]+\.md)", text):
                     target = os.path.normpath(os.path.join(sub, m.group(1)))
                     if not os.path.isfile(target):
                         bad_cites.append(f"{os.path.join(sub, name)} -> {m.group(1)}")

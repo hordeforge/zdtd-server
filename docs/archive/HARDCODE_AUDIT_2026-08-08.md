@@ -4,7 +4,7 @@ Date: 2026-08-08. HEAD: 3b06680 (main, clean tree). Method:
 `docs/prompts/hardcoded-data-review.md` + systematic `rg` / file reads against
 `src/`, stock `Data/Config` (V3.1.0 b14 dedicated install),
 `docs/ASSETS.md`, `docs/GAME_OPTIONS.md`, `docs/GAP_ANALYSIS.md`,
-`../7dtd-research/docs` (aidirector.md, loot-economy.md, weather-environment.md,
+`../7dtd-engine-research/docs` (aidirector.md, loot-economy.md, weather-environment.md,
 tile-entities-power.md). Re-verification of the 2026-08-08 pass in
 `HARDCODE_AUDIT.md` plus new findings.
 
@@ -102,7 +102,7 @@ Spot-check summary vs the prior audit claims:
 | A18 | stock_chunk terrain pins | P2 | Dump-verified pins (stock_terr_*); server dictates ids via NameIdMapping (A22) |
 | A21 | director / gamestages | P2 | gamestages.xml loads; stage inputs partial (GAP_ANALYSIS 5.x) |
 | A24 | NONE loaders | P2 | Until feature lands |
-| A33 | subbiome noise perm literal | P2 | `../7dtd-research` task; rest of the port exact |
+| A33 | subbiome noise perm literal | P2 | `../7dtd-engine-research` task; rest of the port exact |
 | B08-B12 | lock_channel[16] array, lock stale | P2/P3 | `lock_stale_ms` config; array size engineering |
 | B23-B24 | LiteNet port offset, APM cadence | P3 | Port+2 documented; APM cadence = B37 |
 
@@ -123,7 +123,7 @@ citation:
   tick path), B34-B36 (named consts already; array sizes / ops constants),
   B38 (fixed-size architecture caps, documented), B40 (documented mirror, see row).
 - **RE-BLOCKED**: A33 (subbiome noise `_perm` literal byte-reproduction is owned
-  by `../7dtd-research`; the rest of the subbiome port is exact, GAP_ANALYSIS 18).
+  by `../7dtd-engine-research`; the rest of the subbiome port is exact, GAP_ANALYSIS 18).
 
 No remaining row is an un-cited hardcode in game behavior: every Bucket A value
 either reads stock data, is an OK-class dump/RE pin, or carries its blocker

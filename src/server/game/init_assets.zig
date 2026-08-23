@@ -433,6 +433,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // (sender 0 = server). Unset hook = announcements dropped.
         self.sim.say_ctx = self;
         self.sim.say_fn = &game_mod.announceChat;
+        // Pre-trade price verdict (on_trade_price): routes the sim buy price
+        // to the plugin + wasm host. Unset hook = no plugins.
+        self.sim.trade_price_verdict_ctx = self;
+        self.sim.trade_price_verdict_fn = &game_mod.tradePriceVerdict;
         // Quest-accept gate (AGENTS rule 29): on_quest_accept verdict on every
         // acceptance (plugins gate which quests a player may take).
         self.sim.quest_accept_ctx = self;

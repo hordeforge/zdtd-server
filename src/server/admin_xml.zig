@@ -8,7 +8,7 @@
 //! userid attributes, legacy steamID fallback), AdminUsers.UserPermission
 //! (permission_level), AdminWhitelist.WhitelistUser, and
 //! AdminBlacklist.BannedUser.TryParse (unbandate DateTime) - pinned in
-//! 7dtd-research docs/dedicated-misc-systems.md.
+//! 7dtd-engine-research docs/dedicated-misc-systems.md.
 //!
 //! Divergence: stock hot-reloads the file via a file watcher
 //! (InitFileWatcher -> OnFileChanged -> Load); zdtd applies it at startup,

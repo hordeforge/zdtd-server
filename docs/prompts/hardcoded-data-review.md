@@ -73,7 +73,7 @@ Read first (in order):
 | `docs/GAP_ANALYSIS.md` | Known gaps vs stock |
 | `docs/GAME_OPTIONS.md` | Existing serverconfig / options surface |
 | `docs/WORLDGEN.md` | Proc gen is on-the-fly stream (if touching gen constants) |
-| `../7dtd-research/docs/protocol.md` (+ package notes) | Wire ground truth |
+| `../7dtd-engine-research/docs/protocol.md` (+ package notes) | Wire ground truth |
 
 ### Hard constraints
 
@@ -612,7 +612,7 @@ For every `source: enum { builtin, xml }` table:
 List these explicitly in the audit when you skip them:
 
 - LiteNet / package body layout constants with RE cites
-  (`../7dtd-research/docs`, loadgen goldens)
+  (`../7dtd-engine-research/docs`, loadgen goldens)
 - Unity / string hash helpers fed by stock **names**
 - ConfigFile LoadLocal XML name list when protocol requires it
 - Test fixtures under `assets/fixtures/`, `tests/`, scenario world dirs

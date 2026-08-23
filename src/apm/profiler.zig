@@ -1,4 +1,4 @@
-//! Scoped wall-clock sections for tick phases (zdtd-native; not 7dtd-apm).
+//! Scoped wall-clock sections for tick phases (zdtd-native; not 7dtd-server-apm).
 
 const std = @import("std");
 const metrics = @import("metrics.zig");

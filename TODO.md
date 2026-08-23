@@ -133,7 +133,7 @@ Decision: [ADR 0023](docs/adr/0023-perk-attribute-system.md). Plan:
 
 ### GameEvent engine, challenges, and other research-vs-plan gaps
 
-A broader sweep of `../7dtd-research/docs/` (63 docs; the perk and anti-cheat
+A broader sweep of `../7dtd-engine-research/docs/` (63 docs; the perk and anti-cheat
 programs above only came from a first triage) against `GAP_ANALYSIS.md` and
 this file. Decision for the largest item: [ADR 0025](docs/adr/0025-gameevent-scoped-interpreter.md)
 (a scoped dispatch engine, not stock's full ~132-verb set, per the same
@@ -347,7 +347,7 @@ PR); unpark the rest after core demo depth + M11 unless prioritized.
 - [ ] **W7** Far-terrain LOD sampling (ties [SCALE.md](docs/SCALE.md); after M11 planet track) (multi-milestone)
 - [x] Operator: `--worldgen-seed U64` (implies proc); world dir = overlay+cache only; GAME_OPTIONS still open
 - [x] Persist: player edits win over regen (ZCH3 load before regen; heights-only re-load after gen; blockmeta/containers)
-- [ ] Stock RWG XML RE (rwgmixer/tiles) in `../7dtd-research` only; zdtd tables, no DLL
+- [ ] Stock RWG XML RE (rwgmixer/tiles) in `../7dtd-engine-research` only; zdtd tables, no DLL
 
 ### P3 ECS ergonomics / scale brainstorm
 
@@ -478,7 +478,7 @@ Core loop and parity landings. Do not re-open without new evidence.
 - [x] admin `kill <entityId>` on `--admin-port`
 - [x] NetPackageBag is ToServer-only (IL dir=1): removed all S2C Bag/PlayerInventory sends; loot contents now ride ECD `bag` field (Bag.Write) inside EntitySpawn; S2C inv echo = HoldingItem only
 - [x] AGENTS review sweep 1: join-phase gate (unjoined peers only handshake pkgs); Bag ownership (no cross-player inv writes); DamageEntity strength cap 200 + fatal only vs NPC; SetBlock/Explosion/TileEntity reach checks (96 blocks); respawn heal only when dead; savePlayers debounced to save tick
-- [x] AGENTS review sweep 2: deleted dead parallel encoders (simplified EntitySpawn, ZCHC/ZCHL chunk, ZTE1 TE, native inv/holding, legacy WorldInfo); comptime Unity hashes for entity classes (pinned by test); RE tools moved to ../7dtd-research/il/zdtd_re_tools; em dashes purged repo-wide; apm chunk_stream section + join_fail counter wired; dead apm sections pruned
+- [x] AGENTS review sweep 2: deleted dead parallel encoders (simplified EntitySpawn, ZCHC/ZCHL chunk, ZTE1 TE, native inv/holding, legacy WorldInfo); comptime Unity hashes for entity classes (pinned by test); RE tools moved to ../7dtd-engine-research/il/zdtd_re_tools; em dashes purged repo-wide; apm chunk_stream section + join_fail counter wired; dead apm sections pruned
 
 Review backlog sweep 3 (2026-07-22, all landed + pw19 live green Items:3):
 - [x] ContainerStore persist (`containers.zct`) + block_hp/block_raw persist (`blockmeta.zbm`); save tick + deinit
@@ -674,7 +674,7 @@ All items below shipped. Kept as historical checklist.
 ## Explicit non-goals (do not put here)
 
 - Mod host / Harmony / EfficientServer
-- 7dtd-apm Mono bridge
+- 7dtd-server-apm Mono bridge
 - EAC-on
 - Encryption* RSA+AES (platform AntiCheat; EAC-off research clone)
 - SpacetimeDB or external multiplayer substrate as sim core

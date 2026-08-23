@@ -17,8 +17,7 @@ const ecs_party = @import("../../ecs/party.zig");
 const max_clients = game_mod.max_clients;
 
 /// GameStats[54] party_shared_kill_range (stock default 100; no V3.1.0
-/// serverconfig key, so it rides the GameStats blob default).
-const party_shared_kill_range_sq: f32 = 100.0 * 100.0;
+/// serverconfig key, so it rides the `[sim] party_shared_kill_range` surface).
 
 /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
 /// Levels up using progression.xml exp curve when loaded.
@@ -100,7 +99,7 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
                 if (!self.sim.mask[ms].transform) continue;
                 const dx = self.sim.transform[ms].x - kt.x;
                 const dz = self.sim.transform[ms].z - kt.z;
-                if (dx * dx + dz * dz <= party_shared_kill_range_sq) in_range += 1;
+                if (dx * dx + dz * dz <= self.party_shared_kill_range * self.party_shared_kill_range) in_range += 1;
             }
         }
     }

@@ -1,14 +1,14 @@
 # zdtd metrics and profiling harness
 
 **Owns:** first-class instrumentation **inside** the Zig dedicated process.  
-**Not:** sibling `7dtd-apm` (stock Unity Mono dedi, managed bridge, bpftrace suite).  
+**Not:** sibling `7dtd-server-apm` (stock Unity Mono dedi, managed bridge, bpftrace suite).  
 **Not:** mod or Harmony hooks.
 
 Code: `src/apm/` (`metrics.zig`, `profiler.zig`, `report.zig`, `root.zig`).
 
-## Why separate from 7dtd-apm
+## Why separate from 7dtd-server-apm
 
-| 7dtd-apm | zdtd apm |
+| 7dtd-server-apm | zdtd apm |
 |---|---|
 | External process + optional C# bridge | Linked into the **`zdtd`** binary |
 | Assumes Mono / gmUpdate section names | Named **our** stages (net_poll, sim_entities, …) |
@@ -212,7 +212,7 @@ guarantees it.
 | M1b | Ops gauges in JSON; admin `apm` dump; rate-limited encode/send/phase logs (done) |
 | M1c | Optional Tracy zones over apm sections (opt-in, operator-supplied client) (done) |
 | M3+ | Per-player / per-interest byte budgets |
-| Later | Optional HTTP `/metrics` or unix socket; never depend on 7dtd-apm |
+| Later | Optional HTTP `/metrics` or unix socket; never depend on 7dtd-server-apm |
 
 ## Compare under load
 
@@ -228,4 +228,4 @@ guarantees it.
 |---|---|
 | [../README.md](../README.md) | Project |
 | [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture |
-| [../../7dtd-optimizer/docs/measured-scaling.md](../../7dtd-optimizer/docs/measured-scaling.md) | Stock scale shapes (design input) |
+| [../../7dtd-server-optimizer/docs/measured-scaling.md](../../7dtd-server-optimizer/docs/measured-scaling.md) | Stock scale shapes (design input) |

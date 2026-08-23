@@ -440,7 +440,7 @@ function needs to sit above both `progression.zig` and `buffs.zig`),
 **Grounding:** `progression.xml` `<passive_effect>` rows inside `<perk>`
 blocks; the aggregation rule already proven correct in `assets/buffs.zig`;
 the layer set and order in
-`../../7dtd-research/docs/minevents.md` section 7.0.
+`../../7dtd-engine-research/docs/minevents.md` section 7.0.
 
 **Done when:** a player with `perkAdvancedEngineering` at level 3 is credited
 45% of a turret kill's XP (the stock value at that level), a player with no
@@ -538,7 +538,7 @@ on it.
 
 ## T29. Stealth, noise and smell
 
-**Why:** `../../7dtd-research/docs/stealth-smell.md` documents a
+**Why:** `../../7dtd-engine-research/docs/stealth-smell.md` documents a
 server-authoritative per-tick system (ambient/held-light level, a noise-event
 queue with geometric decay, a smell radius driven by carried items, blood and
 wetness) that feeds sleeper-wake and zombie detection. `docs/GAP_ANALYSIS.md`
@@ -560,7 +560,7 @@ plausible guess.
 `src/ecs/systems.zig`, `src/wire/packages.zig` (the two package builders
 already stubbed by name).
 
-**Grounding:** `../../7dtd-research/docs/stealth-smell.md` in full; cross-check
+**Grounding:** `../../7dtd-engine-research/docs/stealth-smell.md` in full; cross-check
 against `entity-ai.md` for how sense checks currently gate on it in stock.
 
 **Done when:** a crouched, unlit, quiet player is measurably harder for a
@@ -578,7 +578,7 @@ AI, not the client display of it.
 
 ## T30. Drone companion AI (`EntityDrone`)
 
-**Why:** `../../7dtd-research/docs/raycast-pathing.md` section 6b is the
+**Why:** `../../7dtd-engine-research/docs/raycast-pathing.md` section 6b is the
 authoritative source for the drone state machine (`vehicles-drones-turrets.md`
 section 5 covers persistence/sync only, and defers the state machine itself
 to `raycast-pathing.md`, per that doc's own scope note). Verified: the real
@@ -606,9 +606,9 @@ enough once written), `src/ecs/schedule.zig` (a new phase entry, gated by
 `Rules.systems` per ADR 0021 so a mode can turn it off), `src/wire/packages.zig`
 (`NetPackageDroneDataSync` builder).
 
-**Grounding:** `../../7dtd-research/docs/raycast-pathing.md` section 6b (the
+**Grounding:** `../../7dtd-engine-research/docs/raycast-pathing.md` section 6b (the
 state machine, including the state table and transition diagram) and
-`../../7dtd-research/docs/vehicles-drones-turrets.md` section 5
+`../../7dtd-engine-research/docs/vehicles-drones-turrets.md` section 5
 (persistence/sync).
 
 **Done when:** a placed drone follows its owner, engages a nearby hostile in
@@ -701,7 +701,7 @@ only where `gameevents.xml` needs a requirement type T25 did not cover.
 (replace the echo with real dispatch), `src/ecs/aidirector.zig` (blood-moon
 boss setup should feed through this rather than staying a separate path).
 
-**Grounding:** `../../7dtd-research/docs/game-events.md` in full, especially
+**Grounding:** `../../7dtd-engine-research/docs/game-events.md` in full, especially
 section 1 (architecture), section 4 (requirement gating), section 5 (decisions
 and loops), section 8 (dedicated relevance: `IsServer`-gated, near-zero idle
 cost with no running sequences).
@@ -724,7 +724,7 @@ client-side HUD/boss-bar presentation of a running sequence.
 
 ## T33. Challenge system
 
-**Why:** `../../7dtd-research/docs/quests-challenges.md` sections 6-9
+**Why:** `../../7dtd-engine-research/docs/quests-challenges.md` sections 6-9
 document a full engine (`ChallengeStates`, staged objective groups,
 daily/random rotation and tiering, 28 objective verbs, reward delivery through
 a GameEvent `RewardEvent`). `GAP_ANALYSIS.md` scores "Challenges system |
@@ -744,7 +744,7 @@ T32 rather than implementing all 28 speculatively.
 (`ChallengeJournal` stops being a permanent empty stub), `src/server/c2s/*`
 (whichever C2S package requests/tracks challenge state).
 
-**Grounding:** `../../7dtd-research/docs/quests-challenges.md` sections 6-9 in
+**Grounding:** `../../7dtd-engine-research/docs/quests-challenges.md` sections 6-9 in
 full.
 
 **Done when:** a player can complete a challenge's staged objectives and
@@ -767,7 +767,7 @@ gap is real, but implementing the formula as documented would not visibly
 change anything, because the number stock would grant is already zero for
 every recipe that states it.
 
-**What's confirmed:** `../../7dtd-research/docs/crafting-recipes.md` section 2
+**What's confirmed:** `../../7dtd-engine-research/docs/crafting-recipes.md` section 2
 documents `Progression.AddLevelExp(CraftExpGain / total, ...)`, where `total`
 is a cumulative per-recipe craft counter (diminishing returns on repeated
 crafts of the same recipe). `src/server/game/craft.zig`'s `tryCraft` (not
@@ -803,7 +803,7 @@ stock-declared crafting XP rather than silently normalizing them to the same
 a sentinel distinct from an explicit `0`), `src/server/game/craft.zig`
 (`tryCraftRecipe`, the per-recipe craft counter and the grant call).
 
-**Grounding:** `../../7dtd-research/docs/crafting-recipes.md` section 2;
+**Grounding:** `../../7dtd-engine-research/docs/crafting-recipes.md` section 2;
 `Data/Config/recipes.xml` (all 639 elements, the `craft_exp_gain` distribution
 above); `Data/Config/items.xml` (zero `CraftComponentExp` occurrences).
 
@@ -820,7 +820,7 @@ formula).
 **Out of scope:** resolving the undeclared-recipe question definitively —
 that needs an IL read of what `AddLevelExp` does with a negative or absent
 input, which is a research task (file it against
-`../../7dtd-research/docs/crafting-recipes.md` if picked up), not an
+`../../7dtd-engine-research/docs/crafting-recipes.md` if picked up), not an
 implementation guess. The ADR 0023/0024 perk-gated crafting bonuses are
 likewise out of scope here.
 
@@ -836,7 +836,7 @@ NavObject marker". Residual: the marker has no removal companion
 (`NetPackageEntityMapMarkerRemove`) when the crate is looted or expires, so
 it outlives the loot; not implemented, noted rather than silently dropped.
 
-**Why:** `../../7dtd-research/docs/map-objects.md` section 8: air-drop crates
+**Why:** `../../7dtd-engine-research/docs/map-objects.md` section 8: air-drop crates
 are stock's one server-push nav marker (`AIDirectorAirDropComponent.RefreshCrates`
 sends `NetPackageNavObject`); every other marker is client-derived.
 `src/server/game/tick.zig`'s `tickAirDrop` spawns the loot bag and broadcasts
@@ -850,7 +850,7 @@ loot-bag spawn broadcast in `tickAirDrop`, using the same builder
 
 **Files:** `src/server/game/tick.zig` (`tickAirDrop`).
 
-**Grounding:** `../../7dtd-research/docs/map-objects.md` section 8.
+**Grounding:** `../../7dtd-engine-research/docs/map-objects.md` section 8.
 
 **Done when:** an air-drop spawn sends a NavObject the client can render as a
 compass marker.
@@ -866,7 +866,7 @@ guessing a decay curve.
 
 ## T36. `BlockTrigger` has no server-side authority
 
-**Why:** `../../7dtd-research/docs/block-shapes.md` section 7: stock's
+**Why:** `../../7dtd-engine-research/docs/block-shapes.md` section 7: stock's
 `BlockTrigger`/`TriggerManager`/`PrefabTriggerData` is a real per-POI channel
 system (latch state, AND/OR combine, `Block.OnTriggered` mutating switches,
 doors, lights, hazards, batched as `BlockChangeInfo`).
@@ -886,7 +886,7 @@ unvalidated request.
 **Files:** `src/server/c2s/blocks.zig`, `src/world/prefabs.zig` (trigger
 wiring parse), a new component or table for channel/latch state.
 
-**Grounding:** `../../7dtd-research/docs/block-shapes.md` section 7.
+**Grounding:** `../../7dtd-engine-research/docs/block-shapes.md` section 7.
 
 **Done when:** a trigger fire is validated against the prefab's actual
 wiring and latch state before the server applies or relays it; an
@@ -919,7 +919,7 @@ records with a progression tail get a bed_present=0 byte appended. Covered by
 two scenarios: round-trip through a restart, and a save with no bedroll tail
 reading back `has_bed = false` rather than an error.
 
-**Why:** `../../7dtd-research/docs/server-lifecycle.md` section 6.1: stock's
+**Why:** `../../7dtd-engine-research/docs/server-lifecycle.md` section 6.1: stock's
 `PersistentPlayerData.Write` carries the bedroll position as a first-class
 field alongside land-claim blocks and the backpack. `GAP_ANALYSIS.md` already
 scores this accurately ("Bedroll / last logout pos | PARTIAL... bedroll
@@ -934,7 +934,7 @@ it owns the last field.
 
 **Files:** `src/server/persist.zig` (`savePlayers`/`tryRestorePlayer`).
 
-**Grounding:** `../../7dtd-research/docs/server-lifecycle.md` section 6.1.
+**Grounding:** `../../7dtd-engine-research/docs/server-lifecycle.md` section 6.1.
 
 **Done when:** a player's bedroll position and ownership round-trip through a
 save and restart.
@@ -980,7 +980,7 @@ weigh, not a foregone implementation:
 belong there), `src/world/store.zig` or wherever block place/break already
 has a hook other indexes attach to.
 
-**Grounding:** `../../7dtd-research/docs/dedicated-misc-systems.md`
+**Grounding:** `../../7dtd-engine-research/docs/dedicated-misc-systems.md`
 "BlockRadiusEffect" section; the shipped `blocks.xml` `ActiveRadiusEffects`
 rows (torch_wall, candle-class blocks, barrelRadiated) already parsed by
 `assets/blocks.zig` (A36's landed half).

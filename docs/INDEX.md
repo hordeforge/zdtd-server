@@ -12,7 +12,7 @@ real client.
 **Version pin:** the target is stock **V3.1.0 b14**, EAC off, and that is what
 the live gate runs against. IL citations of the form `asm.il:NNNN` refer to the
 V3.1.0 single-file dump whose identity (size, line count, MD5) is recorded in
-[`../../7dtd-research/il/README.md`](../../7dtd-research/il/README.md); those
+[`../../7dtd-engine-research/il/README.md`](../../7dtd-engine-research/il/README.md); those
 line numbers are valid only against that exact file. The research repo tracks
 the latest release only: its `il/` sets are all V3.1.0 and the V3.0.1 sets were
 deleted on 2026-08-06. Mentions of V3.0.1 in these documents are provenance, and
@@ -39,6 +39,19 @@ New to the project, or picking up work:
    method, gates, honesty rules; picked up by `~/review-prompts`).
 10. [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) M7-M16 phases (post-playable
    stack).
+
+## Document series (PRD / RFC / ADR)
+
+Numbered series, one directory per series; each series' README is its
+registry. PRD and RFC numbers pair by addon (same number = same addon's
+requirements and design). Convention: 4-digit zero-padded, never reused;
+next number in each series is in its README.
+
+| Series | Lives in | Registry |
+|---|---|---|
+| PRD (product requirements) | [prd/](prd/README.md) | [prd/README.md](prd/README.md) |
+| RFC (request for comments: proposal / design) | [rfc/](rfc/README.md) | [rfc/README.md](rfc/README.md) |
+| ADR (architecture decisions) | [adr/](adr/README.md) | [adr/README.md](adr/README.md) |
 
 ## Wire and play path
 
@@ -76,10 +89,9 @@ Where the world and its data come from.
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
 | [PLUGIN_API.md](PLUGIN_API.md) | Wasm plugin design (ADR 0020) |
 | [PLUGIN_DEV.md](PLUGIN_DEV.md) | Writing a plugin: hooks, limits, and building a .wasm from any language |
-| [MCP_PRD.md](MCP_PRD.md) | MCP server addon product requirements (ADR 0031) |
-| [MCP_DESIGN.md](MCP_DESIGN.md) | MCP server addon design: guest protocol, host transport + std.json |
-| [MODLETS_PRD.md](MODLETS_PRD.md) | Pure XML/assetbundle modlet compatibility requirements |
-| [MODLETS_PLAN.md](MODLETS_PLAN.md) | Modlet compatibility implementation plan |
+| [PRD 0001](prd/0001-fps-bot.md) | FPS Bot addon requirements (with [RFC 0001](rfc/0001-fps-bot-spec.md); ADR 0026) |
+| [PRD 0002](prd/0002-mcp-server.md) | MCP server addon requirements (with [RFC 0002](rfc/0002-mcp-server-design.md); ADR 0031) |
+| [PRD 0003](prd/0003-modlets.md) | Pure XML/assetbundle modlet compatibility requirements (with [RFC 0003](rfc/0003-modlets-plan.md)) |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http plus posix residuals |
 | [adr/README.md](adr/README.md) | Architecture decision records |
 
@@ -88,6 +100,7 @@ Where the world and its data come from.
 | Doc | Role |
 |---|---|
 | [WEBUI.md](WEBUI.md) | Operator web UI, security model, roadmap |
+| [PRD 0004](prd/0004-hot-restart.md) | What survives a server restart: persistence inventory + operator webui session continuity |
 
 ## Scale
 

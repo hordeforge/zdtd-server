@@ -43,7 +43,7 @@ pub const min_surface: u8 = 12;
 pub const max_surface: u8 = 200;
 
 /// Top water cell of the RWG water table. RE: `Block.cWaterLevel` cctor
-/// `ldc.r4 62.88` (7dtd-research stock_facts `world_water_level`; the client
+/// `ldc.r4 62.88` (7dtd-engine-research stock_facts `world_water_level`; the client
 /// renders the surface of the top water cell at 62.88), so the table fills
 /// cells 0..62 and the surface cell is 62. Terrain at or above the surface
 /// cell stays dry.

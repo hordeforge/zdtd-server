@@ -36,7 +36,7 @@ const help_text =
     \\  --webui-port N        HTTP ops UI (0 = off; requires secret; see docs/WEBUI.md)
     \\  --webui-bind ADDR     webui bind, loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
     \\  --webui-secret STR    shared secret, min 8 chars (prefer env ZDTD_WEBUI_SECRET; CLI visible in ps)
-    \\  --mcp-port N          MCP streamable-HTTP endpoint (0 = off; needs an MCP wasm plugin; docs/MCP_DESIGN.md)
+    \\  --mcp-port N          MCP streamable-HTTP endpoint (0 = off; needs an MCP wasm plugin; docs/rfc/0002-mcp-server-design.md)
     \\  --mcp-bind ADDR       mcp bind, loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
     \\  --mcp-token STR       shared token for /mcp (empty = loopback only, no token)
     \\  --mcp-allowlist LIST  comma-separated SimCommand prefixes the admin_command tool may queue (default: none)
@@ -814,6 +814,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (mp.bots.spawn_spread) |v| bcfg.spawn_spread = v;
         if (mp.bots.spawn_y) |v| bcfg.spawn_y = v;
         if (mp.bots.max_step_up) |v| bcfg.max_step_up = v;
+        if (mp.bots.weapon_profiles.len > 0) bcfg.weapon_profiles = mp.bots.weapon_profiles;
     }
     if (toml_owned) |*tf| {
         if (tf.bots.shoot_damage) |v| bcfg.shoot_damage = v;
@@ -821,6 +822,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (tf.bots.spawn_spread) |v| bcfg.spawn_spread = v;
         if (tf.bots.spawn_y) |v| bcfg.spawn_y = v;
         if (tf.bots.max_step_up) |v| bcfg.max_step_up = v;
+        if (tf.bots.weapon_profiles.len > 0) bcfg.weapon_profiles = tf.bots.weapon_profiles;
     }
     init_opts.bot_config = bcfg;
     // Always sanitize after merge (mode pack and/or toml may set stream/authority knobs).

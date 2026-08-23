@@ -489,8 +489,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (dmg.knocked) {
             if (self.sim.slotOfNetId(d.entity_id)) |vslot| {
                 const kb = self.sim.zombie_ai[vslot];
-                const kb_vx: f32 = kb.kb_dx * components.kb_speed;
-                const kb_vz: f32 = kb.kb_dz * components.kb_speed;
+                const kb_vx: f32 = kb.kb_dx * self.sim.rules.combat.knockback_speed;
+                const kb_vz: f32 = kb.kb_dz * self.sim.rules.combat.knockback_speed;
                 if (packages.stock_xp.buildEntityVelocityBody(self.body_buf[48..72], .{
                     .entity_id = d.entity_id,
                     .b_add = true,

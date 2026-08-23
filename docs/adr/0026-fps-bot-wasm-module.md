@@ -1,4 +1,4 @@
-# 0026. FPS bots as a Wasm module: a host sense/act boundary, not a core bot brain
+# ADR 0026: FPS bots as a Wasm module: a host sense/act boundary, not a core bot brain
 
 - **Status:** accepted (amended 2026-08-12: bots are **not** ECS entities —
   decisions 1 and 3 below are superseded by the host-side `BotManager` in
@@ -15,9 +15,9 @@
 ## Context
 
 People who operate a zdtd server want populated worlds without real players.
-The reference behaviour is the `../7dtd-clanker` C# mod (a stock-server mode that
+The reference behaviour is the `../7dtd-fps-bots` C# mod (a stock-server mode that
 spawns player-mesh FPS bots that hunt, shoot and strafe, driven by a
-Quake 3 / Doom 3-inspired brain — see `../7dtd-clanker/docs/q3-inspiration-notes.md`
+Quake 3 / Doom 3-inspired brain — see `../7dtd-fps-bots/docs/q3-inspiration-notes.md`
 and the ported `BotCharacter` / `BotAimAtEnemy` / `BotCheckAttack` /
 `BotChangeViewAngles` model). We want the same gameplay as an **addon**, not a
 fork, and `src/plugin/` already exposes a Wasm plugin host.
@@ -105,7 +105,7 @@ starts with `bot `), **not** the ECS command buffer. `parsePluginCommand` and
 | `bot move <id> <x> <y> <z> <speed>` | commanded intent | clamp to move caps, integrate toward dest for the tick |
 | `bot look <id> <yaw>` | face | set facing (aim direction for fire) |
 | `bot shoot <id> <target_id>` | fire request | apply damage to target if LOS and in range |
-| `bot count <n>` | population floor | spawn bots until the live count reaches n (like 7dtd-clanker TargetBotCount) |
+| `bot count <n>` | population floor | spawn bots until the live count reaches n (like 7dtd-fps-bots TargetBotCount) |
 | `bot cfg <id> <key> <val>` | per-bot skill override | mutate the bot's `BotDef` config |
 
 The 128-byte queue bound and the allocation-free hot path stand; the BotManager
@@ -163,6 +163,6 @@ command parser is added.
 ## Follow-up
 
 Delivery tracked in [IMPLEMENTATION_PLAN_BOTS.md](../IMPLEMENTATION_PLAN_BOTS.md);
-spec and product requirements in [BOTS_SPEC.md](../BOTS_SPEC.md) and
-[BOTS_PRD.md](../BOTS_PRD.md). Validation is the loadgen smoke + stock client
+spec and product requirements in [RFC 0001](../rfc/0001-fps-bot-spec.md) and
+[PRD 0001](../prd/0001-fps-bot.md). Validation is the loadgen smoke + stock client
 (EAC off) + apm triad (ADR 0019), not unit tests alone.

@@ -1,9 +1,9 @@
 //! Stock texture-atlas minimap colors, generated from
-//! `../7dtd-research/tools/sandbox/atlas/ta_*.xml` by
-//! `../7dtd-research/tools/sandbox/gen_atlas_zig.py` (do not hand-edit).
+//! `../7dtd-engine-research/tools/sandbox/atlas/ta_*.xml` by
+//! `../7dtd-engine-research/tools/sandbox/gen_atlas_zig.py` (do not hand-edit).
 //! Source of truth: the `MeshDescription.MetaData` TextAssets in the
 //! stock V3.1.0 b14 `meshdescriptions_assets_all.bundle` (docs/texture-atlas.md
-//! in the 7dtd-research repo). Colors are packed with the stock
+//! in the 7dtd-engine-research repo). Colors are packed with the stock
 //! Utils.ToColor5 RGB555 formula: (r*31+0.5)<<10 | (g*31+0.5)<<5 | (b*31+0.5).
 
 pub const Entry = struct {

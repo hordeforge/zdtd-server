@@ -107,7 +107,7 @@ engine went WORKS (DynamicPrefabDecorator-equivalent selector: tier pool +
 lockouts, squared center distance, trader 500/1500 bands; RandomPOIGoto/
 Goto/ClosestPOIGoto objective meta drives it; trader offers pre-positioned
 with the real QuestLocation/QuestSize/POIName instead of the fabricated
-catalog spot; rally rects bound by the selector; RE pinned in 7dtd-research
+catalog spot; rally rects bound by the selector; RE pinned in 7dtd-engine-research
 quests-challenges.md), total **194/95/44**. Then quest journal persistence
 went WORKS (players.zsv ZPV5: journal entries store the quest **name** (stock
 Quest.Write identity) and the accepted POI rect; restore resolves by name so
@@ -683,7 +683,7 @@ client displays; Count and DeadZone are enforced at claim registration
 (claimAllowed refuses claims past the owner's count or inside another
 claim's dead zone; test land claim count and dead-zone gates). The
 DecayMode/OfflineDelay keystone-damage rate stays RE-blocked (not documented
-in 7dtd-research), so the row remains PARTIAL.
+in 7dtd-engine-research), so the row remains PARTIAL.
 Then players.zsv went ZPV9: the progression tail now carries the game-stage
 born world time, so days-alive (and the gamestage the client reads) survives
 a server restart instead of snapping to the level cap; v2-8 records migrate
@@ -703,7 +703,7 @@ client's XUiM_Trader display instead of paying flat. PercentUsesLeft
 passive; Entry.Markup open. Test `trader prices scale with item quality`.
 Then destroy_on_close went WORKS: the missing trigger was found by RE
 (TEFeatureStorage.OnUnlockedServer IL=6 -> CheckDestroyTileEntity IL=37,
-documented in 7dtd-research loot-economy.md), and the C2S LockRequest unlock
+documented in 7dtd-engine-research loot-economy.md), and the C2S LockRequest unlock
 now evaluates the loot def's mode - "true" (airDrop) drops the remaining
 contents as a bag at +0.5,0.75,+0.5 and breaks the block; "empty"
 (safes/backpacks/junk) breaks only when emptied. Parsed from loot.xml (233
@@ -853,7 +853,7 @@ sleepers now spawn with the stock IsSleeperPassive flag (client renders them
 lying down) and waking - player proximity, combat noise, or damage (stock
 ProcessDamageResponseLocal wakes unconditionally) - broadcasts
 NetPackageSleeperWakeup from a drained ECS ring so the client plays the wake
-animation. RE pin in 7dtd-research protocol-packages.md: exact bodies, the
+animation. RE pin in 7dtd-engine-research protocol-packages.md: exact bodies, the
 ConditionalTriggerSleeperWakeUp / SetSleeperActive senders, and the finding
 that stock never emits NetPackageSleeperPose (the pose rides EntitySpawn
 flags). SleeperPassiveChange stays unsent: zdtd's sim has no
@@ -892,7 +892,7 @@ minimap color source is the block texture-atlas metadata (uvmapping XMLs),
 which lives in the operator install's meshdescriptions_assets_all.bundle as
 MeshDescription.MetaData TextAssets - not Data/Config XML. RE pinned the
 UnityFS v8 bundle layout + the CalcChunkColors -> Block.GetMapColor ->
-GetColorForSide -> uvMapping[id].color -> ToColor5 chain (7dtd-research
+GetColorForSide -> uvMapping[id].color -> ToColor5 chain (7dtd-engine-research
 docs/texture-atlas.md), and the six ta_* XMLs are extracted into
 src/assets/map_atlas.zig as a comptime RGB555 color table (231 entries).
 The map wire landed 2026-08-21 (S2C emission row, stays PARTIAL): blocks.xml
@@ -930,7 +930,7 @@ bInfinite=true with (0,0)/(0,0) and pos (0,0,0), matching the WorldChunkCache
 ctor defaults and primary-cluster Position. The b14 client's border-box
 methods are no-op stubs and no client code subscribes to the fixed-size
 finished-loading delegate, so the fixed-size branch cannot wedge it. RE pin:
-7dtd-research protocol-packages.md 4.4. No scorecard change (the row's
+7dtd-engine-research protocol-packages.md 4.4. No scorecard change (the row's
 PARTIAL reflects the remaining never-sent names, all non-client-visible
 or RE-gated; Net and ops stays 43/8/5, total **182/107/44**).
 
@@ -941,7 +941,7 @@ GameManager.WaypointInviteServer: Friends mode (0) fans to the inviter's
 AllyStore allies, Everyone (1) to all players, skipping the inviter, with
 the waypoint re-keyed (bTracked cleared, inviterEntityId set). Local
 waypoints stay client-local as in stock - only invites traverse the server.
-RE pin: 7dtd-research protocol-packages.md 5.7. C2S handled names 76 -> 77
+RE pin: 7dtd-engine-research protocol-packages.md 5.7. C2S handled names 76 -> 77
 of the 98 stock client sends; Net and ops stays 43/8/5, total **182/107/44**.
 
 GameMessage relay shipped 2026-08-21 (C2S handler row, stays PARTIAL):
@@ -951,7 +951,7 @@ re-broadcasts verbatim to every client per GameManager.FinishGameMessageServer
 isGameMessageOnDeath), team changes (set_TeamNumber), leaves
 (DisconnectClient LeftGame) and chat-form announcements now reach all
 players, including the sender whose client displays on receipt. RE pin:
-7dtd-research protocol-packages.md 5.8. C2S handled names 77 -> 78 of the 98
+7dtd-engine-research protocol-packages.md 5.8. C2S handled names 77 -> 78 of the 98
 stock client sends; Net and ops stays 43/8/5, total **182/107/44**.
 
 SoundAtPosition relay shipped 2026-08-21 (C2S handler row, stays PARTIAL):
@@ -960,7 +960,7 @@ distance + entityId + volumeScale) re-broadcasts verbatim to every client
 except the owning player per GameManager.PlaySoundAtPositionServer (IL=60,
 allButAttachedToEntityId = entityId); the owner already played the sound
 locally and the distance field drives the receiving client's rolloff, not
-the fan-out. RE pin: 7dtd-research protocol-packages.md 5.9. C2S handled
+the fan-out. RE pin: 7dtd-engine-research protocol-packages.md 5.9. C2S handled
 names 78 -> 79 of the 98 stock client sends; Net and ops stays 43/8/5,
 total **182/107/44**.
 
@@ -969,7 +969,7 @@ the client's kill report (killerEntityId + killedEntityId, sent from
 OnEntityDeath -> AwardKill when the local player scored the kill) is a
 validated no-op: zdtd credits kill objectives and XP authoritatively at the
 death path (questOnZombieKilled for melee/ranged/turret/trap kills), so
-applying the client echo would double-credit. RE pin: 7dtd-research
+applying the client echo would double-credit. RE pin: 7dtd-engine-research
 protocol-packages.md 5.10 (documents the stock SharedKillClient -> client
 report -> QuestEventManager.EntityKilled credit flow). C2S handled names
 79 -> 80 of the 98 stock client sends; Net and ops stays 43/8/5, total
@@ -991,7 +991,7 @@ the zdtd list files. Whitelist enforcement shipped 2026-08-21: with a
 non-empty whitelist the login gate now denies everyone except whitelisted
 players (composite "platform:id" or login name) and admins (the stock
 HasEntry bypass), matching BansAndWhitelistAuthorizer.Authorize (IL=71)
-with EKickReason.NotOnWhitelist(7); RE pin in 7dtd-research
+with EKickReason.NotOnWhitelist(7); RE pin in 7dtd-engine-research
 dedicated-misc-systems.md. Admin-list keying shipped 2026-08-21 (admin TCP
 row recount): `admin add` / `whitelist add` on an online target now key the
 entry by the "platform:id" composite like the ban path (a rename cannot
@@ -1004,7 +1004,7 @@ IL=174) - ServerReservedSlots/ServerReservedSlotsPermission admit
 privileged players through the reserved slots (occupied < max - reserved)
 and ServerAdminSlots/ServerAdminSlotsPermission add admin headroom
 (total < max + adminSlots); 0 disables each tier, so the default gate is
-the plain cap. RE pin: 7dtd-research dedicated-misc-systems.md.
+the plain cap. RE pin: 7dtd-engine-research dedicated-misc-systems.md.
 serveradmin.xml hot-reload shipped 2026-08-21 (bans row -> WORKS): the
 tick polls the file's mtime every 5 s (stock InitFileWatcher ->
 OnFileChanged) and re-applies the admins/whitelist/blacklist, replacing
@@ -1020,7 +1020,7 @@ except the causing entity's owner (SpawnParticleEffectServer IL=41,
 allButAttachedToEntityId), so client-triggered particles reach other
 players; NetPackageEntityStealth is a validated no-op because zdtd computes
 stealth server-side (crouch from movement frames, smell from buffs). RE
-pins: 7dtd-research protocol-packages.md 5.11/5.12. C2S handled names 80
+pins: 7dtd-engine-research protocol-packages.md 5.11/5.12. C2S handled names 80
 -> 82 of the 98 stock client sends; Net and ops stays 44/7/5, total
 **183/106/44**.
 
@@ -1029,7 +1029,7 @@ stays PARTIAL): the goto-marker report and the treasure-dig report are
 validated no-ops - goto objectives complete by proximity (questTickGoto,
 radius^2 per tick) and fetch/treasure phases advance from the client's
 QuestObjectiveUpdate treasure_complete event, so both client echoes are
-redundant. RE pin: 7dtd-research protocol-packages.md 5.13. C2S handled
+redundant. RE pin: 7dtd-engine-research protocol-packages.md 5.13. C2S handled
 names 82 -> 84 of the 98 stock client sends; Net and ops stays 44/7/5,
 total **183/106/44**.
 
@@ -1045,7 +1045,7 @@ EntityRagdoll relay shipped 2026-08-21: the owner-client's ragdoll impulse
 (entityId + flag-gated duration/bodyPart/vectors + mode/state) relays
 verbatim to the other clients - the owner already ragdolled locally
 (SendPacketToTrackedPlayersAndTrackedEntity). RE pin:
-7dtd-research protocol-packages.md 5.15. C2S handled names 85
+7dtd-engine-research protocol-packages.md 5.15. C2S handled names 85
 -> 86 of the 98 stock client sends; Net and ops stays 44/7/5, total
 **183/106/44**.
 
@@ -1101,7 +1101,7 @@ quest/rally/sleeper_volume/treasure/restore_power/fetch_container/
 go_to_trader/return_to_trader) with the legacy kind fallback, and the
 position is the placed POI center or the objective target - the old
 primary-spawn fallback put kill/fetch markers on the wrong side of the
-map. RE pin: 7dtd-research map-objects.md. Quests 20/11/1 -> 21/10/1,
+map. RE pin: 7dtd-engine-research map-objects.md. Quests 20/11/1 -> 21/10/1,
 total 186/103/44 -> **187/102/44**.
 
 Quest objective party mirror shipped 2026-08-22 (S2C progress row ->
@@ -1111,7 +1111,7 @@ events, the server applies them to the authoritative journal AND re-applies
 them to each party member's journal + re-sends the package to each member's
 client, so a shared quest advances live for the whole party
 (treasure_complete -> fetch phase, block_activated -> block_activate
-phase). RE pin: 7dtd-research protocol-packages.md. Quests 21/10/1 ->
+phase). RE pin: 7dtd-engine-research protocol-packages.md. Quests 21/10/1 ->
 22/9/1, total 187/102/44 -> **188/101/44**.
 
 Per-objective CurrentValue row -> WORKS 2026-08-22: the journal writer
@@ -1132,7 +1132,7 @@ Rewards row -> WORKS 2026-08-22: LootItem rewards whose id is a loot group
 (groupQuestWeapons etc.) roll `value` prob-weighted picks (ischosen) or the
 first `value` entries (isfixed) and grant each stack; RewardQuest entries
 chain - the turn-in grants the named quest to the journal. RE pin:
-7dtd-research quests-challenges.md. Quests 24/7/1 -> 25/6/1, total
+7dtd-engine-research quests-challenges.md. Quests 24/7/1 -> 25/6/1, total
 190/99/44 -> **191/98/44**.
 
 POI lockout row -> WORKS 2026-08-22: the home reasons now fire - a Game
@@ -1618,7 +1618,7 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   density instead of ~3 objects. Verified against stock biomes.xml + AssignIds
   dump. Residual: the stock `_perm` literal is not byte-reproduced (classic
   Ken Perlin table used); banding is stock-shaped, boundaries may drift
-  (HARDCODE_AUDIT A33, extraction owned by 7dtd-research).
+  (HARDCODE_AUDIT A33, extraction owned by 7dtd-engine-research).
 
 **Gates at this pin:** `make check` exit 0 · 950 unit tests · live stock-client
 gate 23/23 · playtest full suite green on a fresh world.
@@ -1691,7 +1691,7 @@ product notes stay in this file + linked docs.
 
 ```text
 loadgen  → demand
-apm      → measure (zdtd native `src/apm/`, not 7dtd-apm)
+apm      → measure (zdtd native `src/apm/`, not 7dtd-server-apm)
 optimizer / server-guard / realworld → separate repos
 zdtd     → Zig dedi, client wire only, no mods
 ```

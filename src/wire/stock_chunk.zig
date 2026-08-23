@@ -2,7 +2,7 @@
 //! Derived on V3.0.1, verified against the V3.1.0 b14 client: the live join
 //! streams these chunks and the client meshes them.
 //! Used as NetPackageChunk payload so the stock client can Chunk.read without
-//! client-side generation. See ../../../7dtd-research/docs/save-region.md and Chunk IL dumps.
+//! client-side generation. See ../../../7dtd-engine-research/docs/save-region.md and Chunk IL dumps.
 
 const std = @import("std");
 const binary = @import("binary.zig");

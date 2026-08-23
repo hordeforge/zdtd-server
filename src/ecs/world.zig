@@ -359,6 +359,25 @@ pub const World = struct {
     /// no plugins, today's behaviour exactly.
     kill_verdict_ctx: ?*anyopaque = null,
     kill_verdict_fn: ?*const fn (?*anyopaque, Kind, i32, i32) i32 = null,
+    /// on_player_damage verdict for the ECS damage path (zombie melee /
+    /// deferred accumulator): (ctx, victim_net_id, amount) -> i32. Below 0
+    /// denies the hit (victim keeps hp), above 0 scales the applied amount by
+    /// percent. The attacker is not tracked by the accumulator, so it reads
+    /// -1 (unknown), matching kill_verdict. Game wires this to the Wasm host;
+    /// unset = no plugins, today's behaviour exactly.
+    player_damage_verdict_ctx: ?*anyopaque = null,
+    player_damage_verdict_fn: ?*const fn (?*anyopaque, i32, f32) i32 = null,
+    /// Server chat broadcast for plugin announcements (`zdtd.queue say`):
+    /// (ctx, msg) -> void. Game wires this to the stock chat broadcast; unset
+    /// = announcements are dropped (today's behaviour).
+    say_ctx: ?*anyopaque = null,
+    say_fn: ?*const fn (?*anyopaque, []const u8) void = null,
+    /// Pre-trade price verdict (on_trade_price): (ctx, player_net, item, unit)
+    /// -> i32. <0 denies the trade, 0 keeps the price, >0 scales the unit
+    /// price by percent. Game wires this to the plugin + wasm host; unset =
+    /// no plugins, today's behaviour exactly.
+    trade_price_verdict_ctx: ?*anyopaque = null,
+    trade_price_verdict_fn: ?*const fn (?*anyopaque, i32, u16, u32) i32 = null,
     /// Optional host-side bot snap for the zombie AI (ADR 0026). Bots are NOT
     /// ECS entities, so the AI asks the Game through this hook instead of a
     /// slot: `exact >= 0` resolves that one net id (any range — revenge);
@@ -1168,7 +1187,7 @@ pub const World = struct {
         self.mask[s].vehicle = true;
         self.vehicle[s] = .{
             .kind = kind,
-            .fuel = if (kind == .bicycle) 0 else 100,
+            .fuel = if (kind == .bicycle) 0 else self.rules.vehicle.fuel_cap,
             .max_speed = max_speed,
             .seat_count = @max(1, @min(seat_count, @as(u8, c.max_seats))),
         };
@@ -1217,7 +1236,7 @@ pub const World = struct {
             self.alive[s] and self.mask[s].zombie_ai and amount > 0)
         {
             self.zombie_ai[s].revenge_target = attacker_net_id;
-            self.zombie_ai[s].revenge_time = c.revenge_window_s;
+            self.zombie_ai[s].revenge_time = self.rules.ai.revenge_window_s;
         }
         if (self.kind[s] == .trader) return .{};
         if (!self.mask[s].health) return .{};
@@ -1326,7 +1345,7 @@ pub const World = struct {
             if (kx != 0 or kz != 0) {
                 if (self.mask[s].zombie_ai) {
                     const ai = &self.zombie_ai[s];
-                    ai.kb_time = c.kb_seconds;
+                    ai.kb_time = self.rules.combat.knockback_seconds;
                     ai.kb_dx = kx;
                     ai.kb_dz = kz;
                 }
@@ -1457,7 +1476,7 @@ test "damageFrom records the attacker as the revenge target" {
     const zs = w.slotOfNetId(z).?;
     _ = w.damageFrom(z, 3, p);
     try std.testing.expectEqual(p, w.zombie_ai[zs].revenge_target);
-    try std.testing.expectEqual(c.revenge_window_s, w.zombie_ai[zs].revenge_time);
+    try std.testing.expectEqual(@as(f32, 20.0), w.zombie_ai[zs].revenge_time); // rules.ai default
     // Unattributed and self-inflicted damage leave the target alone.
     w.zombie_ai[zs] = .{};
     _ = w.damage(z, 3);

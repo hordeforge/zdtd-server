@@ -17,6 +17,7 @@ const admin_mod = @import("admin.zig");
 const webui_mod = @import("webui.zig");
 const io_fs = @import("../util/io_fs.zig");
 const clock = @import("../util/clock.zig");
+const sys_metrics = @import("../util/sys_metrics.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const admin_cmds = @import("admin_cmds.zig");
 const c2s_text = @import("c2s_text.zig");
@@ -170,6 +171,16 @@ pub fn fillWebuiSnap(self: *Game) void {
     s.authority_correct = self.authority_mode == .correct;
     s.password_set = self.password.len > 0;
     s.wire_chunks = self.wire_chunks;
+    const host = sys_metrics.sample();
+    s.os_load_1 = host.load_1;
+    s.os_load_5 = host.load_5;
+    s.os_load_15 = host.load_15;
+    s.os_mem_total_mb = host.mem_total_mb;
+    s.os_mem_avail_mb = host.mem_avail_mb;
+    s.os_proc_cpu_pct = host.proc_cpu_pct;
+    s.os_proc_rss_mb = host.proc_rss_mb;
+    s.os_procs = host.procs;
+    s.os_uptime_s = host.uptime_s;
     const wn = self.world_name;
     // World names come from config/CLI and may be non-ASCII: cut on a codepoint
     // boundary so the dashboard header is not mojibake.
@@ -202,6 +213,16 @@ pub fn fillWebuiSnap(self: *Game) void {
         }
         s.players[pi] = row;
         pi += 1;
+    }
+    // Loaded Wasm plugin modules (same roster as the Modules partial).
+    const wp = &self.wasm_plugins;
+    for (0..@min(wp.n, s.modules.len)) |i| {
+        const p = &wp.slots[i];
+        var row: webui_mod.ModuleRow = .{ .used = true, .disabled = p.disabled };
+        const nl = @min(p.name.len, row.name.len);
+        @memcpy(row.name[0..nl], p.name[0..nl]);
+        row.name_len = @intCast(nl);
+        s.modules[i] = row;
     }
 }
 

@@ -13,6 +13,7 @@ pub const clock = @import("clock.zig");
 pub const rng = @import("rng.zig");
 pub const secret = @import("secret.zig");
 pub const sim = @import("sim.zig");
+pub const sys_metrics = @import("sys_metrics.zig");
 pub const tcp_listen = @import("tcp_listen.zig");
 pub const toml_bind = @import("toml_bind.zig");
 
@@ -25,6 +26,7 @@ test {
     _ = rng;
     _ = secret;
     _ = sim;
+    _ = sys_metrics;
     _ = tcp_listen;
     _ = toml_bind;
 }

@@ -29,6 +29,9 @@ pub const BotHostConfig = struct {
     spawn_spread: f32 = 2.0,
     spawn_y: f32 = 70,
     max_step_up: f32 = 1.5,
+    /// Host loadout pool as `tag:damage:range:pellets,tag:...` (up to 8 guns;
+    /// default = the builtin bot_weapon_* pool). Empty = builtin pool.
+    weapon_profiles: []const u8 = "",
 };
 
 /// Historic default config (pre-`[bots]` values; tests and docs reference it).
@@ -76,27 +79,27 @@ const bot_spawn_y: f32 = bot_host_defaults.spawn_y;
 /// Horizontal arrival tolerance: move intent clears when within this distance.
 const arrival_dist: f32 = 0.05;
 
-/// Sense record byte size (BOTS_SPEC §3): one fixed 32-byte record per entity.
+/// Sense record byte size (RFC 0001 §3): one fixed 32-byte record per entity.
 pub const sense_record_len: usize = 32;
-/// Sense kind value for a bot (BOTS_SPEC §3: 0 player, 1 zombie, 2 bot).
+/// Sense kind value for a bot (RFC 0001 §3: 0 player, 1 zombie, 2 bot).
 const sense_kind_bot: u8 = 2;
-/// Damage-event records in the sense trailer cap (BOTS_SPEC §3): at most this
+/// Damage-event records in the sense trailer cap (RFC 0001 §3): at most this
 /// many 16-byte events follow the entity records. Bounded so the guest's
 /// parsing stays fixed-size; overflow events are dropped (flavor, not fidelity).
 pub const max_sense_events: usize = 8;
-/// Sense event kind for a damage event (BOTS_SPEC §3: 3 = damage).
+/// Sense event kind for a damage event (RFC 0001 §3: 3 = damage).
 pub const sense_kind_damage: u8 = 3;
-/// Sense event kind for a bot-info record (BOTS_SPEC §3: 4 = bot info). The
+/// Sense event kind for a bot-info record (RFC 0001 §3: 4 = bot info). The
 /// host writes one per live bot each sense pass so the guest can adapt to the
 /// bot's host-assigned weapon (range/burst/lead) without a record-layout bump.
 pub const sense_kind_bot_info: u8 = 4;
 /// Max bot-info records in the sense trailer (one per live bot; cap = slots).
 pub const max_sense_info: usize = max_bots;
-/// Sense event record byte size (BOTS_SPEC §3): kind u8 + 3 pad, attacker i32,
+/// Sense event record byte size (RFC 0001 §3): kind u8 + 3 pad, attacker i32,
 /// victim i32, amount f32 — packed, little-endian.
 pub const sense_event_len: usize = 16;
 
-/// One sense damage event (BOTS_SPEC §3). Host-recorded whenever a live bot
+/// One sense damage event (RFC 0001 §3). Host-recorded whenever a live bot
 /// takes attributed damage, so the guest learns *who* hit it and can
 /// retaliate (clanker `Bot.OnDamaged` parity).
 pub const SenseEvent = struct {
@@ -168,13 +171,41 @@ pub const BotManager = struct {
     /// Live bot count (spawn ++, remove / kill --). Indexes known_bots bits.
     n: usize = 0,
     /// Remembered population floor (set by `bot count <n>`); tick tops up when
-    /// bots die so the floor is self-healing (BOTS_SPEC: keep n alive).
+    /// bots die so the floor is self-healing (RFC 0001: keep n alive).
     floor: u32 = 0,
-    /// Damage events pending in the sense trailer (BOTS_SPEC §3). Recorded on
+    /// Damage events pending in the sense trailer (RFC 0001 §3). Recorded on
     /// attributed damage to a live bot; drained (and cleared) by
     /// `drainSenseEvents` each sense pass, so they are one-tick flavor.
     events: [max_sense_events]SenseEvent = [_]SenseEvent{.{}} ** max_sense_events,
     ev_n: usize = 0,
+    /// Loadout pool from `[bots] weapon_profiles` (parsed at init; empty =
+    /// use the builtin `bot_loadout_pool`).
+    loadout: [8]BotWeapon = undefined,
+    loadout_n: usize = 0,
+
+    /// Parse `cfg.weapon_profiles` ("tag:damage:range:pellets,..") into the
+    /// loadout pool. Malformed entries are skipped; empty keeps the builtin
+    /// pool. Called once after the config lands (Game.initWithOptions).
+    pub fn parseLoadout(self: *BotManager) void {
+        self.loadout_n = 0;
+        var it = std.mem.splitScalar(u8, self.cfg.weapon_profiles, ',');
+        while (it.next()) |entry_raw| {
+            if (self.loadout_n >= self.loadout.len) break;
+            const entry = std.mem.trim(u8, entry_raw, " \t\r\n");
+            if (entry.len == 0) continue;
+            var f = std.mem.splitScalar(u8, entry, ':');
+            const tag = std.mem.trim(u8, f.next() orelse continue, " \t");
+            if (tag.len == 0 or tag.len > 12) continue;
+            const dmg = std.fmt.parseFloat(f32, f.next() orelse continue) catch continue;
+            const range = std.fmt.parseFloat(f32, f.next() orelse continue) catch continue;
+            const pellets = std.fmt.parseInt(u8, f.next() orelse continue, 10) catch continue;
+            var w: BotWeapon = .{ .damage = dmg, .range = range, .pellets = pellets };
+            @memcpy(w.tag[0..tag.len], tag);
+            w.tag_len = tag.len;
+            self.loadout[self.loadout_n] = w;
+            self.loadout_n += 1;
+        }
+    }
 
     /// Allocate a live bot at (x, y, z). Returns its net id, or null when the
     /// table is full. The id comes from the shared sim counter (Game helper),
@@ -193,6 +224,8 @@ pub const BotManager = struct {
         var prng: u32 = @as(u32, @bitCast(id)) *% 2654435761 +% @as(u32, @truncate(@as(u64, @bitCast(g.tick_n))));
         prng = prng *% 1103515245 +% 12345;
         const widx: usize = @intCast((prng >> 8 & 0x00ffffff) % bot_loadout_pool.len);
+        const pool: []const BotWeapon = if (self.loadout_n > 0) self.loadout[0..self.loadout_n] else &bot_loadout_pool;
+        const wsel = pool[widx % pool.len];
         self.bots[slot] = .{
             .net_id = id,
             .x = x,
@@ -200,7 +233,7 @@ pub const BotManager = struct {
             .z = z,
             .hp = @max(hp, 1),
             .alive = true,
-            .weapon = bot_loadout_pool[widx],
+            .weapon = wsel,
             .weapon_id = @intCast(widx),
         };
         self.bots[slot].setName(default_bot_name);
@@ -242,7 +275,7 @@ pub const BotManager = struct {
     }
 
     /// `bot shoot <shooter> <target> [head]`: only a live bot may fire, and only
-    /// when the shot is not blocked by solid voxels (BOTS_SPEC §4 host-LOS gate;
+    /// when the shot is not blocked by solid voxels (RFC 0001 §4 host-LOS gate;
     /// `Game.botLosClear` from the shooter's eye to the target's chest). A live
     /// bot target takes weapon damage (dies at hp <= 0); any other target
     /// resolves through the ECS damage path (guarded against absence). The
@@ -309,7 +342,7 @@ pub const BotManager = struct {
     }
 
     /// Apply damage to a live bot by net id, attributed to `attacker`
-    /// (BOTS_SPEC §3 / ADR 0026: the host attributes every hit so the guest
+    /// (RFC 0001 §3 / ADR 0026: the host attributes every hit so the guest
     /// can retaliate). No-op when the target is absent. Records a damage-event
     /// sense record for the guest and sets the victim's `last_attacker`.
     /// Players and bots both route here (C2S damage path + `shoot`).
@@ -379,7 +412,7 @@ pub const BotManager = struct {
     /// Write one kind-4 bot-info record per live bot into the sense trailer
     /// starting at byte `base` (before the damage events). Returns the number
     /// written (<= `cap`). The guest builds its per-bot weapon map from these
-    /// (BOTS_SPEC §3) so the brain adapts range/burst/lead to the host-assigned
+    /// (RFC 0001 §3) so the brain adapts range/burst/lead to the host-assigned
     /// loadout. No heap; stops early when `out` cannot fit the next record.
     pub fn fillSenseBotInfo(self: *BotManager, out: []u8, base: usize, cap: usize) usize {
         var written: usize = 0;
@@ -418,7 +451,7 @@ pub const BotManager = struct {
         const target = @min(n, @as(u32, max_bots));
         self.floor = target;
         // The population floor is two-way: remove extras when over target
-        // (BOTS_SPEC `bot count` = "keep n alive"). `bot count 0` clears all.
+        // (RFC 0001 `bot count` = "keep n alive"). `bot count 0` clears all.
         while (self.n > target) {
             var slot: usize = 0;
             while (slot < max_bots and !self.bots[slot].alive) : (slot += 1) {}
@@ -546,7 +579,7 @@ pub const BotManager = struct {
         self.maintainFloor(g);
     }
 
-    /// Append Bot sense records after the host's ECS actor records (BOTS_SPEC
+    /// Append Bot sense records after the host's ECS actor records (RFC 0001
     /// §3): one 32-byte record per live bot, starting at byte `base`, capped at
     /// `max_records`. `*n` is the running record count (updated in place); the
     /// caller owns the header and return length. Stops early when the caller's

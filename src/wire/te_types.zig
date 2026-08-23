@@ -1,5 +1,5 @@
 //! Stock TileEntityType enum values (RE: TileEntityType / network TE discriminant,
-//! IL 1311761-1311788, tabulated in 7dtd-research world-generation.md).
+//! IL 1311761-1311788, tabulated in 7dtd-engine-research world-generation.md).
 //! Named constants only; not loaded from XML (engine enum, not game data tables).
 
 const std = @import("std");

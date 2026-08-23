@@ -3,88 +3,74 @@
 <title>Sign in · zdtd</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>/* zdtd-tokens */
-/* Tokens — single source of truth, inlined into every page by build-webui-ts.sh */
 :root{
   color-scheme:dark;
-  --bg:#080c12;
-  --bg2:#0d121b;
-  --card:#101722;
-  --card2:#141e2e;
-  --sunken:#0a101a;
-  --well:#060a12;
-  --line:rgba(148,163,184,.09);
-  --line2:rgba(148,163,184,.14);
-  --edge:rgba(148,163,184,.22);
-  --fg:#e6edf7;
-  --muted:#8694b0;
-  --muted2:#64748d;
-  --muted3:#4a5873;
-  --acc:#8fb4ff;
-  --acc2:#6e9bff;
-  --acc-soft:rgba(143,180,255,.12);
-  --acc-ghost:rgba(143,180,255,.06);
-  --acc-ring:rgba(143,180,255,.35);
-  --ok:#34d399;
-  --ok-soft:rgba(52,211,153,.12);
-  --warn:#fbbf24;
-  --warn-soft:rgba(251,191,36,.12);
-  --err:#fb7185;
-  --err-soft:rgba(251,113,133,.11);
-  --nav:#0a0e15;
+  --bg:#050507;
+  --bg2:#0a0a0c;
+  --panel:#111113;
+  --panel2:#17171a;
+  --inset:#080809;
+  --well:#070708;
+  --line:#1e1e21;
+  --line2:#27272a;
+  --edge:#333338;
+  --fg:#ededed;
+  --muted:#9a9aa0;
+  --muted2:#6f6f77;
+  --muted3:#52525b;
+  --acc:#ededed;
+  --acc2:#d4d4d8;
+  --acc-soft:rgba(237,237,237,.07);
+  --acc-ghost:rgba(237,237,237,.035);
+  --acc-ring:rgba(237,237,237,.14);
+  --ok:#22c55e;
+  --ok-soft:rgba(34,197,94,.08);
+  --warn:#eab308;
+  --warn-soft:rgba(234,179,8,.10);
+  --err:#ef4444;
+  --err-soft:rgba(239,68,68,.07);
   --sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Cascadia Mono","JetBrains Mono",monospace;
-  --fs-micro:0.6875rem;
-  --fs-sm:0.8125rem;
-  --fs:0.875rem;
-  --fs-lead:1rem;
-  --r-xs:6px;
-  --r-sm:8px;
-  --r-md:10px;
-  --r-lg:12px;
-  --r-xl:14px;
-  --r-pill:999px;
-  --shadow-card:0 1px 2px rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.28);
-  --shadow-lg:0 16px 48px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.04) inset;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Berkeley Mono","JetBrains Mono",monospace;
+  --r:0px;
+  --r2:2px;
 }
+/* /zdtd-tokens */
 *{box-sizing:border-box}
 html{scrollbar-gutter:stable}
-body{font-family:var(--sans);margin:0;min-height:100dvh;display:grid;place-items:center;padding:clamp(1rem,4vw,2rem);line-height:1.55;color:var(--fg);background:radial-gradient(720px 460px at 50% 0%, rgba(143,180,255,.08), transparent 62%), linear-gradient(to bottom, var(--bg2) 0%, var(--bg) 100%);-webkit-font-smoothing:antialiased}
-a{color:var(--acc);text-decoration:none}
-a:hover{color:var(--acc2);text-decoration:underline;text-underline-offset:2px}
-code{font-family:var(--mono);font-size:0.82em;background:rgba(143,180,255,.08);border:1px solid rgba(143,180,255,.11);padding:0.12em 0.36em;border-radius:6px;color:var(--muted)}
-main{width:min(26rem,100%);background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.5rem 1.5rem 1.25rem;box-shadow:var(--shadow-lg)}
-h1{font-family:var(--mono);font-size:0.72rem;letter-spacing:0.16em;text-transform:uppercase;margin:0;font-weight:700;color:var(--fg);display:flex;align-items:center;gap:0.45rem}
-h1::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted3);flex:none}
-.meta{color:var(--muted);font-family:var(--mono);font-size:0.66rem;letter-spacing:0.04em;margin:0.3rem 0 1.1rem}
-.lead{color:var(--muted);font-size:0.875rem;margin:0 0 0.9rem;line-height:1.5}
-label{display:block;font-size:0.74rem;font-weight:600;letter-spacing:0.02em;color:var(--fg);margin:1rem 0 0.35rem}
-.secret-row{display:flex;align-items:stretch;gap:0.5rem}
+body{font-family:var(--sans);margin:0;min-height:100dvh;display:grid;place-items:center;padding:clamp(1rem,4vw,2rem);line-height:1.5;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
+a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line2)}
+a:hover{border-bottom-color:var(--fg)}
+code{font-family:var(--mono);font-size:0.74em;background:var(--inset);border:1px solid var(--line);padding:0.1em 0.32em;border-radius:0;color:var(--muted)}
+main{width:min(26rem,100%);background:var(--panel);border:1px solid var(--line);border-radius:0;padding:1.2rem 1.25rem 1rem}
+.meta{color:var(--muted2);font-family:var(--mono);font-size:0.62rem;letter-spacing:0.05em;text-transform:uppercase;font-weight:600;margin:0.2rem 0 1rem}
+.lead{color:var(--muted);font-size:0.82rem;margin:0 0 1rem;line-height:1.5}
+label{display:block;font-family:var(--mono);font-size:0.62rem;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;color:var(--muted);margin:1rem 0 0.3rem}
+.secret-row{display:flex;align-items:stretch;gap:0.35rem}
 .secret-row input{flex:1;min-width:0}
-input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:42px;padding:0.5rem 0.7rem;border:1px solid var(--line2);border-radius:10px;background:var(--well);color:var(--fg);font-family:var(--mono);font-size:0.92rem;transition:border-color .14s,box-shadow .14s,background .14s}
-input[type=password]:focus,input[type=text]:focus{outline:none;border-color:var(--acc-ring);box-shadow:0 0 0 3px var(--acc-ghost);background:var(--sunken)}
-input[aria-invalid=true]{border-color:rgba(251,113,133,.45);box-shadow:0 0 0 3px var(--err-soft)}
-button{appearance:none;min-height:42px;min-width:5rem;padding:0.5rem 1rem;border:1px solid transparent;border-radius:10px;background:var(--acc);color:var(--bg);font-weight:700;font-size:0.875rem;cursor:pointer;box-shadow:0 1px 0 rgba(255,255,255,.1) inset;transition:filter .12s,transform .05s,opacity .12s}
-button:hover{filter:brightness(1.05)}
+input[type=password],input[type=text]{width:100%;box-sizing:border-box;min-height:34px;padding:0.35rem 0.55rem;border:1px solid var(--line2);border-radius:0;background:var(--well);color:var(--fg);font-family:var(--mono);font-size:0.84rem}
+input[type=password]:focus,input[type=text]:focus{outline:none;border-color:var(--edge);background:var(--inset)}
+input[aria-invalid=true]{border-color:rgba(239,68,68,.45);box-shadow:0 0 0 2px var(--err-soft)}
+button{appearance:none;min-height:34px;min-width:5rem;padding:0.35rem 0.85rem;border:1px solid var(--fg);border-radius:0;background:var(--fg);color:var(--bg);font-family:var(--mono);font-weight:700;font-size:0.72rem;letter-spacing:0.03em;cursor:pointer}
+button:hover{background:#fff;border-color:#fff}
 button:active{transform:translateY(1px)}
-.secret-row button{margin-top:0;min-width:4.5rem;background:var(--well);color:var(--fg);border-color:var(--line2);box-shadow:none;font-weight:600;font-size:0.8125rem}
-.secret-row button:hover{background:rgba(255,255,255,.05);border-color:var(--edge)}
-.secret-row button[aria-pressed=true]{background:var(--acc-soft);border-color:rgba(143,180,255,.22);color:var(--fg)}
-.hint{color:var(--muted2);font-size:0.76rem;margin:0.9rem 0 0;line-height:1.5}
-.hint + .hint{margin-top:0.4rem}
-.err{margin:0 0 0.9rem;padding:0.6rem 0.75rem;border-radius:10px;background:var(--err-soft);border:1px solid rgba(251,113,133,.22);color:#fecdd3;font-size:0.84rem;line-height:1.4}
-a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--acc-ring);outline-offset:2px}
-@media(forced-colors:active){:root{--bg:Canvas;--card:Canvas;--well:Canvas;--fg:CanvasText;--muted:GrayText;--acc:LinkText;--edge:ButtonText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
-/* /zdtd-tokens */
+.secret-row button{margin-top:0;min-width:3.8rem;min-height:34px;background:transparent;color:var(--muted);border-color:var(--line2);font-weight:600;font-size:0.68rem}
+.secret-row button:hover{color:var(--fg);border-color:var(--edge);background:var(--panel2)}
+.secret-row button[aria-pressed=true]{background:var(--acc-soft);border-color:var(--edge);color:var(--fg)}
+.hint{color:var(--muted2);font-size:0.70rem;margin:0.75rem 0 0;line-height:1.5}
+.hint + .hint{margin-top:0.25rem}
+.err{margin:0 0 0.85rem;padding:0.5rem 0.6rem;border-radius:0;background:var(--err-soft);border:1px solid rgba(239,68,68,.18);color:#f0a0a2;font-family:var(--mono);font-size:0.74rem;line-height:1.4}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:1px solid var(--fg);outline-offset:1px}
+@media(forced-colors:active){:root{--bg:Canvas;--panel:Canvas;--well:Canvas;--fg:CanvasText;--muted:GrayText}body{background:Canvas;color:CanvasText}main{border:1px solid CanvasText}a{color:LinkText}input,button{border:1px solid ButtonText}.err{color:MarkText;background:Mark}}
 </style></head>
-<body><main><h1>zdtd</h1><p class="meta">webui · sign in</p>
-<p>Sign in with the webui shared secret to set a session cookie.</p>
+<body><main><p style="margin:0;font-family:var(--mono);font-size:0.70rem;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;color:var(--fg)">zdtd</p><p class="meta">operator console · sign in</p>
+<p class="lead">Sign in with the webui shared secret to set a session cookie.</p>
 <form method="post" action="/login">
 <label for="login-token">Shared secret</label>
 <div class="secret-row"><input type="password" name="token" id="login-token" required maxlength="128" autocomplete="current-password" spellcheck="false" aria-describedby="login-help" autofocus><button type="button" id="toggle-secret" aria-controls="login-token" aria-pressed="false">Show</button></div>
-<button type="submit">Sign in</button>
+<button type="submit" style="margin-top:0.65rem;width:100%">Sign in</button>
 </form>
-<p id="login-help">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
-<p>Use the secret configured by the server operator with <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
+<p id="login-help" class="hint">Or send <code>Authorization: Bearer …</code> / <code>X-Zdtd-Secret</code>.</p>
+<p class="hint">Secret is set by the operator via <code>ZDTD_WEBUI_SECRET</code>.</p></main><script>
 /* zdtd-ts:login */
 "use strict";
 //! Webui login form: show/hide the shared secret.

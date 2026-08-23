@@ -1,5 +1,5 @@
 //! Config-file S2C: stock `SendXmlsToClient` / `NetPackageConfigFile`
-//! (`../7dtd-research/docs/mod-loading.md` §5.6, `protocol-packages.md`
+//! (`../7dtd-engine-research/docs/mod-loading.md` §5.6, `protocol-packages.md`
 //! IL=25). Patched config bytes are Deflate-cached once at init
 //! (serialize-once, PRD R8); the join send streams name + len + blob per row.
 //!
@@ -23,7 +23,7 @@ const flate = std.compress.flate;
 pub const max_config_blob_len: usize = 384 * 1024;
 
 /// The 42 `SendToClients=true` rows of `xmlsToLoad`
-/// (`../7dtd-research/docs/inventories/xmlsToLoad.md`). `archetypes` is
+/// (`../7dtd-engine-research/docs/inventories/xmlsToLoad.md`). `archetypes` is
 /// `LoadClientFile` (name-only, RE §5.6). Never sent: rwgmixer, gamestages,
 /// spawning, signs, loadingscreen, subtitles, videos.
 const s2c_names = [_][]const u8{

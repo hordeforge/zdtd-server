@@ -12,6 +12,7 @@ const tcp = @import("../util/tcp_listen.zig");
 const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 const version = @import("../version.zig");
 const clock = @import("../util/clock.zig");
+const plugin_mod = @import("../plugin/root.zig");
 
 pub const max_req: usize = 8192;
 pub const max_secret: usize = 128;
@@ -19,6 +20,12 @@ pub const max_secret: usize = 128;
 pub const min_secret: usize = 8;
 /// Hex length of HMAC-derived session token (cookie + CSRF; not the shared secret).
 pub const session_token_hex_len: usize = 32;
+/// Deterministic session "nonce": HMAC(secret, label) makes the session token
+/// stable across server restarts, so an operator's still-valid cookie keeps
+/// working after a restart (the cookie's own Max-Age still bounds it). The
+/// token leaks nothing about the secret, and the loopback ops threat model
+/// already assumes secret possession grants access.
+const session_nonce_label = "zdtd-webui-session-v1";
 /// One roster row per client slot: a 64-slot server must not hide the players
 /// past the cap from the operator (both the HTML partial and the stats JSON
 /// render a full roster inside the 16 KiB body buffer).
@@ -27,6 +34,10 @@ pub const max_name: usize = 32;
 /// Max admin line from web console POST /api/cmd.
 pub const max_cmd_line: usize = 256;
 pub const max_cmd_out: usize = 4096;
+// Shell page (compiled TS + CSS inlined) is the largest rendered body; 60 KiB
+// keeps headroom for chrome and the live latency chart. Poll path only: the
+// buffer lives on the tick thread's stack.
+pub const max_shell_html: usize = 60 * 1024;
 pub const max_audit: usize = 24;
 pub const max_audit_line: usize = 160;
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
@@ -55,6 +66,15 @@ pub const PlayerRow = struct {
     z: f32 = 0,
     name_len: u8 = 0,
     name: [max_name]u8 = .{0} ** max_name,
+};
+
+/// One row per loaded Wasm plugin module (`Game.wasm_plugins`; module names
+/// come from the mods/ dir, capped at 64 bytes for the dashboard).
+pub const ModuleRow = struct {
+    used: bool = false,
+    disabled: bool = false,
+    name_len: u8 = 0,
+    name: [64]u8 = .{0} ** 64,
 };
 
 pub const Snapshot = struct {
@@ -132,9 +152,20 @@ pub const Snapshot = struct {
     authority_correct: bool = true,
     password_set: bool = false,
     wire_chunks: bool = true,
+    // Host OS (sysinfo + getrusage; sampled with the snapshot)
+    os_load_1: f32 = 0,
+    os_load_5: f32 = 0,
+    os_load_15: f32 = 0,
+    os_mem_total_mb: u32 = 0,
+    os_mem_avail_mb: u32 = 0,
+    os_proc_cpu_pct: f32 = 0,
+    os_proc_rss_mb: u32 = 0,
+    os_procs: u32 = 0,
+    os_uptime_s: u64 = 0,
     world_name_len: u8 = 0,
     world_name: [48]u8 = .{0} ** 48,
     players: [max_players_snap]PlayerRow = [_]PlayerRow{.{}} ** max_players_snap,
+    modules: [plugin_mod.wasm.max_wasm_plugins]ModuleRow = [_]ModuleRow{.{}} ** plugin_mod.wasm.max_wasm_plugins,
 };
 
 /// Called from HTTP poll with one admin line; must fill reply into out (same as admin TCP).
@@ -218,12 +249,9 @@ pub const Server = struct {
 
         @memcpy(self.secret_buf[0..cfg.secret.len], cfg.secret);
         self.secret_len = cfg.secret.len;
-        var nonce: [32]u8 = undefined;
-        defer @memset(&nonce, 0);
-        var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
-        defer threaded.deinit();
-        threaded.io().random(&nonce);
-        fillSessionToken(cfg.secret, &nonce, &self.session_token);
+        // Deterministic per secret so a valid cookie survives a server restart
+        // (session_expires_ns = 0 below means "valid until the next login").
+        fillSessionToken(cfg.secret, session_nonce_label, &self.session_token);
         self.session_expires_ns = 0;
         self.port = self.listener.port;
         self.bind_addr = addr_host;
@@ -252,18 +280,16 @@ pub const Server = struct {
     }
 
     fn sessionValid(self: *const Server) bool {
-        // Zero keeps isolated unit fixtures that install a token directly
-        // usable; production sessions always receive a deadline at login.
+        // Zero = "no login yet": valid from process start, which is exactly
+        // what makes a pre-restart cookie work again (deterministic token).
+        // Login always sets a deadline; unit fixtures install a token directly.
         return self.session_expires_ns == 0 or clock.monoNs() < self.session_expires_ns;
     }
 
-    fn rotateSession(self: *Server) void {
-        var nonce: [32]u8 = undefined;
-        defer @memset(&nonce, 0);
-        var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
-        defer threaded.deinit();
-        threaded.io().random(&nonce);
-        fillSessionToken(self.secret(), &nonce, &self.session_token);
+    fn issueSession(self: *Server) void {
+        // Same deterministic token as init: a login refreshes the deadline but
+        // must not invalidate a cookie that already works across a restart.
+        fillSessionToken(self.secret(), session_nonce_label, &self.session_token);
         self.session_expires_ns = clock.monoNs() +% (@as(u64, session_cookie_max_age_s) * std.time.ns_per_s);
     }
 
@@ -517,7 +543,7 @@ pub const Server = struct {
                 if (constantTimeEql(tok, self.secret())) {
                     self.login_fails = 0;
                     self.login_lock_until_ns = 0;
-                    self.rotateSession();
+                    self.issueSession();
                     self.set_cookie = true;
                     // Successes are as load-bearing as failures for an audit
                     // trail: /api/cmd runs privileged console lines under this
@@ -595,9 +621,9 @@ pub const Server = struct {
             return;
         }
 
-        // Shell HTML with the compiled TS JS is the largest body; 32 KiB keeps
-        // headroom for CSS/JS polish (poll path only; the tick thread's stack).
-        var body_buf: [32768]u8 = undefined;
+        // Shell HTML with the compiled TS JS is the largest body; max_shell_html
+        // keeps headroom for CSS/JS polish (poll path only; the tick thread's stack).
+        var body_buf: [max_shell_html]u8 = undefined;
 
         if (std.mem.eql(u8, path, "/api/cmd")) {
             if (method != .POST) {
@@ -630,8 +656,16 @@ pub const Server = struct {
                 try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderPlayers(&body_buf, &self.snap), &.{});
                 return;
             }
+            if (std.mem.eql(u8, path, "/partials/modules")) {
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderModules(&body_buf, &self.snap), &.{});
+                return;
+            }
             if (std.mem.eql(u8, path, "/partials/apm")) {
                 try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderApm(&body_buf, &self.snap), &.{});
+                return;
+            }
+            if (std.mem.eql(u8, path, "/partials/settings")) {
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderSettings(&body_buf, &self.snap), &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/partials/console")) {
@@ -968,7 +1002,9 @@ fn isGetOnlyPath(path: []const u8) bool {
         std.mem.eql(u8, path, "/index.html") or
         std.mem.eql(u8, path, "/partials/status") or
         std.mem.eql(u8, path, "/partials/players") or
+        std.mem.eql(u8, path, "/partials/modules") or
         std.mem.eql(u8, path, "/partials/apm") or
+        std.mem.eql(u8, path, "/partials/settings") or
         std.mem.eql(u8, path, "/partials/console") or
         std.mem.eql(u8, path, "/api/apm.json");
 }
@@ -1219,9 +1255,11 @@ fn renderConsoleLog(buf: []u8, s: *const Server) ![]const u8 {
     return w.buffered();
 }
 
-/// HMAC-SHA256(secret, fresh process nonce) → first 16 bytes as hex (32 chars).
-/// Cookie and CSRF use this so the shared secret is not stored in browser storage/HTML,
-/// and old cookies stop working whenever the listener restarts.
+/// HMAC-SHA256(secret, session_nonce_label) → first 16 bytes as hex (32 chars).
+/// Deterministic per secret: the same cookie value is re-derived after a server
+/// restart, so a still-valid operator cookie keeps working (browser Max-Age and
+/// logout still bound it). Cookie and CSRF use this so the shared secret is not
+/// stored in browser storage/HTML.
 fn fillSessionToken(secret: []const u8, nonce: []const u8, out: *[session_token_hex_len]u8) void {
     var mac: [std.crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
     std.crypto.auth.hmac.sha2.HmacSha256.create(&mac, nonce, secret);
@@ -1520,6 +1558,77 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
         pw,
         wc,
     });
+    const up_h: u64 = s.os_uptime_s / (60 * 60);
+    const up_m: u64 = (s.os_uptime_s % (60 * 60)) / 60;
+    try w.print(
+        \\<h3>Host</h3>
+        \\<ul class="grid">
+        \\<li class="stat"><b class="num">{d:.2} / {d:.2} / {d:.2}</b><span>load 1 / 5 / 15 min</span></li>
+        \\<li class="stat"><b class="num">{d} / {d} MiB</b><span>ram free+buf / total</span></li>
+        \\<li class="stat"><b class="num">{d:.1}%</b><span>proc cpu (of host uptime)</span></li>
+        \\<li class="stat"><b class="num">{d} MiB</b><span>proc rss peak</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>processes</span></li>
+        \\<li class="stat"><b class="num">{d}h {d}m</b><span>host uptime</span></li>
+        \\</ul>
+    , .{
+        s.os_load_1,
+        s.os_load_5,
+        s.os_load_15,
+        s.os_mem_avail_mb,
+        s.os_mem_total_mb,
+        s.os_proc_cpu_pct,
+        s.os_proc_rss_mb,
+        s.os_procs,
+        up_h,
+        up_m,
+    });
+    return w.buffered();
+}
+
+fn renderSettings(buf: []u8, s: *const Snapshot) ![]const u8 {
+    var w: std.Io.Writer = .fixed(buf);
+    const wn = s.world_name[0..s.world_name_len];
+    const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
+    const pw: []const u8 = if (s.password_set) "set" else "not set";
+    const wc: []const u8 = if (s.wire_chunks) "on" else "off";
+    try w.writeAll("<h3 style=\"margin-top:0\">Server</h3><ul class=\"grid\"><li class=\"stat\"><b>");
+    // World names come from config/CLI; still escape so a crafted path cannot break HTML.
+    if (wn.len == 0) {
+        try w.writeAll("<span class=\"meta\">(unnamed)</span>");
+    } else {
+        try htmlEscape(&w, wn);
+    }
+    try w.print(
+        \\</b><span>world</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>max players</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>info port</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>game port</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>webui port</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>blood moon every (days)</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>view radius</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>max streamed chunks</span></li>
+        \\<li class="stat"><b class="num">{d:.0}</b><span>interest range (m)</span></li>
+        \\<li class="stat"><b class="num">{d:.0}</b><span>edit range (m)</span></li>
+        \\<li class="stat"><b class="num">{d}</b><span>max spawned zombies</span></li>
+        \\<li class="stat"><b>{s}</b><span>authority mode</span></li>
+        \\<li class="stat"><b>{s}</b><span>password</span></li>
+        \\<li class="stat"><b>{s}</b><span>chunk streaming</span></li>
+        \\</ul>
+    , .{
+        s.max_players,
+        s.info_port,
+        s.info_port +% 2,
+        s.webui_port,
+        s.bloodmoon_frequency,
+        s.view_radius,
+        s.max_streamed_chunks,
+        s.interest_range,
+        s.max_edit_range,
+        s.max_spawned_zombies,
+        auth,
+        pw,
+        wc,
+    });
     return w.buffered();
 }
 
@@ -1540,6 +1649,27 @@ fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
         , .{ p.entity_id, p.x, p.y, p.z, st });
     }
     if (!any) try w.writeAll("<tr><td colspan=\"5\" style=\"color:var(--muted)\">No players are connected. They appear here when clients join.</td></tr>");
+    try w.writeAll("</tbody></table>");
+    return w.buffered();
+}
+
+fn renderModules(buf: []u8, s: *const Snapshot) ![]const u8 {
+    var w: std.Io.Writer = .fixed(buf);
+    try w.writeAll("<table><caption class=\"sr-only\">Loaded modules</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Module</th><th scope=\"col\">State</th></tr></thead><tbody>");
+    var any = false;
+    for (&s.modules, 0..) |m, i| {
+        if (!m.used) continue;
+        any = true;
+        const nm = m.name[0..m.name_len];
+        // Module names come from the mods/ dir; still escape so a crafted path
+        // cannot break HTML.
+        try w.print("<tr><td class=\"num\">{d}</td><th scope=\"row\">", .{i});
+        try htmlEscape(&w, nm);
+        const st: []const u8 = if (m.disabled) "disabled" else "enabled";
+        const st_cls: []const u8 = if (m.disabled) "num err" else "num";
+        try w.print("</th><td class=\"{s}\">{s}</td></tr>", .{ st_cls, st });
+    }
+    if (!any) try w.writeAll("<tr><td colspan=\"3\" style=\"color:var(--muted)\">No modules loaded. Drop a .wasm under mods/ and restart, or run `plugin reload &lt;name&gt;`.</td></tr>");
     try w.writeAll("</tbody></table>");
     return w.buffered();
 }
@@ -1775,6 +1905,19 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
     try w.writeAll(",\"world\":\"");
     try jsonEscapeWrite(&w, s.world_name[0..s.world_name_len]);
     try w.writeAll("\"");
+    // Host OS gauges (same snapshot as the status Host grid).
+    try w.print(
+        \\,"os_load_1":{d:.2},"os_load_5":{d:.2},"os_load_15":{d:.2},"os_mem_avail_mb":{d},"os_mem_total_mb":{d},"os_proc_cpu_pct":{d:.1},"os_proc_rss_mb":{d},"os_uptime_s":{d}
+    , .{
+        s.os_load_1,
+        s.os_load_5,
+        s.os_load_15,
+        s.os_mem_avail_mb,
+        s.os_mem_total_mb,
+        s.os_proc_cpu_pct,
+        s.os_proc_rss_mb,
+        s.os_uptime_s,
+    });
     // Same reject counters as HTML Errors panel / guardstats (tools use this JSON).
     try w.print(
         \\,"phase_rejects":{d},"ownership_rejects":{d},"bounds_rejects":{d},"movement_rejects":{d},"decode_rejects":{d}
@@ -1806,6 +1949,19 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
         try jsonEscapeWrite(&w, p.name[0..p.name_len]);
         try w.writeAll("\"}");
     }
+    // Loaded Wasm plugin modules (same roster as the Modules partial).
+    try w.writeAll(",\"modules\":[");
+    var first_module = true;
+    for (&s.modules) |m| {
+        if (!m.used) continue;
+        if (!first_module) try w.writeAll(",");
+        first_module = false;
+        try w.writeAll("{\"name\":\"");
+        try jsonEscapeWrite(&w, m.name[0..m.name_len]);
+        try w.writeAll("\",\"disabled\":");
+        try w.writeAll(if (m.disabled) "true" else "false");
+        try w.writeAll("}");
+    }
     try w.writeAll("]}\n");
     return w.buffered();
 }
@@ -1830,6 +1986,8 @@ test "isGetOnlyPath known dashboard routes" {
     try std.testing.expect(isGetOnlyPath("/"));
     try std.testing.expect(isGetOnlyPath("/api/apm.json"));
     try std.testing.expect(isGetOnlyPath("/partials/status"));
+    try std.testing.expect(isGetOnlyPath("/partials/settings"));
+    try std.testing.expect(isGetOnlyPath("/partials/modules"));
     try std.testing.expect(!isGetOnlyPath("/api/cmd"));
     try std.testing.expect(!isGetOnlyPath("/logout"));
     try std.testing.expect(!isGetOnlyPath("/nope"));
@@ -1869,6 +2027,21 @@ test "requestAuthorized cookie and bearer" {
     // Query credentials are accepted only by the dedicated /login route.
     const h4 = "GET /api/apm.json?token=s3cr3t HTTP/1.1\r\n";
     try std.testing.expect(!requestAuthorized(h4, "s3cr3t", &sess));
+}
+
+test "session token is deterministic per secret across restarts" {
+    // The token is HMAC(secret, fixed label): two processes started with the
+    // same secret derive the same cookie value, so a valid operator cookie
+    // survives a server restart without a re-login. A different secret must
+    // yield a different token.
+    var a: [session_token_hex_len]u8 = undefined;
+    var b: [session_token_hex_len]u8 = undefined;
+    fillSessionToken("s3cr3t", session_nonce_label, &a);
+    fillSessionToken("s3cr3t", session_nonce_label, &b);
+    try std.testing.expectEqualStrings(a[0..], b[0..]);
+    var other: [session_token_hex_len]u8 = undefined;
+    fillSessionToken("different", session_nonce_label, &other);
+    try std.testing.expect(!std.mem.eql(u8, a[0..], other[0..]));
 }
 
 /// Test helper: load a complete HTTP/1.1 request into recv_buf and run std.http path.
@@ -1940,6 +2113,8 @@ test "HEAD accepted on GET-only dashboard routes" {
     const cases = [_][]const u8{
         "HEAD / HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
         "HEAD /partials/status HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "HEAD /partials/settings HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
+        "HEAD /partials/modules HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
         "HEAD /api/apm.json HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n",
     };
     for (cases) |req| {
@@ -2209,7 +2384,7 @@ fn fuzzHttpHelpers(_: void, smith: *std.testing.Smith) !void {
 }
 
 test "renderShell exposes console names and status updates" {
-    var buf: [32 * 1024]u8 = undefined;
+    var buf: [max_shell_html]u8 = undefined;
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x33} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
@@ -2227,7 +2402,7 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "action=\"/logout\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "line.split") != null);
-    try std.testing.expect(html.len < 32768);
+    try std.testing.expect(html.len < max_shell_html);
 }
 
 test "loginHintHtml exposes labeled secret form" {
@@ -2306,7 +2481,7 @@ test "command result marks known failures and is keyboard-scrollable" {
     var sess: [session_token_hex_len]u8 = undefined;
     const nonce = [_]u8{0x44} ** 32;
     fillSessionToken("s3cr3t", &nonce, &sess);
-    var shell_buf: [32 * 1024]u8 = undefined;
+    var shell_buf: [max_shell_html]u8 = undefined;
     const shell = try renderShell(&shell_buf, sess[0..]);
     // role= so the aria-label is actually exposed (a bare div has no name),
     // tabindex=-1 so the poll's focus restore has somewhere to land.
@@ -2346,6 +2521,33 @@ test "renderStatus uses h3 for subsections under shell Status h2" {
     try std.testing.expect(std.mem.find(u8, html, "<h3>Server</h3>") != null);
 }
 
+test "renderStatus includes host OS metrics grid" {
+    var s: Snapshot = .{ .tick_n = 1, .os_mem_total_mb = 16384, .os_mem_avail_mb = 8192, .os_load_1 = 0.5, .os_uptime_s = 7200 };
+    var buf: [8192]u8 = undefined;
+    const html = try renderStatus(&buf, &s);
+    try std.testing.expect(std.mem.find(u8, html, "<h3>Host</h3>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "load 1 / 5 / 15 min") != null);
+    try std.testing.expect(std.mem.find(u8, html, "ram free+buf / total") != null);
+    try std.testing.expect(std.mem.find(u8, html, "proc cpu") != null);
+    try std.testing.expect(std.mem.find(u8, html, "proc rss peak") != null);
+    // 7200 s renders as "2h 0m" host uptime.
+    try std.testing.expect(std.mem.find(u8, html, "2h 0m") != null);
+}
+
+test "renderSettings lists effective server policy" {
+    var snap: Snapshot = .{ .tick_n = 1, .max_players = 8, .view_radius = 7, .info_port = 27002, .webui_port = 8080, .max_spawned_zombies = 64, .bloodmoon_frequency = 7 };
+    snap.world_name_len = @intCast("Navezgane".len);
+    @memcpy(snap.world_name[0..snap.world_name_len], "Navezgane");
+    var buf: [8192]u8 = undefined;
+    const settings = try renderSettings(&buf, &snap);
+    try std.testing.expect(std.mem.find(u8, settings, "<ul class=\"grid\">") != null);
+    try std.testing.expect(std.mem.find(u8, settings, "Navezgane") != null);
+    try std.testing.expect(std.mem.find(u8, settings, "max players") != null);
+    try std.testing.expect(std.mem.find(u8, settings, "blood moon every (days)") != null);
+    try std.testing.expect(std.mem.find(u8, settings, "authority mode") != null);
+    try std.testing.expect(std.mem.find(u8, settings, "chunk streaming") != null);
+}
+
 test "renderPlayers identifies each player name as a row header" {
     var s: Snapshot = .{};
     s.players[0].used = true;
@@ -2354,6 +2556,24 @@ test "renderPlayers identifies each player name as a row header" {
     var buf: [4096]u8 = undefined;
     const html = try renderPlayers(&buf, &s);
     try std.testing.expect(std.mem.find(u8, html, "<th scope=\"row\">Ada</th>") != null);
+}
+
+test "renderModules lists loaded wasm modules with state" {
+    var s: Snapshot = .{};
+    s.modules[0] = .{ .used = true, .name_len = 8, .disabled = false };
+    @memcpy(s.modules[0].name[0..8], "zdtd_bot");
+    s.modules[1] = .{ .used = true, .name_len = 13, .disabled = true };
+    @memcpy(s.modules[1].name[0..13], "zdtd_announce");
+    var buf: [4096]u8 = undefined;
+    const html = try renderModules(&buf, &s);
+    try std.testing.expect(std.mem.find(u8, html, "<th scope=\"row\">zdtd_bot</th>") != null);
+    try std.testing.expect(std.mem.find(u8, html, ">enabled</td>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "class=\"num err\">disabled</td>") != null);
+    // Empty roster gets a hint row, not a bare table.
+    var s2: Snapshot = .{};
+    var buf2: [4096]u8 = undefined;
+    const empty = try renderModules(&buf2, &s2);
+    try std.testing.expect(std.mem.find(u8, empty, "No modules loaded") != null);
 }
 
 test "renderApmJson includes escaped player names and world" {
@@ -2380,6 +2600,9 @@ test "renderApmJson includes escaped player names and world" {
     try std.testing.expect(std.mem.find(u8, js, "\"name\":\"A\\\"b\\\\c\"") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"slot\":1") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"entity_id\":100") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"os_load_1\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"os_uptime_s\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"modules\":[") != null);
 }
 
 test "prefersPlainBody honors Accept without HTML" {

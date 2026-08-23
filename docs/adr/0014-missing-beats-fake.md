@@ -35,7 +35,7 @@ gaps, not a visually busy fake world.
   remaining readable by stock `Read`.
 - Implementers spend RE time instead of inventing bytes; loadgen goldens stay
   trustworthy.
-- Client tooling (`7dtd-connect`, playtest) stays join/automation only.
+- Client tooling (`7dtd-fastconnect`, playtest) stays join/automation only.
 
 ## Alternatives considered
 

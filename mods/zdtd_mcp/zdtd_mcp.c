@@ -71,7 +71,7 @@ extern int zdtd_json_obj(int path_ptr, int path_len);
 #define SENSE_SCRATCH_LEN 2048   // host_sense_max (src/plugin/wasm.zig)
 #define QUERY_REQ_LEN 128
 #define QUERY_RESP_LEN 64        // query_resp_max (src/plugin/wasm.zig)
-#define SENSE_HEADER_LEN 16
+#define SENSE_HEADER_LEN 24
 #define SENSE_RECORD_LEN 32
 #define SBUF_LEN 96              // decoded strings: jsonrpc, method, tool name
 #define VBUF_LEN 128             // decoded admin_command verb
@@ -259,7 +259,7 @@ static float rd_f32(const unsigned char *p) {
 
 // text result for a tool that reads the snapshot; returns 0 on overflow.
 static int tool_text_snapshot(wbuf_t *w, const unsigned char *snap, int snap_len, int tool) {
-  if (snap_len < SENSE_HEADER_LEN || rd_u32(snap) != 0x3253425a) return 0; // 'ZBS2'
+  if (snap_len < SENSE_HEADER_LEN || rd_u32(snap) != 0x3353425a) return 0; // .ZBS3.
   unsigned int count = rd_u32(snap + 4);
   unsigned int tick = rd_u32(snap + 8);
   // Records follow at a fixed stride; the snapshot may also carry a 16-byte
