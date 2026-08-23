@@ -19,7 +19,7 @@ comments are the authority, not this document.
 **World/save:** [world-chunks.md](../../7dtd-engine-research/docs/world-chunks.md), [save-region.md](../../7dtd-engine-research/docs/save-region.md).  
 **Entities:** [entity-ai.md](../../7dtd-engine-research/docs/entity-ai.md).  
 **Golden wire / join bots:** sibling [`../../7dtd-loadgen/`](../../7dtd-loadgen) (`PackageCodec`, `JoinStateMachine`).  
-**Implementation:** [`../../zdtd-server-server/`](..).
+**Implementation:** [`../../zdtd-server-server-server-server/`](..).
 
 **Policy:** research only. Clone work must use **your** reimplemented logic and **your** assets pipeline; do not ship TFP managed assemblies or bulk decompiled source.
 
@@ -109,7 +109,7 @@ deco.zig` behind `[feature] deco_mirror`), and `docs/STATE_MACHINES.md` §2
 already pins the tick pipeline and its `Game.step` owners; `docs/INDEX.md` lists
 the read order. The sketch below is the founding map, not the update procedure.
 
-**Implementation tree:** sibling [`../../zdtd-server-server/`](..) (**zdtd** = Zeven Days to Die).
+**Implementation tree:** sibling [`../../zdtd-server-server-server-server/`](..) (**zdtd** = Zeven Days to Die).
 
 ```text
 zdtd/                        # workspace folder name
@@ -543,7 +543,7 @@ Parallel RE tracks (feed packages/):
 | Loadgen | [`../../7dtd-loadgen/docs/README.md`](../../7dtd-loadgen/docs/README.md) (zdtd validation) |
 | HOST_TUNING | [`../../7dtd-server-optimizer/docs/HOST_TUNING.md`](../../7dtd-server-optimizer/docs/HOST_TUNING.md) (host ops ideas) |
 | SIM_PARALLELISM | [`../../7dtd-server-optimizer/docs/SIM_PARALLELISM.md`](../../7dtd-server-optimizer/docs/SIM_PARALLELISM.md) (stock MT limits) |
-| zdtd | [`../../zdtd-server-server/`](..) (implementation; no mods; native metrics in `src/apm/`) |
+| zdtd | [`../../zdtd-server-server-server-server/`](..) (implementation; no mods; native metrics in `src/apm/`) |
 
 ## Changelog
 

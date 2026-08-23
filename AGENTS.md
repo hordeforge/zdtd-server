@@ -191,7 +191,7 @@ How to use:
 
 ## Zig style
 
-Zig **0.16**. Shaped by wire fidelity, 20 TPS, SoA sim, and loadgen/stock-client evidence. Naming/memory follow usual Zig house style ([agave](https://github.com/maci0/agave/blob/main/AGENTS.md) is one reference); rest is dedi-specific.
+Zig **0.16**. Shaped by wire fidelity, 20 TPS, SoA sim, and loadgen/stock-client evidence. Naming/memory follow usual Zig house style ([agave](https://github.com/hordeforge/agave/blob/main/AGENTS.md) is one reference); rest is dedi-specific.
 
 ### Naming
 

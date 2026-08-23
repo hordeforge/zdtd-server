@@ -430,7 +430,7 @@ wire shapes; only ops knobs.
 
 ```bash
 # From 7dtd-playtest/
-uv run playtest run --suite smoke --world ../zdtd-server/worlds/playtest_nav
+uv run playtest run --suite smoke --world ../zdtd-server-server/worlds/playtest_nav
 uv run playtest run --suite core,combat --port 27025 --admin-port 8081
 uv run playtest run --suite persist     # multi-phase restart
 uv run playtest report path/to/client.log
