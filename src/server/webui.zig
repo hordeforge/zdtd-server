@@ -35,6 +35,8 @@ pub const login_fail_limit: u32 = 8;
 pub const login_lockout_ns: u64 = 30 * std.time.ns_per_s;
 /// Session cookie lifetime (seconds). Stolen cookies expire without process restart.
 pub const session_cookie_max_age_s: u32 = 43_200;
+/// Test-only response capture size; must hold any embedded page after rendering.
+const max_test_resp: usize = 64 * 1024;
 
 pub const Config = struct {
     port: u16 = 0,
@@ -177,9 +179,11 @@ pub const Server = struct {
     /// Mono ns until which further login attempts are rejected (0 = unlocked).
     login_lock_until_ns: u64 = 0,
     /// When `client_fd < 0` (unit tests), the last response is copied here so
-    /// assertions can check status lines without a real socket.
+    /// assertions can check status lines without a real socket. Sized for the
+    /// largest rendered page (shell.html) plus template expansion and headers;
+    /// writes past the cap are dropped by design.
     test_resp_len: usize = 0,
-    test_resp: [4096]u8 = undefined,
+    test_resp: [max_test_resp]u8 = undefined,
 
     pub fn enabled(self: *const Server) bool {
         return self.listener.enabled();
@@ -2237,7 +2241,7 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "pre:focus-visible") != null);
     try std.testing.expect(std.mem.find(u8, html, "list-style:none") != null);
     try std.testing.expect(std.mem.find(u8, html, "min-width:") != null);
-    try std.testing.expect(std.mem.find(u8, html, "aria-labelledby=\"status-heading\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "aria-labelledby=\"tab-status\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "Loading performance data") != null);
     try std.testing.expect(std.mem.find(u8, html, "Loading command history") != null);
     try std.testing.expect(std.mem.find(u8, html, "position:sticky") != null);
