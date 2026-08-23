@@ -3,6 +3,34 @@
 Consumer-visible changes are recorded here. The project follows the release
 and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
+## [0.2.0] - 2026-08-22
+
+### Added
+
+- MCP server addon (docs/MCP_PRD.md, docs/MCP_DESIGN.md, ADR 0031): a Model
+  Context Protocol server shipped as a Wasm plugin (`mods/zdtd_mcp`). Protocol
+  logic lives in the guest; the host provides a streamable-HTTP endpoint
+  (`--mcp-port`, loopback + optional `--mcp-token`) and std.json parsing
+  (`json_*` imports). Tools: `server_status`, `player_list`, and an
+  `admin_command` tool gated by `--mcp-allowlist` verb prefixes.
+- Player save format ZPV10: per-player seed persistence.
+- World topsoil bitfield rides the wire (stock m_bTopSoilBroken, splat
+  terrain).
+- POI light tile entities from prefab .tts markers; ambient spawn rules
+  enforce a POI-tag gate, maxcount and respawn delay; sleeper triggered state
+  persists across restart.
+- Trader: sell price prices the sold stack (PercentUsesLeft, worn items);
+  real-client TraderData echo is stock-faithful; quest tier mod feeds the
+  quest reward loot stage; POI difficulty tier scales the loot stage.
+
+### Fixed
+
+- WebUI: stray line-number prefixes removed from shell.html; shared-token
+  restyle with a tabbed shell (logs and settings); test response capture sized
+  for rendered pages.
+- main: exit 141 on a broken stdout pipe; flag hints skipped under 3 chars.
+- game: terrain_mu held in solid/water sense probes.
+
 ## [0.1.0] - 2026-08-22
 
 ### Breaking changes
