@@ -109,6 +109,10 @@ fn writeStdout(msg: []const u8) void {
     var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
     defer threaded.deinit();
     std.Io.File.stdout().writeStreamingAll(threaded.io(), msg) catch |err| {
+        // A reader that hung up (`zdtd --help | head -1`) ended the pipeline by
+        // choice; die silently with the conventional SIGPIPE status like cat or
+        // grep instead of printing an error the consumer asked to stop reading.
+        if (err == error.BrokenPipe) std.process.exit(141);
         fatal("cannot write stdout: {s}", .{@errorName(err)});
     };
 }
@@ -222,8 +226,11 @@ fn editDistance(a: []const u8, b: []const u8) usize {
     return prev[b.len];
 }
 
-/// Nearest known flag within edit distance 2, for typo hints.
+/// Nearest known flag within edit distance 2, for typo hints. Tokens shorter
+/// than three characters never get one: every "-x" is within distance 2 of
+/// every short flag, so a guess there is noise ("-x" would suggest "-V").
 fn suggestFlag(name: []const u8) ?[]const u8 {
+    if (name.len < 3) return null;
     var best: ?[]const u8 = null;
     var best_d: usize = 3;
     for (known_flags) |f| {
@@ -954,7 +961,9 @@ test "typo suggestion finds nearest flag" {
     try std.testing.expectEqualStrings("--port", suggestFlag("--prot").?);
     try std.testing.expectEqualStrings("--ticks", suggestFlag("--tick").?);
     try std.testing.expectEqualStrings("--world", suggestFlag("-world").?);
-    try std.testing.expectEqualStrings("-v", suggestFlag("-v").?);
+    // Two-character tokens never suggest: any short flag is within distance 2.
+    try std.testing.expect(suggestFlag("-v") == null);
+    try std.testing.expect(suggestFlag("-x") == null);
     try std.testing.expect(suggestFlag("--zzzzzzzz") == null);
     try std.testing.expectEqual(@as(usize, 0), editDistance("--map", "--map"));
     try std.testing.expectEqual(@as(usize, 2), editDistance("ab", "ba"));

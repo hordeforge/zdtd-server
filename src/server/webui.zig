@@ -2251,7 +2251,7 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "el._hxOnce = () => swap(true)") != null);
     try std.testing.expect(std.mem.find(u8, html, "r.status === HTTP_UNAUTHORIZED") != null);
     try std.testing.expect(std.mem.find(u8, html, "let inFlight = false;") != null);
-    try std.testing.expect(std.mem.find(u8, html, "if (!el.hasAttribute('data-load-error'))") != null);
+    try std.testing.expect(std.mem.find(u8, html, "if (!('loadError' in el.dataset))") != null);
     try std.testing.expect(std.mem.find(u8, html, "forced-color-adjust:none") == null);
     try std.testing.expect(std.mem.find(u8, html, ".err,.noscript,.warn-text{color:MarkText;background:Mark}") != null);
     try std.testing.expect(std.mem.find(u8, html, "prefers-reduced-motion: reduce').matches") == null);
