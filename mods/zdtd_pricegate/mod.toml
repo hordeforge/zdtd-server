@@ -1,0 +1,4 @@
+name = "zdtd_pricegate"
+version = "0.1.0"
+wasm = "zdtd_pricegate.wasm"
+description = "Trader price scaling via the on_trade_price pre-trade verdict (1.5x default; specialize per item). Enable via zdtd.toml [plugin] modules = \"mods/zdtd_pricegate/zdtd_pricegate.wasm\"."

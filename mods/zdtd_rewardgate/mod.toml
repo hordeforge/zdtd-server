@@ -1,0 +1,4 @@
+name = "zdtd_rewardgate"
+version = "0.1.0"
+wasm = "zdtd_rewardgate.wasm"
+description = "Quest-reward scaling via the on_quest_complete verdict (1.5x default; specialize per quest_def). Enable via zdtd.toml [plugin] modules = \"mods/zdtd_rewardgate/zdtd_rewardgate.wasm\"."
