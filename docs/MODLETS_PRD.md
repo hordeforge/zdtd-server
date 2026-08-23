@@ -296,6 +296,32 @@ Resolved from RE or explicitly documented before the "compatible" claim:
 Unresolvable gaps (no RE evidence, no stock probe available) must be written up
 in the PRD/plan as documented limitations, not silently implemented.
 
+**Resolution status (2026-08-23):**
+
+- **G1** (stock dedi mod assetbundle load): no `Mod`/`AssetBundles` IL dump is
+  available in `7dtd-research/il/` (protocol/wire-focused dump set). Fallback
+  taken: zdtd never reads `Bundles/` (PRD R11); operator note says bundle
+  content is client-side rendering and a vanilla client needs the bundle mod
+  installed. RE follow-up stays in the backlog.
+- **G2** (mods-folder roots + folder order): fallback taken - `game-dir/Mods`
+  (plus `--mods-dir`), sorted folder order, documented in `src/assets/modlets.zig`.
+- **G3** (patch target selection): fallback taken - `file=` attribute wins, then
+  patch file name (modlet convention), then xpath root inference (superset,
+  covers real modlets), documented in `src/assets/xml_patch.zig`.
+- **G4/G5** (csvoperations / conditional grammar): csvoperations implemented for
+  the common `op` add/remove/set forms (unit-tested, not IL-pinned);
+  `conditional` **fails closed** (load error, PRD R6) until RE pins the grammar.
+- **G6** (`@modfolder:` edge cases): `@modfolder:` and `@modfolder(Name):`
+  implemented, path remainder appended verbatim; documented.
+- **G7** (ConfigFile compress layering): the stock `compressed` envelope is the
+  existing `DeflateFramer` (already proven by `sendBlockIdMapping`); the data
+  field is raw-Deflate(patched xml) per stock `cacheSingleXml`. Wire golden
+  tests pin the body; a loadgen byte-level golden is a follow-up.
+- **G8** (localization payload source): no IL evidence available. The
+  `NetPackageLocalization` join send stays **out of scope** (plan Phase 3
+  gate); mod `Localization.csv` is never parsed and never breaks loading.
+  Follow-up task in the backlog.
+
 ## 9. Test strategy
 
 - Unit: new ops (prepend, insertbefore/after, removeattribute, csv, conditional,

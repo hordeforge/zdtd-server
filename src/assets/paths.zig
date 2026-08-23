@@ -1,8 +1,10 @@
-//! Resolve Data/Config XML paths, optional override patch dirs, generic tryLoad.
+//! Resolve Data/Config XML paths, optional modlet + override patch dirs,
+//! generic tryLoad.
 
 const std = @import("std");
 const io_fs = @import("../util/io_fs.zig");
 const xml_patch = @import("xml_patch.zig");
+const mods = @import("modlets.zig");
 
 /// Prefer `config_dir/<file>`, else `game_dir/Data/Config/<file>`.
 /// Writes into `path_buf`; returns null if neither dir is set or path too long.
@@ -21,14 +23,66 @@ pub fn resolveConfigXml(
     return null;
 }
 
+/// Optional modlet `Config/` dirs (stock mod order, PRD R6: applied before
+/// operator overrides). Owned by paths (see setModDirs) so Game teardown -
+/// which frees the mods scan these come from - cannot leave loaders with
+/// dangling dirs. Set at Game init from `mods.install`.
+var mod_dirs_owned: []mods.ModDir = &.{};
+pub var mod_dirs: []const mods.ModDir = &.{};
+
 /// Optional override directories (xpath patch XMLs, filename order). Set at Game init.
 pub var override_dirs: []const []const u8 = &.{};
+
+fn freeOwnedModDirs(allocator: std.mem.Allocator, owned: []mods.ModDir, n: usize) void {
+    for (owned[0..n]) |md| {
+        allocator.free(md.config_dir);
+        allocator.free(md.mod_path);
+    }
+    allocator.free(owned);
+}
+
+pub fn setModDirs(allocator: std.mem.Allocator, dirs: []const mods.ModDir) void {
+    deinitModDirs(allocator);
+    if (dirs.len == 0) return; // deinitModDirs already cleared the vars
+    const owned = allocator.alloc(mods.ModDir, dirs.len) catch return;
+    var filled: usize = 0;
+    for (dirs, 0..) |d, idx| {
+        owned[idx].config_dir = allocator.dupe(u8, d.config_dir) catch {
+            freeOwnedModDirs(allocator, owned, filled);
+            return;
+        };
+        owned[idx].mod_path = allocator.dupe(u8, d.mod_path) catch {
+            allocator.free(owned[idx].config_dir);
+            freeOwnedModDirs(allocator, owned, filled);
+            return;
+        };
+        filled = idx + 1;
+    }
+    mod_dirs_owned = owned;
+    mod_dirs = owned;
+}
+
+pub fn deinitModDirs(allocator: std.mem.Allocator) void {
+    for (mod_dirs_owned) |md| {
+        allocator.free(md.config_dir);
+        allocator.free(md.mod_path);
+    }
+    if (mod_dirs_owned.len > 0) allocator.free(mod_dirs_owned);
+    mod_dirs_owned = &.{};
+    mod_dirs = &.{};
+}
 
 pub fn setOverrideDirs(dirs: []const []const u8) void {
     override_dirs = dirs;
 }
 
-/// Read base config XML and apply --config-overrides patches for this file.
+/// True when any patch source is configured (fast-path guard for loaders).
+pub fn hasPatches() bool {
+    return mod_dirs.len > 0 or override_dirs.len > 0;
+}
+
+/// Read base config XML and apply modlet patches (fatal on error, PRD R6) then
+/// --config-overrides patches (optional) for this file.
 /// Caller owns returned slice. Null if base path missing / unreadable.
 pub fn readConfigXml(
     allocator: std.mem.Allocator,
@@ -49,18 +103,36 @@ pub fn readConfigXml(
         }
         return null;
     };
-    errdefer allocator.free(base);
-    if (override_dirs.len == 0) return base;
-    const merged = xml_patch.applyOverrideDirs(allocator, base, file_name, override_dirs) catch |err| {
-        // Patches are optional; keep base so a bad override does not blank the catalog.
-        std.debug.print(
-            "zdtd: config overrides for {s} failed: {s}; using unpatched base\n",
-            .{ file_name, @errorName(err) },
-        );
-        return base;
-    };
-    allocator.free(base);
-    return merged;
+    if (!hasPatches()) return base;
+    var cur: []u8 = base;
+    if (mod_dirs.len > 0) {
+        // Modlet patches are mandatory: a patch that fails to apply changes
+        // AssignIds vs the client, so the server must not start (PRD R6).
+        const m = xml_patch.applyModDirs(allocator, cur, file_name, mod_dirs) catch |err| {
+            std.debug.print(
+                "zdtd: mod patches for {s} failed: {s}; refusing to start (modlet desync risk)\n",
+                .{ file_name, @errorName(err) },
+            );
+            allocator.free(cur);
+            return err;
+        };
+        allocator.free(cur);
+        cur = m;
+    }
+    if (override_dirs.len > 0) {
+        // Operator overrides stay optional: a bad override must not blank the
+        // catalog; keep the mod-patched bytes.
+        const m2 = xml_patch.applyOverrideDirs(allocator, cur, file_name, override_dirs) catch |err| {
+            std.debug.print(
+                "zdtd: config overrides for {s} failed: {s}; keeping mod-patched base\n",
+                .{ file_name, @errorName(err) },
+            );
+            return cur;
+        };
+        allocator.free(cur);
+        cur = m2;
+    }
+    return cur;
 }
 
 /// Load via `loadFn(allocator, path) !T` using config path resolution (no patches).
@@ -89,7 +161,7 @@ pub fn tryLoadConfigPatched(
     game_dir: ?[]const u8,
     config_dir: ?[]const u8,
 ) !?T {
-    if (override_dirs.len == 0) {
+    if (!hasPatches()) {
         var path_buf: [2048]u8 = undefined;
         const path = resolveConfigXml(&path_buf, file_name, game_dir, config_dir) orelse return null;
         return loadFn(allocator, path) catch |err| {

@@ -1,0 +1,8 @@
+<configs file="blocks.xml">
+  <append xpath="/blocks">
+    <block name="modletTestBlock" tags="testblock">
+      <property name="MaxDamage" value="500"/>
+      <property name="Class" value="Terrain"/>
+    </block>
+  </append>
+</configs>

@@ -34,6 +34,9 @@ pub fn deinit(self: *Game) void {
     self.info_tcp.stop();
     self.world.deinit();
     self.net.deinit();
+    @import("config_files.zig").deinitCache(self.allocator);
+    @import("../../assets/paths.zig").deinitModDirs(self.allocator);
+    @import("../../assets/modlets.zig").deinit(self.allocator);
     if (self.serveradmin_path) |p| self.allocator.free(p);
     if (leave_sim) util_sim.disable();
 }

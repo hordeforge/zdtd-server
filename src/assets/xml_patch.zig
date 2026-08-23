@@ -1,17 +1,26 @@
 //! Clean-room config XML patches (stock XmlPatcher subset).
-//! Override files under --config-overrides dirs, applied in filename order.
+//! Sources: modlet `Config/` dirs (via `applyModDirs`, stock mod order) and
+//! `--config-overrides` dirs (via `applyOverrideDirs`), both in file order.
 //!
 //! Supported ops (element local name, case-insensitive):
-//!   set / setattribute / setbyxpath  : set attribute or replace element text
-//!   remove / removebyxpath           : delete matched element
-//!   append / appendbyxpath           : append child markup under matched element
+//!   set / setattribute / setbyxpath            : set attribute or replace element text
+//!   remove / removebyxpath                     : delete matched element
+//!   removeattribute / removeattributebyxpath   : delete an attribute
+//!   append / appendbyxpath                     : append child markup under matched element
+//!   prepend / prependbyxpath                   : prepend child markup under matched element
+//!   insertafter / insertbefore (byxpath)       : sibling insert
+//!   csvoperations                              : comma-list edits on an attribute value
+//!   include                                    : pull another patch file (@modfolder: tokens)
+//!   conditional                                : NOT implemented (RE gap G5); fails closed
 //!
 //! XPath subset: /tag/tag[@attr='val']/... and optional trailing /@attr
-//! Root may be <configs file="blocks.xml"> … or file inferred from first /tag.
+//! Root may be <configs file="blocks.xml"> … or file inferred from first /tag
+//! (stock also routes by patch file name; see applyPatchDoc).
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
+const mods = @import("modlets.zig");
 
 const XSeg = struct {
     tag: []const u8 = "",
@@ -253,24 +262,159 @@ fn opNameEq(a: []const u8, b: []const u8) bool {
     return true;
 }
 
+/// Context for one patch application. Stock `XmlPatcher.PatchXml` passes the
+/// patch file and the issuing `Mod` to each op (`mod-loading.md` §5.3).
+pub const PatchCtx = struct {
+    /// Patch file basename. Stock routes a patch to the config named by its
+    /// file name (modlet convention: `Config/items.xml` patches `items.xml`),
+    /// so a file-name match applies even when the xpath root does not resolve
+    /// (G3 target selection; unverified against IL, superset implementation).
+    patch_file_name: ?[]const u8 = null,
+    /// Absolute path of the issuing mod folder, for `@modfolder:` tokens.
+    mod_path: ?[]const u8 = null,
+};
+
+/// Strip a trailing `.xml` (case-insensitive) for file-name routing.
+fn stripXmlExt(s: []const u8) []const u8 {
+    if (s.len >= 4 and std.ascii.eqlIgnoreCase(s[s.len - 4 ..], ".xml")) return s[0 .. s.len - 4];
+    return s;
+}
+
+/// Basename of a path (after the last `/`).
+fn basenameOf(path: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, path, '/')) |sl| return path[sl + 1 ..];
+    return path;
+}
+
+/// Splice `body` into `cur` at `pos` with newline framing (shared by
+/// append/prepend/insertafter/insertbefore).
+fn insertWithNewlines(allocator: std.mem.Allocator, cur: []const u8, pos: usize, body: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, cur[0..pos]);
+    try out.append(allocator, '\n');
+    try out.appendSlice(allocator, body);
+    try out.append(allocator, '\n');
+    try out.appendSlice(allocator, cur[pos..]);
+    return try out.toOwnedSlice(allocator);
+}
+
+/// Remove `attr_name="..."` from the element opening at `open_at`.
+/// Null when the attribute is absent (no-op, like a stock remove that matches
+/// nothing). Caller frees the result when non-null.
+fn removeAttributeFrom(allocator: std.mem.Allocator, cur: []const u8, open_at: usize, attr_name: []const u8) !?[]u8 {
+    const gt = std.mem.findPos(u8, cur, open_at, ">") orelse return error.BadElement;
+    const w = cur[open_at..gt];
+    var i: usize = 0;
+    while (i < w.len) {
+        while (i < w.len and std.ascii.isWhitespace(w[i])) i += 1;
+        const key_start = i;
+        while (i < w.len and !std.ascii.isWhitespace(w[i]) and w[i] != '=') i += 1;
+        const key = w[key_start..i];
+        var eq = i;
+        while (eq < w.len and std.ascii.isWhitespace(w[eq])) eq += 1;
+        if (eq >= w.len or w[eq] != '=') continue; // tag name or bare key
+        eq += 1;
+        while (eq < w.len and std.ascii.isWhitespace(w[eq])) eq += 1;
+        if (eq >= w.len or (w[eq] != '"' and w[eq] != '\'')) continue;
+        const quote = w[eq];
+        eq += 1;
+        while (eq < w.len and w[eq] != quote) eq += 1;
+        if (eq >= w.len) return error.BadAttr;
+        if (std.mem.eql(u8, key, attr_name)) {
+            var seg_start = key_start;
+            while (seg_start > 0 and std.ascii.isWhitespace(w[seg_start - 1])) seg_start -= 1;
+            const seg_end = eq + 1;
+            var out: std.ArrayList(u8) = .empty;
+            errdefer out.deinit(allocator);
+            try out.appendSlice(allocator, cur[0 .. open_at + seg_start]);
+            try out.appendSlice(allocator, cur[open_at + seg_end ..]);
+            return try out.toOwnedSlice(allocator);
+        }
+        i = eq + 1;
+    }
+    return null;
+}
+
+/// Resolve `@modfolder:` / `@modfolder(Name):` tokens (stock
+/// `ReadPatchXmlWithFixedModFolders`, G6). Absolute paths pass through.
+/// Caller frees the result.
+fn rewriteModFolder(allocator: std.mem.Allocator, path: []const u8, own_mod_path: ?[]const u8) ![]const u8 {
+    if (std.mem.startsWith(u8, path, "@modfolder:")) {
+        const rest = path["@modfolder:".len..];
+        const mp = own_mod_path orelse return error.MissingModFolder;
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ mp, rest });
+    }
+    if (std.mem.startsWith(u8, path, "@modfolder(")) {
+        const close = std.mem.findScalar(u8, path, ')') orelse return error.BadModFolderToken;
+        const name = path["@modfolder(".len..close];
+        var rest = path[close + 1 ..];
+        if (rest.len > 0 and rest[0] == ':') rest = rest[1..];
+        const mp = mods.modPathByName(name) orelse return error.UnknownModFolder;
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ mp, rest });
+    }
+    return allocator.dupe(u8, path);
+}
+
+/// True when `want` is an entry of the comma-separated `cur_val`.
+fn csvHas(cur_val: []const u8, want: []const u8) bool {
+    const want_t = std.mem.trim(u8, want, " \t");
+    var it = std.mem.splitScalar(u8, cur_val, ',');
+    while (it.next()) |entry| {
+        if (std.mem.eql(u8, std.mem.trim(u8, entry, " \t"), want_t)) return true;
+    }
+    return false;
+}
+
+/// Remove an entry from a comma-separated value; caller frees the result when
+/// the value changed.
+fn csvRemove(allocator: std.mem.Allocator, cur_val: []const u8, drop: []const u8) !?[]u8 {
+    const drop_t = std.mem.trim(u8, drop, " \t");
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var changed = false;
+    var first = true;
+    var it = std.mem.splitScalar(u8, cur_val, ',');
+    while (it.next()) |entry| {
+        const e = std.mem.trim(u8, entry, " \t");
+        if (std.mem.eql(u8, e, drop_t)) {
+            changed = true;
+            continue;
+        }
+        if (!first) try out.append(allocator, ',');
+        first = false;
+        try out.appendSlice(allocator, entry);
+    }
+    if (!changed) return null;
+    return try out.toOwnedSlice(allocator);
+}
+
 /// Apply one patch document to base XML. Caller frees result.
-pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: []const u8, target_file: []const u8) ![]u8 {
+/// Errors are load-time fatal (PRD R6): a patch that cannot be applied must
+/// stop the server rather than silently desync AssignIds against the client.
+pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: []const u8, target_file: []const u8, ctx: PatchCtx) ![]u8 {
     const clean = try xml.stripComments(allocator, patch_xml);
     defer allocator.free(clean);
     var cur = try allocator.dupe(u8, base);
     errdefer allocator.free(cur);
 
-    // Optional file= on configs root
+    // Optional file= on configs root (explicit wins over everything).
     var patch_file_filter: ?[]const u8 = null;
     if (std.mem.find(u8, clean, "<configs")) |ci| {
         if (xml.attr(clean, ci, "file")) |f| patch_file_filter = f;
     }
     if (patch_file_filter) |pf| {
         if (!std.mem.eql(u8, pf, target_file)) {
-            // Patch not for this file
+            // Patch not for this file.
             return cur;
         }
     }
+    // Stock file-name routing (G3): a patch file named after the config
+    // applies to it even when the xpath root cannot be inferred.
+    const file_name_match = if (ctx.patch_file_name) |pfn|
+        std.mem.eql(u8, stripXmlExt(pfn), stripXmlExt(target_file))
+    else
+        false;
 
     var i: usize = 0;
     while (i < clean.len) {
@@ -291,18 +435,18 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
             i = ne;
             continue;
         }
-        const xpath = xml.attr(clean, lt, "xpath") orelse {
-            i = ne;
-            continue;
-        };
-        // Infer file from xpath when no root file=
-        if (patch_file_filter == null) {
-            if (fileFromXPath(xpath)) |inf| {
-                if (!std.mem.eql(u8, inf, target_file)) {
-                    i = ne;
-                    continue;
-                }
-            }
+        if (opNameEq(op, "conditional")) {
+            // RE gap G5: the condition grammar is not pinned. Applying a
+            // conditional patch blindly could change ids vs the client, so
+            // fail closed instead of guessing (PRD R6).
+            return error.PatchOpConditionalUnsupported;
+        }
+        const is_include = opNameEq(op, "include");
+        const xpath = xml.attr(clean, lt, "xpath");
+        if (!is_include and xpath == null) {
+            // include may carry the path in `path=`; no other op works
+            // without xpath (fail closed rather than silently skip, PRD R6).
+            return error.UnknownPatchOp;
         }
         const gt = std.mem.findPos(u8, clean, lt, ">") orelse break;
         const self_close = gt > lt and clean[gt - 1] == '/';
@@ -327,7 +471,47 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
             next_i = cl + ct.len;
         }
 
-        const xp = parseXPath(xpath) orelse {
+        if (xpath) |xp0| {
+            if (!is_include and patch_file_filter == null and !file_name_match) {
+                // No file= and the file name does not select this target: route
+                // by xpath root; no routing evidence means the op does not
+                // belong to this config (skip the whole element, PRD R6).
+                const inferred = fileFromXPath(xp0);
+                if (inferred) |inf| {
+                    if (!std.mem.eql(u8, inf, target_file)) {
+                        i = next_i;
+                        continue;
+                    }
+                } else {
+                    i = next_i;
+                    continue;
+                }
+            }
+        }
+
+        // include needs no xpath (path= form); handle it before the common
+        // xpath parse.
+        if (is_include) {
+            const inc_path = xpath orelse (xml.attr(clean, lt, "path") orelse return error.MissingIncludePath);
+            const resolved = try rewriteModFolder(allocator, inc_path, ctx.mod_path);
+            defer allocator.free(resolved);
+            const included = io_fs.readFileAll(allocator, resolved) catch |err| {
+                std.debug.print("zdtd: include '{s}' unreadable: {s}\n", .{ resolved, @errorName(err) });
+                return err;
+            };
+            defer allocator.free(included);
+            const next = try applyPatchDoc(allocator, cur, included, target_file, .{
+                .patch_file_name = basenameOf(resolved),
+                .mod_path = ctx.mod_path,
+            });
+            allocator.free(cur);
+            cur = next;
+            i = next_i;
+            continue;
+        }
+
+        const xp = parseXPath(xpath.?) orelse {
+            // Malformed xpath: stock logs and skips the element.
             i = next_i;
             continue;
         };
@@ -360,7 +544,23 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
             try out.appendSlice(allocator, cur[span.end..]);
             allocator.free(cur);
             cur = try out.toOwnedSlice(allocator);
-        } else if (opNameEq(op, "append") or opNameEq(op, "appendbyxpath")) {
+        } else if (opNameEq(op, "removeattribute") or opNameEq(op, "removeattributebyxpath")) {
+            const attr_name = xp.set_attr orelse {
+                i = next_i;
+                continue;
+            };
+            const open = findElement(cur, xp) orelse {
+                i = next_i;
+                continue;
+            };
+            const updated = try removeAttributeFrom(allocator, cur, open, attr_name) orelse {
+                // Attribute absent: no-op (stock remove of a missing node).
+                i = next_i;
+                continue;
+            };
+            allocator.free(cur);
+            cur = updated;
+        } else if (opNameEq(op, "append") or opNameEq(op, "appendbyxpath") or opNameEq(op, "prepend") or opNameEq(op, "prependbyxpath")) {
             const open = findElement(cur, xp) orelse {
                 i = next_i;
                 continue;
@@ -369,7 +569,6 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
                 i = next_i;
                 continue;
             };
-            // Insert before closing tag of matched element
             const gt2 = std.mem.findPos(u8, cur, open, ">") orelse {
                 i = next_i;
                 continue;
@@ -378,8 +577,8 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
                 i = next_i;
                 continue;
             }
-            // Find last close before span.end
-            const insert_at = span.end - blk: {
+            const is_prepend = opNameEq(op, "prepend") or opNameEq(op, "prependbyxpath");
+            const insert_at = if (is_prepend) gt2 + 1 else span.end - blk: {
                 // length of </tag>
                 var t0 = open + 1;
                 while (t0 < cur.len and (cur[t0] == ' ' or cur[t0] == '\t')) t0 += 1;
@@ -394,15 +593,73 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
                 i = next_i;
                 continue;
             }
-            var out: std.ArrayList(u8) = .empty;
-            errdefer out.deinit(allocator);
-            try out.appendSlice(allocator, cur[0..insert_at]);
-            try out.append(allocator, '\n');
-            try out.appendSlice(allocator, body);
-            try out.append(allocator, '\n');
-            try out.appendSlice(allocator, cur[insert_at..]);
+            const updated = try insertWithNewlines(allocator, cur, insert_at, body);
             allocator.free(cur);
-            cur = try out.toOwnedSlice(allocator);
+            cur = updated;
+        } else if (opNameEq(op, "insertafter") or opNameEq(op, "insertafterbyxpath") or opNameEq(op, "insertbefore") or opNameEq(op, "insertbeforebyxpath")) {
+            const open = findElement(cur, xp) orelse {
+                i = next_i;
+                continue;
+            };
+            const span = elementSpan(cur, open) orelse {
+                i = next_i;
+                continue;
+            };
+            const is_after = opNameEq(op, "insertafter") or opNameEq(op, "insertafterbyxpath");
+            const insert_at = if (is_after) span.end else span.start;
+            const updated = try insertWithNewlines(allocator, cur, insert_at, body);
+            allocator.free(cur);
+            cur = updated;
+        } else if (opNameEq(op, "csvoperations")) {
+            const open = findElement(cur, xp) orelse {
+                i = next_i;
+                continue;
+            };
+            const attr_name = xp.set_attr orelse {
+                i = next_i;
+                continue;
+            };
+            const csv_op = xml.attr(clean, lt, "op") orelse {
+                i = next_i;
+                continue;
+            };
+            const val = if (body.len > 0) body else (xml.attr(clean, lt, "value") orelse {
+                i = next_i;
+                continue;
+            });
+            const cur_val = xml.attr(cur, open, attr_name) orelse {
+                i = next_i;
+                continue;
+            };
+            var owned_new: ?[]u8 = null;
+            defer if (owned_new) |on| allocator.free(on);
+            const new_val: []const u8 = if (opNameEq(csv_op, "add")) blk: {
+                if (csvHas(cur_val, val)) break :blk cur_val;
+                if (cur_val.len == 0) break :blk std.mem.trim(u8, val, " \t");
+                var out: std.ArrayList(u8) = .empty;
+                errdefer out.deinit(allocator);
+                try out.appendSlice(allocator, cur_val);
+                try out.append(allocator, ',');
+                try out.appendSlice(allocator, std.mem.trim(u8, val, " \t"));
+                owned_new = try out.toOwnedSlice(allocator);
+                break :blk owned_new.?;
+            } else if (opNameEq(csv_op, "remove")) blk: {
+                if (try csvRemove(allocator, cur_val, val)) |rv| {
+                    owned_new = rv;
+                    break :blk rv;
+                } else {
+                    i = next_i;
+                    continue;
+                }
+            } else if (opNameEq(csv_op, "set")) val else {
+                i = next_i;
+                continue;
+            };
+            const updated = try setAttribute(allocator, cur, open, attr_name, new_val);
+            allocator.free(cur);
+            cur = updated;
+        } else {
+            return error.UnknownPatchOp;
         }
         i = next_i;
     }
@@ -441,7 +698,9 @@ pub fn listXmlFilesSorted(allocator: std.mem.Allocator, dir_path: []const u8, ou
     }
 }
 
-/// Apply all override XMLs from dirs (dir order, then filename order) onto base for target_file.
+/// Apply all override XMLs from dirs (dir order, then filename order) onto
+/// base for target_file. Overrides stay optional: failures keep the current
+/// bytes (paths.zig logs and uses what it has).
 pub fn applyOverrideDirs(
     allocator: std.mem.Allocator,
     base: []const u8,
@@ -465,12 +724,47 @@ pub fn applyOverrideDirs(
             continue;
         };
         defer allocator.free(patch_raw);
-        const next = applyPatchDoc(allocator, cur, patch_raw, target_file) catch |err| {
+        const next = applyPatchDoc(allocator, cur, patch_raw, target_file, .{
+            .patch_file_name = basenameOf(fp),
+        }) catch |err| {
             std.debug.print("zdtd: override {s} failed: {s}; skipped\n", .{ fp, @errorName(err) });
             continue;
         };
         allocator.free(cur);
         cur = next;
+    }
+    return cur;
+}
+
+/// Apply mod `Config/` patch dirs in mod order (then file order per dir) onto
+/// base for target_file, carrying each mod's path for `@modfolder:` tokens.
+/// Errors are fatal (PRD R6): a mod patch that cannot be applied stops the
+/// server instead of silently desyncing AssignIds against the client.
+pub fn applyModDirs(
+    allocator: std.mem.Allocator,
+    base: []const u8,
+    target_file: []const u8,
+    mod_dirs: []const mods.ModDir,
+) ![]u8 {
+    var cur = try allocator.dupe(u8, base);
+    errdefer allocator.free(cur);
+    for (mod_dirs) |md| {
+        var files: std.ArrayList([]const u8) = .empty;
+        defer {
+            for (files.items) |p| allocator.free(p);
+            files.deinit(allocator);
+        }
+        try listXmlFilesSorted(allocator, md.config_dir, &files);
+        for (files.items) |fp| {
+            const patch_raw = try io_fs.readFileAll(allocator, fp);
+            defer allocator.free(patch_raw);
+            const next = try applyPatchDoc(allocator, cur, patch_raw, target_file, .{
+                .patch_file_name = basenameOf(fp),
+                .mod_path = md.mod_path,
+            });
+            allocator.free(cur);
+            cur = next;
+        }
     }
     return cur;
 }
@@ -498,7 +792,7 @@ test "set MaxFuel on generatorbank" {
         \\  <set xpath="/blocks/block[@name='generatorbank']/property[@name='MaxFuel']/@value">50</set>
         \\</configs>
     ;
-    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml");
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
     defer std.testing.allocator.free(out);
     try std.testing.expect(std.mem.find(u8, out, "value=\"50\"") != null);
     try std.testing.expect(std.mem.find(u8, out, "12250") != null);
@@ -516,10 +810,170 @@ test "remove block" {
         \\  <remove xpath="/blocks/block[@name='a']"/>
         \\</configs>
     ;
-    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml");
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
     defer std.testing.allocator.free(out);
     try std.testing.expect(std.mem.find(u8, out, "name=\"a\"") == null);
     try std.testing.expect(std.mem.find(u8, out, "name=\"b\"") != null);
+}
+
+test "prepend inserts after the opening tag" {
+    const base =
+        \\<blocks>
+        \\<block name="a"><property name="x" value="1"/></block>
+        \\</blocks>
+    ;
+    const patch =
+        \\<configs file="blocks.xml">
+        \\  <prepend xpath="/blocks/block[@name='a']"><property name="pre" value="1"/></prepend>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    // prepended property precedes the original child
+    const pre = std.mem.find(u8, out, "name=\"pre\"").?;
+    const x = std.mem.find(u8, out, "name=\"x\"").?;
+    try std.testing.expect(pre < x);
+}
+
+test "insertafter places a sibling after the matched element" {
+    const base =
+        \\<blocks>
+        \\<block name="a"><property name="x" value="1"/></block>
+        \\</blocks>
+    ;
+    const patch =
+        \\<configs file="blocks.xml">
+        \\  <insertafter xpath="/blocks/block[@name='a']"><block name="b"/></insertafter>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "name=\"b\"") != null);
+    const a = std.mem.find(u8, out, "name=\"a\"").?;
+    const b = std.mem.find(u8, out, "name=\"b\"").?;
+    try std.testing.expect(a < b);
+}
+
+test "removeattribute drops one attribute from the element" {
+    const base =
+        \\<blocks>
+        \\<block name="a" class="terrain" hardness="3"><property name="x" value="1"/></block>
+        \\</blocks>
+    ;
+    const patch =
+        \\<configs file="blocks.xml">
+        \\  <removeattribute xpath="/blocks/block[@name='a']/@class"/>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "class=") == null);
+    try std.testing.expect(std.mem.find(u8, out, "hardness=\"3\"") != null);
+}
+
+test "csvoperations add and remove on a comma list" {
+    const base =
+        \\<items>
+        \\<item name="x"><property name="Tags" value="a,b,c"/></item>
+        \\</items>
+    ;
+    const add_patch =
+        \\<configs file="items.xml">
+        \\  <csvoperations xpath="/items/item[@name='x']/property[@name='Tags']/@value" op="add" value="d"/>
+        \\</configs>
+    ;
+    const after_add = try applyPatchDoc(std.testing.allocator, base, add_patch, "items.xml", .{});
+    defer std.testing.allocator.free(after_add);
+    try std.testing.expect(std.mem.find(u8, after_add, "value=\"a,b,c,d\"") != null);
+
+    const rm_patch =
+        \\<configs file="items.xml">
+        \\  <csvoperations xpath="/items/item[@name='x']/property[@name='Tags']/@value" op="remove" value="b"/>
+        \\</configs>
+    ;
+    const after_rm = try applyPatchDoc(std.testing.allocator, base, rm_patch, "items.xml", .{});
+    defer std.testing.allocator.free(after_rm);
+    try std.testing.expect(std.mem.find(u8, after_rm, "value=\"a,c\"") != null);
+}
+
+test "file name routes a patch with an unresolvable xpath root" {
+    // Stock modlet convention (G3): Config/loadingscreen.xml targets
+    // loadingscreen.xml, and must not leak into other catalogs even though
+    // /loadingscreen is not in the inference map.
+    const base =
+        \\<blocks><block name="a"/></blocks>
+    ;
+    const patch =
+        \\<configs>
+        \\  <append xpath="/loadingscreen/tip"><tip text="hi"/></append>
+        \\</configs>
+    ;
+    // Patch file named blocks.xml applies to blocks.xml (append no-ops: xpath
+    // not found) instead of leaking.
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{ .patch_file_name = "blocks.xml" });
+    defer std.testing.allocator.free(out);
+    try std.testing.expectEqualStrings("<blocks><block name=\"a\"/></blocks>", out);
+    // With no routing evidence and no file name, the op is skipped entirely.
+    const out2 = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out2);
+    try std.testing.expectEqualStrings("<blocks><block name=\"a\"/></blocks>", out2);
+}
+
+test "unknown op fails closed" {
+    const base =
+        \\<blocks><block name="a"/></blocks>
+    ;
+    const patch =
+        \\<configs file="blocks.xml">
+        \\  <append xpath="/blocks"><block name="b"/></append>
+        \\  <frobnicate xpath="/blocks/block[@name='a']"/>
+        \\</configs>
+    ;
+    try std.testing.expectError(error.UnknownPatchOp, applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{}));
+}
+
+test "conditional fails closed until RE pins the grammar (G5)" {
+    const base =
+        \\<blocks><block name="a"/></blocks>
+    ;
+    const patch =
+        \\<configs file="blocks.xml">
+        \\  <conditional xpath="/blocks"><append xpath="/blocks"><block name="b"/></append></conditional>
+        \\</configs>
+    ;
+    try std.testing.expectError(error.PatchOpConditionalUnsupported, applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{}));
+}
+
+test "include with @modfolder token pulls another patch file" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
+    defer std.testing.allocator.free(mods_root);
+    const mod_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/A", .{mods_root});
+    defer std.testing.allocator.free(mod_dir);
+    const cfg_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/Config", .{mod_dir});
+    defer std.testing.allocator.free(cfg_dir);
+    io_fs.mkdirPath(cfg_dir);
+    var p_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const mi = try std.fmt.bufPrint(&p_buf, "{s}/ModInfo.xml", .{mod_dir});
+    try io_fs.writeFile(mi, "<xml><Name value=\"A\"/><DisplayName value=\"A\"/><Version value=\"1.0\"/></xml>");
+    const main_f = try std.fmt.bufPrint(&p_buf, "{s}/main.xml", .{cfg_dir});
+    try io_fs.writeFile(main_f, "<configs file=\"blocks.xml\"><include xpath=\"@modfolder:/Config/inc.xml\"/></configs>");
+    const inc_f = try std.fmt.bufPrint(&p_buf, "{s}/inc.xml", .{cfg_dir});
+    try io_fs.writeFile(inc_f, "<configs file=\"blocks.xml\"><append xpath=\"/blocks/block[@name='a']\"><property name=\"FromInclude\" value=\"1\"/></append></configs>");
+
+    const mod_dirs = try mods.install(std.testing.allocator, mods_root);
+    defer mods.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), mod_dirs.len);
+
+    const base =
+        \\<blocks><block name="a"><property name="x" value="1"/></block></blocks>
+    ;
+    const out = try applyModDirs(std.testing.allocator, base, "blocks.xml", mod_dirs);
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "FromInclude") != null);
 }
 
 test "fileFromXPath" {

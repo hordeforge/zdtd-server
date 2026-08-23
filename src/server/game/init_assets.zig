@@ -47,10 +47,32 @@ fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result))
 
 pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.InitOptions) !void {
     const assets_paths = @import("../../assets/paths.zig");
+    const modlets = @import("../../assets/modlets.zig");
+    // Stock Mods/ scan (PRD R1): XML/assetbundle modlets. Mod patches apply
+    // before --config-overrides (PRD R6 order). Scan/parse failures are fatal:
+    // a modlet that cannot be applied changes AssignIds vs the client.
+    var mods_root_buf: [2048]u8 = undefined;
+    const mods_root: ?[]const u8 = if (opts.mods_dir) |md|
+        md
+    else if (opts.game_dir) |gd|
+        std.fmt.bufPrint(&mods_root_buf, "{s}/Mods", .{gd}) catch null
+    else
+        null;
+    if (mods_root) |root| {
+        const mod_dirs = modlets.install(allocator, root) catch |err| {
+            util_log.err("zdtd: mods scan '{s}' failed: {s}\n", .{ root, @errorName(err) });
+            return err;
+        };
+        assets_paths.setModDirs(allocator, mod_dirs);
+        util_log.info("zdtd: modlets config dirs={d}\n", .{mod_dirs.len});
+    }
     assets_paths.setOverrideDirs(opts.config_overrides);
     if (opts.config_overrides.len > 0) {
         util_log.info("zdtd: config overrides dirs={d}\n", .{opts.config_overrides.len});
     }
+    // Patched-config S2C cache (PRD R8): deflate the same merged bytes the
+    // catalogs use, once, for join-phase NetPackageConfigFile sends.
+    try @import("config_files.zig").buildCache(allocator, opts.game_dir, opts.config_dir);
     if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path, opts.quest_policy) catch |err| blk: {
         util_log.err("zdtd: quests catalog load failed: {s}\n", .{@errorName(err)});
         break :blk null;
@@ -402,6 +424,15 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // rest). Unset hook = no plugins = today's behaviour.
         self.sim.kill_verdict_ctx = self;
         self.sim.kill_verdict_fn = &game_mod.killVerdict;
+        // on_player_damage verdict for the ECS damage path (zombie melee /
+        // deferred accumulator): routes to the plugin + wasm host with the
+        // attacker unknown. Unset hook = no plugins = today's behaviour.
+        self.sim.player_damage_verdict_ctx = self;
+        self.sim.player_damage_verdict_fn = &game_mod.playerDamageVerdict;
+        // `zdtd.queue say` announcements: routed to the stock chat broadcast
+        // (sender 0 = server). Unset hook = announcements dropped.
+        self.sim.say_ctx = self;
+        self.sim.say_fn = &game_mod.announceChat;
         // Quest-accept gate (AGENTS rule 29): on_quest_accept verdict on every
         // acceptance (plugins gate which quests a player may take).
         self.sim.quest_accept_ctx = self;
@@ -476,6 +507,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 // GameStats wire value so client and server agree.
                 .storm_frequency = @as(f32, @floatFromInt(self.storm_frequency)) / 100.0,
                 .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
+                // [sim] storm_bm_push_ticks: storms pushed past a horde night.
+                .blood_moon_storm_push = opts.storm_bm_push_ticks,
             });
             self.restoreWeather();
             const burnt = bl.stackFor(9);
@@ -496,6 +529,12 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         }
     }
     self.power_registry = ecs.powerblocks.Registry.build(&self.maxdamage);
+    // `[rules.power]` battery proxies: rules are merged before init_assets
+    // runs, so copy the floor onto the registry the grid reads.
+    self.power_registry.battery_capacity_scale = self.sim.rules.power.battery_capacity_scale;
+    self.power_registry.battery_initial_charge_frac = self.sim.rules.power.battery_initial_charge_frac;
+    // `[rules.power]` trigger-plate pulse duration.
+    self.sim.power.trigger_pulse_s = self.sim.rules.power.trigger_pulse_s;
     util_log.info("zdtd: power blocks registered={d}\n", .{self.power_registry.n});
     if (opts.game_dir != null or opts.config_dir != null) {
         if (self.maxdamage.power_class_by_name.count() == 0)

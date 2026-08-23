@@ -128,7 +128,7 @@ pub fn tryLoad(
     var t: Table = .{};
     errdefer t.deinit();
     const path: ?[]const u8 = blk: {
-        if (paths.override_dirs.len > 0) {
+        if (paths.hasPatches()) {
             if (try paths.readConfigXml(allocator, "blocks.xml", game_dir, config_dir)) |merged| {
                 defer allocator.free(merged);
                 io_fs.mkdirPath(".zdtd_cfg_cache");

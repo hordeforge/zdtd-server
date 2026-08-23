@@ -1,0 +1,7 @@
+<configs file="items.xml">
+  <append xpath="/items">
+    <item name="modletTestItem">
+      <property name="Tags" value="testitem"/>
+    </item>
+  </append>
+</configs>

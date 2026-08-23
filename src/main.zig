@@ -44,6 +44,7 @@ const help_text =
     \\  --config-dir DIR      stock Data/Config dir (XML assets; dir must exist)
     \\  --config-overrides DIR
     \\                        dir of xpath patch XMLs (repeatable; filename order; dir must exist)
+    \\  --mods-dir DIR        stock Mods root for XML/assetbundle modlets (default: GAME_DIR/Mods)
     \\  --worldgen-seed U64   procedural terrain, decimal or 0x hex (conflicts with --map)
     \\  --ticks N             run N ticks then save and exit (0 = run forever)
     \\  --once                run one tick then save and exit (conflicts with --ticks)
@@ -307,6 +308,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var config_dir: ?[]const u8 = null;
     var config_overrides: std.ArrayList([]const u8) = .empty;
     defer config_overrides.deinit(gpa);
+    var mods_dir: ?[]const u8 = null;
     var quests_path: ?[]const u8 = null;
     var world_name: ?[]const u8 = null;
     var world_name_cli = false;
@@ -359,6 +361,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
             config_dir = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--config-overrides")) {
             try config_overrides.append(gpa, flagValue(&it, name, inline_val));
+        } else if (std.mem.eql(u8, name, "--mods-dir")) {
+            mods_dir = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--quests")) {
             quests_path = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--world-name")) {
@@ -631,6 +635,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .game_dir = game_dir,
         .config_dir = config_dir,
         .config_overrides = config_overrides.items,
+        .mods_dir = mods_dir,
         .quests_path = quests_path,
         .serveradmin_path = serveradmin_path,
         .admin_port = admin_port,
@@ -780,6 +785,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (mp.quests.kill_per_tier) |v| qpol.kill_per_tier = v;
         if (mp.quests.goto_radius) |v| qpol.goto_radius = v;
         if (mp.quests.stay_radius) |v| qpol.stay_radius = v;
+        if (mp.quests.poi_min_dist) |v| qpol.poi_min_dist = v;
+        if (mp.quests.poi_max_dist) |v| qpol.poi_max_dist = v;
+        if (mp.quests.max_poi_attempts) |v| qpol.max_poi_attempts = v;
+        if (mp.quests.poi_bed_lockout_radius) |v| qpol.poi_bed_lockout_radius = v;
+        if (mp.quests.trader_band_1) |v| qpol.trader_band_1 = v;
+        if (mp.quests.trader_band_2) |v| qpol.trader_band_2 = v;
     }
     if (toml_owned) |*tf| {
         if (tf.quests.objective_kinds.len > 0) qpol.objective_kinds = tf.quests.objective_kinds;
@@ -787,6 +798,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (tf.quests.kill_per_tier) |v| qpol.kill_per_tier = v;
         if (tf.quests.goto_radius) |v| qpol.goto_radius = v;
         if (tf.quests.stay_radius) |v| qpol.stay_radius = v;
+        if (tf.quests.poi_min_dist) |v| qpol.poi_min_dist = v;
+        if (tf.quests.poi_max_dist) |v| qpol.poi_max_dist = v;
+        if (tf.quests.max_poi_attempts) |v| qpol.max_poi_attempts = v;
+        if (tf.quests.poi_bed_lockout_radius) |v| qpol.poi_bed_lockout_radius = v;
+        if (tf.quests.trader_band_1) |v| qpol.trader_band_1 = v;
+        if (tf.quests.trader_band_2) |v| qpol.trader_band_2 = v;
     }
     init_opts.quest_policy = qpol;
     // Effective bot host policy: mode pack < zdtd.toml (same precedence).

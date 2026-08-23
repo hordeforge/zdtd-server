@@ -973,7 +973,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8, policy: ques
 }
 
 /// Try explicit path, config dir, game dir, then map-derived Data/Config.
-/// Applies --config-overrides patches when set (via paths.override_dirs).
+/// Applies modlet patches (fatal) then --config-overrides patches when set.
 pub fn tryLoad(
     allocator: std.mem.Allocator,
     game_dir: ?[]const u8,
@@ -998,19 +998,29 @@ pub fn tryLoad(
     }.call;
     if (quests_path) |p| {
         if (!io_fs.fileExists(p)) return error.OpenFailed;
-        if (paths.override_dirs.len == 0) return loadLogged(allocator, p, policy);
+        if (!paths.hasPatches()) return loadLogged(allocator, p, policy);
         const base = try io_fs.readFileAll(allocator, p);
         defer allocator.free(base);
-        const merged = try @import("xml_patch.zig").applyOverrideDirs(allocator, base, "quests.xml", paths.override_dirs);
-        defer allocator.free(merged);
+        var cur: []u8 = base;
+        if (paths.mod_dirs.len > 0) {
+            const m = try @import("xml_patch.zig").applyModDirs(allocator, cur, "quests.xml", paths.mod_dirs);
+            allocator.free(cur);
+            cur = m;
+        }
+        if (paths.override_dirs.len > 0) {
+            const m2 = try @import("xml_patch.zig").applyOverrideDirs(allocator, cur, "quests.xml", paths.override_dirs);
+            allocator.free(cur);
+            cur = m2;
+        }
+        defer allocator.free(cur);
         io_fs.mkdirPath(".zdtd_cfg_cache");
         const cp = ".zdtd_cfg_cache/quests.xml";
         {
-            try io_fs.writeFile(cp, merged);
+            try io_fs.writeFile(cp, cur);
         }
         return loadLogged(allocator, cp, policy);
     }
-    if (paths.override_dirs.len > 0) {
+    if (paths.hasPatches()) {
         if (try paths.readConfigXml(allocator, "quests.xml", game_dir, config_dir)) |merged| {
             defer allocator.free(merged);
             io_fs.mkdirPath(".zdtd_cfg_cache");

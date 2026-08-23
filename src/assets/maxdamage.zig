@@ -769,8 +769,8 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
     errdefer tbl.deinit();
     var path_buf: [2048]u8 = undefined;
     if (paths.resolveConfigXml(&path_buf, "materials.xml", game_dir, config_dir)) |mp| {
-        // Apply materials patches via cache path when overrides set.
-        if (paths.override_dirs.len > 0) {
+        // Apply materials patches via cache path when patches are set.
+        if (paths.hasPatches()) {
             if (try paths.readConfigXml(allocator, "materials.xml", game_dir, config_dir)) |merged| {
                 defer allocator.free(merged);
                 io_fs.mkdirPath(".zdtd_cfg_cache");

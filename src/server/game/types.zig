@@ -172,6 +172,9 @@ pub const InitOptions = struct {
     config_dir: ?[]const u8 = null,
     /// Xpath patch dirs (filename order). Applied after base Data/Config load.
     config_overrides: []const []const u8 = &.{},
+    /// Stock mods root (XML/assetbundle modlets, PRD R1). Default:
+    /// `<game_dir>/Mods`. Mod patches apply before config_overrides.
+    mods_dir: ?[]const u8 = null,
     quests_path: ?[]const u8 = null,
     /// Stock serveradmin.xml (admins/whitelist/blacklist) to merge into the
     /// operator lists at startup; null = no file (zdtd list files only).
@@ -276,6 +279,12 @@ pub const InitOptions = struct {
     land_claim_offline_delay: u16 = 3,
     land_claim_decay_mode: u8 = 0,
     loot_respawn_days: u16 = 7,
+    /// `[sim] trader_use_range` (blocks): trader/vending open-and-echo reach.
+    trade_use_range: f32 = 32,
+    /// `[sim] party_shared_kill_range` (blocks; stock GameStats[54] default 100).
+    party_shared_kill_range: f32 = 100,
+    /// `[sim] storm_bm_push_ticks`: storms pushed past a horde night.
+    storm_bm_push_ticks: i64 = 5000,
     /// When set, enables procedural terrain (terrain_source=proc). Ignored if map_dir loads.
     worldgen_seed: ?u64 = null,
     /// Authority mode. Default correct (hard rejects on). See docs/AUTHORITY.md.
@@ -338,6 +347,9 @@ pub const InitOptions = struct {
     /// Workstation craft budgets (zdtd.toml [sim] workstation_*).
     workstation_crafts_per_tick: u16 = default_workstation_crafts_per_tick,
     workstation_craft_backlog: f32 = default_workstation_craft_backlog,
+    /// `[sim] sleeper_cap_gate_enabled`: restore the stock sleeper global
+    /// spawn gate (default false = the documented zdtd divergence).
+    sleeper_cap_gate_enabled: bool = false,
     /// Periodic apm snapshot dump period in seconds (zdtd.toml [apm]
     /// dump_every_s; null = the 60 s default). Converted to ticks at create.
     apm_dump_every_s: ?u64 = null,

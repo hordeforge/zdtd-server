@@ -23,7 +23,7 @@ Governs every rule below. When in doubt, these decide.
 2. **Stock wire/sim only.** No invented terrain, packages, FX, or journal blobs. One stock shape → one builder the client `Read`s.
 3. **Missing beats fake.** Prefer documented gaps over fabrication. A partial failing stock `Read` is worse than nothing.
 4. **Ground truth is RE.** Wire/sim derive from decompiled `Assembly-CSharp.dll` (IL) and real prefabs/saves, cited (`../7dtd-research/docs`, loadgen goldens). Fix code to RE, not the reverse; update RE only with evidence. **RE tooling/artifacts** (IL dumps, DLL-surface parity, format probes) live in `../7dtd-research`, not zdtd.
-5. **Not a mod host.** Research clone, not Unity host. No IModApi, Harmony, or `Mods/` loading. Connect mod is test harness only; client tooling is join/automation only. **Hardcoding (ADR 0010):** stock content → game data (XML/AssignIds); server policy → config (`serverconfig`/`zdtd.toml`); sim/wire → Zig systems with data params + sandboxed Wasm plugins (ADR 0020).
+5. **Not a mod host.** Research clone, not Unity host. No IModApi, Harmony, or `Mods/` code loading. Pure XML/assetbundle modlets (`Mods/<name>/Config` XPath patches, `Bundles/`, `Localization.csv`) are stock **data** and load as such (`docs/MODLETS_PRD.md`): patched catalogs + join-phase config sync; DLLs are never hosted. Connect mod is test harness only; client tooling is join/automation only. **Hardcoding (ADR 0010):** stock content → game data (XML/AssignIds); server policy → config (`serverconfig`/`zdtd.toml`); sim/wire → Zig systems with data params + sandboxed Wasm plugins (ADR 0020).
 6. **Correctness/security > minimalism > style.** Server authoritative, validates at trust boundaries; illegal states unrepresentable; YAGNI + **Zig Zen** (intent, edge cases, one obvious way, memory is a resource). Prefer idiomatic Zig **stdlib abstractions** (`std.Io`, …) over shelling/OS syscall glue (rule 26).
 7. **Hold the 20 TPS budget.** 50 ms tick is the constraint. Validate via loadgen + stock client (EAC off) + zdtd apm dumps, not unit tests alone.
 8. **Wire is contract; internals are not.** Client sees only binary wire. Never copy Mono per-entity heaps, Unity field order, or GC layouts into sim — prefer idiomatic measurable Zig (SoA, pools, serialize-once) judged by `apm` dumps, not RE visual similarity.
@@ -33,7 +33,8 @@ Governs every rule below. When in doubt, these decide.
 | Owns | Does not own |
 |---|---|
 | Zig dedi process, wire, sim, world store | Stock Unity dedicated process |
-| Protocol from RE + golden/loadgen tests | **Mods** (Harmony, ModAPI, XML modlets, EfficientServer, RealEarth) |
+| Protocol from RE + golden/loadgen tests | **Code mods** (Harmony, ModAPI, DLL modlets, EfficientServer, RealEarth) |
+| XML/assetbundle modlet data loading: `Mods/` Config XPath patches → patched catalogs + `NetPackageConfigFile` join sync (MODLETS_PRD) | Code mod hosting / IModApi |
 | Join / spawn / chunk / inv play path for stock client + bots | Shipping TFP content/assets (load from user `game-dir`) |
 | Native metrics (`src/apm/`) | **7dtd-apm** (Mono bridge; different process) |
 | SoA ECS + serialize-once interest | Copying stock Mono architecture line-for-line |

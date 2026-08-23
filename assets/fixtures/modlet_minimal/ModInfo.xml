@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xml>
+  <Name value="ModletMinimal"/>
+  <DisplayName value="Modlet Minimal Test"/>
+  <Description value="zdtd fixture: pure XML/assetbundle modlet for compatibility tests"/>
+  <Author value="zdtd"/>
+  <Version value="1.0"/>
+</xml>

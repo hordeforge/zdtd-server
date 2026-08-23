@@ -799,7 +799,7 @@ pub fn tryLoad(
             };
         }
     }.call;
-    if (paths.override_dirs.len == 0) {
+    if (!paths.hasPatches()) {
         return try loadLogged(allocator, base, id_by_name, is_distant_deco, ctx);
     }
     const merged = try paths.readConfigXml(allocator, "biomes.xml", game_dir, config_dir) orelse return null;

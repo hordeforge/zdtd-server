@@ -78,6 +78,8 @@ Where the world and its data come from.
 | [PLUGIN_DEV.md](PLUGIN_DEV.md) | Writing a plugin: hooks, limits, and building a .wasm from any language |
 | [MCP_PRD.md](MCP_PRD.md) | MCP server addon product requirements (ADR 0031) |
 | [MCP_DESIGN.md](MCP_DESIGN.md) | MCP server addon design: guest protocol, host transport + std.json |
+| [MODLETS_PRD.md](MODLETS_PRD.md) | Pure XML/assetbundle modlet compatibility requirements |
+| [MODLETS_PLAN.md](MODLETS_PLAN.md) | Modlet compatibility implementation plan |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http plus posix residuals |
 | [adr/README.md](adr/README.md) | Architecture decision records |
 

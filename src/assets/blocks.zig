@@ -478,7 +478,7 @@ pub fn tryLoad(
     const paths = @import("paths.zig");
     var path_buf: [2048]u8 = undefined;
     const base = paths.resolveConfigXml(&path_buf, "blocks.xml", game_dir, config_dir) orelse return null;
-    if (paths.override_dirs.len == 0) {
+    if (!paths.hasPatches()) {
         return loadLogged(allocator, base, id_by_name, ctx);
     }
     const merged = try paths.readConfigXml(allocator, "blocks.xml", game_dir, config_dir) orelse return null;
