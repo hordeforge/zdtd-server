@@ -91,7 +91,7 @@ abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 
 ### zdtd.toml (operator tunables)
 
-Template: [`zdtd.toml.example`](../zdtd-server-server.toml.example). Loaded from
+Template: [`zdtd.toml.example`](../zdtd.toml.example). Loaded from
 `<world>/zdtd.toml` if present, else CWD `zdtd.toml`. Parser:
 `src/server/zdtd_config.zig`. Unknown keys and malformed assignments abort
 startup so misspelled operator settings cannot silently use defaults.

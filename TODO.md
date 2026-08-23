@@ -283,7 +283,7 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
 - [x] Power: gas-can / FuelValue item refuel via InvTx place → `electric.refuelAt` (items.xml FuelValue; stock name ammoGasCan)
 - [x] Power: full trigger TE wire (pressure plate / tripwire gate + `activateTriggerAt` on player step; pulse opens BFS)
 - [x] Workstation RecipeQueue C2S: TileEntity type 12 parse applies queue + burn; tick crafts + dirty rebroadcast
-- [x] Hardcode audit: run `docs/prompts/hardcoded-data-review.md` → [`docs/reviews/HARDCODE_AUDIT.md`](docs/reviews/HARDCODE_AUDIT.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
+- [x] Hardcode audit: run `docs/prompts/hardcoded-data-review.md` → [`docs/archive/HARDCODE_AUDIT_2026-08-08.md`](docs/archive/HARDCODE_AUDIT_2026-08-08.md) (Bucket A stock XML vs Bucket B zdtd config; 2026-08-04)
 
 ### M11 multiplayer CPU (1.0 scale gate)
 

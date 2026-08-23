@@ -3,7 +3,7 @@
 **Date pin:** 2026-08-23  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`); `game.zig` delegates to 42 shards in
+`lint-architecture: clean`); `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
 owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 263 `WORKS`,
 28 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).

@@ -112,7 +112,7 @@ fetched, and outside `make check` ([`docs/APM.md`](docs/APM.md)).
 cd zdtd-server
 make                 # Debug binary → zig-out/bin/zdtd
 make test
-make check           # pin + lint + build + test + fuzz (serial; safe under -j)
+make check           # pin + lint + provenance/XML audits + build + test + fuzz (serial; safe under -j)
 make release         # stripped linux-x86_64 ReleaseSafe binary + sha256 + licenses, examples, modes/
 # or: zig build / zig build test (dev builds use the native host target)
 ```

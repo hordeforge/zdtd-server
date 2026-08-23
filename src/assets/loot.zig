@@ -306,11 +306,9 @@ pub const LootTable = struct {
                 n += 1;
             }
         }
-        if (n == 0 and out.len > 0) {
-            // Fallback scrap
-            out[0] = .{ .item_name = "resourceScrapIron", .count = 5 };
-            return 1;
-        }
+        // Fail closed (AGENTS rule 10): stock LootContainer.roll yields an
+        // empty container when every entry fails its prob gate; never invent
+        // items loot.xml does not define.
         return n;
     }
 
@@ -787,8 +785,14 @@ test "load stock loot when present" {
     try std.testing.expect(t.containers.len > 20);
     try std.testing.expect(t.containerByName("woodenChest") != null);
     var stacks: [max_roll_stacks]Stack = undefined;
-    const n = t.rollContainer("woodenChest", 1, 7, &stacks);
-    try std.testing.expect(n >= 1);
+    // Fail-closed rolls mean a single seed can legitimately come up empty
+    // (stock prob gates); some seed in a spread must still yield loot.
+    var total: usize = 0;
+    var seed: u32 = 0;
+    while (seed < 32) : (seed += 1) {
+        total += t.rollContainer("woodenChest", 7, seed, &stacks);
+    }
+    try std.testing.expect(total >= 1);
 }
 
 test "loot prob templates gate entries by loot stage" {
@@ -853,6 +857,30 @@ test "loot prob templates gate entries by loot stage" {
     }
     try std.testing.expectEqual(@as(usize, 0), seen_low);
     try std.testing.expect(seen_high >= 1);
+}
+
+test "all-gated roll yields an empty container, not fabricated items" {
+    const src =
+        \\<lootcontainers>
+        \\<lootprobtemplates>
+        \\  <lootprobtemplate name="never">
+        \\    <loot level="0,999999" prob="0"/>
+        \\  </lootprobtemplate>
+        \\</lootprobtemplates>
+        \\<lootcontainer name="emptyOk" size="6,2">
+        \\  <item name="gatedA" loot_prob_template="never"/>
+        \\  <item name="gatedB" prob="0"/>
+        \\</lootcontainer>
+        \\</lootcontainers>
+    ;
+    var t = try loadFromSlice(std.testing.allocator, src);
+    defer t.deinit();
+    var stacks: [max_roll_stacks]Stack = undefined;
+    var seed: u32 = 0;
+    while (seed < 50) : (seed += 1) {
+        const n = t.rollContainer("emptyOk", 30, seed, &stacks);
+        try std.testing.expectEqual(@as(usize, 0), n);
+    }
 }
 
 test "loot quality template rolls quality by loot stage" {
