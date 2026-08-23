@@ -26,8 +26,10 @@ not for identity; the primary key did not change.
 
 - Rename on the client creates a new persist row (old row remains until wipe).
 - Two players cannot safely share one login name on one world file.
-- Adding platform id later is a **ZPV4** (or flagged extension) migration, not a
-  silent field insert and not a reuse of the ZPV3 magic already spent on progression.
+- Adding platform id later is a **further magic bump** (or flagged extension) migration, not a
+  silent field insert and not a reuse of a magic already spent on another field
+  (the bumps after ZPV3 went to bedroll, journal identity, durability, hp,
+  born-time and seed; the current writer is ZPV10).
 
 ## Alternatives considered
 

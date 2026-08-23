@@ -33,7 +33,7 @@ budget, hot-path no-alloc rule, stock wire fidelity, deterministic tests, and
 ADR 0003 (not a stock mod host). Native plugins (ADR 0005) already define the
 extension direction.
 
-Related: [HARDCODE_AUDIT.md](../reviews/HARDCODE_AUDIT.md),
+Related: [HARDCODE_AUDIT.md](../archive/HARDCODE_AUDIT_2026-08-08.md),
 [prompts/hardcoded-data-review.md](../prompts/hardcoded-data-review.md),
 [PLUGIN_API.md](../PLUGIN_API.md), [ASSETS.md](../ASSETS.md),
 [GAME_OPTIONS.md](../GAME_OPTIONS.md).
@@ -168,5 +168,5 @@ Do not skip ahead to scripting or dynlib gamemodes.
 - ADR 0004 server-authoritative C2S  
 - ADR 0005 native plugin API  
 - ADR 0009 dynamic package ids  
-- docs/ASSETS.md, docs/GAME_OPTIONS.md, ../reviews/HARDCODE_AUDIT.md, docs/PLUGIN_API.md  
+- docs/ASSETS.md, docs/GAME_OPTIONS.md, ../archive/HARDCODE_AUDIT_2026-08-08.md, docs/PLUGIN_API.md  
 

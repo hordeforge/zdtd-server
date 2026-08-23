@@ -386,8 +386,10 @@ field-by-field provenance.
 ### 3.9 Divergence register (provenance for the differences)
 
 Places zdtd does **not** reproduce stock values today. Each row states the
-stock source and the tracking item. Finding ids refer to the **live** audit
-(`reviews/HARDCODE_AUDIT.md`, updated 2026-08-10) unless noted.
+stock source and the tracking item. Finding ids refer to the hardcode audit
+(the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on
+2026-08-23; the archived snapshot `archive/HARDCODE_AUDIT_2026-08-08.md`
+survives, see §3.10 for its caveats) unless noted.
 
 | Location | zdtd value | Stock value (source) | Sev | Tracking |
 |---|---|---|---:|---|
@@ -413,11 +415,14 @@ stock source and the tracking item. Finding ids refer to the **live** audit
 - class_table speeds/damage/sight from XML: live A10/A11/A30 marked **Fixed**.
 - terrain ids: live A05/A06/A08 marked **Fixed** (`World.terrain_ids` + bundled-dump coverage guard).
 
-### 3.10 Live hardcode audit linkage (reviews/HARDCODE_AUDIT.md, 2026-08-10)
+### 3.10 Live hardcode audit linkage (audit removed from repo 2026-08-23; ids as of the last live pass, 2026-08-10)
 
-Every finding id the live audit names, its status there, and where this ledger
-covers it. The stale `archive/HARDCODE_AUDIT_2026-08-08.md` snapshot is NOT
-authoritative (different numbering; archived as stale 2026-08-09).
+Every finding id the live audit named, its status there, and where this ledger
+covers it. The live `docs/reviews/HARDCODE_AUDIT.md` was deleted on
+2026-08-23 ("rm old reviews"); only the stale archived snapshot
+`archive/HARDCODE_AUDIT_2026-08-08.md` survives, and that snapshot is NOT
+authoritative (different numbering; archived as stale 2026-08-09). The table
+below is therefore the surviving record of the final live statuses.
 
 | Id | Topic | Live status | Ledger coverage |
 |---|---|---|---|

@@ -3,8 +3,8 @@
 - **Status:** accepted
 - **Date:** 2026-08-10
 - **Related:** [ADR 0023](0023-perk-attribute-system.md) (`resolvePassiveEffect`,
-  T26), [docs/reviews/HARDCODE_AUDIT.md](../reviews/HARDCODE_AUDIT.md) A34
-  (trap kill XP) and A35 (armor mitigation), `src/assets/buffs.zig` (T16
+  T26), [docs/archive/HARDCODE_AUDIT_2026-08-08.md](../archive/HARDCODE_AUDIT_2026-08-08.md)
+  A34 (trap kill XP) and A35 (armor mitigation), `src/assets/buffs.zig` (T16
   survival rates).
 
 ## Context

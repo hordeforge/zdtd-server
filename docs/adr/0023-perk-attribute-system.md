@@ -4,7 +4,7 @@
 - **Date:** 2026-08-10
 - **Related:** [ADR 0021](0021-config-driven-game-modes.md) (`Rules` floors over
   stock data), [GAP_ANALYSIS.md](../GAP_ANALYSIS.md) (Server-side XP ledger,
-  Skill points granted per level), [docs/reviews/HARDCODE_AUDIT.md](../reviews/HARDCODE_AUDIT.md)
+  Skill points granted per level), [docs/archive/HARDCODE_AUDIT_2026-08-08.md](../archive/HARDCODE_AUDIT_2026-08-08.md)
   A34.
 
 ## Context

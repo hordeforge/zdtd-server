@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-04
-- **Updated:** 2026-08-07 (ZPV3 progression tail; document claims/clock/weather siblings)
+- **Updated:** 2026-08-07 (ZPV3 progression tail; document claims/clock/weather siblings); 2026-08-23 (store table synced to the shipped writers: ZPV10/ZCT2/ZBM2/ZCL2; byte layouts now canonical in the owning src files)
 
 ## Context
 
@@ -34,17 +34,22 @@ after restart (TTS re-stamp then block overlay without paint channels).
    remain clear after restart.
 5. **Sibling stores** stay separate under `--world`. Do not fold them into one
    mega-format until a migration plan exists. Magic bumps only on
-   non-extensible layout change. Layouts (source of truth for implementers):
+   non-extensible layout change. Writers only move forward; readers accept the
+   listed older magics and upgrade on merge-write. The byte-exact,
+   version-aware layouts live in the save/load doc comments of the owning src
+   file (`src/server/persist.zig`, `src/world/*.zig`): that code is the
+   source of truth for implementers, not this table (the table duplicated it
+   once and drifted). Current writers:
 
-| File | Magic | Layout (LE) |
-|---|---|---|
-| `c_X_Z.zch` | **ZCH3** | See decision §2 (flagged channels) |
-| `players.zsv` | **ZPV3** (writes; **ZPV2** still read) | Header `n:u32` then records: `name_len:u8 \| name \| x,y,z:f32 \| coins:u32 \| inv_n:u8 \| inv_n×(item:u16,count:u16,quality:u8,meta:u16) \| jn:u8 \| jn×(def_id:u16,quest_code:i32,flags:u8,progress:u16,phase:u8)` then **v3 progression tail**: `prog:u8` (0 = absent; 1 = present) \| when 1: `level:u16 \| xp:u64 \| food,food_max,water,water_max:f32×4 \| buff_n:u8 \| buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32, upd_ticks:u16, upd_rate:i32, dur_max:f32, remove_on_death:u8)`. Merge-write keeps offline names and upgrades bare ZPV2 records by appending `prog=0`. Key = login name ([ADR 0017](0017-player-identity-login-name.md)). |
-| `containers.zct` | **ZCT1** | `count:u16` then: `pos xyz:i32×3 \| block_id:i32 \| slot_count:u16 \| touched:u8 \| player:u8 \| slot_count×(item,count,quality,meta)` |
-| `blockmeta.zbm` | **ZBM1** | `raw_n:u16 \| raw_n×(key:u64, raw:u32) \| hp_n:u16 \| hp_n×(key:u64, hp:u16)` |
-| `claims.zlc` | **ZCLC** | `count:u16` then records: `x,y,z:i32 \| name_len:u8 \| name[32] \| owner_seen_day:u32`. Owner entity is not stored; re-mapped on login by name. |
-| `clock.zcl` | **ZCL1** | `worldTime:u64` (stock-shaped: `(day-1)*24000 + hours*1000`). Missing file = fresh day 1. |
-| `weather.zwt` | **ZWTH1** | Storm state machine encode (`world/weather.zig`); missing/corrupt = re-roll open groups. |
+| File | Magic (writes) | Still read | Owner |
+|---|---|---|---|
+| `c_X_Z.zch` | **ZCH3** | pre-paint ZCH3 (flags decide channels) | decision §2; `src/world/store.zig` |
+| `players.zsv` | **ZPV10** | **ZPV2**–**ZPV9** | `src/server/persist.zig` (`savePlayers`). Grew from the ZPV3 base (name, pos, coins, inventory, journal, progression tail) by version bumps: bedroll (v4+), journal name + POI rect (v5+), slot `use_times` (v7+), tail hp (v8+), born world time (v9+), slot seed (v10). Merge-write keeps offline names and upgrades old records. Key = login name ([ADR 0017](0017-player-identity-login-name.md)). |
+| `containers.zct` | **ZCT2** | **ZCT1** | `src/world/containers.zig` (ZCT2 adds touched_day + grid size_x/size_y) |
+| `blockmeta.zbm` | **ZBM2** | **ZBM1** | `src/server/game/blockmeta.zig` (ZBM2 adds the damage plane) |
+| `claims.zlc` | **ZCLC** | - | `src/server/persist.zig`: `x,y,z:i32 \| name_len:u8 \| name[32] \| owner_seen_day:u32`. Owner entity is not stored; re-mapped on login by name. |
+| `clock.zcl` | **ZCL2** | **ZCL1** | `src/server/game/clock_persist.zig` (ZCL2 adds the persisted blood-moon schedule). Missing file = fresh day 1. |
+| `weather.zwt` | **ZWTH1** | - | Storm state machine encode (`src/world/weather.zig`); missing/corrupt = re-roll open groups. |
 
 Slot `item_id` fields are ECS handles (see [ADR 0015](0015-ecs-item-id-vs-stock-type.md)).
 

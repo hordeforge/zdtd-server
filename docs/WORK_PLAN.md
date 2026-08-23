@@ -434,7 +434,7 @@ levels in a perk that grants it.
 
 **Files:** `src/assets/progression.zig` (or a new shared module if the
 function needs to sit above both `progression.zig` and `buffs.zig`),
-`src/server/game/step.zig`, `docs/reviews/HARDCODE_AUDIT.md` (A34 moves from
+`src/server/game/step.zig`, `docs/archive/HARDCODE_AUDIT_2026-08-08.md` (A34 moves from
 "fixed with a floor" to "fixed per-player").
 
 **Grounding:** `progression.xml` `<passive_effect>` rows inside `<perk>`
@@ -494,7 +494,7 @@ did not implement.
 
 ## T28. Resolve armor mitigation from items.xml instead of a flat 10%/piece
 
-**Why:** [HARDCODE_AUDIT A35](reviews/HARDCODE_AUDIT.md). `armorMitigation`
+**Why:** [HARDCODE_AUDIT A35](archive/HARDCODE_AUDIT_2026-08-08.md). `armorMitigation`
 credits every equipped armor item the same flat 10%, capped at 50%, regardless
 of the item, its tier, or its quality, and does not distinguish physical from
 elemental damage. Stock ships the real numbers as `PhysicalDamageResist` /
@@ -950,7 +950,7 @@ elsewhere; this task is only the persistence gap.
 ## T38. `ActiveRadiusEffects` for always-on light sources (torch, candle, radiated barrel)
 
 **Status: partially landed 2026-08-10.** Workstation-backed radius-effect
-blocks (campfire, burning barrel) work: see [HARDCODE_AUDIT A36](reviews/HARDCODE_AUDIT.md).
+blocks (campfire, burning barrel) work: see [HARDCODE_AUDIT A36](archive/HARDCODE_AUDIT_2026-08-08.md).
 This task is the residual: blocks that carry `ActiveRadiusEffects` but have
 no fuel module and therefore no workstation record.
 
