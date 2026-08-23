@@ -3,19 +3,6 @@
 Consumer-visible changes are recorded here. The project follows the release
 and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
-## [Unreleased]
-
-### Added
-
-- Pure XML/assetbundle modlet support (docs/MODLETS_PRD.md,
-  docs/MODLETS_PLAN.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
-  `XmlPatcher` op catalog (append/prepend/insert/remove/set/csv/include,
-  `@modfolder:` tokens; `conditional` fails closed until RE pins the grammar),
-  patched catalogs feeding every XML loader (`--mods-dir` override), and the
-  stock join-phase config sync (`NetPackageConfigFile`, 42 S2C rows,
-  Deflate-cached patched XML, `archetypes` name-only). DLL mods are never
-  hosted; `Bundles/` is tolerated, never read.
-
 ## [0.2.0] - 2026-08-22
 
 ### Added
@@ -381,3 +368,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   to every nearby or connected peer.
 
 ## [Unreleased]
+
+- Pure XML/assetbundle modlet support (docs/MODLETS_PRD.md,
+  docs/MODLETS_PLAN.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
+  `XmlPatcher` op catalog (append/prepend/insert/remove/set/csv/include,
+  `@modfolder:` tokens; `conditional` fails closed until RE pins the grammar),
+  patched catalogs feeding every XML loader (`--mods-dir` override), and the
+  stock join-phase config sync (`NetPackageConfigFile`, 42 S2C rows,
+  Deflate-cached patched XML, `archetypes` name-only). DLL mods are never
+  hosted; `Bundles/` is tolerated, never read.
