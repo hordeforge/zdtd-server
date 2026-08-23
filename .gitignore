@@ -64,3 +64,4 @@ docs/provenance.html
 # Python tooling (tools/*.py)
 __pycache__/
 *.pyc
+*.lock
