@@ -34,9 +34,11 @@ Status is one of: **accepted**, **superseded**, **deprecated** — a decision st
 | [0030](0030-plugin-spatiotemporal-composability.md) | Plugin spatiotemporal composability: reload (HMR), effect withdrawal, declarative `_zdtd_requires` dependencies | accepted |
 | [0031](0031-mcp-wasm-module.md) | MCP server as a Wasm module: guest protocol, host transport | accepted |
 
+Numbers 0027–0029 were never assigned. Next free number is **0032**.
+
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),
-[HARDCODE_AUDIT.md](../reviews/HARDCODE_AUDIT.md), [ASSETS.md](../ASSETS.md),
+[HARDCODE_AUDIT.md](../archive/HARDCODE_AUDIT_2026-08-08.md), [ASSETS.md](../ASSETS.md),
 [WIRE_CHUNK.md](../wire/WIRE_CHUNK.md), [MAPS.md](../MAPS.md),
 [WEBUI.md](../WEBUI.md), [STD_ABSTRACTIONS.md](../STD_ABSTRACTIONS.md),
 [../TODO.md](../../TODO.md) (P3 ECS ideas, P4 authority; plugin = ADR 0020),

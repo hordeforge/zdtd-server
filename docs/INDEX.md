@@ -24,8 +24,8 @@ roughly 3500 lines in the NetPackage region.
 New to the project, or picking up work:
 
 1. [STATUS.md](STATUS.md) what works now, with the current gates.
-2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 330 features scored
-   WORKS / PARTIAL / MISSING with anchors.
+2. [GAP_ANALYSIS.md](GAP_ANALYSIS.md) what does not, 291 features scored
+   WORKS / PARTIAL / MISSING with anchors (263 / 28 / 0).
 3. [WORK_PLAN.md](WORK_PLAN.md) what to build next, as self-contained tasks.
 4. [../AGENTS.md](../AGENTS.md) the rules everyone works under.
 5. [../TODO.md](../TODO.md) open backlog first; shipped log below the fold.
@@ -93,6 +93,11 @@ Where the world and its data come from.
 | [PRD 0002](prd/0002-mcp-server.md) | MCP server addon requirements (with [RFC 0002](rfc/0002-mcp-server-design.md); ADR 0031) |
 | [PRD 0003](prd/0003-modlets.md) | Pure XML/assetbundle modlet compatibility requirements (with [RFC 0003](rfc/0003-modlets-plan.md)) |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http plus posix residuals |
+| [IMPLEMENTATION_PLAN_BOTS.md](IMPLEMENTATION_PLAN_BOTS.md) | FPS bot execution plan (ADR 0026) |
+| [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) | Plugin/config boundary review (ADR 0020/0026) |
+| [RULES_CONFIG.md](RULES_CONFIG.md) | Tunables disposition (ADR 0021) |
+| [XML_DATA_AUDIT.md](XML_DATA_AUDIT.md) | No-hardcode audit + `make check-xml-audit` gate |
+| [q3-inspiration-notes.md](q3-inspiration-notes.md) | Bot brain reference notes (Q3/Doom 3) |
 | [adr/README.md](adr/README.md) | Architecture decision records |
 
 ## Ops and UI
@@ -111,18 +116,20 @@ Where the world and its data come from.
 ## Review prompts and their findings
 
 The prompts under `prompts/` are named `*-review.md` so the review-loop tool
-discovers them as project prompts. Findings live under `reviews/`: each is the
-output of one run and is a **snapshot, not a live inventory**. That separation
-is the point of the directory. When a review contradicts
-[STATUS.md](STATUS.md), STATUS wins.
+discovers them as project prompts. Findings from a run are snapshots, not a
+live inventory; the former `reviews/` directory was removed, and surviving
+snapshots live under [archive/](archive/) (e.g.
+[HARDCODE_AUDIT_2026-08-08.md](archive/HARDCODE_AUDIT_2026-08-08.md)). When a
+review contradicts [STATUS.md](STATUS.md), STATUS wins.
 
 | Prompt | Findings |
 |---|---|
-| [prompts/zig-idiomatic-review.md](prompts/zig-idiomatic-review.md) | [ZIG_REVIEW.md](reviews/ZIG_REVIEW.md) |
-| [prompts/abstractions-review.md](prompts/abstractions-review.md) | [ABSTRACTION_REVIEW.md](reviews/ABSTRACTION_REVIEW.md) |
-| [prompts/simd-review.md](prompts/simd-review.md) | [SIMD_REVIEW.md](reviews/SIMD_REVIEW.md) |
-| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | [ECS_REVIEW.md](reviews/ECS_REVIEW.md) |
-| [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [HARDCODE_AUDIT.md](reviews/HARDCODE_AUDIT.md) |
-| [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | [ZIG_0_16_REVIEW.md](reviews/ZIG_0_16_REVIEW.md) |
+| [prompts/zig-idiomatic-review.md](prompts/zig-idiomatic-review.md) | archived (see `docs/archive/`) |
+| [prompts/abstractions-review.md](prompts/abstractions-review.md) | archived (see `docs/archive/`) |
+| [prompts/simd-review.md](prompts/simd-review.md) | archived (see `docs/archive/`) |
+| [prompts/ecs-soa-review.md](prompts/ecs-soa-review.md) | archived (see `docs/archive/`) |
+| [prompts/hardcoded-data-review.md](prompts/hardcoded-data-review.md) | [archive/HARDCODE_AUDIT_2026-08-08.md](archive/HARDCODE_AUDIT_2026-08-08.md) |
+| [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | archived (see `docs/archive/`) |
 | [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | not yet run |
 | [prompts/net-send-review.md](prompts/net-send-review.md) | not yet run |
+| [prompts/plugin-composability-review.md](prompts/plugin-composability-review.md) | not yet run |

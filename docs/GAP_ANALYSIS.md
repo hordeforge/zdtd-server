@@ -139,7 +139,8 @@ was implemented or consolidated into a PARTIAL row with a documented residual.
 Fifty-three feature bullets use ad-hoc status labels (`PARTIAL (waived)`,
 `BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `RESOLVED`, `PER-CLASS`,
 `DONE`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and are
-not counted; see [reviews/DOC_CONSISTENCY_AUDIT.md](reviews/DOC_CONSISTENCY_AUDIT.md).
+not counted; the former `reviews/DOC_CONSISTENCY_AUDIT.md` snapshot was removed
+with the `reviews/` directory.
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ## 2. Scorecard

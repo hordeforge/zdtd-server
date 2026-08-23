@@ -2675,10 +2675,6 @@ fn recordHit(f: *c.FallingBlocks, nid: i32) void {
     }
 }
 
-/// EntityVehicle::cGravity static literal, asm.il:536018. Vertical acceleration
-/// applied to server-simulated vehicles (distinct from World::Gravity 0.08).
-const gravity_accel: f32 = -9.81;
-
 pub fn systemVehicles(w: *World, dt: f32) void {
     // Vehicle physics does not change entity membership, so the dense group
     // avoids a full-capacity scan on every tick, especially for parked fleets.
@@ -2688,10 +2684,12 @@ pub fn systemVehicles(w: *World, dt: f32) void {
 
         // Vertical physics: gravity accumulator + terrain-top clamp. Runs for
         // every vehicle (parked included). Skipped when no terrain hook is set.
+        // rules.vehicle.gravity (RE EntityVehicle::cGravity, asm.il:536018;
+        // distinct from World::Gravity 0.08) is the config surface (ADR 0021).
         const t = &w.transform[i];
         if (w.groundY(t.x, t.z)) |gy| {
             if (t.y > gy) {
-                v.vy += gravity_accel * dt;
+                v.vy += w.rules.vehicle.gravity * dt;
                 t.y += v.vy * dt;
                 if (t.y <= gy) { // landed / no-fly
                     t.y = gy;

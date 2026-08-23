@@ -58,6 +58,9 @@ package-lock.json
 # semcode index (rebuild with `semcode-index -s .`; not a product input)
 .semcode.db/
 
+# Generated provenance dashboard (rebuilt by tools/provenance_scan.py)
+docs/provenance.html
+
 # Python tooling (tools/*.py)
 __pycache__/
 *.pyc

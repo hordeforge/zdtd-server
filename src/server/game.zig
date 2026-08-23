@@ -215,6 +215,21 @@ pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
     return if (sv != 0) sv else g.wasm_plugins.playerDamage(-1, victim, @intFromFloat(amount));
 }
 
+/// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
+/// Wasm-first): runs the static then wasm hosts with the given attacker and
+/// returns the post-verdict amount — 0 when denied (<0), percent-scaled
+/// (>0), unchanged when no plugin votes (0). Used by damage sources outside
+/// the C2S/ECS melee paths: environmental survival damage (drowning,
+/// radiation, starvation, attacker -1) and explosion damage (attacker = the
+/// blaster), so a module shapes ALL damage directed at players.
+pub fn playerDamageVerdictAmount(g: *Game, attacker: i32, victim: i32, amount: f32) f32 {
+    const sv = g.plugins.playerDamage(attacker, victim, @intFromFloat(amount));
+    const v = if (sv != 0) sv else g.wasm_plugins.playerDamage(attacker, victim, @intFromFloat(amount));
+    if (v < 0) return 0;
+    if (v > 0) return amount * @as(f32, @floatFromInt(v)) / 100.0;
+    return amount;
+}
+
 /// Server chat broadcast for plugin announcements (`zdtd.queue say`): builds
 /// the stock chat body (sender 0 = server, global chat) and broadcasts it to
 /// every client. Guest-controlled bytes are sanitized to one printable line.

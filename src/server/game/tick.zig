@@ -50,7 +50,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             ) catch 0 == water_id) {
                 c.drown_accum += secs;
                 if (c.drown_accum >= 1.0) {
-                    _ = self.sim.damageFrom(c.entity_id, prog.drowning_damage_per_second * c.drown_accum, -1);
+                    // Wasm-first (AGENTS rule 29): environmental damage passes
+                    // the on_player_damage verdict with attacker -1, so a
+                    // module scales/denies drowning like any other player hit.
+                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.drowning_damage_per_second * c.drown_accum);
+                    if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.drown_accum = 0;
                 }
             } else {
@@ -63,7 +67,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             if (self.isRadiatedAt(@trunc(self.sim.transform[ps].x), @trunc(self.sim.transform[ps].z))) {
                 c.radiation_accum += secs;
                 if (c.radiation_accum >= 1.0) {
-                    _ = self.sim.damageFrom(c.entity_id, prog.radiation_damage_per_second * c.radiation_accum, -1);
+                    // Wasm-first (AGENTS rule 29): verdict with attacker -1,
+                    // like drowning above.
+                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.radiation_damage_per_second * c.radiation_accum);
+                    if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.radiation_accum = 0;
                 }
             } else {
@@ -90,7 +97,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                     sv.starve_hp_per_s
                 else
                     sv.dehydrate_hp_per_s;
-                hp_delta -= per_s * secs;
+                // Wasm-first (AGENTS rule 29): verdict with attacker -1, like
+                // drowning/radiation above.
+                hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, per_s * secs);
             } else if (sv.hungry_frac[0] > 0 and sv.thirsty_frac[0] > 0) {
                 if (h.food >= sv.hungry_frac[0] * h.food_max and h.water >= sv.thirsty_frac[0] * h.water_max) {
                     hp_delta += prog.well_fed_regen_per_hour * game_hours;
@@ -100,7 +109,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             }
         } else {
             if (h.food <= 0 or h.water <= 0) {
-                hp_delta -= prog.starvation_damage_per_hour * game_hours;
+                // Wasm-first (AGENTS rule 29): verdict with attacker -1, like
+                // drowning/radiation above.
+                hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.starvation_damage_per_hour * game_hours);
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }

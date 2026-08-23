@@ -441,6 +441,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const mit = invsys.armorMitigation(&self.sim, victim_slot);
                     amount *= (1.0 - mit);
                 }
+                // Wasm-first (AGENTS rule 29): the on_player_damage verdict
+                // applies to explosion damage too (attacker = the blaster), so
+                // a module scales/denies PvP and self-damage from explosives
+                // like any other hit. The native pvp_mode floor still wins.
+                const atk = if (c.entity_id > 0) c.entity_id else -1;
+                amount = game_mod.playerDamageVerdictAmount(self, atk, nid, amount);
+                if (amount <= 0) continue;
             }
             const dmg = self.sim.damageFrom(nid, amount, if (c.entity_id > 0) c.entity_id else -1);
             if (dmg.killed and !self.sim.mask[es].player) {
