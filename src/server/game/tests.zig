@@ -1345,6 +1345,45 @@ test "path step hook sees walls and terrain, and the snapshot agrees" {
     try std.testing.expectEqual(before + 1, g.world.chunks.count());
 }
 
+test "parallel solid/water probes share one world without corruption" {
+    if (@import("builtin").single_threaded) return error.SkipZigTest;
+    const parallel = @import("../../util/parallel.zig");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_hooks_par", 0, .{
+        .enable_sample_plugin = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // The port-0 offline Game pins DST serial scheduling; this test needs real
+    // fan-out so several workers enter the chunk-generating probes at once.
+    // (Pre-2026-08 audit these hooks reached World.getOrCreate unlocked:
+    // concurrent getOrPut/rehash on the chunk map plus non-atomic touch_seq.)
+    defer parallel.setForceSerial(false);
+    parallel.setForceSerial(false);
+    const Probe = struct {
+        g: *Game,
+        fn work(ctx: @This(), begin: usize, end: usize) void {
+            const solid = ctx.g.sim.solid_fn.?;
+            const water = ctx.g.sim.water_fn.?;
+            var i = begin;
+            while (i < end) : (i += 1) {
+                // Interleave coordinates across a 128x128 block area (64
+                // chunks) so every worker inserts into the same chunk keys.
+                const x: i32 = @as(i32, @intCast(i % 128)) - 64;
+                const z: i32 = @as(i32, @intCast((i / 128) % 128)) - 64;
+                _ = solid(ctx.g, x, 61, z);
+                _ = water(ctx.g, x, 60, z);
+            }
+        }
+    };
+    parallel.forRanges(128 * 128, Probe{ .g = g }, Probe.work);
+    // All workers joined: the map is consistent and answers stably.
+    try std.testing.expect(g.world.chunks.count() >= 64);
+    const s0 = g.sim.solid_fn.?(g, 3, 61, 3);
+    try std.testing.expectEqual(s0, g.sim.solid_fn.?(g, 3, 61, 3));
+}
+
 test "deco burst is biome driven and mirrors into the block store" {
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/deco_biome", 0, .{
         .enable_sample_plugin = false,

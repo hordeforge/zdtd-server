@@ -427,15 +427,23 @@ pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
 
 /// Block-solid probe for the AI sense LOS ray (stock CanSee's Voxel.Raycast).
 /// A missing/erroring chunk counts as clear (nothing to hide behind yet).
+/// Runs on parallel AI/turret workers (LOS, movement probes, gravity), so the
+/// world probe holds `terrain_mu`: `isSolidWorld` reaches `World.getOrCreate`,
+/// which mutates shared state (chunk-map insert/evict/rehash, touch_seq) and
+/// allocates from the non-thread-safe World allocator.
 pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
+    g.terrain_mu.lock();
+    defer g.terrain_mu.unlock();
     return g.world.isSolidWorld(x, y, z) catch false;
 }
 
 /// Water probe for the AI swim physics (stock inWaterPercent): true when the
-/// cell holds water.
+/// cell holds water. Same locking contract as `blockSolidAt`.
 pub fn blockIsWaterAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
+    g.terrain_mu.lock();
+    defer g.terrain_mu.unlock();
     const id = g.world.blockWorld(x, y, z) catch return false;
     return g.world.isWaterId(id);
 }
