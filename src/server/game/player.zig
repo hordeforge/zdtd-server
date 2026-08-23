@@ -18,7 +18,6 @@ const max_clients = game_mod.max_clients;
 
 /// GameStats[54] party_shared_kill_range (stock default 100; no V3.1.0
 /// serverconfig key, so it rides the `[sim] party_shared_kill_range` surface).
-
 /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
 /// Levels up using progression.xml exp curve when loaded.
 pub fn awardXp(self: *Game, slot: usize, base: u64) void {

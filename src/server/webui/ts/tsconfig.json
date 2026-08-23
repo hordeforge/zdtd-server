@@ -8,6 +8,18 @@
     "module": "es2022",
     "lib": ["es2022", "dom", "dom.iterable"],
     "strict": true,
+    // Strict beyond `strict`: every flag below was verified against the tree
+    // (tsc 5.9.3, 2026-08-23) and passes clean. Diagnostics only: none of them
+    // changes emit, so the committed pages stay byte-identical.
+    // noUncheckedIndexedAccess / noPropertyAccessFromIndexSignature were tried
+    // and do NOT pass yet (shell.ts apm-sample and dataset indexing); enable
+    // once the sources are narrowed.
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
     "noEmitOnError": true,
     "types": []
   },

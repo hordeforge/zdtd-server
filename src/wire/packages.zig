@@ -337,12 +337,12 @@ test "buildConfigFileBody pins name + len + bytes and null form" {
     // 7-bit name len 6 | "blocks" | i32 len 4 | 4 bytes
     try std.testing.expectEqualSlices(u8, &.{
         6, 'b', 'l', 'o', 'c', 'k', 's',
-        4, 0, 0, 0,
-        1, 2, 3, 4,
+        4, 0,   0,   0,   1,   2,   3,
+        4,
     }, with_data);
     const null_form = try buildConfigFileBody(&buf, "archetypes", null);
     try std.testing.expectEqualSlices(u8, &.{
-        10, 'a', 'r', 'c', 'h', 'e', 't', 'y', 'p', 'e', 's',
+        10,   'a',  'r',  'c',  'h', 'e', 't', 'y', 'p', 'e', 's',
         0xff, 0xff, 0xff, 0xff,
     }, null_form);
 }

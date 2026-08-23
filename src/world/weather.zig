@@ -23,7 +23,6 @@ pub const update_interval_ticks: i64 = 5;
 /// CalcGlobalWeatherType pushes every storm at least this far out while a blood
 /// moon is up, so no storm can start inside the horde night. Value is
 /// `[sim] storm_bm_push_ticks` (Manager field; default 5000).
-
 /// One `WeatherManager/BiomeWeather`. `group_index` is the wire groupIndex and is
 /// always a valid ordinal into that biome's group set.
 pub const BiomeState = struct {

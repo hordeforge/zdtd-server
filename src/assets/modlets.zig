@@ -209,7 +209,7 @@ pub fn scan(allocator: std.mem.Allocator, mods_root: []const u8) !Scan {
         var path_buf: [2048]u8 = undefined;
         const mod_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ mods_root, folder }) catch continue;
         var mi_buf: [2048]u8 = undefined;
-        const mi_path = std.fmt.bufPrint(&mi_buf, "{s}/ModInfo.xml", .{ mod_path }) catch continue;
+        const mi_path = std.fmt.bufPrint(&mi_buf, "{s}/ModInfo.xml", .{mod_path}) catch continue;
         const info = io_fs.readFileAll(allocator, mi_path) catch |err| switch (err) {
             error.FileNotFound => {
                 util_log.warn("zdtd: [MODS]{s}/ModInfo.xml missing; mod skipped\n", .{folder});

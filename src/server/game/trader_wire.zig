@@ -17,7 +17,6 @@ const vending_mod = @import("../../world/vending.zig");
 /// (TraderData.CopyFrom on the raw key, loot-economy.md 5); this gate closes
 /// the "rewrite any trader from anywhere" vector without affecting a
 /// legitimate trade. Reach is `[sim] trader_use_range` (Game.trade_use_range).
-
 pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) usize {
     const stock = self.sim.trader_stock[s];
     var n: usize = 0;

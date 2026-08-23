@@ -18,7 +18,6 @@ pub const LockReason = enum(u8) {
 /// QuestLockInstance.SetUnlocked: LockedOutUntil = worldTime + 0x7d0 (asm.il 1002020).
 /// The grace is `rules.world.poi_unlock_grace_ticks` (Table field, synced at
 /// init; 2000 = 100 s at 20 TPS).
-
 /// Fixed capacity: the table is grown from client packets, so it must not be
 /// an unbounded allocation a peer can drive.
 pub const max_locks: usize = 64;

@@ -143,13 +143,13 @@ lint: need-zig lint-webui lint-html
 	}
 	bash -n scripts/*.sh
 	shellcheck scripts/*.sh
-	$(ZIG) fmt --check build.zig src
+	$(ZIG) fmt --check build.zig build.zig.zon src
 	bash scripts/lint-architecture.sh
 	bash scripts/lint-cycles.sh
 	bash scripts/lint-wire.sh
 
 fmt: need-zig
-	$(ZIG) fmt build.zig src
+	$(ZIG) fmt build.zig build.zig.zon src
 
 # Pass ZIG explicitly: make variables are not exported to recipe environments,
 # so `make ZIG=/path/zig release` must validate the same compiler it builds with.
@@ -164,6 +164,10 @@ check:
 	$(MAKE) release-check
 	$(MAKE) lint
 	$(MAKE) need-python3
+	# Syntax-compile every repo Python source (stdlib ast gate): provenance_scan
+	# and check_xml_audit are executed below anyway, but gen_provenance.py never
+	# runs in check, so a syntax error there would otherwise land unseen.
+	python3 -m py_compile tools/*.py scripts/gen_provenance.py
 	python3 tools/provenance_scan.py
 	$(MAKE) check-xml-audit
 	$(MAKE) build

@@ -161,7 +161,6 @@ pub const PathWp = struct { x: i32 = 0, z: i32 = 0, y: i16 = 0 };
 /// Read via w.rules.ai.revenge_window_s (mode/zdtd.toml overlay); the
 /// knockback impulse (rules.combat.knockback_speed / knockback_seconds) also
 /// lives on the rules surface.
-
 pub const ZombieAi = struct {
     state: AiState = .idle,
     target_id: i32 = -1,

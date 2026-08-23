@@ -446,7 +446,6 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
 /// the budget runs down to DigStop. A dug block that is already gone ends the
 /// dig so the zombie walks on. Both values are `rules.ai` (dig_windup_ticks /
 /// dig_budget_ticks) so a mode can pace zombie block-chew.
-
 pub fn systemDigUpdate(w: *World) void {
     const solid_fn = w.solid_fn;
     for (query.groupSlice(w, .zombie)) |s| {

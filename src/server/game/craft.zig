@@ -19,7 +19,6 @@ const game_social = @import("social.zig");
 
 /// Vehicle tank cap and the InvTx refuel pickup reach are
 /// rules.vehicle (fuel_cap / refuel_reach).
-
 /// ECS armor hook: stock/builtin name starts with "armor".
 pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));

@@ -9,7 +9,6 @@ pub const max_wires: usize = 512;
 pub const max_node_watts: f32 = 100_000;
 /// Pressure plate / tripwire pulse duration (seconds), `[rules.power]
 /// trigger_pulse_s` (PowerGrid field; ~10 ticks at 20 TPS).
-
 /// Stock PowerTrigger/TriggerPowerDelayTypes -> seconds. The enum is Instant=0
 /// then OneSecond..FiveSecond, and set_IsTriggered stores the index verbatim as
 /// delayStartTime (asm.il:900414, switch at IL_0112). Out of range = Instant.
