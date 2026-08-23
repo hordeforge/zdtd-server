@@ -177,6 +177,19 @@ pub const Plugin = struct {
     max_pages: ?u64 = null,
 };
 
+/// `[mods]` config section (PRD 0005): module tiers and override.
+/// `disabled` and `blacklist` are comma-separated mod-name lists (manifest
+/// name or mods/ dir name), like `[plugin] modules`. The comptime binder
+/// handles scalars only, so lists ride as strings; main.zig splits them.
+pub const Mods = struct {
+    /// Skip loading these discovered mods (one info log per mod).
+    disabled: ?[]const u8 = null,
+    /// Refuse these mods: never loaded, and any mod overriding or requiring
+    /// a blacklisted name is a load failure. Naming a core component here is
+    /// a config error.
+    blacklist: ?[]const u8 = null,
+};
+
 /// Authority.mode is a constrained string: observe | permissive | correct.
 /// The binder validates it by name and canonicalises the spelling.
 pub const AuthorityModeName = enum {
@@ -246,6 +259,8 @@ pub const File = struct {
     sim: Sim = .{},
     mode: Mode = .{},
     plugin: Plugin = .{},
+    /// Mod tiers and override (PRD 0005).
+    mods: Mods = .{},
     /// Quest data policy: the objective `type=` -> phase-kind mapping is
     /// config, not code (ADR 0021) — a new stock objective type is a row here,
     /// `"Type=PhaseKind, ..."` (see assets/quests.zig parseObjectiveKinds).

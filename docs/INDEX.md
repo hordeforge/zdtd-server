@@ -92,6 +92,7 @@ Where the world and its data come from.
 | [PRD 0001](prd/0001-fps-bot.md) | FPS Bot addon requirements (with [RFC 0001](rfc/0001-fps-bot-spec.md); ADR 0026) |
 | [PRD 0002](prd/0002-mcp-server.md) | MCP server addon requirements (with [RFC 0002](rfc/0002-mcp-server-design.md); ADR 0031) |
 | [PRD 0003](prd/0003-modlets.md) | Pure XML/assetbundle modlet compatibility requirements (with [RFC 0003](rfc/0003-modlets-plan.md)) |
+| [PRD 0005](prd/0005-mod-tiers-and-override.md) | Module tiers and mod override requirements (with [RFC 0005](rfc/0005-mod-tiers-and-override.md)) |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http plus posix residuals |
 | [IMPLEMENTATION_PLAN_BOTS.md](IMPLEMENTATION_PLAN_BOTS.md) | FPS bot execution plan (ADR 0026) |
 | [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) | Plugin/config boundary review (ADR 0020/0026) |
