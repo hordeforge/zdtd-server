@@ -183,76 +183,76 @@ pre .in{color:var(--acc)} .err{color:var(--err)} .ok{color:var(--ok)} pre .meta{
 </style>
 </head>
 <body>
-155	<a class="skip-link" href="#main-content">Skip to dashboard</a>
-156	<noscript><p class="noscript">JavaScript is required for live updates. Console commands still submit, but the response replaces this page.</p></noscript>
-157	<header>
-158	<h1>zdtd</h1><span class="meta">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · ops dashboard</span>
-159	<div class="header-actions">
-160	<label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
-161	<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm players console logs settings">Refresh</button>
-162	<form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="__ZDTD_CSRF__"><button type="submit">Sign out</button></form>
-163	</div>
-164	</header>
-165	<nav class="page-nav" role="tablist" aria-label="Dashboard sections">
-166	<button type="button" class="tab" id="tab-status" role="tab" aria-selected="true" aria-controls="status-section">Status</button>
-167	<button type="button" class="tab" id="tab-apm" role="tab" aria-selected="false" aria-controls="apm-section">Performance</button>
-168	<button type="button" class="tab" id="tab-players" role="tab" aria-selected="false" aria-controls="players-section">Players</button>
-169	<button type="button" class="tab" id="tab-console" role="tab" aria-selected="false" aria-controls="console-section">Console</button>
-170	<button type="button" class="tab" id="tab-logs" role="tab" aria-selected="false" aria-controls="logs-section">Logs</button>
-171	<button type="button" class="tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="settings-section">Settings</button>
-172	</nav>
-173	<main id="main-content" tabindex="-1">
-174	<section id="status-section" role="tabpanel" aria-labelledby="tab-status"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
-175	<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm-chart-wrap"><canvas id="apm-canvas" width="600" height="150" aria-label="Live tick latency and section means">Live performance graphs require JavaScript.</canvas></div><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
-176	<section id="players-section" role="tabpanel" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
-177	<section id="console-section" role="tabpanel" aria-labelledby="tab-console" hidden>
-178	<h2 id="console-heading">Console</h2>
-179	<p id="cmd-help" class="meta" style="margin:0;padding:0.7rem 1rem 0;color:var(--muted);font-size:0.78rem;border-bottom:1px solid var(--line)">Same commands as the admin telnet console — <code>help</code>, <code>status</code>, <code>give</code>, <code>kick</code>, <code>settime</code>. Press <kbd>/</kbd> to focus, <kbd>↑</kbd><kbd>↓</kbd> for history.</p>
-180	<div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
-181	<button type="button" class="quick-cmd" data-cmd="help">help</button>
-182	<button type="button" class="quick-cmd" data-cmd="status">status</button>
-183	<button type="button" class="quick-cmd" data-cmd="lp">players</button>
-184	<button type="button" class="quick-cmd" data-cmd="save">save</button>
-185	<button type="button" class="quick-cmd" data-cmd="settime day">day</button>
-186	<button type="button" class="quick-cmd" data-cmd="settime night">night</button>
-187	</div>
-188	<div id="console-term" class="console-term"></div>
-189	<form id="cmd-form" class="cmd-row" method="post" action="/api/cmd">
-190	<input type="hidden" name="csrf" value="__ZDTD_CSRF__">
-191	<label for="cmd-line" class="sr-only">Admin command</label>
-192	<input type="text" name="line" id="cmd-line" placeholder="try help  ·  status  ·  settime day" aria-describedby="cmd-help" autocomplete="off" spellcheck="false" maxlength="256" required>
-193	<button type="submit">Run</button>
-194	</form>
-195	<div id="cmd-out" aria-live="polite" aria-atomic="true"></div>
-196	<div id="console-log" aria-label="Recent commands" role="region" tabindex="-1" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
-197	</section>
-198	<section id="settings-section" role="tabpanel" aria-labelledby="tab-settings" hidden>
-199	<h2 id="settings-heading">Settings</h2>
-200	<div id="settings" aria-live="polite" aria-atomic="true" hx-get="/partials/settings" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading settings…</p></div>
-201	</section>
-202	<section id="logs-section" role="tabpanel" aria-labelledby="tab-logs" hidden>
-203	<h2 id="logs-heading">Server log</h2>
-204	<div class="logs-tools" role="group" aria-label="Log filters">
-205	<label class="sr-only" for="log-level">Minimum severity</label>
-206	<select id="log-level">
-207	<option value="debug" selected>All</option>
-208	<option value="info">info +</option>
-209	<option value="warn">warn +</option>
-210	<option value="err">err +</option>
-211	<option value="crit">crit</option>
-212	</select>
-213	<label class="sr-only" for="log-filter">Filter log messages</label>
-214	<input type="search" id="log-filter" placeholder="Filter — chunk, join, error…" autocomplete="off" spellcheck="false">
-215	<span id="logs-state" class="meta" role="status">Loading…</span>
-216	</div>
-217	<div id="logs-view" role="region" aria-label="Server log lines" tabindex="0"><p class="meta">Loading server log…</p></div>
-218	<p class="meta" style="margin:0;padding:0.6rem 1rem;border-top:1px solid var(--line)">Newest first · 2048 lines kept · <code>loglevel</code> controls verbosity.</p>
-219	</section>
-220	</main>
-221	<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">apm.json</a> · <a href="/api/logs.json">logs.json</a> · <a href="/healthz">healthz</a> · <a href="/readyz">readyz</a></footer>
-222	<script src="/static/xterm.js"></script>
-223	<script src="/static/addon-fit.js"></script>
-224	<script>
+<a class="skip-link" href="#main-content">Skip to dashboard</a>
+<noscript><p class="noscript">JavaScript is required for live updates. Console commands still submit, but the response replaces this page.</p></noscript>
+<header>
+<h1>zdtd</h1><span class="meta">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · ops dashboard</span>
+<div class="header-actions">
+<label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
+<button type="button" class="refresh-now" id="refresh-now" aria-controls="status apm players console logs settings">Refresh</button>
+<form class="logout-form" method="post" action="/logout"><input type="hidden" name="csrf" value="__ZDTD_CSRF__"><button type="submit">Sign out</button></form>
+</div>
+</header>
+<nav class="page-nav" role="tablist" aria-label="Dashboard sections">
+<button type="button" class="tab" id="tab-status" role="tab" aria-selected="true" aria-controls="status-section">Status</button>
+<button type="button" class="tab" id="tab-apm" role="tab" aria-selected="false" aria-controls="apm-section">Performance</button>
+<button type="button" class="tab" id="tab-players" role="tab" aria-selected="false" aria-controls="players-section">Players</button>
+<button type="button" class="tab" id="tab-console" role="tab" aria-selected="false" aria-controls="console-section">Console</button>
+<button type="button" class="tab" id="tab-logs" role="tab" aria-selected="false" aria-controls="logs-section">Logs</button>
+<button type="button" class="tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="settings-section">Settings</button>
+</nav>
+<main id="main-content" tabindex="-1">
+<section id="status-section" role="tabpanel" aria-labelledby="tab-status"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
+<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm-chart-wrap"><canvas id="apm-canvas" width="600" height="150" aria-label="Live tick latency and section means">Live performance graphs require JavaScript.</canvas></div><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
+<section id="players-section" role="tabpanel" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
+<section id="console-section" role="tabpanel" aria-labelledby="tab-console" hidden>
+<h2 id="console-heading">Console</h2>
+<p id="cmd-help" class="meta" style="margin:0;padding:0.7rem 1rem 0;color:var(--muted);font-size:0.78rem;border-bottom:1px solid var(--line)">Same commands as the admin telnet console — <code>help</code>, <code>status</code>, <code>give</code>, <code>kick</code>, <code>settime</code>. Press <kbd>/</kbd> to focus, <kbd>↑</kbd><kbd>↓</kbd> for history.</p>
+<div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
+<button type="button" class="quick-cmd" data-cmd="help">help</button>
+<button type="button" class="quick-cmd" data-cmd="status">status</button>
+<button type="button" class="quick-cmd" data-cmd="lp">players</button>
+<button type="button" class="quick-cmd" data-cmd="save">save</button>
+<button type="button" class="quick-cmd" data-cmd="settime day">day</button>
+<button type="button" class="quick-cmd" data-cmd="settime night">night</button>
+</div>
+<div id="console-term" class="console-term"></div>
+<form id="cmd-form" class="cmd-row" method="post" action="/api/cmd">
+<input type="hidden" name="csrf" value="__ZDTD_CSRF__">
+<label for="cmd-line" class="sr-only">Admin command</label>
+<input type="text" name="line" id="cmd-line" placeholder="try help  ·  status  ·  settime day" aria-describedby="cmd-help" autocomplete="off" spellcheck="false" maxlength="256" required>
+<button type="submit">Run</button>
+</form>
+<div id="cmd-out" aria-live="polite" aria-atomic="true"></div>
+<div id="console-log" aria-label="Recent commands" role="region" tabindex="-1" hx-get="/partials/console" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading command history…</p></div>
+</section>
+<section id="settings-section" role="tabpanel" aria-labelledby="tab-settings" hidden>
+<h2 id="settings-heading">Settings</h2>
+<div id="settings" aria-live="polite" aria-atomic="true" hx-get="/partials/settings" hx-trigger="load, every 5s" hx-swap="innerHTML"><p class="meta">Loading settings…</p></div>
+</section>
+<section id="logs-section" role="tabpanel" aria-labelledby="tab-logs" hidden>
+<h2 id="logs-heading">Server log</h2>
+<div class="logs-tools" role="group" aria-label="Log filters">
+<label class="sr-only" for="log-level">Minimum severity</label>
+<select id="log-level">
+<option value="debug" selected>All</option>
+<option value="info">info +</option>
+<option value="warn">warn +</option>
+<option value="err">err +</option>
+<option value="crit">crit</option>
+</select>
+<label class="sr-only" for="log-filter">Filter log messages</label>
+<input type="search" id="log-filter" placeholder="Filter — chunk, join, error…" autocomplete="off" spellcheck="false">
+<span id="logs-state" class="meta" role="status">Loading…</span>
+</div>
+<div id="logs-view" role="region" aria-label="Server log lines" tabindex="0"><p class="meta">Loading server log…</p></div>
+<p class="meta" style="margin:0;padding:0.6rem 1rem;border-top:1px solid var(--line)">Newest first · 2048 lines kept · <code>loglevel</code> controls verbosity.</p>
+</section>
+</main>
+<footer><span id="refresh-state" role="status" aria-live="polite">Auto-refresh on</span> · <a href="/api/apm.json">apm.json</a> · <a href="/api/logs.json">logs.json</a> · <a href="/healthz">healthz</a> · <a href="/readyz">readyz</a></footer>
+<script src="/static/xterm.js"></script>
+<script src="/static/addon-fit.js"></script>
+<script>
 /* zdtd-ts:shell */
 "use strict";
 //! Webui dashboard shell: htmx-style poller for the [hx-get] partials,
