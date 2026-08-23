@@ -53,8 +53,10 @@ is exactly the kind of correctness risk the boundary exists to absorb.
 
 The transport is MCP **Streamable HTTP** (spec version pinned in
 `MCP_DESIGN.md`; baseline 2025-06-18): client to server is JSON-RPC over HTTP
-POST, server to client messages (notifications) over SSE when the client
-requests it. The host implements it with the existing stack: `util/tcp_listen`
+POST; server to client messages would go over SSE when the client requests
+it, but the MVP has no server-initiated messages, so every POST is answered
+with `application/json` (the spec permits this when the server has nothing to
+push). The host implements it with the existing stack: `util/tcp_listen`
 (`std.Io.net`) + `std.http.Server`, the same pair the operator WebUI uses
 (`src/server/webui.zig`).
 
@@ -146,9 +148,10 @@ for MCP.
 
 - Unit tests for the guest-facing protocol core: framing, session, error
   table, tool registry, `tools/call` argument validation.
-- A harness end-to-end test: a real MCP client (in-process test) speaks
-  Streamable HTTP to the listener and drives `initialize` / `ping` /
-  `tools/list` / `tools/call`.
+- A harness end-to-end test: the real guest `.wasm` behind the transport's
+  HTTP framing (same test-mode capture as webui — raw requests in, responses
+  out), driving `initialize` / `notifications/initialized` / `tools/list` /
+  `tools/call` including an allowlisted `admin_command`.
 - `zig build test` and `make check` stay green. No loadgen/stock-client leg:
   this addon never touches stock wire or the client (ADR 0019 applies to wire
   changes; this is an internal-boundary addon, per MCP_PRD.md NFR-5).
