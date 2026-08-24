@@ -1,4 +1,8 @@
-# NetPackage catalog (stock V3.x, generated from parity_v3x.json)
+# NetPackage catalog (stock V3.1.0 b14, generated from parity_v3x.json)
+
+> Purpose: authoritative stock `NetPackage*` catalog for the V3.1.0 b14 wire — direction, C2S dispatch coverage, S2C emit set, and `BinaryReader` head — derived from the parity snapshot so join/wire work stays RE-grounded.
+
+Related: [WIRE_CHUNK.md](WIRE_CHUNK.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) · [PARITY_TOOLING.md](../PARITY_TOOLING.md) · [AUTHORITY.md](../AUTHORITY.md) · `src/wire/packages.zig`
 
 Direction: ToServer=client→server (server MUST handle), ToClient=server→client
 (server may send), Both=either. `handled` = a dispatch arm in `c2s/*` (the join/move/inv/quest/misc domains, formerly game.zig onData);

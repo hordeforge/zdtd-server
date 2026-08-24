@@ -1,5 +1,9 @@
 # Parity tooling: keep zdtd in sync with stock 7DTD
 
+> Purpose: how `7dtd-engine-research` parity snapshots and `parity_diff.py` keep the 190-package catalog, enums, and C2S coverage honest across game updates.
+
+Related: [wire/PACKAGES.md](wire/PACKAGES.md) · [wire/WIRE_CHUNK.md](wire/WIRE_CHUNK.md) · [AUTHORITY.md](AUTHORITY.md) · `assets/fixtures/parity_v3x.json` · `../../7dtd-engine-research/tools/parity/` · [INDEX.md](INDEX.md)
+
 Scripts live in the reversing project: `../../7dtd-engine-research/tools/parity/`
 (reversing tooling does not live in zdtd; see AGENTS.md principle 4).
 

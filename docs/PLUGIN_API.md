@@ -1,5 +1,7 @@
 # Plugin API: Wasm guests (design)
 
+> **Purpose:** the host/guest contract for Wasm plugins — runtime, host imports, hook table, budgets, and composition rules.
+
 **Status:** shipped first cut (2026-08-06, WORK_PLAN T9). A plugin is a `.wasm`
 module ([ADR 0020](adr/0020-wasm-only-plugin-api.md),
 which supersedes [ADR 0005](adr/0005-native-plugin-api.md)); the zwasm v2
@@ -7,7 +9,10 @@ runtime loads modules named in zdtd.toml `[plugin] modules` and calls the
 exported hooks under fuel and memory budgets.
 **Not:** stock `IModApi`, Harmony, `Mods/` XML, or a native plugin ABI.
 **Related:** [ADR 0003](adr/0003-no-stock-mod-host.md), [ADR 0004](adr/0004-server-authoritative-c2s.md),
-[ADR 0010](adr/0010-data-config-zig-plugins.md) (data and config layers beneath this one).
+[ADR 0010](adr/0010-data-config-zig-plugins.md) (data and config layers beneath this one) ·
+[PLUGIN_DEV.md](PLUGIN_DEV.md) (authoring guide) · [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) (naming and manifest) ·
+[STATE_MACHINES.md](STATE_MACHINES.md) (tick and lifecycle) ·
+[PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) (boundary audit).
 
 ## Why Wasm
 
@@ -58,6 +63,20 @@ Both are load-time resolution: a branch on a fixed slot table on the tick
 path, no per-tick allocation.
 
 ## The boundary
+
+```mermaid
+flowchart LR
+    subgraph Guest[Guest .wasm]
+      E[exports: on_enable / on_tick / verdict hooks]
+    end
+    subgraph Host[Host zdtd]
+      I[imports: log / tick / queue / sense / query / json_*]
+      Budgets[fuel + memory caps]
+    end
+    E -->|called under budget| Host
+    I -->|capability-gated| E
+    Host --- Budgets
+```
 
 The contract is the module's exports plus the host's imports. Nothing else
 crosses.
@@ -161,20 +180,25 @@ build too, not a defect in zwasm.
 
 ## Lifecycle
 
-```text
-process start
-  → load config (which .wasm modules, with their declared capabilities)
-  → Game.create / world + assets init
-  → plugin.on_enable(Host)        // register hooks, commands
-  → listen
-  loop step():
-      net poll → C2S hooks → apply
-      sim phases → phase hooks
-      replicate → observe hooks
-      tick end → onTickEnd / frame scrub
-  → plugin.on_shutdown
-  → Game.deinit
+```mermaid
+sequenceDiagram
+    participant C as config + discovery
+    participant G as Game.create
+    participant P as plugins
+    participant L as tick loop
+    C->>G: load .wasm + capabilities
+    G->>P: on_enable
+    P-->>G: register hooks / commands
+    loop every 50 ms
+        L->>P: net poll → C2S hooks → apply
+        L->>P: sim phases → phase hooks
+        L->>P: replicate → observe hooks
+        L->>P: onTickEnd / frame scrub
+    end
+    P->>G: on_shutdown
+    G->>G: deinit
 ```
+Owner: `src/plugin/wasm.zig` (instantiate + budgets), `src/server/game/wasm_host.zig` (dispatch), `src/server/game/step.zig` (phase order).
 
 Guests: each `.wasm` is instantiated once, its exported hooks registered, and
 every call runs under the fuel and memory budget described above. No raw `*Game`

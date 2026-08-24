@@ -1,5 +1,8 @@
 # High-performance Zig dedicated clone (architecture from the stock RE)
 
+> **What this is:** the founding RE-derived architecture and design rationale (M0–M6 era, stock ceilings, budget and milestone framing). Superseded on wire details by [wire/*](wire/PACKAGES.md) and code comments.
+> **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) · [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [MAPS.md](MAPS.md) · [WORLDGEN.md](WORLDGEN.md) · [ECS_SYSTEMS.md](ECS_SYSTEMS.md) · [APM.md](APM.md)
+
 **Version note:** the architecture here was derived from the V3.0.1 RE. The
 project now targets **V3.1.0 b14**, which is what the live gate runs against.
 Structure carried over; where a wire detail changed, the wire docs and the code

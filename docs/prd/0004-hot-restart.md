@@ -1,5 +1,7 @@
 # Server Hot Restart - Product Requirements (PRD)
 
+> **Purpose:** hot-restart continuity contract — what must survive a full process restart, inventoried in one place.
+
 **Number:** PRD 0004
 **Status:** shipped (v1). One new requirement (R1, webui operator-session continuity,
 shipped 2026-08-23); everything else in section 5 is an inventory of
@@ -11,6 +13,7 @@ has a single checklist instead of scattered STATUS rows and WORK_PLAN tasks.
 | Owner | operator tooling (webui, admin TCP) + `world/*` save paths |
 | Related | [WEBUI.md](../WEBUI.md) (security model), [CLIENT_PLAYTEST.md](../CLIENT_PLAYTEST.md) (persist suite), `src/server/persist.zig`, [WORK_PLAN.md](../WORK_PLAN.md) T37, [ADRs](../adr/) |
 | Gate | loadgen join + `7dtd-playtest` `persist` suite + stock client rejoin |
+| Also see | [STATE_MACHINES.md](../STATE_MACHINES.md) (persistence), [GAME_OPTIONS.md](../GAME_OPTIONS.md) (config), [PLUGIN_API.md](../PLUGIN_API.md) (plugin reload) |
 
 ## 1. Background and problem
 

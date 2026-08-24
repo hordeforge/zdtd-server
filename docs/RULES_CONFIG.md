@@ -1,5 +1,8 @@
 # Rules/config disposition (ADR 0021 review)
 
+> **What this is:** which server tunables moved onto config and which stayed in code, with the reason for each keep, so adding a new tunable does not regress into ad hoc globals.
+> **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) §10 · [GAME_OPTIONS.md](GAME_OPTIONS.md) · [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) · [ZIG_CLONE.md](ZIG_CLONE.md) · [STATUS.md](STATUS.md)
+
 Result of the "everything that can be config should be config" review of the
 server's rules/logic. For every hardcoded tunable found, this records the
 disposition: **move** it onto the established config surface (`src/ecs/rules.zig`

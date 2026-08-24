@@ -82,6 +82,7 @@ Where the world and its data come from.
 
 | Doc | Role |
 |---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | **System overview with diagrams** — tick, net, sim, world, interest, plugins, persistence |
 | [ZIG_CLONE.md](ZIG_CLONE.md) | M0-M6 architecture derived from the RE |
 | [STATE_MACHINES.md](STATE_MACHINES.md) | All stateful lifecycles with diagrams (join, AI, quests, weather, plugins, peer) |
 | [GAMEPLAY.md](GAMEPLAY.md) | Gameplay behavior flows (craft, trade, loot, survival, movement) |

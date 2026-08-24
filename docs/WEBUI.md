@@ -1,5 +1,9 @@
 # Server web UI design (HTMX + Alpine.js)
 
+> **What this is:** the operator web dashboard for zdtd, status, players, APM, and admin commands over loopback HTTP. Not a Steam browser clone.
+
+> **Related:** [ARCHITECTURE](ARCHITECTURE.md) · [ARCHITECTURE §11](ARCHITECTURE.md#11-observability-apm) · [APM](APM.md) · [AUTHORITY](AUTHORITY.md) · [PLUGIN_API](PLUGIN_API.md) · [GAME_OPTIONS](GAME_OPTIONS.md) · [STD_ABSTRACTIONS](STD_ABSTRACTIONS.md) · `src/server/admin.zig`
+
 Operator-facing **ops dashboard** for zdtd. Not a stock Steam browser clone, not
 a Unity GUI, not a mod host. Complements existing **admin TCP** and **apm**
 dumps with a browser UI.
@@ -65,6 +69,15 @@ parallel JSON-RPC + REST + GraphQL stacks.
     +-- read snapshots
           apm harness copy
           client list, clock, world stats  (RCU or tick-end snapshot)
+```
+
+```mermaid
+flowchart TB
+    B[Browser] --> W[webui HTTP<br/>src/server/webui.zig<br/>std.http.Server + tcp_listen]
+    W --> AUTH[auth middleware]
+    AUTH --> ROUTER[router → handlers<br/>partials + /api/apm.json]
+    W --> CMD[admin command<br/>POST /api/cmd → setAdminHandler → runAdminLine]
+    W --> SNAP[snapshot reads<br/>WebSnapshot, tick-end copy]
 ```
 
 **Critical separation** (shipped: there is no HTTP thread; `Game.step` calls

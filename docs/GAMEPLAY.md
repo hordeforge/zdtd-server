@@ -1,11 +1,11 @@
 # Gameplay behavior flows
 
+> **What this is:** flow reference for the player-visible gameplay verbs — craft, workstation queue, trade, trader roll, loot, survival, movement and the blood moon window. Lifecycle state machines (join, quest, weather, power, sleepers, trader hours, party, vending, buffs, guard) live in [STATE_MACHINES.md](STATE_MACHINES.md); system overview and tick order live in [ZIG_CLONE.md](ZIG_CLONE.md) and [STATE_MACHINES.md](STATE_MACHINES.md). Diagrams are Mermaid; the `src/` anchors are the authority when a diagram and a comment disagree.
+
 The core gameplay behaviors as flows (what happens when a player crafts,
-trades, rolls loot, survives or moves). Lifecycle state machines (join, quest,
-weather, blood moon window, power, sleepers, trader hours, party, vending
-rent, buffs, guard policy) live in [STATE_MACHINES.md](STATE_MACHINES.md); this
-file covers the flow shapes that are not state lifecycles. The `src/` anchors
-are the authority when a diagram and a comment disagree.
+trades, rolls loot, survives or moves). This file covers the flow shapes that
+are not state lifecycles; every numbered section below is one verb with its
+validation, mutation and broadcast steps plus the owning `src/` anchors.
 
 ## 1. Craft (player inventory)
 
@@ -296,3 +296,19 @@ first move after a sanctioned teleport always
 rebaselines; dt is floored at 1/40 s and capped at 1 s so a single packet
 cannot jump the whole map. Observe mode counts the violation but still applies
 the client position.
+
+## Related docs
+
+| Doc | Role |
+|---|---|
+| [STATE_MACHINES.md](STATE_MACHINES.md) | 20 state lifecycles with diagrams and `src/` anchors |
+| [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture — M0-M6 and system overview |
+| [AUTHORITY.md](AUTHORITY.md) | Join phases, C2S validation, interest, mode |
+| [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | SoA columns, queries, groups, tick order |
+| [wire/PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
+| [STATUS.md](STATUS.md) | What works now — the hub |
+
+## Keeping this document honest
+
+- This doc is the flow companion to [STATE_MACHINES.md](STATE_MACHINES.md); `src/` is the territory. When a diagram and code disagree, fix code to RE, then fix the diagram.
+- Flows added or removed in code: update the diagram and the `src/` anchors in the same commit as the code change.

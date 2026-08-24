@@ -1,38 +1,36 @@
 # Writing a zdtd plugin
 
+> **Purpose:** authoring guide for Wasm plugins — module shape, host imports, hook signatures, budgets, and how to build a `.wasm` from any language.
+
 **Status:** shipped (T9 runtime 2026-08-06; T15 event hooks + deny/adjust
 2026-08-07). The runtime loads `.wasm` modules named in zdtd.toml and calls the
 lifecycle/event hooks under fuel and memory budgets. The host import table is
 deliberately small and documented below; read-only sim views are still open.
+**Related:** [PLUGIN_API.md](PLUGIN_API.md) (host/guest contract and budgets) · [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) (naming and manifest) · [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) (boundary audit) · [STATE_MACHINES.md](STATE_MACHINES.md) (tick and net) · [AUTHORITY.md](AUTHORITY.md) (authority rules) · [GAME_OPTIONS.md](GAME_OPTIONS.md) (config)
 
 A plugin is a single `.wasm` file. Any language that targets WebAssembly works:
 Rust, TinyGo, Zig, C, AssemblyScript. You do not link against zdtd, you do not
-match a native ABI, and you do not need the zdtd source to build.
-
-- Decision and rationale: [ADR 0020](adr/0020-wasm-only-plugin-api.md)
-- Host-side design: [PLUGIN_API.md](PLUGIN_API.md)
+match a native ABI, and you do not need the zdtd source to build. Ships as an installed
+mod under `mods/` or `plugins/` with a `mod.toml` manifest — see [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md)
+for the manifest format and `mods/BUILDING.md` for the core build layout.
 
 ## The shape of a plugin
 
 You export functions; the server calls them. You import functions; the server
 provides them. Nothing else crosses.
 
+```mermaid
+flowchart LR
+    Guest[your .wasm] -->|exports| Host[zdtd host]
+    Host -->|imports| Guest
+    Guest -. "on_enable / on_tick / on_player_join / on_shutdown" .-> Host
+    Guest -. "verdict: on_player_death / on_entity_killed / on_block_damage / on_quest_complete" .-> Host
+    Guest -. "request/reply: on_admin_command / on_chat / on_player_login" .-> Host
+    Host -. "zdtd.log / tick / queue / sense / query / json_*" .-> Guest
 ```
-your .wasm                        zdtd
-  exports:  on_enable      <────  called once when the plugin is enabled
-            on_tick        <────  called late in each server tick
-            on_player_join <────  called on a player's first join
-            on_shutdown    <────  called once at shutdown
-            on_player_death <───  verdict hook: deny/adjust (T15)
-            on_entity_killed <──  verdict hook: deny/adjust (T15)
-            on_block_damage <───  verdict hook: deny/adjust (T15)
-            on_quest_complete <─  verdict hook: deny/adjust (T15)
-            on_admin_command <──  first handler with reply wins
-            on_chat <───────────  filter hook: deny/rewrite
-            on_player_login <───  join gate: first deny wins
-  imports:  log            ────>  provided by the host, capability-gated
-            ...
-```
+
+Hook table (observe / verdict / request-reply) is in [Hooks](#hooks) and the full
+host contract in [PLUGIN_API.md](PLUGIN_API.md#the-boundary).
 
 Export only the hooks you need. A missing export means that hook is not
 registered, and costs nothing at runtime. Every signature is listed under

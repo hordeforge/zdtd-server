@@ -1,5 +1,7 @@
 # MCP Server Addon - Product Requirements (PRD)
 
+> **Purpose:** product requirements for the MCP server addon — what the MCP bridge must do and how it is validated.
+
 **Number:** PRD 0002
 **Status:** shipped (module + transport live: `mods/mcp/`,
 `src/server/mcp_transport.zig`; design recorded in [ADR 0031](../adr/0031-mcp-wasm-module.md)
@@ -12,6 +14,7 @@ module is Wasm (ADR 0020 / ADR 0030) + a minimal host transport bridge.
 **Protocol reference:** Model Context Protocol (open spec,
 `modelcontextprotocol.io`), JSON-RPC 2.0 based; spec version pinned in
 ADR 0031.
+**Related:** [RFC 0002](../rfc/0002-mcp-server-design.md) (design) · [ADR 0031](../adr/0031-mcp-wasm-module.md) (decision) · [PLUGIN_API.md](../PLUGIN_API.md) · [PLUGIN_DEV.md](../PLUGIN_DEV.md)
 
 ---
 

@@ -1,10 +1,13 @@
 # MCP Server Addon - Design (RFC 0002)
 
+> **Purpose:** concrete design for the MCP server addon — guest/host split, transport bridge, frame flow, caps, and test harness.
+
 **Number:** RFC 0002
 **Status:** decided — implements [PRD 0002](../prd/0002-mcp-server.md) and
 [ADR 0031](../adr/0031-mcp-wasm-module.md). Decisions below are recorded in the
 ADR; this document fixes the concrete shape: layout, transport bridge, frame
 flow, caps, tests.
+**Related:** [PRD 0002](../prd/0002-mcp-server.md) · [ADR 0031](../adr/0031-mcp-wasm-module.md) · [PLUGIN_API.md](../PLUGIN_API.md) · [PLUGIN_DEV.md](../PLUGIN_DEV.md) · [WEBUI.md](../WEBUI.md) (HTTP listener precedent)
 
 ---
 
@@ -16,6 +19,16 @@ plus one new host file, one new guest export (`on_mcp_frame`), the host
 std.json capability (`json_*` imports), and an `[mcp]` config section.
 Nothing on the tick path except one hook call per pending frame, no hot-path
 heap, and no stock wire involvement.
+
+```mermaid
+flowchart LR
+    Client[MCP client] -->|POST /mcp JSON-RPC| Transport[host transport]
+    Transport -->|frame bytes| Guest[Wasm guest: session + tools]
+    Guest -->|json_* + sense / query / queue| Host
+    Host -->|world snapshot| Guest
+    Guest -->|response bytes| Transport
+    Transport -->|HTTP 200 / 202| Client
+```
 
 ## 2. Module layout
 

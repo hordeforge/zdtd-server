@@ -1,5 +1,9 @@
 # zdtd metrics and profiling harness
 
+> **What this is:** the native instrumentation inside the Zig dedi, counters, section timers, and text/JSON reports that prove the 50 ms tick budget.
+
+> **Related:** [ARCHITECTURE §11](ARCHITECTURE.md#11-observability-apm) · [ARCHITECTURE §3](ARCHITECTURE.md#3-process-lifecycle-and-the-50-ms-tick) · [STATUS](STATUS.md) · [AUTHORITY](AUTHORITY.md) · [SCALE](SCALE.md) · [STD_ABSTRACTIONS](STD_ABSTRACTIONS.md)
+
 **Owns:** first-class instrumentation **inside** the Zig dedicated process.  
 **Not:** sibling `7dtd-server-apm` (stock Unity Mono dedi, managed bridge, bpftrace suite).  
 **Not:** mod or Harmony hooks.
@@ -25,6 +29,16 @@ tick loop
   profiler.begin/end section  # latency hist per phase
   snapshot → text             # emitted after bounded --ticks/--once runs
            → JSON             # available through apm.report.writeJsonLine
+```
+
+```mermaid
+flowchart LR
+    LOOP[tick loop<br/>server/game/step.zig] --> CNT[counters.inc/add<br/>apm/metrics.zig]
+    LOOP --> PRF[profiler scope<br/>apm/profiler.zig]
+    CNT --> SNAP[snapshot<br/>apm/report.zig]
+    PRF --> SNAP
+    SNAP --> TXT[text dump<br/>--ticks/--once]
+    SNAP --> JSON[JSON line<br/>stdout + /api/apm.json]
 ```
 
 ### Counters (`CounterId`)
@@ -226,6 +240,10 @@ guarantees it.
 
 | Doc | Role |
 |---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System overview (APM §11) |
+| [ZIG_CLONE.md](ZIG_CLONE.md) | Founding architecture |
+| [AUTHORITY.md](AUTHORITY.md) | Guard/phase counters consumed here |
+| [SCALE.md](SCALE.md) | M11 acceptance checks (replicate trio, perf switches) |
+| [WEBUI.md](WEBUI.md) | Dashboard reads the snapshot + `/api/apm.json` |
 | [../README.md](../README.md) | Project |
-| [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture |
 | [../../7dtd-server-optimizer/docs/measured-scaling.md](../../7dtd-server-optimizer/docs/measured-scaling.md) | Stock scale shapes (design input) |

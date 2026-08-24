@@ -1,9 +1,12 @@
 # Plugin standards: naming and manifest format
 
+> **Purpose:** binding naming and `mod.toml` rules for every plugin under `mods/` and `plugins/` — enforced fail-closed at load.
+
 Binding rules for every plugin under `mods/` (addons) and `plugins/`
 (first-party core). The host enforces the manifest format at load
 (fail-closed); naming is enforced by review and `scripts/lint-architecture.sh`
 where mechanical.
+**Related:** [PLUGIN_API.md](PLUGIN_API.md) (host/guest contract) · [PLUGIN_DEV.md](PLUGIN_DEV.md) (authoring guide) · [mods/BUILDING.md](../mods/BUILDING.md) (build layout) · [GAME_OPTIONS.md](GAME_OPTIONS.md) (config) · [STATE_MACHINES.md](STATE_MACHINES.md) (system overview)
 
 ## Naming standards
 
@@ -86,13 +89,13 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
 3. `enabled = false` skips auto-discovery (`manifest.discover`); the module is
    still loadable via an explicit `[plugin] modules` path. Demo gates/feeds
    ship off by default so a fresh boot stays stock.
-3. Known override points (values for `points`), each mapping to one verdict
+4. Known override points (values for `points`), each mapping to one verdict
    hook: `loot.roll`, `quest.payout`, `damage.player_scale`, `craft.request`,
    `trade.price`. Anything else is rejected at bind time.
-4. Two mods claiming the same point resolve by tier then dir order; a user mod
-   may take over an official slot only via `override` (DuplicateClaim
+5. Two mods claiming the same point resolve by tier then dir order; a user mod
+   may take over an official slot only via `override` (`DuplicateClaim`
    otherwise).
-5. `[mods] disabled = "a,b"` skips mods by name; entries naming a native core
+6. `[mods] disabled = "a,b"` skips mods by name; entries naming a native core
    component are config errors.
 
 ### Example (minimal)

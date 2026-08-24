@@ -1,8 +1,9 @@
 # State machines in zdtd
 
+> **What this is:** every stateful lifecycle in the server — one state machine per section, with the transitions, owning `src/` anchors and a Mermaid diagram. Companion flows (craft, trade, loot, survival, movement) live in [GAMEPLAY.md](GAMEPLAY.md); architecture and tick order live in [ZIG_CLONE.md](ZIG_CLONE.md). Diagrams are Mermaid; the `src/` anchors are the authority when a diagram and a comment disagree.
+
 Every stateful lifecycle in the server, with the state transitions and the code
-that owns them. Diagrams are mermaid; the `src/` anchors are the authority when
-a diagram and a comment disagree.
+that owns them.
 
 | # | State machine | Owner | Diagram |
 |---|---|---|---|
@@ -592,6 +593,18 @@ the same tick (no triggered-effect VM); the effect stack saturates at 255;
 a dead entity skips the started/duration half of the tick; expiry removals
 ride `TickResult.buff_expired` to the net layer, which relays the removal to
 observers (the owner already dropped its own copy on death).
+
+## Related docs
+
+| Doc | Role |
+|---|---|
+| [GAMEPLAY.md](GAMEPLAY.md) | Gameplay flows — craft, trade, loot, survival |
+| [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture — M0-M6 and system overview |
+| [AUTHORITY.md](AUTHORITY.md) | Join phases, C2S validation, interest, mode |
+| [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | SoA columns, queries, groups, tick order |
+| [APM.md](APM.md) | Native metrics (`src/apm/`) |
+| [wire/PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
+| [STATUS.md](STATUS.md) | What works now — the hub |
 
 ## Keeping this document honest
 

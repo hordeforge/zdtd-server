@@ -1,5 +1,8 @@
 # Implementation plan (close the gaps)
 
+> **What this is:** the ordered M7–M16 phase plan that turns the gap inventory into build order; status banner is summary, [STATUS.md](STATUS.md) is authoritative.
+> **Related:** [INDEX.md](INDEX.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [STATUS.md](STATUS.md) · [WORK_PLAN.md](WORK_PLAN.md) · [ZIG_CLONE.md](ZIG_CLONE.md)
+
 **Companion:** [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (what is missing).  
 **Living hub:** [STATUS.md](STATUS.md) (wins on conflict) · open work: [TODO.md](../TODO.md) · [INDEX.md](INDEX.md).  
 **Architecture:** SoA ECS only (`src/ecs/`), stock client wire (EAC off), no mods.  

@@ -1,5 +1,7 @@
 # FPS Bot Addon — Product Requirements (PRD)
 
+> **Purpose:** product requirements for the FPS bot addon — what the bot addon must do, for whom, and how it is accepted.
+
 **Number:** PRD 0001
 **Status:** shipped (bot module + host surface live: `mods/fps_bot/`,
 `src/server/game/bot.zig`; see the ADR 0026 amendment and
@@ -11,6 +13,7 @@
 module is Wasm (ADR 0020 / ADR 0026) + a small host sense/act surface.
 **Behavioural reference:** `../../../7dtd-fps-bots` (the stock-server FPS bot C# mod),
 Q3 / Doom 3 bot AI distilled there.
+**Related:** [RFC 0001](../rfc/0001-fps-bot-spec.md) (technical contract) · [ADR 0026](../adr/0026-fps-bot-wasm-module.md) (decision) · [PLUGIN_API.md](../PLUGIN_API.md) · [PLUGIN_DEV.md](../PLUGIN_DEV.md)
 
 ---
 

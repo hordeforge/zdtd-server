@@ -1,5 +1,9 @@
 # Workstation TE wire (RE notes, V3.1.0 b14 IL)
 
+> Purpose: stock `TileEntityWorkstation` (type 12) network/persist body and the queue sim that rides `NetPackageTileEntity` — field order from `asm.il` so encode/decode and `world/workstations.zig` stay RE-faithful.
+
+Related: [PACKAGES.md](PACKAGES.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_CHUNK.md](WIRE_CHUNK.md) · [AUTHORITY.md](../AUTHORITY.md) · `src/wire/stock_te.zig` · `src/world/workstations.zig` · `src/server/c2s/inv.zig`
+
 No `NetPackageRecipe*` exists in the 190-package list. Workstation craft state
 rides `NetPackageTileEntity` with `TileEntityType.Workstation = 12` (classic TE,
 not composite). Queue sync is server-authoritative TE re-send, same as storage.

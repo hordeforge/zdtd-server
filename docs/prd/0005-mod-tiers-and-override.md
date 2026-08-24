@@ -1,10 +1,13 @@
 # Module Tiers and Mod Override — Product Requirements (PRD)
 
+> **Purpose:** product requirements for the mod tier and override model — which modules are the server, which are replaceable, and how conflicts fail closed.
+
 **Number:** PRD 0005
 **Status:** shipped (ADR 0032; AC1-AC8 covered by `scenarios.zig` mods tests + resolver unit tests)
 **Owner:** zdtd core (mod ecosystem is a server feature, not an addon onto stock).
 **Answers the question:** which modules are the server, and which are
 replaceable by the operator or by other mods?
+**Related:** [RFC 0005](../rfc/0005-mod-tiers-and-override.md) (technical proposal) · [ADR 0032](../adr/0032-module-tiers-and-override.md) (decision) · [PLUGIN_API.md](../PLUGIN_API.md) · [PLUGIN_STANDARDS.md](../PLUGIN_STANDARDS.md) (manifest and naming)
 
 ---
 

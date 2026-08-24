@@ -1,5 +1,7 @@
 # Requests for Comments — Technical Specifications and Designs (RFC)
 
+> **Purpose:** registry and guide for RFCs — technical proposals and designs that answer the PRD of the same number.
+
 RFC = request for comments, in the industry sense: the technical proposal
 that answers a PRD's "what" (the "how"), circulated for review before the
 decision is locked. It fixes the concrete contract the requirement needs
@@ -11,6 +13,7 @@ record of what was proposed.
 Status is one of: **draft**, **in review**, **decided**, **withdrawn**,
 **superseded** (see each doc's `**Status:**` line). New RFCs start from
 [TEMPLATE.md](TEMPLATE.md).
+**Related:** [PRD](../prd/README.md) (requirements) · [ADR](../adr/README.md) (decisions) · [INDEX.md](../INDEX.md) (doc map)
 
 | RFC | Title | Status |
 |---|---|---|

@@ -1,5 +1,8 @@
 # FPS Bot Addon — Implementation Plan
 
+> **What this is:** execution plan for the FPS bot addon (ADR 0026 / RFC 0001 / PRD 0001), milestones M0–M3 from host surface to guest brain.
+> **Related:** [INDEX.md](INDEX.md) · [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [WORK_PLAN.md](WORK_PLAN.md) · [PLUGIN_API.md](PLUGIN_API.md) · [PLUGIN_DEV.md](PLUGIN_DEV.md)
+
 **Status:** execution plan for ADR 0026 / RFC 0001 / PRD 0001.
 **Anchored in the current tree** with exact `file:line` references confirmed by
 an explore pass (2026-08-12). Milestones M0–M3. Nothing here delegates the

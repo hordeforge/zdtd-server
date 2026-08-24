@@ -1,5 +1,8 @@
 # Releases and compatibility
 
+> **What this is:** the version and compatibility policy — what SemVer means here, what is covered by compat promises (stock client, Zig, config, saves, wire), and the gate for tagging a release.
+> **Related:** [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [INDEX.md](INDEX.md) · [CHANGELOG.md](../CHANGELOG.md)
+
 zdtd is pre-1.0 research software. There are currently no tagged or published
 releases. `0.1.0` identifies the upcoming development release, not a stable API
 commitment.

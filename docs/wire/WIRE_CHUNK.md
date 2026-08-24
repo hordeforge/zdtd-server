@@ -1,8 +1,23 @@
 # Chunk wire formats (zdtd)
 
+> Purpose: stock `NetPackageChunk` / `ChunkRemove` wire plus the ZCH3 disk overlay — what the client `Read`s, what `src/wire/stock_chunk.zig` encodes, and how it differs from test helpers.
+
+Related: [PACKAGES.md](PACKAGES.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) · [AUTHORITY.md](../AUTHORITY.md) · [PARITY_TOOLING.md](../PARITY_TOOLING.md) · `src/wire/stock_chunk.zig` · `src/world/chunks.zig`
+
 **Production S→C** for the stock client is the network-mode encoder in
 `src/wire/stock_chunk.zig` (`buildNetPackageChunkNew`), not the height-plane
 helpers. Those helpers remain for unit tests and loadgen-style payloads.
+
+```mermaid
+flowchart LR
+    A[World cell<br/>height + blocks + paint] --> B{path}
+    B -- S→C net --> C[stock_chunk<br/>Chunk.write bNetwork=true<br/>NetPackageChunk]
+    B -- disk --> D[ZCH3 .zch<br/>flags + heights + blocks/textures/dens]
+    B -- tests/loadgen --> E[height-plane helper<br/>Layout A / D]
+    C --> F[stock client Chunk.read]
+    D --> A
+    E --> G[unit tests]
+```
 
 Stock `Chunk.write` is ~601 IL (64 layers, channels, TE, …). Full bit-diff
 goldens against a stock dedi capture are still open; the live path already uses

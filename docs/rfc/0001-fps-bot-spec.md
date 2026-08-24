@@ -1,5 +1,7 @@
 # zdtd FPS Bot Addon — Technical Specification
 
+> **Purpose:** technical contract for the FPS bot addon — what crosses the plugin boundary, in what shape, and who owns what.
+
 **Number:** RFC 0001
 **Status:** decided and shipped (the host integration facts landed: `sense`/
 `query` imports, bot verbs, host-side `BotManager`; see the ADR 0026 amendment).
@@ -15,6 +17,15 @@ This document is the **technical contract**: what crosses the plugin boundary,
 in what shape, and what responsibility the host keeps. The product intent,
 scope and acceptance criteria are in [PRD 0001](../prd/0001-fps-bot.md). The
 architecture decision is [ADR 0026](../adr/0026-fps-bot-wasm-module.md).
+**Related:** [PRD 0001](../prd/0001-fps-bot.md) · [ADR 0026](../adr/0026-fps-bot-wasm-module.md) · [PLUGIN_API.md](../PLUGIN_API.md) · [PLUGIN_DEV.md](../PLUGIN_DEV.md) · [STATE_MACHINES.md](../STATE_MACHINES.md) (zombie/bot lifecycle) · [AUTHORITY.md](../AUTHORITY.md) (move/LOS caps)
+
+```mermaid
+flowchart LR
+    Guest[Wasm guest: bot brain] -->|sense / query| Host
+    Host[Host: BotManager + replication] -->|move / shoot / spawn| World
+    Guest -->|queue: bot move / look / shoot| Host
+    Host -->|LOS + move caps| Guest
+```
 
 ---
 

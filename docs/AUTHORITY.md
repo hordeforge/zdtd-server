@@ -1,5 +1,9 @@
 # Server authority (P4 spine)
 
+> **What this is:** who owns sim state and which C2S gates enforce it: the P4 authority spine for join phases, validation, interest, and guard policy.
+
+> **Related:** [ARCHITECTURE §12](ARCHITECTURE.md#12-invariants) · [ARCHITECTURE §4](ARCHITECTURE.md#4-net-stack-litenet-framing-packages) · [ARCHITECTURE §5](ARCHITECTURE.md#5-join-flow) · [STATUS](STATUS.md) · [STATE_MACHINES](STATE_MACHINES.md) · [wire/PACKAGES](wire/PACKAGES.md) · [wire/INVENTORY](wire/INVENTORY.md) · [APM](APM.md) · [SCALE](SCALE.md)
+
 Short map of **who owns state** and the gates already on the C2S path.
 ADR: [adr/0004-server-authoritative-c2s.md](adr/0004-server-authoritative-c2s.md).
 Backlog depth: [TODO.md](../TODO.md) P4 section.
@@ -54,6 +58,17 @@ UDP → LiteNet → deframe
   → Hard checks (reach, ownership, caps, movement envelope)
   → sim apply (ecs / world store)
   → interest replicate result
+```
+
+```mermaid
+flowchart LR
+    UDP[UDP] --> LN[LiteNet<br/>litenet/server.zig]
+    LN --> FR[deframe<br/>wire/frame.zig]
+    FR --> PG[phase gate<br/>server/phase_gate.zig]
+    PG --> DP[typed parse<br/>server/c2s/dispatch.zig]
+    DP --> HC[Hard checks<br/>server/c2s/*.zig]
+    HC --> SIM[sim apply<br/>ecs/world.zig<br/>world/store.zig]
+    SIM --> REP[interest replicate<br/>server/game/replicate.zig]
 ```
 
 Inv cause ledger (first cut): `World.inv_ledger` fixed ring (`ecs/inv_ledger.zig`),

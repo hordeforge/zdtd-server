@@ -1,5 +1,8 @@
 # Provenance ledger: every zdtd behavior and value -> stock source
 
+> **What this is:** the ledger that proves every behavior and value in `src/` comes from a documented stock source or is explicitly zdtd-owned, file by file and constant by constant (machine-gated by `tools/provenance_scan.py`).
+> **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) · [ASSETS.md](ASSETS.md) · [ZIG_CLONE.md](ZIG_CLONE.md) · [STATUS.md](STATUS.md) · [INDEX.md](INDEX.md)
+
 **Owns:** the proof that every behavior, perk and constant in zdtd comes from a
 documented stock-game source (or is explicitly marked zdtd-owned). For each
 src/ file: which stock behavior it implements, and for each behavioral

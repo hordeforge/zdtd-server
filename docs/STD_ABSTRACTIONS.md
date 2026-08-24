@@ -1,5 +1,9 @@
 # Zig stdlib abstraction audit (zdtd)
 
+> **What this is:** where the codebase uses high-level Zig 0.16 stdlib (`std.Io`, `std.http`, `std.Io.net`) versus the thin posix that remains.
+
+> **Related:** [ARCHITECTURE §2](ARCHITECTURE.md#2-source-layout-and-dependency-edges) · [ARCHITECTURE §4](ARCHITECTURE.md#4-net-stack-litenet-framing-packages) · [WEBUI](WEBUI.md) · [APM](APM.md) · [SCALE](SCALE.md)
+
 Living map of where we use high-level Zig 0.16 APIs vs thin posix.
 Policy: **AGENTS rule 26** (stdlib / `std.Io` over raw `std.os.linux`).
 
@@ -36,6 +40,14 @@ app (server/ecs/world/assets)
 2. `http.Server.init(Io.Reader.fixed(buf), Io.Writer.fixed(out))`
 3. `receiveHead` + route on `method`/`target`; body = remainder of fixed reader
 4. `request.respond` + flush Writer buffer via `tcp.writeAll`
+
+```mermaid
+flowchart LR
+    TCP[TCP accept<br/>util/tcp_listen.zig] --> BUF[recv_buf fill]
+    BUF --> HTTP[std.http.Server<br/>fixed Reader + Writer]
+    HTTP --> ROUTE[route by method/target<br/>server/webui.zig]
+    ROUTE --> RESP[respond + writeAll flush]
+```
 
 ## Why clock stays on `posix.system`
 

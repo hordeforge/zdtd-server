@@ -1,8 +1,11 @@
 # Module Tiers and Mod Override — Technical Proposal (RFC 0005)
 
+> **Purpose:** technical proposal for the mod tier and override model — manifest shape, discovery, override claims, and conflict rules.
+
 **Number:** RFC 0005
 **Status:** decided (shipped; implements PRD 0005, recorded in ADR 0032)
 **Source:** [PRD 0005](../prd/0005-mod-tiers-and-override.md) — the requirements this answers
+**Related:** [PRD 0005](../prd/0005-mod-tiers-and-override.md) · [ADR 0032](../adr/0032-module-tiers-and-override.md) · [PLUGIN_API.md](../PLUGIN_API.md) · [PLUGIN_STANDARDS.md](../PLUGIN_STANDARDS.md)
 
 ## 1. Decision to make
 

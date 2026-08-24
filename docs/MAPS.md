@@ -1,5 +1,9 @@
 # Stock maps (Navezgane / Pregen)
 
+> **What this is:** how `src/world/*` loads stock heightmaps, prefabs and water from `Data/Worlds/<Name>` and turns them into chunks the stock client can stand on.
+
+> **Related:** [ARCHITECTURE §7](ARCHITECTURE.md#7-world-and-chunks) · [ASSETS](ASSETS.md) · [WORLDGEN](WORLDGEN.md) · [SCALE](SCALE.md) · [wire/WIRE_CHUNK](wire/WIRE_CHUNK.md) · [ZIG_CLONE](ZIG_CLONE.md) · [STATUS](STATUS.md) · [PROVENANCE](PROVENANCE.md)
+
 zdtd can load **baked heightmaps** from the dedicated/game install:
 
 ```text
@@ -8,6 +12,18 @@ Data/Worlds/<Name>/
   dtm.raw           W*H × u16 LE, value = surfaceY * 256
   dtm_processed.raw preferred when present (same layout)
   spawnpoints.xml   position="x,y,z" (first used as default spawn)
+```
+
+## Asset-driven world sources
+
+Stock content is loaded from `Data/Config` and `Data/Worlds/<Name>` via `src/assets/*`; block ids come from the AssignIds dump, biome ids from `biomes.xml`, and wired chunks use MicroSplat splats. Fail closed: missing name means omit or skip deco. See [ASSETS](ASSETS.md) for the loader map and [ARCHITECTURE §10](ARCHITECTURE.md#10-config-assets-and-persistence).
+
+```mermaid
+flowchart TB
+    GAME_DIR["--game-dir / Data/Config + Data/Worlds"] --> ASSETS_MAP["assets/* loaders + AssignIds idByName"]
+    ASSETS_MAP --> WORLD_STORE["world/store — chunks, TTS, prefabs, DTM"]
+    WORLD_STORE --> WIRE_CHUNK["wire/stock_chunk — stock Chunk.write order"]
+    WIRE_CHUNK --> CLIENT["stock client — fixedSizeCC + splat load"]
 ```
 
 ## Coordinate mapping

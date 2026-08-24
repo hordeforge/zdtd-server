@@ -1,5 +1,9 @@
 # Procedural world generation (design)
 
+> **What this is:** streaming procedural terrain plan for `src/world/worldgen.zig` — the density-field, biome and structure design that complements baked DTM worlds without prebaking the map.
+
+> **Related:** [ARCHITECTURE §7](ARCHITECTURE.md#7-world-and-chunks) · [MAPS](MAPS.md) · [ASSETS](ASSETS.md) · [ECS_SYSTEMS](ECS_SYSTEMS.md) · [SCALE](SCALE.md) · [STATUS](STATUS.md) · [GAP_ANALYSIS](GAP_ANALYSIS.md)
+
 **Product model: on-the-fly streaming gen**, not a static full-map bake.
 
 Minecraft-style infinite (or huge) worlds: the server never materializes the

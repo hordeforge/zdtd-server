@@ -1,6 +1,10 @@
 # ECS simulation architecture and systems
 
-zdtd’s game sim is a single **SoA entity-component-system**.
+> **What this is:** the SoA ECS layout, schedule order, queries/groups and the per-system inventory for `src/ecs/*` — the sim plane that ticks at 20 Hz inside [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule).
+
+> **Related:** [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule) · [ARCHITECTURE §8](ARCHITECTURE.md#8-interest-and-replication-serialize-once) · [STATE_MACHINES](STATE_MACHINES.md) · [GAMEPLAY](GAMEPLAY.md) · [AUTHORITY](AUTHORITY.md) · [ASSETS](ASSETS.md) · [STATUS](STATUS.md) · [GAP_ANALYSIS](GAP_ANALYSIS.md) · [APM](APM.md)
+
+zdtd's game sim is a single **SoA entity-component-system**.
 
 ```text
 src/ecs/
@@ -63,14 +67,33 @@ trader_stock                     // traders (inventory on the entity)
 
 ### Tick order (`schedule.run` / `systems.tickAll`)
 
-0. `World.beginTick`: clear `TickLocals`  
-1. `systemBuffs`: 20 Hz buff duration/stack tick; reports expiries to the net layer  
-2. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)  
-3. `systemZombieAi`: multi-threaded over slots; deferred player damage  
-4. `systemVehicles`: driver transform stick  
-5. Power: resolve stays in `Game.step` (daylight); not doubled here  
-6. `systemTurrets`: multi-threaded targeting; deferred zombie damage  
-7. `systemDespawnFar`: cull far zombies  
+Pinned order `src/ecs/schedule.zig:order` — document order is run order; mode packs may disable a phase but never reorder it.
+
+```mermaid
+flowchart LR
+    BEGIN([beginTick<br/>clear TickLocals]) --> BUFFS
+    BUFFS[buffs — systemBuffs] --> DIR
+    DIR[director — clock + spawns] --> AI
+    AI[ai — systemZombieAi<br/>parallel] --> VEH
+    VEH[vehicles] --> TUR
+    TUR[turrets — parallel] --> DESP
+    DESP[despawn] --> CMDS
+    CMDS[commands — drainCommands cap 64]
+
+    classDef phase fill:#1a3a5c,stroke:#5b8def,color:#dbe6ff
+    class BUFFS,DIR,AI,VEH,TUR,DESP,CMDS phase
+```
+
+Detail: `src/ecs/schedule.zig:run` and [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule). Power resolves once per tick in `Game.step` with real daylight, not inside `schedule.run`.
+
+0. `World.beginTick`: clear `TickLocals`
+1. `systemBuffs`: 20 Hz buff duration/stack tick; reports expiries to the net layer
+2. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)
+3. `systemZombieAi`: multi-threaded over slots; deferred player damage
+4. `systemVehicles`: driver transform stick
+5. Power: resolve stays in `Game.step` (daylight); not doubled here
+6. `systemTurrets`: multi-threaded targeting; deferred zombie damage
+7. `systemDespawnFar`: cull far zombies
 8. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
 
 Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,

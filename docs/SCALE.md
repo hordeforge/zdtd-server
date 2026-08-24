@@ -1,5 +1,9 @@
 # Scale: M11 single-node scale and planet-scale shard plan
 
+> **What this is:** the parked scale plan, M11 single-node switches plus the planet-scale sharding design gated on M11 numbers.
+
+> **Related:** [ARCHITECTURE §8](ARCHITECTURE.md#8-interest-and-replication-serialize-once) · [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule) · [STATUS](STATUS.md) · [APM](APM.md) · [AUTHORITY](AUTHORITY.md) · [WORLDGEN](WORLDGEN.md) · [STD_ABSTRACTIONS](STD_ABSTRACTIONS.md)
+
 **Dates:** 2026-07-22 (substrate analysis), 2026-07-23 (build plan). Research
 verified via adversarial deep-research pass (104 agents, 3-vote refutation per
 claim; sources cited inline).

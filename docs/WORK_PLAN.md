@@ -1,5 +1,9 @@
 # Work plan (current)
 
+> **What this is:** the handoff-ready queue for the next build slice — one scoped task per section with grounding, proof, and acceptance, in build order.
+
+> **Related:** hub [STATUS.md](STATUS.md) (wins on conflict) · gaps [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md) · backlog [../TODO.md](../TODO.md)
+
 Archived detailed task history: [`archive/WORK_PLAN_2026-08-09.md`](archive/WORK_PLAN_2026-08-09.md).
 
 Active planning is now tracked in the living docs:

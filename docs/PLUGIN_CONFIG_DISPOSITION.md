@@ -1,7 +1,10 @@
 # Plugin/config disposition (ADR 0020/0026 review)
 
+> **Purpose:** audit of every behavioral rule against the plugin boundary — which decisions belong in Wasm, in config, or stay native.
+
 Classification of every behavioral rule/decision point in the server's
 rules/logic against the plugin boundary. The rule (ADR 0020/0026, AGENTS 28/29):
+**Related:** [PLUGIN_API.md](PLUGIN_API.md) · [PLUGIN_DEV.md](PLUGIN_DEV.md) · [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) · [RULES_CONFIG.md](RULES_CONFIG.md) · [STATE_MACHINES.md](STATE_MACHINES.md) · [GAMEPLAY.md](GAMEPLAY.md)
 
 1. **Wasm module** — anything the boundary can express: `zdtd.sense` /
    `zdtd.queue` / `zdtd.query` plus the event hooks and verdict convention

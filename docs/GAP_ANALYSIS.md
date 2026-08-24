@@ -1,7 +1,12 @@
 # Gap analysis: what a player can and cannot do on Navezgane
 
+> **What this is:** the full 291-feature inventory for the V3.1.0 b14 stock-client play path, with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
+
+> **Related:** hub [STATUS.md](STATUS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md)
+
 **Date pin:** 2026-08-06
 **Game line:** stock client **V3.1.0 b14**, EAC off, Navezgane, direct IP.
+**Version pin:** target is stock **V3.1.0 b14**; IL citations `asm.il:NNNN` refer to the V3.1.0 dump whose identity (size, line count, MD5) is recorded in [`../../7dtd-engine-research/il/README.md`](../../7dtd-engine-research/il/README.md). Mentions of V3.0.1 are provenance only; pre-2026-08-06 line numbers may drift by roughly 3500 lines in the NetPackage region.
 **IL reference:** `/home/maci/.cache/zdtd-scratch/asm.il` (2026-08-05 dump). Line
 numbers in this document refer to **that** dump. Older ranges quoted in
 [GAP_ANALYSIS.md](GAP_ANALYSIS.md) drift by roughly 3500 lines in the

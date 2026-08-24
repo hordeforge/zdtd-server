@@ -1,9 +1,12 @@
 # Product Requirements Documents (PRD)
 
+> **Purpose:** registry and guide for PRDs — product requirements for each addon, paired with the RFC of the same number.
+
 Numbered product-requirements documents for zdtd. Format: background →
 scope → requirements (R1…) → acceptance. Status is one of: **draft**,
 **in review**, **shipped** (see each doc's `**Status:**` line). New PRDs
 start from [TEMPLATE.md](TEMPLATE.md).
+**Related:** [RFC](../rfc/README.md) (design) · [ADR](../adr/README.md) (decisions) · [INDEX.md](../INDEX.md) (doc map)
 
 | PRD | Title | Status |
 |---|---|---|

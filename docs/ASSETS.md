@@ -1,6 +1,10 @@
 # Stock config assets
 
-Policy hub for loading game data from the operator's install (`--game-dir`).
+> **What this is:** policy and loader map for stock XML, AssignIds and patched catalogs — how `src/assets/*` turns `--game-dir` into the ids and tables the sim and wire builders consume.
+
+> **Related:** [ARCHITECTURE §10](ARCHITECTURE.md#10-config-assets-and-persistence) · [MAPS](MAPS.md) · [WORLDGEN](WORLDGEN.md) · [PROVENANCE](PROVENANCE.md) · [ZIG_CLONE](ZIG_CLONE.md) · [STATUS](STATUS.md) · [wire/PACKAGES](wire/PACKAGES.md) · [AUTHORITY](AUTHORITY.md)
+
+Policy hub for loading game data from the operator's install (`--game-dir`). Stock content is data loaded at init and never hardcoded; see [ARCHITECTURE §10](ARCHITECTURE.md#10-config-assets-and-persistence) for the config precedence and persistence plane.
 
 ## Config XML + overrides
 

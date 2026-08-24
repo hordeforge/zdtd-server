@@ -1,9 +1,12 @@
 # Client playtest suite: stock-client gameplay automation
 
+> **What this is:** automated stock-client gameplay suite that drives the real Unity client (EAC off) and asserts observable state, the fidelity oracle above unit tests and loadgen.
+> **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) · [STATE_MACHINES.md](STATE_MACHINES.md) · [GAMEPLAY.md](GAMEPLAY.md) · [STATUS.md](STATUS.md) · [PARITY_TOOLING.md](PARITY_TOOLING.md)
+
 **Status:** Phase A implemented (2026-07-24): `7dtd-playtest` mod + orchestrator;
 connect is join-only again.  
 **Audience:** agents and humans extending acceptance beyond unit tests and loadgen  
-**Related:** [STATUS.md](STATUS.md), [PARITY_TOOLING.md](PARITY_TOOLING.md), sibling
+**Related:** [STATUS.md](STATUS.md), [PARITY_TOOLING.md](PARITY_TOOLING.md), [ARCHITECTURE.md](ARCHITECTURE.md), [STATE_MACHINES.md](STATE_MACHINES.md), [GAMEPLAY.md](GAMEPLAY.md), sibling
 [`../../7dtd-fastconnect/`](../../7dtd-fastconnect/), [`../../7dtd-loadgen/`](../../7dtd-loadgen/)
 
 This doc specs how we grow **programmatic, real-client** gameplay testing for

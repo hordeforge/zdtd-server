@@ -1,5 +1,9 @@
 # Status: stock-client join and play path
 
+> **What this is:** the living hub for what actually works today on the V3.1.0 b14 stock-client join and play path, with gate evidence and residual gaps.
+
+> **Related:** gaps [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md)
+
 **Date pin:** 2026-08-23  
 **Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
 **Validation:** `make check` passes (`zig build test`, fuzz, and
@@ -8,9 +12,10 @@
 owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 263 `WORKS`,
 28 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
+**Conflict rule:** this document wins where it disagrees with GAP_ANALYSIS or IMPLEMENTATION_PLAN on whether a gate shipped.
 
-This is the hub for "what works now" vs `GAP_ANALYSIS.md` (full inventory) and
-`IMPLEMENTATION_PLAN.md` (phased plan). Doc index: [INDEX.md](INDEX.md).
+This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
 ## Wave 2026-08-20 (surface-parity reconciliation)
 
@@ -1897,13 +1902,14 @@ place+WireActions, sleeper volumes, quest multi-phase graphs, EAI task table
 
 ## Related docs
 
-Full map: [INDEX.md](INDEX.md).
+Full map: [INDEX.md](INDEX.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · sources [PROVENANCE.md](PROVENANCE.md).
 
 | Doc | Role |
 |---|---|
 | [TODO.md](../TODO.md) | Open backlog (shipped log below the fold) |
 | [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Gap inventory (honest PARTIAL sections); its scorecard feeds the standalone provenance dashboard ([provenance.html](provenance.html)) |
-| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack) |
-| [PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
+| [WORK_PLAN.md](WORK_PLAN.md) | Active handoff-ready tasks |
+| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | M7-M16 phases (post-playable stack; banner is authoritative) |
+| [wire/PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
 | [GAME_OPTIONS.md](GAME_OPTIONS.md) | serverconfig.xml → sim |
 | [SCALE.md](SCALE.md) | Shard plan + substrate research (parked until M11) |

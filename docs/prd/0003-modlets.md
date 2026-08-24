@@ -1,5 +1,7 @@
 # Pure XML / Assetbundle Modlet Compatibility - Product Requirements (PRD)
 
+> **Purpose:** product requirements for pure XML/assetbundle modlet compatibility — discovery, XML patching, and join-phase config sync.
+
 **Number:** PRD 0003
 **Status:** shipped (Mods/ discovery + patch pipeline + `NetPackageConfigFile`
 join sync live: `src/assets/modlets.zig`, `src/wire/packages.zig`
@@ -15,6 +17,7 @@ machinery.
 `../../../7dtd-engine-research/docs/inventories/xmlsToLoad.md` (49-row config table),
 `../../../7dtd-engine-research/docs/protocol-packages.md` (NetPackageConfigFile IL=25,
 NetPackageLocalization IL=30).
+**Related:** [RFC 0003](../rfc/0003-modlets-plan.md) (implementation plan) · [ASSETS.md](../ASSETS.md) · [AUTHORITY.md](../AUTHORITY.md) (join gate)
 
 ---
 

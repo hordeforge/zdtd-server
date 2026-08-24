@@ -1,5 +1,8 @@
 # Server game options (serverconfig.xml)
 
+> **What this is:** how stock `serverconfig.xml` properties map into the sim and the precedence that decides the effective value (CLI > env > zdtd.toml > mode pack > serverconfig XML > code defaults). Stock names, stock defaults, applied wiring.
+> **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) §10 · [ZIG_CLONE.md](ZIG_CLONE.md) · [RULES_CONFIG.md](RULES_CONFIG.md) · [AUTHORITY.md](AUTHORITY.md) · [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) · [serverconfig.example.xml](../serverconfig.example.xml)
+
 `src/server/config.zig` parses the stock `serverconfig.xml` `<property>` list.
 Every gameplay option below is read with the same name/default as the stock
 dedicated server and **applied to the sim** (`game.initWithOptions` + runtime
@@ -34,6 +37,18 @@ abort startup (LiteNet uses UDP port+2 and is not checked against TCP).
 toml file is present. Invalid authority modes and mode-file name mismatches
 abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
 256 KiB zdtd.toml, 64 KiB mode pack). Webui listen failures abort startup.
+
+```mermaid
+flowchart LR
+    DFLT["code defaults"] --> SC
+    SC["serverconfig XML"] --> MODE
+    MODE["mode pack"] --> TCFG
+    TCFG["zdtd.toml"] --> ENV
+    ENV["env"] --> CLI
+    CLI["CLI"] --> EFF["effective"]
+```
+
+Ground: `src/server/config.zig` (XML parse + `applySandboxCode` + clamps), `src/ecs/rules.zig` (`Rules` floors), `src/server/zdtd_config.zig` + `src/util/toml_bind.zig` (toml overlay).
 
 ## Applied to the sim
 

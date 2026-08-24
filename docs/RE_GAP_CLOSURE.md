@@ -1,5 +1,8 @@
 # RE gap closure: research specs for zdtd's open items
 
+> **What this is:** the bridge from each PARTIAL/MISSING gap in [GAP_ANALYSIS.md](GAP_ANALYSIS.md) to the RE spec that now covers it, so gaps close against a spec not guesswork.
+> **Related:** [INDEX.md](INDEX.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [PROVENANCE.md](PROVENANCE.md) · [wire/PACKAGES.md](wire/PACKAGES.md) · [STATUS.md](STATUS.md)
+
 **Purpose:** map each PARTIAL/MISSING item in [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md)
 to the reverse-engineering doc that now fully specifies it, so a gap can be closed
 against a spec instead of guesswork. The stock RE corpus at `../7dtd-engine-research/docs/`
