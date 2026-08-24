@@ -8,7 +8,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 ### Added
 
 - MCP server addon (docs/prd/0002-mcp-server.md, docs/rfc/0002-mcp-server-design.md, ADR 0031): a Model
-  Context Protocol server shipped as a Wasm plugin (`mods/zdtd_mcp`). Protocol
+  Context Protocol server shipped as a Wasm plugin (`mods/mcp`). Protocol
   logic lives in the guest; the host provides a streamable-HTTP endpoint
   (`--mcp-port`, loopback + optional `--mcp-token`) and std.json parsing
   (`json_*` imports). Tools: `server_status`, `player_list`, and an

@@ -28,6 +28,7 @@ done
 
 # Addons stay in mods/: mcp is Zig; bot stays C by design (ADR 0026);
 # example_chat_filter is untouched.
+# shellcheck disable=SC2043  # list-shaped on purpose: new Zig addons append to the list; mcp is the only one today
 for m in mcp; do
   $ZIG build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
     --name "$m" \
