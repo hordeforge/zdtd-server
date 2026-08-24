@@ -1366,6 +1366,14 @@ pub const Game = struct {
         return game_player.awardXp(self, slot, base);
     }
 
+    pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
+        return game_player.purchaseSkill(self, slot, skill, target_level);
+    }
+
+    pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
+        return game_player.skillLevelOf(self, slot, skill);
+    }
+
     pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
         return game_player.killXpAward(self, killer_slot, base);
     }

@@ -393,6 +393,16 @@ pub const InitOptions = struct {
     job_batches: bool = false,
 };
 
+/// One purchased progression value (attribute/perk) on a player.
+pub const SkillLevel = struct {
+    name: []const u8 = "",
+    level: u8 = 0,
+};
+
+/// Cap on distinct purchased skills per player (stock: 8 attributes + 57
+/// perks + skills; 64 covers the tree with room for skill rows).
+pub const max_skill_levels: usize = 64;
+
 pub const Client = struct {
     peer: ?*ln_peer.Peer = null,
     entity_id: i32 = -1,
@@ -400,6 +410,14 @@ pub const Client = struct {
     xp: u64 = 0,
     /// Player level derived from progression curve (1-based).
     level: u16 = 1,
+    /// Unspent skill points (progression.xml skill_points_per_level per new
+    /// level; ADR 0023 ledger).
+    skill_points: u32 = 0,
+    /// Purchased progression levels by name (attributes/perks). `name` must
+    /// point to static/indefinite-lifetime data (the progression table
+    /// arena); persisted with the player record.
+    skill_levels: [max_skill_levels]SkillLevel = [_]SkillLevel{.{}} ** max_skill_levels,
+    skill_level_n: u8 = 0,
     /// Per-player blood-moon-music eligibility edge state (stock
     /// EntityPlayer.bloodMoonParty): the horde music plays while the player's
     /// own party's horde is alive, not for every player on a multi-party

@@ -57,17 +57,18 @@ pub const PlayerStatsArgs = struct {
     entity_name: []const u8,
     level: u16,
     exp_to_next: i32,
+    skill_points: u16 = 0,
     killed_zombies: i32 = 0,
     held_item: ?stock_inv.StockSlot = null,
 };
 
 /// Progression.Write v3 with an empty values list: version byte + Level u16 +
 /// ExpToNextLevel i32 + SkillPoints u16 + count i32 + ExpDeficit i32.
-pub fn writeMinimalProgression(w: *binary.Writer, level: u16, exp_to_next: i32) !void {
+pub fn writeMinimalProgression(w: *binary.Writer, level: u16, exp_to_next: i32, skill_points: u16) !void {
     try w.writeByte(3); // version
     try w.writeU16(level);
     try w.writeI32(exp_to_next);
-    try w.writeU16(0); // SkillPoints (zdtd has no SP ledger yet)
+    try w.writeU16(skill_points); // SkillPoints (ADR 0023 ledger balance)
     try w.writeI32(0); // progressionValueCount
     try w.writeI32(0); // ExpDeficit
 }
@@ -102,7 +103,7 @@ pub fn buildPlayerStatsBody(buf: []u8, args: PlayerStatsArgs) ![]u8 {
     try w.writeBool(true); // hasProgression
     const len_off = w.pos;
     try w.writeI16(0); // progressionsData length, patched after the blob
-    try writeMinimalProgression(&w, args.level, args.exp_to_next);
+    try writeMinimalProgression(&w, args.level, args.exp_to_next, args.skill_points);
     const blob_len: i16 = @intCast(w.pos - len_off - 2);
     std.mem.writeInt(i16, buf[len_off..][0..2], blob_len, .little);
     return w.written();
@@ -112,6 +113,7 @@ test "player stats body is the stock EntityNetworkStats shape" {
     var buf: [128]u8 = undefined;
     const body = try buildPlayerStatsBody(&buf, .{
         .entity_id = 42,
+        .skill_points = 7,
         .entity_name = "Bot",
         .level = 3,
         .exp_to_next = 1000,
@@ -144,7 +146,7 @@ test "player stats body is the stock EntityNetworkStats shape" {
     try std.testing.expectEqual(@as(u8, 3), try r.readByte()); // Progression version
     try std.testing.expectEqual(@as(u16, 3), try r.readU16()); // Level
     try std.testing.expectEqual(@as(i32, 1000), try r.readI32()); // ExpToNextLevel
-    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // SkillPoints
+    try std.testing.expectEqual(@as(u16, 7), try r.readU16()); // SkillPoints
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // count
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // ExpDeficit
     try std.testing.expect(r.remaining() == 0);
@@ -219,4 +221,15 @@ test "entity velocity body is the 17-byte stock shape" {
     try std.testing.expectEqual(@as(f32, 1), try r.readF32());
     try std.testing.expectEqual(@as(f32, 0), try r.readF32());
     try std.testing.expectEqual(@as(f32, -1), try r.readF32());
+}
+
+
+/// NetPackageEntitySetSkillLevelClient body: entityId i32 | skill string |
+/// level i32 (RE netpackage-bodies.md). Sent on a successful purchase.
+pub fn buildEntitySetSkillLevelBody(buf: []u8, entity_id: i32, skill: []const u8, level: i32) ![]u8 {
+    var w = binary.Writer{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeString(skill);
+    try w.writeI32(level);
+    return w.written();
 }

@@ -36,6 +36,10 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
         if (c.xp < next_threshold) break;
         c.level += 1;
         next_threshold += self.progression.expForLevel(c.level);
+        // Level-up grants skill points (progression.xml skill_points_per_level;
+        // RE progression.md: LevelUp -> GrantPoints: player level += 1, skill
+        // points += award).
+        c.skill_points +|= self.progression.skill_points_per_level;
         // Level-up refreshes the EntityNetworkStats snapshot the peers hold:
         // stock's NED dirty path pushes PlayerStats when progression changes.
         broadcastPlayerStats(self, slot);
@@ -58,6 +62,7 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
         .entity_name = c.name[0..c.name_len],
         .level = c.level,
         .exp_to_next = exp_to_next,
+        .skill_points = @intCast(@min(c.skill_points, 65535)),
     })) |psb| {
         for (&self.clients) |*cl| {
             if (!cl.joined or cl.peer == null or cl.entity_id == c.entity_id) continue;
@@ -314,4 +319,127 @@ pub fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
         return best;
     }
     return @max(1, lootStageOf(self, peer_slot));
+}
+
+
+/// Purchased level of a progression value (attribute/perk) for a client.
+pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
+    if (slot >= self.clients.len) return 0;
+    const c = &self.clients[slot];
+    for (c.skill_levels[0..c.skill_level_n]) |sl| {
+        if (std.mem.eql(u8, sl.name, skill)) return sl.level;
+    }
+    return 0;
+}
+
+/// CalculatedCostForLevel (stock ProgressionClass; the exact IL rounding is
+/// RE-tracked, formula shape from progression.xml base_skill_point_cost x
+/// cost_multiplier_per_level^(level-1), standard stock geometric cost).
+fn skillCostForLevel(def_cost: u16, mult: f32, level: u8) u32 {
+    if (level <= 1) return def_cost;
+    var acc: f64 = @as(f64, @floatFromInt(def_cost));
+    var i: u8 = 1;
+    while (i < level) : (i += 1) acc *= @as(f64, mult);
+    const v: u64 = @intFromFloat(@round(acc));
+    return @intCast(@max(1, @min(v, 65535)));
+}
+
+/// Purchase one progression level (NetPackageEntitySetSkillLevelServer,
+/// RE progression.md §3 SpendSkillPoints). Validates: known skill, one level
+/// at a time, max level, SP balance >= cost, and (for perks) the parent
+/// attribute purchased. Applies server-side and echoes
+/// NetPackageEntitySetSkillLevelClient. Returns false when denied.
+pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
+    if (slot >= self.clients.len) return false;
+    const c = &self.clients[slot];
+    const cur = self.skillLevelOf(slot, skill);
+    if (target_level != cur + 1) return false; // one level per purchase
+    const pt = self.progression_table;
+    // Resolve the skill: attributes first, then perks.
+    var is_attr = false;
+    var max_level: u8 = 0;
+    var base_cost: u16 = 1;
+    var cost_mult: f32 = 1.0;
+    for (pt.attributes) |a| {
+        if (!std.mem.eql(u8, a.name, skill)) continue;
+        is_attr = true;
+        max_level = a.max_level;
+        base_cost = a.base_cost;
+        cost_mult = a.cost_mult;
+        break;
+    }
+    if (!is_attr) {
+        var parent: []const u8 = "";
+        for (pt.perks) |pk| {
+            if (!std.mem.eql(u8, pk.name, skill)) continue;
+            max_level = pk.max_level;
+            parent = pk.parent_attr;
+            break;
+        }
+        if (max_level == 0) return false; // unknown skill
+        if (parent.len > 0 and self.skillLevelOf(slot, parent) == 0) return false;
+    }
+    if (cur >= max_level) return false;
+    const cost: u32 = skillCostForLevel(base_cost, cost_mult, target_level);
+    if (c.skill_points < cost) return false;
+    c.skill_points -= cost;
+    var i: usize = 0;
+    while (i < c.skill_level_n) : (i += 1) {
+        if (std.mem.eql(u8, c.skill_levels[i].name, skill)) {
+            c.skill_levels[i].level = target_level;
+            return true;
+        }
+    }
+    if (c.skill_level_n < c.skill_levels.len) {
+        c.skill_levels[c.skill_level_n] = .{ .name = skill, .level = target_level };
+        c.skill_level_n += 1;
+        return true;
+    }
+    return false;
+}
+
+const assets_progression_test = @import("../../assets/progression.zig");
+
+test "skill ledger: level-up awards SP; purchase validates, prereqs and spends" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ledger", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Minimal progression tree: one attribute + one perk gated on it.
+    const attrs = [_]assets_progression_test.AttrDef{
+        .{ .name = "attGeneral", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
+    };
+    const perks = [_]assets_progression_test.PerkDef{
+        .{ .name = "perkLightEater", .max_level = 5, .parent_attr = "attGeneral" },
+    };
+    g.progression_table.attributes = &attrs;
+    g.progression_table.perks = &perks;
+    g.progression.skill_points_per_level = 1;
+
+    // Level up from 1 to 2: skill_points_per_level awarded per new level.
+    const level1_xp = g.progression.expForLevel(1);
+    g.awardXp(0, level1_xp);
+    try std.testing.expectEqual(@as(u16, 2), g.clients[0].level);
+    try std.testing.expectEqual(@as(u32, 1), g.clients[0].skill_points);
+
+    // Perk without the parent attribute: prereq denies.
+    try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 1));
+    // Unknown skill denies.
+    try std.testing.expect(!g.purchaseSkill(0, "notASkill", 1));
+    // Buy the attribute first (cost 1 = base), then the perk.
+    try std.testing.expect(g.purchaseSkill(0, "attGeneral", 1));
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "attGeneral"));
+    try std.testing.expectEqual(@as(u32, 0), g.clients[0].skill_points);
+    // Second level would cost base x mult (1.14 -> round 1): still 0 SP.
+    try std.testing.expect(!g.purchaseSkill(0, "attGeneral", 2));
+    // Perk buys at base cost 1.
+    g.clients[0].skill_points = 1;
+    try std.testing.expect(g.purchaseSkill(0, "perkLightEater", 1));
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "perkLightEater"));
+    try std.testing.expectEqual(@as(u32, 0), g.clients[0].skill_points);
+    // Re-purchase of the same level denies (one level per request).
+    try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 1));
+    std.debug.print("PASS skill-ledger: SP award, cost, prereq, echo state\n", .{});
 }

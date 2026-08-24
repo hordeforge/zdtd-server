@@ -310,9 +310,26 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerEquipment") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient") or std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
         return true;
     }
-    if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer") or std.mem.eql(u8, name, "NetPackageEntitySetSkillLevelServer")) {
-        // No server-side skill sim yet; the client tracks its own progress.
-        // Ack silently (dir=1, client-authoritative XP under EAC-off).
+    if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer")) {
+        // No server-side skill sim for these yet; ack silently.
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageEntitySetSkillLevelServer")) {
+        // ADR 0023 ledger: the client requests one skill purchase. Body
+        // (sender-addressed, inherited serialization): skill string | level
+        // i32 (RE netpackage-bodies.md). Server-validated; echoes the Client
+        // package on success.
+        var r = wire_binary.Reader{ .data = body };
+        var skill_buf: [128]u8 = undefined;
+        const skill = r.readString(&skill_buf) catch return true;
+        const level = r.readI32() catch return true;
+        if (skill.len == 0 or level < 1 or level > 255) return true;
+        if (!self.purchaseSkill(c.slot, skill, @intCast(level))) return true;
+        if (c.entity_id > 0) {
+            if (packages.stock_xp.buildEntitySetSkillLevelBody(&self.body_buf, c.entity_id, skill, level)) |sb| {
+                self.sendGame(peer, "NetPackageEntitySetSkillLevelClient", sb) catch {};
+            } else |_| {}
+        }
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageGameEventRequest")) {
