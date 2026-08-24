@@ -33,8 +33,9 @@ Status is one of: **accepted**, **superseded**, **deprecated** — a decision st
 | [0026](0026-fps-bot-wasm-module.md) | FPS bots as a Wasm module: host sense/act boundary, not a core bot brain | accepted (amended 2026-08-12: bots are not ECS entities) |
 | [0030](0030-plugin-spatiotemporal-composability.md) | Plugin spatiotemporal composability: reload (HMR), effect withdrawal, declarative `_zdtd_requires` dependencies | accepted |
 | [0031](0031-mcp-wasm-module.md) | MCP server as a Wasm module: guest protocol, host transport | accepted |
+| [0032](0032-module-tiers-and-override.md) | Module tiers and override: core / official mod / user mod, discovery, exclusive override points, mod-replaces-mod | accepted |
 
-Numbers 0027–0029 were never assigned. Next free number is **0032**.
+Numbers 0027–0029 were never assigned. Next free number is **0033**.
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),

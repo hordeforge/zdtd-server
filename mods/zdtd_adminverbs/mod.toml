@@ -1,4 +1,5 @@
 name = "zdtd_adminverbs"
 version = "0.1.0"
 wasm = "zdtd_adminverbs.wasm"
-description = "Custom operator verbs via on_admin_command: `wave <n>` queues n zombie spawns. Enable via zdtd.toml [plugin] modules = \"mods/zdtd_adminverbs/zdtd_adminverbs.wasm\"."
+enabled = false
+description = "In-tree zdtd module: demo/feed, enabled = false, load via [plugin] modules."

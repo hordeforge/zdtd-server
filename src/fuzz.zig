@@ -930,7 +930,7 @@ fn fuzzXmlPatch(_: void, smith: *std.testing.Smith) !void {
 
     const targets = [_][]const u8{ "blocks.xml", "items.xml", "quests.xml" };
     const target = targets[smith.index(targets.len)];
-    const out = xml_patch.applyPatchDoc(std.testing.allocator, base, patch, target) catch return;
+    const out = xml_patch.applyPatchDoc(std.testing.allocator, base, patch, target, .{}) catch return;
     defer std.testing.allocator.free(out);
     // No-op apply is a base dupe; mutations may grow or shrink but stay finite.
     if (std.mem.eql(u8, target, "blocks.xml") and patch.len == 0) {

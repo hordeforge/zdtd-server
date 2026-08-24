@@ -1,4 +1,5 @@
 name = "zdtd_announce"
 version = "0.1.0"
 wasm = "zdtd_announce.wasm"
-description = "Server chat announcements (join/leave) via the zdtd.queue 'say' verb. Enable via zdtd.toml [plugin] modules = \"mods/zdtd_announce/zdtd_announce.wasm\"."
+enabled = false
+description = "In-tree zdtd module: demo/feed, enabled = false, load via [plugin] modules."

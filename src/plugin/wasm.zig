@@ -10,6 +10,11 @@
 const std = @import("std");
 const zwasm = @import("zwasm");
 const io_fs = @import("../util/io_fs.zig");
+const manifest = @import("manifest.zig");
+const resolver = @import("resolver.zig");
+
+/// Sentinel in WasmHost.claims: no module exclusively owns the point.
+pub const no_claim: u8 = 0xFF;
 
 pub const Hook = enum(u8) {
     on_enable = 0,
@@ -124,6 +129,11 @@ pub const Plugin = struct {
     linker: zwasm.Linker,
     instance: zwasm.Instance,
     name: []const u8,
+    /// PRD 0005: tier from mod.toml (default user for legacy [plugin] modules).
+    tier: manifest.Tier = .user,
+    /// PRD 0005: manifest name (duped at loadResolved; "" for legacy modules,
+    /// which fall back to the path in `name`).
+    display: []const u8 = "",
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
     hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
@@ -192,6 +202,7 @@ pub const Plugin = struct {
         if (self.json_buf) |b| self.allocator.free(b);
         self.allocator.destroy(self.engine);
         self.allocator.free(self.name);
+        if (self.display.len > 0) self.allocator.free(self.display);
         self.* = undefined;
     }
 
@@ -705,6 +716,65 @@ pub const WasmHost = struct {
     /// Pending-effect withdrawal marks: a disabled plugin's queued commands are
     /// dropped once (temporal composability); cleared on reload.
     withdrawn: [max_wasm_plugins]bool = .{false} ** max_wasm_plugins,
+    /// PRD 0005: exclusive core override-point claims, point -> slot (load-fixed;
+    /// no_claim when unclaimed). A claimed point routes only to its claimant.
+    claims: [manifest.OverridePoint.count]u8 = .{no_claim} ** manifest.OverridePoint.count,
+
+    /// Load through a resolved mod plan (PRD 0005): the plan is final load
+    /// order with tiers and exclusive point claims; the caller owns the plan
+    /// and its manifests. Explicit `[plugin] modules` are folded in as
+    /// synthetic user mods by the resolver.
+    pub fn loadResolved(
+        self: *WasmHost,
+        allocator: std.mem.Allocator,
+        plan: *const resolver.ResolvedResult,
+        ctx: *HostCtx,
+        budget: Budget,
+    ) void {
+        self.allocator = allocator;
+        self.ctx = ctx;
+        self.budget = budget;
+        for (plan.modules) |rm| {
+            if (self.n >= max_wasm_plugins) {
+                std.debug.print("zdtd: wasm plugin cap {d} reached; skipping '{s}'\n", .{ max_wasm_plugins, rm.manifest.wasm.? });
+                return;
+            }
+            // Path = <manifest dir>/<wasm> for discovered mods; synthetic
+            // explicit modules carry the full path as wasm with dir "".
+            const full_path = if (rm.manifest.dir.len > 0)
+                (std.fs.path.join(allocator, &.{ rm.manifest.dir, rm.manifest.wasm.? }) catch {
+                    std.debug.print("zdtd: mod '{s}' bad wasm path; skipping\n", .{rm.manifest.name.?});
+                    continue;
+                })
+            else
+                rm.manifest.wasm.?;
+            defer if (rm.manifest.dir.len > 0) allocator.free(full_path);
+            self.loadInto(self.n, full_path) catch |err| {
+                std.debug.print("zdtd: mod '{s}' load failed: {s}\n", .{ rm.manifest.name.?, @errorName(err) });
+                continue;
+            };
+            self.slots[self.n].tier = rm.tier;
+            self.slots[self.n].display = allocator.dupe(u8, rm.manifest.name.?) catch "";
+            self.n += 1;
+            const tier_s = switch (rm.tier) {
+                .core => "core",
+                .official => "official",
+                .user => "user",
+            };
+            if (rm.replaces) |tgt| {
+                std.debug.print("zdtd: mod '{s}' [{s}] loaded (replaces '{s}')\n", .{ rm.manifest.name.?, tier_s, tgt });
+            } else {
+                std.debug.print("zdtd: mod '{s}' [{s}] loaded\n", .{ rm.manifest.name.?, tier_s });
+            }
+        }
+        // Install exclusive point claims (load-fixed table; no per-tick cost).
+        self.claims = .{no_claim} ** manifest.OverridePoint.count;
+        var it = plan.point_claims.iterator();
+        while (it.next()) |entry| {
+            const point = manifest.OverridePoint.parse(entry.key_ptr.*) orelse continue;
+            self.claims[@intFromEnum(point)] = @intCast(entry.value_ptr.*);
+        }
+    }
 
     /// Load every module path that exists; a missing or unloadable module is
     /// logged and skipped so one bad file does not take the server down.
@@ -763,6 +833,13 @@ pub const WasmHost = struct {
         // callers passing slots[idx].name (the admin verb does) stay valid.
         const path_owned = self.allocator.dupe(u8, path) catch return false;
         defer self.allocator.free(path_owned);
+        // Preserve tier/display across the reload (loadInto resets them).
+        const tier = self.slots[idx].tier;
+        const display_owned = if (self.slots[idx].display.len > 0)
+            self.allocator.dupe(u8, self.slots[idx].display) catch ""
+        else
+            "";
+        defer if (display_owned.len > 0) self.allocator.free(display_owned);
         _ = self.slots[idx].callHook(.on_shutdown);
         self.slots[idx].deinit();
         if (self.ctx) |ctx| {
@@ -773,6 +850,8 @@ pub const WasmHost = struct {
             std.debug.print("zdtd: wasm plugin reload '{s}' failed: {s}\n", .{ path_owned, @errorName(err) });
             return false;
         };
+        self.slots[idx].tier = tier;
+        if (display_owned.len > 0) self.slots[idx].display = display_owned;
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
@@ -843,7 +922,11 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Player-damage verdict; point `damage.player_scale` is exclusive when
+    /// claimed: only the claimant is consulted and its verdict is final.
     pub fn playerDamage(self: *WasmHost, attacker: i32, victim: i32, amount: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.damage_player_scale)];
+        if (c != no_claim and c < self.n) return self.slots[c].callPlayerDamage(attacker, victim, amount);
         for (0..self.n) |i| {
             const v = self.slots[i].callPlayerDamage(attacker, victim, amount);
             if (v != verdict_keep) return v;
@@ -859,7 +942,10 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Craft-request verdict; point `craft.request` is exclusive when claimed.
     pub fn craftRequest(self: *WasmHost, player: i32, recipe_name: []const u8, times: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.craft_request)];
+        if (c != no_claim and c < self.n) return self.slots[c].callCraftRequest(player, recipe_name, times);
         for (0..self.n) |i| {
             const v = self.slots[i].callCraftRequest(player, recipe_name, times);
             if (v != verdict_keep) return v;
@@ -867,7 +953,10 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Loot-roll verdict; point `loot.roll` is exclusive when claimed.
     pub fn lootRoll(self: *WasmHost, list_name: []const u8, rolled: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.loot_roll)];
+        if (c != no_claim and c < self.n) return self.slots[c].callLootRoll(list_name, rolled);
         for (0..self.n) |i| {
             const v = self.slots[i].callLootRoll(list_name, rolled);
             if (v != verdict_keep) return v;
@@ -883,9 +972,11 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
-    /// Pre-trade price verdict: first non-zero adjustment wins (like the
-    /// other verdicts); 0 keeps the stock price.
+    /// Pre-trade price verdict: point `trade.price` is exclusive when claimed;
+    /// 0 keeps the stock price.
     pub fn tradePrice(self: *WasmHost, player: i32, item: i32, unit_price: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.trade_price)];
+        if (c != no_claim and c < self.n) return self.slots[c].callTradePrice(player, item, unit_price);
         for (0..self.n) |i| {
             const v = self.slots[i].callTradePrice(player, item, unit_price);
             if (v != verdict_keep) return v;
@@ -893,7 +984,10 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Quest-complete verdict; point `quest.payout` is exclusive when claimed.
     pub fn questComplete(self: *WasmHost, player: i32, quest_def: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.quest_payout)];
+        if (c != no_claim and c < self.n) return self.slots[c].callQuestComplete(player, quest_def);
         for (0..self.n) |i| {
             const v = self.slots[i].callQuestComplete(player, quest_def);
             if (v != verdict_keep) return v;
@@ -1337,6 +1431,69 @@ test "wasm on_player_login join gate: deny reason, allow others" {
     const reason = host.playerLoginDeny(1, "rejectme", &out).?;
     try std.testing.expectEqualStrings("nope", reason);
     try std.testing.expect(host.playerLoginDeny(1, "SurvivorBob", &out) == null);
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "zdtd_announce.wasm (zig-built) join/leave says + clock announcements" {
+    const Cap = struct {
+        var queued: [8][128]u8 = undefined;
+        var queued_len: [8]usize = .{0} ** 8;
+        var queued_n: usize = 0;
+        var world_time: u32 = 2 * 24000; // day 2
+        var blood_moon: u32 = 1;
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 7;
+        }
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
+            if (queued_n < queued.len) {
+                const n = @min(cmd.len, 128);
+                @memcpy(queued[queued_n][0..n], cmd[0..n]);
+                queued_len[queued_n] = n;
+                queued_n += 1;
+            }
+        }
+        fn senseFn(_: *HostCtx, out_buf: []u8) usize {
+            if (out_buf.len < 24) return 0;
+            std.mem.writeInt(u32, out_buf[0..4], 0x3353425a, .little); // 'ZBS3'
+            std.mem.writeInt(u32, out_buf[4..8], 0, .little);
+            std.mem.writeInt(u32, out_buf[8..12], 1, .little);
+            std.mem.writeInt(i32, out_buf[12..16], -1, .little);
+            std.mem.writeInt(u32, out_buf[16..20], world_time, .little);
+            std.mem.writeInt(u32, out_buf[20..24], blood_moon, .little);
+            return 24;
+        }
+    };
+    Cap.queued_n = 0;
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_announce/zdtd_announce.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_tick)]);
+    host.enable();
+    host.playerJoin(3, 77);
+    host.playerLeave(3, 77);
+    // First tick: baseline only (no announcements yet).
+    host.onTick();
+    // Second tick with the same clock: still nothing.
+    host.onTick();
+    try std.testing.expectEqual(@as(usize, 2), Cap.queued_n); // join + leave says
+    try std.testing.expectEqualStrings("say A new survivor has joined the wasteland.", Cap.queued[0][0..Cap.queued_len[0]]);
+    try std.testing.expectEqualStrings("say A survivor has left the wasteland.", Cap.queued[1][0..Cap.queued_len[1]]);
+    // Day roll + blood-moon end on the next tick.
+    Cap.queued_n = 0;
+    Cap.world_time = 3 * 24000; // day 3
+    Cap.blood_moon = 0;
+    host.onTick();
+    try std.testing.expectEqual(@as(usize, 2), Cap.queued_n);
+    try std.testing.expectEqualStrings("say Day 3", Cap.queued[0][0..Cap.queued_len[0]]);
+    try std.testing.expectEqualStrings("say The blood moon fades.", Cap.queued[1][0..Cap.queued_len[1]]);
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 

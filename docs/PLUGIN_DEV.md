@@ -41,6 +41,37 @@ fails, which disables your module.
 
 ## Enabling a plugin
 
+Two ways (PRD 0005): auto-discovery from a `mods/<name>/mod.toml` manifest,
+or the legacy explicit list.
+
+### Auto-discovery via `mod.toml` (PRD 0005)
+
+Drop a directory under `mods/` with a `mod.toml` and a `.wasm`; the server
+scans `mods/*/mod.toml` at boot, sorted by directory name, and loads every
+manifest it finds (unless disabled/blacklisted). This is how the shipped
+official mods (`zdtd_bot`, `zdtd_mcp`) load; a fresh install needs zero
+config.
+
+```toml
+name = "my_rules"
+version = "0.1.0"
+wasm = "my_rules.wasm"      # relative to the mod directory
+tier = "user"               # "official" (ships with zdtd) or "user"; "core" is a load error
+# override = "zdtd_bot"     # load THIS mod in place of zdtd_bot (target not instantiated)
+# points = "loot.roll"      # exclusive core override points this mod claims (comma-separated)
+# claim_mode = "exclusive"  # only "exclusive"; "chain" (call-next) is reserved, rejected at load
+# requires = "on_tick"      # extra hook/verb declarations (same vocabulary as _zdtd_requires)
+# enabled = false           # do not auto-load; load via [plugin] modules instead
+description = "Scales loot, denies crafts."
+```
+
+Unknown keys and unknown override points fail the load loudly (fail-closed,
+RFC 0005 N2). An entry naming a **core component** (`loot`, `quests`,
+`damage`, `craft`, `trading`) in `[mods] disabled`/`blacklist` is a config
+error: core components cannot be disabled or blacklisted.
+
+### Explicit `[plugin] modules` (legacy)
+
 List `.wasm` files in `[plugin] modules` in zdtd.toml (world dir or CWD,
 see [GAME_OPTIONS.md](GAME_OPTIONS.md)):
 
@@ -49,11 +80,41 @@ see [GAME_OPTIONS.md](GAME_OPTIONS.md)):
 modules = "mods/my_plugin.wasm, mods/stats.wasm"
 ```
 
+Explicit paths still load and are folded in after discovery as user mods
+(this also loads a discovered mod whose manifest says `enabled = false`).
 Modules load once at startup; a missing or unloadable module is logged and
 skipped, it does not stop the server. `on_enable` runs right after load,
 `on_tick` runs late in every tick, `on_player_join` runs on a player's first
 join, `on_shutdown` runs at shutdown, and the four event hooks run at their
 game events (death, kill, block damage, quest completion).
+
+### Disabling and blacklisting (`[mods]`)
+
+```toml
+[mods]
+disabled = "zdtd_killfeed"   # skip loading, one info log per mod
+blacklist = "evil_mod"       # refuse; also vetoes any mod that overrides or requires it
+```
+
+### Tiers and core override points
+
+Tiers are provenance, not privilege: official and user mods run under the
+same fuel/memory budgets and effect attribution (ADR 0020/0030). The five
+core override points a mod may claim are the existing verdict hooks with a
+core decision site:
+
+| Point id | Hook | Exclusive claim effect |
+|---|---|---|
+| `loot.roll` | `on_loot_roll` | the claimant decides the roll; native default skipped |
+| `quest.payout` | `on_quest_complete` | the claimant decides the payout; native default skipped |
+| `damage.player_scale` | `on_player_damage` | the claimant decides the damage verdict |
+| `craft.request` | `on_craft_request` | the claimant decides the craft verdict |
+| `trade.price` | `on_trade_price` | the claimant decides the price verdict |
+
+Claims are exclusive and checked at load: two mods claiming the same point
+stop the boot with an error naming both. Unclaimed points keep today's
+composition (first non-zero verdict across subscribers in load order).
+Replacing a whole component means claiming all of its points.
 
 ### Declarative dependencies (`_zdtd_requires`)
 
@@ -247,10 +308,14 @@ native by construction; a feature that *decides* about such things is a plugin.
 (an ADR-worthy decision) or document why the native placement is required.
 
 **Reference modules shipped in this repo (production plugins, committed
-`.wasm`):**
+`.wasm`). All core plugins are written in Zig and rebuilt with
+`scripts/build-plugins.sh` (see [mods/BUILDING.md](../mods/BUILDING.md) for the
+layout, build recipe, and [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) for naming
+and manifest rules). The one exception is `zdtd_bot`, which is C by design
+(ADR 0026):**
 
 - `mods/zdtd_bot/zdtd_bot.wasm` — the bot brain (ADR 0026): sense → decide →
-  `bot <verb>` commands; the flagship plugin.
+  `bot <verb>` commands; the flagship plugin (C source).
 - `mods/zdtd_killfeed/zdtd_killfeed.wasm` — a minimal event observer: logs
   kills, player deaths and quest completions via the verdict hooks and keeps
   every outcome (0). Use it as the template for announcements, kill-feeds,
@@ -273,6 +338,13 @@ native by construction; a feature that *decides* about such things is a plugin.
 - `mods/zdtd_tradefeed/zdtd_tradefeed.wasm` — a trader-event observer module:
   uses `on_trader_event` (kind 0 open / 1 buy / 2 sell) to log every trade
   window event. Use it as the template for trader/vehicle announcements.
+- `mods/zdtd_announce/zdtd_announce.wasm`, `mods/zdtd_damagegate`,
+  `mods/zdtd_pricegate`, `mods/zdtd_rewardgate`,
+  `mods/zdtd_adminverbs`, `mods/zdtd_mcp` (ADR 0031) — the remaining core
+  plugins: clock/join announcements, damage/price/reward scaling verdicts,
+  operator verbs via `on_admin_command`, and the MCP server addon.
+- `mods/example_chat_filter/` — a drop-in example layout (C), not a core
+  plugin.
 
 ## Data across the boundary
 
@@ -361,8 +433,16 @@ pub extern "C" fn on_tick() { /* ... */ }
 **Zig**
 
 ```sh
-zig build-lib plugin.zig -target wasm32-freestanding -dynamic -rdynamic -OReleaseSmall
+zig build-exe plugin.zig -target wasm32-freestanding -rdynamic -OReleaseSmall \
+  --name my_plugin
+mv my_plugin.wasm my_plugin_final.wasm
 ```
+
+`zig build-exe` needs an entry point even for freestanding targets; add a
+one-line `export fn _start() void {}` to your module (the committed core
+plugins put it in a separate `main.zig` wrapper — see
+[mods/BUILDING.md](../mods/BUILDING.md)). zwasm runs the start section only if
+the module declares one, which ours never do, so `_start` is never invoked.
 
 ```zig
 export fn on_tick() void { }

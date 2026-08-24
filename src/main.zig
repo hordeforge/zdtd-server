@@ -12,6 +12,7 @@ const ecs_mod = @import("ecs/root.zig");
 const server_config = @import("server/config.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
 const mode_mod = @import("server/mode.zig");
+const plugin_mod = @import("plugin/root.zig");
 const webui_mod = @import("server/webui.zig");
 const io_fs = @import("util/io_fs.zig");
 const log = @import("util/log.zig");
@@ -768,6 +769,54 @@ pub fn main(init: std.process.Init.Minimal) !void {
         // enum_by_name), so this is a straight apply.
         if (tf.authority.mode) |mode_s| {
             if (server_config.AuthorityMode.parse(mode_s)) |am| init_opts.authority_mode = am;
+        }
+    }
+
+    // PRD 0005: discover mods/ manifests, resolve tiers + overrides + claims,
+    // then load through the plan. `[mods] disabled`/`blacklist` gate discovery.
+    const discovered = plugin_mod.manifest.discover(gpa, "mods") catch |err| {
+        fatal("cannot scan mods/: {s}", .{@errorName(err)});
+    };
+    defer {
+        for (discovered) |dm| plugin_mod.manifest.free(gpa, &dm);
+        if (discovered.len > 0) gpa.free(discovered);
+    }
+    const disabled_list = if (toml_owned) |*tf| blk: {
+        const s = tf.mods.disabled orelse "";
+        break :blk splitPluginModules(gpa, s);
+    } else &.{};
+    defer if (disabled_list.len > 0) gpa.free(disabled_list);
+    const blacklist_list = if (toml_owned) |*tf| blk: {
+        const s = tf.mods.blacklist orelse "";
+        break :blk splitPluginModules(gpa, s);
+    } else &.{};
+    defer if (blacklist_list.len > 0) gpa.free(blacklist_list);
+
+    var mod_plan = plugin_mod.resolver.resolve(
+        gpa,
+        discovered,
+        init_opts.plugin_modules,
+        disabled_list,
+        blacklist_list,
+    ) catch |err| {
+        fatal("mod resolution failed: {s}", .{@errorName(err)});
+    };
+    // Owned by main until after Game.createWithOptions (init_world loads it).
+    defer mod_plan.deinit(gpa);
+    init_opts.plugin_plan = &mod_plan;
+    // Log which discovered mods were skipped (disabled / blacklisted /
+    // enabled=false) so the operator sees why something did not load. The
+    // loaded set with tiers and replacements is logged by loadResolved.
+    for (discovered) |dm| {
+        var in_plan = false;
+        for (mod_plan.modules) |rm| {
+            if (std.mem.eql(u8, rm.manifest.name.?, dm.name.?)) {
+                in_plan = true;
+                break;
+            }
+        }
+        if (!in_plan) {
+            log.info("zdtd: mod '{s}' skipped (disabled, blacklisted, or enabled=false)\n", .{dm.name.?});
         }
     }
     // Effective sim rules: defaults < mode pack < zdtd.toml (ADR 0021). The
