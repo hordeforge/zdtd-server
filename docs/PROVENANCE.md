@@ -47,7 +47,7 @@ python3 tools/provenance_scan.py      # file coverage + ledger well-formedness g
 ```
 
 Coverage targets, all enforced by the scan:
-- **File coverage: 193/193 (100%).** Every row below carries a bucket and a
+- **File coverage: 201/201 (100%).** Every row below carries a bucket and a
   source; a file without a row, or a row without a bucket/source, fails.
 - **Value coverage: 100%.** Every file-scope typed constant in **every** src
   file (whole tree, test/fuzz/harness excluded) carries an inline provenance
@@ -229,7 +229,7 @@ Coverage targets, all enforced by the scan:
 | `src/version.zig` | Z | Product and compatibility versions reported to operators |
 | `src/wire/binary.zig` | R | Little-endian readers/writers matching .NET BinaryReader/Writer (7-bit strings) |
 | `src/wire/frame.zig` | R | Game channel envelope + inner packages (stock NetConnectionSimple layout) |
-| `src/wire/packages.zig` | R | Golden package body builders/parsers for join, motion, damage, spawn, TE. Prefer this facade for all wire/stock_* body modules (and te_types); leaf. parse/buildPickupBlockBody = NetPackagePickupBlock layout (netpackage-bodies.md); parse/buildSetBlockTexture = NetPackageSetBlockTexture layout; parseItemReload = NetPackageItemReload layout | parsePlayerLogin reads version/compVersion (LongStringNoBuild form) + KickReason.version_mismatch channelFor picks the envelope channel by package name (stock get_Channel set)
+| `src/wire/packages.zig` | R | Golden package body builders/parsers for join, motion, damage, spawn, TE. Prefer this facade for all wire/stock_* body modules (and te_types); leaf. parse/buildPickupBlockBody = NetPackagePickupBlock layout (inventories/netpackage-bodies.md); parse/buildSetBlockTexture = NetPackageSetBlockTexture layout; parseItemReload = NetPackageItemReload layout | parsePlayerLogin reads version/compVersion (LongStringNoBuild form) + KickReason.version_mismatch channelFor picks the envelope channel by package name (stock get_Channel set)
 | `src/wire/platform_user.zig` | R | PlatformUserIdentifierAbs wire codec (stock V3.1.0 b14). |
 | `src/wire/root.zig` | R | Wire package layer: binary LE helpers, frames, stock body builders. |
 | `src/wire/stock_buff.zig` | R | Stock buff wire (V3.1.0 b14): NetPackageAddRemoveBuff body and the EntityBuffs blob carried by NetPackageEntityStatsBuff and PlayerDataFile.buffData |
@@ -461,7 +461,7 @@ below is therefore the surviving record of the final live statuses.
 ## 4. Coverage and maintenance
 
 - **Gate:** `python3 tools/provenance_scan.py` runs in `make check` (CI-enforced).
-  File coverage must stay **193/193 (100%)**; a new src file without a ledger
+  File coverage must stay **201/201 (100%)**; a new src file without a ledger
   row, or a row without a bucket/source, fails the gate (AGENTS.md rule 15).
 - **Constants:** the ledger covers the behavioral values; the authoritative
   field-by-field provenance for the rules surface lives inline in
@@ -472,7 +472,7 @@ below is therefore the surviving record of the final live statuses.
 - **Divergences:** tracked in GAP_ANALYSIS / WORK_PLAN / the audit's per-finding
   table (`archive/HARDCODE_AUDIT_2026-08-08.md`); re-verify on change.
 
-- `python3 tools/provenance_scan.py` gates **file coverage 193/193** and ledger
+- `python3 tools/provenance_scan.py` gates **file coverage 201/201** and ledger
   well-formedness (every row: bucket + non-empty source; every constant anchor
   file exists). Wire it into `make check` after the first green run.
 - After a game update: re-run `../../7dtd-engine-research/tools/parity/drift-check.sh`,

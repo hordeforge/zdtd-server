@@ -9,7 +9,7 @@ as-is.
 ## One command
 
 ```sh
-scripts/build-plugins.sh        # or ZIG=/path/to/zig scripts/build-plugins.sh
+make plugins                     # or: scripts/build-plugins.sh
 ```
 
 This rebuilds every `plugins/<name>/<name>.wasm` from

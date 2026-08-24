@@ -3880,7 +3880,7 @@ persists so little that a restart visibly damages a built base.
 
 - **Wrench pickup (NetPackagePickupBlock handling)** `WORKS` `(2026-08-21)`
   The C2S body (3x i32 pos | u32 rawData | i32 playerId | platform identity,
-  RE netpackage-bodies.md) is parsed and run through the stock server checks
+  RE inventories/netpackage-bodies.md) is parsed and run through the stock server checks
   (asm.il GameManager.PickupBlockServer IL=77): the claimed entity must be the
   sender's own, the platform identity must match the registered primary/native
   id (null passes only when the sender registered none, NetPackage IL=29), the
@@ -3898,7 +3898,7 @@ persists so little that a restart visibly damages a built base.
 
 - **Paint (NetPackageSetBlockTexture handling)** `WORKS` `(2026-08-21)`
   The C2S body (3x i32 pos | u8 face | u8 idx | i32 playerIdThatChanged | u8
-  channel, RE netpackage-bodies.md) is parsed and validated (own-entity claim,
+  channel, RE inventories/netpackage-bodies.md) is parsed and validated (own-entity claim,
   reach + land-claim bounds; channel 0 only - `Chunk.chnTextures` is a
   1-element array, Chunk IL_01F8-01FE - and face 0..5). The face byte stores
   the BlockTextureData catalog idx raw (Chunk.SetBlockFaceTexture IL=48 masks
@@ -3913,7 +3913,7 @@ persists so little that a restart visibly damages a built base.
   `src/world/store.zig` `textures` plane + `setBlockTexDensWorld`
 
 - **Reload relay (NetPackageItemReload handling)** `WORKS` `(2026-08-21)`
-  The C2S body (single i32 entityId, RE netpackage-bodies.md) is validated
+  The C2S body (single i32 entityId, RE inventories/netpackage-bodies.md) is validated
   against a real player entity and relayed to every peer but the sender
   (GameManager.ItemReloadServer IL=32, flags 192), so the other players see
   the reload animation; the sender already started its own reload locally and

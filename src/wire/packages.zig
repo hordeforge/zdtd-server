@@ -3642,7 +3642,7 @@ pub fn parseTraderDataToServer(body: []const u8) !TraderDataToServer {
     return t;
 }
 
-/// Stock NetPackagePickupBlock (RE netpackage-bodies.md "NetPackagePickupBlock",
+/// Stock NetPackagePickupBlock (RE inventories/netpackage-bodies.md "NetPackagePickupBlock",
 /// read asm.il 20: StreamUtils.ReadVector3i | ReadUInt32 rawData | ReadInt32
 /// playerId | PlatformUserIdentifierAbs.FromStream(errorOnEmpty=false,
 /// inclCustomData=false)). The S2C echo of a pickup carries the same layout
@@ -3683,7 +3683,7 @@ pub fn buildPickupBlockBody(buf: []u8, x: i32, y: i32, z: i32, raw: u32, player_
     return w.written();
 }
 
-/// Stock NetPackageItemReload (RE netpackage-bodies.md "NetPackageItemReload"):
+/// Stock NetPackageItemReload (RE inventories/netpackage-bodies.md "NetPackageItemReload"):
 /// a single i32 entityId. Same layout both directions; the dedi relays it to
 /// every peer but the sender (GameManager.ItemReloadServer IL=32, flags 192).
 pub fn parseItemReload(body: []const u8) !i32 {
@@ -3691,7 +3691,7 @@ pub fn parseItemReload(body: []const u8) !i32 {
     return std.mem.readInt(i32, body[0..4], .little);
 }
 
-/// Stock NetPackageSetBlockTexture (RE netpackage-bodies.md "NetPackageSetBlockTexture",
+/// Stock NetPackageSetBlockTexture (RE inventories/netpackage-bodies.md "NetPackageSetBlockTexture",
 /// read asm.il 24: StreamUtils.ReadVector3i | u8 face | u8 idx | i32
 /// playerIdThatChanged | u8 channel). The dedi rebroadcast sets
 /// playerIdThatChanged=-1 (GameManager.SetBlockTextureServer IL=41

@@ -33,7 +33,7 @@ New to the project, or picking up work:
 7. [../CHANGELOG.md](../CHANGELOG.md) consumer-visible changes and migrations.
 8. [RE_GAP_CLOSURE.md](RE_GAP_CLOSURE.md) open items turned into research specs.
 9. [PROVENANCE.md](PROVENANCE.md) where every behavior/perk/value comes from in
-   the stock game (file map 198/198 + constants ledger; gated by
+   the stock game (file map 201/201 + constants ledger; gated by
    `tools/provenance_scan.py` in `make check`). Re-run the review with
    [provenance-review.md](provenance-review.md) (copy-paste agent prompt:
    method, gates, honesty rules; picked up by `~/review-prompts`).

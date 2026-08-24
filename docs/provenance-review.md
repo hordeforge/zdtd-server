@@ -37,7 +37,7 @@ Three buckets per file/constant:
   R = stock behavior reproduced from RE (cite ../7dtd-engine-research/docs/<doc>.md
       section, or asm.il offset; fix code to match RE, never the reverse)
   Z = zdtd-owned policy (explicitly not a provenance claim)
-The gate is tools/provenance_scan.py: 198/198 files + every file-scope typed
+The gate is tools/provenance_scan.py: 201/201 files + every file-scope typed
 constant carries an inline provenance comment. Mark honest status everywhere:
 verified / inferred / diverges / not-implemented. NEVER silently mark a
 divergence as matching.
@@ -76,7 +76,7 @@ divergence as matching.
    bodies are all byte-exact-verified in save-region.md).
 
 # Gates (run before every commit and at the end)
-- zdtd:  python3 tools/provenance_scan.py   (198/198, constants ledgered)
+- zdtd:  python3 tools/provenance_scan.py   (201/201, constants ledgered)
 - zdtd:  make check                          (zig build + tests)
 - RESEARCH: make test (24 checks) + make verify (ALL GATES GREEN)
 - RESEARCH: make save-roundtrip-all          (every probe save + shipped world)
@@ -102,7 +102,7 @@ Commit only when the gates pass.
 # Done looks like
 - PROVENANCE.md has no R-bucket row whose cite is missing or inaccurate; every
   divergence carries the stock value + cite + reason.
-- provenance_scan.py: 198/198 and all constants ledgered.
+- provenance_scan.py: 201/201 and all constants ledgered.
 - Every fleet gate above is green; all commits pushed.
 - The changelog records what each pass verified and corrected.
 ```

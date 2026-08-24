@@ -159,7 +159,7 @@ pub fn free(a: std.mem.Allocator, m: *const Manifest) void {
 /// by directory name for deterministic resolution (sim rule 22). Directories
 /// without mod.toml are skipped silently. Caller owns the slice + each
 /// manifest (free each, then free the slice). Non-directory entries (files
-/// like BUILDING.md, plugin_common.zig) are not mods and are ignored.
+/// like mods/BUILDING.md, plugin_common.zig) are not mods and are ignored.
 pub fn discover(a: std.mem.Allocator, root: []const u8) ![]Manifest {
     if (!io_fs.dirExists(root)) return &.{};
     const names = try io_fs.listDirNames(a, root);

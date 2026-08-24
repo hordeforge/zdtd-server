@@ -83,18 +83,23 @@ def ledger_rows():
     return file_rows, const_rows
 
 
-# The LIVE hardcode audit (docs/reviews/HARDCODE_AUDIT.md, updated 2026-08-10).
-# The archive/HARDCODE_AUDIT_2026-08-08.md snapshot is explicitly stale and has
-# a different finding numbering; never gate on it.
-AUDIT = os.path.join(ROOT, "docs", "reviews", "HARDCODE_AUDIT.md")
+# The live hardcode audit (docs/reviews/HARDCODE_AUDIT.md, last pass 2026-08-10)
+# was removed from the repo 2026-08-23 ("rm old reviews"). PROVENANCE.md §3.10 is
+# the surviving record of the final live statuses and pins these finding ids; the
+# archive/HARDCODE_AUDIT_2026-08-08.md snapshot has a different numbering and must
+# never gate. The set is frozen here so the linkage gate stays real (fail closed)
+# instead of silently no-oping on the missing file.
+FROZEN_AUDIT_IDS = tuple(
+    [f"A{n:02d}" for n in range(1, 37)]
+    + [f"B{n:02d}" for n in range(1, 29)]
+    + ["B38", "B39", "B40"]
+)
 
 
 def audit_finding_ids():
-    """Every A##/B## finding id the audit names, as the linkage gate."""
-    if not os.path.isfile(AUDIT):
-        return []
-    import re
-    return sorted(set(re.findall(r"\b[A-B]\d{2}\b", open(AUDIT, encoding="utf-8").read())))
+    """Every A##/B## finding id the (removed) live audit named at its final
+    pass, per PROVENANCE.md §3.10 plus the B38-B40 constant rows."""
+    return FROZEN_AUDIT_IDS
 
 
 def main():
@@ -144,19 +149,19 @@ def main():
             print("  " + u)
         return 1
 
-    # 4. AUDIT LINKAGE: every finding id the audit names must appear in the ledger.
-    if os.path.isfile(AUDIT):
-        import re as _re
-        ledger_text = open(LEDGER, encoding="utf-8").read()
-        covered = set(_re.findall(r"\b[AB]\d{2}\b", ledger_text))
-        # expand ledger ranges like "A01-A12" (or "B14-B21") into ids
-        for pre, lo, _pre2, hi in _re.findall(r"\b([AB])(\d{2})\s*-\s*([AB])(\d{2})\b", ledger_text):
-            for n in range(int(lo), int(hi) + 1):
-                covered.add(f"{pre}{n:02d}")
-        missing_findings = [f for f in audit_finding_ids() if f not in covered]
-        if missing_findings:
-            print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
-            return 1
+    # 4. AUDIT LINKAGE: every finding id the (removed) live audit named at its
+    #    final pass must appear in the ledger.
+    import re as _re
+    ledger_text = open(LEDGER, encoding="utf-8").read()
+    covered = set(_re.findall(r"\b[AB]\d{2}\b", ledger_text))
+    # expand ledger ranges like "A01-A12" (or "B14-B21") into ids
+    for pre, lo, _pre2, hi in _re.findall(r"\b([AB])(\d{2})\s*-\s*([AB])(\d{2})\b", ledger_text):
+        for n in range(int(lo), int(hi) + 1):
+            covered.add(f"{pre}{n:02d}")
+    missing_findings = [f for f in audit_finding_ids() if f not in covered]
+    if missing_findings:
+        print(f"FAIL: audit findings not linked in ledger: {missing_findings}")
+        return 1
 
     # 5. CROSS-REPO CITATIONS: every full-path ../7dtd-engine-research/docs/<file>.md
     #    reference in zdtd docs resolves to an existing research doc.

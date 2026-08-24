@@ -48,6 +48,11 @@ need-oxlint:
 lint-webui: need-oxlint need-python3
 	bash scripts/lint-webui.sh
 
+# Rebuild every committed plugin .wasm from its source (mods/BUILDING.md).
+# After changing a plugin, run this and commit both source and binary.
+plugins: need-zig
+	bash scripts/build-plugins.sh
+
 # Regenerate the committed webui pages from the TS sources (tsc + marker
 # splice); `make lint` fails when the committed pages are stale.
 webui-ts: need-oxlint need-python3

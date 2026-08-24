@@ -70,6 +70,7 @@ name = "core_announce"            # required; MUST equal the directory name
 version = "0.1.0"                 # semver string; informational
 wasm = "core_announce.wasm"       # required; relative to this directory
 description = "..."               # one line, says what + which hook(s)
+enabled = true                    # optional; false = skip auto-discovery (demo gates ship off); explicit [plugin] modules paths still load
 tier = "official"                 # optional; "official" | "user" ("core" is an error)
 override = "<other-mod-name>"     # optional; full replacement of that module (PRD 0005 R7)
 points = "damage.player_scale"    # optional; comma-separated core override points (PRD 0005 R5)
@@ -82,6 +83,9 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
 1. Scalars only — no TOML arrays (the binder binds scalars; lists are
    comma-separated strings).
 2. `name` == directory name; `wasm` == `<name>.wasm`.
+3. `enabled = false` skips auto-discovery (`manifest.discover`); the module is
+   still loadable via an explicit `[plugin] modules` path. Demo gates/feeds
+   ship off by default so a fresh boot stays stock.
 3. Known override points (values for `points`), each mapping to one verdict
    hook: `loot.roll`, `quest.payout`, `damage.player_scale`, `craft.request`,
    `trade.price`. Anything else is rejected at bind time.

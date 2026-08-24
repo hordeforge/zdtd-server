@@ -205,6 +205,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .explode_threshold = zdef.explode_threshold,
             .explode_delay_s = zdef.explode_delay_s,
             .ai_attack = zdef.ai_attack,
+            .is_enemy = zdef.is_enemy,
+            .xp_gain = zdef.xp_gain,
         });
         const adef = self.entities.defaultAnimal();
         self.sim.setClassDef(7, .{
@@ -221,6 +223,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .sight_range = adef.sight_range,
             .view_angle_deg = adef.view_angle_deg,
             .ai_attack = adef.ai_attack,
+            .is_enemy = adef.is_enemy,
+            .xp_gain = adef.xp_gain,
         });
         // (animals never explode; threshold stays 0)
         util_log.info("zdtd: entityclasses defs={d} zombie={s} hash={d}\n", .{
@@ -274,7 +278,11 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .wander_speed = def.wander_speed,
                 .attack_damage = self.handItemDamage(def.hand_item),
                 .time_stay = def.time_stay,
+                .sight_range = def.sight_range,
                 .view_angle_deg = def.view_angle_deg,
+                .ai_attack = def.ai_attack,
+                .is_enemy = def.is_enemy,
+                .xp_gain = def.xp_gain,
                 .explode_threshold = def.explode_threshold,
                 .explode_delay_s = def.explode_delay_s,
                 .explosion_radius = def.explosion.radius_blocks,

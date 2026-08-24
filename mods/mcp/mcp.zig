@@ -1,4 +1,4 @@
-// mcp — MCP server addon (ADR 0031, docs/MCP_PRD.md, docs/MCP_DESIGN.md).
+// mcp — MCP server addon (ADR 0031, PRD 0002, RFC 0002).
 //
 // A WebAssembly plugin that implements the Model Context Protocol server side:
 // JSON-RPC 2.0 framing, session lifecycle, capabilities, and a tool registry.
@@ -54,7 +54,7 @@ const sbuf_len = 96; // decoded strings: jsonrpc, method, tool name
 const vbuf_len = 128; // decoded admin_command verb
 const rbuf_len = 96; // raw JSON-RPC id echo
 
-// Session states (MCP_DESIGN.md §5): awaiting_initialize accepts only
+// Session states (RFC 0002 §5): awaiting_initialize accepts only
 // initialize and ping; initialize sends the capability response and moves to
 // init_sent; the notifications/initialized notification moves to ready.
 const session_closed = 0;
@@ -355,7 +355,7 @@ fn runTool(tool: usize, verb: []const u8, w: *Wbuf) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Frame dispatch (session state machine, MCP_DESIGN.md §5). JSON is parsed by
+// Frame dispatch (session state machine, RFC 0002 §5). JSON is parsed by
 // the host (std.json) into the current doc; field reads go through json_*.
 
 export fn on_mcp_frame(frame_ptr: i32, frame_len: i32, out_ptr: i32, out_cap: i32) i32 {

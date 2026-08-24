@@ -5,7 +5,8 @@ rules/logic against the plugin boundary. The rule (ADR 0020/0026, AGENTS 28/29):
 
 1. **Wasm module** — anything the boundary can express: `zdtd.sense` /
    `zdtd.queue` / `zdtd.query` plus the event hooks and verdict convention
-   (`<0` deny, `0` keep, `>0` percent-adjust). Modules live in `mods/`.
+   (`<0` deny, `0` keep, `>0` percent-adjust). Modules live in `mods/`
+   (addons) or `plugins/` (first-party core, AGENTS rule 31).
 2. **Config** — operator policy that is data, not plugin logic: `rules.zig`
    groups (`zdtd.toml [rules.*]`, mode-pack overlaid), `[sim]`, `[quests]`,
    `[bots]`, serverconfig.
@@ -23,10 +24,13 @@ on_player_damage, on_quest_accept, on_craft_request, on_loot_roll,
 on_trader_event, on_mcp_frame, on_trade_price`. Host: `src/server/game/wasm_host.zig`
 (wasmTick / killVerdict / wasmQueue / wasmSense / wasmQuery / adminPlugin).
 
-Existing modules (`mods/`): example_chat_filter (chat), bot (bot brains),
-core_craftgate (craft verdict), core_killfeed (kill feed observer),
-core_lootgate (loot scaling), mcp (MCP protocol), core_pvp (player-damage
-verdicts), core_questgate (quest-accept verdict), core_tradefeed (trader feed).
+Existing modules (`plugins/`): core_craftgate (craft verdict), core_killfeed
+(kill feed observer), core_lootgate (loot scaling), core_pvp (player-damage
+verdicts), core_questgate (quest-accept verdict), core_tradefeed (trader
+feed), core_damagegate (incoming damage ×N), core_pricegate (trade price
+×N), core_rewardgate (quest reward ×N), core_announce (join/clock feed),
+core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
+(chat), fps_bot (bot brains, ADR 0026), mcp (MCP protocol).
 
 ## Already correctly placed (no action)
 
@@ -65,7 +69,7 @@ verdicts), core_questgate (quest-accept verdict), core_tradefeed (trader feed).
 | Candidate | Hook | Module shape |
 |---|---|---|
 | Quest-reward scaling | `on_quest_complete` (>0 = percent) — already wired at `game/step.zig:315`, today only observed by core_killfeed | `core_rewardgate`: scale items/exp/coins per quest def |
-| Immortal horde / no-death gates | `on_entity_killed` / `on_player_death` deny (killVerdict <0 → victim survives at 1 HP) — works today | `zdtd_peaceful` / per-entity kill gates |
+| Immortal horde / no-death gates | `on_entity_killed` / `on_player_death` deny (killVerdict <0 → victim survives at 1 HP) — works today | `peaceful` / per-entity kill gates (user mod; no `core_`/`zdtd_` prefix) |
 | Custom admin verbs | `on_admin_command` (only bot uses it) | `givequest`, `spawnwave`, `setdifficulty` as module verbs instead of native console arms |
 
 ## Config-eligible logic (non-scalar policy, not yet config-driven)
@@ -180,3 +184,14 @@ full-suite runs green). Residuals, each with a reason:
    HTML pages (`login_lockout.html` etc., 17:04–17:09); their follow-up HTML
    edit restored the `aria-live="off"` markup the tests assert, and subsequent
    runs pass. Not a code defect in the current tree.
+
+## Open question: `points` on the shipped gate modules
+
+None of the shipped gate manifests declares `points`, so the exclusive
+override-point mechanism (resolver DuplicateClaim + WasmHost claims table) is
+only exercised by resolver unit tests, not by shipped modules. Two demo gates
+(`core_pvp` deny-all, `core_damagegate` scale-all) target the same
+`damage.player_scale` hook; declaring `points` on both would make loading both
+a loud boot error (RFC 0005 R8 exclusivity) instead of first-non-keep-wins
+voting. Resolution is a policy call (declare points on the gates vs keep the
+fallback voting), not a defect: the modules behave correctly today either way.
