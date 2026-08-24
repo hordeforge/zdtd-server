@@ -34,10 +34,10 @@ pub const max_name: usize = 32;
 /// Max admin line from web console POST /api/cmd.
 pub const max_cmd_line: usize = 256;
 pub const max_cmd_out: usize = 4096;
-// Shell page (compiled TS + CSS inlined) is the largest rendered body; 60 KiB
+// Shell page (compiled TS + CSS inlined) is the largest rendered body; 72 KiB
 // keeps headroom for chrome and the live latency chart. Poll path only: the
 // buffer lives on the tick thread's stack.
-pub const max_shell_html: usize = 60 * 1024;
+pub const max_shell_html: usize = 72 * 1024;
 pub const max_audit: usize = 24;
 pub const max_audit_line: usize = 160;
 /// Failed POST /login attempts before temporary lockout (brute-force throttle).
