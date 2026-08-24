@@ -122,6 +122,37 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
     return try names.toOwnedSlice(allocator);
 }
 
+/// List subdirectory names under `dir_path`, sorted ascending for
+/// deterministic iteration (sim rule 22). Caller frees each name and the
+/// slice. Used by mod discovery (PRD 0005): a mod is a directory holding
+/// `mod.toml`.
+pub fn listDirNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]const u8 {
+    var threaded = ioThreaded();
+    defer threaded.deinit();
+    const io = threaded.io();
+    var dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true });
+    defer dir.close(io);
+
+    var names: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (names.items) |n| allocator.free(n);
+        names.deinit(allocator);
+    }
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .directory) continue;
+        const name = try allocator.dupe(u8, entry.name);
+        errdefer allocator.free(name);
+        try names.append(allocator, name);
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.less);
+    return try names.toOwnedSlice(allocator);
+}
+
 /// Read entire file. Caller frees.
 pub fn readFileAll(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     if (consumeFault(&read_fail_remaining)) return error.InputOutput;

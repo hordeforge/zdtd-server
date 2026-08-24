@@ -10,6 +10,11 @@
 const std = @import("std");
 const zwasm = @import("zwasm");
 const io_fs = @import("../util/io_fs.zig");
+const manifest = @import("manifest.zig");
+const resolver = @import("resolver.zig");
+
+/// Sentinel in WasmHost.claims: no module exclusively owns the point.
+pub const no_claim: u8 = 0xFF;
 
 pub const Hook = enum(u8) {
     on_enable = 0,
@@ -124,6 +129,11 @@ pub const Plugin = struct {
     linker: zwasm.Linker,
     instance: zwasm.Instance,
     name: []const u8,
+    /// PRD 0005: tier from mod.toml (default user for legacy [plugin] modules).
+    tier: manifest.Tier = .user,
+    /// PRD 0005: manifest name (duped at loadResolved; "" for legacy modules,
+    /// which fall back to the path in `name`).
+    display: []const u8 = "",
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
     hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
@@ -192,6 +202,7 @@ pub const Plugin = struct {
         if (self.json_buf) |b| self.allocator.free(b);
         self.allocator.destroy(self.engine);
         self.allocator.free(self.name);
+        if (self.display.len > 0) self.allocator.free(self.display);
         self.* = undefined;
     }
 
@@ -705,6 +716,65 @@ pub const WasmHost = struct {
     /// Pending-effect withdrawal marks: a disabled plugin's queued commands are
     /// dropped once (temporal composability); cleared on reload.
     withdrawn: [max_wasm_plugins]bool = .{false} ** max_wasm_plugins,
+    /// PRD 0005: exclusive core override-point claims, point -> slot (load-fixed;
+    /// no_claim when unclaimed). A claimed point routes only to its claimant.
+    claims: [manifest.OverridePoint.count]u8 = .{no_claim} ** manifest.OverridePoint.count,
+
+    /// Load through a resolved mod plan (PRD 0005): the plan is final load
+    /// order with tiers and exclusive point claims; the caller owns the plan
+    /// and its manifests. Explicit `[plugin] modules` are folded in as
+    /// synthetic user mods by the resolver.
+    pub fn loadResolved(
+        self: *WasmHost,
+        allocator: std.mem.Allocator,
+        plan: *const resolver.ResolvedResult,
+        ctx: *HostCtx,
+        budget: Budget,
+    ) void {
+        self.allocator = allocator;
+        self.ctx = ctx;
+        self.budget = budget;
+        for (plan.modules) |rm| {
+            if (self.n >= max_wasm_plugins) {
+                std.debug.print("zdtd: wasm plugin cap {d} reached; skipping '{s}'\n", .{ max_wasm_plugins, rm.manifest.wasm.? });
+                return;
+            }
+            // Path = <manifest dir>/<wasm> for discovered mods; synthetic
+            // explicit modules carry the full path as wasm with dir "".
+            const full_path = if (rm.manifest.dir.len > 0)
+                (std.fs.path.join(allocator, &.{ rm.manifest.dir, rm.manifest.wasm.? }) catch {
+                    std.debug.print("zdtd: mod '{s}' bad wasm path; skipping\n", .{rm.manifest.name.?});
+                    continue;
+                })
+            else
+                rm.manifest.wasm.?;
+            defer if (rm.manifest.dir.len > 0) allocator.free(full_path);
+            self.loadInto(self.n, full_path) catch |err| {
+                std.debug.print("zdtd: mod '{s}' load failed: {s}\n", .{ rm.manifest.name.?, @errorName(err) });
+                continue;
+            };
+            self.slots[self.n].tier = rm.tier;
+            self.slots[self.n].display = allocator.dupe(u8, rm.manifest.name.?) catch "";
+            self.n += 1;
+            const tier_s = switch (rm.tier) {
+                .core => "core",
+                .official => "official",
+                .user => "user",
+            };
+            if (rm.replaces) |tgt| {
+                std.debug.print("zdtd: mod '{s}' [{s}] loaded (replaces '{s}')\n", .{ rm.manifest.name.?, tier_s, tgt });
+            } else {
+                std.debug.print("zdtd: mod '{s}' [{s}] loaded\n", .{ rm.manifest.name.?, tier_s });
+            }
+        }
+        // Install exclusive point claims (load-fixed table; no per-tick cost).
+        self.claims = .{no_claim} ** manifest.OverridePoint.count;
+        var it = plan.point_claims.iterator();
+        while (it.next()) |entry| {
+            const point = manifest.OverridePoint.parse(entry.key_ptr.*) orelse continue;
+            self.claims[@intFromEnum(point)] = @intCast(entry.value_ptr.*);
+        }
+    }
 
     /// Load every module path that exists; a missing or unloadable module is
     /// logged and skipped so one bad file does not take the server down.
@@ -763,6 +833,13 @@ pub const WasmHost = struct {
         // callers passing slots[idx].name (the admin verb does) stay valid.
         const path_owned = self.allocator.dupe(u8, path) catch return false;
         defer self.allocator.free(path_owned);
+        // Preserve tier/display across the reload (loadInto resets them).
+        const tier = self.slots[idx].tier;
+        const display_owned = if (self.slots[idx].display.len > 0)
+            self.allocator.dupe(u8, self.slots[idx].display) catch ""
+        else
+            "";
+        defer if (display_owned.len > 0) self.allocator.free(display_owned);
         _ = self.slots[idx].callHook(.on_shutdown);
         self.slots[idx].deinit();
         if (self.ctx) |ctx| {
@@ -773,6 +850,8 @@ pub const WasmHost = struct {
             std.debug.print("zdtd: wasm plugin reload '{s}' failed: {s}\n", .{ path_owned, @errorName(err) });
             return false;
         };
+        self.slots[idx].tier = tier;
+        if (display_owned.len > 0) self.slots[idx].display = display_owned;
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
@@ -843,7 +922,11 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Player-damage verdict; point `damage.player_scale` is exclusive when
+    /// claimed: only the claimant is consulted and its verdict is final.
     pub fn playerDamage(self: *WasmHost, attacker: i32, victim: i32, amount: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.damage_player_scale)];
+        if (c != no_claim and c < self.n) return self.slots[c].callPlayerDamage(attacker, victim, amount);
         for (0..self.n) |i| {
             const v = self.slots[i].callPlayerDamage(attacker, victim, amount);
             if (v != verdict_keep) return v;
@@ -859,7 +942,10 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Craft-request verdict; point `craft.request` is exclusive when claimed.
     pub fn craftRequest(self: *WasmHost, player: i32, recipe_name: []const u8, times: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.craft_request)];
+        if (c != no_claim and c < self.n) return self.slots[c].callCraftRequest(player, recipe_name, times);
         for (0..self.n) |i| {
             const v = self.slots[i].callCraftRequest(player, recipe_name, times);
             if (v != verdict_keep) return v;
@@ -867,7 +953,10 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Loot-roll verdict; point `loot.roll` is exclusive when claimed.
     pub fn lootRoll(self: *WasmHost, list_name: []const u8, rolled: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.loot_roll)];
+        if (c != no_claim and c < self.n) return self.slots[c].callLootRoll(list_name, rolled);
         for (0..self.n) |i| {
             const v = self.slots[i].callLootRoll(list_name, rolled);
             if (v != verdict_keep) return v;
@@ -883,9 +972,11 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
-    /// Pre-trade price verdict: first non-zero adjustment wins (like the
-    /// other verdicts); 0 keeps the stock price.
+    /// Pre-trade price verdict: point `trade.price` is exclusive when claimed;
+    /// 0 keeps the stock price.
     pub fn tradePrice(self: *WasmHost, player: i32, item: i32, unit_price: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.trade_price)];
+        if (c != no_claim and c < self.n) return self.slots[c].callTradePrice(player, item, unit_price);
         for (0..self.n) |i| {
             const v = self.slots[i].callTradePrice(player, item, unit_price);
             if (v != verdict_keep) return v;
@@ -893,7 +984,10 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// Quest-complete verdict; point `quest.payout` is exclusive when claimed.
     pub fn questComplete(self: *WasmHost, player: i32, quest_def: i32) i32 {
+        const c = self.claims[@intFromEnum(manifest.OverridePoint.quest_payout)];
+        if (c != no_claim and c < self.n) return self.slots[c].callQuestComplete(player, quest_def);
         for (0..self.n) |i| {
             const v = self.slots[i].callQuestComplete(player, quest_def);
             if (v != verdict_keep) return v;
@@ -1340,7 +1434,70 @@ test "wasm on_player_login join gate: deny reason, allow others" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
+test "core_announce.wasm (zig-built) join/leave says + clock announcements" {
+    const Cap = struct {
+        var queued: [8][128]u8 = undefined;
+        var queued_len: [8]usize = .{0} ** 8;
+        var queued_n: usize = 0;
+        var world_time: u32 = 2 * 24000; // day 2
+        var blood_moon: u32 = 1;
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 7;
+        }
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
+            if (queued_n < queued.len) {
+                const n = @min(cmd.len, 128);
+                @memcpy(queued[queued_n][0..n], cmd[0..n]);
+                queued_len[queued_n] = n;
+                queued_n += 1;
+            }
+        }
+        fn senseFn(_: *HostCtx, out_buf: []u8) usize {
+            if (out_buf.len < 24) return 0;
+            std.mem.writeInt(u32, out_buf[0..4], 0x3353425a, .little); // 'ZBS3'
+            std.mem.writeInt(u32, out_buf[4..8], 0, .little);
+            std.mem.writeInt(u32, out_buf[8..12], 1, .little);
+            std.mem.writeInt(i32, out_buf[12..16], -1, .little);
+            std.mem.writeInt(u32, out_buf[16..20], world_time, .little);
+            std.mem.writeInt(u32, out_buf[20..24], blood_moon, .little);
+            return 24;
+        }
+    };
+    Cap.queued_n = 0;
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_announce/core_announce.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_tick)]);
+    host.enable();
+    host.playerJoin(3, 77);
+    host.playerLeave(3, 77);
+    // First tick: baseline only (no announcements yet).
+    host.onTick();
+    // Second tick with the same clock: still nothing.
+    host.onTick();
+    try std.testing.expectEqual(@as(usize, 2), Cap.queued_n); // join + leave says
+    try std.testing.expectEqualStrings("say A new survivor has joined the wasteland.", Cap.queued[0][0..Cap.queued_len[0]]);
+    try std.testing.expectEqualStrings("say A survivor has left the wasteland.", Cap.queued[1][0..Cap.queued_len[1]]);
+    // Day roll + blood-moon end on the next tick.
+    Cap.queued_n = 0;
+    Cap.world_time = 3 * 24000; // day 3
+    Cap.blood_moon = 0;
+    host.onTick();
+    try std.testing.expectEqual(@as(usize, 2), Cap.queued_n);
+    try std.testing.expectEqualStrings("say Day 3", Cap.queued[0][0..Cap.queued_len[0]]);
+    try std.testing.expectEqualStrings("say The blood moon fades.", Cap.queued[1][0..Cap.queued_len[1]]);
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "core_killfeed.wasm observer keeps every verdict and never disables" {
     // The reference event-observer plugin (AGENTS.md rule 29, Wasm-first):
     // loaded from the committed module, its verdict hooks must always keep
     // (0) and the module must never trap/disable — a pure observer is a
@@ -1354,7 +1511,7 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_killfeed/zdtd_killfeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_killfeed/core_killfeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());
@@ -1374,7 +1531,7 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
+test "core_pvp.wasm denies player-vs-player damage via kind query" {
     // The player-damage policy plugin (AGENTS rule 29): with the "kind" query
     // verb stubbed (100/200 players, 300 zombie), on_player_damage must deny
     // player-vs-player and keep everything else, never disabling.
@@ -1400,7 +1557,7 @@ test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn, .query_fn = &Cap.queryFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_pvp/zdtd_pvp.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_pvp/core_pvp.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_damage)]);
@@ -1409,7 +1566,7 @@ test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
+test "core_questgate.wasm denies forbidden_* quests via quest query" {
     // The quest-acceptance policy plugin (AGENTS rule 29): with the "quest"
     // query verb stubbed (def 1 -> "forbidden_evil", def 2 -> "tier1_clear"),
     // on_quest_accept must deny the forbidden name and keep the rest, never
@@ -1437,7 +1594,7 @@ test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn, .query_fn = &Cap.queryFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_questgate/zdtd_questgate.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_questgate/core_questgate.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_accept)]);
@@ -1446,7 +1603,7 @@ test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
+test "core_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     // The craft-request policy plugin (AGENTS rule 29): on_craft_request must
     // deny the forbidden recipe name and keep the rest, never disabling.
     const Cap = struct {
@@ -1458,7 +1615,7 @@ test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_craftgate/zdtd_craftgate.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_craftgate/core_craftgate.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_craft_request)]);
@@ -1467,7 +1624,7 @@ test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
+test "core_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     // The loot-roll policy plugin (AGENTS rule 29): on_loot_roll must return
     // 50 (scale percent) for every list and never disable.
     const Cap = struct {
@@ -1479,7 +1636,7 @@ test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_lootgate/zdtd_lootgate.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_lootgate/core_lootgate.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_loot_roll)]);
@@ -1487,7 +1644,7 @@ test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_tradefeed.wasm observes trader events via on_trader_event" {
+test "core_tradefeed.wasm observes trader events via on_trader_event" {
     // The trader-event observer plugin (AGENTS rule 29): on_trader_event must
     // be present, fire for every kind without disabling, and stay loaded.
     const Cap = struct {
@@ -1499,7 +1656,7 @@ test "zdtd_tradefeed.wasm observes trader events via on_trader_event" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_trader_event)]);
@@ -1522,7 +1679,7 @@ test "_zdtd_requires validates declarative dependencies at load" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.n);
@@ -1548,7 +1705,7 @@ test "plugin reload disposes and reinstantiates the module in place" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     const path = host.slots[0].name;
@@ -1588,7 +1745,7 @@ test "queue import attributes commands to the calling plugin slot" {
     try std.testing.expect(std.mem.startsWith(u8, Cap.last_cmd[0..Cap.last_len], "spawn"));
 }
 
-test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
+test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
     // Loads the real committed bot brain and drives it through the host sense
     // import with a canned snapshot, proving the end-to-end sense→brain→queue
     // pipe (RFC 0001 §3 / ADR 0026). The brain must NOT be modified; this is
@@ -1699,7 +1856,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         .sense_fn = &Cap.senseFn,
     };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_bot/zdtd_bot.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/fps_bot/fps_bot.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());
@@ -1909,7 +2066,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
+test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
     // The MCP addon guest (ADR 0031, docs/rfc/0002-mcp-server-design.md M1): the host feeds a
     // client JSON-RPC frame through the on_mcp_frame hook and gets the guest's
     // response back. The guest owns protocol logic; JSON parsing is the host
@@ -1978,7 +2135,7 @@ test "zdtd_mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
         .query_fn = &Cap.queryFn,
     };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_mcp/zdtd_mcp.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/mcp/mcp.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());

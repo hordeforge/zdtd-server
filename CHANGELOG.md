@@ -8,7 +8,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 ### Added
 
 - MCP server addon (docs/prd/0002-mcp-server.md, docs/rfc/0002-mcp-server-design.md, ADR 0031): a Model
-  Context Protocol server shipped as a Wasm plugin (`mods/zdtd_mcp`). Protocol
+  Context Protocol server shipped as a Wasm plugin (`mods/mcp`). Protocol
   logic lives in the guest; the host provides a streamable-HTTP endpoint
   (`--mcp-port`, loopback + optional `--mcp-token`) and std.json parsing
   (`json_*` imports). Tools: `server_status`, `player_list`, and an
@@ -369,6 +369,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+- Dependency bump: zwasm 2.4.1 → 2.5.0 (build.zig.zon URL + hash, THIRD_PARTY.md).
+  Picks up the upstream pre-tag cleanliness sweep (file org, build flags, audit
+  fixes) and full WASI 0.3 coverage; no zdtd-facing API change.
 - Pure XML/assetbundle modlet support (docs/prd/0003-modlets.md,
   docs/rfc/0003-modlets-plan.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
   `XmlPatcher` op catalog (append/prepend/insert/remove/set/csv/include,

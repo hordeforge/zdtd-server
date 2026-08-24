@@ -373,6 +373,10 @@ pub const InitOptions = struct {
     /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
     /// modules; ADR 0020). Empty = no Wasm plugins.
     plugin_modules: []const []const u8 = &.{},
+    /// PRD 0005: resolved mod plan (discovery + tiers + overrides + claims).
+    /// When set, it wins over `plugin_modules` (which are folded in as legacy
+    /// explicit modules by the resolver). Owned by main until after Game init.
+    plugin_plan: ?*const plugin_mod.resolver.ResolvedResult = null,
     /// Per-instance budget for Wasm plugins (fuel + max linear-memory pages;
     /// fuel is lifetime, never re-armed).
     plugin_budget: plugin_mod.wasm.Budget = .{},

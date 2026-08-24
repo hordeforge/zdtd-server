@@ -101,8 +101,13 @@ pub fn build(b: *std.Build) void {
         .strip = false,
     });
     wireApmOptions(fuzz_mod, build_opts, tracy_cpp);
+    // fuzz.zig imports server/persist.zig -> game.zig -> plugin/root.zig ->
+    // wasm.zig, which needs the zwasm import (and use_llvm, per PLUGIN_API.md
+    // "Known constraint": self-hosted x86 backend fails on R_X86_64_PC64).
+    fuzz_mod.addImport("zwasm", zwasm_dep.module("zwasm"));
     const fuzz_tests = b.addTest(.{
         .root_module = fuzz_mod,
+        .use_llvm = true,
     });
     const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
     const fuzz_step = b.step("fuzz", "Run wire-parser fuzz targets");

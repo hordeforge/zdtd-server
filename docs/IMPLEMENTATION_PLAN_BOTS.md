@@ -112,7 +112,7 @@ verb and the host drains them.
 
 ## M2 — Guest brain module (Q3/Doom 3) + admin commands
 
-- `mods/zdtd_bot/zdtd_bot.c` → `zdtd_bot.wasm` (same clang→wasm32 build path
+- `mods/fps_bot/bot.c` → `fps_bot.wasm` (same clang→wasm32 build path
   as `assets/fixtures/*.c`, no WASI, no libc deps).
 - Brain (ported from `../7dtd-fps-bots`/Q3/Doom 3, re-expressed):
   - **Target selection**: nearest hostile within vision range/angle (players,
@@ -154,7 +154,7 @@ scripted scenario.
 2. M0 host: `bot` kind, `Mask.bot`, `BotDef`, command ops + drain, LOS march,
    `is_mob` replication, `parsePluginCommand` extension.
 3. M1: `sense` import + snapshot builder + C fixture + test.
-4. M2: `zdtd_bot.wasm` brain + admin commands.
+4. M2: `fps_bot.wasm` brain + admin commands.
 5. M3: dynamics, `bot cfg`, `make check`, loadgen + stock-client evidence.
 
 Each slice leaves `zig build test` green and is independently reviewable.

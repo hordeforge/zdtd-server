@@ -136,6 +136,8 @@ Coverage targets, all enforced by the scan:
 | `src/main.zig` | Z | zdtd: Zig dedicated server for 7 Days to Die (client wire). Run `zdtd --help` for CLI options and precedence |
 | `src/plugin/api.zig` | Z | Static plugin hook types for in-tree test scaffolding only (ADR 0020). Product plugins are Wasm modules (`wasm.zig`); this table is not a shipping |
 | `src/plugin/host.zig` | Z | Static plugin host: fixed table, ordered enable/tick/join/shutdown. No dynlib, no Wasm, no heap on the tick path |
+| `src/plugin/manifest.zig` | Z | Mod manifests (PRD 0005/ADR 0032): `mod.toml` parse via toml_bind, tier + override-point vocabulary, `mods/*/mod.toml` discovery |
+| `src/plugin/resolver.zig` | Z | Mod resolution (PRD 0005/ADR 0032): tiers, disabled/blacklist (core protected), exclusive override-point claims, mod-replaces-mod, load-time conflict detection |
 | `src/plugin/root.zig` | Z | Plugin package: Wasm guest runtime (ADR 0020) plus in-tree static host as test scaffolding only (`api` / `host` / `sample_hello`). Shipping plugins |
 | `src/plugin/sample_hello.zig` | Z | In-tree sample static plugin: logs once on enable |
 | `src/plugin/wasm.zig` | Z | Wasm plugin runtime (ADR 0020, zwasm v2): load a .wasm module, instantiate it under fuel and memory budgets, register the minimal host import table, |

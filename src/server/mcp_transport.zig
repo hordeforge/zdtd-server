@@ -494,7 +494,7 @@ test "mcp transport: binding is loopback only" {
 // ---------------------------------------------------------------------------
 // End-to-end: the real MCP guest behind the transport (ADR 0031 M2 harness).
 // The transport serves raw HTTP frames in test mode; the frame handler runs
-// mods/zdtd_mcp/zdtd_mcp.wasm with a sense/query Cap standing in for Game.
+// mods/mcp/mcp.wasm with a sense/query Cap standing in for Game.
 
 const plugin_mod = @import("../plugin/wasm.zig");
 
@@ -558,7 +558,7 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
         .query_fn = &Cap.queryFn,
     };
     var host: plugin_mod.WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_mcp/zdtd_mcp.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/mcp/mcp.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());

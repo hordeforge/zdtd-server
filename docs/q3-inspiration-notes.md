@@ -1,11 +1,11 @@
 # Q3 / Doom 3 bot inspiration notes
 
-The bot brain in `mods/zdtd_bot/zdtd_bot.c` distills *concepts* from the
+The bot brain in `mods/fps_bot/fps_bot.c` distills *concepts* from the
 open-source id Tech fps bot code. This file records which ideas are borrowed
 and how they are adapted for a 7DTD wire model. It is a local pointer; the
 detailed reverse-engineering write-up of the stock reference behaviour that our
 own 7dtd-fps-bots mod describes lives in the sibling project:
-[`../7dtd-fps-bots/docs/q3-inspiration-notes.md`](../7dtd-fps-bots/docs/q3-inspiration-notes.md).
+[`../../7dtd-fps-bots/docs/q3-inspiration-notes.md`](../../7dtd-fps-bots/docs/q3-inspiration-notes.md).
 
 Ground rule: id Tech's `botlib`/`BotAimAtEnemy`, `BotCheckAttack`,
 `BotChangeViewAngles`, and `bot_character` skill blocks are GPL code we reuse as

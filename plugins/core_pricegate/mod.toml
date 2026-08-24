@@ -1,0 +1,5 @@
+name = "core_pricegate"
+version = "0.1.0"
+wasm = "core_pricegate.wasm"
+enabled = false
+description = "In-tree zdtd module: demo/feed, enabled = false, load via [plugin] modules."

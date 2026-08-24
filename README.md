@@ -2,6 +2,13 @@
 
 > **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
 
+![CI](https://github.com/hordeforge/zdtd-server/actions/workflows/ci.yml/badge.svg)
+![quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=maci0_zdtd)
+![license](https://img.shields.io/github/license/hordeforge/zdtd-server)
+![last commit](https://img.shields.io/github/last-commit/hordeforge/zdtd-server)
+![languages](https://img.shields.io/github/languages/count/hordeforge/zdtd-server)
+![top language](https://img.shields.io/github/languages/top/hordeforge/zdtd-server)
+
 **Zeven Days to Die** (or **ZDTD**): a zero-allocation, high-throughput dedicated server written from scratch in Zig, targeting the stock 7 Days to Die **client wire** (EAC off).
 
 ```text
@@ -23,8 +30,9 @@ That is **not** sibling `7dtd-server-apm` (stock Mono dedi).
 ## Status
 
 **Client-wire dedi:** core stock loop playable (EAC off). Join, dig/build, fight,
-death/respawn, loot, craft/workstation, trade, persist; automated playtest
-**80-81 of 83 cases PASS** (2026-08-06; two known residual timing cases, see STATUS).
+death/respawn, loot, craft/workstation, trade, persist; live stock-client gate
+**23/23** on a fresh world each run (`FRESH=1`), demo residuals closed
+(2026-08-09, see STATUS).
 See [docs/STATUS.md](docs/STATUS.md).
 
 ```bash
@@ -92,7 +100,7 @@ and release builds use the exact compiler in `.zigversion`; `make check`
 enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck.
 `make release` additionally requires `sha256sum`.
 
-One pinned dependency: the Wasm plugin runtime `zwasm` v2.4.1 (`build.zig.zon`,
+One pinned dependency: the Wasm plugin runtime `zwasm` v2.5.0 (`build.zig.zon`,
 URL + hash). `zig build` fetches it into Zig's global cache on first use, so a
 clean checkout needs network for that one fetch; later builds are offline and
 the hash pins the exact content. Override the compiler with
@@ -104,7 +112,7 @@ fetched, and outside `make check` ([`docs/APM.md`](docs/APM.md)).
 cd zdtd-server
 make                 # Debug binary → zig-out/bin/zdtd
 make test
-make check           # pin + lint + build + test + fuzz (serial; safe under -j)
+make check           # pin + lint + provenance/XML audits + build + test + fuzz (serial; safe under -j)
 make release         # stripped linux-x86_64 ReleaseSafe binary + sha256 + licenses, examples, modes/
 # or: zig build / zig build test (dev builds use the native host target)
 ```

@@ -304,9 +304,16 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
 
     // Static plugins after world/assets are ready (sample_hello logs once).
     self.plugins.enableStaticDefaults();
-    // Wasm plugins from config ([plugin] modules, ADR 0020): load once at
-    // init (allocation allowed here), then enable. loadAll logs and skips
-    // a missing or unloadable module, so one bad file does not kill boot.
-    self.wasm_plugins.loadAll(self.allocator, opts.plugin_modules, &self.wasm_ctx, opts.plugin_budget);
+    // Wasm plugins (ADR 0020 / PRD 0005): when a resolved mod plan is present
+    // (main.zig discovered mods/, applied [mods] disabled/blacklist, resolved
+    // tiers/overrides/claims), load through it; otherwise fall back to the
+    // legacy [plugin] modules list (scenarios/tests call this path). loadAll
+    // logs and skips a missing or unloadable module, so one bad file does not
+    // kill boot.
+    if (opts.plugin_plan) |plan| {
+        self.wasm_plugins.loadResolved(self.allocator, plan, &self.wasm_ctx, opts.plugin_budget);
+    } else {
+        self.wasm_plugins.loadAll(self.allocator, opts.plugin_modules, &self.wasm_ctx, opts.plugin_budget);
+    }
     self.wasm_plugins.enable();
 }

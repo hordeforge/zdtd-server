@@ -11,6 +11,8 @@ pub const api = @import("api.zig");
 pub const host = @import("host.zig");
 pub const wasm = @import("wasm.zig");
 pub const sample_hello = @import("sample_hello.zig");
+pub const manifest = @import("manifest.zig");
+pub const resolver = @import("resolver.zig");
 
 pub const PLUGIN_API_VERSION = api.PLUGIN_API_VERSION;
 pub const Host = api.Host;
@@ -23,4 +25,6 @@ test {
     _ = host;
     _ = wasm;
     _ = sample_hello;
+    _ = manifest;
+    _ = resolver;
 }

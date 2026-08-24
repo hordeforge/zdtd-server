@@ -131,6 +131,15 @@ block_id_mapping = true
 # fuel = 100000000      # per-instance fuel budget (never re-armed; lower bounds a hostile guest)
 # max_pages = 1024      # max linear-memory pages per instance
 
+# Mod tiers and override (PRD 0005, docs/PLUGIN_DEV.md). Mods are auto-discovered
+# from mods/<name>/mod.toml at boot; disable or blacklist any non-core mod by
+# name here (core components cannot be disabled or blacklisted). Blacklisted
+# mods are refused, and any mod overriding or requiring a blacklisted name is a
+# load failure.
+# [mods]
+# disabled = "zdtd_killfeed"   # skip loading, one info log per mod
+# blacklist = "evil_mod"       # refuse; also vetoes overrides/requires of it
+
 # Sim rule overlay (ADR 0021, docs/GAME_OPTIONS.md "[rules] sim rules"). Both
 # this file and a mode pack can set [rules.*]; the operator's zdtd.toml wins
 # over the pack for the same key. Defaults equal the code constants.

@@ -31,10 +31,31 @@ A native ABI could promise neither.
 | Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
 | Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny, magnitude = reason bytes in out; first deny wins (traps treated as allow) |
 | SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick) |
+| Module tiers + discovery (PRD 0005 / ADR 0032) | **implemented**: `mod.toml` manifests, `mods/*/mod.toml` scan, `[mods] disabled`/`blacklist`, five exclusive core override points, `override = <name>` replacement, conflict detection at load (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`, `WasmHost.loadResolved`) |
 
 The static host stays because scenarios need to drive hooks without standing up
 a Wasm runtime in the test path. It is not a way to ship a plugin and is not
 loaded from user configuration.
+
+### Core override points (ADR 0032)
+
+A mod that claims a point (in `mod.toml` `points = "loot.roll"`) becomes the
+exclusive decision maker for that verdict: the native default is skipped and
+no other subscriber runs. Duplicate claims fail the boot loudly. Unclaimed
+points keep the first-non-zero fan-out above.
+
+| Point | Hook | Effect of an exclusive claim |
+|---|---|---|
+| `loot.roll` | `on_loot_roll` | the claimant decides the roll |
+| `quest.payout` | `on_quest_complete` | the claimant decides the payout |
+| `damage.player_scale` | `on_player_damage` | the claimant decides the damage verdict |
+| `craft.request` | `on_craft_request` | the claimant decides the craft verdict |
+| `trade.price` | `on_trade_price` | the claimant decides the price verdict |
+
+Replacing a whole core component means claiming all of its points; replacing
+a whole mod means `override = "<name>"` (the target is not instantiated).
+Both are load-time resolution: a branch on a fixed slot table on the tick
+path, no per-tick allocation.
 
 ## The boundary
 
@@ -72,7 +93,7 @@ tick's budget, not the server. Budgets are configurable
 
 ## Runtime: zwasm v2 (decided 2026-08-06)
 
-zdtd embeds [zwasm](https://github.com/clojurewasm/zwasm) v2 (2.4.1), a
+zdtd embeds [zwasm](https://github.com/clojurewasm/zwasm) v2 (2.5.0), a
 WebAssembly runtime written in Zig, so the server takes no C dependency and no
 FFI boundary. Its `minimum_zig_version` is 0.16.0, matching this tree.
 
