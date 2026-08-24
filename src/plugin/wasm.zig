@@ -833,13 +833,16 @@ pub const WasmHost = struct {
         // callers passing slots[idx].name (the admin verb does) stay valid.
         const path_owned = self.allocator.dupe(u8, path) catch return false;
         defer self.allocator.free(path_owned);
-        // Preserve tier/display across the reload (loadInto resets them).
+        // Preserve tier/display across the reload (loadInto resets them). The
+        // display copy is owned by this frame until it moves into the slot on
+        // success; the failure path frees it explicitly. A defer here would
+        // free it under the reloaded slot (use-after-free, then a double free
+        // at deinit).
         const tier = self.slots[idx].tier;
-        const display_owned = if (self.slots[idx].display.len > 0)
+        const display_copy = if (self.slots[idx].display.len > 0)
             self.allocator.dupe(u8, self.slots[idx].display) catch ""
         else
             "";
-        defer if (display_owned.len > 0) self.allocator.free(display_owned);
         _ = self.slots[idx].callHook(.on_shutdown);
         self.slots[idx].deinit();
         if (self.ctx) |ctx| {
@@ -848,13 +851,53 @@ pub const WasmHost = struct {
         }
         self.loadInto(idx, path_owned) catch |err| {
             std.debug.print("zdtd: wasm plugin reload '{s}' failed: {s}\n", .{ path_owned, @errorName(err) });
+            // The disposed slot cannot stay inside 0..n (hooks and deinit
+            // would run on undefined memory): drop it from the active range.
+            self.dropDisposedSlot(idx);
+            if (display_copy.len > 0) self.allocator.free(display_copy);
             return false;
         };
         self.slots[idx].tier = tier;
-        if (display_owned.len > 0) self.slots[idx].display = display_owned;
+        self.slots[idx].display = display_copy;
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
+    }
+
+    /// Remove an already-disposed (deinit'd) slot from the active range:
+    /// shift later modules down so every slot in 0..n stays a valid live
+    /// instance. Re-points each moved module's HostCtx backlink and shifts
+    /// override-point claims to follow their module (the dropped slot's
+    /// claims release). Never call on a live slot.
+    fn dropDisposedSlot(self: *WasmHost, idx: usize) void {
+        if (idx >= self.n) return;
+        var i: usize = idx;
+        while (i + 1 < self.n) : (i += 1) {
+            self.slots[i] = self.slots[i + 1];
+            self.withdrawn[i] = self.withdrawn[i + 1];
+        }
+        if (self.ctx) |ctx| {
+            i = idx;
+            while (i + 1 < self.n) : (i += 1) {
+                ctx.rt_slot[i] = ctx.rt_slot[i + 1];
+                // The moved module's backlink must address its new slot.
+                ctx.plugin_slot[i] = if (ctx.plugin_slot[i + 1] != null)
+                    @ptrCast(&self.slots[i])
+                else
+                    null;
+            }
+            ctx.rt_slot[self.n - 1] = null;
+            ctx.plugin_slot[self.n - 1] = null;
+        }
+        for (&self.claims) |*c| {
+            if (c.* == no_claim) continue;
+            if (c.* == idx) {
+                c.* = no_claim;
+            } else if (c.* > idx) {
+                c.* -= 1;
+            }
+        }
+        self.n -= 1;
     }
 
     /// First slot whose module path ends with `name` (basename or suffix).
@@ -1715,6 +1758,75 @@ test "plugin reload disposes and reinstantiates the module in place" {
     try std.testing.expect(!host.slots[0].disabled);
     host.traderEvent(107, 42, 1);
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "plugin reload keeps a heap-owned display name valid" {
+    // Regression: reload used to free its display copy via defer on the
+    // success path while the reloaded slot still pointed at it (use-after-free
+    // on the next `plugin list` render, double free at shutdown). A resolved
+    // mod slot (PRD 0005) owns its display string, so reload must transfer
+    // that ownership, not release it under the slot.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    // Install a manifest-style display name owned by the slot.
+    host.slots[0].display = try std.testing.allocator.dupe(u8, "core_tradefeed");
+    const path = host.slots[0].name;
+    try std.testing.expect(host.reload(0, path));
+    // Readable after the reload...
+    try std.testing.expectEqualStrings("core_tradefeed", host.slots[0].display);
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_trader_event)]);
+    // ...and freed exactly once at shutdown (the defer above); a double free
+    // fails this test under std.testing.allocator.
+}
+
+test "plugin reload failure frees the display copy and reports false" {
+    // The failed-reload branch must not leave a disposed slot inside 0..n:
+    // hooks/deinit would run on undefined memory on the next tick or at
+    // shutdown. The dead module is dropped from the range and later modules
+    // shift down (HostCtx backlinks and override-point claims follow).
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(
+        std.testing.allocator,
+        &[_][]const u8{ "plugins/core_tradefeed/core_tradefeed.wasm", "assets/fixtures/plugin_hello.wasm" },
+        &ctx,
+        .{},
+    );
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 2), host.n);
+    host.slots[0].display = try std.testing.allocator.dupe(u8, "core_tradefeed");
+    // Claim points on both modules so claim handling is observable:
+    // craft_request -> slot 1 (survivor, must follow down to 0),
+    // loot_roll -> slot 0 (dropped, must release).
+    host.claims[@intFromEnum(manifest.OverridePoint.craft_request)] = 1;
+    host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)] = 0;
+    try std.testing.expect(!host.reload(0, "/no/such/plugin.wasm"));
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    // Slot 0 now holds the survivor; its backlink addresses its new slot.
+    try std.testing.expect(std.mem.endsWith(u8, host.slots[0].name, "plugin_hello.wasm"));
+    try std.testing.expect(ctx.plugin_slot[0] != null);
+    try std.testing.expectEqual(@as(*anyopaque, @ptrCast(&host.slots[0])), ctx.plugin_slot[0].?);
+    try std.testing.expect(ctx.plugin_slot[1] == null and ctx.rt_slot[1] == null);
+    // The survivor's claim followed it down; the dropped module's released.
+    try std.testing.expectEqual(@as(u8, 0), host.claims[@intFromEnum(manifest.OverridePoint.craft_request)]);
+    try std.testing.expectEqual(no_claim, host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)]);
 }
 
 test "queue import attributes commands to the calling plugin slot" {

@@ -31,6 +31,7 @@ pub fn deinit(self: *Game) void {
     deinitStores(self);
     self.admin.deinit();
     self.webui.deinit();
+    self.mcp.deinit();
     self.info_tcp.stop();
     self.world.deinit();
     self.net.deinit();
