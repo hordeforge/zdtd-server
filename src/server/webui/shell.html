@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>zdtd — operator console</title>
+<title>zdtd - operator console</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/static/xterm.css">
 <style>/* zdtd-tokens */
@@ -257,6 +257,11 @@ footer a:hover{color:var(--fg);border-bottom-color:var(--line2)}
 .chart-tools{display:flex;align-items:center;justify-content:space-between;gap:0.5rem;margin-bottom:0.35rem}
 .chart-tools .meta{font-family:var(--mono);font-size:0.60rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--muted2)}
 #apm-canvas{width:100%;height:10rem;display:block;border-radius:4px;background:var(--well);border:1px solid var(--line)}
+.chart-tools-right{display:inline-flex;align-items:center;gap:0.45rem}
+#chart-history{min-height:26px;background:var(--well);border:1px solid var(--line2);color:var(--fg);border-radius:5px;padding:0.1rem 0.3rem;font-family:var(--mono);font-size:0.62rem}
+.chart-tools .meta{font-variant-numeric:tabular-nums}
+@keyframes zdtd-flash{0%{background:var(--acc-soft)}100%{background:transparent}}
+.stat.flash,tbody tr.flash{animation:zdtd-flash 1.1s ease-out}
 a,button,input,[tabindex]{scroll-margin-top:6.5rem}
 pre.cmd-out,pre.cmd-log{margin:0 0.8rem 0.75rem;background:var(--well);border:1px solid var(--line);border-radius:var(--r-sm);padding:0.55rem 0.65rem;font-family:var(--mono);font-size:0.76rem;line-height:1.5;overflow:auto;max-height:15rem;white-space:pre-wrap;word-break:break-word}
 #cmd-out{padding:0}
@@ -319,11 +324,11 @@ pre .in{color:var(--muted)} .err{color:var(--err)} .ok{color:var(--ok)} pre .met
 </nav>
 <main id="main-content" tabindex="-1">
 <section id="status-section" role="tabpanel" aria-labelledby="tab-status"><h2 id="status-heading">Status</h2><div id="status" hx-get="/partials/status" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading server status…</p></div></section>
-<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm-chart-wrap"><div class="chart-tools"><span class="meta" id="apm-chart-caption">tick mean / p99 · section means · 50 ms budget</span><label class="refresh-ctrl" for="chart-compress"><input type="checkbox" id="chart-compress" checked> Compress history</label></div><canvas id="apm-canvas" width="600" height="150" aria-label="Live tick latency and section means">Live performance graphs require JavaScript.</canvas></div><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
+<section id="apm-section" role="tabpanel" aria-labelledby="tab-apm" hidden><h2 id="apm-heading">Performance and counters</h2><div id="apm-chart-wrap"><div class="chart-tools"><span class="meta" id="apm-chart-caption">collecting samples…</span><span class="chart-tools-right"><label class="refresh-ctrl" for="chart-history">history</label><select id="chart-history" aria-label="History window"><option value="120000">2 min</option><option value="300000">5 min</option><option value="600000">10 min</option></select><label class="refresh-ctrl" for="chart-compress"><input type="checkbox" id="chart-compress" checked> Compress history</label></span></div><canvas id="apm-canvas" width="600" height="150" aria-label="Live tick latency and section means">Live performance graphs require JavaScript.</canvas></div><div id="apm" hx-get="/partials/apm" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading performance data…</p></div></section>
 <section id="players-section" role="tabpanel" aria-labelledby="tab-players" hidden><h2 id="players-heading">Players</h2><div id="players" role="region" aria-label="Connected players table" tabindex="0" hx-get="/partials/players" hx-trigger="load, every 2s" hx-swap="innerHTML"><p class="meta">Loading players…</p></div></section>
 <section id="console-section" role="tabpanel" aria-labelledby="tab-console" hidden>
 <h2 id="console-heading">Console</h2>
-<p id="cmd-help" class="meta" style="margin:0;padding:0.55rem 0.8rem;color:var(--muted);font-size:0.72rem;border-bottom:1px solid var(--line)">Same commands as the admin telnet console — <code>help</code>, <code>status</code>, <code>give</code>, <code>kick</code>, <code>settime</code>. Press <kbd>/</kbd> to focus, <kbd>↑</kbd><kbd>↓</kbd> for history.</p>
+<p id="cmd-help" class="meta" style="margin:0;padding:0.55rem 0.8rem;color:var(--muted);font-size:0.72rem;border-bottom:1px solid var(--line)">Same commands as the admin telnet console: <code>help</code>, <code>status</code>, <code>give</code>, <code>kick</code>, <code>settime</code>. Press <kbd>/</kbd> to focus, <kbd>↑</kbd><kbd>↓</kbd> for history.</p>
 <div class="quick-row" id="quick-commands" role="group" aria-label="Quick commands">
 <button type="button" class="quick-cmd" data-cmd="help">help</button>
 <button type="button" class="quick-cmd" data-cmd="status">status</button>
@@ -359,7 +364,7 @@ pre .in{color:var(--muted)} .err{color:var(--err)} .ok{color:var(--ok)} pre .met
 <option value="crit">crit</option>
 </select>
 <label class="sr-only" for="log-filter">Filter log messages</label>
-<input type="search" id="log-filter" placeholder="Filter — chunk, join, error…" autocomplete="off" spellcheck="false">
+<input type="search" id="log-filter" placeholder="Filter: chunk, join, error…" autocomplete="off" spellcheck="false">
 <span id="logs-state" class="meta" role="status">Loading…</span>
 </div>
 <div id="logs-view" role="region" aria-label="Server log lines" tabindex="0"><p class="meta">Loading server log…</p></div>
@@ -392,6 +397,37 @@ function queryEl(selector) {
     }
     return el;
 }
+// Churn visibility: after a poller swaps in fresh markup, flash the stat cells
+// and table rows whose text changed so updates register in peripheral vision.
+// Signatures are keyed by position within the region; a reorder therefore
+// flashes too, which is honest (the order did change).
+const FLASH_MS = 1200;
+const prevSigs = new WeakMap();
+let reduceMotion = null;
+function flashChanges(el) {
+    if (reduceMotion === null) {
+        reduceMotion = globalThis.matchMedia('(prefers-reduced-motion: reduce)');
+    }
+    if (reduceMotion.matches) {
+        return;
+    }
+    const nodes = el.querySelectorAll('.stat, tbody tr');
+    const prev = prevSigs.get(el);
+    const next = new Map();
+    let index = 0;
+    for (const node of nodes) {
+        next.set(String(index), node.textContent ?? '');
+        if (prev !== undefined && prev.size > 0 && prev.get(String(index)) !== next.get(String(index))) {
+            node.classList.remove('flash');
+            // Force a reflow so back-to-back flashes restart the animation.
+            void node.offsetWidth;
+            node.classList.add('flash');
+            globalThis.setTimeout(() => node.classList.remove('flash'), FLASH_MS);
+        }
+        index += 1;
+    }
+    prevSigs.set(el, next);
+}
 // Poller swap factory: one closure per polled region, created here so hxPoll
 // stays a thin wiring function. Inlining it would push hxPoll past the
 // 60-line function cap the strict preset enforces; the
@@ -423,6 +459,7 @@ function createSwap(el, u) {
             }
             el.innerHTML = t;
             delete el.dataset.loadError;
+            flashChanges(el);
             el.scrollLeft = regionScroll;
             const npre = el.querySelector('pre');
             if (npre) {
@@ -505,9 +542,21 @@ const ALPHA_LINE = 0.95;
 const ALPHA_BUDGET = 0.85;
 const DASH_LEN_PX = 4;
 const DASH_GAP_PX = 3;
+const EDGE_MARKER_RADIUS_PX = 3;
+const GHOST_MARKER_RADIUS_PX = 2.5;
+// Structure shown while the first samples are still arriving: the grid renders
+// at the nominal window/scale so the empty instrument is visible immediately.
+const PLACEHOLDER_WINDOW_MS = 60000;
 const CHART_FONT = '10px ui-monospace, Menlo, Consolas, monospace';
-const CAPTION_DEFAULT = 'tick mean / p99 · section means · 50 ms budget';
 const CAPTION_STALE = 'live data unavailable - showing last samples';
+// Configurable history window (rule: depth is a setting, memory proportional
+// to what is drawn). Pruned on every push; ceiling = CHART_SAMPLES_MAX polls.
+const HISTORY_STORAGE_KEY = 'zdtd.apmHistoryMs';
+const HISTORY_DEFAULT_MS = 300000;
+const HISTORY_2_MIN_MS = 120000;
+const HISTORY_5_MIN_MS = 300000;
+const HISTORY_10_MIN_MS = 600000;
+const HISTORY_WINDOW_MS = [HISTORY_2_MIN_MS, HISTORY_5_MIN_MS, HISTORY_10_MIN_MS];
 const TIME_GRID_5_S = 5000;
 const TIME_GRID_10_S = 10000;
 const TIME_GRID_15_S = 15000;
@@ -562,8 +611,14 @@ const SECTION_FILL_COLORS = [
 const chartCanvas = queryEl('#apm-canvas');
 const chartCtx = chartCanvas.getContext('2d');
 const compressEl = queryEl('#chart-compress');
+const historyEl = queryEl('#chart-history');
 const chartCaption = document.querySelector('#apm-chart-caption');
 const chartWrap = document.querySelector('#apm-chart-wrap');
+function loadHistoryMs() {
+    // oxlint-disable-next-line @rikalabs/no-json-parse-default-fallback -- deliberate: localStorage holds a bare integer written by this page, not JSON; Number() parse failure falls back to the default window
+    const stored = Number(globalThis.localStorage.getItem(HISTORY_STORAGE_KEY));
+    return HISTORY_WINDOW_MS.includes(stored) ? stored : HISTORY_DEFAULT_MS;
+}
 const samples = [];
 let chartCompressed = true;
 let chartTimer = null;
@@ -576,6 +631,13 @@ let chartYMaxMs = 0;
 let chartRafId = null;
 let edgeMean = null;
 let edgeP99 = null;
+let historyMs = loadHistoryMs();
+function pruneHistory() {
+    const cutoff = Date.now() - historyMs;
+    while (samples.length > 0 && samples[0].at < cutoff) {
+        samples.shift();
+    }
+}
 function pickGridStep(steps, max, maxLines) {
     for (const step of steps) {
         if (max / step <= maxLines) {
@@ -636,7 +698,7 @@ function drawPlaceholder(ctx) {
     ctx.font = CHART_FONT;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('collecting samples…', chartCssW / 2, chartCssH / 2);
+    ctx.fillText('collecting samples…', EDGE_PAD_PX + plotDims().w / 2, EDGE_PAD_PX + plotDims().h / 2);
 }
 function drawGrid(ctx) {
     const plot = plotDims();
@@ -749,6 +811,43 @@ function drawBudgetLine(ctx) {
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
 }
+function setCaption(text) {
+    if (chartCaption !== null && chartCaption.textContent !== text) {
+        chartCaption.textContent = text;
+    }
+}
+function markChartLive() {
+    if (chartWrap !== null) {
+        delete chartWrap.dataset.loadError;
+    }
+    // The live readout is written per frame by finishChartFrame.
+}
+function markChartStale() {
+    if (chartWrap !== null) {
+        chartWrap.dataset.loadError = 'true';
+    }
+    setCaption(CAPTION_STALE);
+}
+// Leading-edge markers plus their paired numeric readout: the eye anchor and
+// the stable-position numbers for the newest mean/p99 values.
+function finishChartFrame(ctx, nowMs) {
+    const plot = plotDims();
+    const x = EDGE_PAD_PX + plot.w;
+    const yAt = (ms) => EDGE_PAD_PX + plot.h * (1 - ms / chartYMaxMs);
+    const p99Now = edgeValueMs(edgeP99, nowMs, samples[samples.length - 1].tickP99Ms);
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(x, yAt(p99Now), GHOST_MARKER_RADIUS_PX, 0, 2 * Math.PI);
+    ctx.fillStyle = CHART_GHOST_COLOR;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, yAt(edgeValueMs(edgeMean, nowMs, samples[samples.length - 1].tickMeanMs)), EDGE_MARKER_RADIUS_PX, 0, 2 * Math.PI);
+    ctx.fillStyle = CHART_LINE_COLOR;
+    ctx.fill();
+    // Tabular digits via the caption's monospace face; setCaption no-ops
+    // when nothing changed.
+    setCaption(`mean ${edgeValueMs(edgeMean, nowMs, samples[samples.length - 1].tickMeanMs).toFixed(1)} · p99 ${p99Now.toFixed(1)} ms · budget ${TICK_BUDGET_MS} ms`);
+}
 function drawChart(nowMs) {
     if (chartCtx === null || !sizeChartCanvas()) {
         return;
@@ -760,6 +859,11 @@ function drawChart(nowMs) {
     ctx.restore();
     ctx.setTransform(chartDpr, 0, 0, chartDpr, 0, 0);
     if (samples.length < 2) {
+        // Render the empty structure at nominal scales: absence of signal is
+        // visible as an unlit instrument, not a blank box.
+        chartMaxAgeMs = PLACEHOLDER_WINDOW_MS;
+        chartYMaxMs = TICK_BUDGET_MS;
+        drawGrid(ctx);
         drawPlaceholder(ctx);
         return;
     }
@@ -776,6 +880,7 @@ function drawChart(nowMs) {
     drawStackedSections(ctx, nowMs);
     drawSeries(ctx, nowMs);
     drawBudgetLine(ctx);
+    finishChartFrame(ctx, nowMs);
     if (chartRafId === null) {
         chartRafId = globalThis.requestAnimationFrame(() => {
             chartRafId = null;
@@ -796,6 +901,7 @@ function pushSample(sample) {
     if (samples.length > CHART_SAMPLES_MAX) {
         samples.splice(0, samples.length - CHART_SAMPLES_MAX);
     }
+    pruneHistory();
 }
 function startEdgeLerp() {
     const count = samples.length;
@@ -809,23 +915,6 @@ function startEdgeLerp() {
     const now = Date.now();
     edgeMean = { fromMs: prev.tickMeanMs, targetMs: newest.tickMeanMs, startAt: now };
     edgeP99 = { fromMs: prev.tickP99Ms, targetMs: newest.tickP99Ms, startAt: now };
-}
-function setCaption(text) {
-    if (chartCaption !== null && chartCaption.textContent !== text) {
-        chartCaption.textContent = text;
-    }
-}
-function markChartLive() {
-    if (chartWrap !== null) {
-        delete chartWrap.dataset.loadError;
-    }
-    setCaption(CAPTION_DEFAULT);
-}
-function markChartStale() {
-    if (chartWrap !== null) {
-        chartWrap.dataset.loadError = 'true';
-    }
-    setCaption(CAPTION_STALE);
 }
 async function fetchApmSample() {
     if (chartInFlight) {
@@ -926,6 +1015,23 @@ function wireTabs() {
 function initChart() {
     compressEl.addEventListener('change', () => {
         chartCompressed = compressEl.checked;
+        drawChart(Date.now());
+    });
+    historyEl.value = String(historyMs);
+    historyEl.addEventListener('change', () => {
+        const chosen = Number(historyEl.value);
+        if (!HISTORY_WINDOW_MS.includes(chosen)) {
+            return;
+        }
+        historyMs = chosen;
+        try {
+            globalThis.localStorage.setItem(HISTORY_STORAGE_KEY, String(historyMs));
+            // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: persistence is best-effort; the chosen window still applies to this session
+        }
+        catch {
+            // Storage blocked (private mode): keep the session-only window.
+        }
+        pruneHistory();
         drawChart(Date.now());
     });
     globalThis.addEventListener('resize', () => drawChart(Date.now()));

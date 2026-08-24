@@ -30,6 +30,39 @@ function queryEl<T extends HTMLElement>(selector: string): T {
     return el;
 }
 
+// Churn visibility: after a poller swaps in fresh markup, flash the stat cells
+// and table rows whose text changed so updates register in peripheral vision.
+// Signatures are keyed by position within the region; a reorder therefore
+// flashes too, which is honest (the order did change).
+const FLASH_MS = 1200;
+const prevSigs = new WeakMap<HTMLElement, Map<string, string>>();
+let reduceMotion: MediaQueryList | null = null;
+
+function flashChanges(el: HTMLElement): void {
+    if (reduceMotion === null) {
+        reduceMotion = globalThis.matchMedia('(prefers-reduced-motion: reduce)');
+    }
+    if (reduceMotion.matches) {
+        return;
+    }
+    const nodes = el.querySelectorAll<HTMLElement>('.stat, tbody tr');
+    const prev = prevSigs.get(el);
+    const next = new Map<string, string>();
+    let index = 0;
+    for (const node of nodes) {
+        next.set(String(index), node.textContent ?? '');
+        if (prev !== undefined && prev.size > 0 && prev.get(String(index)) !== next.get(String(index))) {
+            node.classList.remove('flash');
+            // Force a reflow so back-to-back flashes restart the animation.
+            void node.offsetWidth;
+            node.classList.add('flash');
+            globalThis.setTimeout(() => node.classList.remove('flash'), FLASH_MS);
+        }
+        index += 1;
+    }
+    prevSigs.set(el, next);
+}
+
 // Poller swap factory: one closure per polled region, created here so hxPoll
 // stays a thin wiring function. Inlining it would push hxPoll past the
 // 60-line function cap the strict preset enforces; the
@@ -59,9 +92,10 @@ function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promis
                 if (t === null) {
                     return;
                 }
-                el.innerHTML = t;
-                delete el.dataset.loadError;
-                el.scrollLeft = regionScroll;
+            el.innerHTML = t;
+            delete el.dataset.loadError;
+            flashChanges(el);
+            el.scrollLeft = regionScroll;
                 const npre = el.querySelector('pre');
                 if (npre) {
                     npre.scrollTop = preScroll;
@@ -148,9 +182,21 @@ const ALPHA_LINE = 0.95;
 const ALPHA_BUDGET = 0.85;
 const DASH_LEN_PX = 4;
 const DASH_GAP_PX = 3;
+const EDGE_MARKER_RADIUS_PX = 3;
+const GHOST_MARKER_RADIUS_PX = 2.5;
+// Structure shown while the first samples are still arriving: the grid renders
+// at the nominal window/scale so the empty instrument is visible immediately.
+const PLACEHOLDER_WINDOW_MS = 60000;
 const CHART_FONT = '10px ui-monospace, Menlo, Consolas, monospace';
-const CAPTION_DEFAULT = 'tick mean / p99 · section means · 50 ms budget';
 const CAPTION_STALE = 'live data unavailable - showing last samples';
+// Configurable history window (rule: depth is a setting, memory proportional
+// to what is drawn). Pruned on every push; ceiling = CHART_SAMPLES_MAX polls.
+const HISTORY_STORAGE_KEY = 'zdtd.apmHistoryMs';
+const HISTORY_DEFAULT_MS = 300000;
+const HISTORY_2_MIN_MS = 120000;
+const HISTORY_5_MIN_MS = 300000;
+const HISTORY_10_MIN_MS = 600000;
+const HISTORY_WINDOW_MS: ReadonlyArray<number> = [HISTORY_2_MIN_MS, HISTORY_5_MIN_MS, HISTORY_10_MIN_MS];
 const TIME_GRID_5_S = 5000;
 const TIME_GRID_10_S = 10000;
 const TIME_GRID_15_S = 15000;
@@ -232,8 +278,15 @@ const SECTION_FILL_COLORS: ReadonlyArray<string> = [
 const chartCanvas = queryEl<HTMLCanvasElement>('#apm-canvas');
 const chartCtx = chartCanvas.getContext('2d');
 const compressEl = queryEl<HTMLInputElement>('#chart-compress');
+const historyEl = queryEl<HTMLSelectElement>('#chart-history');
 const chartCaption = document.querySelector<HTMLElement>('#apm-chart-caption');
 const chartWrap = document.querySelector<HTMLElement>('#apm-chart-wrap');
+
+function loadHistoryMs(): number {
+    // oxlint-disable-next-line @rikalabs/no-json-parse-default-fallback -- deliberate: localStorage holds a bare integer written by this page, not JSON; Number() parse failure falls back to the default window
+    const stored = Number(globalThis.localStorage.getItem(HISTORY_STORAGE_KEY));
+    return HISTORY_WINDOW_MS.includes(stored) ? stored : HISTORY_DEFAULT_MS;
+}
 
 const samples: Array<ApmSample> = [];
 let chartCompressed = true;
@@ -247,6 +300,14 @@ let chartYMaxMs = 0;
 let chartRafId: number | null = null;
 let edgeMean: EdgeLerp | null = null;
 let edgeP99: EdgeLerp | null = null;
+let historyMs = loadHistoryMs();
+
+function pruneHistory(): void {
+    const cutoff = Date.now() - historyMs;
+    while (samples.length > 0 && samples[0].at < cutoff) {
+        samples.shift();
+    }
+}
 
 function pickGridStep(steps: ReadonlyArray<number>, max: number, maxLines: number): number {
     for (const step of steps) {
@@ -314,7 +375,7 @@ function drawPlaceholder(ctx: CanvasRenderingContext2D): void {
     ctx.font = CHART_FONT;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('collecting samples…', chartCssW / 2, chartCssH / 2);
+    ctx.fillText('collecting samples…', EDGE_PAD_PX + plotDims().w / 2, EDGE_PAD_PX + plotDims().h / 2);
 }
 
 function drawGrid(ctx: CanvasRenderingContext2D): void {
@@ -432,6 +493,47 @@ function drawBudgetLine(ctx: CanvasRenderingContext2D): void {
     ctx.globalAlpha = 1;
 }
 
+function setCaption(text: string): void {
+    if (chartCaption !== null && chartCaption.textContent !== text) {
+        chartCaption.textContent = text;
+    }
+}
+
+function markChartLive(): void {
+    if (chartWrap !== null) {
+        delete chartWrap.dataset.loadError;
+    }
+    // The live readout is written per frame by finishChartFrame.
+}
+
+function markChartStale(): void {
+    if (chartWrap !== null) {
+        chartWrap.dataset.loadError = 'true';
+    }
+    setCaption(CAPTION_STALE);
+}
+
+// Leading-edge markers plus their paired numeric readout: the eye anchor and
+// the stable-position numbers for the newest mean/p99 values.
+function finishChartFrame(ctx: CanvasRenderingContext2D, nowMs: number): void {
+    const plot = plotDims();
+    const x = EDGE_PAD_PX + plot.w;
+    const yAt = (ms: number): number => EDGE_PAD_PX + plot.h * (1 - ms / chartYMaxMs);
+    const p99Now = edgeValueMs(edgeP99, nowMs, samples[samples.length - 1].tickP99Ms);
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(x, yAt(p99Now), GHOST_MARKER_RADIUS_PX, 0, 2 * Math.PI);
+    ctx.fillStyle = CHART_GHOST_COLOR;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, yAt(edgeValueMs(edgeMean, nowMs, samples[samples.length - 1].tickMeanMs)), EDGE_MARKER_RADIUS_PX, 0, 2 * Math.PI);
+    ctx.fillStyle = CHART_LINE_COLOR;
+    ctx.fill();
+    // Tabular digits via the caption's monospace face; setCaption no-ops
+    // when nothing changed.
+    setCaption(`mean ${edgeValueMs(edgeMean, nowMs, samples[samples.length - 1].tickMeanMs).toFixed(1)} · p99 ${p99Now.toFixed(1)} ms · budget ${TICK_BUDGET_MS} ms`);
+}
+
 function drawChart(nowMs: number): void {
     if (chartCtx === null || !sizeChartCanvas()) {
         return;
@@ -443,6 +545,11 @@ function drawChart(nowMs: number): void {
     ctx.restore();
     ctx.setTransform(chartDpr, 0, 0, chartDpr, 0, 0);
     if (samples.length < 2) {
+        // Render the empty structure at nominal scales: absence of signal is
+        // visible as an unlit instrument, not a blank box.
+        chartMaxAgeMs = PLACEHOLDER_WINDOW_MS;
+        chartYMaxMs = TICK_BUDGET_MS;
+        drawGrid(ctx);
         drawPlaceholder(ctx);
         return;
     }
@@ -459,6 +566,7 @@ function drawChart(nowMs: number): void {
     drawStackedSections(ctx, nowMs);
     drawSeries(ctx, nowMs);
     drawBudgetLine(ctx);
+    finishChartFrame(ctx, nowMs);
     if (chartRafId === null) {
         chartRafId = globalThis.requestAnimationFrame(() => {
             chartRafId = null;
@@ -481,6 +589,7 @@ function pushSample(sample: ApmSample): void {
     if (samples.length > CHART_SAMPLES_MAX) {
         samples.splice(0, samples.length - CHART_SAMPLES_MAX);
     }
+    pruneHistory();
 }
 
 function startEdgeLerp(): void {
@@ -495,26 +604,6 @@ function startEdgeLerp(): void {
     const now = Date.now();
     edgeMean = { fromMs: prev.tickMeanMs, targetMs: newest.tickMeanMs, startAt: now };
     edgeP99 = { fromMs: prev.tickP99Ms, targetMs: newest.tickP99Ms, startAt: now };
-}
-
-function setCaption(text: string): void {
-    if (chartCaption !== null && chartCaption.textContent !== text) {
-        chartCaption.textContent = text;
-    }
-}
-
-function markChartLive(): void {
-    if (chartWrap !== null) {
-        delete chartWrap.dataset.loadError;
-    }
-    setCaption(CAPTION_DEFAULT);
-}
-
-function markChartStale(): void {
-    if (chartWrap !== null) {
-        chartWrap.dataset.loadError = 'true';
-    }
-    setCaption(CAPTION_STALE);
 }
 
 async function fetchApmSample(): Promise<void> {
@@ -621,6 +710,22 @@ function wireTabs(): void {
 function initChart(): void {
     compressEl.addEventListener('change', () => {
         chartCompressed = compressEl.checked;
+        drawChart(Date.now());
+    });
+    historyEl.value = String(historyMs);
+    historyEl.addEventListener('change', () => {
+        const chosen = Number(historyEl.value);
+        if (!HISTORY_WINDOW_MS.includes(chosen)) {
+            return;
+        }
+        historyMs = chosen;
+        try {
+            globalThis.localStorage.setItem(HISTORY_STORAGE_KEY, String(historyMs));
+            // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: persistence is best-effort; the chosen window still applies to this session
+        } catch {
+            // Storage blocked (private mode): keep the session-only window.
+        }
+        pruneHistory();
         drawChart(Date.now());
     });
     globalThis.addEventListener('resize', () => drawChart(Date.now()));
