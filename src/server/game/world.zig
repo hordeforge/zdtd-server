@@ -158,6 +158,15 @@ pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
     return 500;
 }
 
+/// materials.xml Experience for a broken block (harvest XP; stock
+/// AddLevelExp(material.Experience * count), RE items.md; one block = one
+/// count here). Resolves via AssignIds id → name → Material → Experience;
+/// 0 = no harvest XP (offline catalog, air, or material without Experience).
+pub fn harvestXpForBlock(self: *const Game, block_id: u16) u32 {
+    if (block_id == 0) return 0;
+    return @intFromFloat(@max(0, self.maxdamage.harvestExpFor(block_id)));
+}
+
 pub fn packBlockKey(x: i32, y: i32, z: i32) u64 {
     const xu: u64 = @as(u32, @bitCast(x));
     const yu: u64 = @as(u16, @truncate(@as(u32, @bitCast(y))));

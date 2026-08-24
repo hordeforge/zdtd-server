@@ -75,6 +75,9 @@ pub const Table = struct {
     /// materials.xml id → MaxDamage (e.g. Mhay → 50). Used when block has no
     /// MaxDamage property and only a Material ref.
     material_max: std.StringHashMapUnmanaged(u16) = .{},
+    /// material name → materials.xml `Experience` (harvest XP; RE items.md
+    /// AddLevelExp(material.Experience * count)). 0 = none.
+    material_exp: std.StringHashMapUnmanaged(f32) = .{},
     /// block name → material id (from blocks.xml Material property).
     block_material: std.StringHashMapUnmanaged([]const u8) = .{},
     /// block name → resolved `UpgradeBlock.ToBlock` after the Extends chain.
@@ -126,6 +129,7 @@ pub const Table = struct {
             self.power_output_per_charge_by_name = .{};
             self.power_output_per_stack_by_name = .{};
             self.material_max = .{};
+            self.material_exp = .{};
             self.block_material = .{};
             self.distant_deco = .{};
             self.multi_block_dim = .{};
@@ -142,6 +146,15 @@ pub const Table = struct {
 
     pub fn maxDamage(self: *const Table, block_id: u16) ?u16 {
         return self.by_id.get(block_id);
+    }
+
+    /// materials.xml Experience for a block id: block name → Material →
+    /// Experience (harvest XP, RE items.md `AddLevelExp(material.Experience *
+    /// count)`). 0 = no harvest XP (unassigned/air).
+    pub fn harvestExpFor(self: *const Table, block_id: u16) f32 {
+        const name = self.name_by_id.get(block_id) orelse return 0;
+        const mat = self.block_material.get(name) orelse return 0;
+        return self.material_exp.get(mat) orelse 0;
     }
 
     pub fn maxDamageByName(self: *const Table, name: []const u8) ?u16 {
@@ -413,6 +426,12 @@ pub const Table = struct {
                 if (xml.parseU32(mv)) |v| {
                     const kn = try arena.dupe(u8, mid);
                     try self.material_mass.put(arena, kn, @floatFromInt(v));
+                }
+            }
+            if (xml.propertyValue(body, "Experience")) |ev| {
+                if (xml.parseF32(ev)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_exp.put(arena, kn, v);
                 }
             }
             if (xml.propertyValue(body, "damage_category")) |dc| {
@@ -1022,6 +1041,14 @@ test "materials.xml MaxDamage fills hayBaleSquare" {
     try std.testing.expectEqual(@as(u16, 50), t.maxDamageByName("hayBaleSquare").?);
     if (t.idByName("hayBaleSquare")) |hid| {
         try std.testing.expectEqual(@as(u16, 50), t.maxDamage(hid).?);
+    }
+    // materials.xml Experience (harvest XP, RE items.md): dirt (Mdirt)
+    // grants 2 per block; hay (Mhay) has no Experience → 0.
+    if (t.idByName("terrDirt")) |tid| {
+        try std.testing.expectEqual(@as(f32, 2), t.harvestExpFor(tid));
+    }
+    if (t.idByName("hayBaleSquare")) |hid2| {
+        try std.testing.expectEqual(@as(f32, 0), t.harvestExpFor(hid2));
     }
 }
 

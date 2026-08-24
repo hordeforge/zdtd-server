@@ -1597,6 +1597,10 @@ pub const Game = struct {
         return game_world.maxDamageForBlock(self, block_id);
     }
 
+    pub fn harvestXpForBlock(self: *Game, block_id: u16) u32 {
+        return game_world.harvestXpForBlock(self, block_id);
+    }
+
     pub fn getBlockHp(self: *const Game, x: i32, y: i32, z: i32) u16 {
         return game_world.getBlockHp(self, x, y, z);
     }

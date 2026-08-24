@@ -86,6 +86,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (cur_id != 0) {
                     self.noteBlockBreak(c);
                     self.removeClaimAt(b.x, b.y, b.z);
+                    // Harvest XP: material.Experience for the broken block
+                    // (RE items.md AddLevelExp(material.Experience * count)).
+                    const hxp = self.harvestXpForBlock(cur_id);
+                    if (hxp > 0) self.awardXp(c.slot, hxp);
                 }
             } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
                 const wire_abs = b.damage;
@@ -111,6 +115,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (abs >= max_hp) {
                     self.noteBlockBreak(c);
                     self.removeClaimAt(b.x, b.y, b.z);
+                    // Harvest XP: material.Experience for the broken block.
+                    const hxp = self.harvestXpForBlock(base_cur);
+                    if (hxp > 0) self.awardXp(c.slot, hxp);
                     place_id = 0;
                     out_dmg = 0;
                     self.clearBlockHp(b.x, b.y, b.z);
