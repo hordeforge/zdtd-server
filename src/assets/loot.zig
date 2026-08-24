@@ -65,6 +65,23 @@ pub const LootContainer = struct {
     /// TEFeatureStorage.ShouldDestroyOnClose (IL=19) + CheckDestroyTileEntity
     /// (IL=37, loot-economy.md 454-456).
     destroy_on_close: u8 = 0,
+    /// ignore_loot_abundance="true" (65 stock containers, twitch-only in b14):
+    /// counts roll unmodified by the global LootAbundance setting.
+    ignore_abundance: bool = false,
+    /// unique_item="true" (stock questRewardSkillMagazines): each entry rolls
+    /// at most once per fill (no duplicate magazines).
+    unique_item: bool = false,
+    /// abundance_type (Armor/Books/Magazines/Melee/Ranged, 67 stock): the
+    /// per-type LootAbundance multiplier. Parsed; the type multiplier table
+    /// is RE-tracked (loot-economy), not applied in the sim yet.
+    abundance_type: []const u8 = "",
+    /// unmodified_lootstage="true" (138 stock): roll at the raw stage,
+    /// skipping the container's stage-modifier chain. Parsed; the stage
+    /// chain is Game-side, not applied here.
+    raw_lootstage: bool = false,
+    /// open_time seconds the container stays open (190 stock; client
+    /// display). Parsed; not consumed server-side.
+    open_time: f32 = 0,
     entries: [max_entries]LootEntry = [_]LootEntry{.{}} ** max_entries,
     entry_n: u8 = 0,
 };
@@ -157,9 +174,11 @@ pub const LootTable = struct {
         return (s % 1000) <= thresh;
     }
 
-    /// Scale a rolled count by LootAbundance, keeping at least 1.
-    fn scaleCount(self: *const LootTable, cnt: u16) u16 {
-        if (self.abundance_pct == 100) return @max(cnt, 1);
+    /// Scale a rolled count by LootAbundance, keeping at least 1. Containers
+    /// with ignore_loot_abundance="true" pass apply=false (stock
+    /// LootAbundance skips those; twitch-only carriers in b14).
+    fn scaleCount(self: *const LootTable, cnt: u16, apply_abundance: bool) u16 {
+        if (!apply_abundance or self.abundance_pct == 100) return @max(cnt, 1);
         const scaled = (@as(u32, cnt) * self.abundance_pct) / 100;
         return @intCast(@max(scaled, 1));
     }
@@ -216,7 +235,7 @@ pub const LootTable = struct {
                 } else {
                     out[n] = .{
                         .item_name = e.name,
-                        .count = self.scaleCount(if (e.count_min > 0) e.count_min else 1),
+                        .count = self.scaleCount(if (e.count_min > 0) e.count_min else 1, true),
                         .quality = self.resolveQuality(qt, loot_stage, s ^ @as(u32, i)),
                     };
                     n += 1;
@@ -258,7 +277,7 @@ pub const LootTable = struct {
                 const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                 out[n] = .{
                     .item_name = picked.name,
-                    .count = self.scaleCount(cnt),
+                    .count = self.scaleCount(cnt, true),
                     .quality = self.resolveQuality(qt, loot_stage, s),
                 };
                 n += 1;
@@ -298,9 +317,21 @@ pub const LootTable = struct {
                 // overflow; widen so the modulo never sees a wrapped zero.
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
+                // unique_item="true": each entry rolls at most once per fill
+                // (stock questRewardSkillMagazines: no duplicate magazines).
+                if (cont.unique_item) {
+                    var dup = false;
+                    for (out[0..n]) |st| {
+                        if (st.item_name.len > 0 and std.mem.eql(u8, st.item_name, e.name)) {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (dup) continue;
+                }
                 out[n] = .{
                     .item_name = e.name,
-                    .count = self.scaleCount(cnt),
+                    .count = self.scaleCount(cnt, !cont.ignore_abundance),
                     .quality = self.resolveQuality(cont.quality_template, loot_stage, s),
                 };
                 n += 1;
@@ -335,7 +366,7 @@ pub const LootTable = struct {
                     const cmax = if (e.count_max >= cmin) e.count_max else cmin;
                     const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                     const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                    out[an] = .{ .item_name = e.name, .count = self.scaleCount(cnt), .quality = self.resolveQuality(qt, loot_stage, s) };
+                    out[an] = .{ .item_name = e.name, .count = self.scaleCount(cnt, true), .quality = self.resolveQuality(qt, loot_stage, s) };
                     an += 1;
                 }
             }
@@ -388,7 +419,7 @@ pub const LootTable = struct {
                 // Same span widening as rollContainer (count="0,65535").
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                out[n] = .{ .item_name = picked_e.name, .count = self.scaleCount(cnt), .quality = self.resolveQuality(qt, loot_stage, s) };
+                out[n] = .{ .item_name = picked_e.name, .count = self.scaleCount(cnt, true), .quality = self.resolveQuality(qt, loot_stage, s) };
                 n += 1;
             }
         }
@@ -735,6 +766,25 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             } else if (std.mem.eql(u8, doc, "empty")) {
                 c.destroy_on_close = 2;
             }
+        }
+        // LootAbundance/type/lootstage/open flags (RE loot-economy.md):
+        // ignore_loot_abundance skips the global abundance scale; the rest
+        // are parsed for the audit (type multipliers and the stage chain are
+        // not applied server-side yet).
+        if (xml.attr(clean, tag, "ignore_loot_abundance")) |ila| {
+            c.ignore_abundance = std.mem.eql(u8, ila, "true");
+        }
+        if (xml.attr(clean, tag, "unique_item")) |ui| {
+            c.unique_item = std.mem.eql(u8, ui, "true");
+        }
+        if (xml.attr(clean, tag, "abundance_type")) |at| {
+            c.abundance_type = try arena.dupe(u8, at);
+        }
+        if (xml.attr(clean, tag, "unmodified_lootstage")) |ul| {
+            c.raw_lootstage = std.mem.eql(u8, ul, "true");
+        }
+        if (xml.attr(clean, tag, "open_time")) |ot| {
+            c.open_time = xml.parseF32(ot) orelse 0;
         }
         var bi: usize = 0;
         while (bi < body.len and c.entry_n < max_entries) {
@@ -1116,4 +1166,19 @@ test "container group rolls are prob-weighted, not uniform" {
     // ~90/10 split with a wide tolerance band (no flaky seed edge).
     try std.testing.expect(common > rare * 4);
     try std.testing.expect(common + rare == 4000);
+}
+
+
+test "stock loot.xml container flags parse" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var lt = try loadFromPath(std.testing.allocator, path);
+    defer lt.deinit();
+    // unique_item + destroy_on_close="empty" on the reachable quest rewards.
+    const mags = lt.containerByName("questRewardSkillMagazines").?;
+    try std.testing.expect(mags.unique_item);
+    try std.testing.expectEqual(@as(u8, 2), mags.destroy_on_close);
+    // ignore_loot_abundance on a twitch carrier.
+    const tw = lt.containerByName("twitch_tier0weapon").?;
+    try std.testing.expect(tw.ignore_abundance);
 }

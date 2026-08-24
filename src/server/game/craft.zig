@@ -232,6 +232,16 @@ pub fn handItemBlockChew(self: *Game, hand_item: []const u8) f32 {
     return 0;
 }
 
+/// Hand-item melee reach (items.xml Range, fallback passive MaxRange) for
+/// the per-class attack-range gate; 0 when the hand item has none (the
+/// caller falls back to the Rules floor). Stock: zombie hand 1.6,
+/// club/axe 2.4.
+pub fn handItemRange(self: *Game, hand_item: []const u8) f32 {
+    if (hand_item.len == 0) return 0;
+    if (self.items.byName(hand_item)) |d| return d.melee_range;
+    return 0;
+}
+
 /// One workstation step: burn/craft, then re-broadcast the stations it changed.
 pub fn tickWorkstations(self: *Game, dt: f32) !void {
     self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self, .{

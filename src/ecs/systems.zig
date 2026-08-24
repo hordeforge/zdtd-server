@@ -1825,8 +1825,8 @@ fn senseDistSq(w: *const World, s: Slot) f32 {
 fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
     const sense_d2 = senseDistSq(w, s);
     return switch (id) {
-        .break_block => breakBlockCanExecute(w, ai, np.id, np.d2, sense_d2),
-        .destroy_area => destroyAreaCanExecute(w, ai, np.id, np.d2, sense_d2),
+        .break_block => breakBlockCanExecute(w, s, ai, np.id, np.d2, sense_d2),
+        .destroy_area => destroyAreaCanExecute(w, s, ai, np.id, np.d2, sense_d2),
         .runaway => runawayCanExecute(w, s, ai),
         .approach_attack => w.class_id[s].ai_attack and approachCanExecute(w, ai, np.id, np.d2, sense_d2),
         .territorial => territorialCanExecute(w, s, ai, np.id, np.d2, sense_d2),
@@ -1893,13 +1893,21 @@ fn rngFrac(ai: *c.ZombieAi, rng_seed: i32) f32 {
     return @as(f32, @floatFromInt(ai.wander_rng % 10000)) / 10000.0;
 }
 
+/// Per-class melee reach, squared: the hand item's items.xml Range (zombie
+/// hand 1.6) or passive MaxRange (club/axe 2.4); 0 → the combat floor.
+fn meleeRangeSq(w: *const World, s: Slot) f32 {
+    const pe = w.class_id[s].melee_range;
+    if (pe > 0) return pe * pe;
+    return w.rules.combat.attack_range_sq;
+}
+
 /// EAIBreakBlock::CanExecute (asm.il:425121): alert chase with a sensed player
 /// and a solid cell directly toward the goal (set by chaseAlongPath).
-fn breakBlockCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
+fn breakBlockCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
     if (!ai.path_blocked) return false;
     if (!(np_id >= 0 and np_d2 < sense_d2)) return false;
     // Melee range: approach owns the bite; do not stick on break.
-    if (np_d2 <= w.rules.combat.attack_range_sq) return false;
+    if (np_d2 <= meleeRangeSq(w, s)) return false;
     return true;
 }
 
@@ -1932,10 +1940,10 @@ fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) v
 
 /// EAIDestroyArea::CanExecute: alert/target chase with path stuck, or sparse
 /// random while chasing (same block-damage feed as BreakBlock).
-fn destroyAreaCanExecute(w: *const World, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
+fn destroyAreaCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: i32, np_d2: f32, sense_d2: f32) bool {
     const chasing = (np_id >= 0 and np_d2 < sense_d2) or (ai.alert and ai.target_id >= 0);
     if (!chasing) return false;
-    if (np_id >= 0 and np_d2 <= w.rules.combat.attack_range_sq) return false;
+    if (np_id >= 0 and np_d2 <= meleeRangeSq(w, s)) return false;
     if (ai.path_blocked) return true;
     // Random chew while chase: only when rng already seeded and hits the gate.
     if (ai.wander_rng != 0 and (ai.wander_rng % w.rules.ai.destroy_area_rng_mod) == 1) return true;
@@ -2169,7 +2177,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
     ai.path_goal_x = np.px;
     ai.path_goal_z = np.pz;
     ai.has_path = true;
-    if (np.d2 <= ctx.w.rules.combat.attack_range_sq) {
+    if (np.d2 <= meleeRangeSq(ctx.w, s)) {
         ai.state = .attack;
         ai.clearPath();
         const pad: f32 = ctx.w.class_id[s].attack_damage;

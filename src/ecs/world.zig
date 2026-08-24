@@ -145,6 +145,9 @@ pub const EntityClass = struct {
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
     /// feral 24); 0 = use the Rules chew floor.
     block_chew: f32 = 0,
+    /// HandItem melee reach (items.xml Range/MaxRange: zombie hand 1.6,
+    /// club/axe 2.4); 0 = use the Rules attack-range floor.
+    melee_range: f32 = 0,
     /// TimeStayAfterDeath seconds a corpse lingers (entityclasses.xml).
     time_stay: f32 = 0,
     /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
@@ -919,6 +922,7 @@ pub const World = struct {
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].block_chew = def.block_chew;
+            self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
@@ -996,6 +1000,7 @@ pub const World = struct {
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].block_chew = def.block_chew;
+            self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;

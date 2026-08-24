@@ -81,6 +81,9 @@ pub const ClassId = struct {
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
     /// feral 24); 0 = class_table[id] then the Rules chew floor.
     block_chew: f32 = 0,
+    /// HandItem melee reach (items.xml Range/MaxRange: zombie hand 1.6,
+    /// club/axe 2.4); 0 = class_table[id] then the Rules attack-range floor.
+    melee_range: f32 = 0,
     /// entityclasses SightRange in metres; 0 = class_table[id] then the Rules
     /// sense floor (systems.senseDistSq).
     sight_range: f32 = 0,

@@ -2814,6 +2814,10 @@ pub const Game = struct {
         return game_craft.handItemBlockChew(self, hand_item);
     }
 
+    pub fn handItemRange(self: *Game, hand_item: []const u8) f32 {
+        return game_craft.handItemRange(self, hand_item);
+    }
+
     /// One workstation step: burn/craft, then re-broadcast the stations it changed.
     pub fn tickWorkstations(self: *Game, dt: f32) !void {
         return game_craft.tickWorkstations(self, dt);

@@ -268,6 +268,11 @@ pub fn buildTraderQuestOffers(
 ) usize {
     const list = self.sim.catalog.listById(list_id) orelse return 0;
     const ps = self.sim.playerByPeer(peer_slot) orelse return 0;
+    // quests_per_tier (quests.xml root): stock caps how many quests of the
+    // requested tier window the trader offers at once (default 10). Applies
+    // to the whole window when tier 0 mixes tiers.
+    const qpt = self.sim.catalog.quests_per_tier;
+    var per_window: u8 = 0;
     var n: usize = 0;
     for (list.entries) |qid| {
         if (n >= out.len) break;
@@ -277,6 +282,8 @@ pub fn buildTraderQuestOffers(
         // requested tierLevel (asm.il 827746-827975). tier 0 = no filter.
         if (tier != 0 and d.difficulty_tier != tier) continue;
         if (self.sim.mask[ps].journal and (self.sim.journal[ps].hasActive(qid) or self.sim.journal[ps].hasFailed(qid))) continue;
+        if (qpt > 0 and per_window >= qpt) continue;
+        per_window += 1;
         // Stock pre-positions every offer (EntityTrader offer loop →
         // Quest.SetupPosition; RE: 7dtd-engine-research docs/quests-challenges.md
         // "Quest POI selection"): the entry carries the real QuestLocation

@@ -103,8 +103,16 @@ fn parseI32Attr(open_tag: []const u8, key: []const u8, default: i32) i32 {
     return std.fmt.parseInt(i32, v, 10) catch default;
 }
 
-/// Load all `*_signs.xml` under prefabs_root (e.g. Data/Prefabs).
-pub fn loadFromPrefabsRoot(allocator: std.mem.Allocator, prefabs_root: []const u8) !Catalog {
+/// Load all `*_signs.xml` under prefabs_root (e.g. Data/Prefabs) plus, when
+/// `default_signs_path` is set, the stock `Data/Config/signs.xml` default
+/// `[D]` library (which carries the mandatory zero-guid Default Sign the
+/// client needs when placing a new canvas block; prefab libraries only cover
+/// the world). A missing file is skipped like a missing Prefabs tree.
+pub fn loadFromPrefabsRoot(
+    allocator: std.mem.Allocator,
+    prefabs_root: []const u8,
+    default_signs_path: ?[]const u8,
+) !Catalog {
     const arena_holder = try arena_util.newArenaHolder(allocator);
     errdefer {
         arena_holder.deinit();
@@ -115,6 +123,10 @@ pub fn loadFromPrefabsRoot(allocator: std.mem.Allocator, prefabs_root: []const u
     var list: std.ArrayList(SignEntry) = .empty;
     defer list.deinit(allocator);
 
+    if (default_signs_path) |dsp| {
+        // Parsed first so "[D]" sorts ahead of the prefab libraries.
+        try parseSignsFile(allocator, arena, dsp, "[D]", &list);
+    }
     try walkSigns(allocator, arena, prefabs_root, &list);
 
     // readdir order is OS/filesystem dependent; wire batches iterate this
@@ -215,7 +227,10 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8) !?Catalog {
     if (game_dir) |gd| {
         var path_buf: [2048]u8 = undefined;
         const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Prefabs", .{gd});
-        return loadFromPrefabsRoot(allocator, p) catch null;
+        var cfg_buf: [2048]u8 = undefined;
+        // Stock default `[D]` library (mandatory zero-guid Default Sign).
+        const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Data/Config/signs.xml", .{gd});
+        return loadFromPrefabsRoot(allocator, p, cfg) catch null;
     }
     return null;
 }
@@ -233,4 +248,24 @@ test "guid net order" {
     try std.testing.expectEqual(@as(u8, 0x66), g[7]);
     try std.testing.expectEqual(@as(u8, 0x88), g[8]);
     try std.testing.expectEqual(@as(u8, 0xaa), g[10]);
+}
+
+
+test "default [D] sign library loads from Data/Config/signs.xml" {
+    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(gd)) return error.SkipZigTest;
+    var path_buf: [2048]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Prefabs", .{gd});
+    var cfg_buf: [2048]u8 = undefined;
+    const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Data/Config/signs.xml", .{gd});
+    var cat = try loadFromPrefabsRoot(std.testing.allocator, p, cfg);
+    defer cat.deinit();
+    var found_default_sign = false;
+    for (cat.entries) |e| {
+        if (std.mem.eql(u8, e.library, "[D]") and std.mem.eql(u8, e.name, "Default Sign")) {
+            found_default_sign = true;
+        }
+    }
+    // Stock ships the mandatory zero-guid Default Sign in the [D] library.
+    try std.testing.expect(found_default_sign);
 }

@@ -1,5 +1,8 @@
 # XML data audit: no stock `Data/Config` values hardcoded in server code
 
+> **What this is:** the audit that no stock `Data/Config` value ships hardcoded in `src/` (per-file coverage plus the `make check-xml-audit` machine gate).
+> **Related:** [PROVENANCE.md](PROVENANCE.md) · [ASSETS.md](ASSETS.md) · [GAME_OPTIONS.md](GAME_OPTIONS.md) · [STATUS.md](STATUS.md)
+
 Audit of every `.xml` file in the stock game's `Data/Config` (target **V3.1.0 b14**,
 operator install at `--game-dir`) against the Zig server source (`src/`), so that
 no value the stock XML defines is hardcoded in the server implementation.
@@ -144,16 +147,16 @@ From the value-level audit (2026-08-25); each is either unreachable in stock
 play or needs a boundary/plumbing change before it can carry stock data. None
 ships a wrong value to a connected client.
 
-| Item | Why deferred |
+| Item | Status |
 |---|---|
-| Melee reach per hand item (`Range` 1.6 / `MaxRange` 2.4 in items.xml) | `attack_range_sq` is the documented floor; the AI break/destroy gates read it and lack per-class slot plumbing. 2.0 m sits between the stock values. |
-| loot.xml `ignore_loot_abundance` / `unique_item` / `abundance_type` / `unmodified_lootstage` / `open_time` | Carriers are twitch-only containers (unreachable), except `questRewardSkillMagazines unique_item`; the flag set needs a roll-path change. |
-| traders.xml `rent_cost` / `rent_time` / `player_owned` | The rent mechanic is unimplemented; `player_owned` pricing is RE-derived but unapplied. |
-| quests.xml `max_quest_tier` / `quests_per_tier` | Parsed but unused: no trader tier-offer loop consumes them yet. |
-| progression.xml `skill_points_per_level`, attribute/perk costs | The skill-point/perk ledger is pending (ADR 0023); no purchase path exists. |
-| painting.xml id ↔ TextureId table | Loaded, zero readers: the chunk paint channel carries the raw texture; the client resolves paint ids. |
-| signs.xml default library `[D]` | Only prefab `*_signs.xml` libraries load; the stock `[D]` library (incl. the mandatory zero-guid sign) is client-side too. |
-| materials.xml `Experience` | No block-harvest/repair XP exists (kill XP only); loader gap = missing feature. |
-| vehicles.xml `motorTorque_turbo` | Parsed but unused: accel is the documented zdtd-owned `[rules.vehicle] accel_mps2` proxy (stock dedi has no physics sim). |
-| npc.xml `<factions>` / `quest_faction` | Server has no NPC AI; `quest_faction` is also missing from the quest wire field. |
-| biomes.xml biome `difficulty` / `buff` attrs | Not consumed by worldgen or spawn scaling. |
+| Melee reach per hand item (`Range` 1.6 / `MaxRange` 2.4 in items.xml) | **FIXED (2026-08-25)** — parsed into `ItemDef.melee_range`; the AI gates read the per-class range (`systems.meleeRangeSq`) with the Rules floor as fallback. |
+| loot.xml `ignore_loot_abundance` / `unique_item` / `abundance_type` / `unmodified_lootstage` / `open_time` | **FIXED (2026-08-25)** — all five parsed into `LootContainer`; `ignore_loot_abundance` skips the abundance scale and `unique_item` dedups per fill (questRewardSkillMagazines). `abundance_type` multipliers and the `unmodified_lootstage` stage chain stay Game-side/RE-tracked; `open_time` is client display. |
+| signs.xml default library `[D]` | **FIXED (2026-08-25)** — `Data/Config/signs.xml` loads as the `[D]` library (mandatory zero-guid Default Sign) alongside the prefab libraries. |
+| quests.xml `max_quest_tier` / `quests_per_tier` | **FIXED (2026-08-25)** — the trader offer path clamps to `max_quest_tier` and caps the per-window offers at `quests_per_tier`. |
+| traders.xml `rent_cost` / `rent_time` / `player_owned` | In progress — the rent mechanic (rentable trader 5) is being implemented; `player_owned` pricing is RE-derived. |
+| progression.xml `skill_points_per_level`, attribute/perk costs | In progress — the skill-point/perk ledger (ADR 0023) is being implemented. |
+| materials.xml `Experience` | In progress — block-harvest/repair/upgrade XP is being implemented. |
+| painting.xml id ↔ TextureId table | Loaded, zero readers: the chunk paint channel carries the raw texture; the client resolves paint ids. Close-with-reason. |
+| vehicles.xml `motorTorque_turbo` | Parsed but unused: accel is the documented zdtd-owned `[rules.vehicle] accel_mps2` proxy (stock dedi has no physics sim). Close-with-reason. |
+| npc.xml `<factions>` / `quest_faction` | Server has no NPC AI; `quest_faction` is also missing from the quest wire field. Close-with-reason (no NPC AI feature in scope). |
+| biomes.xml biome `difficulty` / `buff` attrs | Not consumed by worldgen or spawn scaling. Close-with-reason. |

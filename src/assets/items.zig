@@ -52,6 +52,10 @@ pub const ItemDef = struct {
     /// feral 24; 0 = none/unset → the `[rules.progression] block_bite_damage`
     /// floor).
     damage_block: f32 = 0,
+    /// items.xml melee reach: `Range` property (zombie hand 1.6) or the
+    /// passive `MaxRange` (club/axe 2.4). 0 = none/unset → the
+    /// `[rules.combat] attack_range_sq` floor.
+    melee_range: f32 = 0,
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -506,6 +510,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_place_names.deinit(allocator);
     var stock_dmg_blocks: std.ArrayList(f32) = .empty;
     defer stock_dmg_blocks.deinit(allocator);
+    var stock_melee_ranges: std.ArrayList(f32) = .empty;
+    defer stock_melee_ranges.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
     defer stock_fuels.deinit(allocator);
     var stock_is_eat: std.ArrayList(bool) = .empty;
@@ -610,6 +616,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 dmg_block = xml.parseF32(v) orelse 0;
             }
             try stock_dmg_blocks.append(allocator, dmg_block);
+            // Melee reach: `Range` property (zombie hand 1.6) or the passive
+            // `MaxRange` (club/axe 2.4). Drives the AI attack-range gate.
+            var mrange: f32 = 0;
+            if (xml.propertyValue(clean[ii..item_end], "Range")) |v| {
+                mrange = xml.parseF32(v) orelse 0;
+            }
+            if (mrange <= 0) {
+                if (xml.passiveEffectValue(clean[ii..item_end], "MaxRange")) |v| {
+                    mrange = xml.parseF32(v) orelse 0;
+                }
+            }
+            try stock_melee_ranges.append(allocator, mrange);
             var fuel: f32 = 0;
             if (xml.propertyValue(clean[ii..item_end], "FuelValue")) |v| {
                 fuel = xml.parseF32(v) orelse 0;
@@ -768,6 +786,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.entity_damage = stock_edmgs.items[idx];
                 def.place_block_name = stock_place_names.items[idx];
                 def.damage_block = stock_dmg_blocks.items[idx];
+                def.melee_range = stock_melee_ranges.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
@@ -805,6 +824,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .entity_damage = stock_edmgs.items[idx],
             .place_block_name = stock_place_names.items[idx],
             .damage_block = stock_dmg_blocks.items[idx],
+            .melee_range = stock_melee_ranges.items[idx],
             .fuel_value = stock_fuels.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
             .is_eat = stock_is_eat.items[idx],
@@ -1007,6 +1027,14 @@ test "load stock items.xml when present" {
     }
     if (t.byName("meleeHandZombieFeral")) |feral| {
         try std.testing.expectEqual(@as(f32, 24), feral.damage_block);
+    }
+    // Melee reach: zombie hand Range property 1.6; club falls back to the
+    // passive MaxRange 2.4.
+    if (t.byName("meleeHandZombie01")) |hand| {
+        try std.testing.expectEqual(@as(f32, 1.6), hand.melee_range);
+    }
+    if (t.byName("meleeWpnClubT0WoodenClub")) |club| {
+        try std.testing.expectEqual(@as(f32, 2.4), club.melee_range);
     }
     // Medical heal: bandage heals via the medicalRegHealthAmount cvar.
     if (t.byName("medicalFirstAidBandage")) |band| {

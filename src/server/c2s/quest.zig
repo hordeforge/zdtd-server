@@ -264,6 +264,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 tz = self.sim.transform[ni].z;
             }
         }
+        // max_quest_tier (quests.xml root): stock clamps the offered tier
+        // window to the declared maximum (accept + offer paths below).
+        const req_tier: u8 = blk: {
+            const mt = self.sim.catalog.max_tier;
+            const tl: u8 = @intCast(@max(head.tier_level, 0));
+            if (mt > 0 and tl > mt) break :blk mt;
+            break :blk tl;
+        };
         if (head.event_type == .remove_quest) {
             // Stock accept marker (asm.il 827746-827975): the client took
             // the removeIndex'th offer, filtered by DifficultyTier and
@@ -274,7 +282,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 for (list.entries) |qid| {
                     const d = self.sim.catalog.byId(qid) orelse continue;
                     if (d.name.len == 0 or !self.isStockClientQuestName(d.name)) continue;
-                    if (d.difficulty_tier != head.tier_level) continue;
+                    if (d.difficulty_tier != req_tier) continue;
                     const ps = self.sim.playerByPeer(c.slot) orelse break;
                     if (self.sim.mask[ps].journal and self.sim.journal[ps].hasActive(qid)) continue;
                     if (idx == head.remove_index) {
@@ -297,7 +305,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
             var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-            const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(head.tier_level, 0)), &offers);
+            const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(req_tier, 0)), &offers);
             const body_out = try packages.buildNpcQuestListFetch(
                 self.body_buf[0..2048],
                 head.npc_entity_id,
@@ -310,7 +318,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         if (head.event_type == .fetch_list or head.event_type == .reset_quests) {
             var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
-            const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(head.tier_level, 0)), &offers);
+            const on = self.buildTraderQuestOffers(self.traderQuestList(head.npc_entity_id), c.slot, tx, ty, tz, @intCast(@max(req_tier, 0)), &offers);
             const body_out = try packages.buildNpcQuestListFetch(
                 self.body_buf[0..2048],
                 head.npc_entity_id,
