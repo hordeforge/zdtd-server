@@ -190,13 +190,20 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         // A39: the sell base is EconomicValue * EconomicSellScale (stock
         // GetSellPrice; default scale 1.0, a few items mark down to .5).
         const sell_scale: f32 = if (self.items.byId(iid)) |d| d.econ_sell_scale else 1.0;
+        // EconomicBundleSize (RE loot-economy.md §5): GetBuyPrice/GetSellPrice
+        // divide the unit price by the bundle; the trade path multiplies
+        // unit × qty. ammoGasCan (bundle 100) sells at ~0.9 dukes/can stock.
+        const bundle: f64 = if (self.items.byId(iid)) |d|
+            @floatFromInt(@max(1, d.econ_bundle_size))
+        else
+            1.0;
         const qmod = ecs.systems.qualityPriceMod(qmin, qmax, r.quality);
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
             .count = r.count,
             .quality = r.quality,
-            .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod))), 65535)) else 5,
-            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod))), 65535)))) else 1,
+            .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod) / bundle)), 65535)) else 5,
+            .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle)), 65535)))) else 1,
         };
         n += 1;
     }

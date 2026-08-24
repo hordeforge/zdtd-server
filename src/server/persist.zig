@@ -1095,7 +1095,11 @@ pub fn loadEntities(self: *Game) !void {
                 const fuel = r.readF32() catch return error.Truncated;
                 const seats = r.readByte() catch return error.Truncated;
                 const max_speed = r.readF32() catch return error.Truncated;
-                if (self.sim.spawnVehicleEx(kind, x, y, z, 200, max_speed, seats)) |nid| {
+                // Restore the loader's per-kind max HP (EntityVehicle C#
+                // constants: gyro 250, 4x4 300, rest 200) — a saved gyro/4x4
+                // must not come back at the flat 200.
+                const vhp: f32 = if (self.vehicles.byKind(kind)) |vd| vd.max_hp else 200;
+                if (self.sim.spawnVehicleEx(kind, x, y, z, vhp, max_speed, seats)) |nid| {
                     if (self.sim.slotOfNetId(nid)) |vs| {
                         self.sim.vehicle[vs].fuel = fuel;
                         self.sim.transform[vs].yaw = yaw;

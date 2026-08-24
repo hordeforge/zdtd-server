@@ -68,7 +68,12 @@ pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, a
     }
     const vs = best orelse return false;
     const v = &self.sim.vehicle[vs];
-    const fuel_cap = self.sim.rules.vehicle.fuel_cap;
+    // Tank cap: vehicles.xml fuelTank capacity when known (Game table);
+    // else the `[rules.vehicle] fuel_cap` floor.
+    var fuel_cap = self.sim.rules.vehicle.fuel_cap;
+    if (self.vehicles.byKind(v.kind)) |vd| {
+        if (vd.tank_capacity > 0) fuel_cap = vd.tank_capacity;
+    }
     if (v.fuel >= fuel_cap) return false;
     v.fuel = @min(fuel_cap, v.fuel + amount);
     // Fuel is a vehicle payload; pos flags the vehicle for the periodic

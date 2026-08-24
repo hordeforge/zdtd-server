@@ -824,6 +824,10 @@ pub const Game = struct {
         self.sim.place_fn = &placeBlockId;
         self.sim.fuel_value_ctx = self;
         self.sim.fuel_value_fn = &itemFuelValue;
+        self.sim.vehicle_tank_ctx = self;
+        self.sim.vehicle_tank_fn = &vehicleTankCapacity;
+        self.sim.turret_watts_ctx = self;
+        self.sim.turret_watts_fn = &turretWatts;
         self.sim.stack_ctx = self;
         self.sim.stack_fn = &itemStackFor;
         self.sim.is_armor_ctx = self;
@@ -1063,6 +1067,14 @@ pub const Game = struct {
 
     fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 {
         return game_hooks.itemFuelValue(ctx, item_id);
+    }
+
+    fn vehicleTankCapacity(ctx: ?*anyopaque, kind: ecs.components.VehicleKind) f32 {
+        return game_hooks.vehicleTankCapacity(ctx, kind);
+    }
+
+    fn turretWatts(ctx: ?*anyopaque) f32 {
+        return game_hooks.turretWatts(ctx);
     }
 
     fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {

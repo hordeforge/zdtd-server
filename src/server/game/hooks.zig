@@ -395,12 +395,6 @@ pub fn questAcceptAt(ctx: ?*anyopaque, peer_slot: i32, def_id: u16) i32 {
 
 pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
-    const iname: ?[]const u8 = if (g.items.byId(item_id)) |d|
-        d.name
-    else if (g.items.source == .builtin and !g.stock_catalogs_requested)
-        invsys.builtinStockNameFallback(item_id)
-    else
-        null;
     const IdCtx = struct {
         t: *const assets_maxdamage.Table,
         fn lookup(c: ?*anyopaque, n: []const u8) ?u16 {
@@ -409,8 +403,16 @@ pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
         }
     };
     var id_ctx: IdCtx = .{ .t = &g.maxdamage };
-    const resolved = invsys.itemToBlockResolved(item_id, iname, IdCtx.lookup, &id_ctx);
+    // Stock placement: only items with an Action1 PlaceAsBlock Blockname place
+    // (b14: torch → wallTorchLightPlayer, candle → candleWallLightPlayer).
+    // resourceWood etc. carry none and are not placeable (fail closed).
+    const place_name: ?[]const u8 = if (g.items.byId(item_id)) |d|
+        d.place_block_name
+    else
+        null;
+    const resolved = invsys.itemToBlockResolved(place_name, IdCtx.lookup, &id_ctx);
     if (resolved != 0) return resolved;
+    // Offline demo (no game-dir): builtin pin map (wood/cobble frame shapes).
     if (g.items.source == .builtin and !g.stock_catalogs_requested) return invsys.itemToBlock(item_id);
     return 0;
 }
@@ -418,6 +420,25 @@ pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
 pub fn itemFuelValue(ctx: ?*anyopaque, item_id: u16) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     return g.items.fuelValueFor(item_id);
+}
+
+/// vehicles.xml fuelTank capacity for a kind (0 = unset → the
+/// `[rules.vehicle] fuel_cap` floor). Wired to World.vehicle_tank_fn so the
+/// ECS spawn fills the stock tank (minibike 40, motorcycle 120, 4x4 400,
+/// gyro 80) when a game-dir is present.
+pub fn vehicleTankCapacity(ctx: ?*anyopaque, kind: ecs.components.VehicleKind) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.vehicles.byKind(kind)) |vd| return vd.tank_capacity;
+    return 0;
+}
+
+/// autoTurret block RequiredPower (maxdamage; stock 15 W, builtin 15).
+/// Wired to World.turret_watts_fn so placed/restored turrets draw the stock
+/// load instead of the old flat 25.
+pub fn turretWatts(ctx: ?*anyopaque) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.maxdamage.wattsByName("autoTurret")) |w| return w;
+    return 15;
 }
 
 pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
@@ -593,7 +614,10 @@ pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
         }
         if (sell_markup == 0.02 and g.traders.sell_markdown > 0) sell_markup = g.traders.sell_markdown;
     }
-    const scaled: f64 = @as(f64, d.econ) * @as(f64, d.econ_sell_scale) * @as(f64, sell_markup);
+    // EconomicBundleSize (RE loot-economy.md §5 GetSellPrice): the sell base
+    // divides by the bundle; the caller multiplies unit × qty.
+    const bundle: f64 = @floatFromInt(@max(1, d.econ_bundle_size));
+    const scaled: f64 = @as(f64, d.econ) * @as(f64, d.econ_sell_scale) * @as(f64, sell_markup) / bundle;
     return @max(1, @as(u32, @intCast(@min(@as(u64, @intFromFloat(@floor(scaled))), 65535))));
 }
 

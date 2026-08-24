@@ -87,32 +87,19 @@ pub fn itemToBlock(item_id: u16) u16 {
     return 0;
 }
 
-/// Production place: resolve via AssignIds idByName (game-dir dump). Fail closed → 0.
-/// Item names are not block names: never return idByName(itemName) as a block id.
+/// Production place: resolve the item's Action1 PlaceAsBlock `Blockname` via
+/// AssignIds idByName (game-dir dump). Fail closed → 0. Stock places only
+/// items that carry a Blockname (b14: torch → wallTorchLightPlayer, candle →
+/// candleWallLightPlayer); resourceWood etc. have none and are not placeable.
+/// Item names are not block names: never return idByName(itemName).
 pub fn itemToBlockResolved(
-    item_id: u16,
-    item_name: ?[]const u8,
+    place_block_name: ?[]const u8,
     id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
     ctx: ?*anyopaque,
 ) u16 {
-    const name = item_name orelse offlineStockName(item_id) orelse return 0;
-    // Stock placeables: item → shape block (AssignIds), not the item type id.
-    if (std.mem.eql(u8, name, "resourceWood") or std.mem.eql(u8, name, "wood")) {
-        if (id_by_name(ctx, "frameShapes:cube")) |id| return id;
-        return 0;
-    }
-    if (std.mem.eql(u8, name, "resourceCobblestones") or std.mem.eql(u8, name, "cobblePlaceable") or
-        std.mem.eql(u8, name, "cobblestone"))
-    {
-        if (id_by_name(ctx, "cobblestoneShapes:cube")) |id| return id;
-        return 0;
-    }
-    // Other items: only accept an explicit block-shaped name if present in dump.
-    if (id_by_name(ctx, name)) |id| {
-        // Reject if this is clearly the same as a pure item-only path with no place shape.
-        // Prefer non-zero dump id for names that are already block names (e.g. frameShapes:*).
-        return id;
-    }
+    const pn = place_block_name orelse return 0;
+    if (pn.len == 0) return 0;
+    if (id_by_name(ctx, pn)) |id| return id;
     return 0;
 }
 
@@ -749,13 +736,32 @@ test "resolved placeables fail closed when AssignIds lacks the block name" {
             return null;
         }
     };
+    // Stock: only a PlaceAsBlock Blockname places. resourceWood carries none
+    // (b14 items.xml) → not placeable even when the dump lacks the shape.
     try std.testing.expectEqual(
         @as(u16, 0),
-        itemToBlockResolved(7, "resourceWood", Missing.lookup, null),
+        itemToBlockResolved("", Missing.lookup, null),
     );
     try std.testing.expectEqual(
         @as(u16, 0),
-        itemToBlockResolved(10, "resourceCobblestones", Missing.lookup, null),
+        itemToBlockResolved("wallTorchLightPlayer", Missing.lookup, null),
+    );
+    try std.testing.expectEqual(
+        @as(u16, 0),
+        itemToBlockResolved(null, Missing.lookup, null),
+    );
+}
+
+test "resolved placeables map the stock Blockname through AssignIds" {
+    const Map = struct {
+        fn lookup(_: ?*anyopaque, n: []const u8) ?u16 {
+            if (std.mem.eql(u8, n, "wallTorchLightPlayer")) return 4242;
+            return null;
+        }
+    };
+    try std.testing.expectEqual(
+        @as(u16, 4242),
+        itemToBlockResolved("wallTorchLightPlayer", Map.lookup, null),
     );
 }
 

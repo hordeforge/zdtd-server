@@ -35,6 +35,10 @@ pub const ItemDef = struct {
     /// IL default 1.0; the sell price base is EconomicValue * scale, RE
     /// loot-economy.md GetSellPrice). A39.
     econ_sell_scale: f32 = 1.0,
+    /// items.xml EconomicBundleSize (RE loot-economy.md §5 GetBuyPrice/
+    /// GetSellPrice: the price divides by the bundle). 89 stock items carry
+    /// it (ammoGasCan 100, resourceWood 50, …); absent = 1.
+    econ_bundle_size: u16 = 1,
     /// items.xml passive_effect DegradationMax (passive 8, stock
     /// `ItemClass.get_MaxUseTimesBase`, IL=25): the durability cap. Quality
     /// tiers "min,max" (tier 1..6 = quality 1..6) lerp between the pair; a
@@ -44,6 +48,12 @@ pub const ItemDef = struct {
     degradation_max: u32 = 0,
     /// items.xml Action0 DamageEntity (melee hand damage; 0 = none/unset).
     entity_damage: f32 = 0,
+    /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
+    /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
+    /// Resolved to a block id via AssignIds at place time; empty = not
+    /// placeable (fail closed — resourceWood etc. carry no Blockname and do
+    /// not place in stock).
+    place_block_name: []const u8 = "",
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
     fuel_value: f32 = 0,
     /// ItemActionEat (Action0 Class=Eat) or name prefix food/drink.
@@ -478,10 +488,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer ext_names.deinit(allocator);
     var stock_econs: std.ArrayList(u16) = .empty;
     defer stock_econs.deinit(allocator);
+    var stock_econ_declared: std.ArrayList(bool) = .empty;
+    defer stock_econ_declared.deinit(allocator);
+    var stock_bundles: std.ArrayList(u16) = .empty;
+    defer stock_bundles.deinit(allocator);
+    var stock_bundle_declared: std.ArrayList(bool) = .empty;
+    defer stock_bundle_declared.deinit(allocator);
     var stock_econ_scales: std.ArrayList(f32) = .empty;
     defer stock_econ_scales.deinit(allocator);
     var stock_edmgs: std.ArrayList(f32) = .empty;
     defer stock_edmgs.deinit(allocator);
+    var stock_place_names: std.ArrayList([]const u8) = .empty;
+    defer stock_place_names.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
     defer stock_fuels.deinit(allocator);
     var stock_is_eat: std.ArrayList(bool) = .empty;
@@ -534,10 +552,24 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             const ext = xml.propertyValue(clean[ii..item_end], "Extends");
             try ext_names.append(allocator, if (ext) |e| try arena.dupe(u8, e) else "");
             var econ: u16 = 0;
+            var econ_declared = false;
             if (xml.propertyValue(clean[ii..item_end], "EconomicValue")) |v| {
                 econ = xml.parseU16(v) orelse 0;
+                econ_declared = true;
             }
             try stock_econs.append(allocator, econ);
+            try stock_econ_declared.append(allocator, econ_declared);
+            // EconomicBundleSize (RE loot-economy.md §5): GetBuyPrice /
+            // GetSellPrice divide the unit price by the bundle. 89 stock
+            // items carry it (ammoGasCan 100, resourceWood 50, …); absent = 1.
+            var bundle: u16 = 1;
+            var bundle_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "EconomicBundleSize")) |v| {
+                bundle = xml.parseU16(v) orelse 1;
+                bundle_declared = true;
+            }
+            try stock_bundles.append(allocator, bundle);
+            try stock_bundle_declared.append(allocator, bundle_declared);
             // A39: EconomicSellScale (default 1.0 = stock ItemClass ctor IL).
             var econ_scale: f32 = 1.0;
             if (xml.propertyValue(clean[ii..item_end], "EconomicSellScale")) |v| {
@@ -550,6 +582,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 edmg = xml.parseF32(v) orelse 0;
             }
             try stock_edmgs.append(allocator, edmg);
+            // ItemActionPlaceAsBlock (Action1 Class=PlaceAsBlock): only items
+            // with a Blockname place (stock b14 exactly two). Empty = not
+            // placeable; resolved via AssignIds at place time.
+            var place_name: []const u8 = "";
+            if (itemActionClassIs(clean[ii..item_end], "PlaceAsBlock")) {
+                if (xml.propertyValue(clean[ii..item_end], "Blockname")) |bn| place_name = try arena.dupe(u8, bn);
+            }
+            try stock_place_names.append(allocator, place_name);
             var fuel: f32 = 0;
             if (xml.propertyValue(clean[ii..item_end], "FuelValue")) |v| {
                 fuel = xml.parseF32(v) orelse 0;
@@ -627,17 +667,26 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         i = ii + 6;
     }
 
-    // Resolve Stacknumber through the Extends chain (stock items.xml declares
-    // ~1144 Extends properties; a child can precede its parent in the file, so
-    // this is a second pass). An item with no Stacknumber anywhere inherits the
-    // ItemClass default of 500 (asm.il:749089).
+    // Resolve Stacknumber, EconomicValue and EconomicBundleSize through the
+    // Extends chain (stock items.xml declares ~1144 Extends properties; a
+    // child can precede its parent in the file, so this is a second pass).
+    // An item with no Stacknumber anywhere inherits the ItemClass default of
+    // 500 (asm.il:749089). EconomicValue inherits like any property (286
+    // stock items get their econ from a master, e.g. armorAssassinBoots ->
+    // armorMediumMaster econ 1000; no stock item declares EconomicValue="0").
     {
-        var own_map: std.StringHashMapUnmanaged(u16) = .{};
-        defer own_map.deinit(allocator);
+        var own_stack_map: std.StringHashMapUnmanaged(u16) = .{};
+        defer own_stack_map.deinit(allocator);
+        var own_econ_map: std.StringHashMapUnmanaged(u16) = .{};
+        defer own_econ_map.deinit(allocator);
+        var own_bundle_map: std.StringHashMapUnmanaged(u16) = .{};
+        defer own_bundle_map.deinit(allocator);
         var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
         defer ext_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
-            if (own_stacks.items[idx] != 0) try own_map.put(allocator, n, own_stacks.items[idx]);
+            if (own_stacks.items[idx] != 0) try own_stack_map.put(allocator, n, own_stacks.items[idx]);
+            if (stock_econ_declared.items[idx]) try own_econ_map.put(allocator, n, stock_econs.items[idx]);
+            if (stock_bundle_declared.items[idx]) try own_bundle_map.put(allocator, n, stock_bundles.items[idx]);
             if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
         }
         const max_hops: usize = 24;
@@ -645,8 +694,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             var cur = n;
             var hops: usize = 0;
             while (hops < max_hops) : (hops += 1) {
-                if (own_map.get(cur)) |s| {
+                if (own_stack_map.get(cur)) |s| {
                     stock_stacks.items[idx] = s;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_econ_map.get(cur)) |e| {
+                    stock_econs.items[idx] = e;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_bundle_map.get(cur)) |b| {
+                    stock_bundles.items[idx] = b;
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
@@ -666,10 +737,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.stock_type = stock_types.items[idx];
                 def.stack = stock_stacks.items[idx];
                 def.econ = stock_econs.items[idx];
+                def.econ_bundle_size = stock_bundles.items[idx];
                 def.econ_sell_scale = stock_econ_scales.items[idx];
                 def.degradation_min = stock_degrad_min.items[idx];
                 def.degradation_max = stock_degrad_max.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
+                def.place_block_name = stock_place_names.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
@@ -700,10 +773,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .stack = stock_stacks.items[idx],
             .stock_type = stock_types.items[idx],
             .econ = stock_econs.items[idx],
+            .econ_bundle_size = stock_bundles.items[idx],
             .econ_sell_scale = stock_econ_scales.items[idx],
             .degradation_min = stock_degrad_min.items[idx],
             .degradation_max = stock_degrad_max.items[idx],
             .entity_damage = stock_edmgs.items[idx],
+            .place_block_name = stock_place_names.items[idx],
             .fuel_value = stock_fuels.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
             .is_eat = stock_is_eat.items[idx],
@@ -869,6 +944,28 @@ test "load stock items.xml when present" {
     if (t.byName("ammoGasCan")) |gas| {
         try std.testing.expect(gas.fuel_value > 0);
         try std.testing.expectEqual(gas.fuel_value, t.fuelValueFor(gas.id));
+    }
+    // Action1 PlaceAsBlock Blockname: b14 exactly two items place, and the
+    // rest (resourceWood etc.) are not placeable.
+    if (t.byName("meleeToolTorch")) |torch| {
+        try std.testing.expectEqualStrings("wallTorchLightPlayer", torch.place_block_name);
+    }
+    if (t.byName("candle")) |cnd| {
+        try std.testing.expectEqualStrings("candleWallLightPlayer", cnd.place_block_name);
+    }
+    if (t.byName("resourceWood")) |wood| {
+        try std.testing.expectEqualStrings("", wood.place_block_name);
+    }
+    // EconomicValue resolves through the Extends chain (286 stock items get
+    // their econ from a master) and EconomicBundleSize divides the price.
+    if (t.byName("armorAssassinBoots")) |boots| {
+        try std.testing.expectEqual(@as(u16, 1000), boots.econ);
+    }
+    if (t.byName("ammoGasCan")) |gas| {
+        try std.testing.expectEqual(@as(u16, 100), gas.econ_bundle_size);
+    }
+    if (t.byName("resourceWood")) |wood| {
+        try std.testing.expectEqual(@as(u16, 50), wood.econ_bundle_size);
     }
     var buf: [512 * 1024]u8 = undefined;
     const map = try t.writeNameIdMapping(&buf);

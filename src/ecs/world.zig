@@ -346,6 +346,13 @@ pub const World = struct {
     /// Optional item_id → items.xml FuelValue (0 = not fuel). Game wires ItemTable.
     fuel_value_ctx: ?*anyopaque = null,
     fuel_value_fn: ?*const fn (?*anyopaque, u16) f32 = null,
+    /// Optional → autoTurret block RequiredPower (maxdamage; stock 15 W).
+    turret_watts_ctx: ?*anyopaque = null,
+    turret_watts_fn: ?*const fn (?*anyopaque) f32 = null,
+    /// Optional kind → vehicles.xml fuelTank capacity (0 = unset → the
+    /// `[rules.vehicle] fuel_cap` floor). Game wires the vehicle table.
+    vehicle_tank_ctx: ?*anyopaque = null,
+    vehicle_tank_fn: ?*const fn (?*anyopaque, c.VehicleKind) f32 = null,
     /// Optional item_id → max stack (items.xml Stacknumber). Null → builtin_defs.
     stack_ctx: ?*anyopaque = null,
     stack_fn: ?*const fn (?*anyopaque, u16) u16 = null,
@@ -1185,9 +1192,18 @@ pub const World = struct {
         const hp = if (max_hp > 0) max_hp else 200;
         const s = self.spawnBase(.vehicle, x, y, z, hp) orelse return null;
         self.mask[s].vehicle = true;
+        // Tank capacity: vehicles.xml fuelTank capacity via the Game hook when
+        // known; else the `[rules.vehicle] fuel_cap` floor. Bicycles carry no
+        // tank in stock (they burn nothing and cannot be refueled).
+        var tank_cap: f32 = 0;
+        if (self.vehicle_tank_fn) |f| {
+            const cap = f(self.vehicle_tank_ctx, kind);
+            if (cap > 0) tank_cap = cap;
+        }
+        if (tank_cap <= 0) tank_cap = self.rules.vehicle.fuel_cap;
         self.vehicle[s] = .{
             .kind = kind,
-            .fuel = if (kind == .bicycle) 0 else self.rules.vehicle.fuel_cap,
+            .fuel = if (kind == .bicycle) 0 else tank_cap,
             .max_speed = max_speed,
             .seat_count = @max(1, @min(seat_count, @as(u8, c.max_seats))),
         };
@@ -1197,7 +1213,14 @@ pub const World = struct {
 
     pub fn spawnTurret(self: *World, x: f32, y: f32, z: f32) ?NetId {
         const s = self.spawnBase(.turret, x, y, z, 150) orelse return null;
-        const nid = self.power.addNode(.consumer, @floor(x), @floor(y), @floor(z), 25) orelse {
+        // Turret draw: autoTurret block RequiredPower via the Game hook (stock
+        // 15 W); 15 is also the builtin/offline table value (never 25).
+        var watts: f32 = 15;
+        if (self.turret_watts_fn) |f| {
+            const w = f(self.turret_watts_ctx);
+            if (w > 0) watts = w;
+        }
+        const nid = self.power.addNode(.consumer, @floor(x), @floor(y), @floor(z), watts) orelse {
             self.destroy(s);
             return null;
         };

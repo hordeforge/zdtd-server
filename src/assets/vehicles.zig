@@ -16,9 +16,12 @@ pub const Def = struct {
     velocity_max: f32 = 7,
     /// Motor torque forward (stock units).
     motor_torque: f32 = 400,
-    /// Max HP when used as entity (from entityclasses if linked; else default).
+    /// Max HP when used as entity (EntityVehicle C# constant: gyro 250,
+    /// 4x4 300, rest 200; stock entityclasses carry no vehicle HealthMax).
     max_hp: f32 = 200,
-    fuel_km_per_l: f32 = 0.2,
+    /// vehicles.xml fuelTank `capacity` (minibike 40, motorcycle 120,
+    /// 4x4 400, gyro 80). 0 = unset → the `[rules.vehicle] fuel_cap` floor.
+    tank_capacity: f32 = 0,
     /// Usable seats without vehicle mods (see seatCountFromBody).
     seat_count: u8 = 1,
 };
@@ -133,7 +136,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
         var vel: f32 = 7;
         var torque: f32 = 400;
-        var fuel: f32 = 0.2;
+        var tank_cap: f32 = 0;
         if (xml.propertyValue(body, "velocityMax_turbo")) |v| {
             const f = firstF32(v);
             if (f > 0) vel = f;
@@ -145,11 +148,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             const f = firstF32(v);
             if (f > 0) torque = f;
         }
-        // engine fuelKmPerL may be nested; scan body
-        if (std.mem.find(u8, body, "fuelKmPerL")) |fi| {
-            if (xml.attr(body, fi, "value")) |v| {
-                const f = firstF32(v);
-                if (f > 0) fuel = f;
+        // fuelTank capacity may be nested; scan body (stock capacity:
+        // minibike 40, motorcycle 120, 4x4 400, gyro 80).
+        if (std.mem.find(u8, body, "fuelTank")) |fi| {
+            if (std.mem.findPos(u8, body, fi, "capacity")) |ci| {
+                if (xml.attr(body, ci, "value")) |v| {
+                    const f = firstF32(v);
+                    if (f > 0) tank_cap = f;
+                }
             }
         }
 
@@ -158,7 +164,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             .kind = kind,
             .velocity_max = vel,
             .motor_torque = torque,
-            .fuel_km_per_l = fuel,
+            .tank_capacity = tank_cap,
             .max_hp = if (kind == .gyrocopter) 250 else if (kind == .four_by_four) 300 else 200,
             .seat_count = seatCountFromBody(body),
         });
@@ -185,6 +191,10 @@ test "load vehicles.xml when present" {
     try std.testing.expectEqual(components.VehicleKind.minibike, mb.kind);
     try std.testing.expect(mb.velocity_max > 0);
     try std.testing.expect(t.byKind(.bicycle) != null);
+    // fuelTank capacity from vehicles.xml (minibike 40; not the flat 100).
+    try std.testing.expectEqual(@as(f32, 40), mb.tank_capacity);
+    const gyr = t.byName("vehicleGyrocopter").?;
+    try std.testing.expectEqual(@as(f32, 80), gyr.tank_capacity);
 }
 
 test "seat count stops at the first modded seat" {
