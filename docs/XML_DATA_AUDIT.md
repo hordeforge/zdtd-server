@@ -22,9 +22,11 @@ Load-order priority for any value the server needs (ADR 0010 / AGENTS rule 15):
 Re-run the audit: `make check-xml-audit` (or `python3 tools/check_xml_audit.py`)
 — the deterministic gate re-extracts stock names from the operator's
 `Data/Config/*.xml` and fails on any stock-name literal in non-loader, non-wire,
-non-test server code that is not in its allowlist, and on any un-audited XML
-file. The manual pass below (per-file table + findings) is the written record;
-the script is the machine check.
+non-test server code that is not in its allowlist, on any un-audited XML file,
+and (value-level scan, 2026-08-25) on any pinned stock numeric literal
+(`VALUE_ITEMS` in the script) appearing in a production file outside its
+documented allowlist. The manual pass below (per-file table + findings) is the
+written record; the script is the machine check.
 
 ## Per-file coverage
 
@@ -156,7 +158,7 @@ ships a wrong value to a connected client.
 | traders.xml `rent_cost` / `rent_time` / `player_owned` | **CLOSED (2026-08-25)** — the rent mechanic already ships: `NetPackagePlayerVendingMachine` (c2s/quest.zig) implements the stock state machine (rent/extend/expire/clear, one machine per player, wallet sync, term from `rent_time`, cost from `rent_cost`), scenario-tested. `player_owned` is parsed; the owner-priced markup (`1 + Entry.Markup × 0.2`, RE loot-economy §5.2) is stock client-side pricing (XUiM_Trader; the wire carries base + owner markup, the server owns base price/sell). Server-side re-pricing would collide with the shared demand-spike markup (IncreaseMarkup), so it stays client-priced with the server owning the base — close-with-reason. |
 | progression.xml `skill_points_per_level`, attribute/perk costs | In progress — the skill-point/perk ledger (ADR 0023) is being implemented. |
 | materials.xml `Experience` | In progress — block-harvest/repair/upgrade XP is being implemented. |
-| painting.xml id ↔ TextureId table | Loaded, zero readers: the chunk paint channel carries the raw texture; the client resolves paint ids. Close-with-reason. |
-| vehicles.xml `motorTorque_turbo` | Parsed but unused: accel is the documented zdtd-owned `[rules.vehicle] accel_mps2` proxy (stock dedi has no physics sim). Close-with-reason. |
-| npc.xml `<factions>` / `quest_faction` | Server has no NPC AI; `quest_faction` is also missing from the quest wire field. Close-with-reason (no NPC AI feature in scope). |
-| biomes.xml biome `difficulty` / `buff` attrs | Not consumed by worldgen or spawn scaling. Close-with-reason. |
+| painting.xml id ↔ TextureId table | **CLOSED (2026-08-25)** — Loaded, zero readers: the chunk paint channel carries the raw texture; the client resolves paint ids. (close-with-reason). |
+| vehicles.xml `motorTorque_turbo` | **CLOSED (2026-08-25)** — Parsed but unused: accel is the documented zdtd-owned `[rules.vehicle] accel_mps2` proxy (stock dedi has no physics sim). (close-with-reason). |
+| npc.xml `<factions>` / `quest_faction` | **CLOSED (2026-08-25)** — Server has no NPC AI; `quest_faction` is also missing from the quest wire field. Close-with-reason (no NPC AI feature in scope). |
+| biomes.xml biome `difficulty` / `buff` attrs | **CLOSED (2026-08-25)** — Not consumed by worldgen or spawn scaling. (close-with-reason). |

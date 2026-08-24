@@ -101,6 +101,30 @@ ALLOWLIST = {
 }
 
 
+# Value-level scan: stock numeric literals pinned by the audit
+# (docs/XML_DATA_AUDIT.md fixed rows). A literal may appear in loader
+# (src/assets), wire (src/wire), fuzz, tests, or the explicitly listed
+# files (config floors / documented fallbacks). Any other production
+# occurrence is a hardcode-regression candidate that must be triaged.
+# Floats only: bare integers (40, 100, 8) are too common (buffer sizes,
+# loop bounds) to be diagnostic; decimal literals are distinctive.
+VALUE_ITEMS = {
+    "1.6": "items.xml meleeHand Range (zombie hand reach)",
+    "2.4": "items.xml passive MaxRange (club/axe reach)",
+    "0.02": "rules.vehicle.fuel_per_m floor (sell markdown default)",
+}
+# Files (relative to src/) beyond loader/wire/test where the literal is a
+# documented floor, RE conversion or zdtd-owned constant; any other
+# production file with the literal is a violation. Reasons per entry.
+VALUE_ALLOWED = {
+    "ecs/rules.zig": {"0.02", "1.6"},  # fuel_per_m floor; zombie ai gravity -1.6
+    "server/game/hooks.zig": {"0.02"},  # sell-markdown fallback (RULES_CONFIG STOCK fallbacks)
+    "server/game/trader.zig": {"0.02"},  # sell-markdown fallback (same)
+    "world/worldgen.zig": {"0.02", "1.6"},  # procedural noise frequency + shaping (zdtd-owned)
+    "ecs/systems.zig": {"1.6"},  # eye-height + chase-speed RE conversions (not melee range)
+}
+
+
 def extract_stock_names(config_dir):
     """Stock name set from the loader-consumed XMLs in Data/Config."""
     names = set()
@@ -210,6 +234,53 @@ def scan_src(src_dir, stock_names):
     return violations
 
 
+def production_floats(path):
+    """Decimal float literals in non-test production lines (comments stripped)."""
+    in_test = False
+    depth = 0
+    out = []
+    with open(path, "r", errors="replace") as fh:
+        for lineno, raw in enumerate(fh, 1):
+            if not in_test:
+                if re.match(r"^\s*test\b", raw):
+                    in_test = True
+                    depth = 0
+                else:
+                    no_comments = re.sub(r"//.*$", "", raw)
+                    for m in re.finditer(r"(?<![A-Za-z0-9_])(\d+\.\d+)", no_comments):
+                        out.append((lineno, m.group(1)))
+            if in_test:
+                stripped = strip_zig_line(raw)
+                depth += stripped.count("{") - stripped.count("}")
+                if depth <= 0:
+                    in_test = False
+                    depth = 0
+    return out
+
+
+def scan_values(src_dir):
+    """Stock numeric literals in production code outside their allowed files."""
+    violations = []
+    for root, _dirs, files in os.walk(src_dir):
+        rel = os.path.relpath(root, src_dir)
+        if rel == "assets" or rel.startswith("assets" + os.sep):
+            continue
+        if rel == "wire" or rel.startswith("wire" + os.sep):
+            continue
+        for fname in sorted(files):
+            if not fname.endswith(".zig"):
+                continue
+            path = os.path.join(root, fname)
+            if os.path.normpath(path) == os.path.normpath(os.path.join(src_dir, "fuzz.zig")):
+                continue
+            relpath = os.path.relpath(path, src_dir)
+            allowed = VALUE_ALLOWED.get(relpath, set())
+            for lineno, lit in production_floats(path):
+                if lit in VALUE_ITEMS and lit not in allowed:
+                    violations.append((relpath, lineno, lit, VALUE_ITEMS[lit]))
+    return violations
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--game-dir", default=DEFAULT_GAME)
@@ -232,6 +303,13 @@ def main():
         print("check_xml_audit: stock XML names used as literals outside loaders:")
         for rel, lineno, lit in violations:
             print("  %s:%d  %s" % (rel, lineno, lit))
+
+    value_violations = scan_values(args.src)
+    if value_violations:
+        ok = False
+        print("check_xml_audit: stock XML numeric literals outside loaders/allowlist:")
+        for rel, lineno, lit, why in value_violations:
+            print("  %s:%d  %s  (%s)" % (rel, lineno, lit, why))
 
     if not ok:
         print("check_xml_audit: FAIL")
