@@ -80,3 +80,15 @@ Wiring changes that accompany the moves (non-field fixes, same behavior):
 
 - `zig build test` exits 0.
 - `make check-xml-audit` exits 0 (independent gate).
+
+## 2026-08-25 additions (lift sweep)
+
+- `[rules.progression] kill_xp_fallback` (100) — kill-XP floor when
+  entityclasses ExperienceGain did not resolve (was a flat literal in
+  `xpGainFor`); binder + overlay + GAME_OPTIONS row ship with the field.
+- `[bots] arrival_dist` (0.05) / `[bots] shot_range_slop` (2.0) — bot host
+  move-arrival tolerance and fire-range slop (were module constants in
+  `bot.zig`); binder + main merge + GAME_OPTIONS row ship with the fields.
+- Re-audit found no dead `Rules` fields and no unconsumed config keys; the
+  kept-with-reason items are recorded in `docs/PLUGIN_CONFIG_DISPOSITION.md`
+  ("2026-08-25 lift sweep").
