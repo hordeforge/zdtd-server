@@ -710,6 +710,8 @@ test "parse [bots] section" {
         \\spawn_spread = 4.0
         \\spawn_y = 80.0
         \\max_step_up = 2.0
+        \\arrival_dist = 0.1
+        \\shot_range_slop = 3.0
     );
     defer f.deinit();
     try std.testing.expectEqual(@as(?f32, 20.0), f.bots.shoot_damage);
@@ -717,6 +719,8 @@ test "parse [bots] section" {
     try std.testing.expectEqual(@as(?f32, 4.0), f.bots.spawn_spread);
     try std.testing.expectEqual(@as(?f32, 80.0), f.bots.spawn_y);
     try std.testing.expectEqual(@as(?f32, 2.0), f.bots.max_step_up);
+    try std.testing.expectEqual(@as(?f32, 0.1), f.bots.arrival_dist);
+    try std.testing.expectEqual(@as(?f32, 3.0), f.bots.shot_range_slop);
 }
 
 /// Mirror of the server init-options shape the merge helpers write into.
