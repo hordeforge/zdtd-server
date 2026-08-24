@@ -369,6 +369,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+- Dependency bump: zwasm 2.4.1 → 2.5.0 (build.zig.zon URL + hash, THIRD_PARTY.md).
+  Picks up the upstream pre-tag cleanliness sweep (file org, build flags, audit
+  fixes) and full WASI 0.3 coverage; no zdtd-facing API change.
 - Pure XML/assetbundle modlet support (docs/prd/0003-modlets.md,
   docs/rfc/0003-modlets-plan.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
   `XmlPatcher` op catalog (append/prepend/insert/remove/set/csv/include,

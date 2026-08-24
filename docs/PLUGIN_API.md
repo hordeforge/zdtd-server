@@ -93,7 +93,7 @@ tick's budget, not the server. Budgets are configurable
 
 ## Runtime: zwasm v2 (decided 2026-08-06)
 
-zdtd embeds [zwasm](https://github.com/clojurewasm/zwasm) v2 (2.4.1), a
+zdtd embeds [zwasm](https://github.com/clojurewasm/zwasm) v2 (2.5.0), a
 WebAssembly runtime written in Zig, so the server takes no C dependency and no
 FFI boundary. Its `minimum_zig_version` is 0.16.0, matching this tree.
 

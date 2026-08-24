@@ -12,7 +12,7 @@ zdtd links or evaluates third-party code through its Zig package manager
 
 | Package | Version | License | Copyright | Notes |
 |---|---|---|---|---|
-| [zwasm](https://github.com/clojurewasm/zwasm) | 2.4.1 | Apache-2.0 | 2026 zwasm Contributors | WebAssembly runtime for the native plugin host (`src/plugin/wasm.zig`). Hash-pinned in `build.zig.zon`. |
+| [zwasm](https://github.com/clojurewasm/zwasm) | 2.5.0 | Apache-2.0 | 2026 zwasm Contributors | WebAssembly runtime for the native plugin host (`src/plugin/wasm.zig`). Hash-pinned in `build.zig.zon`. |
 
 Apache-2.0 section 4 requires that recipients of derivative works receive a
 copy of the license. The full Apache-2.0 text is reproduced below.

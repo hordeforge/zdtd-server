@@ -100,7 +100,7 @@ and release builds use the exact compiler in `.zigversion`; `make check`
 enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck.
 `make release` additionally requires `sha256sum`.
 
-One pinned dependency: the Wasm plugin runtime `zwasm` v2.4.1 (`build.zig.zon`,
+One pinned dependency: the Wasm plugin runtime `zwasm` v2.5.0 (`build.zig.zon`,
 URL + hash). `zig build` fetches it into Zig's global cache on first use, so a
 clean checkout needs network for that one fetch; later builds are offline and
 the hash pins the exact content. Override the compiler with
