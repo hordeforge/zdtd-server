@@ -561,11 +561,13 @@ function chartStopRaf(): void {
 }
 
 function chartStop(): void {
-    if (chartTimer === null) {
-        return;
+    // The rAF chain is (re)started by drawChart regardless of the poll timer
+    // (tab switch, resize, compress toggle), so it must be cancelled even
+    // when the interval is already stopped.
+    if (chartTimer !== null) {
+        clearInterval(chartTimer);
+        chartTimer = null;
     }
-    clearInterval(chartTimer);
-    chartTimer = null;
     chartStopRaf();
 }
 
