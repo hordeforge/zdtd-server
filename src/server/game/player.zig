@@ -81,7 +81,9 @@ pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
         const g = self.sim.class_id[s].xp_gain;
         if (g > 0) return @trunc(g);
     }
-    return 100;
+    // Rules floor (progression.kill_xp_fallback) when the class resolved no
+    // ExperienceGain (offline/builtin catalog or recycled slot).
+    return @intFromFloat(@max(0, self.sim.rules.progression.kill_xp_fallback));
 }
 
 /// Party.GetPartyXP + GameManager.SharedKillServer (parties-factions.md

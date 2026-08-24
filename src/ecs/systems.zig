@@ -571,12 +571,10 @@ fn completeQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
     s.completed = true;
     s.active = false;
     s.ready_turn_in = false;
-    if (w.catalog.byId(s.def_id)) |d| {
-        if (w.mask[ps].wallet) {
-            w.wallet[ps].coins +|= d.reward_coin;
-        }
-        // Stash for the Game's tick-end payout (items + exp need the assets
-        // table and the client xp ledger, both outside the sim).
+    if (w.catalog.byId(s.def_id) != null) {
+        // reward_coin pays at the tick-end payout (step.zig), through the
+        // on_quest_complete verdict like items/exp — paying here would let a
+        // deny/scaling plugin never touch the coin leg.
         if (w.completed_quests_n < w.completed_quests_ring.len) {
             w.completed_quests_ring[w.completed_quests_n] = .{ .slot = ps, .def_id = s.def_id };
             w.completed_quests_n += 1;
@@ -1188,6 +1186,22 @@ pub fn questCoins(w: *const World, peer_slot: usize) u32 {
     const ps = w.playerByPeer(peer_slot) orelse return 0;
     if (!w.mask[ps].wallet) return 0;
     return w.wallet[ps].coins;
+}
+
+/// Test-only: drain the completed-quest ring's coin rewards into the wallet.
+/// The Game's tick-end payout (step.zig) does this with the on_quest_complete
+/// verdict; ECS-level tests have no Game, so they drain the ring directly.
+pub fn drainQuestCoins(w: *World, peer_slot: usize) void {
+    const ps = w.playerByPeer(peer_slot) orelse return;
+    var i: usize = 0;
+    while (i < w.completed_quests_n) : (i += 1) {
+        const cq = w.completed_quests_ring[i];
+        if (cq.slot != ps) continue;
+        if (w.catalog.byId(cq.def_id)) |d| {
+            if (w.mask[ps].wallet) w.wallet[ps].coins +|= d.reward_coin;
+        }
+    }
+    w.completed_quests_n = 0;
 }
 
 pub fn questHasActive(w: *const World, peer_slot: usize, def_id: u16) bool {
@@ -4081,6 +4095,7 @@ test "quest kill complete on journal component" {
     questOnZombieKilled(&w, 0, 0, 0);
     questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expect(!questHasActive(&w, 0, 1));
+    drainQuestCoins(&w, 0);
     try std.testing.expectEqual(@as(u32, 25), questCoins(&w, 0));
 }
 
@@ -4104,6 +4119,7 @@ test "quest progress and coin rewards saturate instead of wrapping" {
     questOnFetchItem(&w, 0, 10);
 
     try std.testing.expect(!questHasActive(&w, 0, 22));
+    drainQuestCoins(&w, 0);
     try std.testing.expectEqual(std.math.maxInt(u32), questCoins(&w, 0));
 }
 
@@ -4156,6 +4172,7 @@ test "quest phase graph goto then kill then turn-in at trader" {
     // Interacting at the trader satisfies the highest phase and turns in.
     questOnTraderOpen(&w, 0);
     try std.testing.expect(!questHasActive(&w, 0, 20));
+    drainQuestCoins(&w, 0);
     try std.testing.expectEqual(@as(u32, 50), questCoins(&w, 0));
 }
 
@@ -4186,6 +4203,7 @@ test "quest phase graph auto-skips leading scaffolding on accept" {
     questOnZombieKilled(&w, 0, 0, 0);
     questOnZombieKilled(&w, 0, 0, 0);
     try std.testing.expect(!questHasActive(&w, 0, 21));
+    drainQuestCoins(&w, 0);
     try std.testing.expectEqual(@as(u32, 30), questCoins(&w, 0));
 }
 
@@ -4234,6 +4252,7 @@ test "goto quest binds the nearest real POI instead of an invented spot" {
     // Arriving at the POI center completes the goto quest.
     questTickGoto(&w, 0, 120, 70, 220);
     try std.testing.expect(!questHasActive(&w, 0, 40));
+    drainQuestCoins(&w, 0);
     try std.testing.expectEqual(@as(u32, 10), questCoins(&w, 0));
 }
 
@@ -4745,6 +4764,7 @@ test "quest turn_in needs trader open" {
     try std.testing.expect(questFindActive(&w, 0, 9).?.ready_turn_in);
     questOnTraderOpen(&w, 0);
     try std.testing.expect(!questHasActive(&w, 0, 9));
+    drainQuestCoins(&w, 0);
     try std.testing.expectEqual(@as(u32, 40), questCoins(&w, 0));
 }
 

@@ -238,6 +238,7 @@ test, so a retune cannot land silently).
 | `block_damage_range` | 3.0 | Policy: anti-kite gate - only when the zombie is within this range of its target |
 | `drowning_damage_per_second` | 2.0 | HP lost per real second while the head block is water (drowning, after the client's local O2 bar empties; stock ~2 hp/s) |
 | `radiation_damage_per_second` | 8.0 | HP lost per real second inside a radiated biome (biomes.xml `<biomemap name="radiated"/>`; stock BiomeType.Radiated is deadly) |
+| `kill_xp_fallback` | 100 | **Floor**: kill XP when entityclasses.xml ExperienceGain did not resolve (offline/builtin catalog or recycled slot); stock classes resolve their own XP when a game-dir is present |
 | `trap_kill_xp_frac` | 0.0 | **Floor**: fraction of a turret/trap kill's XP the owner is credited. Stock reads `PassiveEffects.ElectricalTrapXP` (default 0, unlocked by `perkAdvancedEngineering` levels 1-5 at .15/.3/.45/.6/.75); zdtd has no per-player perk level yet (planned: ADR 0023/0024), so this is a flat floor rather than a per-player lookup. 0.0 matches stock's unperked default |
 | `[rules.world]` | | |
 | `poi_unlock_grace_ticks` | 2000 | POI quest-lock release grace after unlock (ticks; 100 s at 20 TPS; RE QuestLockInstance.SetUnlocked 0x7d0) |

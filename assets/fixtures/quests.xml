@@ -2,7 +2,7 @@
 <!-- zdtd fixture: subset of stock quest shape for offline tests -->
 <quests max_quest_tier="2" quests_per_tier="3" starter_quest="quest_whiteRiverCitizen1">
 
-<quest id="quest_whiteRiverCitizen1">
+<quest id="quest_whiteRiverCitizen1" reward_coin="100">
   <property name="group_name_key" value="quest_WhiteRiverCitizen"/>
   <property name="name_key" value="quest_WhiteRiverCitizen1"/>
   <property name="category_key" value="quest"/>

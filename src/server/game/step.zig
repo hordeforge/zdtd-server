@@ -316,6 +316,14 @@ pub fn step(self: *Game) !void {
             const v = if (sv != 0) sv else self.wasm_plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);
             if (v < 0) continue;
             const pct: u32 = if (v > 0) @intCast(v) else 100;
+            // reward_coin through the same verdict (deny withholds, >0
+            // scales the coin leg like items/exp).
+            const coin_reward: u32 = @as(u32, d.reward_coin) * pct / 100;
+            if (coin_reward > 0) {
+                if (self.sim.mask[cq.slot].wallet) {
+                    self.sim.wallet[cq.slot].coins +|= coin_reward;
+                }
+            }
             var ri: usize = 0;
             while (ri < @min(@as(usize, d.reward_n), ecs.quest.max_reward_flags)) : (ri += 1) {
                 const spec = d.rewards[ri];

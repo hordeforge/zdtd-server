@@ -331,6 +331,10 @@ pub const Progression = struct {
     /// Pressed-against-cover range gate for block chew (m). Anti-kite: only when
     /// the zombie is within this range of its target and facing it.
     block_damage_range: f32 = 3.0,
+    /// Kill-XP floor when entityclasses.xml ExperienceGain did not resolve
+    /// (offline/builtin catalog or recycled slot); stock classes resolve
+    /// their own XP when a game-dir is present.
+    kill_xp_fallback: f32 = 100,
     /// Fraction of a turret/trap kill's XP the owner is credited (stock
     /// ItemActionAttack.Hit / ProjectileMoveScript.checkCollision read the
     /// PassiveEffects.ElectricalTrapXP passive; buffs.xml documents its
@@ -605,6 +609,7 @@ pub const ProgressionOverlay = struct {
     drowning_damage_per_second: ?f32 = null,
     radiation_damage_per_second: ?f32 = null,
     block_damage_range: ?f32 = null,
+    kill_xp_fallback: ?f32 = null,
     trap_kill_xp_frac: ?f32 = null,
 };
 
