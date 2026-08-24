@@ -7066,7 +7066,7 @@ test "scenario bot host config flows from options (headshot multiplier)" {
     );
 }
 
-test "scenario on_player_damage verdict denies PvP via the real zdtd_pvp module" {
+test "scenario on_player_damage verdict denies PvP via the real core_pvp module" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -7083,7 +7083,7 @@ test "scenario on_player_damage verdict denies PvP via the real zdtd_pvp module"
     }
     // Load the committed policy module into the Game's wasm host (its
     // sense/query fns are already wired in wasm_ctx).
-    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_pvp/zdtd_pvp.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"plugins/core_pvp/core_pvp.wasm"}, &g.wasm_ctx, .{});
     g.wasm_plugins.enable();
 
     const id_a: platform_user.Id = .{ .platform = "Steam", .id = "9001" };
@@ -7117,7 +7117,7 @@ test "scenario on_player_damage verdict denies PvP via the real zdtd_pvp module"
     std.debug.print("PASS pvp-verdict: player damage denied, zombie damage kept\n", .{});
 }
 
-test "scenario zdtd_announce broadcasts join via the say verb" {
+test "scenario core_announce broadcasts join via the say verb" {
     // ADR 0020/0026: announcements ship as a Wasm module; the `say` queue verb
     // (ecs/command.zig Op.say) routes through the stock chat broadcast with
     // sender 0 = server. This is the end-to-end proof of the affordance.
@@ -7127,7 +7127,7 @@ test "scenario zdtd_announce broadcasts join via the say verb" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const modules = [_][]const u8{"mods/zdtd_announce/zdtd_announce.wasm"};
+    const modules = [_][]const u8{"plugins/core_announce/core_announce.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_announce", 0, .{
         .enable_sample_plugin = false,
         .plugin_modules = &modules,
@@ -7177,7 +7177,7 @@ test "scenario zdtd_announce broadcasts join via the say verb" {
     std.debug.print("PASS announce v2: day roll + blood-moon announcements from sense\n", .{});
 }
 
-test "scenario zdtd_rewardgate scales quest item rewards (1.5x)" {
+test "scenario core_rewardgate scales quest item rewards (1.5x)" {
     // on_quest_complete verdict at the step reward payout (step.zig): <0 deny,
     // 0 keep, >0 percent. With rewardgate's 150, the fixture starter's
     // 100-casinoCoin Item reward pays 150; without a module it pays 100.
@@ -7189,7 +7189,7 @@ test "scenario zdtd_rewardgate scales quest item rewards (1.5x)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const modules = [_][]const u8{"mods/zdtd_rewardgate/zdtd_rewardgate.wasm"};
+    const modules = [_][]const u8{"plugins/core_rewardgate/core_rewardgate.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
         .enable_sample_plugin = false,
@@ -7217,7 +7217,7 @@ test "scenario zdtd_rewardgate scales quest item rewards (1.5x)" {
     std.debug.print("PASS rewardgate: item reward scaled 100 -> {d}\n", .{coins});
 }
 
-test "scenario zdtd_pricegate scales trader buy prices (1.5x)" {
+test "scenario core_pricegate scales trader buy prices (1.5x)" {
     // on_trade_price pre-trade verdict in the sim buy path (systems.trade):
     // <0 deny, 0 keep, >0 percent. With pricegate's 150, a unit price of 100
     // costs 150; without a module it costs 100.
@@ -7227,7 +7227,7 @@ test "scenario zdtd_pricegate scales trader buy prices (1.5x)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const modules = [_][]const u8{"mods/zdtd_pricegate/zdtd_pricegate.wasm"};
+    const modules = [_][]const u8{"plugins/core_pricegate/core_pricegate.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_pricegate", 0, .{
         .enable_sample_plugin = false,
         .plugin_modules = &modules,
@@ -7258,7 +7258,7 @@ test "scenario zdtd_pricegate scales trader buy prices (1.5x)" {
     std.debug.print("PASS pricegate: buy 100 -> 150 via on_trade_price\n", .{});
 }
 
-test "scenario zdtd_damagegate halves incoming player damage (0.5x)" {
+test "scenario core_damagegate halves incoming player damage (0.5x)" {
     // on_player_damage verdict on the C2S melee path (c2s/misc.zig): with
     // damagegate's 50, a 50-damage hit costs the victim 25 hp.
     io_fs.mkdirPath("worlds");
@@ -7267,7 +7267,7 @@ test "scenario zdtd_damagegate halves incoming player damage (0.5x)" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const modules = [_][]const u8{"mods/zdtd_damagegate/zdtd_damagegate.wasm"};
+    const modules = [_][]const u8{"plugins/core_damagegate/core_damagegate.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_damagegate", 0, .{
         .enable_sample_plugin = false,
         .plugin_modules = &modules,
@@ -7296,7 +7296,7 @@ test "scenario zdtd_damagegate halves incoming player damage (0.5x)" {
     std.debug.print("PASS damagegate: 50-damage hit reduced to 25\n", .{});
 }
 
-test "scenario zdtd_adminverbs wave verb spawns zombies" {
+test "scenario core_adminverbs wave verb spawns zombies" {
     // on_admin_command fallthrough: an unknown console verb routes to the
     // plugin host; the module queues spawns via zdtd.queue and replies.
     io_fs.mkdirPath("worlds");
@@ -7305,7 +7305,7 @@ test "scenario zdtd_adminverbs wave verb spawns zombies" {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    const modules = [_][]const u8{"mods/zdtd_adminverbs/zdtd_adminverbs.wasm"};
+    const modules = [_][]const u8{"plugins/core_adminverbs/core_adminverbs.wasm"};
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_adminverbs", 0, .{
         .enable_sample_plugin = false,
         .plugin_modules = &modules,
@@ -7370,7 +7370,7 @@ test "scenario player dig routes the on_block_damage verdict (plugin_rules doubl
     std.debug.print("PASS dig-verdict: player dig scales through on_block_damage (10 -> 30)\n", .{});
 }
 
-test "scenario on_quest_accept verdict gates acceptance (real zdtd_questgate)" {
+test "scenario on_quest_accept verdict gates acceptance (real core_questgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -7393,7 +7393,7 @@ test "scenario on_quest_accept verdict gates acceptance (real zdtd_questgate)" {
     g.sim.catalog = .{ .defs = &defs, .starter_id = 99, .source = .builtin };
 
     // Load the committed gate module into the Game's wasm host.
-    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_questgate/zdtd_questgate.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"plugins/core_questgate/core_questgate.wasm"}, &g.wasm_ctx, .{});
     g.wasm_plugins.enable();
 
     var cap: ln_peer.Capture = .{};
@@ -7408,7 +7408,7 @@ test "scenario on_quest_accept verdict gates acceptance (real zdtd_questgate)" {
     std.debug.print("PASS questgate: forbidden_evil denied, ok_quest accepted\n", .{});
 }
 
-test "scenario on_craft_request verdict gates crafting (real zdtd_craftgate)" {
+test "scenario on_craft_request verdict gates crafting (real core_craftgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -7434,7 +7434,7 @@ test "scenario on_craft_request verdict gates crafting (real zdtd_craftgate)" {
     g.recipes = .{ .defs = &defs, .source = .builtin };
 
     // Load the committed gate module into the Game's wasm host.
-    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_craftgate/zdtd_craftgate.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"plugins/core_craftgate/core_craftgate.wasm"}, &g.wasm_ctx, .{});
     g.wasm_plugins.enable();
 
     var cap: ln_peer.Capture = .{};
@@ -7452,7 +7452,7 @@ test "scenario on_craft_request verdict gates crafting (real zdtd_craftgate)" {
     std.debug.print("PASS craftgate: forbidden_sword denied, resourceWood crafted\n", .{});
 }
 
-test "scenario on_loot_roll verdict halves loot (real zdtd_lootgate)" {
+test "scenario on_loot_roll verdict halves loot (real core_lootgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -7473,7 +7473,7 @@ test "scenario on_loot_roll verdict halves loot (real zdtd_lootgate)" {
     try std.testing.expect(n0 >= 1);
 
     // Load the committed gate module (scales every roll to 50%).
-    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"mods/zdtd_lootgate/zdtd_lootgate.wasm"}, &g.wasm_ctx, .{});
+    g.wasm_plugins.loadAll(gpa, &[_][]const u8{"plugins/core_lootgate/core_lootgate.wasm"}, &g.wasm_ctx, .{});
     g.wasm_plugins.enable();
 
     // Fill a loot bag with the SAME seed: the verdict halves the stack count.
@@ -8094,10 +8094,10 @@ test "scenario mods AC2: disabled skips, blacklist vetoes refs" {
 
     const mods = [_]plugin_mod.manifest.Manifest{
         mkManifest("fps_bot", "fps_bot.wasm", "official", null, null, null),
-        mkManifest("zdtd_killfeed", "k.wasm", "official", null, null, null),
+        mkManifest("core_killfeed", "k.wasm", "official", null, null, null),
     };
-    // disabled = ["zdtd_killfeed"] drops it.
-    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{"zdtd_killfeed"}, &.{});
+    // disabled = ["core_killfeed"] drops it.
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{"core_killfeed"}, &.{});
     defer plan.deinit(gpa);
     try std.testing.expectEqual(@as(usize, 1), plan.modules.len);
     try std.testing.expectEqualStrings("fps_bot", plan.modules[0].manifest.name.?);

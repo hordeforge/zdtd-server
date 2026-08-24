@@ -1434,7 +1434,7 @@ test "wasm on_player_login join gate: deny reason, allow others" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_announce.wasm (zig-built) join/leave says + clock announcements" {
+test "core_announce.wasm (zig-built) join/leave says + clock announcements" {
     const Cap = struct {
         var queued: [8][128]u8 = undefined;
         var queued_len: [8]usize = .{0} ** 8;
@@ -1472,7 +1472,7 @@ test "zdtd_announce.wasm (zig-built) join/leave says + clock announcements" {
         .sense_fn = &Cap.senseFn,
     };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_announce/zdtd_announce.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_announce/core_announce.wasm"}, &ctx, .{});
     defer host.shutdown();
     try std.testing.expectEqual(@as(usize, 1), host.count());
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_tick)]);
@@ -1497,7 +1497,7 @@ test "zdtd_announce.wasm (zig-built) join/leave says + clock announcements" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
+test "core_killfeed.wasm observer keeps every verdict and never disables" {
     // The reference event-observer plugin (AGENTS.md rule 29, Wasm-first):
     // loaded from the committed module, its verdict hooks must always keep
     // (0) and the module must never trap/disable — a pure observer is a
@@ -1511,7 +1511,7 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_killfeed/zdtd_killfeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_killfeed/core_killfeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());
@@ -1531,7 +1531,7 @@ test "zdtd_killfeed.wasm observer keeps every verdict and never disables" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
+test "core_pvp.wasm denies player-vs-player damage via kind query" {
     // The player-damage policy plugin (AGENTS rule 29): with the "kind" query
     // verb stubbed (100/200 players, 300 zombie), on_player_damage must deny
     // player-vs-player and keep everything else, never disabling.
@@ -1557,7 +1557,7 @@ test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn, .query_fn = &Cap.queryFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_pvp/zdtd_pvp.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_pvp/core_pvp.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_damage)]);
@@ -1566,7 +1566,7 @@ test "zdtd_pvp.wasm denies player-vs-player damage via kind query" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
+test "core_questgate.wasm denies forbidden_* quests via quest query" {
     // The quest-acceptance policy plugin (AGENTS rule 29): with the "quest"
     // query verb stubbed (def 1 -> "forbidden_evil", def 2 -> "tier1_clear"),
     // on_quest_accept must deny the forbidden name and keep the rest, never
@@ -1594,7 +1594,7 @@ test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn, .query_fn = &Cap.queryFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_questgate/zdtd_questgate.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_questgate/core_questgate.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_accept)]);
@@ -1603,7 +1603,7 @@ test "zdtd_questgate.wasm denies forbidden_* quests via quest query" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
+test "core_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     // The craft-request policy plugin (AGENTS rule 29): on_craft_request must
     // deny the forbidden recipe name and keep the rest, never disabling.
     const Cap = struct {
@@ -1615,7 +1615,7 @@ test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_craftgate/zdtd_craftgate.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_craftgate/core_craftgate.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_craft_request)]);
@@ -1624,7 +1624,7 @@ test "zdtd_craftgate.wasm denies forbidden_* recipes via on_craft_request" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
+test "core_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     // The loot-roll policy plugin (AGENTS rule 29): on_loot_roll must return
     // 50 (scale percent) for every list and never disable.
     const Cap = struct {
@@ -1636,7 +1636,7 @@ test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_lootgate/zdtd_lootgate.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_lootgate/core_lootgate.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_loot_roll)]);
@@ -1644,7 +1644,7 @@ test "zdtd_lootgate.wasm scales loot rolls to 50% via on_loot_roll" {
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_tradefeed.wasm observes trader events via on_trader_event" {
+test "core_tradefeed.wasm observes trader events via on_trader_event" {
     // The trader-event observer plugin (AGENTS rule 29): on_trader_event must
     // be present, fire for every kind without disabling, and stay loaded.
     const Cap = struct {
@@ -1656,7 +1656,7 @@ test "zdtd_tradefeed.wasm observes trader events via on_trader_event" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_trader_event)]);
@@ -1679,7 +1679,7 @@ test "_zdtd_requires validates declarative dependencies at load" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.n);
@@ -1705,7 +1705,7 @@ test "plugin reload disposes and reinstantiates the module in place" {
     };
     var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_tradefeed/zdtd_tradefeed.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     const path = host.slots[0].name;

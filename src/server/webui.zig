@@ -2563,7 +2563,7 @@ test "renderModules lists loaded wasm modules with state" {
     s.modules[0] = .{ .used = true, .name_len = 7, .disabled = false };
     @memcpy(s.modules[0].name[0..7], "fps_bot");
     s.modules[1] = .{ .used = true, .name_len = 13, .disabled = true };
-    @memcpy(s.modules[1].name[0..13], "zdtd_announce");
+    @memcpy(s.modules[1].name[0..13], "core_announce");
     var buf: [4096]u8 = undefined;
     const html = try renderModules(&buf, &s);
     try std.testing.expect(std.mem.find(u8, html, "<th scope=\"row\">fps_bot</th>") != null);

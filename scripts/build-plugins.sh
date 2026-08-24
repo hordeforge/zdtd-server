@@ -13,17 +13,30 @@ build() {
   $ZIG build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
     --name "$mod" \
     --dep plugin_common --dep plugin_root \
-    -Mroot="mods/$mod/main.zig" \
-    --dep plugin_common -Mplugin_root="mods/$mod/$mod.zig" \
+    -Mroot="plugins/$mod/main.zig" \
+    --dep plugin_common -Mplugin_root="plugins/$mod/$mod.zig" \
     -Mplugin_common=mods/plugin_common.zig
-  mv "$mod.wasm" "mods/$mod/$mod.wasm"
-  echo "built mods/$mod/$mod.wasm"
+  mv "$mod.wasm" "plugins/$mod/$mod.wasm"
+  echo "built plugins/$mod/$mod.wasm"
 }
 
-for m in zdtd_announce zdtd_killfeed zdtd_damagegate zdtd_pricegate \
-         zdtd_rewardgate zdtd_lootgate zdtd_tradefeed zdtd_pvp \
-         zdtd_questgate zdtd_craftgate zdtd_adminverbs mcp; do
+for m in core_announce core_killfeed core_damagegate core_pricegate \
+         core_rewardgate core_lootgate core_tradefeed core_pvp \
+         core_questgate core_craftgate core_adminverbs; do
   build "$m"
+done
+
+# Addons stay in mods/: mcp is Zig; bot stays C by design (ADR 0026);
+# example_chat_filter is untouched.
+for m in mcp; do
+  $ZIG build-exe -OReleaseSmall -target wasm32-freestanding -rdynamic \
+    --name "$m" \
+    --dep plugin_common --dep plugin_root \
+    -Mroot="mods/$m/main.zig" \
+    --dep plugin_common -Mplugin_root="mods/$m/$m.zig" \
+    -Mplugin_common=mods/plugin_common.zig
+  mv "$m.wasm" "mods/$m/$m.wasm"
+  echo "built mods/$m/$m.wasm"
 done
 
 echo "done"

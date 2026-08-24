@@ -92,7 +92,7 @@ game events (death, kill, block damage, quest completion).
 
 ```toml
 [mods]
-disabled = "zdtd_killfeed"   # skip loading, one info log per mod
+disabled = "core_killfeed"   # skip loading, one info log per mod
 blacklist = "evil_mod"       # refuse; also vetoes any mod that overrides or requires it
 ```
 
@@ -256,20 +256,20 @@ behavior, not server.
 | Native domain | Status | Boundary affordance |
 |---|---|---|
 | Chat filtering / commands / reactions | **Plugin already** | `on_chat` (rewrite/suppress, `c2s/misc.zig:42`) |
-| Kill / death / quest events | **Plugin already** | `on_entity_killed` / `on_player_death` / `on_quest_complete` verdicts; `mods/zdtd_killfeed` is the reference |
-| Quest acceptance policy (which quests a player may take) | **Plugin already** | `on_quest_accept` verdict (added 2026-08-20, fired on every acceptance via a World gate) + the `quest` query verb; `mods/zdtd_questgate` is the reference (denies `forbidden_*` quests by name) |
-| Craft-request policy (which recipes a player may craft, batch caps) | **Plugin already** | `on_craft_request` verdict (added 2026-08-20, `<0` deny / `>0` cap at the `tryCraft` gate, recipe name is the key); `mods/zdtd_craftgate` is the reference (denies `forbidden_*` recipes) |
-| Loot-roll policy (loot abundance / empty rolls) | **Plugin already** | `on_loot_roll` verdict (added 2026-08-20, `<0` empty / `>0` scale the rolled stack count by percent, at both the bag and container chokepoints); `mods/zdtd_lootgate` is the reference (50% loot) |
+| Kill / death / quest events | **Plugin already** | `on_entity_killed` / `on_player_death` / `on_quest_complete` verdicts; `mods/core_killfeed` is the reference |
+| Quest acceptance policy (which quests a player may take) | **Plugin already** | `on_quest_accept` verdict (added 2026-08-20, fired on every acceptance via a World gate) + the `quest` query verb; `mods/core_questgate` is the reference (denies `forbidden_*` quests by name) |
+| Craft-request policy (which recipes a player may craft, batch caps) | **Plugin already** | `on_craft_request` verdict (added 2026-08-20, `<0` deny / `>0` cap at the `tryCraft` gate, recipe name is the key); `mods/core_craftgate` is the reference (denies `forbidden_*` recipes) |
+| Loot-roll policy (loot abundance / empty rolls) | **Plugin already** | `on_loot_roll` verdict (added 2026-08-20, `<0` empty / `>0` scale the rolled stack count by percent, at both the bag and container chokepoints); `mods/core_lootgate` is the reference (50% loot) |
 | Quest reward scaling | **Plugin already** | `on_quest_complete` verdict `>0` scales the payout (`step.zig`) |
 | Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`; also the C2S player-dig delta since 2026-08-20 — every block-damage path routes through it) |
 | Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
 | Admin commands / tooling | **Plugin already** | `on_admin_command` |
 | Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`join.zig:72`) |
 | Bot brains | **Plugin already** | `mods/fps_bot` (ADR 0026) |
-| Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `mods/zdtd_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
+| Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `mods/core_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
 | Guard / anti-cheat policy ladder | **Not yet** — technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
-| Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) — `mods/zdtd_killfeed` logs both |
-| Trader announcements (window open, buy, sell) | **Plugin already** | `on_trader_event` (added 2026-08-20; kind 0 open / 1 buy / 2 sell, fired at the LockResponse open and the typed trade path) — `mods/zdtd_tradefeed` is the reference |
+| Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) — `mods/core_killfeed` logs both |
+| Trader announcements (window open, buy, sell) | **Plugin already** | `on_trader_event` (added 2026-08-20; kind 0 open / 1 buy / 2 sell, fired at the LockResponse open and the typed trade path) — `mods/core_tradefeed` is the reference |
 | Announcements wired to more events (vehicle) | **Not yet** — technically expressible | Missing hooks for those events; add hooks, do not add native announcement code |
 | Wire encode/emit, LiteNet, chunk stream, interest/replication | **Cannot be a plugin** | Boundary never touches wire bytes or package layout (enforced) |
 | ECS sim mutation: inventory, blocks, quests, trading authority | **Cannot be a plugin** | Plugins mutate only via `queue` verbs the server already understands; no direct sim access |
@@ -316,31 +316,31 @@ and manifest rules). The one exception is `bot`, which is C by design
 
 - `mods/fps_bot/fps_bot.wasm` — the bot brain (ADR 0026): sense → decide →
   `bot <verb>` commands; the flagship plugin (C source).
-- `mods/zdtd_killfeed/zdtd_killfeed.wasm` — a minimal event observer: logs
+- `mods/core_killfeed/core_killfeed.wasm` — a minimal event observer: logs
   kills, player deaths and quest completions via the verdict hooks and keeps
   every outcome (0). Use it as the template for announcements, kill-feeds,
   scoreboards and integrations.
-- `mods/zdtd_pvp/zdtd_pvp.wasm` — a player-damage policy module: uses the
+- `mods/core_pvp/core_pvp.wasm` — a player-damage policy module: uses the
   `on_player_damage` verdict + the `kind` query verb to deny all
   player-vs-player damage while leaving NPC damage untouched. Use it as the
   template for PvP/friendly-fire and damage-scaling policies.
-- `mods/zdtd_questgate/zdtd_questgate.wasm` — a quest-acceptance policy
+- `mods/core_questgate/core_questgate.wasm` — a quest-acceptance policy
   module: uses the `on_quest_accept` verdict + the `quest` query verb to deny
   quests named `forbidden_*` and log every acceptance. Use it as the template
   for quest gating (whitelists, class/level restrictions).
-- `mods/zdtd_craftgate/zdtd_craftgate.wasm` — a craft-request policy module:
+- `mods/core_craftgate/core_craftgate.wasm` — a craft-request policy module:
   uses the `on_craft_request` verdict to deny recipes named `forbidden_*` and
   log every request. Use it as the template for recipe blacklists and batch
   caps.
-- `mods/zdtd_lootgate/zdtd_lootgate.wasm` — a loot-roll policy module: uses
+- `mods/core_lootgate/core_lootgate.wasm` — a loot-roll policy module: uses
   the `on_loot_roll` verdict to scale every rolled loot count to 50%. Use it
   as the template for loot-abundance and empty-loot policies.
-- `mods/zdtd_tradefeed/zdtd_tradefeed.wasm` — a trader-event observer module:
+- `mods/core_tradefeed/core_tradefeed.wasm` — a trader-event observer module:
   uses `on_trader_event` (kind 0 open / 1 buy / 2 sell) to log every trade
   window event. Use it as the template for trader/vehicle announcements.
-- `mods/zdtd_announce/zdtd_announce.wasm`, `mods/zdtd_damagegate`,
-  `mods/zdtd_pricegate`, `mods/zdtd_rewardgate`,
-  `mods/zdtd_adminverbs`, `mods/mcp` (ADR 0031) — the remaining core
+- `mods/core_announce/core_announce.wasm`, `mods/core_damagegate`,
+  `mods/core_pricegate`, `mods/core_rewardgate`,
+  `mods/core_adminverbs`, `mods/mcp` (ADR 0031) — the remaining core
   plugins: clock/join announcements, damage/price/reward scaling verdicts,
   operator verbs via `on_admin_command`, and the MCP server addon.
 - `mods/example_chat_filter/` — a drop-in example layout (C), not a core

@@ -772,10 +772,24 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
-    // PRD 0005: discover mods/ manifests, resolve tiers + overrides + claims,
-    // then load through the plan. `[mods] disabled`/`blacklist` gate discovery.
-    const discovered = plugin_mod.manifest.discover(gpa, "mods") catch |err| {
-        fatal("cannot scan mods/: {s}", .{@errorName(err)});
+    // PRD 0005: discover mods/ (addons) + plugins/ (first-party core)
+    // manifests, resolve tiers + overrides + claims, then load through the
+    // plan. `[mods] disabled`/`blacklist` gate discovery.
+    const discovered = blk: {
+        const mods_list = plugin_mod.manifest.discover(gpa, "mods") catch |err| {
+            fatal("cannot scan mods/: {s}", .{@errorName(err)});
+        };
+        const core_list = plugin_mod.manifest.discover(gpa, "plugins") catch |err| {
+            fatal("cannot scan plugins/: {s}", .{@errorName(err)});
+        };
+        if (core_list.len == 0) break :blk mods_list;
+        const merged = gpa.alloc(plugin_mod.manifest.Manifest, mods_list.len + core_list.len) catch |err|
+            fatal("oom merging plugin manifests: {s}", .{@errorName(err)});
+        @memcpy(merged[0..mods_list.len], mods_list);
+        @memcpy(merged[mods_list.len..], core_list);
+        if (mods_list.len > 0) gpa.free(mods_list);
+        gpa.free(core_list);
+        break :blk merged;
     };
     defer {
         for (discovered) |dm| plugin_mod.manifest.free(gpa, &dm);

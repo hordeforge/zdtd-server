@@ -87,7 +87,7 @@ itself.
 
 - As an operator, I run the server with zero config and get the official
   addons (bots, MCP) active, so a fresh install is useful immediately.
-- As an operator, I add `zdtd_killfeed` to `[mods] disabled` and it stops
+- As an operator, I add `core_killfeed` to `[mods] disabled` and it stops
   loading, with one log line saying so.
 - As an operator, I blacklist a broken user mod and the server refuses to
   load it even if another mod names it as an override target or dependency.

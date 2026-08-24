@@ -1,5 +1,0 @@
-name = "zdtd_questgate"
-version = "0.1.0"
-wasm = "zdtd_questgate.wasm"
-enabled = false
-description = "In-tree zdtd module: demo/feed, enabled = false, load via [plugin] modules."

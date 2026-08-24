@@ -1,32 +1,39 @@
 # Plugin standards: naming and manifest format
 
-Binding rules for every plugin under `mods/`. The host enforces the manifest
-format at load (fail-closed); naming is enforced by review and
-`scripts/lint-architecture.sh` where mechanical.
+Binding rules for every plugin under `mods/` (addons) and `plugins/`
+(first-party core). The host enforces the manifest format at load
+(fail-closed); naming is enforced by review and `scripts/lint-architecture.sh`
+where mechanical.
 
 ## Naming standards
 
 ### Directory / module name
 
-- Pattern: **`zdtd_<topic>`**, all lowercase snake_case, one word after the
-  `zdtd_` prefix whenever possible (`zdtd_announce`, not
-  `zdtd_chat_announcements`).
+- First-party core plugins live under **`plugins/`** with pattern
+  **`core_<topic>`**, all lowercase snake_case, one word after the `core_`
+  prefix whenever possible (`core_announce`, not `core_chat_announcements`).
+- Addons (third-party-ecosystem-shaped, e.g. `mcp`, `fps_bot`) live under
+  **`mods/`**.
 - The directory name IS the module name: `mod.toml` `name` must equal the
   directory name. A mismatch is a load-time defect.
-- Reserve plain topic words for what the module does, not how: `zdtd_pvp`,
-  `zdtd_lootgate`, `zdtd_tradefeed`. Gate suffix (`*gate`) marks modules whose
+- Reserve plain topic words for what the module does, not how: `core_pvp`,
+  `core_lootgate`, `core_tradefeed`. Gate suffix (`*gate`) marks modules whose
   primary job is deny/adjust verdicts; feed/announce suffixes mark observers.
 
 ### Tier
 
 | Tier | Who ships it | Naming |
 |---|---|---|
-| official | ships with zdtd under `mods/` | `zdtd_<topic>` |
-| user | operator/third-party drop-in | any name; must NOT start with `zdtd_` unless replacing an official mod via `override` |
+| official core plugin | ships with zdtd under `plugins/` | `core_<topic>` |
+| official addon | ships with zdtd under `mods/` (`fps_bot`, `mcp`) | any; no `core_`/`zdtd_` prefix |
+| user | operator/third-party drop-in under `mods/` | any name; must NOT start with `core_` or `zdtd_` unless replacing an official mod via `override` |
 
 `tier = "core"` in a mod.toml is a load error by design: "core" components are
 native host-side systems (`loot`, `quests`, `damage`, `craft`, `trading`,
-PRD 0005 R4) and can never be claimed by a `.wasm`.
+PRD 0005 R4) and can never be claimed by a `.wasm`. The `core_*` *name prefix*
+on a plugin directory marks a first-party Wasm plugin, which is a different
+sense of "core" (shipped in-tree, Zig source, built by
+`scripts/build-plugins.sh`).
 
 ### Files inside a plugin directory
 
@@ -48,7 +55,7 @@ plugin directory). No other files are read by the host.
 - `_zdtd_requires` lists hooks + host verbs, comma-separated, matching what
   the module actually imports/exports; validated fail-closed at load (ADR
   0030). A typo'd capability is a loud load rejection.
-- Log lines start with the module name: `"zdtd_announce v2.0 enabled ..."`.
+- Log lines start with the module name: `"core_announce v2.0 enabled ..."`.
 
 ## mod.toml format
 
@@ -59,9 +66,9 @@ TOML, bound by `src/plugin/manifest.zig` through the comptime binder
 ### Keys
 
 ```toml
-name = "zdtd_announce"            # required; MUST equal the directory name
+name = "core_announce"            # required; MUST equal the directory name
 version = "0.1.0"                 # semver string; informational
-wasm = "zdtd_announce.wasm"       # required; relative to this directory
+wasm = "core_announce.wasm"       # required; relative to this directory
 description = "..."               # one line, says what + which hook(s)
 tier = "official"                 # optional; "official" | "user" ("core" is an error)
 override = "<other-mod-name>"     # optional; full replacement of that module (PRD 0005 R7)
@@ -87,8 +94,8 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
 ### Example (minimal)
 
 ```toml
-name = "zdtd_killfeed"
+name = "core_killfeed"
 version = "1.0.0"
-wasm = "zdtd_killfeed.wasm"
+wasm = "core_killfeed.wasm"
 description = "Logs join/leave/kill/death/quest events via the observer hooks."
 ```

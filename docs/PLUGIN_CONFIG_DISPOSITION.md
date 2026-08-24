@@ -24,9 +24,9 @@ on_trader_event, on_mcp_frame, on_trade_price`. Host: `src/server/game/wasm_host
 (wasmTick / killVerdict / wasmQueue / wasmSense / wasmQuery / adminPlugin).
 
 Existing modules (`mods/`): example_chat_filter (chat), bot (bot brains),
-zdtd_craftgate (craft verdict), zdtd_killfeed (kill feed observer),
-zdtd_lootgate (loot scaling), mcp (MCP protocol), zdtd_pvp (player-damage
-verdicts), zdtd_questgate (quest-accept verdict), zdtd_tradefeed (trader feed).
+core_craftgate (craft verdict), core_killfeed (kill feed observer),
+core_lootgate (loot scaling), mcp (MCP protocol), core_pvp (player-damage
+verdicts), core_questgate (quest-accept verdict), core_tradefeed (trader feed).
 
 ## Already correctly placed (no action)
 
@@ -51,9 +51,9 @@ verdicts), zdtd_questgate (quest-accept verdict), zdtd_tradefeed (trader feed).
 
 | Gap | Today | Fix | Unlocks |
 |---|---|---|---|
-| Zombie-melee player damage bypasses `on_player_damage` | verdict only in player-melee C2S (`c2s/misc.zig:464`) + bot shots; the ECS zombie attack path (`applyDeferredDamage`) called only `killVerdict` on death | **SHIPPED** — `player_damage_verdict_fn` on `World` (like `kill_verdict_fn`), consulted in `applyDeferredDamage` for player victims; Game routes to plugin + wasm host with attacker unknown; **`mods/zdtd_damagegate`** (incoming damage ×N) + scenario test | "incoming damage ×N", "deny fall/drowning", zombie friendly-fire policy |
-| Announcements / event feed | `on_tick` + `zdtd.tick` can watch the clock, but `zdtd.queue` has no `say`/announce verb and there is no chat-broadcast host import | **SHIPPED** — `say` queue verb routed through the stock chat broadcast + `zdtd.sense` header v3 exposes world time + blood-moon day flag; **`mods/zdtd_announce`** v2 announces horde night, blood-moon countdown and airdrops from `on_tick` + scenario test | horde-night / blood-moon / airdrop / first-join announcements |
-| Pre-trade price verdict | `on_trader_event` fires after a trade | **SHIPPED** — pre-trade price verdict hook (`on_trade_price`: `<0` deny, `>0` percent-adjust buy price); **`mods/zdtd_pricegate`** (1.5x trader prices per player) + scenario test | "trader prices ×N per player" module (reward/tax policy) |
+| Zombie-melee player damage bypasses `on_player_damage` | verdict only in player-melee C2S (`c2s/misc.zig:464`) + bot shots; the ECS zombie attack path (`applyDeferredDamage`) called only `killVerdict` on death | **SHIPPED** — `player_damage_verdict_fn` on `World` (like `kill_verdict_fn`), consulted in `applyDeferredDamage` for player victims; Game routes to plugin + wasm host with attacker unknown; **`mods/core_damagegate`** (incoming damage ×N) + scenario test | "incoming damage ×N", "deny fall/drowning", zombie friendly-fire policy |
+| Announcements / event feed | `on_tick` + `zdtd.tick` can watch the clock, but `zdtd.queue` has no `say`/announce verb and there is no chat-broadcast host import | **SHIPPED** — `say` queue verb routed through the stock chat broadcast + `zdtd.sense` header v3 exposes world time + blood-moon day flag; **`mods/core_announce`** v2 announces horde night, blood-moon countdown and airdrops from `on_tick` + scenario test | horde-night / blood-moon / airdrop / first-join announcements |
+| Pre-trade price verdict | `on_trader_event` fires after a trade | **SHIPPED** — pre-trade price verdict hook (`on_trade_price`: `<0` deny, `>0` percent-adjust buy price); **`mods/core_pricegate`** (1.5x trader prices per player) + scenario test | "trader prices ×N per player" module (reward/tax policy) |
 
 > Correction: the `on_block_damage` gap was investigated and does NOT exist —
 > zombie chew (`tick.zig:275,383`) and explosions (`world.zig:313`) already
@@ -64,7 +64,7 @@ verdicts), zdtd_questgate (quest-accept verdict), zdtd_tradefeed (trader feed).
 
 | Candidate | Hook | Module shape |
 |---|---|---|
-| Quest-reward scaling | `on_quest_complete` (>0 = percent) — already wired at `game/step.zig:315`, today only observed by zdtd_killfeed | `zdtd_rewardgate`: scale items/exp/coins per quest def |
+| Quest-reward scaling | `on_quest_complete` (>0 = percent) — already wired at `game/step.zig:315`, today only observed by core_killfeed | `core_rewardgate`: scale items/exp/coins per quest def |
 | Immortal horde / no-death gates | `on_entity_killed` / `on_player_death` deny (killVerdict <0 → victim survives at 1 HP) — works today | `zdtd_peaceful` / per-entity kill gates |
 | Custom admin verbs | `on_admin_command` (only bot uses it) | `givequest`, `spawnwave`, `setdifficulty` as module verbs instead of native console arms |
 
@@ -89,20 +89,20 @@ verdicts), zdtd_questgate (quest-accept verdict), zdtd_tradefeed (trader feed).
   hardcoded in hooks.zig); `on_player_damage` verdict in the ECS zombie-melee
   path (`player_damage_verdict_fn` on World + Game adapter); the `say` queue
   verb (`ecs/command.zig Op.say` + `Game.announceChat` through the stock chat
-  broadcast) with the **`mods/zdtd_announce`** module (join/leave
-  announcements) and a scenario test; **`mods/zdtd_rewardgate`** module
+  broadcast) with the **`mods/core_announce`** module (join/leave
+  announcements) and a scenario test; **`mods/core_rewardgate`** module
   (1.5x quest rewards via the already-wired `on_quest_complete` verdict) and a
   scenario test.
 - **Shipped (plugin-boundary extensions):** `zdtd.sense` header **v3**
   (`src/server/game/wasm_host.zig`: 24-byte header, magic `ZBS3`, exposing
   tick, self entity, world time and blood-moon day flag; `mods/fps_bot` and
-  `mods/mcp` migrated); **`mods/zdtd_announce` v2** announces horde
+  `mods/mcp` migrated); **`mods/core_announce` v2** announces horde
   night, blood-moon countdown and airdrops from `on_tick` (sense-driven) +
   scenario test; pre-trade price verdict hook **`on_trade_price`** (host
   `WasmHost.tradePrice` → `World.trade_price_verdict_fn`, consulted in
-  `ecs/systems.zig` buy-price path) + **`mods/zdtd_pricegate`** (1.5x) +
-  scenario test; **`mods/zdtd_damagegate`** (0.5x incoming damage via
-  `on_player_damage`) + scenario test; **`mods/zdtd_adminverbs`** (`wave <n>`
+  `ecs/systems.zig` buy-price path) + **`mods/core_pricegate`** (1.5x) +
+  scenario test; **`mods/core_damagegate`** (0.5x incoming damage via
+  `on_player_damage`) + scenario test; **`mods/core_adminverbs`** (`wave <n>`
   queue verb via `on_admin_command`, guest writes the reply) + scenario test.
   All five module scenario tests green.
 - **Shipped:** `[sim] sleeper_cap_gate_enabled` (restores the stock sleeper
@@ -116,7 +116,7 @@ verdicts), zdtd_questgate (quest-accept verdict), zdtd_tradefeed (trader feed).
 - The config surface is complete: every config-eligible candidate identified
   by the review is either moved (rules/[sim]/[quests]/[bots]) or kept with a
   reason above. Clock-based announcements (horde night, airdrop) shipped with
-  sense v3 + `zdtd_announce` v2 (see above).
+  sense v3 + `core_announce` v2 (see above).
 - `make check-xml-audit` — green (independent gate).
 
 ## Baseline OOM investigation (goal item 5)
@@ -139,7 +139,7 @@ included):
   binary (`--seed=0x4f244d4b`), all `All 1294 tests passed.` exit 0.
 - **`zig build test` itself exits 0 with the suite complete** (two runs, 17:53
   and 18:01, both exit 0; the captured test stderr shows every module
-  scenario including `zdtd_announce`/`pricegate`/`damagegate`/`adminverbs`
+  scenario including `core_announce`/`pricegate`/`damagegate`/`adminverbs`
   and the final log-emitting test #1288). The trailing `failed command: ...`
   line that appears at the end of a successful `zig build test` log is a
   Zig 0.16 build-runner cosmetic artifact: the run step's success path still

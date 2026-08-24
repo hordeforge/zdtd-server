@@ -1,0 +1,5 @@
+name = "core_killfeed"
+version = "0.1.0"
+wasm = "core_killfeed.wasm"
+enabled = false
+description = "In-tree zdtd module: demo/feed, enabled = false, load via [plugin] modules."
