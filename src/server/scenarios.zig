@@ -8072,8 +8072,8 @@ test "scenario mods AC1: resolver keeps official tiers in discovery order" {
     const gpa = gpa_impl.allocator();
 
     const mods = [_]plugin_mod.manifest.Manifest{
-        mkManifest("zdtd_bot", "zdtd_bot.wasm", "official", null, null, null),
-        mkManifest("zdtd_mcp", "zdtd_mcp.wasm", "official", null, null, null),
+        mkManifest("fps_bot", "fps_bot.wasm", "official", null, null, null),
+        mkManifest("mcp", "mcp.wasm", "official", null, null, null),
         mkManifest("my_user_mod", "u.wasm", "user", null, null, null),
     };
     var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{});
@@ -8081,7 +8081,7 @@ test "scenario mods AC1: resolver keeps official tiers in discovery order" {
 
     try std.testing.expectEqual(@as(usize, 3), plan.modules.len);
     try std.testing.expectEqual(.official, plan.modules[0].tier);
-    try std.testing.expectEqualStrings("zdtd_bot", plan.modules[0].manifest.name.?);
+    try std.testing.expectEqualStrings("fps_bot", plan.modules[0].manifest.name.?);
     try std.testing.expectEqual(.official, plan.modules[1].tier);
     try std.testing.expectEqual(.user, plan.modules[2].tier);
     std.debug.print("PASS mods AC1: official tiers + discovery order\n", .{});
@@ -8093,29 +8093,29 @@ test "scenario mods AC2: disabled skips, blacklist vetoes refs" {
     const gpa = gpa_impl.allocator();
 
     const mods = [_]plugin_mod.manifest.Manifest{
-        mkManifest("zdtd_bot", "zdtd_bot.wasm", "official", null, null, null),
+        mkManifest("fps_bot", "fps_bot.wasm", "official", null, null, null),
         mkManifest("zdtd_killfeed", "k.wasm", "official", null, null, null),
     };
     // disabled = ["zdtd_killfeed"] drops it.
     var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{"zdtd_killfeed"}, &.{});
     defer plan.deinit(gpa);
     try std.testing.expectEqual(@as(usize, 1), plan.modules.len);
-    try std.testing.expectEqualStrings("zdtd_bot", plan.modules[0].manifest.name.?);
+    try std.testing.expectEqualStrings("fps_bot", plan.modules[0].manifest.name.?);
 
-    // blacklist = ["zdtd_bot"] refuses the mod itself.
+    // blacklist = ["fps_bot"] refuses the mod itself.
     try std.testing.expectError(
         error.BlacklistedTarget,
-        plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{"zdtd_bot"}),
+        plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{"fps_bot"}),
     );
 
     // A mod whose override names a blacklisted target cannot load.
     const replacers = [_]plugin_mod.manifest.Manifest{
-        mkManifest("zdtd_bot", "zdtd_bot.wasm", "official", null, null, null),
-        mkManifest("evil_bot", "e.wasm", "user", "zdtd_bot", null, null),
+        mkManifest("fps_bot", "fps_bot.wasm", "official", null, null, null),
+        mkManifest("evil_bot", "e.wasm", "user", "fps_bot", null, null),
     };
     try std.testing.expectError(
         error.BlacklistedTarget,
-        plugin_mod.resolver.resolve(gpa, &replacers, &.{}, &.{}, &.{"zdtd_bot"}),
+        plugin_mod.resolver.resolve(gpa, &replacers, &.{}, &.{}, &.{"fps_bot"}),
     );
     std.debug.print("PASS mods AC2: disabled drops, blacklist vetoes refs\n", .{});
 }
@@ -8177,22 +8177,22 @@ test "scenario mods AC4/AC5: exclusive core override point routes only to the cl
 }
 
 test "scenario mods AC6: override = name replaces the official mod" {
-    // A user mod declaring override = "zdtd_bot" loads in its place; the
+    // A user mod declaring override = "fps_bot" loads in its place; the
     // official module is not instantiated.
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
     const mods = [_]plugin_mod.manifest.Manifest{
-        mkManifest("zdtd_bot", "mods/zdtd_bot/zdtd_bot.wasm", "official", null, null, null),
-        mkManifest("my_bot", "assets/fixtures/plugin_hello.wasm", "user", "zdtd_bot", null, null),
+        mkManifest("fps_bot", "mods/fps_bot/fps_bot.wasm", "official", null, null, null),
+        mkManifest("my_bot", "assets/fixtures/plugin_hello.wasm", "user", "fps_bot", null, null),
     };
     var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{});
     defer plan.deinit(gpa);
     // The target is dropped; only the replacer loads.
     try std.testing.expectEqual(@as(usize, 1), plan.modules.len);
     try std.testing.expectEqualStrings("my_bot", plan.modules[0].manifest.name.?);
-    try std.testing.expectEqualStrings("zdtd_bot", plan.modules[0].replaces.?);
+    try std.testing.expectEqualStrings("fps_bot", plan.modules[0].replaces.?);
 
     freshScenarioDir("worlds/zdtd_sc_mods_replace");
     const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_replace", 0, .{
@@ -8204,7 +8204,7 @@ test "scenario mods AC6: override = name replaces the official mod" {
         gpa.destroy(g);
     }
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
-    // The loaded slot is the replacer (display = my_bot), not zdtd_bot.
+    // The loaded slot is the replacer (display = my_bot), not bot.
     try std.testing.expectEqualStrings("my_bot", g.wasm_plugins.slots[0].display);
     std.debug.print("PASS mods AC6: replacer occupies the official mod's slot\n", .{});
 }
@@ -8224,11 +8224,11 @@ test "scenario mods AC7: duplicate point claim / duplicate replacer is a boot er
         plugin_mod.resolver.resolve(gpa, &dup_points, &.{}, &.{}, &.{}),
     );
 
-    // Two mods replacing zdtd_bot.
+    // Two mods replacing bot.
     const dup_replacer = [_]plugin_mod.manifest.Manifest{
-        mkManifest("zdtd_bot", "b.wasm", "official", null, null, null),
-        mkManifest("a", "a.wasm", "user", "zdtd_bot", null, null),
-        mkManifest("b", "b.wasm", "user", "zdtd_bot", null, null),
+        mkManifest("fps_bot", "b.wasm", "official", null, null, null),
+        mkManifest("a", "a.wasm", "user", "fps_bot", null, null),
+        mkManifest("b", "b.wasm", "user", "fps_bot", null, null),
     };
     try std.testing.expectError(
         error.DuplicateClaim,

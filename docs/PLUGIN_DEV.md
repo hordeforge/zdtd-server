@@ -49,7 +49,7 @@ or the legacy explicit list.
 Drop a directory under `mods/` with a `mod.toml` and a `.wasm`; the server
 scans `mods/*/mod.toml` at boot, sorted by directory name, and loads every
 manifest it finds (unless disabled/blacklisted). This is how the shipped
-official mods (`zdtd_bot`, `zdtd_mcp`) load; a fresh install needs zero
+official mods (`bot`, `mcp`) load; a fresh install needs zero
 config.
 
 ```toml
@@ -57,7 +57,7 @@ name = "my_rules"
 version = "0.1.0"
 wasm = "my_rules.wasm"      # relative to the mod directory
 tier = "user"               # "official" (ships with zdtd) or "user"; "core" is a load error
-# override = "zdtd_bot"     # load THIS mod in place of zdtd_bot (target not instantiated)
+# override = "fps_bot"     # load THIS mod in place of fps_bot (target not instantiated)
 # points = "loot.roll"      # exclusive core override points this mod claims (comma-separated)
 # claim_mode = "exclusive"  # only "exclusive"; "chain" (call-next) is reserved, rejected at load
 # requires = "on_tick"      # extra hook/verb declarations (same vocabulary as _zdtd_requires)
@@ -140,7 +140,7 @@ Admin console (or webui console):
 
 ```text
 plugin list              # slot, module path, enabled/disabled
-plugin reload zdtd_bot   # suffix match on the module path
+plugin reload bot   # suffix match on the module path
 ```
 
 `plugin reload` disposes the old instance (`on_shutdown`, fuel/memory
@@ -265,7 +265,7 @@ behavior, not server.
 | Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
 | Admin commands / tooling | **Plugin already** | `on_admin_command` |
 | Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`join.zig:72`) |
-| Bot brains | **Plugin already** | `mods/zdtd_bot` (ADR 0026) |
+| Bot brains | **Plugin already** | `mods/fps_bot` (ADR 0026) |
 | Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `mods/zdtd_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
 | Guard / anti-cheat policy ladder | **Not yet** — technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
 | Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) — `mods/zdtd_killfeed` logs both |
@@ -283,7 +283,7 @@ the affordance, then move the behavior into a module.
 
 **Belongs in a plugin (behavior / policy):**
 
-- Bots and bot brains (`mods/zdtd_bot` is the reference implementation).
+- Bots and bot brains (`mods/fps_bot` is the reference implementation).
 - Chat commands, filters, and moderation reactions (the `on_chat` hook and
   `queue`).
 - Announcements, kill-feeds, scoreboards, stat hooks (the `on_player_death` /
@@ -311,10 +311,10 @@ native by construction; a feature that *decides* about such things is a plugin.
 `.wasm`). All core plugins are written in Zig and rebuilt with
 `scripts/build-plugins.sh` (see [mods/BUILDING.md](../mods/BUILDING.md) for the
 layout, build recipe, and [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) for naming
-and manifest rules). The one exception is `zdtd_bot`, which is C by design
+and manifest rules). The one exception is `bot`, which is C by design
 (ADR 0026):**
 
-- `mods/zdtd_bot/zdtd_bot.wasm` — the bot brain (ADR 0026): sense → decide →
+- `mods/fps_bot/fps_bot.wasm` — the bot brain (ADR 0026): sense → decide →
   `bot <verb>` commands; the flagship plugin (C source).
 - `mods/zdtd_killfeed/zdtd_killfeed.wasm` — a minimal event observer: logs
   kills, player deaths and quest completions via the verdict hooks and keeps
@@ -340,7 +340,7 @@ and manifest rules). The one exception is `zdtd_bot`, which is C by design
   window event. Use it as the template for trader/vehicle announcements.
 - `mods/zdtd_announce/zdtd_announce.wasm`, `mods/zdtd_damagegate`,
   `mods/zdtd_pricegate`, `mods/zdtd_rewardgate`,
-  `mods/zdtd_adminverbs`, `mods/zdtd_mcp` (ADR 0031) — the remaining core
+  `mods/zdtd_adminverbs`, `mods/mcp` (ADR 0031) — the remaining core
   plugins: clock/join announcements, damage/price/reward scaling verdicts,
   operator verbs via `on_admin_command`, and the MCP server addon.
 - `mods/example_chat_filter/` — a drop-in example layout (C), not a core

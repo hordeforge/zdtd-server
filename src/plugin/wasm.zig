@@ -1745,7 +1745,7 @@ test "queue import attributes commands to the calling plugin slot" {
     try std.testing.expect(std.mem.startsWith(u8, Cap.last_cmd[0..Cap.last_len], "spawn"));
 }
 
-test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
+test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pursue" {
     // Loads the real committed bot brain and drives it through the host sense
     // import with a canned snapshot, proving the end-to-end sense→brain→queue
     // pipe (RFC 0001 §3 / ADR 0026). The brain must NOT be modified; this is
@@ -1856,7 +1856,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
         .sense_fn = &Cap.senseFn,
     };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_bot/zdtd_bot.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/fps_bot/fps_bot.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());
@@ -2066,7 +2066,7 @@ test "zdtd_bot.wasm integration: sense drives brain; aim/look, gating, memory-pu
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
 
-test "zdtd_mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
+test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
     // The MCP addon guest (ADR 0031, docs/rfc/0002-mcp-server-design.md M1): the host feeds a
     // client JSON-RPC frame through the on_mcp_frame hook and gets the guest's
     // response back. The guest owns protocol logic; JSON parsing is the host
@@ -2135,7 +2135,7 @@ test "zdtd_mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
         .query_fn = &Cap.queryFn,
     };
     var host: WasmHost = .{};
-    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/zdtd_mcp/zdtd_mcp.wasm"}, &ctx, .{});
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/mcp/mcp.wasm"}, &ctx, .{});
     defer host.shutdown();
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());

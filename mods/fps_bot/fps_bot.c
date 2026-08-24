@@ -1,4 +1,4 @@
-// zdtd_bot — FPS bot addon (ADR 0026, docs/BOTS_SPEC.md / BOTS_PRD.md).
+// bot — FPS bot addon (ADR 0026, docs/BOTS_SPEC.md / BOTS_PRD.md).
 //
 // A WebAssembly plugin that commands player-mesh FPS bots through the host's
 // sense/act boundary. The servant (host) owns spawn/tick/replicate/kill/LOS
@@ -28,7 +28,7 @@
 //     starts a reload during which the bot holds fire and keeps strafing
 //                                                      (Q3 bots managed ammo)
 // Improvements this guest already carried that clanker borrowed back:
-//   - per-slot LCG + deterministic burst cadence  (Bot.cs "zdtd_bot parity")
+//   - per-slot LCG + deterministic burst cadence  (Bot.cs "bot parity")
 //
 // Host imports (module "zdtd", bare field names — PLUGIN_DEV.md):
 //   log(level, ptr, len)   write a log line
@@ -39,9 +39,9 @@
 // Exports: on_enable, on_tick, on_shutdown, on_admin_command.
 // No libc, no WASI imports (freestanding wasm32).
 //
-// Build (clang, committed as mods/zdtd_bot/zdtd_bot.wasm):
+// Build (clang, committed as mods/bot/bot.wasm):
 //   clang --target=wasm32 -nostdlib -O2 -Wl,--no-entry -Wl,--export-all \
-//     -o mods/zdtd_bot/zdtd_bot.wasm mods/zdtd_bot/zdtd_bot.c
+//     -o mods/bot/bot.wasm mods/bot/bot.c
 
 __attribute__((import_module("zdtd"), import_name("log")))
 extern void zdtd_log(int level, int ptr, int len);
@@ -1244,7 +1244,7 @@ static float atan2f_impl(float y, float x) {
 void on_enable(void) {
   bot_init();
   out_n = 0;
-  e("zdtd_bot v2.5 enabled");
+  e("bot v2.5 enabled");
   flush(1);
 }
 
@@ -1252,7 +1252,7 @@ void on_tick(void) { brain_tick(); }
 
 void on_shutdown(void) {
   out_n = 0;
-  e("zdtd_bot shutdown");
+  e("bot shutdown");
   flush(1);
 }
 
@@ -1307,7 +1307,7 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       int nb = 0;
       int ii;
       for (ii = 0; ii < MAX_BOTS; ++ii) if (bot_net[ii] >= 0) nb++;
-      rn += st(reply_buf + rn, 599 - rn, "zdtd_bot: bots_known=");
+      rn += st(reply_buf + rn, 599 - rn, "bot: bots_known=");
       rn += e_to(reply_buf + rn, 599 - rn, nb);
       rn += st(reply_buf + rn, 599 - rn, " floor=");
       rn += e_to(reply_buf + rn, 599 - rn, bot_count_static);

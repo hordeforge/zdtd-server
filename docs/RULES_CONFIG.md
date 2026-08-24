@@ -1,0 +1,79 @@
+# Rules/config disposition (ADR 0021 review)
+
+Result of the "everything that can be config should be config" review of the
+server's rules/logic. For every hardcoded tunable found, this records the
+disposition: **move** it onto the established config surface (`src/ecs/rules.zig`
+groups, auto-bound via `util/toml_bind.zig` to `zdtd.toml [rules.*]` and overlaid
+by `modes/*.toml`, or the `[sim]`/`[quests]`/`[bots]` sections of
+`src/server/zdtd_config.zig`), or **keep** it in code with a reason.
+
+Load-order rule (ADR 0010): stock XML data → config → mode packs → source as the
+documented last resort. A `Rules` value is a **floor** where per-entity stock
+data exists; defaults stay identical (a move is not a retune).
+
+## Moved (rules.zig — new fields, defaults identical)
+
+| Group | Field | Default | Source (pre-move) |
+|---|---|---|---|
+| `combat` | `knockback_speed` | 8.0 | `components.zig` kb_speed (melee shove) |
+| `combat` | `knockback_seconds` | 0.3 | `components.zig` kb_seconds |
+| `ai` | `no_target_scale` | 0.1 | `systems.zig` active_scale no-player |
+| `ai` | `sleep_dist_mult` | 4.0 | `systems.zig` ultra-far gate (× full_dist_sq) |
+| `ai` | `sleep_decision_scale` | 0.05 | `systems.zig` ultra-far decision drain |
+| `ai` | `sleep_wander_interval_s` | 1.0 | `systems.zig` ultra-far re-decide |
+| `ai` | `sleep_wander_speed_frac` | 0.5 | `systems.zig` ultra-far wander speed |
+| `ai` | `fear_scan_cd_s` | 0.5 | `systems.zig` animal flee-scan cadence |
+| `ai` | `move_arrive` | 0.2 | `systems.zig` stepToward arrive (0.04 sq) |
+| `ai` | `push_range` | 0.7 | `systems.zig` AttackPush proximity (x/z) |
+| `ai` | `push_y_tol` | 1.5 | `systems.zig` AttackPush vertical tolerance |
+| `ai` | `push_shove` | 0.15 | `systems.zig` AttackPush shove per step |
+| `ai` | `dig_windup_ticks` | 18 | `systems.zig` DigUpdate windup (RE, mode-pace) |
+| `ai` | `dig_budget_ticks` | 90 | `systems.zig` DigStop budget |
+| `bloodmoon` | `budget_scale` | 1.9 | `aidirector.zig` CanSpawn(1.9f) ceiling (RE) |
+| `bloodmoon` | `wave_frac` | 0.5 | `aidirector.zig` BM wave = enemy_count/2 |
+| `director` | `heat_scout_count` | 2 | `aidirector.zig` scouts per heat event |
+| `director` | `heat_feral_chance` | 0.2 | `aidirector.zig` feral roll (`% 5`, was doc-only) |
+| `director` | `heat_feral_cd_mult` | 2.0 | `aidirector.zig` feral cooldown doubling |
+| `director` | `heat_event_ticks` | 720.0 | `aidirector.zig` const, actually used by `craft.zig` |
+| `vehicle` | `fuel_cap` | 100 | `world.zig` spawn fill + `craft.zig` tank cap |
+| `vehicle` | `refuel_reach` | 3.0 | `craft.zig` InvTx refuel reach |
+| `vehicle` | `gravity` | -9.81 | `systems.zig` EntityVehicle cGravity (RE) |
+| `world` | `poi_unlock_grace_ticks` | 2000 | `poi_lock.zig` SetUnlocked grace |
+| `power` (new) | `battery_capacity_scale` | 10.0 | `powerblocks.zig` battery fallback |
+| `power` (new) | `battery_initial_charge_frac` | 0.5 | `powerblocks.zig` initial charge |
+| `power` (new) | `trigger_pulse_s` | 0.5 | `electric.zig` plate/tripwire pulse |
+
+## Moved (zdtd.toml sections)
+
+| Section | Key | Default | Source (pre-move) |
+|---|---|---|---|
+| `[sim]` | `trader_use_range` | 32 | `trader_wire.zig` trade echo reach gate |
+| `[sim]` | `party_shared_kill_range` | 100 | `player.zig` GameStats[54] default |
+| `[sim]` | `storm_bm_push_ticks` | 5000 | `weather.zig` blood_moon_storm_push |
+| `[quests]` | `poi_min_dist` | 32 | `hooks.zig` POI selector min (1000 sq) |
+| `[quests]` | `poi_max_dist` | 2000 | `hooks.zig` POI selector max (4e6 sq) |
+| `[quests]` | `max_poi_attempts` | 50 | `hooks.zig` search loop bound |
+
+Wiring changes that accompany the moves (non-field fixes, same behavior):
+- `world.zig` revenge window read `components.revenge_window_s` → `rules.ai.revenge_window_s` (the rule was already surfaced but inert — real bug fixed).
+- `systems.zig` falling-block terminal velocity reuses `rules.ai.fall_max_vy` (-30) instead of a duplicate literal.
+- Removed the now-dead module consts: `components.kb_speed/kb_seconds/revenge_window_s`, `systems.dig_*`, `aidirector.heat_*`, `electric.default_trigger_pulse_s`, `powerblocks.battery_*`, `poi_lock.unlock_grace`, `craft.vehicle_fuel_max/refuel_reach`, `trader_wire.trade_use_range`, `player.party_shared_kill_range_sq`, `hooks.poi_*`, `weather.blood_moon_storm_push`.
+
+## Kept in code (documented reason)
+
+| Candidate | Reason |
+|---|---|
+| `aidirector` difficulty/move tier tables (hp 0.5–2.0, speed 0.5–1.7) | `toml_bind` is scalar-only; surfacing needs per-tier scalar expansion (11 fields). Tracked; documented in `aidirector.zig` as zdtd-tuned R9. |
+| `worldgen.zig` terrain params (base_height 68, amp 24, …) | Procedural fallback world only; would need a worldgen config surface. Low value, deferred. |
+| `store.zig` sea_level 64 | Used in comptime default literals (`.{sea_level} ** 256`); runtime config would be a structural refactor. |
+| `store.zig`/`water.zig` water-source radius 12 | Worldgen-only carve; low value. |
+| `dem.zig` elevation mapping, `prefabs.zig` paint cap, trader gate scan margins, `sleeper.zig` scatter cap 8, `join.zig` mob burst cap 16, `bot.zig` weapon profiles | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
+| RE wire/protocol facts | `tts.zig` blockvalue_version 18, `components.buff_ticks_per_second 20`, `c2s/move.zig` 1/32 scale, trigger-duration enum table — not tunables. |
+| PERF compile-time budgets | Table/array caps (bm_parties, path replans/stride, max_poi_candidates, noise/dig/sleeper wake rings, max_workstations/containers/vending/lights/nodes/wires, max_resident_chunks, flush queues, terrain-snapshot window, `dmg_scale`) — compile-time bounds by design. |
+| FAIL safety guards | `electric.max_node_watts` 100k, movement dt envelope, explosion-radius clamp 6, `max_poi_candidates` — fail-closed bounds. |
+| STOCK fallbacks (offline/no-XML) | `world.stock_zombie_hp 200`, `stock_turret_watts 15`, eat props, maxStackOffline, trader price/markup fallbacks, weather default params, sleepers 5,5 — XML/offline data, covered by the XML audit. |
+
+## Verification
+
+- `zig build test` exits 0.
+- `make check-xml-audit` exits 0 (independent gate).

@@ -32,7 +32,7 @@ of ADR 0030 stay intact.
 
 ### D1. Guest owns protocol; host owns transport and JSON parsing
 
-The guest module (`mods/zdtd_mcp`) owns everything that is MCP semantics:
+The guest module (`mods/mcp`) owns everything that is MCP semantics:
 JSON-RPC 2.0 framing and validation over the parsed view, session state
 (`initialize`, `notifications/initialized`), capabilities, the tool registry
 (name / description / JSON-Schema input), `ping`, `tools/list`, `tools/call`,

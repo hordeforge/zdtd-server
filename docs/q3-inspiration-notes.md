@@ -1,6 +1,6 @@
 # Q3 / Doom 3 bot inspiration notes
 
-The bot brain in `mods/zdtd_bot/zdtd_bot.c` distills *concepts* from the
+The bot brain in `mods/fps_bot/fps_bot.c` distills *concepts* from the
 open-source id Tech fps bot code. This file records which ideas are borrowed
 and how they are adapted for a 7DTD wire model. It is a local pointer; the
 detailed reverse-engineering write-up of the stock reference behaviour that our

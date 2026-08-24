@@ -1,6 +1,6 @@
 // zdtd_adminverbs — custom operator verbs via the on_admin_command hook
 // (AGENTS.md rule 29, Wasm-first; the hook is otherwise only used by
-// zdtd_bot). Demonstrates shipping operator tooling as a module instead of a
+// bot). Demonstrates shipping operator tooling as a module instead of a
 // native console arm.
 //
 // Verb: `wave <n>` — queues <n> zombie spawns at the seed pad (256,70,256)
