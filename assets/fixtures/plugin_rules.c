@@ -14,8 +14,9 @@ int on_player_death(int victim) {
 }
 
 int on_entity_killed(int killed, int killer) {
-  // Observe only: keep the kill.
-  return 0;
+  // Adjust: scale the kill-XP award by 150% (boundary extension: the
+  // positive verdict rides the DamageResult to the XP award site).
+  return 150;
 }
 
 int on_block_damage(int x, int y, int z, int dmg) {

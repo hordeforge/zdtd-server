@@ -92,7 +92,9 @@ pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
 /// (party_shared_kill_range, stock default 100); every other in-range
 /// member gets the same split XP through NetPackageSharedPartyKill so the
 /// client shows the shared-kill tooltip. Out of party the award is full.
-pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
+pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32) void {
+    // on_entity_killed verdict >0 scales the kill XP (100 = keep).
+    const base_scaled: u64 = @as(u64, @min(base, std.math.maxInt(u64))) * scale_pct / 100;
     const killer = &self.clients[killer_slot];
     const party = self.parties.partyByMember(killer.entity_id);
     var in_range: u8 = 0;
@@ -110,9 +112,9 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
         }
     }
     const split: u64 = if (party != null)
-        base * (100 - 10 * @as(u64, in_range)) / 100
+        base_scaled * (100 - 10 * @as(u64, in_range)) / 100
     else
-        base;
+        base_scaled;
     awardXp(self, killer_slot, split);
     // Stock sends NetPackageEntityAddExpClient (xpType 0 = Kill) so the
     // killer's client shows the XP icon and applies the gain locally; the
@@ -444,4 +446,19 @@ test "skill ledger: level-up awards SP; purchase validates, prereqs and spends" 
     // Re-purchase of the same level denies (one level per request).
     try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 1));
     std.debug.print("PASS skill-ledger: SP award, cost, prereq, echo state\n", .{});
+}
+
+test "killXpAward scales by the on_entity_killed verdict percent" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_killscale", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // killXpAward(slot, base, scale): 200 base x 150% = 300 (xp_multiplier
+    // default 100 keeps 1.0x).
+    const before = g.clients[0].xp;
+    g.killXpAward(0, 200, 150);
+    try std.testing.expectEqual(before + 300, g.clients[0].xp);
+    std.debug.print("PASS kill-xp-scale: 200 x 150% = {d}\n", .{g.clients[0].xp - before});
 }

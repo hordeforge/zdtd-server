@@ -1253,6 +1253,10 @@ pub const World = struct {
         /// True when the hit applied a knockback impulse to the victim (the
         /// caller broadcasts NetPackageEntityVelocity so peers animate it).
         knocked: bool = false,
+        /// on_entity_killed verdict >0 percent (100 = keep): the kill-XP
+        /// award scales by this (ADR 0020 verdict convention; the <0 deny
+        /// branch already consumed the hit above).
+        kill_scale_pct: u32 = 100,
     };
 
     pub fn damage(self: *World, net_id: NetId, amount: f32) DamageResult {
@@ -1293,11 +1297,16 @@ pub const World = struct {
         if (self.health[s].hp <= 0) {
             // Kill verdict (T15): a plugin may deny the death; the victim
             // survives at 1 hp and the hit is consumed (no loot/corpse/flow).
+            // A >0 verdict scales the kill-XP award (boundary extension
+            // 2026-08-25): the scale rides the DamageResult to the award site.
+            var kill_scale: u32 = 100;
             if (self.kill_verdict_fn) |vf| {
-                if (vf(self.kill_verdict_ctx, self.kind[s], self.network_id[s].id, attacker_net_id) < 0) {
+                const v = vf(self.kill_verdict_ctx, self.kind[s], self.network_id[s].id, attacker_net_id);
+                if (v < 0) {
                     self.health[s].hp = 1;
                     return .{};
                 }
+                if (v > 0) kill_scale = @intCast(v);
             }
             // Drop loot bag for zombies/animals (caller must S2C stock ECD + Bag).
             if ((self.kind[s] == .zombie or self.kind[s] == .animal) and self.mask[s].transform) {
@@ -1329,13 +1338,14 @@ pub const World = struct {
                 }
                 if (!self.rollLootDrop(nid, drop_prob)) {
                     // zPackReg is a 4% bag: most kills drop nothing, like stock.
-                    return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name };
+                    return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name, .kill_scale_pct = kill_scale };
                 }
                 const loot = self.spawnLootBag(x, y, z, 1, 5);
                 return .{
                     .killed = true,
                     .loot_bag_id = if (loot) |id| id else -1,
                     .loot_list = loot_name,
+                    .kill_scale_pct = kill_scale,
                 };
             }
             // Players stay in the world dead (stock death → respawn flow keeps

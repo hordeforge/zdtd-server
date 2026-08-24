@@ -230,7 +230,7 @@ pub fn step(self: *Game) !void {
                 // trap_kill_xp_frac is a flat floor rather than a per-player lookup.
                 const trap_xp = self.xpGainFor(r.killed_ids[tk]);
                 const trap_xp_scaled: u64 = @trunc(@as(f32, @floatFromInt(trap_xp)) * self.sim.rules.progression.trap_kill_xp_frac);
-                self.killXpAward(osz, trap_xp_scaled);
+                self.killXpAward(osz, trap_xp_scaled, 100); // trap kills carry no verdict scale
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{

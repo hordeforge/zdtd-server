@@ -1325,32 +1325,33 @@ test "wasm host fires the T15 event hooks with deny/adjust verdicts" {
     };
     var host: WasmHost = .{};
     const paths = [_][]const u8{
-        "assets/fixtures/plugin_rules.wasm",
         "assets/fixtures/plugin_trap.wasm",
+        "assets/fixtures/plugin_rules.wasm",
     };
     host.loadAll(std.testing.allocator, &paths, &ctx, .{});
     defer host.shutdown();
     try std.testing.expectEqual(@as(usize, 2), host.count());
 
-    // plugin_rules: deny death, double block damage, double quest reward,
-    // observe kills.
-    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_player_death)]);
-    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_entity_killed)]);
-    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_block_damage)]);
-    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_quest_complete)]);
+    // plugin_rules (slot 1 after the trap reorder): deny death, double block
+    // damage, double quest reward, scale kills 150%.
+    try std.testing.expect(host.slots[1].hook_present[@intFromEnum(Hook.on_player_death)]);
+    try std.testing.expect(host.slots[1].hook_present[@intFromEnum(Hook.on_entity_killed)]);
+    try std.testing.expect(host.slots[1].hook_present[@intFromEnum(Hook.on_block_damage)]);
+    try std.testing.expect(host.slots[1].hook_present[@intFromEnum(Hook.on_quest_complete)]);
     try std.testing.expectEqual(verdict_deny, host.playerDeath(7));
-    try std.testing.expectEqual(@as(i32, 0), host.entityKilled(8, 1));
+    try std.testing.expectEqual(@as(i32, 150), host.entityKilled(8, 1));
     try std.testing.expectEqual(@as(i32, 200), host.blockDamage(0, 0, 0, 50));
     try std.testing.expectEqual(@as(i32, 200), host.questComplete(9, 2));
 
-    // plugin_trap: on_entity_killed traps -> that module only is disabled; the
-    // verdict keeps (0) so the sim's kill is not blocked by a broken plugin.
-    try std.testing.expectEqual(@as(i32, 0), host.entityKilled(10, 1));
+    // plugin_trap (slot 0): on_entity_killed traps -> that module only is
+    // disabled (returns keep), then plugin_rules (slot 1) scales 150%; the
+    // sim's kill is not blocked by the broken plugin.
+    try std.testing.expectEqual(@as(i32, 150), host.entityKilled(10, 1));
     try std.testing.expectEqual(@as(usize, 1), host.disabledCount());
-    try std.testing.expect(host.slots[1].disabled);
-    try std.testing.expect(!host.slots[0].disabled);
+    try std.testing.expect(host.slots[0].disabled);
+    try std.testing.expect(!host.slots[1].disabled);
     // A disabled module keeps reporting keep for every hook.
-    try std.testing.expectEqual(@as(i32, 0), host.entityKilled(11, 1));
+    try std.testing.expectEqual(@as(i32, 150), host.entityKilled(11, 1));
 }
 
 test "wasm plugin admin command hook handles ping/echo and falls through" {

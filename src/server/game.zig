@@ -1374,8 +1374,8 @@ pub const Game = struct {
         return game_player.skillLevelOf(self, slot, skill);
     }
 
-    pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
-        return game_player.killXpAward(self, killer_slot, base);
+    pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32) void {
+        return game_player.killXpAward(self, killer_slot, base, scale_pct);
     }
 
     pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {

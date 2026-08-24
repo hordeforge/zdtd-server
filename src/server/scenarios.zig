@@ -4832,8 +4832,8 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
     const gpa = gpa_impl.allocator();
 
     const modules = [_][]const u8{
-        "assets/fixtures/plugin_rules.wasm",
         "assets/fixtures/plugin_trap.wasm",
+        "assets/fixtures/plugin_rules.wasm",
     };
     const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
         .quests_path = "assets/fixtures/quests.xml",
@@ -4877,15 +4877,15 @@ test "scenario wasm T15 hooks: deny death, double block damage and quest reward,
     // 1000 exp x 200% = 2000 (xp_multiplier default 100 keeps it 1.0x).
     try std.testing.expect(xp_gain >= 2000);
 
-    // --- on_entity_killed trap: the trap module is disabled, the kill still
-    // lands (verdict keep), and the server keeps stepping ---
+    // --- on_entity_killed: the trap module (slot 0) disables on the kill
+    // (returns keep), then plugin_rules (slot 1) scales; the kill lands ---
     const z = g.sim.spawnZombie(40, 70, 0, 40).?;
     const killed = g.sim.damage(z, 99999);
     try std.testing.expect(killed.killed);
     try std.testing.expect(g.sim.slotOfNetId(z) == null or g.sim.health[g.sim.slotOfNetId(z).?].hp == 0);
     try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.disabledCount());
-    try std.testing.expect(g.wasm_plugins.slots[1].disabled);
-    try std.testing.expect(!g.wasm_plugins.slots[0].disabled);
+    try std.testing.expect(g.wasm_plugins.slots[0].disabled);
+    try std.testing.expect(!g.wasm_plugins.slots[1].disabled);
     try g.step();
     try std.testing.expect(g.tick_n >= 2);
 

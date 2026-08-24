@@ -563,7 +563,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 systems.questOnZombieKilled(&self.sim, c.slot, vx, vz);
                 // XPMultiplier + party split: award scaled server-side XP for
                 // the kill, sharing it with in-range party mates (§2.3).
-                self.killXpAward(c.slot, self.xpGainFor(d.entity_id));
+                self.killXpAward(c.slot, self.xpGainFor(d.entity_id), dmg.kill_scale_pct);
                 // AddScoreClient: the character-sheet zombie-kill counter.
                 // Stock EntityAlive.AddScore fires on every zombie kill.
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;

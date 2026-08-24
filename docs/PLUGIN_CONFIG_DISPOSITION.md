@@ -198,3 +198,25 @@ only exercised by resolver unit tests, not by shipped modules. Two demo gates
 a loud boot error (RFC 0005 R8 exclusivity) instead of first-non-keep-wins
 voting. Resolution is a policy call (declare points on the gates vs keep the
 fallback voting), not a defect: the modules behave correctly today either way.
+
+## 2026-08-25 lift sweep (terminal)
+
+Re-audit of the current tree (plugin-eligible behavior + hardcoded tunables;
+two parallel passes) plus the lifts it produced. All open items below shipped;
+nothing plugin-eligible or config-eligible remains native.
+
+| Item | Lift |
+|---|---|
+| Quest **coin** rewards bypassed `on_quest_complete` (completeQuest paid `reward_coin` before the tick-end verdict; deny/scaling could not touch coins) | **FIXED** — coins pay at the payout through the same verdict (`step.zig`), deny withholds, >0 scales; ECS/scenario tests drain the completed-quest ring (4-slot, drained every tick in production); rewardgate module doc + fixture `reward_coin=100` prove the scaled coin leg |
+| Kill-XP floor `100` in `xpGainFor` | **MOVED** — `[rules.progression] kill_xp_fallback` (binder + overlay + GAME_OPTIONS row) |
+| Bot host move-arrival `0.05` + fire-range slop `2.0` | **MOVED** — `[bots] arrival_dist`, `[bots] shot_range_slop` (binder, main merge, Bot carries from cfg) |
+| `on_entity_killed` positive verdict (>0 percent) unconsumed — kill plugins could not scale kill XP | **SHIPPED (boundary extension)** — the positive verdict rides `DamageResult.kill_scale_pct` to `killXpAward`; `plugin_rules.wasm` now scales kills 150% and the host test asserts it; trap-kill path passes 100 |
+
+Closed with reason (re-audit): `world/worldgen.zig` terrain/noise constants are
+zdtd-owned procedural worldgen; `electric.zig` max-node-watts and the interest/
+path/queue caps are structural bounds; `world.zig` cover-score `10.0 - d*0.2`
+is a host query heuristic (RE-adjacent, low operator value); offline-only
+fallbacks (maxDamageForBlock id bands, rent term 30, POI bbox 50/20/50) are
+documented stock-data defaults that XML overrides when present. Every Rules
+group/field and every zdtd.toml key has a consumer (the old dead-field class
+is gone; the parity + pin tests hold).
