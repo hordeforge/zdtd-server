@@ -48,7 +48,11 @@ pub const Combat = struct {
     /// items.xml DamageEntity wins when non-zero (systems.zig reads
     /// `if (ct.attack_damage > 0) ct.attack_damage else <this>`).
     attack_damage: f32 = 8.0,
-    /// Melee reach, squared blocks. Policy: no per-entity stock equivalent.
+    /// Melee reach, squared blocks. **Floor**: items.xml hand-item `Range`
+    /// (meleeHandZombie01 1.6, club/axe MaxRange 2.4) is the stock per-class
+    /// source, but the AI break/destroy gates read this flat floor (per-class
+    /// range needs gate slot plumbing; recorded in XML_DATA_AUDIT). 2.0 m
+    /// sits between the stock values.
     attack_range_sq: f32 = 2.0 * 2.0,
     /// Strike cadence in seconds. Policy: "No entityclasses field; always this
     /// cadence (stock melee interval approx)" (pre-move comment).

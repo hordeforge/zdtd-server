@@ -48,6 +48,10 @@ pub const ItemDef = struct {
     degradation_max: u32 = 0,
     /// items.xml Action0 DamageEntity (melee hand damage; 0 = none/unset).
     entity_damage: f32 = 0,
+    /// items.xml DamageBlock property (hand-item block chew: zombie hand 8,
+    /// feral 24; 0 = none/unset → the `[rules.progression] block_bite_damage`
+    /// floor).
+    damage_block: f32 = 0,
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -500,6 +504,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_edmgs.deinit(allocator);
     var stock_place_names: std.ArrayList([]const u8) = .empty;
     defer stock_place_names.deinit(allocator);
+    var stock_dmg_blocks: std.ArrayList(f32) = .empty;
+    defer stock_dmg_blocks.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
     defer stock_fuels.deinit(allocator);
     var stock_is_eat: std.ArrayList(bool) = .empty;
@@ -581,6 +587,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             if (xml.propertyValue(clean[ii..item_end], "DamageEntity")) |v| {
                 edmg = xml.parseF32(v) orelse 0;
             }
+            // Club/axe declare damage only as the EntityDamage passive effect
+            // (operation=base_set; perk-tagged perc_add rows are ignored
+            // without perks). Stock: club 12, stone axe 6.
+            if (edmg == 0) {
+                if (xml.passiveEffectValue(clean[ii..item_end], "EntityDamage")) |v| {
+                    edmg = xml.parseF32(v) orelse 0;
+                }
+            }
             try stock_edmgs.append(allocator, edmg);
             // ItemActionPlaceAsBlock (Action1 Class=PlaceAsBlock): only items
             // with a Blockname place (stock b14 exactly two). Empty = not
@@ -590,6 +604,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 if (xml.propertyValue(clean[ii..item_end], "Blockname")) |bn| place_name = try arena.dupe(u8, bn);
             }
             try stock_place_names.append(allocator, place_name);
+            // DamageBlock property (hand items: zombie hand 8, feral 24).
+            var dmg_block: f32 = 0;
+            if (xml.propertyValue(clean[ii..item_end], "DamageBlock")) |v| {
+                dmg_block = xml.parseF32(v) orelse 0;
+            }
+            try stock_dmg_blocks.append(allocator, dmg_block);
             var fuel: f32 = 0;
             if (xml.propertyValue(clean[ii..item_end], "FuelValue")) |v| {
                 fuel = xml.parseF32(v) orelse 0;
@@ -599,7 +619,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             const body = clean[ii..item_end];
             var is_eat = itemActionClassIs(body, "Eat");
             const food_amt: f32 = firstCvarAdd(body, "$foodAmountAdd") orelse 0;
-            const food_hp: f32 = firstCvarAdd(body, "foodHealthAmount") orelse 0;
+            // HP on consume: food items carry `foodHealthAmount`; medical
+            // items heal through the `medicalRegHealthAmount` cvar instead
+            // (stock bandage 30/action, medkit 400). Both feed EatProps.hp.
+            const food_hp: f32 = firstCvarAdd(body, "foodHealthAmount") orelse
+                firstCvarAdd(body, "medicalRegHealthAmount") orelse 0;
             const water_amt: f32 = firstCvarAdd(body, "$waterAmountAdd") orelse 0;
             if (!is_eat and (food_amt > 0 or water_amt > 0)) is_eat = true;
             if (!is_eat and (std.mem.startsWith(u8, name, "food") or std.mem.startsWith(u8, name, "drink")))
@@ -743,6 +767,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.degradation_max = stock_degrad_max.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
                 def.place_block_name = stock_place_names.items[idx];
+                def.damage_block = stock_dmg_blocks.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
@@ -779,6 +804,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .degradation_max = stock_degrad_max.items[idx],
             .entity_damage = stock_edmgs.items[idx],
             .place_block_name = stock_place_names.items[idx],
+            .damage_block = stock_dmg_blocks.items[idx],
             .fuel_value = stock_fuels.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
             .is_eat = stock_is_eat.items[idx],
@@ -966,6 +992,25 @@ test "load stock items.xml when present" {
     }
     if (t.byName("resourceWood")) |wood| {
         try std.testing.expectEqual(@as(u16, 50), wood.econ_bundle_size);
+    }
+    // Melee damage: club/axe declare it as the EntityDamage passive effect
+    // (base_set) — property-less items must not resolve to 0.
+    if (t.byName("meleeWpnClubT0WoodenClub")) |club| {
+        try std.testing.expectEqual(@as(f32, 12), club.entity_damage);
+    }
+    if (t.byName("meleeToolRepairT0StoneAxe")) |axe| {
+        try std.testing.expectEqual(@as(f32, 6), axe.entity_damage);
+    }
+    // Per-class block chew: DamageBlock property on the zombie hand items.
+    if (t.byName("meleeHandZombie01")) |hand| {
+        try std.testing.expectEqual(@as(f32, 8), hand.damage_block);
+    }
+    if (t.byName("meleeHandZombieFeral")) |feral| {
+        try std.testing.expectEqual(@as(f32, 24), feral.damage_block);
+    }
+    // Medical heal: bandage heals via the medicalRegHealthAmount cvar.
+    if (t.byName("medicalFirstAidBandage")) |band| {
+        try std.testing.expect(band.food_health > 0);
     }
     var buf: [512 * 1024]u8 = undefined;
     const map = try t.writeNameIdMapping(&buf);

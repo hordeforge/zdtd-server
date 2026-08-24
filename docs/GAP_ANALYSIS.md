@@ -2983,10 +2983,11 @@ and server-to-client XP/level pushes do not exist.
   `output_log_client_zdtd_connect.txt:5236`
 
 - **XP from non-kill sources** `PARTIAL (waived)`
-  Only kill XP is authoritative; quest/mining/loot XP is client-reported and
-  would be faked without the full skill/XP economy. Waived until progression
+  Kill XP and quest `Exp` rewards are server-awarded (`awardXp`; quest payout
+  at `step.zig`). Mining/repair/craft XP stays client-reported and would be
+  faked without the full skill/XP economy; waived until the progression
   ledger is wired end-to-end.
-  *Anchors:* `src/server/game.zig:4964` `awardXp`, `Data/Config/quests.xml:103`
+  *Anchors:* `src/server/game.zig` `awardXp`, `Data/Config/quests.xml:103`
 
 - **Skill points granted per level** `PARTIAL (waived)`
   `skill_points_per_level` parsed but no server-side balance exists yet; spending

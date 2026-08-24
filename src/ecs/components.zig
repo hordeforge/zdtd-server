@@ -78,6 +78,9 @@ pub const ClassId = struct {
     chase_speed: f32 = 0,
     wander_speed: f32 = 0,
     attack_damage: f32 = 0,
+    /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
+    /// feral 24); 0 = class_table[id] then the Rules chew floor.
+    block_chew: f32 = 0,
     /// entityclasses SightRange in metres; 0 = class_table[id] then the Rules
     /// sense floor (systems.senseDistSq).
     sight_range: f32 = 0,

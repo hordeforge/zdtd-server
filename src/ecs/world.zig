@@ -142,6 +142,9 @@ pub const EntityClass = struct {
     wander_speed: f32 = 0,
     /// HandItem Action0 DamageEntity from items.xml; 0 = use systems default.
     attack_damage: f32 = 0,
+    /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
+    /// feral 24); 0 = use the Rules chew floor.
+    block_chew: f32 = 0,
     /// TimeStayAfterDeath seconds a corpse lingers (entityclasses.xml).
     time_stay: f32 = 0,
     /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
@@ -915,6 +918,7 @@ pub const World = struct {
             self.class_id[s].chase_speed = def.chase_speed;
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].block_chew = def.block_chew;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
@@ -991,6 +995,7 @@ pub const World = struct {
             self.class_id[s].chase_speed = def.chase_speed;
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].block_chew = def.block_chew;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;

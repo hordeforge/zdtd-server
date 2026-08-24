@@ -223,6 +223,15 @@ pub fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
     return 0;
 }
 
+/// Hand-item DamageBlock (items.xml) for the per-class block chew; 0 when
+/// the hand item has none (the caller falls back to the Rules floor).
+/// Stock: meleeHandZombie01 8, meleeHandZombieFeral 24.
+pub fn handItemBlockChew(self: *Game, hand_item: []const u8) f32 {
+    if (hand_item.len == 0) return 0;
+    if (self.items.byName(hand_item)) |d| return d.damage_block;
+    return 0;
+}
+
 /// One workstation step: burn/craft, then re-broadcast the stations it changed.
 pub fn tickWorkstations(self: *Game, dt: f32) !void {
     self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self, .{

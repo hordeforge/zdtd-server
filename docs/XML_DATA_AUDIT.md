@@ -85,10 +85,10 @@ hardcoded literal. Verified against the b14 install before changing.
 | # | Was (hardcoded) | Stock source | Fix |
 |---|---|---|---|
 | 1 | Player spawn/respawn HP `100` (`ecs/world.zig` spawnPlayer/respawnPlayer) | `entityclasses.xml` playerMale `HealthMax` (base_set 100) | `entities.defaultPlayer()` + class_table[0] filled from XML; spawn/respawn read `class_table[player_class_id].max_hp` |
-| 2 | Turret power draw `25` W (`ecs/world.zig` spawnTurret) | `blocks.xml` autoTurret `RequiredPower=15` | `spawnTurretEx(x,y,z,watts)`; Game `turretWatts()` = `maxdamage.wattsByName("autoTurret")`; player C2S + save restore pass it |
+| 2 | Turret power draw `25` W (`ecs/world.zig` spawnTurret) | `blocks.xml` autoTurret `RequiredPower=15` | `World.turret_watts_fn` wired to `maxdamage.wattsByName("autoTurret")`; the ECS `spawnTurret` draws the resolved 15 W |
 | 3 | Saved vehicle restore HP `200` (`server/persist.zig`) | `vehicles.xml` per-kind `max_hp` (gyro 250, 4x4 300) | restore passes `vehicles.byKind(kind).max_hp` |
 | 4 | Airdrop loot container `"supplyCrate"` (`server/game/tick.zig`) — no such stock name, crates rolled empty | `loot.xml` `airDrop` (+ `entityclasses.xml` `LootList`) | renamed to `"airDrop"` |
-| 5 | Item→block place map `resourceWood→frameShapes:cube`, `resourceCobblestones→cobblestoneShapes:cube` (`ecs/inventory.zig`, `server/game/hooks.zig`) — invented; b14 defines no `Placeable` for them | `items.xml` `Blockname` (torch → `wallTorchLightPlayer` etc.) | `items.zig` parses `Blockname` into `ItemDef.place_block_name`; `hooks.placeBlockId` places only items with a `Blockname`, resolved via AssignIds; removed dead `itemToBlockResolved` |
+| 5 | Item→block place map `resourceWood→frameShapes:cube`, `resourceCobblestones→cobblestoneShapes:cube` (`ecs/inventory.zig`, `server/game/hooks.zig`) — invented; b14 defines no `Placeable` for them | `items.xml` `Blockname` (torch → `wallTorchLightPlayer`, candle → `candleWallLightPlayer`) | `items.zig` parses `Blockname` into `ItemDef.place_block_name`; `placeBlockId` resolves only that name via AssignIds and drops the invented wood/cobble map (frameShapes:cube is not an item in b14) |
 | 6 | Starter kit (4 items + counts) hardcoded in `ecs/world.zig` spawnPlayer | none — stock defines the kit in code, so it is server policy | moved to `zdtd.toml` `spawn_starter_kit` (config level, per ADR 0010); Game parses once, applies at fresh join, resolves names through items.xml, fail-closed on unknown names |
 
 ## Offline fallbacks (allowed last resort, code bucket)
@@ -101,7 +101,10 @@ values to a connected stock client:
   `quests.zig`, `traders.zig`, `maxdamage.zig`, `biome_layers.zig`) and the ECS
   `class_table` defaults (`ecs/world.zig`) — offline sim only; XML tables replace
   them when a game-dir loads. Offline values that stock XML defines were aligned
-  to stock in this audit (e.g. builtin zombie HP 40 → 200 = `^healthNormal`).
+  to stock in this audit: the `entities.zig` builtin defs ship stock HP
+  (zombie 200 = `^healthNormal`); the ECS offline `class_table` rows keep the
+  documented 40 fail-closed floor, and live spawns resolve classes through the
+  builtin defs, so the effective offline value is stock.
 - Stock-name selection keys resolved through a loaded table (never values):
   `buffInjuryBleeding` (`hooks.zig`), `bloodMoon` (`weather.zig`), `Scouts*`
   (`aidirector.zig`), `autoTurret` (`game.zig`), `airDrop` (`tick.zig`),
@@ -124,9 +127,33 @@ values to a connected stock client:
 
 ## Known gaps (not hardcodes, tracked elsewhere)
 
-- `ecs/rules.zig` survival `Progression` defaults are documented placeholder
-  numbers (WORK_PLAN T16) — the real values ship as data in `buffs.xml` but are
-  not yet wired to the sim. They are a config floor, not stock-value claims.
+- `ecs/rules.zig` survival `Progression` floors (base food/water depletion,
+  well-fed regen, stamina rates): no stock XML row carries the base rates
+  (stock decays them engine-side via `Stat.Tick`, activity-scaled), so they
+  are operator policy by design. The buffs.xml-derived thresholds and damage
+  ARE wired: `tickSurvival` (`game/tick.zig`) consumes `buffs.survival()`
+  (hunger/thirst stage fractions, starvation/dehydration HP/s,
+  `StaminaChangeOT` penalty) whenever `buffs.xml` is present.
 - `loot.zig` `rollContainer` falls back to fabricated `resourceScrapIron × 5`
   when a container rolls empty; stock yields an empty container (fail-closed
   change is a separate behavioural decision).
+
+## Deferred XML-data items (recorded with reason)
+
+From the value-level audit (2026-08-25); each is either unreachable in stock
+play or needs a boundary/plumbing change before it can carry stock data. None
+ships a wrong value to a connected client.
+
+| Item | Why deferred |
+|---|---|
+| Melee reach per hand item (`Range` 1.6 / `MaxRange` 2.4 in items.xml) | `attack_range_sq` is the documented floor; the AI break/destroy gates read it and lack per-class slot plumbing. 2.0 m sits between the stock values. |
+| loot.xml `ignore_loot_abundance` / `unique_item` / `abundance_type` / `unmodified_lootstage` / `open_time` | Carriers are twitch-only containers (unreachable), except `questRewardSkillMagazines unique_item`; the flag set needs a roll-path change. |
+| traders.xml `rent_cost` / `rent_time` / `player_owned` | The rent mechanic is unimplemented; `player_owned` pricing is RE-derived but unapplied. |
+| quests.xml `max_quest_tier` / `quests_per_tier` | Parsed but unused: no trader tier-offer loop consumes them yet. |
+| progression.xml `skill_points_per_level`, attribute/perk costs | The skill-point/perk ledger is pending (ADR 0023); no purchase path exists. |
+| painting.xml id ↔ TextureId table | Loaded, zero readers: the chunk paint channel carries the raw texture; the client resolves paint ids. |
+| signs.xml default library `[D]` | Only prefab `*_signs.xml` libraries load; the stock `[D]` library (incl. the mandatory zero-guid sign) is client-side too. |
+| materials.xml `Experience` | No block-harvest/repair XP exists (kill XP only); loader gap = missing feature. |
+| vehicles.xml `motorTorque_turbo` | Parsed but unused: accel is the documented zdtd-owned `[rules.vehicle] accel_mps2` proxy (stock dedi has no physics sim). |
+| npc.xml `<factions>` / `quest_faction` | Server has no NPC AI; `quest_faction` is also missing from the quest wire field. |
+| biomes.xml biome `difficulty` / `buff` attrs | Not consumed by worldgen or spawn scaling. |

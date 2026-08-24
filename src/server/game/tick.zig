@@ -245,6 +245,8 @@ pub fn tickAirDrop(self: *Game) void {
 pub fn tickZombieBlockDamage(self: *Game) void {
     const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
     if (mult == 0) return;
+    // Per-class chew: the hand item's DamageBlock (zombie 8, feral 24) when
+    // the class resolved one; the Rules floor otherwise.
     const base_bite: u32 = @trunc(@max(0, self.sim.rules.progression.block_bite_damage));
     // Cached zombie group: this pass only damages blocks, never spawns or
     // destroys entities, so the slice stays valid for the whole loop.
@@ -303,7 +305,13 @@ pub fn tickZombieBlockDamage(self: *Game) void {
                 continue;
             }
         }
-        const dmg: u16 = @intCast(@min(base_bite * mult / 100, 65535));
+        // Per-class chew: hand-item DamageBlock (zombie 8, feral 24) beats
+        // the flat Rules floor when the class resolved one.
+        const chew: u32 = if (self.sim.class_id[s].block_chew > 0)
+            @trunc(self.sim.class_id[s].block_chew)
+        else
+            base_bite;
+        const dmg: u16 = @intCast(@min(chew * mult / 100, 65535));
         const max_hp = self.maxDamageForBlock(id);
         const total = self.addBlockDamage(bx, by, bz, dmg) catch continue;
         if (total >= max_hp) {
@@ -397,6 +405,7 @@ pub fn clearDeadKnownEntities(self: *Game) void {
 pub fn drainDigRequests(self: *Game) void {
     const mult: u32 = if (self.sim.director.bloodmoon_active) self.block_damage_ai_bm else self.block_damage_ai;
     if (mult == 0) return;
+    // Per-class chew floor: hand-item DamageBlock beats the flat Rules value.
     const base_bite: u32 = @trunc(@max(0, self.sim.rules.progression.block_bite_damage));
     const n = @min(self.sim.dig_n, self.sim.dig_reqs.len);
     self.sim.dig_n = 0;
@@ -411,7 +420,11 @@ pub fn drainDigRequests(self: *Game) void {
         }
         const id = self.blockIdAtWorld(d.x, d.y, d.z);
         if (id == 0) continue;
-        const dmg: u16 = @intCast(@min(base_bite * mult / 100, 65535));
+        const chew: u32 = if (self.sim.class_id[d.slot].block_chew > 0)
+            @trunc(self.sim.class_id[d.slot].block_chew)
+        else
+            base_bite;
+        const dmg: u16 = @intCast(@min(chew * mult / 100, 65535));
         const max_hp = self.maxDamageForBlock(id);
         const total = self.addBlockDamage(d.x, d.y, d.z, dmg) catch continue;
         if (total >= max_hp) {

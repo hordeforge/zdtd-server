@@ -148,8 +148,8 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64) void {
 
 /// EntityPlayer::get_gameStage for one client (asm.il ~503972). The biome
 /// terms come from the player's current biome (biomes.xml gamestage_modifier
-/// / gamestage_bonus, progression.md 5); quest modifiers are still zero
-/// (quests.xml GameStageMod/Bonus not parsed yet, docs/GAP_ANALYSIS.md).
+/// / gamestage_bonus, progression.md 5) and the quest terms from the active
+/// quest (quests.xml gamestage_mod / gamestage_bonus, applied below).
 pub fn gameStageOf(self: *const Game, slot: usize) i32 {
     if (slot >= self.clients.len) return 1;
     const c = &self.clients[slot];
