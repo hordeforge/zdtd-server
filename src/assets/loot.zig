@@ -251,14 +251,14 @@ pub const LootTable = struct {
             var total: u32 = 0;
             var e: u8 = 0;
             while (e < g.entry_n) : (e += 1) {
-                total +|= @max(@as(u32, @intFromFloat(g.entries[e].prob * 1000)), 1);
+                total +|= pickWeight(g.entries[e].prob);
             }
             if (total == 0) break;
             const roll = s % total;
             var chosen: u8 = 0;
             var acc: u32 = 0;
             while (chosen < g.entry_n) : (chosen += 1) {
-                acc +|= @max(@as(u32, @intFromFloat(g.entries[chosen].prob * 1000)), 1);
+                acc +|= pickWeight(g.entries[chosen].prob);
                 if (roll < acc) break;
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
@@ -435,7 +435,31 @@ pub const LootTable = struct {
         if (!(ep > 0)) return 0;
         return @intFromFloat(@min(ep, 10.0) * 1000.0);
     }
+
+    /// Milliprobs for the ischosen reward weighted pick. Non-finite or
+    /// non-positive probs fail closed at the weight-1 floor; finite probs
+    /// cap so *1000 stays under maxInt(u32). Either way a malformed
+    /// loot.xml prob can no longer trap the float->u32 cast mid-roll.
+    fn pickWeight(prob: f32) u32 {
+        if (!std.math.isFinite(prob) or prob <= 0) return 1;
+        const milli: f32 = @min(prob, 4_000_000.0) * 1000.0;
+        return @max(@as(u32, @intFromFloat(milli)), 1);
+    }
 };
+
+test "pickWeight clamps malformed probs instead of trapping the cast" {
+    // Normal probs are milliprobs.
+    try std.testing.expectEqual(@as(u32, 500), LootTable.pickWeight(0.5));
+    // Negative, NaN and zero fail closed at the weight-1 floor (a panic in
+    // the float->u32 cast before the clamp).
+    try std.testing.expectEqual(@as(u32, 1), LootTable.pickWeight(-2.0));
+    try std.testing.expectEqual(@as(u32, 1), LootTable.pickWeight(std.math.nan(f32)));
+    try std.testing.expectEqual(@as(u32, 1), LootTable.pickWeight(0));
+    // Huge finite probs cap under maxInt(u32) instead of trapping; a
+    // non-finite prob fails closed at the weight-1 floor.
+    try std.testing.expectEqual(@as(u32, 4_000_000_000), LootTable.pickWeight(1.0e9));
+    try std.testing.expectEqual(@as(u32, 1), LootTable.pickWeight(std.math.inf(f32)));
+}
 
 test "loot abundance scales counts, keeps at least one" {
     var lt = LootTable.builtin();

@@ -229,7 +229,14 @@ pub fn step(self: *Game) !void {
                 // perk levels yet (docs/adr/0023-perk-attribute-system.md), so
                 // trap_kill_xp_frac is a flat floor rather than a per-player lookup.
                 const trap_xp = self.xpGainFor(r.killed_ids[tk]);
-                const trap_xp_scaled: u64 = @trunc(@as(f32, @floatFromInt(trap_xp)) * self.sim.rules.progression.trap_kill_xp_frac);
+                // Guard the float->int cast: a negative or huge
+                // trap_kill_xp_frac (config) traps @trunc into u64.
+                const trap_scaled_f = @as(f32, @floatFromInt(trap_xp)) *
+                    @max(0, self.sim.rules.progression.trap_kill_xp_frac);
+                const trap_xp_scaled: u64 = if (!std.math.isFinite(trap_scaled_f))
+                    0
+                else
+                    @min(@as(u64, @intFromFloat(trap_scaled_f)), std.math.maxInt(i32));
                 self.killXpAward(osz, trap_xp_scaled, 100); // trap kills carry no verdict scale
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
@@ -317,8 +324,13 @@ pub fn step(self: *Game) !void {
             if (v < 0) continue;
             const pct: u32 = if (v > 0) @intCast(v) else 100;
             // reward_coin through the same verdict (deny withholds, >0
-            // scales the coin leg like items/exp).
-            const coin_reward: u32 = @as(u32, d.reward_coin) * pct / 100;
+            // scales the coin leg like items/exp). Widen before the multiply:
+            // a verdict percent can be huge, and u32 math would wrap the
+            // payout (or trap on the overflow check).
+            const coin_reward: u32 = @intCast(@min(
+                @as(u64, d.reward_coin) * @as(u64, pct) / 100,
+                @as(u64, std.math.maxInt(u32)),
+            ));
             if (coin_reward > 0) {
                 if (self.sim.mask[cq.slot].wallet) {
                     self.sim.wallet[cq.slot].coins +|= coin_reward;
@@ -327,7 +339,10 @@ pub fn step(self: *Game) !void {
             var ri: usize = 0;
             while (ri < @min(@as(usize, d.reward_n), ecs.quest.max_reward_flags)) : (ri += 1) {
                 const spec = d.rewards[ri];
-                const scaled: u32 = @as(u32, spec.value) * pct / 100;
+                const scaled: u32 = @intCast(@min(
+                    @as(u64, spec.value) * @as(u64, pct) / 100,
+                    @as(u64, std.math.maxInt(u32)),
+                ));
                 switch (spec.kind) {
                     .item => {
                         const eid = self.items.ecsIdByName(spec.item_name);
@@ -452,6 +467,11 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     const idx: usize = @min(@as(usize, d.difficulty_tier - 1), mods.len - 1);
     const level: f32 = @floatFromInt(self.clients[peer].level);
     const base = level * (1.0 + mods[idx]);
-    if (!std.math.isFinite(base)) return 1;
+    // Clamp before the cast: a modded quest_tier_mod can push base past the
+    // i32 range (finite), which traps @intFromFloat.
+    if (!std.math.isFinite(base) or base < 1.0) return 1;
+    // 2^31 is exactly representable in f32; anything at or above it
+    // truncates out of i32 range.
+    if (base >= 2147483648.0) return std.math.maxInt(i32);
     return @max(1, @as(i32, @intFromFloat(@floor(base))));
 }

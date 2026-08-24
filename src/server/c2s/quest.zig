@@ -427,9 +427,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.wallet[ps].coins < cost) return true; // insufficient currency (CanRent 3)
         if (self.sim.mask[ps].inventory) {
             const have = self.sim.inventory[ps].countItem(coins);
+            // removeItem takes a u16 count; a wallet synced from many coin
+            // stacks can hold more than 65535, so drain in u16 chunks rather
+            // than truncating the cast.
             const from_inv: u32 = @min(have, cost);
             if (from_inv > 0) {
-                if (!self.sim.inventory[ps].removeItem(coins, @intCast(from_inv))) return true;
+                var left: u32 = from_inv;
+                while (left > 0) {
+                    const chunk: u16 = @intCast(@min(left, @as(u32, std.math.maxInt(u16))));
+                    if (!self.sim.inventory[ps].removeItem(coins, chunk)) return true;
+                    left -= chunk;
+                }
                 self.sim.markDirty(ps, .{ .inv = true });
             }
         }

@@ -23,7 +23,9 @@ const max_clients = game_mod.max_clients;
 pub fn awardXp(self: *Game, slot: usize, base: u64) void {
     if (slot >= self.clients.len) return;
     const c = &self.clients[slot];
-    c.xp += base * self.xp_multiplier / 100;
+    // Widen before the multiply: base (verdict-scaled) times an operator
+    // XPMultiplier can wrap u64 otherwise; the ledger add saturates.
+    c.xp +|= @intCast(@min(@as(u128, base) * self.xp_multiplier / 100, @as(u128, std.math.maxInt(u64))));
     // Compute the current cumulative threshold once, then advance it as
     // levels are crossed. Re-summing from level one on every iteration is
     // quadratic for large XP awards.
@@ -79,7 +81,11 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
 pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
     if (self.sim.slotOfNetId(victim_nid)) |s| {
         const g = self.sim.class_id[s].xp_gain;
-        if (g > 0) return @trunc(g);
+        if (g > 0) {
+            // Clamp before the cast: a modded ExperienceGain past u64 range
+            // (finite) traps the float->int conversion. 2^31 is exact in f32.
+            return @intFromFloat(@min(@trunc(g), 2147483648.0));
+        }
     }
     // Rules floor (progression.kill_xp_fallback) when the class resolved no
     // ExperienceGain (offline/builtin catalog or recycled slot).
@@ -93,8 +99,9 @@ pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
 /// member gets the same split XP through NetPackageSharedPartyKill so the
 /// client shows the shared-kill tooltip. Out of party the award is full.
 pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32) void {
-    // on_entity_killed verdict >0 scales the kill XP (100 = keep).
-    const base_scaled: u64 = @as(u64, @min(base, std.math.maxInt(u64))) * scale_pct / 100;
+    // on_entity_killed verdict >0 scales the kill XP (100 = keep). base is
+    // xpGainFor-clamped to i32 range, so the u64 product cannot overflow.
+    const base_scaled: u64 = base * scale_pct / 100;
     const killer = &self.clients[killer_slot];
     const party = self.parties.partyByMember(killer.entity_id);
     var in_range: u8 = 0;

@@ -735,12 +735,9 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
         }
         try w.writeByte(0); // presence: full byte-planes
         var plane_buf: [cells_per_layer]u8 = undefined;
-        var j: u1 = 0;
-        while (true) {
-            packU16Plane(&vals, j, &plane_buf);
+        for (0..2) |j| {
+            packU16Plane(&vals, @intCast(j), &plane_buf);
             try w.writeBytes(&plane_buf);
-            if (j == 1) break;
-            j = 1;
         }
     }
 }
@@ -777,12 +774,9 @@ fn writeDamageChannel(w: *binary.Writer, opts: EncodeOpts) !void {
         }
         try w.writeByte(0);
         var plane_buf: [cells_per_layer]u8 = undefined;
-        var j: u1 = 0;
-        while (true) {
-            packU16Plane(&vals, j, &plane_buf);
+        for (0..2) |j| {
+            packU16Plane(&vals, @intCast(j), &plane_buf);
             try w.writeBytes(&plane_buf);
-            if (j == 1) break;
-            j = 1;
         }
     }
 }

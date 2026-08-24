@@ -1284,8 +1284,11 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                 unit = @intCast(@max(1, @min(scaled, std.math.maxInt(u32))));
             }
         }
-        const cost: u32 = unit * qty;
-        if (cost > std.math.maxInt(u16)) return false;
+        // Widen before the multiply: a verdict-scaled unit can sit at u32 max,
+        // so unit * qty in u32 wraps (free purchase) or traps on the check.
+        const cost_wide: u64 = @as(u64, unit) * @as(u64, qty);
+        if (cost_wide > std.math.maxInt(u16)) return false;
+        const cost: u32 = @intCast(cost_wide);
         if (w.wallet[ps].coins < cost) return false;
         // Spend coins from the client bag first so it matches the wallet;
         // only the remainder draws on server-side balance (quest rewards).
@@ -1347,10 +1350,19 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         if (w.percent_uses_left_fn) |p| {
             scaled *= @as(f64, p(w.percent_uses_left_ctx, item, sold_quality, sold_use_times));
         }
-        unit = @intFromFloat(@max(1.0, scaled));
+        // Clamp before the cast: a hostile sell hook or modded quality_mod can
+        // exceed u32 range (or go non-finite), which traps in @intFromFloat;
+        // fail closed at 1 instead of crashing the tick.
+        if (!std.math.isFinite(scaled) or scaled <= 1.0) {
+            unit = 1;
+        } else {
+            unit = @intFromFloat(@min(scaled, @as(f64, std.math.maxInt(u32))));
+        }
         if (unit == 0) return false;
-        const gain: u32 = unit * qty;
-        if (gain > std.math.maxInt(u16)) return false;
+        // Same widening as the buy cost above.
+        const gain_wide: u64 = @as(u64, unit) * @as(u64, qty);
+        if (gain_wide > std.math.maxInt(u16)) return false;
+        const gain: u32 = @intCast(gain_wide);
         if (w.wallet[ps].coins > std.math.maxInt(u32) - gain) return false;
         if (entry) |en| {
             if (en.count > std.math.maxInt(u16) - qty) return false;
@@ -4780,6 +4792,65 @@ test "full inventory preserves nearby loot bag" {
 
     try std.testing.expectEqual(@as(u32, 0), collectLootNear(&w, 0, 8));
     try std.testing.expect(w.slotOfNetId(bag_id) != null);
+}
+
+test "verdict-scaled buy price cannot wrap the u32 cost into a free purchase" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 50_000).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    w.wallet[ps].coins = 100_000;
+    w.trader_stock[ts].entries[0] = .{ .item = 99, .count = 10, .price = 65535 };
+    // Percent 3276851 scales the unit price to 65535*3276851/100 =
+    // 2147484302; times qty 2 that is 4294968604, which overflows u32 into
+    // a wrapped "cost" of 1308 dukes. The widened math must refuse the buy.
+    w.trade_price_verdict_fn = struct {
+        fn f(_: ?*anyopaque, _: i32, _: u16, _: u32) i32 {
+            return 3_276_851;
+        }
+    }.f;
+    const wallet_before = w.wallet[ps].coins;
+    try std.testing.expect(!trade(&w, 0, trader_id, 99, 2, 0, 6));
+    try std.testing.expectEqual(wallet_before, w.wallet[ps].coins);
+    try std.testing.expectEqual(@as(u16, 10), w.trader_stock[ts].entries[0].count);
+
+    // A moderate percent still prices normally: 65535 * 200% = 131070, over
+    // the u16 wire bound, so refused; 100 * 200% = 200/unit sells fine.
+    w.trade_price_verdict_fn = struct {
+        fn f(_: ?*anyopaque, _: i32, _: u16, _: u32) i32 {
+            return 200;
+        }
+    }.f;
+    try std.testing.expect(!trade(&w, 0, trader_id, 99, 2, 0, 6));
+    w.trader_stock[ts].entries[0] = .{ .item = 99, .count = 10, .price = 100 };
+    try std.testing.expect(trade(&w, 0, trader_id, 99, 2, 0, 6));
+    try std.testing.expectEqual(@as(u32, 100_000 - 400), w.wallet[ps].coins);
+    w.trade_price_verdict_fn = null;
+}
+
+test "huge sell hook price clamps instead of trapping the float cast or gain multiply" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    w.inventory[ps].slots[0] = .{ .item_id = 99, .count = 100, .quality = 1 };
+    w.trader_stock[ts].entries[0] = .{ .item = 99, .count = 2, .price = 10, .sell = 100 };
+    // A sell-price hook at u32 max previously overflowed the unit * qty
+    // gain multiply; the widened math must fail closed as a refused sale
+    // (and the cast clamp covers a modded quality_mod pushing past u32).
+    w.sell_price_fn = struct {
+        fn f(_: ?*anyopaque, _: u16, _: u16) u32 {
+            return std.math.maxInt(u32);
+        }
+    }.f;
+    try std.testing.expect(!trade(&w, 0, trader_id, 99, 4, 1, 6));
+    try std.testing.expectEqual(@as(u16, 100), w.inventory[ps].slots[0].count);
+    try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
+    w.sell_price_fn = null;
 }
 
 test "failed trader buy leaves wallet stock and inventory unchanged" {

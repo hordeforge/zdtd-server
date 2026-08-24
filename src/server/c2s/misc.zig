@@ -36,20 +36,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (std.mem.eql(u8, name, "NetPackageChat")) {
             const ch = packages.parseStockChat(body) catch return true;
             if (!chatMsgOk(ch.msg)) return true;
-            var chat_msg: []const u8 = ch.msg;
             var chat_buf: [c2s_text.max_chat_msg_len]u8 = undefined;
             var wasm_buf: [c2s_text.max_chat_msg_len]u8 = undefined;
-            if (self.plugins.chatFilter(c.entity_id, ch.msg, &chat_buf)) |f| {
-                if (f.len == 0) return true;
-                if (!chatMsgOk(f)) return true;
-                // f is a slice of chat_buf; copying it onto itself panics
-                // ("@memcpy arguments alias"), so use it directly.
-                chat_msg = f;
-            } else if (self.wasm_plugins.chatFilter(c.entity_id, ch.msg, &wasm_buf)) |f| {
-                if (f.len == 0) return true;
-                if (!chatMsgOk(f)) return true;
-                chat_msg = f;
-            }
+            const chat_msg = filteredChatText(self, c, ch.msg, &chat_buf, &wasm_buf) orelse return true;
             const stock = packages.buildStockChat(
                 self.body_buf[0..512],
                 ch.chat_type,
@@ -76,28 +65,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             var r: wire_binary.Reader = .{ .data = body };
             var from_buf: [64]u8 = undefined;
             var msg_buf: [max_chat_msg_len]u8 = undefined;
-            const from = r.readString(&from_buf) catch "";
-            var msg = r.readString(&msg_buf) catch return true;
-            _ = from;
+            // Sender name: read to advance the reader, then discard.
+            _ = r.readString(&from_buf) catch "";
+            const msg = r.readString(&msg_buf) catch return true;
             if (!chatMsgOk(msg)) return true;
-            var chat_msg: []const u8 = msg;
             var chat_buf2: [c2s_text.max_chat_msg_len]u8 = undefined;
             var wasm_buf2: [c2s_text.max_chat_msg_len]u8 = undefined;
-            if (self.plugins.chatFilter(c.entity_id, msg, &chat_buf2)) |f| {
-                if (f.len == 0) return true;
-                if (!chatMsgOk(f)) return true;
-                // f is a slice of chat_buf2; copying it onto itself panics
-                // ("@memcpy arguments alias"), so use it directly.
-                chat_msg = f;
-                msg = chat_msg;
-            } else if (self.wasm_plugins.chatFilter(c.entity_id, msg, &wasm_buf2)) |f| {
-                if (f.len == 0) return true;
-                if (!chatMsgOk(f)) return true;
-                chat_msg = f;
-                msg = chat_msg;
-            } else {
-                chat_msg = msg;
-            }
+            const chat_msg = filteredChatText(self, c, msg, &chat_buf2, &wasm_buf2) orelse return true;
             const stock = try packages.buildStockChat(self.body_buf[0..512], 0, c.entity_id, chat_msg, &.{});
             try self.broadcast("NetPackageChat", stock);
         }
@@ -119,13 +93,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         }
-        for (&self.clients) |*cl| {
-            if (!cl.joined or cl.peer == null) continue;
-            self.sendGame(cl.peer.?, "NetPackageGameMessage", body) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: send GameMessage failed: {s}\n", .{@errorName(err)});
-            };
-        }
+        relayBodyAll(self,"NetPackageGameMessage", body, "GameMessage");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageSoundAtPosition")) {
@@ -141,14 +109,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        for (&self.clients) |*cl| {
-            if (!cl.joined or cl.peer == null) continue;
-            if (cl.entity_id == snd.entity_id) continue; // allButAttachedToEntityId
-            self.sendGame(cl.peer.?, "NetPackageSoundAtPosition", body) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: send SoundAtPosition failed: {s}\n", .{@errorName(err)});
-            };
-        }
+        relayBodyExcept(self,"NetPackageSoundAtPosition", body, snd.entity_id, "SoundAtPosition");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageParticleEffect")) {
@@ -164,14 +125,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        for (&self.clients) |*cl| {
-            if (!cl.joined or cl.peer == null) continue;
-            if (cl.entity_id == pe.entity_caused) continue; // allButAttachedToEntityId
-            self.sendGame(cl.peer.?, "NetPackageParticleEffect", body) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: send ParticleEffect failed: {s}\n", .{@errorName(err)});
-            };
-        }
+        relayBodyExcept(self,"NetPackageParticleEffect", body, pe.entity_caused, "ParticleEffect");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityStealth")) {
@@ -214,14 +168,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        for (&self.clients) |*cl| {
-            if (!cl.joined or cl.peer == null) continue;
-            if (cl.entity_id == rg.entity_id) continue; // owner already ragdolled
-            self.sendGame(cl.peer.?, "NetPackageEntityRagdoll", body) catch |err| {
-                self.harness.counters.inc(.net_send_errors);
-                std.debug.print("zdtd: send EntityRagdoll failed: {s}\n", .{@errorName(err)});
-            };
-        }
+        // Owner already ragdolled (SendPacketToTrackedPlayersAndTrackedEntity).
+        relayBodyExcept(self,"NetPackageEntityRagdoll", body, rg.entity_id, "EntityRagdoll");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
@@ -454,9 +402,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.noteEvidence(c, peer.local_id, d.entity_id, .bounds, .strong, .damage, @sqrt(damage_d2), self.interest_range);
             return true;
         }
-        const was_zombie = blk: {
-            break :blk self.sim.kind[target_slot] == .zombie or self.sim.kind[target_slot] == .animal;
-        };
+        const was_zombie = self.sim.kind[target_slot] == .zombie or self.sim.kind[target_slot] == .animal;
         // Client strength is a claim: cap it, and honor `fatal` only against
         // NPC kinds (a spoofed fatal must not one-shot another player).
         var amount: f32 = @floatFromInt(@min(d.strength, self.max_claimed_damage));
@@ -530,11 +476,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (dmg.killed) {
             // Dead players keep the entity (client runs its own death →
             // respawn flow); EntityRemove would delete the local player.
-            const target_is_player = blk: {
-                if (self.sim.slotOfNetId(d.entity_id)) |ti|
-                    break :blk self.sim.mask[ti].player;
-                break :blk false;
-            };
+            const target_is_player = if (self.sim.slotOfNetId(d.entity_id)) |ti| self.sim.mask[ti].player else false;
             if (!target_is_player) {
                 // Corpse dwell (EntityAlive::OnDeathUpdate): the body stays
                 // in world for TimeStayAfterDeath (30 s zombies, 300 s
@@ -632,31 +574,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const n = tr.readI32() catch 0;
                     var ti: i32 = 0;
                     while (ti < n) : (ti += 1) {
-                        const present = tr.readByte() catch break;
-                        if (present == 0) continue;
-                        const ty = tr.readByte() catch break;
-                        if (ty == 2) {
-                            const eid = tr.readI32() catch break;
-                            if (self.sim.slotOfNetId(eid)) |ts| {
+                        switch (nextLockTarget(&tr) orelse break) {
+                            .entity_id => |eid| if (self.sim.slotOfNetId(eid)) |ts| {
                                 if (self.sim.mask[ts].kind and self.sim.kind[ts] == .trader) {
                                     trader_slot = ts;
                                     break;
                                 }
-                            }
-                        } else if (ty == 0 or ty == 1) {
-                            const tx = tr.readI32() catch break;
-                            const tty = tr.readI32() catch break;
-                            const tz = tr.readI32() catch break;
-                            if (ty == 1) tr.skipString() catch break;
-                            // TileEntity lock target (type 0): a vending block
-                            // under the position opens as a vending machine.
-                            if (self.vending.get(.{ .x = tx, .y = tty, .z = tz }) != null) {
-                                vending_pos = .{ .x = tx, .y = tty, .z = tz };
-                            }
-                        } else if (ty == 3) {
-                            if (tr.remaining() < 16) break;
-                            tr.pos += 16;
-                        } else break;
+                            },
+                            .pos => |p| {
+                                // TileEntity lock target (type 0): a vending block
+                                // under the position opens as a vending machine.
+                                if (self.vending.get(.{ .x = p[0], .y = p[1], .z = p[2] }) != null) {
+                                    vending_pos = .{ .x = p[0], .y = p[1], .z = p[2] };
+                                }
+                            },
+                            else => {},
+                        }
                     }
                 }
                 if (trader_slot) |ts| {
@@ -710,29 +643,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     try self.sendGame(peer, "NetPackageLockResponse", resp);
                 }
                 // Re-push TE for any storage container near the first TEFeature target.
-                // Target blob: i32 count | (present, type, …)*
                 if (req.targets_blob.len >= 4) {
                     var tr: wire_binary.Reader = .{ .data = req.targets_blob };
                     const n = tr.readI32() catch 0;
                     var ti: i32 = 0;
                     while (ti < n) : (ti += 1) {
-                        const present = tr.readByte() catch break;
-                        if (present == 0) continue;
-                        const ty = tr.readByte() catch break;
-                        if (ty == 0 or ty == 1) {
-                            const x = tr.readI32() catch break;
-                            const y = tr.readI32() catch break;
-                            const z = tr.readI32() catch break;
-                            if (ty == 1) tr.skipString() catch break;
-                            try replicate_te.sendStorageTe(self, peer, x, y, z);
-                            try replicate_te.sendWorkstationTe(self, peer, x, y, z);
-                            try replicate_te.sendVendingTe(self, peer, x, y, z);
-                        } else if (ty == 2) {
-                            _ = tr.readI32() catch break;
-                        } else if (ty == 3) {
-                            if (tr.remaining() < 16) break;
-                            tr.pos += 16;
-                        } else break;
+                        switch (nextLockTarget(&tr) orelse break) {
+                            .pos => |p| {
+                                try replicate_te.sendStorageTe(self, peer, p[0], p[1], p[2]);
+                                try replicate_te.sendWorkstationTe(self, peer, p[0], p[1], p[2]);
+                                try replicate_te.sendVendingTe(self, peer, p[0], p[1], p[2]);
+                            },
+                            else => {},
+                        }
                     }
                 }
             } else {
@@ -841,17 +764,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // spam loop cannot plant turrets map-wide and drain the entity table.
         if (!self.placeAllowed(c, x, y, z)) return true;
         if (self.sim.spawnTurret(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) |tid| {
-            if (self.sim.slotOfNetId(tid)) |ts_| self.sim.turret[ts_].owner_slot = @intCast(c.slot);
-            var gi: ?u16 = null;
-            var i: usize = 0;
-            while (i < self.sim.power.node_n) : (i += 1) {
-                if (self.sim.power.nodes[i].kind == .generator) {
-                    gi = self.sim.power.nodes[i].id;
-                    break;
+            if (self.sim.slotOfNetId(tid)) |ts| {
+                self.sim.turret[ts].owner_slot = @intCast(c.slot);
+                var gi: ?u16 = null;
+                var i: usize = 0;
+                while (i < self.sim.power.node_n) : (i += 1) {
+                    if (self.sim.power.nodes[i].kind == .generator) {
+                        gi = self.sim.power.nodes[i].id;
+                        break;
+                    }
                 }
-            }
-            if (gi) |gid| {
-                if (self.sim.slotOfNetId(tid)) |ts| {
+                if (gi) |gid| {
                     _ = self.sim.power.connect(gid, self.sim.turret[ts].power_node);
                     self.sim.power.resolve();
                 }
@@ -860,6 +783,85 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     return false;
+}
+
+/// Type 3 lock-target payload: opaque 16 bytes to stock (RE netpackage-bodies.md).
+const lock_target_opaque_len: usize = 16;
+
+/// One NetPackageLockRequest target entry, decoded in stock blob order
+/// (i32 count | (u8 present, u8 type, ...)* per entry).
+const LockTarget = union(enum) {
+    /// Type 0 block pos / type 1 prefab pos (prefab name already skipped).
+    pos: [3]i32,
+    /// Type 2 entity id.
+    entity_id: i32,
+    /// Type 3 opaque payload, already skipped.
+    opaque16,
+    /// present == 0: empty slot, no payload.
+    empty,
+};
+
+/// Decode one target entry. null ends the walk: truncated entry or unknown
+/// type. Stock aborts the package read there, so the reader position is
+/// untrustworthy past that point and callers must stop.
+fn nextLockTarget(r: *wire_binary.Reader) ?LockTarget {
+    if ((r.readByte() catch return null) == 0) return .empty;
+    const ty = r.readByte() catch return null;
+    switch (ty) {
+        0, 1 => {
+            const x = r.readI32() catch return null;
+            const y = r.readI32() catch return null;
+            const z = r.readI32() catch return null;
+            if (ty == 1) r.skipString() catch return null;
+            return .{ .pos = .{ x, y, z } };
+        },
+        2 => return .{ .entity_id = r.readI32() catch return null },
+        3 => {
+            if (r.remaining() < lock_target_opaque_len) return null;
+            r.pos += lock_target_opaque_len;
+            return .opaque16;
+        },
+        else => return null,
+    }
+}
+
+/// Relay `body` verbatim to every joined client, including the sender
+/// (stock GameMessageServer re-broadcasts to all peers, sender included).
+fn relayBodyAll(self: *Game, pkg: []const u8, body: []const u8, label: []const u8) void {
+    relayBodyExcept(self,pkg, body, null, label);
+}
+
+/// Relay `body` verbatim to every joined client except `except_entity_id`'s
+/// client (stock allButAttachedToEntityId fan-out); null relays to all.
+fn relayBodyExcept(self: *Game, pkg: []const u8, body: []const u8, except_entity_id: ?i32, label: []const u8) void {
+    for (&self.clients) |*cl| {
+        if (!cl.joined or cl.peer == null) continue;
+        if (except_entity_id) |eid| {
+            if (cl.entity_id == eid) continue;
+        }
+        self.sendGame(cl.peer.?, pkg, body) catch |err| {
+            self.harness.counters.inc(.net_send_errors);
+            std.debug.print("zdtd: send {s} failed: {s}\n", .{ label, @errorName(err) });
+        };
+    }
+}
+
+/// Native then Wasm chat filter chain. Returns the possibly-rewritten text
+/// (aliasing one of the scratch buffers), or null when policy drops it.
+fn filteredChatText(self: *Game, c: *Client, msg: []const u8, native_buf: []u8, wasm_buf: []u8) ?[]const u8 {
+    if (self.plugins.chatFilter(c.entity_id, msg, native_buf)) |f| {
+        if (f.len == 0) return null;
+        if (!chatMsgOk(f)) return null;
+        // f aliases native_buf; return it directly rather than copying onto
+        // itself ("@memcpy arguments alias").
+        return f;
+    }
+    if (self.wasm_plugins.chatFilter(c.entity_id, msg, wasm_buf)) |f| {
+        if (f.len == 0) return null;
+        if (!chatMsgOk(f)) return null;
+        return f;
+    }
+    return msg;
 }
 
 /// Push the killer's AddScoreClient (zombie + player kill counters).
