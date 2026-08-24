@@ -101,6 +101,18 @@ pub fn resolve(
         if (!name_index.contains(t)) return error.UnknownOverrideTarget;
     }
 
+    // A blacklisted name is also vetoed as a `requires` dependency (ADR 0032
+    // decision 3): nothing that pulls in a blacklisted mod can load.
+    for (discovered) |m| {
+        const reqs = m.requires orelse continue;
+        var rit = std.mem.splitScalar(u8, reqs, ',');
+        while (rit.next()) |r_raw| {
+            const r = std.mem.trim(u8, r_raw, " \t");
+            if (r.len == 0) continue;
+            if (blacklist_set.contains(r)) return error.BlacklistedTarget;
+        }
+    }
+
     for (discovered) |m| {
         if (m.override != null) continue; // replacers appended below
         // `enabled = false` in mod.toml: not auto-loaded (demo gates ship
@@ -260,6 +272,20 @@ test "resolve blacklist rejects mod and vetoes replacers" {
         error.BlacklistedTarget,
         resolve(testing.allocator, &mods, &.{}, &.{}, &.{"bad"}),
     );
+}
+
+test "resolve blacklist vetoes requires dependencies" {
+    var needy = mk("needy", "needy.wasm", null, null, null);
+    needy.requires = "dep";
+    const mods = [_]manifest.Manifest{ mk("dep", "dep.wasm", null, null, null), needy };
+    try testing.expectError(
+        error.BlacklistedTarget,
+        resolve(testing.allocator, &mods, &.{}, &.{}, &.{"dep"}),
+    );
+    // Without the blacklist entry the same set resolves.
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{});
+    defer r.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), r.modules.len);
 }
 
 test "resolve override drops target, keeps replacer" {

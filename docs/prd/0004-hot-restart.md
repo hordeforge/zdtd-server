@@ -79,9 +79,9 @@ save/load test or scenario. Format IDs are the magic in the store files.
 | World clock + blood-moon schedule | `clock.zcl` | ZCL2 | `src/server/game/clock_persist.zig` |
 | Weather state | `weather.zwt` | ZWTH1 | `src/server/persist.zig` |
 | Workstation fuel/input/output + smelting queue (craft-complete, melt) | `workstations.zws` | ZWS1 | TODO "Workstation persistence" |
-| Cleared sleeper volumes (cleared POI stays clear) | `sleepers_cleared.zsc` | - | STATUS quest rows |
+| Cleared sleeper volumes (cleared POI stays clear) | `sleepers_cleared.zsc` | ZSCL1 | `src/world/sleepers.zig` |
 | Chunk terrain + blockmeta | `*.zch` | ZCH3 | `src/world/` |
-| Trader stock | trader store | - | STATUS trader-stock row |
+| Trader stock | `traders.zst` | ZTR1 | `src/server/persist.zig` |
 | Operator config | zdtd.toml / serverconfig + modlet patches | - | [GAME_OPTIONS.md](../GAME_OPTIONS.md), [PRD 0003](../prd/0003-modlets.md) |
 | Webui operator session | derived, no file | HMAC(secret, fixed label) | R1 below, [WEBUI.md](../WEBUI.md) |
 

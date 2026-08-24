@@ -29,6 +29,13 @@ pub const BotHostConfig = struct {
     spawn_spread: f32 = 2.0,
     spawn_y: f32 = 70,
     max_step_up: f32 = 1.5,
+    /// Move-arrival tolerance: a bot within this distance of its destination
+    /// snaps onto it (anti-oscillation). Config: `[bots] arrival_dist`.
+    arrival_dist: f32 = 0.05,
+    /// Host fire-range slop added to the weapon range (clanker parity):
+    /// `weap.range + slop` is the LOS-gated fire gate. Config:
+    /// `[bots] shot_range_slop`.
+    shot_range_slop: f32 = 2.0,
     /// Host loadout pool as `tag:damage:range:pellets,tag:...` (up to 8 guns;
     /// default = the builtin bot_weapon_* pool). Empty = builtin pool.
     weapon_profiles: []const u8 = "",
@@ -77,7 +84,6 @@ const bot_spawn_spread: f32 = bot_host_defaults.spawn_spread;
 /// Config: `[bots] spawn_y`.
 const bot_spawn_y: f32 = bot_host_defaults.spawn_y;
 /// Horizontal arrival tolerance: move intent clears when within this distance.
-const arrival_dist: f32 = 0.05;
 
 /// Sense record byte size (RFC 0001 §3): one fixed 32-byte record per entity.
 pub const sense_record_len: usize = 32;
@@ -126,6 +132,8 @@ pub const Bot = struct {
     strafe_p: bool = false,
     /// Per-bot weapon (clanker WeaponProfile diversity, host-enforced)
     weapon: BotWeapon = bot_weapon_pistol,
+    /// Move-arrival tolerance from [bots] arrival_dist (set at spawn).
+    arrival_dist: f32 = 0.05,
     /// Operator/console display name (bounded, no heap). The stock client needs
     /// an entity_name in the player-mesh spawn body, so bots carry one.
     name: [24]u8 = .{0} ** 24,
@@ -235,6 +243,7 @@ pub const BotManager = struct {
             .alive = true,
             .weapon = wsel,
             .weapon_id = @intCast(widx),
+            .arrival_dist = self.cfg.arrival_dist,
         };
         self.bots[slot].setName(default_bot_name);
         self.n += 1;
@@ -302,7 +311,7 @@ pub const BotManager = struct {
         const dz = tpos[2] - p.z;
         const dy = (tpos[1] + 1.05) - (p.y + 1.45);
         const dist = @sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist > weap.range + 2.0) return;
+        if (dist > weap.range + self.cfg.shot_range_slop) return;
         const eye: [3]f32 = .{ p.x, p.y + 1.45, p.z };
         const chest: [3]f32 = .{ tpos[0], tpos[1] + 1.05, tpos[2] };
         if (!g.botLosClear(eye, chest)) return;
@@ -613,7 +622,7 @@ fn stepMove(b: *Bot, dt: f32) void {
     const dx = b.dest_x - b.x;
     const dz = b.dest_z - b.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 <= arrival_dist * arrival_dist) {
+    if (d2 <= b.arrival_dist * b.arrival_dist) {
         // Arrived: snap and clear intent (never overshoot / re-oscillate).
         b.x = b.dest_x;
         b.y = b.dest_y;
@@ -662,7 +671,7 @@ fn stepMoveCollide(b: *Bot, g: *Game, dt: f32, max_step_up: f32) void {
     const dx = b.dest_x - ox;
     const dz = b.dest_z - oz;
     const d2 = dx * dx + dz * dz;
-    if (d2 <= arrival_dist * arrival_dist) {
+    if (d2 <= b.arrival_dist * b.arrival_dist) {
         b.x = b.dest_x;
         b.y = b.dest_y;
         b.z = b.dest_z;

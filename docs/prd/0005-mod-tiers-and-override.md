@@ -66,8 +66,10 @@ itself.
 
 ### In scope (MVP)
 
-- Tier model and tier manifests (`component.toml` for core, `mod.toml` for
-  official and user mods).
+- Tier model and tier manifests (`mod.toml` for official and user mods;
+  core override points declared in the comptime registry in
+  `src/plugin/manifest.zig` — the RFC's per-directory `component.toml`
+  wording was deliberately not built, see ADR 0032 decision 2).
 - Auto-discovery of `mods/*/mod.toml` at boot.
 - `[mods] disabled` / `[mods] blacklist` in zdtd.toml.
 - Override points on core components: exclusive claims on named decision
@@ -110,17 +112,22 @@ itself.
 - **R1 (tiers).** The server distinguishes core components, official mods,
   and user mods. Tier is declared in the module manifest. Core components
   are native and registered host-side; official and user mods are Wasm.
-- **R2 (manifests).** Every loadable module has a TOML manifest. Core
-  components use `component.toml` (in-tree, compiled in); mods use
+- **R2 (manifests).** Every loadable module has a manifest. Mods use
   `mod.toml` in their `mods/<name>/` directory, carrying at least `name`,
-  `version`, `wasm`, and optional `tier`, `override`, `requires`.
+  `version`, `wasm`, and optional `tier`, `override`, `requires`. Core
+  components declare their override points host-side in the comptime
+  registry (`OverridePoint` + `core_components`,
+  `src/plugin/manifest.zig`); a second declarative copy (`component.toml`)
+  was rejected as drift-prone (ADR 0032 decision 2).
 - **R3 (discovery).** At boot the server scans `mods/*/mod.toml` and loads
   each mod not disabled or blacklisted. Explicit `[plugin] modules` paths
   keep working as an additional load source.
 - **R4 (disable/blacklist).** `[mods] disabled` skips a mod with an info
-  log. `[mods] blacklist` refuses a mod with a warning and also vetoes any
-  reference to it by other mods. Entries naming a core component are
-  rejected as config errors: core cannot be disabled or blacklisted.
+  log. `[mods] blacklist` is fail-closed: a discovered mod whose name is
+  blacklisted refuses the boot with a named error (pinned by the resolver
+  unit test and mods AC2 scenario), as does any mod overriding it. Entries
+  naming a core component are rejected as config errors: core cannot be
+  disabled or blacklisted.
 - **R5 (core override points).** Core components expose named override
   points at their decision sites (a point id plus the verdict hook it maps
   to). A mod claims points in its manifest. A claimed point routes the
@@ -159,22 +166,22 @@ itself.
 
 ## 8. Acceptance criteria (product)
 
-- [ ] AC1 (G1, G2): fresh world, no zdtd.toml, server boots with official
+- [x] AC1 (G1, G2): fresh world, no zdtd.toml, server boots with official
   addons loaded and logged by tier; `plugin list` shows tiers.
-- [ ] AC2 (G3): `[mods] disabled = ["fps_bot"]` boots without the bot
-  module and one info log; `[mods] blacklist` does the same with a warning
-  and also rejects a mod overriding the blacklisted name.
-- [ ] AC3 (G3): `[mods] disabled` naming a core component fails config
+- [x] AC2 (G3): `[mods] disabled = ["fps_bot"]` boots without the bot
+  module and one info log; `[mods] blacklist` refuses to boot with a named
+  error and also rejects a mod overriding the blacklisted name.
+- [x] AC3 (G3): `[mods] disabled` naming a core component fails config
   validation with a clear error.
-- [ ] AC4 (G4): a test mod claiming one core override point changes only
+- [x] AC4 (G4): a test mod claiming one core override point changes only
   that decision; all other behaviour is byte-identical (scenario test).
-- [ ] AC5 (G4): a test mod claiming every point of a component changes all
+- [x] AC5 (G4): a test mod claiming every point of a component changes all
   of that component's decisions.
-- [ ] AC6 (G5): a test mod with `override = "fps_bot"` runs in its place;
+- [x] AC6 (G5): a test mod with `override = "fps_bot"` runs in its place;
   `fps_bot.wasm` is not instantiated.
-- [ ] AC7 (G6): two test mods claiming the same point produce a boot error
+- [x] AC7 (G6): two test mods claiming the same point produce a boot error
   naming both; server refuses to start.
-- [ ] AC8 (G1): official and user mods run under the same fuel/memory
+- [x] AC8 (G1): official and user mods run under the same fuel/memory
   budget and queued-effect attribution as today.
 
 ## 9. Risks and mitigations

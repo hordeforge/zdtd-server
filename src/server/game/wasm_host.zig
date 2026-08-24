@@ -336,7 +336,14 @@ pub fn adminPlugin(self: *Game, rest: []const u8) void {
         for (0..h.n) |i| {
             const p = &h.slots[i];
             const st: []const u8 = if (p.disabled) "disabled" else "enabled";
-            w.print("{d}: {s} [{s}]\n", .{ i, p.name, st }) catch break;
+            const tier_s: []const u8 = switch (p.tier) {
+                .core => "core",
+                .official => "official",
+                .user => "user",
+            };
+            // Legacy [plugin] modules have no manifest name; fall back to path.
+            const nm: []const u8 = if (p.display.len > 0) p.display else p.name;
+            w.print("{d}: {s} [{s}, {s}]\n", .{ i, nm, tier_s, st }) catch break;
         }
         self.adminReply(w.buffered());
         return;

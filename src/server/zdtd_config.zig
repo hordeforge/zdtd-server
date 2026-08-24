@@ -231,6 +231,8 @@ pub const Bots = struct {
     spawn_spread: ?f32 = null,
     spawn_y: ?f32 = null,
     max_step_up: ?f32 = null,
+    arrival_dist: ?f32 = null,
+    shot_range_slop: ?f32 = null,
     /// Host loadout pool as `tag:damage:range:pellets,tag:...` (up to 8 guns;
     /// empty = the builtin pool). Binder string (table shape), like
     /// `[quests] objective_kinds`.

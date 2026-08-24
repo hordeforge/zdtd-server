@@ -1834,6 +1834,7 @@ test "scenario stock fixture quests.xml load" {
     systems.questOnTraderOpen(&g.sim, c.slot);
     systems.questOnTraderOpen(&g.sim, c.slot);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, g.sim.catalog.starter_id));
+    systems.drainQuestCoins(&g.sim, c.slot);
     try std.testing.expect(systems.questCoins(&g.sim, c.slot) >= 10);
 
     // Accept clear: Goto POI (phase1) → ClearSleepers (phase3) → ReturnToNPC (phase4).
@@ -1886,6 +1887,7 @@ test "scenario quest accept kill complete and trader buy" {
     }
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 1));
     // reward 25 for kill quest; coins may include prior save restore in world dir
+    systems.drainQuestCoins(&g.sim, c.slot);
     try std.testing.expect(systems.questCoins(&g.sim, c.slot) >= 25);
 
     // Find trader entity
@@ -1984,6 +1986,7 @@ test "scenario quest accept kill complete and trader buy" {
     const inv_coins: u32 = if (coin_id != 0) g.sim.inventory[pslot].countItem(coin_id) else 0;
     g.sim.wallet[pslot].coins = inv_coins + 1000;
 
+    systems.drainQuestCoins(&g.sim, c.slot);
     const coins_before = systems.questCoins(&g.sim, c.slot);
     var trade_body: [16]u8 = undefined;
     const tb = try packages.buildTraderTradeBody(&trade_body, te, 2, 1, 0);
@@ -2006,6 +2009,7 @@ test "scenario quest accept kill complete and trader buy" {
     const stock_before = stockCount(&g.sim.trader_stock[tslot], 2);
     try g.handleTrade(c, tb);
     const stock_after = stockCount(&g.sim.trader_stock[tslot], 2);
+    systems.drainQuestCoins(&g.sim, c.slot);
     const coins_after = systems.questCoins(&g.sim, c.slot);
     try std.testing.expect(coins_after <= coins_before); // a buy never credits
     if (stock_after < stock_before) {
@@ -2078,14 +2082,17 @@ test "scenario quest turn-in and phase advance fire on the stock trader lock-ope
     }.f;
 
     const starter_id = g.sim.catalog.starter_id;
+    systems.drainQuestCoins(&g.sim, c.slot);
     const coins0 = systems.questCoins(&g.sim, c.slot);
     // Open 1: phase 2 (InteractWithNPC) advances; the TurnIn phase parks the
     // quest ready.
     try openTrade(g, c, te, &cap);
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, starter_id));
-    // Open 2: the ready quest turns in and pays.
+    // Open 2: the ready quest turns in and pays (coins at the tick-end
+    // payout drain, like the rest of the reward).
     try openTrade(g, c, te, &cap);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, starter_id));
+    systems.drainQuestCoins(&g.sim, c.slot);
     try std.testing.expect(systems.questCoins(&g.sim, c.slot) > coins0);
 
     // A fetch quest parked at ready_turn_in completes on the next open.
@@ -5135,6 +5142,7 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
+    systems.drainQuestCoins(&g.sim, c.slot);
     const coins0 = g.sim.wallet[ps].coins;
     var body: [64]u8 = undefined;
     var frame_buf: [512]u8 = undefined;
@@ -5145,6 +5153,7 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 1));
     questKillAtPoi(g, c);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 1));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // goto_point: the parsed radius gates the arrival — outside does nothing,
     // inside the target (the bound POI center 8,8) completes it.
@@ -5153,6 +5162,7 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 2));
     systems.questTickGoto(&g.sim, c.slot, 8, 70, 8);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 2));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // fetch_item via the treasure_complete event — the wire the stock client
     // sends when it digs the chest (NetPackageQuestObjectiveUpdate).
@@ -5165,21 +5175,25 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     });
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", ub));
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // fetch_item via the direct hook (FetchFromContainer / container loot).
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 3));
     systems.questOnFetchItem(&g.sim, c.slot, 1);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // trader_interact: a trader open completes it.
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 4));
     systems.questOnTraderOpen(&g.sim, c.slot);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 4));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // craft: crafting an item advances the phase.
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 5));
     systems.questOnCraft(&g.sim, c.slot, "testRecipe");
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 5));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // stay_within: the parsed radius gates it — outside does nothing, inside
     // the bound POI center completes it.
@@ -5188,12 +5202,14 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 6));
     systems.questTickStayWithin(&g.sim, c.slot, 8, 8);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 6));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // block_activate: the client's block-activated event advances it.
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 7));
     const bq = systems.questFindActive(&g.sim, c.slot, 7).?;
     _ = systems.questObjectiveEvent(&g.sim, c.slot, bq.quest_code, .block_activate);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 7));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // rally: with a POI bound at accept the phase is real (not scaffolding);
     // the rally-marker activation advances and completes it.
@@ -5202,9 +5218,11 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     try std.testing.expect(rq.poi.valid());
     try std.testing.expect(systems.questOnRallyActivated(&g.sim, c.slot, rq.quest_code));
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 8));
+    systems.drainQuestCoins(&g.sim, c.slot);
 
     // Every completed quest paid its coin reward into the wallet: 8 defs, but
     // the fetch quest is completed twice (event path + direct hook) = 9 pays.
+    systems.drainQuestCoins(&g.sim, c.slot);
     try std.testing.expectEqual(coins0 + 9 * 10, g.sim.wallet[ps].coins);
     std.debug.print("PASS all-quest-kinds: kill/goto/fetch/trader/craft/stay/block/rally completed, coins +{d}\n", .{g.sim.wallet[ps].coins - coins0});
 }
@@ -5880,10 +5898,10 @@ test "scenario quest completion pays out item and exp rewards" {
     systems.questOnTraderOpen(&g.sim, c.slot);
     systems.questOnTraderOpen(&g.sim, c.slot);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, g.sim.catalog.starter_id));
-    try std.testing.expectEqual(coins0 + 100, g.sim.wallet[ps].coins);
-
-    // The payout drain runs at the next step.
+    // Coins (reward_coin) + items + exp all pay through the verdict at the
+    // tick-end payout drain, so assert after the step.
     try g.step();
+    try std.testing.expectEqual(coins0 + 100, g.sim.wallet[ps].coins);
     try std.testing.expect(g.clients[c.slot].xp > xp0);
     var found = false;
     for (g.sim.inventory[ps].slots) |s| {
@@ -7203,6 +7221,10 @@ test "scenario core_rewardgate scales quest item rewards (1.5x)" {
 
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
+    // reward_coin also pays through the verdict at the payout: baseline the
+    // wallet before completing (fixture starter has reward_coin=100).
+    const ps0 = g.sim.playerByPeer(c.slot).?;
+    const wallet_before = g.sim.wallet[ps0].coins;
     // Complete the starter quest (Goto -> Interact -> TurnIn).
     systems.questOnTraderOpen(&g.sim, c.slot);
     systems.questOnTraderOpen(&g.sim, c.slot);
@@ -7214,7 +7236,11 @@ test "scenario core_rewardgate scales quest item rewards (1.5x)" {
     const ps = g.sim.playerByPeer(c.slot).?;
     const coins = g.sim.inventory[ps].countItem(6); // casinoCoin
     try std.testing.expect(coins >= 150);
-    std.debug.print("PASS rewardgate: item reward scaled 100 -> {d}\n", .{coins});
+    // Coin leg: reward_coin 100 x 150% = 150 added to the wallet at the same
+    // verdict (was paid before the verdict in completeQuest; deny/scaling
+    // must reach it).
+    try std.testing.expect(g.sim.wallet[ps].coins >= wallet_before + 150);
+    std.debug.print("PASS rewardgate: item reward scaled 100 -> {d}, coin leg +{d}\n", .{ coins, g.sim.wallet[ps].coins - wallet_before });
 }
 
 test "scenario core_pricegate scales trader buy prices (1.5x)" {

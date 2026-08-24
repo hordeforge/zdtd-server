@@ -61,9 +61,12 @@ assertion rather than provenance — exactly the confusion PRD §9 flags.
 Every loadable module gets a TOML manifest; tier comes from the manifest and
 where it lives; override is a first-class claim checked at load.
 
-- **Core components**: native Zig, in-tree, registered in a host-side
-  registry at compile time via `component.toml` files (a comptime-embedded
-  table), always on.
+- **Core components**: native Zig, in-tree, registered host-side in the
+  comptime registry in `src/plugin/manifest.zig` (`OverridePoint` +
+  `core_components`), always on. As built, there are no per-directory
+  `component.toml` files: a second declarative copy would drift from the
+  compiled registry that routes the tick path (deviation recorded in
+  [ADR 0032](../adr/0032-module-tiers-and-override.md) decision 2).
 - **Official mods and user mods**: Wasm guests in `mods/<name>/` with
   `mod.toml`. Official = shipped in the repo's `mods/` tree; user = anything
   else the operator points at. Tier is declared in the manifest and

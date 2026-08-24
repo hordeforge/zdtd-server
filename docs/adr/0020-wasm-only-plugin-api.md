@@ -1,6 +1,8 @@
 # ADR 0020: Wasm-only plugin API
 
-- **Status:** accepted (supersedes [0005](0005-native-plugin-api.md))
+- **Status:** accepted (supersedes [0005](0005-native-plugin-api.md); also
+  supersedes the plugin / dynlib paragraphs of
+  [0010](0010-data-config-zig-plugins.md), as recorded there)
 - **Date:** 2026-08-06
 
 ## Context

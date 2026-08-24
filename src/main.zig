@@ -877,6 +877,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (mp.bots.spawn_spread) |v| bcfg.spawn_spread = v;
         if (mp.bots.spawn_y) |v| bcfg.spawn_y = v;
         if (mp.bots.max_step_up) |v| bcfg.max_step_up = v;
+        if (mp.bots.arrival_dist) |v| bcfg.arrival_dist = v;
+        if (mp.bots.shot_range_slop) |v| bcfg.shot_range_slop = v;
         if (mp.bots.weapon_profiles.len > 0) bcfg.weapon_profiles = mp.bots.weapon_profiles;
     }
     if (toml_owned) |*tf| {

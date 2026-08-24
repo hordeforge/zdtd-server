@@ -28,7 +28,7 @@ adds a transport bridge. This ADR fixes exactly how much host surface that
 takes, so the authority model, the 20 TPS budget, and the composability rules
 of ADR 0030 stay intact.
 
-## Decisions
+## Decision
 
 ### D1. Guest owns protocol; host owns transport and JSON parsing
 
