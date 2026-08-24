@@ -65,7 +65,9 @@ docs/provenance.html
 __pycache__/
 *.pyc
 
+
 # Agent runtime state (locks, session)
 .gauntlet.lock
 .scratch-test-out.txt
 .scratch/
+*.lock
