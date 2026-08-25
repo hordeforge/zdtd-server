@@ -154,6 +154,7 @@ test, so a retune cannot land silently).
 | `attack_range_sq` | 4.0 | Policy (no per-entity stock equivalent) |
 | `attack_cooldown_s` | 1.2 | Policy (no entityclasses field) |
 | `armor_mitigation_per_piece` / `armor_mitigation_cap` | 0.1 / 0.5 | **Fallback floor**: with a game-dir present, mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality (items.xml curves, stock GetTotalPhysicalArmorRating / Equipment.CalcDamage, combat-damage.md), capped by `armor_mitigation_cap`. `armor_mitigation_per_piece` applies only when no XML row resolved (offline/builtin catalog) |
+| `stamina_usage_multiplier` | 1.0 | Per-attack stamina cost multiplier (stock ItemActionAttack.StaminaUsageMultiplier, sandbox option): a landed melee swing drains the held item's items.xml StaminaLoss x this factor (RE ItemActionMelee IL) |
 | `knockback_speed` / `knockback_seconds` | 8.0 / 0.3 | Melee knockback impulse: shove speed (blocks/s) and hit window (s); 0.3 s at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark) |
 | `[rules.ai]` | | |
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |

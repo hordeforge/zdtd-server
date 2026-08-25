@@ -71,6 +71,12 @@ pub const ItemDef = struct {
     /// ItemValue.UseTimes wear per use): the durability consumed by one use.
     /// 0 = no row -> the callers' 1.0 default (the pre-XML behavior).
     degradation_per_use: f32 = 0,
+    /// items.xml StaminaLoss passive (base_set, first value): the per-attack
+    /// stamina cost (RE ItemActionMelee IL: GetValue(StaminaLoss, item) x
+    /// StaminaUsageMultiplier -> AddStamina(-cost)). The 2-value rows are the
+    /// normal/power pair (first = normal); the negative quality-curve rows
+    /// are recorded, not guessed.
+    stamina_loss: f32 = 0,
     /// items.xml TargetArmor passive (163, perc_add, UNTAGGED rows only):
     /// armor penetration fraction applied to the target's mitigation
     /// (GetTotalPhysicalArmorRating IL=47: passive 163 on the attacking item
@@ -560,6 +566,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_edr_n.deinit(allocator);
     var stock_degrad_per_use: std.ArrayList(f32) = .empty;
     defer stock_degrad_per_use.deinit(allocator);
+    var stock_stamina_loss: std.ArrayList(f32) = .empty;
+    defer stock_stamina_loss.deinit(allocator);
     var stock_target_armor: std.ArrayList(f32) = .empty;
     defer stock_target_armor.deinit(allocator);
     var stock_target_armor_tagged: std.ArrayList(f32) = .empty;
@@ -763,6 +771,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 }
             }
             try stock_degrad_per_use.append(allocator, degrad_per_use);
+            var stamina_loss: f32 = 0;
+            if (xml.passiveEffectRow(body, "StaminaLoss")) |row| {
+                if (xml.attr(row, 0, "value")) |v| stamina_loss = xml.parseF32(v) orelse 0;
+            }
+            try stock_stamina_loss.append(allocator, stamina_loss);
             try stock_target_armor.append(allocator, target_armor);
             try stock_target_armor_tagged.append(allocator, target_armor_tagged);
             try stock_target_armor_tag.append(allocator, target_armor_tag);
@@ -929,6 +942,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.elem_resist_curve = stock_edr_curves.items[idx];
                 def.elem_resist_n = stock_edr_n.items[idx];
                 def.degradation_per_use = stock_degrad_per_use.items[idx];
+                def.stamina_loss = stock_stamina_loss.items[idx];
                 def.target_armor = stock_target_armor.items[idx];
                 def.target_armor_tagged = stock_target_armor_tagged.items[idx];
                 def.target_armor_tag = stock_target_armor_tag.items[idx];
@@ -983,6 +997,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .elem_resist_curve = stock_edr_curves.items[idx],
             .elem_resist_n = stock_edr_n.items[idx],
             .degradation_per_use = stock_degrad_per_use.items[idx],
+            .stamina_loss = stock_stamina_loss.items[idx],
             .target_armor = stock_target_armor.items[idx],
             .target_armor_tagged = stock_target_armor_tagged.items[idx],
             .target_armor_tag = stock_target_armor_tag.items[idx],
@@ -1278,4 +1293,18 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
     try std.testing.expect(stone_axe);
     try std.testing.expect(ap_ammo);
     try std.testing.expect(javelin);
+}
+
+test "StaminaLoss parses as the per-attack cost" {
+    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
+    defer t.deinit();
+    var found = false;
+    for (t.defs) |d| {
+        if (std.mem.eql(u8, d.name, "meleeToolRepairT0StoneAxe")) {
+            try std.testing.expectApproxEqAbs(@as(f32, 8), d.stamina_loss, 0.001);
+            found = true;
+        }
+    }
+    try std.testing.expect(found);
 }

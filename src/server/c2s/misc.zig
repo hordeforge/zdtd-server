@@ -454,6 +454,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // durability bar). Zero keeps a broken, repairable stack.
         if (self.sim.mask[actor_slot].inventory) {
             _ = invsys.degradeUse(&self.sim, c.slot, self.sim.inventory[actor_slot].holding, 1.0);
+            // Per-attack stamina (RE ItemActionMelee IL: the swing drains
+            // `StaminaLoss x StaminaUsageMultiplier` via AddStamina(-cost)).
+            // The item's StaminaLoss passive is the cost; the survival pass
+            // picks the deduction up on its next stamina sync.
+            if (self.sim.mask[actor_slot].health and self.sim.mask[actor_slot].player) {
+                const held = &self.sim.inventory[actor_slot].slots[self.sim.inventory[actor_slot].holding];
+                if (self.items.byId(held.item_id)) |item_def| {
+                    if (item_def.stamina_loss > 0) {
+                        const cost = item_def.stamina_loss * self.sim.rules.combat.stamina_usage_multiplier;
+                        if (cost > 0) self.sim.health[actor_slot].stamina = @max(0, self.sim.health[actor_slot].stamina - cost);
+                    }
+                }
+            }
         }
         // Combat noise (stock NotifyNoise): a landed ranged hit alerts zombies
         // and wakes sleepers around the shooter (group-AI PARTIAL).

@@ -63,6 +63,11 @@ pub const Combat = struct {
     /// approximation made operator-tunable.
     armor_mitigation_per_piece: f32 = 0.1,
     armor_mitigation_cap: f32 = 0.5,
+    /// Per-attack stamina cost multiplier (stock ItemActionAttack.
+    /// StaminaUsageMultiplier, sandbox option; the melee swing drains
+    /// `StaminaLoss x StaminaUsageMultiplier`, RE ItemActionMelee IL). 1.0 =
+    /// the stock default.
+    stamina_usage_multiplier: f32 = 1.0,
     /// Melee knockback impulse: shove speed (blocks/s) and the hit window (s).
     /// 0.3 s at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark;
     /// components.zig kb_speed/kb_seconds).
@@ -573,6 +578,7 @@ pub const CombatOverlay = struct {
     attack_cooldown_s: ?f32 = null,
     armor_mitigation_per_piece: ?f32 = null,
     armor_mitigation_cap: ?f32 = null,
+    stamina_usage_multiplier: ?f32 = null,
     knockback_speed: ?f32 = null,
     knockback_seconds: ?f32 = null,
 };
