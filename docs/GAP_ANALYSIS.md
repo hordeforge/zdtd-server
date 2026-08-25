@@ -245,7 +245,9 @@ area and the concrete work.
    kills drop nothing like stock. Tests: per-block `lootListFor` against the
    stock blocks.xml, the zPackReg chain assertion, and a drop-prob gate test;
    761 tests green. Container slot counts now come from the size attribute
-   (2026-08-08); crafting validation remains open.
+   (2026-08-08); crafting validation is WIRED (the craft path enforces
+   craft_tool / material_based gates and the workstation areas, scenario
+   craftgate).
 
 6. **DONE 2026-08-06.** Entities / net: `EntityRemove(Unloaded)` when a mob leaves interest.
    `DONE`. The replicate pass now mirrors spawn-on-approach: a mob outside a
@@ -535,8 +537,10 @@ area and the concrete work.
 a sweep over the real `Data/Config/quests.xml` accepts each of the 99 defs and
 drives it through its phase graph to completion/turn-in at the real triggers
 (scenario `stock-quest-sweep`, 99/99). The remaining quest rows below are
-fidelity gaps (mid-session S2C sync is RE-blocked; ClearSleepers is a count,
-not a sleeper-volume clear), not completion blockers.
+fidelity gaps (mid-session S2C sync is RE-blocked), not completion
+blockers; ClearSleepers is a real volume clear (questClearSleepers ->
+markClearedRect, persisted in sleepers_cleared.zsc, so a cleared POI never
+re-arms) with the population count as the quest target.
 
 **33 WORKS · 1 PARTIAL · 0 MISSING**
 
