@@ -232,6 +232,30 @@ pub fn parseCurveValue(s: []const u8, out: *[max_curve_len]f32) u8 {
     return n;
 }
 
+/// Stock curve evaluation (RE PassiveEffect::ModValue, IL=796): the curve
+/// Levels are scaled so value[0] sits at level 1 and value[n-1] at
+/// `max_level`, and the effect interpolates linearly between neighbours
+/// (Mathf.Lerp on the level fraction); a level outside every segment applies
+/// nothing (0). The item effect level is the raw ItemValue.Quality
+/// (EffectManager.GetValue IL_0393), so 6-value armor curves are per-quality
+/// values and 2-value curves interpolate Q1..Q6 (e.g. 8..12.3).
+pub fn curveValueAt(level: u8, max_level: u8, curve: []const f32) f32 {
+    if (curve.len == 0 or level == 0 or max_level < 2) return 0;
+    if (curve.len == 1) return curve[0];
+    const l: f32 = @floatFromInt(level);
+    const hi: f32 = @floatFromInt(max_level);
+    const n = curve.len;
+    for (1..n) |i| {
+        const l0: f32 = 1.0 + (hi - 1.0) * @as(f32, @floatFromInt(i - 1)) / @as(f32, @floatFromInt(n - 1));
+        const l1: f32 = 1.0 + (hi - 1.0) * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(n - 1));
+        if (l >= l0 and l <= l1) {
+            const t: f32 = if (l1 > l0) (l - l0) / (l1 - l0) else 0;
+            return curve[i - 1] + (curve[i] - curve[i - 1]) * t;
+        }
+    }
+    return 0;
+}
+
 /// Value of a passive at `level` (1-based): curve segment `level-1`, clamped
 /// past the end; level 0 (unpurchased) is 0; single-segment rows repeat.
 /// Hand-built rows that set only `value` (curve_len 0) repeat that value.
@@ -928,4 +952,23 @@ test "trackedDeltasAt scales a perk curve to its level" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.25), l5.general_resist, 0.0001); // clamp
     const l0 = trackedDeltasAt(&passives, 0);
     try std.testing.expect(!l0.any());
+}
+
+test "curveValueAt interpolates the stock quality curve (Q1..Q6)" {
+    // RE PassiveEffect.ModValue (IL=796): levels scaled so value[0] = Q1 and
+    // value[n-1] = Q6, piecewise-linear. armorPrimitiveHelmet "8,12.3".
+    const two = [_]f32{ 8, 12.3 };
+    try std.testing.expectApproxEqAbs(@as(f32, 8), curveValueAt(1, 6, &two), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.3), curveValueAt(6, 6, &two), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 9.72), curveValueAt(3, 6, &two), 0.001); // 8 + 4.3*(2/5)
+    // A 6-value curve = per-quality values (armorPreacherOutfit .02..15).
+    const six = [_]f32{ 0.02, 0.04, 0.06, 0.08, 0.1, 0.15 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.02), curveValueAt(1, 6, &six), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), curveValueAt(5, 6, &six), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.15), curveValueAt(6, 6, &six), 0.0001);
+    // Single value is constant; level 0 / empty curve apply nothing.
+    const one = [_]f32{5};
+    try std.testing.expectApproxEqAbs(@as(f32, 5), curveValueAt(4, 6, &one), 0.001);
+    try std.testing.expectEqual(@as(f32, 0), curveValueAt(0, 6, &two));
+    try std.testing.expectEqual(@as(f32, 0), curveValueAt(3, 6, &.{}));
 }

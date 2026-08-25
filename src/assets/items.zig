@@ -3,6 +3,7 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
+const buffs = @import("buffs.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 pub const max_items: usize = 8192;
@@ -56,6 +57,16 @@ pub const ItemDef = struct {
     /// passive `MaxRange` (club/axe 2.4). 0 = none/unset → the
     /// `[rules.combat] attack_range_sq` floor.
     melee_range: f32 = 0,
+    /// items.xml PhysicalDamageResist passive (41) quality curve: value[i]
+    /// sits at quality 1 + 5i/(n-1), piecewise-linear (RE PassiveEffect.
+    /// ModValue IL=796; GetTotalPhysicalArmorRating sums it on the wearer,
+    /// combat-damage.md). 0 segments = the item carries no row.
+    phys_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    phys_resist_n: u8 = 0,
+    /// ElementalDamageResist passive (42), same curve shape. The sim's damage
+    /// chokes are physical-only today, so the PDR leg is the live one.
+    elem_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    elem_resist_n: u8 = 0,
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -525,6 +536,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     var stock_dtags: std.ArrayList(u8) = .empty;
     defer stock_dtags.deinit(allocator);
     var stock_dradius: std.ArrayList(f32) = .empty;
+    var stock_pdr_curves: std.ArrayList([buffs.max_curve_len]f32) = .empty;
+    defer stock_pdr_curves.deinit(allocator);
+    var stock_pdr_n: std.ArrayList(u8) = .empty;
+    defer stock_pdr_n.deinit(allocator);
+    var stock_edr_curves: std.ArrayList([buffs.max_curve_len]f32) = .empty;
+    defer stock_edr_curves.deinit(allocator);
+    var stock_edr_n: std.ArrayList(u8) = .empty;
+    defer stock_edr_n.deinit(allocator);
     defer stock_dradius.deinit(allocator);
     var stock_dlifetime: std.ArrayList(i32) = .empty;
     defer stock_dlifetime.deinit(allocator);
@@ -675,6 +694,25 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             if (xml.passiveEffectValue(body, "DistractionStrength")) |v| {
                 dstrength = xml.parseF32(v) orelse 0;
             }
+            // Armor resist passives (41/42): quality curves. The curve
+            // segments are the per-quality values scaled over Q1..Q6 (stock
+            // PassiveEffect.ModValue interpolation, RE items.md).
+            var pdr_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var pdr_n: u8 = 0;
+            const pdr_v = xml.passiveEffectValue(body, "PhysicalDamageResist");
+            if (pdr_v) |v| {
+                pdr_n = buffs.parseCurveValue(v, &pdr_curve);
+            }
+            var edr_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var edr_n: u8 = 0;
+            const edr_v = xml.passiveEffectValue(body, "ElementalDamageResist");
+            if (edr_v) |v| {
+                edr_n = buffs.parseCurveValue(v, &edr_curve);
+            }
+            try stock_pdr_curves.append(allocator, pdr_curve);
+            try stock_pdr_n.append(allocator, pdr_n);
+            try stock_edr_curves.append(allocator, edr_curve);
+            try stock_edr_n.append(allocator, edr_n);
             var deat: i32 = 0;
             if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
                 deat = std.fmt.parseInt(i32, v, 10) catch 0;
@@ -765,6 +803,52 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 cur = ext_map.get(cur) orelse break;
             }
         }
+        // Armor resist curves inherit through the Extends chain like any
+        // property (armorPrimitiveHelmet -> armorPrimitiveMaster carries the
+        // PDR rows): the first ancestor with a row wins (stock property
+        // inheritance; RE items.md Extends).
+        {
+            var own_pdr_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+            defer own_pdr_map.deinit(allocator);
+            var own_pdrn_map: std.StringHashMapUnmanaged(u8) = .{};
+            defer own_pdrn_map.deinit(allocator);
+            var own_edr_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+            defer own_edr_map.deinit(allocator);
+            var own_edrn_map: std.StringHashMapUnmanaged(u8) = .{};
+            defer own_edrn_map.deinit(allocator);
+            for (stock_names.items, 0..) |n, idx| {
+                if (stock_pdr_n.items[idx] > 0) {
+                    try own_pdr_map.put(allocator, n, stock_pdr_curves.items[idx]);
+                    try own_pdrn_map.put(allocator, n, stock_pdr_n.items[idx]);
+                }
+                if (stock_edr_n.items[idx] > 0) {
+                    try own_edr_map.put(allocator, n, stock_edr_curves.items[idx]);
+                    try own_edrn_map.put(allocator, n, stock_edr_n.items[idx]);
+                }
+            }
+            for (stock_names.items, 0..) |n, idx| {
+                var cur = n;
+                var hops: usize = 0;
+                while (hops < max_hops) : (hops += 1) {
+                    if (own_pdrn_map.get(cur)) |cn| {
+                        stock_pdr_n.items[idx] = cn;
+                        stock_pdr_curves.items[idx] = own_pdr_map.get(cur).?;
+                        break;
+                    }
+                    cur = ext_map.get(cur) orelse break;
+                }
+                cur = n;
+                hops = 0;
+                while (hops < max_hops) : (hops += 1) {
+                    if (own_edrn_map.get(cur)) |cn| {
+                        stock_edr_n.items[idx] = cn;
+                        stock_edr_curves.items[idx] = own_edr_map.get(cur).?;
+                        break;
+                    }
+                    cur = ext_map.get(cur) orelse break;
+                }
+            }
+        }
     }
 
     // Builtin defs: fill stock_type + stack/econ/dmg from items.xml via stock alias.
@@ -787,6 +871,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.place_block_name = stock_place_names.items[idx];
                 def.damage_block = stock_dmg_blocks.items[idx];
                 def.melee_range = stock_melee_ranges.items[idx];
+                def.phys_resist_curve = stock_pdr_curves.items[idx];
+                def.phys_resist_n = stock_pdr_n.items[idx];
+                def.elem_resist_curve = stock_edr_curves.items[idx];
+                def.elem_resist_n = stock_edr_n.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
@@ -833,6 +921,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .water_amount = stock_water_amt.items[idx],
             .distraction_tags = stock_dtags.items[idx],
             .distraction_radius = stock_dradius.items[idx],
+            .phys_resist_curve = stock_pdr_curves.items[idx],
+            .phys_resist_n = stock_pdr_n.items[idx],
+            .elem_resist_curve = stock_edr_curves.items[idx],
+            .elem_resist_n = stock_edr_n.items[idx],
             .distraction_lifetime = stock_dlifetime.items[idx],
             .distraction_strength = stock_dstrength.items[idx],
             .distraction_eat_ticks = stock_deat.items[idx],
@@ -1080,4 +1172,25 @@ test "stock items.xml Stacknumber default and Extends resolution" {
     try std.testing.expectEqual(@as(f32, 1.0), scaleOf(&t, "meleeToolRepairT0StoneAxe"));
     try std.testing.expectEqual(@as(f32, 0.5), scaleOf(&t, "toolCookingGrill"));
     try std.testing.expectEqual(@as(f32, 1.0), t.byId(8).?.econ_sell_scale);
+}
+
+test "armor resist curves parse from stock items.xml (PDR quality curves)" {
+    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
+    defer t.deinit();
+    // armorPrimitiveHelmet carries PhysicalDamageResist "8,12.3" (Q1..Q6).
+    var found: usize = 0;
+    for (t.defs) |d| {
+        if (std.mem.eql(u8, d.name, "armorPrimitiveHelmet")) {
+            try std.testing.expectEqual(@as(u8, 2), d.phys_resist_n);
+            try std.testing.expectApproxEqAbs(@as(f32, 8), d.phys_resist_curve[0], 0.001);
+            try std.testing.expectApproxEqAbs(@as(f32, 12.3), d.phys_resist_curve[1], 0.001);
+            try std.testing.expectEqual(@as(u8, 2), d.elem_resist_n);
+            found += 1;
+        }
+        if (d.phys_resist_n > 0) found += 1;
+    }
+    // The XML def table caps at max_items; the armor family (alphabetically
+    // early) carries the bulk of the 134 PDR rows.
+    try std.testing.expect(found >= 50);
 }

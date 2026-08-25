@@ -370,6 +370,11 @@ pub const World = struct {
     /// Optional item_id → armor? (name prefix armor*). Null → offline pin.
     is_armor_ctx: ?*anyopaque = null,
     is_armor_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    /// Equipped-armor PDR percent at the slot's quality (Game wires this
+    /// from the items table; stock GetTotalPhysicalArmorRating sums passive
+    /// 41 on the wearer). 0 = the item carries no row / not an armor item.
+    armor_pdr_ctx: ?*anyopaque = null,
+    armor_pdr_fn: ?*const fn (?*anyopaque, u16, u8) f32 = null,
     /// Optional kill verdict hook (T15 / ADR 0021 decision 4): (ctx, kind,
     /// victim_id, attacker_id) -> i32. Below 0 denies the death: the victim
     /// survives at 1 hp and the fatal hit's side effects (loot, corpse,

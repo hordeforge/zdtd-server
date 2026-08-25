@@ -4773,7 +4773,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | XP / progression / skills | PARTIAL (awardXp ledger; skills MISSING) |
 | Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; disease/temp effects MISSING) |
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
-| Equipment / armor mitigation | PARTIAL (equip slots; mitigation is the zdtd flat approximation, `[rules.combat] armor_mitigation_*` since 2026-08-20; the stock passive-effects chain stays RE-blocked) |
+| Equipment / armor mitigation | WORKS (equip slots; with stock items.xml the mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality - the items.xml quality curves via `curveValueAt` (RE PassiveEffect.ModValue IL=796: piecewise-linear over levels scaled Q1..Q6, item quality is the effect level, EffectManager.GetValue IL_0393; GetTotalPhysicalArmorRating sums passive 41 on the wearer, Equipment.CalcDamage reduces physical damage by rating/100, combat-damage.md), plus the buff/perk resist leg from the effects VM; the `[rules.combat] armor_mitigation_per_piece` floor stands only for the offline/builtin catalog) |
 | Projectile / ranged combat | WORKS (2026-08-20, RE items.md:1097-1140: projectiles are client-side GameObjects with ProjectileMoveScript, never server entities; the server surface is the C2S NetPackageDamageEntity claim, which zdtd validates range/cap/fatal/PvP/armor, applies, knocks back and kills) |
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |

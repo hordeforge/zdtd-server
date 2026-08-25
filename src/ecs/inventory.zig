@@ -121,21 +121,31 @@ fn itemIsArmor(w: *const World, item_id: u16) bool {
     return isArmorOffline(item_id);
 }
 
-/// Armor in equip slots reduces incoming damage (0..0.5), plus the buff-side
-/// PhysicalDamageResist percent from the passive-effects VM (stock
-/// GetTotalPhysicalArmorRating sums the wearer's passive 41 - buffs carry the
-/// same effect as items, so the VM's active-buff total joins the item floor).
+/// Armor in equip slots reduces incoming damage (0..cap), plus the buff-side
+/// PhysicalDamageResist percent from the passive-effects VM. The item leg is
+/// the equipped armor's summed PhysicalDamageResist percent at its quality
+/// (stock GetTotalPhysicalArmorRating sums passive 41 on the wearer;
+/// Equipment.CalcDamage reduces physical damage by rating/100, combat-
+/// damage.md). The pieces-rate floor stands only when no XML row resolved
+/// (offline/builtin catalog).
 pub fn armorMitigation(w: *const World, peer: usize) f32 {
     const ps = w.playerByPeer(peer) orelse return 0;
     if (!w.mask[ps].inventory) return 0;
     var pieces: f32 = 0;
+    var phys_pdr: f32 = 0;
     var i: usize = c.inv_equip_start;
     while (i < c.max_inv_slots) : (i += 1) {
-        if (w.inventory[ps].slots[i].count > 0 and itemIsArmor(w, w.inventory[ps].slots[i].item_id)) {
+        const slot = w.inventory[ps].slots[i];
+        if (slot.count > 0 and itemIsArmor(w, slot.item_id)) {
             pieces += 1;
+            if (w.armor_pdr_fn) |f| {
+                phys_pdr += f(w.armor_pdr_ctx, slot.item_id, slot.quality);
+            }
         }
     }
-    return @min(w.rules.combat.armor_mitigation_cap, pieces * w.rules.combat.armor_mitigation_per_piece + w.buff_phys_resist[ps] / 100.0);
+    const item_mit = phys_pdr / 100.0;
+    const fallback = if (phys_pdr == 0) pieces * w.rules.combat.armor_mitigation_per_piece else 0;
+    return @min(w.rules.combat.armor_mitigation_cap, item_mit + fallback + w.buff_phys_resist[ps] / 100.0);
 }
 
 pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
@@ -805,4 +815,30 @@ test "degradeUse wears a tool down and clamps at zero" {
     }
     try std.testing.expect(!degradeUse(&w, 0, empty_slot, 1));
     try std.testing.expect(!degradeUse(&w, 0, 9999, 1));
+}
+
+test "armorMitigation folds the equipped PDR percent; floor only when no XML row" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].inventory = true;
+    // Two equipped armor pieces (offline id 11 = armorScrap), quality 1.
+    w.inventory[ps].slots[c.inv_equip_start] = .{ .item_id = 11, .count = 1, .quality = 1 };
+    w.inventory[ps].slots[c.inv_equip_start + 1] = .{ .item_id = 11, .count = 1, .quality = 1 };
+    // No hook: the pieces-rate floor (2 x 0.1) stands.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), armorMitigation(&w, 0), 0.001);
+    // Hooked: the summed PDR percent at the slot quality replaces the floor.
+    w.armor_pdr_fn = &testPdr;
+    w.armor_pdr_ctx = null;
+    // testPdr returns 4 for quality 1 (2 pieces x 4 = 8% = 0.08).
+    try std.testing.expectApproxEqAbs(@as(f32, 0.08), armorMitigation(&w, 0), 0.001);
+    // Buff-side resist joins (passive-41 sum on the wearer).
+    w.buff_phys_resist[ps] = 5;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.13), armorMitigation(&w, 0), 0.001);
+}
+
+fn testPdr(_: ?*anyopaque, _: u16, _: u8) f32 {
+    return 4;
 }

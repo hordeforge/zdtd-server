@@ -6,6 +6,8 @@
 
 const std = @import("std");
 const ecs = @import("../../ecs/root.zig");
+const components = @import("../../ecs/components.zig");
+const assets_buffs = @import("../../assets/buffs.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -19,6 +21,22 @@ const game_social = @import("social.zig");
 
 /// Vehicle tank cap and the InvTx refuel pickup reach are
 /// rules.vehicle (fuel_cap / refuel_reach).
+/// ECS armor-PDR hook: the equipped item's PhysicalDamageResist percent at
+/// `quality` (1..6), evaluated from the items.xml quality curve (RE
+/// PassiveEffect.ModValue IL=796; GetTotalPhysicalArmorRating sums passive
+/// 41 on the wearer, combat-damage.md). 0 = the item carries no row, so the
+/// offline pieces-rate floor in armorMitigation stands.
+pub fn armorPdr(ctx: ?*anyopaque, item_id: u16, quality: u8) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.items.byId(item_id)) |d| {
+        if (d.phys_resist_n > 0) {
+            const q: u8 = @intCast(@max(1, @min(quality, components.max_quality_tiers)));
+            return assets_buffs.curveValueAt(q, components.max_quality_tiers, d.phys_resist_curve[0..d.phys_resist_n]);
+        }
+    }
+    return 0;
+}
+
 /// ECS armor hook: stock/builtin name starts with "armor".
 pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));

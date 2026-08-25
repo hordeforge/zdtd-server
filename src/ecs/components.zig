@@ -23,6 +23,10 @@ pub const Transform = struct {
     yaw: f32 = 0,
 };
 
+/// Stock item quality tiers: 1..6 (ItemValue.Quality; items.md). Armor
+/// resist curves scale their first/last value to Q1/Q6.
+pub const max_quality_tiers: u8 = 6;
+
 pub const Health = struct {
     hp: f32 = 0,
     max_hp: f32 = 0,

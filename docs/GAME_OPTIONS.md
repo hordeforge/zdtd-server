@@ -153,7 +153,7 @@ test, so a retune cannot land silently).
 | `attack_damage` | 8.0 | **Floor**: `entityclasses.xml` `HandItem` → `items.xml` `DamageEntity` wins when non-zero |
 | `attack_range_sq` | 4.0 | Policy (no per-entity stock equivalent) |
 | `attack_cooldown_s` | 1.2 | Policy (no entityclasses field) |
-| `armor_mitigation_per_piece` / `armor_mitigation_cap` | 0.1 / 0.5 | Flat armor mitigation per worn armor piece + cap (zdtd approximation, R3). Stock mitigation is the passive-effects damage/armor modifier chain (items.md ModifyValue IL=304) - an engine feature, RE-blocked; these numbers make the approximation operator-tunable |
+| `armor_mitigation_per_piece` / `armor_mitigation_cap` | 0.1 / 0.5 | **Fallback floor**: with a game-dir present, mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality (items.xml curves, stock GetTotalPhysicalArmorRating / Equipment.CalcDamage, combat-damage.md), capped by `armor_mitigation_cap`. `armor_mitigation_per_piece` applies only when no XML row resolved (offline/builtin catalog) |
 | `knockback_speed` / `knockback_seconds` | 8.0 / 0.3 | Melee knockback impulse: shove speed (blocks/s) and hit window (s); 0.3 s at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark) |
 | `[rules.ai]` | | |
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |

@@ -851,6 +851,8 @@ pub const Game = struct {
         self.sim.stack_fn = &itemStackFor;
         self.sim.is_armor_ctx = self;
         self.sim.is_armor_fn = &itemIsArmor;
+        self.sim.armor_pdr_ctx = self;
+        self.sim.armor_pdr_fn = &game_craft.armorPdr;
         // Quest POI placement: rally objectives need a real prefab footprint.
         self.sim.poi_ctx = self;
         self.sim.poi_fn = &poiRectAtWorld;
