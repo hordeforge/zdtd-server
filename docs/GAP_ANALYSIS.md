@@ -161,7 +161,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 38 | 0 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 25 | 0 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 25 | 0 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; still open: purchased-level persistence (ZPV10) and the perk_spend plugin verdict |
 | [World systems](#11-world-systems) | 43 | 0 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
 | **Total** | **289** | **0** | **0** | **289** | All 289 features WORKS; residuals are recorded inline (RE-blocked or non-goal) |
@@ -282,9 +282,12 @@ area and the concrete work.
    active buffs (full BuffInstance state), restored on rejoin and handled by
    the admin wipeplayer rewrite. Old ZPV2 files still read. Round-trip test
    runs two full save/restart cycles. Honest gaps kept open: the client's
-   `NetPackagePlayerStats` blob is still dropped, perk/skill-point spending is
-   client-owned with no server model (the ledger saves level+XP which define
-   the budget), and identity stays login-name keyed per ADR 0017 rather than
+   inbound `NetPackagePlayerStats` blob is dropped (server-authoritative: the
+   server builds and relays its own snapshot on progression change, so peers
+   see your level; distance/time/craft counters in the stock body stay
+   defaults), purchased perk levels do not persist yet (ZPV10 tracked in the
+   player-progression area; the spend ledger + VM effects run while the
+   session does), and identity stays login-name keyed per ADR 0017 rather than
    platform user id.
 
 10. **DONE 2026-08-06 (persistence 2026-08-07).** World: make land claims real.
@@ -418,9 +421,15 @@ area and the concrete work.
     budget, no allocation) and the survival stage buffs
     (buffStatusHungry/Thirsty01..03) are applied/removed as state, with the
     `StaminaChangeOT` penalty and the stage-3 `ModifyStats Health` loss read
-    off the active buffs. Residual: the untracked effect classes
-    (RecipeTagUnlocked/LootProb/CraftingTier...), persisting active buffs
-    across restart (they ride ZPV3 already; effect application is the gap).
+    off the active buffs. **Per-perk leg SHIPPED 2026-08-25**: purchased
+    attribute/perk levels fold through the same VM (progression.xml
+    `value="v1,v2,..."` curves, level-scaled via `curveAt`/`trackedDeltasAt`;
+    `progression.perkTotals` over the spend ledger) into armor
+    PhysicalDamageResist and the HealthChangeOT regen leg. Residual: the
+    untracked effect classes
+    (RecipeTagUnlocked/LootProb/CraftingTier...), perk max-stat and
+    stamina-OT consumers (recorded), and persisting active buffs + purchased
+    levels across restart (ZPV3 carries buffs; ZPV10 carries the ledger).
 
 22. ~~**Progression: simulate survival.**~~ **PARTIAL → DEPLETION LOOP SHIPPED
     2026-08-07**: `Game.tickSurvival` (after tickAll, when the world clock
@@ -4229,9 +4238,11 @@ persists so little that a restart visibly damages a built base.
   slots (11-byte with use_times), journal quests (name + POI rect +
   per-objective progress), plus a progression tail: level, XP, food/water, HP
   (ZPV8), game-stage born time (ZPV9, so days-alive survives), active buffs and
-  the bedroll (ZPV4). Not stored: stamina, temperature, skills and perks, map
-  exploration, waypoints, kill/death stats (the perk runtime is tracked in the
-  player-progression area). Documented per the parity rules as **non-client-
+  the bedroll (ZPV4). Not stored: stamina, temperature, purchased skills and
+  perks (the server-side spend ledger and the level-scaled VM effects run for
+  the session; persisting purchases is the ZPV10 item tracked in the
+  player-progression area), map exploration, waypoints, kill/death stats.
+  Documented per the parity rules as **non-client-
   visible**: the client never reads players.zsv (stock persists its own
   PlayerDataFile blob; the client's state comes over the wire), so the absent
   fields are save-format internals. Offline records are correctly carried over

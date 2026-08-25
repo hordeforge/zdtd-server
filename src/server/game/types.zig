@@ -7,6 +7,7 @@
 const std = @import("std");
 const ln_peer = @import("../../litenet/peer.zig");
 const ecs = @import("../../ecs/root.zig");
+const assets_progression = @import("../../assets/progression.zig");
 const bot_mod = @import("bot.zig");
 const guard_policy = @import("../guard_policy.zig");
 const server_config = @import("../config.zig");
@@ -394,10 +395,10 @@ pub const InitOptions = struct {
 };
 
 /// One purchased progression value (attribute/perk) on a player.
-pub const SkillLevel = struct {
-    name: []const u8 = "",
-    level: u8 = 0,
-};
+/// One purchased progression value (attribute/perk) on a player. Shared with
+/// the assets progression catalog (assets/progression.zig) so the passive-
+/// effects VM folds the player's perk levels without a server type.
+pub const SkillLevel = assets_progression.SkillLevel;
 
 /// Cap on distinct purchased skills per player (stock: 8 attributes + 57
 /// perks + skills; 64 covers the tree with room for skill rows).
@@ -415,7 +416,9 @@ pub const Client = struct {
     skill_points: u32 = 0,
     /// Purchased progression levels by name (attributes/perks). `name` must
     /// point to static/indefinite-lifetime data (the progression table
-    /// arena); persisted with the player record.
+    /// arena). NOT persisted yet: players.zsv carries level/XP only, so
+    /// purchases reset on restart (ZPV10 tracked in the player-progression
+    /// GAP row; the spend ledger is server-validated while the session runs).
     skill_levels: [max_skill_levels]SkillLevel = [_]SkillLevel{.{}} ** max_skill_levels,
     skill_level_n: u8 = 0,
     /// Per-player blood-moon-music eligibility edge state (stock

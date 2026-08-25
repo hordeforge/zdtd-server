@@ -40,11 +40,20 @@ pub const Op = enum(u8) {
 /// the rules in ecs/buff.zig need no dependency on the asset loader.
 pub const StackType = components.StackType;
 
+pub const max_curve_len: usize = 8;
+
 pub const Passive = struct {
     name: []const u8 = "",
     op: Op = .unknown,
+    /// First segment of a comma-separated curve value (level-1 value for
+    /// perks; the flat value for single-segment rows). Kept for the legacy
+    /// readers; `curveAt` is the level-aware accessor.
     value: f32 = 0,
     tags: []const u8 = "",
+    /// Per-level curve segments (stock `value="v1,v2,..."`: segment i applies
+    /// at level i+1, clamped past the end). Filled for every parsed row.
+    curve: [max_curve_len]f32 = .{0} ** max_curve_len,
+    curve_len: u8 = 0,
 };
 
 /// One `<triggered_effect action="ModifyStats" .../>` row. Stock drives
@@ -207,6 +216,31 @@ pub fn firstF32(s: []const u8) f32 {
     return std.fmt.parseFloat(f32, std.mem.trim(u8, s[0..comma], " \t")) catch 0;
 }
 
+/// Fill `out` with the comma-separated curve segments of a passive `value`
+/// (stock: segment i applies at level i+1). Returns the segment count (0 for
+/// an empty value). `out[0]` is always the flat/level-1 value.
+pub fn parseCurveValue(s: []const u8, out: *[max_curve_len]f32) u8 {
+    var n: u8 = 0;
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |seg| {
+        const seg_t = std.mem.trim(u8, seg, " \t");
+        if (seg_t.len == 0) continue;
+        if (n >= max_curve_len) break;
+        out[n] = std.fmt.parseFloat(f32, seg_t) catch 0;
+        n += 1;
+    }
+    return n;
+}
+
+/// Value of a passive at `level` (1-based): curve segment `level-1`, clamped
+/// past the end; level 0 (unpurchased) is 0; single-segment rows repeat.
+/// Hand-built rows that set only `value` (curve_len 0) repeat that value.
+pub fn curveAt(p: Passive, level: u8) f32 {
+    if (level == 0) return 0;
+    if (p.curve_len == 0) return p.value;
+    return p.curve[@min(@as(usize, level - 1), @as(usize, p.curve_len) - 1)];
+}
+
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
@@ -312,11 +346,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             const op_s = xml.attr(body, pi, "operation") orelse "base_add";
             const val_s = xml.attr(body, pi, "value") orelse "0";
             const tags = xml.attr(body, pi, "tags") orelse "";
+            var curve: [max_curve_len]f32 = .{0} ** max_curve_len;
+            const curve_len = parseCurveValue(val_s, &curve);
             try passives_list.append(allocator, .{
                 .name = try arena.dupe(u8, en),
                 .op = parseOp(op_s),
-                .value = firstF32(val_s),
+                .value = curve[0],
                 .tags = try arena.dupe(u8, tags),
+                .curve = curve,
+                .curve_len = curve_len,
             });
             pn += 1;
             j = pi + 16;
@@ -521,7 +559,7 @@ fn addDeltas(a: *TrackedDeltas, b: TrackedDeltas) void {
 /// the pre-VM arithmetic, unchanged). `base_set` and any other op over a
 /// tracked name are omitted: without the per-entity base value the delta is
 /// not defined (recorded, not guessed).
-pub fn trackedDeltasFrom(passives: []const Passive) TrackedDeltas {
+pub fn trackedDeltasAt(passives: []const Passive, level: u8) TrackedDeltas {
     var out: TrackedDeltas = .{};
     for (passives) |p| {
         const field = blk: {
@@ -530,21 +568,34 @@ pub fn trackedDeltasFrom(passives: []const Passive) TrackedDeltas {
             }
             break :blk null;
         } orelse continue;
+        const v = curveAt(p, level);
         switch (p.op) {
-            .base_add => addTo(&out, field, p.value),
-            .base_subtract => addTo(&out, field, -p.value),
-            .perc_add => addTo(&out, field, p.value),
-            .perc_subtract => addTo(&out, field, -p.value),
+            .base_add => addTo(&out, field, v),
+            .base_subtract => addTo(&out, field, -v),
+            .perc_add => addTo(&out, field, v),
+            .perc_subtract => addTo(&out, field, -v),
             else => continue,
         }
     }
     return out;
 }
 
+/// The level-1 (flat) variant, used by the buff VM.
+pub fn trackedDeltasFrom(passives: []const Passive) TrackedDeltas {
+    return trackedDeltasAt(passives, 1);
+}
+
 /// Fold one buff's passive_effect rows over the tracked surface (the buff
 /// variant of trackedDeltasFrom).
 pub fn trackedDeltas(def: *const BuffDef) TrackedDeltas {
     return trackedDeltasFrom(def.passives);
+}
+
+/// Sum two delta sets (perk leg + buff leg, level-scaled).
+pub fn deltasPlus(a: TrackedDeltas, b: TrackedDeltas) TrackedDeltas {
+    var out = a;
+    addDeltas(&out, b);
+    return out;
 }
 
 /// Sum of the tracked deltas over an entity's active buffs (revertible by
@@ -844,3 +895,37 @@ test "stageBuffName maps stages to the stock conditional buff names" {
     try std.testing.expect(stageBuffName(0, false) == null);
 }
 
+
+test "parseCurveValue fills per-level segments; curveAt clamps and levels" {
+    var c: [max_curve_len]f32 = .{0} ** max_curve_len;
+    const n = parseCurveValue(".011,.022,.05,.1,.16", &c);
+    try std.testing.expectEqual(@as(u8, 5), n);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.011), c[0], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.16), c[4], 0.0001);
+    const p = Passive{ .curve = c, .curve_len = n };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.011), curveAt(p, 1), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), curveAt(p, 4), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.16), curveAt(p, 5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.16), curveAt(p, 9), 0.0001); // clamp past end
+    try std.testing.expectEqual(@as(f32, 0), curveAt(p, 0)); // unpurchased
+    // Single-segment rows repeat the flat value.
+    var c1: [max_curve_len]f32 = .{0} ** max_curve_len;
+    _ = parseCurveValue("1.5", &c1);
+    const p1 = Passive{ .curve = c1, .curve_len = 1 };
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), curveAt(p1, 3), 0.0001);
+}
+
+test "trackedDeltasAt scales a perk curve to its level" {
+    const passives = [_]Passive{
+        .{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5 },
+        .{ .name = "GeneralDamageResist", .op = .base_add, .curve = .{ 0.05, 0.25, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 },
+    };
+    const l1 = trackedDeltasAt(&passives, 1);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.011), l1.hp_ot, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), l1.general_resist, 0.0001);
+    const l5 = trackedDeltasAt(&passives, 5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.16), l5.hp_ot, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), l5.general_resist, 0.0001); // clamp
+    const l0 = trackedDeltasAt(&passives, 0);
+    try std.testing.expect(!l0.any());
+}

@@ -135,6 +135,48 @@ fn parseCurve(clean: []const u8) LevelCurve {
     return c;
 }
 
+/// One purchased progression value (attribute/perk) on a player. Shared with
+/// the server Client ledger (server/game/types.zig) so the VM can fold the
+/// player's perk levels directly.
+pub const SkillLevel = struct {
+    name: []const u8 = "",
+    level: u8 = 0,
+};
+
+/// Level-scaled tracked deltas for one purchased progression value: folds its
+/// passive rows at `level` (curve segment i applies at level i+1). Revertible
+/// by recompute-from-set like the buff VM (removing the level drops its
+/// deltas exactly).
+pub fn trackedDeltasAtLevel(def: anytype, level: u8) buffs.TrackedDeltas {
+    return buffs.trackedDeltasAt(def.passives, level);
+}
+
+/// Combined tracked deltas over a player's purchased progression levels
+/// (attributes + perks). No allocation; the fold is bounded by the 64-skill
+/// ledger cap.
+pub fn perkTotals(pt: *const Table, skill_levels: []const SkillLevel) buffs.TrackedDeltas {
+    var out: buffs.TrackedDeltas = .{};
+    for (skill_levels) |sl| {
+        if (sl.level == 0) continue;
+        var found = false;
+        for (pt.attributes) |a| {
+            if (std.mem.eql(u8, a.name, sl.name)) {
+                out = buffs.deltasPlus(out, trackedDeltasAtLevel(&a, sl.level));
+                found = true;
+                break;
+            }
+        }
+        if (found) continue;
+        for (pt.perks) |pk| {
+            if (std.mem.eql(u8, pk.name, sl.name)) {
+                out = buffs.deltasPlus(out, trackedDeltasAtLevel(&pk, sl.level));
+                break;
+            }
+        }
+    }
+    return out;
+}
+
 /// Scan a perk/attribute body for `<passive_effect name operation value>`
 /// rows (mirror of buffs.zig's parse; curve values keep their first segment).
 fn scanPassives(
@@ -153,10 +195,14 @@ fn scanPassives(
         };
         const op_s = xml.attr(body, pi, "operation") orelse "base_add";
         const val_s = xml.attr(body, pi, "value") orelse "0";
+        var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+        const curve_len = buffs.parseCurveValue(val_s, &curve);
         try pool.append(allocator, .{
             .name = try arena.dupe(u8, en),
             .op = buffs.parseOp(op_s),
-            .value = buffs.firstF32(val_s),
+            .value = curve[0],
+            .curve = curve,
+            .curve_len = curve_len,
         });
         j = pi + 16;
     }
@@ -490,4 +536,58 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
     // A known tracked row: perkSexRex BlockDamage is untracked, but the
     // toughness-tree GeneralDamageResist rows land in the VM's resist delta.
     try std.testing.expect(tracked_hits > 0);
+    // Level-scaled fold against the real XML: perkHealingFactor carries
+    // HealthChangeOT .011,.022,.05,.1,.16 (per-second regen), so level 5
+    // folds 0.16 hp/s and level 0 folds nothing.
+    var heal: ?PerkDef = null;
+    for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkHealingFactor")) {
+            heal = pk;
+            break;
+        }
+    }
+    if (heal) |h| {
+        try std.testing.expect(h.passives.len > 0);
+        const d5 = buffs.trackedDeltasAt(h.passives, 5);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.16), d5.hp_ot, 0.0001);
+        const d0 = buffs.trackedDeltasAt(h.passives, 0);
+        try std.testing.expect(!d0.any());
+    }
+}
+
+test "perkTotals folds purchased perk levels level-scaled and reverts" {
+    const attrs = [_]AttrDef{ .{ .name = "attFortitude", .max_level = 10 } };
+    const perks = [_]PerkDef{
+        .{
+            .name = "perkHealingFactor",
+            .max_level = 5,
+            .parent_attr = "attFortitude",
+            .passives = &.{ .{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5 } },
+        },
+        .{
+            .name = "perkPackMule",
+            .max_level = 5,
+            .passives = &.{ .{ .name = "GeneralDamageResist", .op = .base_add, .value = 1 } },
+        },
+    };
+    const pt = Table{ .attributes = attrs[0..], .perks = perks[0..] };
+    // No purchases: no deltas.
+    var levels = [_]SkillLevel{.{}} ** 4;
+    try std.testing.expect(!perkTotals(&pt, &levels).any());
+    // Healing Factor level 1: small regen; level 5: the full curve value.
+    levels[0] = .{ .name = "perkHealingFactor", .level = 1 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.011), perkTotals(&pt, &levels).hp_ot, 0.0001);
+    levels[0].level = 5;
+    levels[1] = .{ .name = "perkPackMule", .level = 3 };
+    const t5 = perkTotals(&pt, &levels);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.16), t5.hp_ot, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), t5.general_resist, 0.0001);
+    // Revertible: dropping the level drops its deltas exactly.
+    levels[1].level = 0;
+    const back = perkTotals(&pt, &levels);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), back.general_resist, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.16), back.hp_ot, 0.0001);
+    // Unknown names are ignored (fail closed).
+    levels[0].name = "notAPerk";
+    try std.testing.expect(!perkTotals(&pt, &levels).any());
 }

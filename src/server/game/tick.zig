@@ -11,6 +11,7 @@ const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
+const assets_progression = @import("../../assets/progression.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
 const admin_cmds = @import("../admin_cmds.zig");
@@ -99,7 +100,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             const stages = assets_buffs.survivalStages(sv, h);
             syncStageBuffs(self, c.entity_id, ps, stages);
             const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps]);
-            self.sim.buff_phys_resist[ps] = vm.phys_resist;
+            // Perk leg (level-scaled): purchased attribute/perk passives fold
+            // through the same VM surface, revertible by recompute-from-set.
+            const pvm = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n]);
+            // Armor: buff + perk PhysicalDamageResist join the mitigation like
+            // stock GetTotalPhysicalArmorRating sums passive 41 on the wearer.
+            self.sim.buff_phys_resist[ps] = vm.phys_resist + pvm.phys_resist;
             const starving = stages.hungry == 3;
             const dehydrated = stages.thirsty == 3;
             if (starving or dehydrated) {
@@ -119,6 +125,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }
+            // Perk/buff HealthChangeOT: stock applies the OT rate per second
+            // (perkHealingFactor .011..16, well-rested regen), composing with
+            // the starvation/regen branches above.
+            const hp_ot = vm.hp_ot + pvm.hp_ot;
+            if (hp_ot != 0) hp_delta += hp_ot * secs;
             // Stamina penalty: stock `StaminaChangeOT perc_subtract .1` on
             // buffStatusHungry03 while its stage holds. The gate moved from
             // "food/water <= 0" to "stage-3 buff active" (the stock 2%
