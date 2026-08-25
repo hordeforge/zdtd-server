@@ -80,10 +80,14 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
     };
     var tex_ctx: TexCtx = .{ .t = &self.block_textures };
     const DmgCtx = struct {
+        g: *Game,
         ch: *const world_store.Chunk,
         fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u16 {
             const d: *const @This() = @ptrCast(@alignCast(ctx.?));
-            return d.ch.dmgAt(lx, y, lz);
+            // Stage2Health (RE blocks.md §5): the wire damage caps at the
+            // block's stage-2 threshold (doors); internal damage stays full.
+            const stored = d.ch.dmgAt(lx, y, lz);
+            return d.g.wireBlockDamage(d.ch.blockAt(lx, y, lz), stored);
         }
     };
     // Per-cell biome provider (GAP per-chunk-biome row): same sources as the
@@ -104,7 +108,7 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         }
     };
     var biome_ctx: BiomeCtx = .{ .g = self, .fallback = biome_id };
-    var dmg_ctx: DmgCtx = .{ .ch = ch };
+    var dmg_ctx: DmgCtx = .{ .g = self, .ch = ch };
     // Stock Chunk.write payload inside NetPackageChunk (overwrite=false first delivery).
     const body = try packages.stock_chunk.buildNetPackageChunkNew(&self.body_buf, .{
         .cx = cx,

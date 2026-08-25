@@ -1624,6 +1624,10 @@ pub const Game = struct {
         return game_world.maxDamageForBlock(self, block_id);
     }
 
+    pub fn wireBlockDamage(self: *const Game, block_id: u16, stored: u16) u16 {
+        return game_world.wireBlockDamage(self, block_id, stored);
+    }
+
     pub fn harvestXpForBlock(self: *Game, block_id: u16) u32 {
         return game_world.harvestXpForBlock(self, block_id);
     }

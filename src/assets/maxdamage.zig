@@ -78,6 +78,11 @@ pub const Table = struct {
     /// material name → materials.xml `Experience` (harvest XP; RE items.md
     /// AddLevelExp(material.Experience * count)). 0 = none.
     material_exp: std.StringHashMapUnmanaged(f32) = .{},
+    /// block name → blocks.xml `Stage2Health` (42 stock doors, all 1): the
+    /// wire damage caps at this threshold (RE blocks.md §5 "Stage2Health, if
+    /// set, caps the applied value at the stage-2 threshold") while the
+    /// internal damage keeps accumulating to MaxDamage for destruction.
+    stage2_health: std.StringHashMapUnmanaged(u16) = .{},
     /// block name → material id (from blocks.xml Material property).
     block_material: std.StringHashMapUnmanaged([]const u8) = .{},
     /// block name → resolved `UpgradeBlock.ToBlock` after the Extends chain.
@@ -130,6 +135,7 @@ pub const Table = struct {
             self.power_output_per_stack_by_name = .{};
             self.material_max = .{};
             self.material_exp = .{};
+            self.stage2_health = .{};
             self.block_material = .{};
             self.distant_deco = .{};
             self.multi_block_dim = .{};
@@ -155,6 +161,13 @@ pub const Table = struct {
         const name = self.name_by_id.get(block_id) orelse return 0;
         const mat = self.block_material.get(name) orelse return 0;
         return self.material_exp.get(mat) orelse 0;
+    }
+
+    /// blocks.xml Stage2Health for a block id (0 = no cap): the wire damage
+    /// caps here (RE blocks.md §5) while internal damage drives destruction.
+    pub fn stage2For(self: *const Table, block_id: u16) u16 {
+        const name = self.name_by_id.get(block_id) orelse return 0;
+        return self.stage2_health.get(name) orelse 0;
     }
 
     pub fn maxDamageByName(self: *const Table, name: []const u8) ?u16 {
@@ -641,6 +654,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var power_output_per_charge_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var power_output_per_stack_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var block_material: std.StringHashMapUnmanaged([]const u8) = .{};
+    var stage2_map: std.StringHashMapUnmanaged(u16) = .{};
     // Own facts first; Extends chains are resolved in a second pass because a
     // child can appear before its parent in the file.
     var own_facts: std.StringHashMapUnmanaged(DecoFacts) = .{};
@@ -662,6 +676,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "MaxDamage")) |md| {
             if (xml.parseU16(md)) |hp| {
                 try by_name.put(arena, kn, hp);
+            }
+        }
+        // Stage2Health (42 stock doors, all 1): the wire damage cap.
+        if (xml.propertyValue(body, "Stage2Health")) |s2| {
+            if (xml.parseU16(s2)) |v| {
+                try stage2_map.put(arena, kn, v);
             }
         }
         if (xml.propertyValue(body, "Material")) |mat| {
@@ -771,6 +791,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .power_output_per_charge_by_name = power_output_per_charge_by_name,
         .power_output_per_stack_by_name = power_output_per_stack_by_name,
         .block_material = block_material,
+        .stage2_health = stage2_map,
         .distant_deco = distant_deco,
         .multi_block_dim = multi_block_dim,
         .non_support = non_support,
@@ -1049,6 +1070,14 @@ test "materials.xml MaxDamage fills hayBaleSquare" {
     }
     if (t.idByName("hayBaleSquare")) |hid2| {
         try std.testing.expectEqual(@as(f32, 0), t.harvestExpFor(hid2));
+    }
+    // Stage2Health (RE blocks.md §5): doors cap the wire damage at 1; a
+    // plain block has no cap.
+    if (t.idByName("vaultDoor01")) |vd| {
+        try std.testing.expectEqual(@as(u16, 1), t.stage2For(vd));
+    }
+    if (t.idByName("woodPillar100")) |wp| {
+        try std.testing.expectEqual(@as(u16, 0), t.stage2For(wp));
     }
 }
 

@@ -207,7 +207,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (mutated) {
                 const stored_raw = self.blockRawAt(b.x, b.y, b.z);
                 const echo_raw: u32 = if (place_id != 0 and (stored_raw & 0xffff) == place_id) stored_raw else @as(u32, place_id);
-                if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], b.x, b.y, b.z, echo_raw, out_dmg, editor_ent, editor_ent)) |sb| {
+                // Stage2Health: the echo damage caps at the stage-2 threshold
+                // (doors show the binary cracked state; internal damage stays).
+                const echo_dmg = self.wireBlockDamage(place_id, out_dmg);
+                if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], b.x, b.y, b.z, echo_raw, echo_dmg, editor_ent, editor_ent)) |sb| {
                     try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
                 } else |_| {}
             }
