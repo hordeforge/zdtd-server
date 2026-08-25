@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const toml_bind = @import("../util/toml_bind.zig");
+const sandbox_presets = @import("../assets/sandbox_presets.zig");
 
 /// Which sim systems run (ADR 0021: behaviour, not just numbers). Every entry
 /// defaults on, so the default table is exactly the stock pipeline; a mode pack
@@ -279,33 +280,33 @@ pub const Ai = struct {
 /// server entity by `EntityIncomingDamageModifier`; PvP and AI-vs-AI are
 /// unchanged, and the stock server never re-scales the client's claimed
 /// strength (NetPackageDamageEntity::ProcessPackage IL=172 stores it verbatim
-/// into DamageResponse::Strength). Both statics default to 1.0
-/// (ItemActionAttack .cctor); the stock Adventurer preset (the default game)
-/// sets IncomingDamage to 0.75 - the shipped serverconfig code
-/// `AAAJABJACJADJARFBNC` decodes option 17 index 5 = 0.75
-/// (sandbox-options.md 246-258), so difficulty 2 here pins 0.75. The full
-/// per-difficulty ladder lives in SandboxOptionManager.SetupOptions IL (not
-/// literal preset codes); extracting it is a research-repo task, so the
-/// remaining defaults stay 1.0 until RE lands them.
+/// into DamageResponse::Strength). The per-difficulty ladder comes from the
+/// stock `Data/Sandbox/sandbox_presets` TextAsset (embedded
+/// `assets/sandbox_presets.xml`, comptime-decoded in assets/sandbox_presets.
+/// zig; RE evidence sandbox-options.md §3, extracted 2026-08-26): each
+/// difficulty preset's SandboxCode decodes option 17 (IncomingDamage) via
+/// `UpdateInGameValuesWithSandboxOptions`. Never hardcode these values - the
+/// defaults below are the comptime XML decode; an operator overrides them in
+/// `[rules.difficulty]` (ADR 0021).
 pub const Difficulty = struct {
     /// Server (AI) attacker -> client entity damage multiplier, per difficulty.
-    incoming_damage_0: f32 = 1.0,
-    incoming_damage_1: f32 = 1.0,
-    incoming_damage_2: f32 = 0.75,
-    incoming_damage_3: f32 = 1.0,
-    incoming_damage_4: f32 = 1.0,
-    incoming_damage_5: f32 = 1.0,
+    incoming_damage_0: f32 = sandbox_presets.difficulty[0].incoming_damage,
+    incoming_damage_1: f32 = sandbox_presets.difficulty[1].incoming_damage,
+    incoming_damage_2: f32 = sandbox_presets.difficulty[2].incoming_damage,
+    incoming_damage_3: f32 = sandbox_presets.difficulty[3].incoming_damage,
+    incoming_damage_4: f32 = sandbox_presets.difficulty[4].incoming_damage,
+    incoming_damage_5: f32 = sandbox_presets.difficulty[5].incoming_damage,
     /// Client attacker -> server entity damage multiplier, per difficulty.
     /// Stock applies this client-side in the attacker's local ItemActionAttack
     /// Hit; the server trusts the claimed strength, so the server never
-    /// re-applies it (double-scaling). Carried here as config for operator
-    /// policy and for the RE ladder when it lands.
-    entity_incoming_damage_0: f32 = 1.0,
-    entity_incoming_damage_1: f32 = 1.0,
-    entity_incoming_damage_2: f32 = 1.0,
-    entity_incoming_damage_3: f32 = 1.0,
-    entity_incoming_damage_4: f32 = 1.0,
-    entity_incoming_damage_5: f32 = 1.0,
+    /// re-applies it (double-scaling). No stock difficulty code touches
+    /// option 42, so every tier decodes to the 1.0 default (comptime XML).
+    entity_incoming_damage_0: f32 = sandbox_presets.difficulty[0].entity_incoming_damage,
+    entity_incoming_damage_1: f32 = sandbox_presets.difficulty[1].entity_incoming_damage,
+    entity_incoming_damage_2: f32 = sandbox_presets.difficulty[2].entity_incoming_damage,
+    entity_incoming_damage_3: f32 = sandbox_presets.difficulty[3].entity_incoming_damage,
+    entity_incoming_damage_4: f32 = sandbox_presets.difficulty[4].entity_incoming_damage,
+    entity_incoming_damage_5: f32 = sandbox_presets.difficulty[5].entity_incoming_damage,
     /// Difficulty index 0..5 (clamped) -> incoming-damage multiplier.
     pub fn incomingFor(self: *const Difficulty, d: u8) f32 {
         return switch (@min(d, 5)) {

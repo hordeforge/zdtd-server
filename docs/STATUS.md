@@ -743,6 +743,28 @@ fixed a latent P0 the scenario exposed: the stability plane computes lazily
 on the first dig after the handler aired the block, so `removed_stab` was 0
 and `cur_stab - 1` underflowed (first dig in any fresh chunk panicked);
 `removeBlockAt` now guards the u8 underflow. The dashboard
+(docs/provenance.html) is synced. Then (2026-08-26 review wave) the
+Fall/Destroy debris events went WORKS: `<drop event="Fall">` rows roll at
+the falling-block landing (hook from `systemFallingBlocks`; stick rows
+re-place the debris block at the cell, others bag it) and `<drop
+event="Destroy">` rows roll at the explosion air-write with the stock
+overallProb 0.5 gate (RE EntityFallingBlock + GameManager.
+ExplodeGroupFrameUpdate IL). Scenarios fall-drop and destroy-drop drive
+both. Then the sounds row went WORKS: `NetPackageSoundAtPosition` (write
+IL=25) now has a wire builder, a C2S relay (validated owner + finite pos,
+re-broadcast to all but the sender, stock PlaySoundAtPositionServer IL=60)
+and a server emitter; the forge dings `Forge/forge_item_complete` on a
+produced-this-tick smelt (TileEntityForge IL_02F9-031F, Logarithmic/100/1).
+Scenarios sound-relay and forge-ding drive both. Then the GameDifficulty
+damage ladder went WORKS: the six difficulty presets were extracted from
+the stock client bundle's `Data/Sandbox/sandbox_presets` TextAsset
+(UnityPy; previously RE-blocked as unparseable) and decode via the sandbox
+codec to the per-difficulty IncomingDamage multipliers
+(0.5/0.75/1.0/1.5/2.0/2.5; EntityIncomingDamage stays 1.0 on every tier);
+zdtd parses the embedded XML at comptime (`src/assets/sandbox_presets.zig`)
+into `[rules.difficulty] incoming_damage_0..5` defaults - never hardcoded -
+and applies them at the AI->player damage choke (`damageScale`, RE
+ItemActionAttack.difficultyModifier IL=44). The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

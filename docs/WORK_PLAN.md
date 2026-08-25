@@ -16,6 +16,20 @@ Active planning is now tracked in the living docs:
 
 For handoff-ready task shape and house rules, see the archived plan's "How to work a task" § — same grounding/proof/commit expectations apply.
 
+**Status 2026-08-26:** most tasks below shipped and are rescored WORKS in
+[`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) (scorecard: all 289 features WORKS,
+residuals recorded inline) — do not re-open them as gaps. Specifically
+done: T24/T25/T26/T27/T28 (progression + perk spend + VM passives, scorecard
+row 10), T29 (stealth/noise/smell — AI senses row), T32/T33 (GameEvent
+dispatch + challenges), T34 (crafting XP: verified near-zero in shipped
+data), T36 (BlockTrigger authority), T37 (bedroll respawn targeting;
+ownership persistence details are recorded PARTIAL/waived in the scorecard).
+Still open / recorded, not wired: T30 (drone companion — zero stock AITask
+uses, deferred), T35 (air-drop compass marker), T38 (radius effects for
+always-on light sources), plus the sandbox/drop/sound items recorded in the
+scorecard rows. The per-task "Why" text below is historical; GAP/STATUS win
+on conflict.
+
 ---
 
 # Active program: anti-cheat (ADR 0022)

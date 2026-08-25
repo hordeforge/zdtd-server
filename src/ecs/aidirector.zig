@@ -324,8 +324,10 @@ pub const Director = struct {
     /// Alive-zombie ceiling (MaxSpawnedZombies). Defaults to the dev cap; the
     /// operator's serverconfig raises it. See default_max_alive_zombies.
     max_alive: u32 = default_max_alive_zombies,
-    /// GameDifficulty 0..5; scales zombie hp (proxy for stock damage scaling).
-    difficulty: u8 = 2,
+    /// GameDifficulty 0..5 (1 = Adventurer, the stock default game); scales
+    /// zombie hp (proxy for stock damage scaling) and picks the
+    /// `[rules.difficulty] incoming_damage_N` ladder (comptime XML presets).
+    difficulty: u8 = 1,
     /// ZombieMove / ZombieMoveNight / ZombieFeralMove / ZombieBMMove indices 0..4.
     zombie_move_day: u8 = 0,
     zombie_move_night: u8 = 3,
@@ -1193,6 +1195,10 @@ test "spawned classes carry full entityclasses stats via the resolver (A35)" {
     var dir: Director = .{
         .clock = .{ .hours = 23.0, .day = 1, .seconds_per_hour = 1.0 },
         .horde_cd = 0,
+        // hpScale neutral tier (difficulty_hp_2 = 1.0): the assert below
+        // checks the resolver's class stats unscaled, not the difficulty
+        // hp ladder (which is covered by its own test).
+        .difficulty = 2,
         .night_group = "ZombiesNight",
         .group_pick_ctx = undefined,
         .group_pick_fn = &Hooks.pick,
@@ -1705,4 +1711,30 @@ test "ambient rule budget caps the drip and releases on destroy" {
     // budget admits the slot freed by the kill within the same cycle.
     for (0..950) |_| _ = w.director.tick(&w, 0.05);
     try std.testing.expect(w.countKind(.zombie) >= 2);
+}
+
+test "difficulty damage scale uses the comptime XML ladder" {
+    // The six difficulty presets decode from the embedded sandbox_presets
+    // XML (assets/sandbox_presets.zig) into `[rules.difficulty]
+    // incoming_damage_0..5`; `damageScale` mirrors stock
+    // ItemActionAttack.difficultyModifier (IL=44): only mixed
+    // server/client matchups scale.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    const d = &w.director;
+    const r = &w.rules.difficulty;
+    d.difficulty = 4; // True Survivalist
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), d.damageScale(false, true, r), 1e-4); // AI -> player x2.0
+    d.difficulty = 0; // Scavenger
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), d.damageScale(false, true, r), 1e-4);
+    d.difficulty = 2; // Nomad (empty code = defaults)
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), d.damageScale(false, true, r), 1e-4);
+    d.difficulty = 5; // Insane
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), d.damageScale(false, true, r), 1e-4);
+    // EntityIncomingDamage never appears in a difficulty code: 1.0 on every
+    // tier, so the player -> zombie leg is unchanged.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), d.damageScale(true, false, r), 1e-4);
+    // PvP and AI-vs-AI pairs never scale (stock difficultyModifier).
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), d.damageScale(true, true, r), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), d.damageScale(false, false, r), 1e-4);
 }

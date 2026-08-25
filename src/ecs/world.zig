@@ -325,6 +325,12 @@ pub const World = struct {
     /// unblocked.
     solid_ctx: ?*anyopaque = null,
     solid_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
+    /// Falling-block landing callback (Fall-event debris drops): the ECS
+    /// has no block/item tables, so the Game rolls the landed cells'
+    /// `<drop event="Fall">` rows (systemFallingBlocks fires it at contact,
+    /// before the entity destroy).
+    fall_land_ctx: ?*anyopaque = null,
+    fall_land_fn: ?*const fn (?*anyopaque, []const c.FallingCell) void = null,
     /// Water probe (Game wires the store): true when the cell holds water.
     /// Lets the AI swim physics detect submersion (stock inWaterPercent).
     water_ctx: ?*anyopaque = null,

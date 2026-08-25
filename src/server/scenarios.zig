@@ -7454,6 +7454,227 @@ test "scenario harvest drops roll into the breaker (terrStone → resourceRockSm
     std.debug.print("PASS harvest-drop: terrStone break rolls resourceRockSmall x55 into inventory\n", .{});
 }
 
+test "scenario fall-event drops re-place debris at landing (terrDirt)" {
+    // Real blocks.xml (game-dir): a collapsed terrDirt column lands and the
+    // Fall-event roll (RE EntityFallingBlock landing DropItemsOnEvent IL)
+    // re-places the debris via the stick path - terrDirt's own Fall row is
+    // count=1 stick_chance=1 (prob is never consulted on stick rows), so
+    // the re-placement is deterministic. Skipped without the game dir.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const dirt_id = g.blocks.byName("terrDirt").?.id;
+    const fd = g.blocks.dropsFor(dirt_id, .fall);
+    try std.testing.expect(fd.len > 0);
+
+    const bx: i32 = 250;
+    const bz: i32 = 250;
+    const base_y: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    try g.setBlock(bx, base_y, bz, dirt_id);
+    try g.setBlock(bx, base_y + 1, bz, dirt_id);
+    try g.setBlock(bx, base_y + 2, bz, dirt_id);
+    _ = game_mod.stabilityAfterSetBlock(g, bx, base_y, bz, dirt_id, 0);
+
+    // Drive the fall to landing; the landing hook rolls the Fall rows and
+    // the stick row re-places terrDirt at the landed cell.
+    const ecs_systems = @import("../ecs/systems.zig");
+    var guard: usize = 0;
+    while (guard < 400) : (guard += 1) {
+        ecs_systems.systemFallingBlocks(&g.sim, 0.05);
+        var any = false;
+        for (g.sim.kind_groups.slice(.falling_block)) |s| {
+            if (g.sim.alive[s] and g.sim.mask[s].falling) any = true;
+        }
+        if (!any) break;
+    }
+    var re_placed = false;
+    var off: i32 = 0;
+    while (off <= 2) : (off += 1) {
+        if ((g.world.blockWorld(bx, base_y + off, bz) catch 0) == dirt_id) re_placed = true;
+    }
+    try std.testing.expect(re_placed);
+    std.debug.print("PASS fall-drop: terrDirt collapse re-places debris at landing\n", .{});
+}
+
+test "scenario destroy-event drops roll the bag at the blast (bathroomStallDoor)" {
+    // Real blocks.xml (game-dir): the Destroy-event roll (explosion debris
+    // path) drops the block's `<drop event="Destroy">` rows. bathroomStallDoor
+    // carries one row: resourceScrapIron count=1 with default prob 1, so with
+    // overall_prob 1.0 the roll is fully deterministic (no range draw, no
+    // prob gate, no overall gate). overall_prob 0.0 brackets the gate: every
+    // stack is blocked. Skipped without the game dir.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const door_id = g.blocks.byName("bathroomStallDoor").?.id;
+    const scrap_id = g.items.byName("resourceScrapIron").?.id;
+    const chunk_fill = @import("game/chunk_fill.zig");
+
+    const bx: i32 = 260;
+    const by: i32 = 71;
+    const bz: i32 = 260;
+    try g.world.setBlockWorld(bx, by, bz, door_id);
+    _ = chunk_fill.rollBlockDropEvent(g, 0, bx, by, bz, door_id, .destroy, 1.0);
+
+    var found: u32 = 0;
+    for (g.sim.kind_groups.slice(.loot_bag)) |s| {
+        if (!g.sim.alive[s] or !g.sim.mask[s].inventory) continue;
+        for (g.sim.inventory[s].slots) |sl| {
+            if (sl.item_id == scrap_id) found += sl.count;
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), found);
+
+    // overall_prob 0.0 blocks every stack (stock explosion debris gate).
+    try g.world.setBlockWorld(bx + 3, by, bz, door_id);
+    _ = chunk_fill.rollBlockDropEvent(g, 0, bx + 3, by, bz, door_id, .destroy, 0.0);
+    var found2: u32 = 0;
+    for (g.sim.kind_groups.slice(.loot_bag)) |s| {
+        if (!g.sim.alive[s] or !g.sim.mask[s].inventory) continue;
+        for (g.sim.inventory[s].slots) |sl| {
+            if (sl.item_id == scrap_id) found2 += sl.count;
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), found2); // unchanged
+    std.debug.print("PASS destroy-drop: bathroomStallDoor rolls resourceScrapIron bag\n", .{});
+}
+
+test "scenario sound relay fans out to peers, excluding the sender" {
+    // NetPackageSoundAtPosition C2S relay (RE ProcessPackage IL=36 +
+    // PlaySoundAtPositionServer IL=60): the dedi re-broadcasts the client's
+    // positional sound to every client except the owning player's (stock
+    // allButAttachedToEntityId = entityId); a spoofed entity id is dropped.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const pa = g.sim.playerByPeer(ca.slot).?;
+    const ap = g.sim.transform[pa];
+
+    var sb: [512]u8 = undefined;
+    var s: packages.SoundAtPosition = .{
+        .pos = .{ ap.x, ap.y, ap.z },
+        .mode = 0, // Logarithmic
+        .distance = 20,
+        .entity_id = ca.entity_id,
+        .volume_scale = 1,
+    };
+    @memcpy(s.clip[0.."test".len], "test");
+    s.clip_len = 4;
+    const body = try packages.buildSoundAtPosition(&sb, s);
+
+    var fb: [512]u8 = undefined;
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageSoundAtPosition", body));
+    const snd_id = packages.idOf("NetPackageSoundAtPosition").?;
+    try std.testing.expect(cap_b.findPkgId(snd_id) != null); // peer hears it
+    try std.testing.expect(cap_a.findPkgId(snd_id) == null); // owner already heard it locally
+
+    // A spoofed owner (another player's entity id) is dropped, not relayed.
+    cap_b.clear();
+    var s2 = s;
+    s2.entity_id = cb.entity_id;
+    const spoofed = try packages.buildSoundAtPosition(&sb, s2);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageSoundAtPosition", spoofed));
+    try std.testing.expect(cap_b.findPkgId(snd_id) == null);
+    std.debug.print("PASS sound-relay: positional sound reaches peers, owner + spoofed dropped\n", .{});
+}
+
+test "scenario forge completion dings NetPackageSoundAtPosition" {
+    // RE TileEntityForge IL_02F9-031F: a produced-this-tick forge plays
+    // PlaySoundAtPositionServer(worldPos, "Forge/forge_item_complete",
+    // Logarithmic, 100, 1). Real blocks.xml (game-dir) so the forge block
+    // resolves by name; a direct-driven workstation queue completes one
+    // craft and the ding reaches nearby peers. Skipped without the game dir.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const pa = g.sim.playerByPeer(c.slot).?;
+    const wx: i32 = @trunc(g.sim.transform[pa].x);
+    const wy: i32 = @trunc(g.sim.transform[pa].y);
+    const wz: i32 = @trunc(g.sim.transform[pa].z);
+
+    const forge_id = g.blocks.byName("forge").?.id;
+    const wood_stock = g.items.byName("resourceWood").?.stock_type;
+    const st = g.workstations.getOrCreate(wx, wy, wz).?;
+    st.block_id = @intCast(forge_id);
+    st.has_fuel_module = true;
+    st.is_burning = true;
+    st.burn_time_left = 30;
+    st.queue_len = 1;
+    st.queue[0] = .{
+        .multiplier = 1,
+        .is_crafting = true,
+        .craft_time_left = 0.2,
+        .one_item_craft_time = 1.0,
+        .starting_entity_id = c.entity_id,
+        .output_type = wood_stock,
+        .output_count = 1,
+        .craft_exp_gain = 1,
+    };
+
+    cap.clear();
+    try g.tickWorkstations(0.5);
+    const snd_id = packages.idOf("NetPackageSoundAtPosition").?;
+    const sb = cap.findPkgId(snd_id) orelse return error.TestUnexpectedResult;
+    const parsed = try packages.parseSoundAtPosition(sb);
+    try std.testing.expectEqualStrings("Forge/forge_item_complete", parsed.clipSlice());
+    try std.testing.expectEqual(@as(u8, 0), parsed.mode); // Logarithmic
+    try std.testing.expectEqual(@as(i32, 100), parsed.distance);
+    std.debug.print("PASS forge-ding: smelt completion broadcasts forge_item_complete\n", .{});
+}
+
 test "scenario on_quest_accept verdict gates acceptance (real core_questgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

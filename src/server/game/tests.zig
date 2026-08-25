@@ -1396,7 +1396,7 @@ test "setgamepref applies runtime GameStats prefs and broadcasts" {
     var cap: ln_peer.Capture = .{};
     _ = try g.attachJoinedClient(&cap);
     const gs_id = packages.idOf("NetPackageGameStats").?;
-    try std.testing.expectEqual(@as(u8, 2), g.sim.director.difficulty);
+    try std.testing.expectEqual(@as(u8, 1), g.sim.director.difficulty); // Adventurer default
 
     // A writable pref applies to the sim and reaches the client as a fresh
     // GameStats blob (HUD difficulty / blood-moon day follow the server).

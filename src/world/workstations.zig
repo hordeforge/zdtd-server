@@ -72,6 +72,11 @@ pub const Caps = struct {
     /// Per-item fuel burn-time lookup (null = offline fallback).
     fuel_resolve: ?FuelResolver = null,
     fuel_ctx: ?*anyopaque = null,
+    /// Fired once per tick when the station completed at least one craft
+    /// (stock TileEntityForge's produced-this-tick sound trigger; the Game
+    /// decides whether the station actually dings).
+    on_craft_done: ?*const fn (?*anyopaque, i32, i32, i32, u16) void = null,
+    craft_done_ctx: ?*anyopaque = null,
 };
 
 /// Offline burn time per fuel item when no items table is attached (the stock
@@ -224,7 +229,11 @@ pub const Workstation = struct {
     pub fn tickResolved(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
         if (dt <= 0) return;
         self.handleFuel(dt, caps);
-        self.handleRecipeQueue(dt, resolve, ctx, caps);
+        if (self.handleRecipeQueue(dt, resolve, ctx, caps)) {
+            // Produced at least one item this tick: stock TileEntityForge
+            // dings once per completion tick (asm.il ~IL_02E6/02F9).
+            if (caps.on_craft_done) |f| f(caps.craft_done_ctx, self.x, self.y, self.z, @intCast(self.block_id));
+        }
     }
 
     /// Stock `HandleFuel` (asm.il ~1331911): burn down, then consume one fuel item.
@@ -254,13 +263,15 @@ pub const Workstation = struct {
 
     /// Stock `HandleRecipeQueue` (asm.il ~1331686): the active entry is the last
     /// slot, a full output array stalls the craft, and each finished item records
-    /// a CraftCompleteData before the multiplier drops.
-    fn handleRecipeQueue(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
-        if (self.queue_len == 0) return;
+    /// a CraftCompleteData before the multiplier drops. Returns true when at
+    /// least one craft completed this tick.
+    fn handleRecipeQueue(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) bool {
+        if (self.queue_len == 0) return false;
         // Stock gate (asm.il 1331687): only stations with a fuel module wait
         // for isBurning; workbench / cement mixer / table saw advance without
         // fuel (their Modules list has no "fuel").
-        if (self.has_fuel_module and !self.is_burning) return;
+        if (self.has_fuel_module and !self.is_burning) return false;
+        var produced = false;
         const last: usize = self.queue_len - 1;
         var active = &self.queue[last];
         // A client-written CraftingTimeLeft of -inf (or a huge backlog) would let
@@ -279,7 +290,8 @@ pub const Workstation = struct {
             if (steps >= caps.max_crafts_per_tick) break;
             steps += 1;
             if (active.multiplier > 0) {
-                if (!self.completeOneCraft(active, resolve, ctx)) return; // output full → stall
+                if (!self.completeOneCraft(active, resolve, ctx)) return produced; // output full → stall
+                produced = true;
                 active.multiplier -= 1;
                 active.craft_time_left += active.one_item_craft_time;
                 self.dirty = true;
@@ -291,6 +303,7 @@ pub const Workstation = struct {
             active.craft_time_left += @min(carry, 0);
             self.dirty = true;
         }
+        return produced;
     }
 
     /// Materialize one crafted item and record the CraftCompleteData. Returns

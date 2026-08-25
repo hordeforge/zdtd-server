@@ -214,7 +214,7 @@ test "parse default pack" {
 const TestOpts = struct {
     max_spawned_zombies: u16 = 100,
     blood_moon_frequency: u8 = 3,
-    game_difficulty: u8 = 2,
+    game_difficulty: u8 = 1,
     blood_moon_enemy_count: u8 = 8,
     blood_moon_range: u8 = 0,
     player_killing_mode: u8 = 3,

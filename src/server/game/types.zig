@@ -249,7 +249,7 @@ pub const InitOptions = struct {
     block_id_mapping: bool = true,
 
     // Gameplay options (stock serverconfig.xml defaults). Applied to the sim below.
-    game_difficulty: u8 = 2,
+    game_difficulty: u8 = 1, // GameDifficulty 0..5 (1 = Adventurer, the stock default game; live dedi GameDifficulty stat = 1, console-commands.md)
     blood_moon_frequency: u8 = 7,
     blood_moon_enemy_count: u8 = 8,
     blood_moon_range: u8 = 0,

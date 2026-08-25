@@ -823,6 +823,9 @@ pub const Game = struct {
         // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
         self.sim.solid_ctx = self;
         self.sim.solid_fn = &blockSolidAt;
+        // Falling-block landing -> Fall-event debris drops (game/chunk_fill).
+        self.sim.fall_land_ctx = self;
+        self.sim.fall_land_fn = &game_chunk_fill.fallBlocksLanded;
         // Water probe for the AI swim physics (stock inWaterPercent).
         self.sim.water_ctx = self;
         self.sim.water_fn = &blockIsWaterAt;

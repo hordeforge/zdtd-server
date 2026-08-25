@@ -9,6 +9,7 @@ const ecs = @import("../../ecs/root.zig");
 const components = @import("../../ecs/components.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const game_mod = @import("../game.zig");
+const packages = @import("../../wire/packages.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const assets_items = @import("../../assets/items.zig");
@@ -294,6 +295,8 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
         .max_craft_backlog = self.workstation_craft_backlog,
         .fuel_resolve = &resolveWorkstationFuel,
         .fuel_ctx = self,
+        .on_craft_done = &onStationCraftDone,
+        .craft_done_ctx = self,
     });
     // Heat map feed (AIDirectorChunkData): burning workstations with a
     // blocks.xml HeatMapStrength (forge 6, campfire 5, workbench 5, ...)
@@ -306,6 +309,46 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
         }
     }
     try replicate_te.broadcastDirtyWorkstations(self);
+}
+
+/// Server-initiated positional sound (stock GameManager.
+/// PlaySoundAtPositionServer IL=60): builds NetPackageSoundAtPosition
+/// (write IL=25) with entityId -1 (no owning player -> broadcast to all)
+/// and fans out to every peer in interest range.
+pub fn playSoundAt(self: *Game, x: f32, y: f32, z: f32, clip: []const u8, mode: u8, distance: i32, volume: f32) void {
+    var s: packages.SoundAtPosition = .{
+        .pos = .{ x, y, z },
+        .mode = mode,
+        .distance = distance,
+        .entity_id = -1,
+        .volume_scale = volume,
+    };
+    if (clip.len > packages.max_audio_clip_len) return;
+    @memcpy(s.clip[0..clip.len], clip);
+    s.clip_len = @intCast(clip.len);
+    if (packages.buildSoundAtPosition(self.body_buf[0..512], s) catch null) |sb| {
+        self.broadcastNear("NetPackageSoundAtPosition", sb, x, z, self.interest_range) catch {};
+    }
+}
+
+/// Forge smelt-completion ding (RE TileEntityForge IL_02F9-031F:
+/// produced-this-tick -> PlaySoundAtPositionServer(worldPos.ToVector3(),
+/// "Forge/forge_item_complete", Logarithmic, 100, 1)). Only the smelter
+/// dings in stock; workbench/campfire/etc. are silent.
+fn onStationCraftDone(ctx: ?*anyopaque, x: i32, y: i32, z: i32, block_id: u16) void {
+    const g: *Game = @ptrCast(@alignCast(ctx orelse return));
+    const name = (g.blocks.byId(block_id) orelse return).name;
+    if (!std.mem.eql(u8, name, "forge")) return;
+    playSoundAt(
+        g,
+        @as(f32, @floatFromInt(x)) + 0.5,
+        @as(f32, @floatFromInt(y)) + 0.5,
+        @as(f32, @floatFromInt(z)) + 0.5,
+        "Forge/forge_item_complete",
+        0, // AudioRolloffMode.Logarithmic
+        100,
+        1.0,
+    );
 }
 
 /// BlockRadiusEffect (dedicated-misc-systems.md; asm.il

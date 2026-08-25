@@ -77,7 +77,7 @@ pub const Config = struct {
 
     // Gameplay options (stock serverconfig.xml defaults). Applied to the sim in
     // game.initWithOptions; see docs/GAME_OPTIONS.md for which are wired.
-    game_difficulty: u8 = 2, // GameDifficulty 0..5 (Adventurer)
+    game_difficulty: u8 = 1, // GameDifficulty 0..5 (1 = Adventurer; the stock default game — live dedi GameDifficulty stat = 1, console-commands.md; the shipped SandboxCode is the Adventurer preset)
     blood_moon_frequency: u8 = 7, // BloodMoonFrequency (0 = off)
     blood_moon_enemy_count: u8 = 8, // BloodMoonEnemyCount per player
     player_killing_mode: u8 = 3, // PlayerKillingMode 0..3 (0 = no PvP)
@@ -580,7 +580,7 @@ test "parse config fixture" {
     // sandbox-options §3); the mapped fields apply (BlockDamage -> player).
     try std.testing.expectEqual(@as(u16, 150), cfg.block_damage_player);
     // Unset gameplay options keep stock defaults.
-    try std.testing.expectEqual(@as(u8, 2), cfg.game_difficulty);
+    try std.testing.expectEqual(@as(u8, 1), cfg.game_difficulty);
     try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);
     try std.testing.expectEqual(@as(u8, 3), cfg.player_killing_mode);
 }

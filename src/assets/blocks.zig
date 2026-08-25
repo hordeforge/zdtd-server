@@ -14,6 +14,10 @@ pub const max_blocks: usize = 8192;
 /// largest stock block carries 16 Harvest rows, 1,748 Harvest rows total).
 pub const max_harvest_drops: usize = 16;
 
+/// The three stock drop events (`EnumDropEvent`: Destroy=0, Fall=1,
+/// Harvest=2, il/full-v3.1.0/_global/EnumDropEvent.il.txt).
+pub const DropEvent = enum { destroy, fall, harvest };
+
 /// One `<drop event="Harvest" .../>` row from a block's body. Roll
 /// semantics are pinned by Block.DropItemsOnEvent IL=246 (count in
 /// [minCount, maxCount+1), skip 0, drop when random < prob) and
@@ -116,6 +120,12 @@ pub const BlockDef = struct {
     /// drops itself once when harvested (stock HarvestOnAttack
     /// ToItemValue x1).
     harvest_drops: []const HarvestDrop = &.{},
+    /// Resolved `<drop event="Destroy">` rows (explosion/debris salvage,
+    /// 1,286 stock rows; e.g. resourceScrapIron from broken metal).
+    destroy_drops: []const HarvestDrop = &.{},
+    /// Resolved `<drop event="Fall">` rows (falling-block debris, 587 stock
+    /// rows; e.g. terrDestroyedStone crumbles into itself at prob .75).
+    fall_drops: []const HarvestDrop = &.{},
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -156,6 +166,16 @@ pub const BlockTable = struct {
     pub fn harvestDrops(self: *const BlockTable, id: u16) []const HarvestDrop {
         if (self.byId(id)) |d| return d.harvest_drops;
         return &.{};
+    }
+
+    /// Resolved drop rows for a block + event (harvest/destroy/fall).
+    pub fn dropsFor(self: *const BlockTable, id: u16, event: DropEvent) []const HarvestDrop {
+        const d = self.byId(id) orelse return &.{};
+        return switch (event) {
+            .harvest => d.harvest_drops,
+            .destroy => d.destroy_drops,
+            .fall => d.fall_drops,
+        };
     }
 
     pub fn isSolid(self: *const BlockTable, id: u16) bool {
@@ -288,6 +308,34 @@ fn parseMinMaxCount(v: []const u8) CountRange {
     return .{ .min = n, .max = n };
 }
 
+/// CopyDroppedFrom merge for one drop event (Block::CopyDroppedFrom IL=89):
+/// base rows append unless the item name is already present (own wins).
+/// Bounded by max_harvest_drops like the own-row parse cap. Arena-backed.
+fn mergeDrops(
+    arena: std.mem.Allocator,
+    own: []const HarvestDrop,
+    base: []const HarvestDrop,
+) ![]const HarvestDrop {
+    if (base.len == 0 or own.len >= max_harvest_drops) return own;
+    const merged = try arena.alloc(HarvestDrop, @min(own.len + base.len, max_harvest_drops));
+    @memcpy(merged[0..own.len], own);
+    var n = own.len;
+    for (base) |bd| {
+        if (n >= max_harvest_drops) break;
+        var dup_name = false;
+        for (merged[0..n]) |od| {
+            if (std.mem.eql(u8, od.item_name, bd.item_name)) {
+                dup_name = true;
+                break;
+            }
+        }
+        if (dup_name) continue;
+        merged[n] = bd;
+        n += 1;
+    }
+    return merged[0..n];
+}
+
 fn isSolidName(name: []const u8) bool {
     if (std.mem.eql(u8, name, "air")) return false;
     if (std.mem.startsWith(u8, name, "water")) return false;
@@ -337,8 +385,10 @@ pub fn loadFromPath(
         mesh: ?[]const u8 = null,
         texture_top: u16 = 0,
         map_color: u16 = 0,
-        /// Own (non-inherited) Harvest drop rows, arena-backed.
+        /// Own (non-inherited) drop rows per event, arena-backed.
         harvest_drops: []const HarvestDrop = &.{},
+        destroy_drops: []const HarvestDrop = &.{},
+        fall_drops: []const HarvestDrop = &.{},
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -380,6 +430,10 @@ pub fn loadFromPath(
         var resource_scale: f32 = 1;
         var own_drops: std.ArrayList(HarvestDrop) = .empty;
         defer own_drops.deinit(allocator);
+        var own_destroy: std.ArrayList(HarvestDrop) = .empty;
+        defer own_destroy.deinit(allocator);
+        var own_fall: std.ArrayList(HarvestDrop) = .empty;
+        defer own_fall.deinit(allocator);
         const body_end = if (std.mem.findPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
@@ -392,9 +446,16 @@ pub fn loadFromPath(
             const at = @min(pi, di);
             if (at >= body_end) break;
             if (di < pi) {
-                if (std.mem.eql(u8, xml.attr(clean, di, "event") orelse "", "Harvest") and
-                    own_drops.items.len < max_harvest_drops)
-                {
+                const ev = xml.attr(clean, di, "event") orelse "";
+                const drop_list = if (std.mem.eql(u8, ev, "Harvest"))
+                    &own_drops
+                else if (std.mem.eql(u8, ev, "Destroy"))
+                    &own_destroy
+                else if (std.mem.eql(u8, ev, "Fall"))
+                    &own_fall
+                else
+                    null;
+                if (drop_list != null and drop_list.?.items.len < max_harvest_drops) {
                     const nm = xml.attr(clean, di, "name") orelse {
                         p = di + 6;
                         continue;
@@ -407,7 +468,7 @@ pub fn loadFromPath(
                     if (xml.attr(clean, di, "prob")) |pr| prob = std.fmt.parseFloat(f32, pr) catch 1;
                     var stick: f32 = 0;
                     if (xml.attr(clean, di, "stick_chance")) |sc| stick = std.fmt.parseFloat(f32, sc) catch 0;
-                    try own_drops.append(allocator, .{
+                    try drop_list.?.append(allocator, .{
                         .item_name = try arena.dupe(u8, nm),
                         .count_min = mc.min,
                         .count_max = mc.max,
@@ -488,15 +549,24 @@ pub fn loadFromPath(
             p = pi + 10;
         }
         // Own rows into arena memory (prob already scaled by ResourceScale).
-        var own_drop_slice: []const HarvestDrop = &.{};
-        if (own_drops.items.len > 0) {
-            const ds = try arena.alloc(HarvestDrop, own_drops.items.len);
-            for (own_drops.items, 0..) |d, dd| {
-                ds[dd] = d;
-                if (resource_scale != 1) ds[dd].prob = d.prob * resource_scale;
+        // Shared so the three events get one copy path.
+        const OwnLists = struct {
+            harvest: std.ArrayList(HarvestDrop),
+            destroy: std.ArrayList(HarvestDrop),
+            fall: std.ArrayList(HarvestDrop),
+            fn slice(l: std.ArrayList(HarvestDrop), al: std.mem.Allocator, sc: f32) ![]const HarvestDrop {
+                if (l.items.len == 0) return &.{};
+                const ds = try al.alloc(HarvestDrop, l.items.len);
+                for (l.items, 0..) |d, dd| {
+                    ds[dd] = d;
+                    if (sc != 1) ds[dd].prob = d.prob * sc;
+                }
+                return ds;
             }
-            own_drop_slice = ds;
-        }
+        };
+        const own_drop_slice = try OwnLists.slice(own_drops, arena, resource_scale);
+        const own_destroy_slice = try OwnLists.slice(own_destroy, arena, resource_scale);
+        const own_fall_slice = try OwnLists.slice(own_fall, arena, resource_scale);
         const idx = parsed.items.len;
         try name_idx.put(allocator, kn, idx);
         try parsed.append(allocator, .{
@@ -517,6 +587,8 @@ pub fn loadFromPath(
             .texture_top = texture_top,
             .map_color = map_color,
             .harvest_drops = own_drop_slice,
+            .destroy_drops = own_destroy_slice,
+            .fall_drops = own_fall_slice,
         });
         i = bi + 7;
     }
@@ -543,11 +615,14 @@ pub fn loadFromPath(
         var own_texture = pb.texture_top;
         var own_map_color = pb.map_color;
         var own_drops = pb.harvest_drops;
+        var own_destroy = pb.destroy_drops;
+        var own_fall = pb.fall_drops;
         var ext = pb.extends;
         while (ext) |e| : (depth += 1) {
             if (depth >= max_extends_depth) break;
             if (own_class != null and own_trader >= 0 and own_mesh != null and
-                own_texture > 0 and own_map_color > 0 and own_drops.len >= max_harvest_drops) break;
+                own_texture > 0 and own_map_color > 0 and own_drops.len >= max_harvest_drops and
+                own_destroy.len >= max_harvest_drops and own_fall.len >= max_harvest_drops) break;
             var dup = false;
             for (seen_chain[0..chain_n]) |s| {
                 if (s == idx_cur) dup = true;
@@ -562,32 +637,13 @@ pub fn loadFromPath(
             if (own_mesh == null) own_mesh = base_p.mesh;
             if (own_texture == 0) own_texture = base_p.texture_top;
             if (own_map_color == 0) own_map_color = base_p.map_color;
-            // CopyDroppedFrom (IL=89): base Harvest rows append unless the
-            // item name is already present (own wins), so a block that
+            // CopyDroppedFrom (IL=89): base drop rows append per event unless
+            // the item name is already present (own wins), so a block that
             // declares its own wood row still inherits the base's stone row.
             // Bounded by max_harvest_drops like the own-row parse cap.
-            if (base_p.harvest_drops.len > 0 and own_drops.len < max_harvest_drops) {
-                const merged = try arena.alloc(
-                    HarvestDrop,
-                    @min(own_drops.len + base_p.harvest_drops.len, max_harvest_drops),
-                );
-                @memcpy(merged[0..own_drops.len], own_drops);
-                var n = own_drops.len;
-                for (base_p.harvest_drops) |bd| {
-                    if (n >= max_harvest_drops) break;
-                    var dup_name = false;
-                    for (merged[0..n]) |od| {
-                        if (std.mem.eql(u8, od.item_name, bd.item_name)) {
-                            dup_name = true;
-                            break;
-                        }
-                    }
-                    if (dup_name) continue;
-                    merged[n] = bd;
-                    n += 1;
-                }
-                own_drops = merged[0..n];
-            }
+            own_drops = try mergeDrops(arena, own_drops, base_p.harvest_drops);
+            own_destroy = try mergeDrops(arena, own_destroy, base_p.destroy_drops);
+            own_fall = try mergeDrops(arena, own_fall, base_p.fall_drops);
             ext = base_p.extends;
         }
         pb.class = own_class;
@@ -596,6 +652,8 @@ pub fn loadFromPath(
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;
         pb.harvest_drops = own_drops;
+        pb.destroy_drops = own_destroy;
+        pb.fall_drops = own_fall;
     }
 
     const defs = try arena.alloc(BlockDef, parsed.items.len);
@@ -617,6 +675,8 @@ pub fn loadFromPath(
             .texture_top = pb.texture_top,
             .map_color = pb.map_color,
             .harvest_drops = pb.harvest_drops,
+            .destroy_drops = pb.destroy_drops,
+            .fall_drops = pb.fall_drops,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
@@ -834,6 +894,8 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "cntOreChild", 203 },
         .{ "scaledBlock", 204 },
         .{ "destroyOnly", 205 },
+        .{ "fallBase", 206 },
+        .{ "fallChild", 207 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];
@@ -870,6 +932,15 @@ test "Harvest drop rows parse with Extends inheritance" {
         \\</block>
         \\<block name="destroyOnly">
         \\  <drop event="Destroy" name="terrDirt" count="1" prob="0.75" stick_chance="1"/>
+        \\  <drop event="Destroy" count="0"/>
+        \\</block>
+        \\<block name="fallBase">
+        \\  <drop event="Fall" name="terrDirt" count="1" prob="0.25" stick_chance="1"/>
+        \\</block>
+        \\<block name="fallChild">
+        \\  <property name="Extends" value="fallBase"/>
+        \\  <drop event="Fall" name="terrDirt" count="2" prob="0.5"/>
+        \\  <drop event="Fall" name="resourceRockSmall" count="44" prob="0.23" stick_chance="0"/>
         \\</block>
         \\</blocks>
     ;
@@ -919,7 +990,30 @@ test "Harvest drop rows parse with Extends inheritance" {
     try std.testing.expectEqual(@as(usize, 1), sc.len);
     try std.testing.expectApproxEqAbs(@as(f32, 0.4), sc[0].prob, 1e-4);
 
-    // Destroy-only rows are not Harvest drops (bounded slice).
+    // Destroy-only rows are not Harvest drops (bounded slice); the nameless
+    // count=0 Destroy row parses away (stock no-op override row).
     const dstr = t.byName("destroyOnly").?;
     try std.testing.expectEqual(@as(usize, 0), t.harvestDrops(dstr.id).len);
+    const dd_ = t.dropsFor(dstr.id, .destroy);
+    try std.testing.expectEqual(@as(usize, 1), dd_.len);
+    try std.testing.expectEqualStrings("terrDirt", dd_[0].item_name);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75), dd_[0].prob, 1e-4);
+
+    // Fall rows route to their own event; Extends merges per event with the
+    // same own-wins-per-name rule (the child's terrDirt overrides the base's,
+    // and the base's rows would only append under different names - here the
+    // child's own rows both win, so exactly 2 rows survive).
+    const fc = t.byName("fallChild").?;
+    const fd = t.dropsFor(fc.id, .fall);
+    try std.testing.expectEqual(@as(usize, 2), fd.len);
+    try std.testing.expectEqualStrings("terrDirt", fd[0].item_name);
+    try std.testing.expectEqual(@as(u32, 2), fd[0].count_min); // own, not base 1
+    try std.testing.expectEqualStrings("resourceRockSmall", fd[1].item_name);
+    try std.testing.expectEqual(@as(f32, 0.23), fd[1].prob);
+    // The child's Fall rows do not leak into Harvest or Destroy.
+    try std.testing.expectEqual(@as(usize, 0), t.dropsFor(fc.id, .harvest).len);
+    try std.testing.expectEqual(@as(usize, 0), t.dropsFor(fc.id, .destroy).len);
+    // The base's own Fall row (terrDirt) was overridden, not duplicated.
+    const fb = t.byName("fallBase").?;
+    try std.testing.expectEqual(@as(usize, 1), t.dropsFor(fb.id, .fall).len);
 }

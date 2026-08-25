@@ -432,8 +432,35 @@ pub fn tryContainerSpill(self: *Game, x: i32, y: i32, z: i32) void {
 /// timestamp, which zdtd deliberately replaces per rule 22). Returns the
 /// total rolled count — the `count` of stock
 /// AddLevelExp(material.Experience * count).
-pub fn tryBlockHarvestDrop(self: *Game, peer_slot: usize, x: i32, y: i32, z: i32, block_id: u16) u32 {
-    const drops = self.blocks.harvestDrops(block_id);
+/// Roll a block's drop rows for one event (RE Block.DropItemsOnEvent
+/// IL=246): per row, count = RandomRange(min, max+1), skip 0, drop when
+/// random < prob. Recipient per stock:
+/// - Harvest: rolled stacks grant to the breaker's inventory
+///   (GameUtils.HarvestOnAttack IL=623), overflow becomes a ground bag.
+/// - Destroy/Fall: stacks become a ground bag at the block (stock
+///   ItemDropServer); stick rows (stick_chance >= 0.001 and random <=
+///   stick_chance) take the stick path instead - the drop is placed as an
+///   item block at the cell when the name resolves to a block and the cell
+///   is air (stock SetBlockRPC), else skipped exactly like stock.
+/// `overall_prob` gates each rolled stack (stock `_overallProb`; 1.0 = no
+/// gate, explosion debris passes 0.5). The roll ignores tool_category /
+/// tag exactly like stock (the IL never reads them; they feed the
+/// item-side bonus legs, recorded). Deterministic: position + tick-seeded
+/// stream (the one sim PRNG policy; stock seeds GameUtils.random from a
+/// timestamp, which zdtd deliberately replaces per rule 22). Returns the
+/// total rolled count - the `count` of stock AddLevelExp(material.
+/// Experience * count) for Harvest.
+pub fn rollBlockDropEvent(
+    self: *Game,
+    peer_slot: usize,
+    x: i32,
+    y: i32,
+    z: i32,
+    block_id: u16,
+    event: assets_blocks.DropEvent,
+    overall_prob: f32,
+) u32 {
+    const drops = self.blocks.dropsFor(block_id, event);
     if (drops.len == 0) return 0;
     var prng = rng_util.XorShift32.initFromU64(
         @as(u64, @bitCast(@as(i64, x))) *% 0x9E37_79B1_7F4A_7C15 ^
@@ -453,9 +480,17 @@ pub fn tryBlockHarvestDrop(self: *Game, peer_slot: usize, x: i32, y: i32, z: i32
             count = d.count_min + @as(u32, @intFromFloat(span * @as(f64, @floatCast(prng.nextFloat()))));
         }
         if (count == 0) continue; // IL: skip if 0 (the count="0" rows).
+        // Stick path (IL_0078-0093): only rows with stick_chance >= 0.001
+        // participate; the placement roll happens BEFORE the prob gate.
+        if (d.stick_chance >= 0.001 and prng.nextFloat() <= d.stick_chance) {
+            _ = tryPlaceStuckDrop(self, x, y, z, d.item_name, overall_prob, &prng);
+            continue;
+        }
         // Prob gate: drop when random < prob (IL `ble.un` on prob <= random).
         if (prng.nextFloat() >= d.prob) continue;
-        // The IL "[recipe]" / "*" names appear on no V3.1.0 b14 Harvest row;
+        // Overall gate (IL_01ED / IL_024F: when _overallProb < 0.999).
+        if (overall_prob < 0.999 and prng.nextFloat() >= overall_prob) continue;
+        // The IL "[recipe]" / "*" names appear on no V3.1.0 b14 drop row;
         // an unknown item fails closed to a skip (missing beats fake).
         const item = self.items.byName(d.item_name) orelse continue;
         if (item.id == 0) continue;
@@ -466,12 +501,13 @@ pub fn tryBlockHarvestDrop(self: *Game, peer_slot: usize, x: i32, y: i32, z: i32
         }
     }
     if (total == 0) return 0;
-    // Grant to the breaker; a full inventory (stock: ItemDropServer on the
-    // ground) becomes a loot bag at the block.
+    // Recipient: Harvest grants to the breaker; a full inventory (stock:
+    // ItemDropServer on the ground) and every Destroy/Fall stack become a
+    // loot bag at the block.
     var drop_inv: ecs.components.Inventory = .{};
     var dn: usize = 0;
     for (stacks[0..sn]) |st| {
-        if (invsys.give(&self.sim, peer_slot, st.id, st.count)) continue;
+        if (event == .harvest and invsys.give(&self.sim, peer_slot, st.id, st.count)) continue;
         if (dn < ecs.components.max_inv_slots) {
             drop_inv.slots[dn] = .{ .item_id = st.id, .count = st.count, .quality = 1, .meta = 0 };
             dn += 1;
@@ -486,6 +522,52 @@ pub fn tryBlockHarvestDrop(self: *Game, peer_slot: usize, x: i32, y: i32, z: i32
         }
     }
     return total;
+}
+
+/// Harvest wrapper for the dig chokes (breaker's inventory, no overall
+/// gate): the terrain harvest drop path.
+pub fn tryBlockHarvestDrop(self: *Game, peer_slot: usize, x: i32, y: i32, z: i32, block_id: u16) u32 {
+    return rollBlockDropEvent(self, peer_slot, x, y, z, block_id, .harvest, 1.0);
+}
+
+/// Stock stick path (Block.DropItemsOnEvent IL_01C7-0235): resolve the
+/// drop name as a BLOCK (GetBlockValue), require a non-air block and an
+/// air target cell, then place it (SetBlockRPC) - the debris stays stuck
+/// in the world instead of becoming a pickable item. Non-block names or
+/// solid cells skip (stock loses the drop in those cases too). Returns
+/// true when the block was placed.
+fn tryPlaceStuckDrop(
+    self: *Game,
+    x: i32,
+    y: i32,
+    z: i32,
+    name: []const u8,
+    overall_prob: f32,
+    prng: *rng_util.XorShift32,
+) bool {
+    if (overall_prob < 0.999 and prng.nextFloat() >= overall_prob) return false;
+    const bid = self.maxdamage.idByName(name) orelse return false;
+    if (bid == 0) return false;
+    const cur = self.world.blockWorld(x, y, z) catch return false;
+    if (cur != 0) return false; // target cell must be air
+    self.world.setBlockWorld(x, y, z, bid) catch return false;
+    if (packages.buildSetBlockBody(self.body_buf[0..64], x, y, z, bid) catch null) |sb| {
+        self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
+    }
+    return true;
+}
+
+/// Game-side Fall-event landing hook (wired as `sim.fall_land_fn`): a
+/// collapsed cell that lands rolls its block's `<drop event="Fall">` rows
+/// at the landing position (RE EntityFallingBlock DropItemsOnEvent IL;
+/// stick rows re-place the debris block, others bag at the cell).
+pub fn fallBlocksLanded(ctx: ?*anyopaque, cells: []const ecs.components.FallingCell) void {
+    const g: *Game = @ptrCast(@alignCast(ctx orelse return));
+    for (cells) |cell| {
+        const tid: u16 = @truncate(cell.raw & 0xffff);
+        if (tid == 0) continue;
+        _ = rollBlockDropEvent(g, 0, cell.x, cell.y, cell.z, tid, .fall, 1.0);
+    }
 }
 
 pub fn maybeDestroyContainerOnClose(self: *Game, x: i32, y: i32, z: i32) void {

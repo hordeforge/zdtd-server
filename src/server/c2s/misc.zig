@@ -776,6 +776,31 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageSoundAtPosition")) {
+        // Positional-audio relay (RE NetPackageSoundAtPosition ProcessPackage
+        // IL=36 + GameManager.PlaySoundAtPositionServer IL=60): the dedi
+        // re-broadcasts the client's sound to every client EXCEPT the owning
+        // player's (allButAttachedToEntityId = entityId; the owner already
+        // played it locally). Same rate gate as SetBlock: an unthrottled spam
+        // loop would fan a broadcast out to every other peer for free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        const s = packages.parseSoundAtPosition(body) catch return true;
+        // The owning entity must be the sender (a spoofed id would silence a
+        // different player instead of the sender); NaN positions are forged.
+        if (s.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        if (!std.math.isFinite(s.pos[0]) or !std.math.isFinite(s.pos[1]) or !std.math.isFinite(s.pos[2])) {
+            self.harness.counters.inc(.bounds_rejects);
+            return true;
+        }
+        try self.broadcastExcept("NetPackageSoundAtPosition", body, c.slot);
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageTurretSpawn")) {
         if (body.len < 12) return true;
         const x = std.mem.readInt(i32, body[0..4], .little);

@@ -2646,6 +2646,22 @@ pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflo
     return out;
 }
 
+/// Encode the stock body (write IL=25): pos Vector3 | clip string | mode u8 |
+/// distance i32 | entityId i32 | volumeScale f32. Server-initiated sounds
+/// carry entityId -1 (the dedicated relay's allButAttachedToEntityId).
+pub fn buildSoundAtPosition(buf: []u8, s: SoundAtPosition) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeF32(s.pos[0]);
+    try w.writeF32(s.pos[1]);
+    try w.writeF32(s.pos[2]);
+    try w.writeString(s.clipSlice());
+    try w.writeByte(s.mode);
+    try w.writeI32(s.distance);
+    try w.writeI32(s.entity_id);
+    try w.writeF32(s.volume_scale);
+    return w.written();
+}
+
 test "sound at position parses the stock body" {
     var body: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &body };

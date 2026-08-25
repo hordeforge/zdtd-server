@@ -440,6 +440,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
                     const sb = packages.buildSetBlockBody(self.body_buf[0..64], wx, wy, wz, 0) catch continue;
                     self.broadcastNear("NetPackageSetBlock", sb, ex.wx, ex.wz, self.interest_range) catch {};
+                    // Destroy-event drops (RE Block.DropItemsOnEvent IL=246 +
+                    // GameManager.ExplodeGroupFrameUpdate IL=145): the
+                    // destroyed block's `<drop event="Destroy">` rows roll at
+                    // the blast with the stock explosion overallProb 0.5;
+                    // stacks bag at the block, stick rows re-place debris.
+                    _ = chunk_fill.rollBlockDropEvent(self, 0, wx, wy, wz, cur, .destroy, 0.5);
                 }
             }
         }

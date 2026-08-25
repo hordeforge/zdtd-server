@@ -35,8 +35,18 @@ check_edges plugin 'server|wire|world|ecs|assets|litenet|apm'
 # Domain and encoding packages follow the dependency notes in their root modules.
 # assets→ecs is allowed (pure shapes only: components, quest kinds).
 # ecs must NOT import assets (offline fixtures live in ecs; production uses hooks).
+# EXCEPTION (comptime-only): ecs/rules.zig seeds its [rules.difficulty] field
+# defaults from assets/sandbox_presets.zig (the comptime-embedded stock
+# sandbox_presets XML ladder). No runtime assets access; the server-side
+# alternative could not preserve operator toml overrides without binder
+# presence tracking. Documented in src/ecs/root.zig.
 check_edges assets 'server|wire|world|litenet|apm'
-check_edges ecs 'server|wire|world|assets|litenet|apm'
+hits="$(rg -n --glob '*.zig' '@import\("(\.\./)+assets/' src/ecs 2>/dev/null | rg -v '^src/ecs/rules\.zig:.*sandbox_presets' || true)"
+if [[ -n "$hits" ]]; then
+  printf '%s\n' "$hits"
+  fail=1
+fi
+check_edges ecs 'server|wire|world|litenet|apm'
 check_edges world 'server|wire|litenet|apm'
 check_edges wire 'server|litenet|apm'
 

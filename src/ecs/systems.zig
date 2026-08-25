@@ -2657,6 +2657,11 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
             }
         }
         if (landed) {
+            // Fall-event debris drops (RE EntityFallingBlock landing
+            // DropItemsOnEvent IL): the Game rolls each carried cell's
+            // `<drop event="Fall">` rows at the landing position before the
+            // entity is destroyed.
+            if (w.fall_land_fn) |hook| hook(w.fall_land_ctx, f.cells[0..f.n]);
             w.destroy(s);
             continue;
         }
@@ -5059,12 +5064,13 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     // RE `ItemActionAttack.difficultyModifier` (combat-damage.md): a server
     // (AI) attacker vs a client entity scales by IncomingDamageModifier,
     // `round(strength x modifier)`; PvP and AI-vs-AI leave strength
-    // unchanged. The default world is Adventurer (difficulty 2), whose
-    // shipped serverconfig preset (`AAAJABJACJADJARFBNC`) pins IncomingDamage
-    // 0.75 (sandbox-options.md 246-258).
+    // unchanged. The default world is Adventurer (difficulty 1 — the stock
+    // default game: the shipped serverconfig SandboxCode is the Adventurer
+    // preset and a live dedi reports GameDifficulty stat = 1, whose
+    // IncomingDamage decodes to 0.75 from the embedded preset XML).
     var w: World = .{};
     defer w.deinit();
-    try std.testing.expectEqual(@as(u8, 2), w.director.difficulty);
+    try std.testing.expectEqual(@as(u8, 1), w.director.difficulty);
     // Same-control pairs unchanged; mixed pairs read the config ladders.
     try std.testing.expectEqual(@as(f32, 1.0), w.director.damageScale(false, false, &w.rules.difficulty));
     try std.testing.expectEqual(@as(f32, 1.0), w.director.damageScale(true, true, &w.rules.difficulty));
@@ -5079,7 +5085,7 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
     try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
     // Config wins: an operator raising the Adventurer incoming scale lifts it.
-    w.rules.difficulty.incoming_damage_2 = 1.25;
+    w.rules.difficulty.incoming_damage_1 = 1.25; // difficulty 1 = Adventurer
     w.health[ps].hp = 100;
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
     try std.testing.expectEqual(@as(f32, 90.0), w.health[ps].hp); // 8 x 1.25 = 10
