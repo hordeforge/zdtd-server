@@ -420,7 +420,11 @@ area and the concrete work.
     budget, no allocation) and the survival stage buffs
     (buffStatusHungry/Thirsty01..03) are applied/removed as state, with the
     `StaminaChangeOT` penalty and the stage-3 `ModifyStats Health` loss read
-    off the active buffs. **Per-perk leg SHIPPED 2026-08-25**: purchased
+    off the active buffs. **APM-instrumented 2026-08-25 (P4b)**: the whole
+    survival/effects pass runs under the `survival` profiler section with
+    `survival_players` / `vm_recomputes` counters, so the per-player VM fold
+    stays observable against the 50 ms budget as player counts scale.
+    **Per-perk leg SHIPPED 2026-08-25**: purchased
     attribute/perk levels fold through the same VM (progression.xml
     `value="v1,v2,..."` curves, level-scaled via `curveAt`/`trackedDeltasAt`;
     `progression.perkTotals` over the spend ledger) into armor

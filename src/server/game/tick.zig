@@ -4,6 +4,7 @@
 //! forwarding wrappers will be added by the main swarm step.
 
 const std = @import("std");
+const apm = @import("../../apm/root.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -27,6 +28,12 @@ const io_fs = @import("../../util/io_fs.zig");
 /// starvation HP loss and the stamina penalty. Runs after tickAll so the world
 /// clock already advanced.
 pub fn tickSurvival(self: *Game, dt: f32) void {
+    // APM (P4b): the per-player effects pass (passive-effects VM + triggered
+    // engine + stat application) is bounded by the client table; the section
+    // timer + survival_players/vm_recomputes counters keep it inside the
+    // 50 ms budget as player counts scale.
+    const sc = apm.profiler.scope(&self.harness.prof, .survival);
+    defer sc.end();
     const prog = self.sim.rules.progression;
     const sv = assets_buffs.survival(&self.buffs);
     const use_buff = sv.ok();
@@ -41,6 +48,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         if (!self.sim.mask[ps].health or !self.sim.mask[ps].transform) continue;
         var h = &self.sim.health[ps];
         if (h.max_hp <= 0) continue;
+        self.harness.counters.inc(.survival_players);
+        if (use_buff) self.harness.counters.add(.vm_recomputes, 3); // engine + effectTotals + perkTotals
         // Drowning: stock drains the client's local O2 bar first, then the
         // server is authoritative for the hp loss. The head block being water
         // is the depth gate (a submerged body at y <= water surface).

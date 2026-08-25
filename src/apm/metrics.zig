@@ -105,6 +105,13 @@ pub const CounterId = enum(u16) {
     /// Candidates that wanted a motion send but had no observer in range, so
     /// the encode was skipped. Pure interest savings.
     replicate_encodes_skipped,
+    /// Players processed by the survival/effects pass per tick (the
+    /// passive-effects VM + triggered engine fold, bounded by the client
+    /// table; watch with the 50 ms budget as player counts scale).
+    survival_players,
+    /// Passive-effects VM recomputes (effectTotals + perkTotals folds) and
+    /// triggered-engine evaluations in the survival pass.
+    vm_recomputes,
     _,
 };
 

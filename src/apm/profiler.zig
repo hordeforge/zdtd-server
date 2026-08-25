@@ -25,6 +25,9 @@ pub const Section = enum(u8) {
     te_scan,
     /// Resident-miss chunk materialization: disk load or procedural gen.
     chunk_gen,
+    /// Per-player survival/effects pass (passive-effects VM + triggered
+    /// engine + stat application; tickSurvival).
+    survival,
     _,
 };
 
