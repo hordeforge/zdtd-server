@@ -997,6 +997,66 @@ test "scenario hammer upgrade validates the UpgradeBlock target" {
     std.debug.print("PASS upgrade: woodMaster -> cobblestoneMaster accepted, forged swap rejected\n", .{});
 }
 
+test "scenario downgrade swap: DowngradeBlock target accepted, break turns into it" {
+    // RE Block.OnBlockDamaged IL_021D-030D: a block with a DowngradeBlock
+    // turns into that block (rotation/meta preserved) when destroyed by
+    // damage instead of being removed; the client swap report must accept the
+    // downgrade target like the upgrade target.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_downgrade");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_downgrade", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
+    mt.tryMergeBundledAssignIds(gpa);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+    const safe_id = g.maxdamage.idByName("cntWallSafeInsecure") orelse return error.SkipZigTest;
+    const open_id = g.maxdamage.idByName("cntWallSafeOpen") orelse return error.SkipZigTest;
+    const bedroll_id = g.maxdamage.idByName("bedroll") orelse return error.SkipZigTest;
+    const wood_id = g.maxdamage.idByName("woodMaster") orelse return error.SkipZigTest;
+    try std.testing.expectEqualStrings("cntWallSafeOpen", g.maxdamage.downgradeTarget("cntWallSafeInsecure").?);
+
+    var frame_buf: [512]u8 = undefined;
+    var body: [64]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, 0)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == 0);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, safe_id)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == safe_id);
+
+    // The wrench downgrade report (client swap to the DowngradeBlock target).
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, open_id)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == open_id);
+
+    // Forged swap: bedroll is neither the upgrade nor the downgrade target.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 250, 150, 250, bedroll_id)));
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == open_id);
+
+    // Damage-break downgrade: the swap raw carries the downgrade target id
+    // with the old block's rotation/meta upper bits.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 251, 150, 250, safe_id)));
+    try std.testing.expect((try g.world.blockWorld(251, 150, 250)) == safe_id);
+    const down_raw = g.downgradeBreakRaw(251, 150, 250, safe_id);
+    try std.testing.expect((down_raw & 0xffff) == open_id);
+    _ = try g.world.setBlockRawWorld(251, 150, 250, down_raw);
+    try std.testing.expect((try g.world.blockWorld(251, 150, 250)) == open_id);
+
+    // A normal block has no downgrade path: break raw is 0.
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, 252, 150, 250, wood_id)));
+    try std.testing.expect(g.downgradeBreakRaw(252, 150, 250, wood_id) == 0);
+
+    std.debug.print("PASS downgrade: cntWallSafeInsecure -> cntWallSafeOpen accepted, forged swap rejected, break swaps\n", .{});
+}
+
+
 test "scenario demolish blast uses per-class ExplosionData and the earth DamageBonus" {
     // drainExplosions: the blast params come from the class's <property
     // class="Explosion"> block carried per entity (spawnZombie copies it from

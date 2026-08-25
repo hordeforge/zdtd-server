@@ -4653,7 +4653,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Package | Priority |
 |---|---|
 | `NetPackageSetBlock` multi-block / shape / rotation | PARTIAL (multi parse; rotation meta sparse) |
-| Block damage / upgrade / paint | PARTIAL (HP accumulate; upgrade/paint open) |
+| Block damage / upgrade / paint | WORKS (2026-08-26: HP accumulate on the chunk damage plane; upgrade validates the blocks.xml `UpgradeBlock` chain on the SetBlock swap; **downgrade-on-destroy wired** - blocks.xml `DowngradeBlock` rows parse through Extends (611 stock rows) and a block that reaches max damage turns into its downgrade target (rotation/meta preserved, RE Block.OnBlockDamaged IL_021D-030D) instead of breaking, on every damage path (player dig, zombie chew/dig, explosion); the client swap report accepts the downgrade target like the upgrade target; paint applies the face texture via SetBlockTexture with the textureFull packing) |
 | `NetPackageAnimateBlock` / `BlockTrigger` | PARTIAL (BlockTrigger C2S handled) |
 | Stability / support collapse | WORKS (2026-08-20: stability plane, see STATUS wave 2026-08-08) |
 | Land claim / bedroll / keystones | PARTIAL (LandClaim options; bedroll open) |

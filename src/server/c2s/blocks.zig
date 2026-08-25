@@ -79,6 +79,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             var place_id: u16 = b.block_id;
             var out_dmg: u16 = 0;
             var mutated = false;
+            // Downgrade swap raw (stock Block.OnBlockDamaged): carries the
+            // downgrade target id with the old block's rotation/meta bits.
+            var place_down_raw: u32 = 0;
             if (b.block_id == 0) {
                 place_id = 0;
                 out_dmg = 0;
@@ -127,24 +130,37 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                 }
                 if (abs >= max_hp) {
-                    self.noteBlockBreak(c);
-                    self.removeClaimAt(b.x, b.y, b.z);
-                    // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):
-                    // same server-side roll as the direct-dig break above.
-                    const harvested = chunk_fill.tryBlockHarvestDrop(self, c.slot, b.x, b.y, b.z, base_cur);
-                    const hxp = self.harvestXpForBlock(base_cur);
-                    if (hxp > 0) {
-                        var count: u32 = 1;
-                        if (self.blocks.byId(base_cur)) |bd| {
-                            if (bd.harvest_drops.len > 0) count = harvested;
+                    // Stock Block.OnBlockDamaged downgrade swap: a block with
+                    // a DowngradeBlock turns into it (rotation/meta preserved)
+                    // instead of breaking - no harvest/XP/claim removal for
+                    // the swap (the block did not break).
+                    const down_raw = self.downgradeBreakRaw(b.x, b.y, b.z, base_cur);
+                    if (down_raw != 0) {
+                        place_id = @truncate(down_raw & 0xffff);
+                        out_dmg = 0;
+                        self.clearBlockHp(b.x, b.y, b.z);
+                        self.clearBlockRaw(b.x, b.y, b.z);
+                        place_down_raw = down_raw;
+                    } else {
+                        self.noteBlockBreak(c);
+                        self.removeClaimAt(b.x, b.y, b.z);
+                        // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):
+                        // same server-side roll as the direct-dig break above.
+                        const harvested = chunk_fill.tryBlockHarvestDrop(self, c.slot, b.x, b.y, b.z, base_cur);
+                        const hxp = self.harvestXpForBlock(base_cur);
+                        if (hxp > 0) {
+                            var count: u32 = 1;
+                            if (self.blocks.byId(base_cur)) |bd| {
+                                if (bd.harvest_drops.len > 0) count = harvested;
+                            }
+                            if (count > 0) self.awardXp(c.slot, hxp *| count);
                         }
-                        if (count > 0) self.awardXp(c.slot, hxp *| count);
+                        // A broken container spills its pre-filled contents.
+                        chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
+                        place_id = 0;
+                        out_dmg = 0;
+                        self.clearBlockHp(b.x, b.y, b.z);
                     }
-                    // A broken container spills its pre-filled contents.
-                    chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
-                    place_id = 0;
-                    out_dmg = 0;
-                    self.clearBlockHp(b.x, b.y, b.z);
                 } else {
                     // Wasm-first (AGENTS rule 29): player dig is a block-damage
                     // path, so the claimed delta passes the on_block_damage
@@ -176,10 +192,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 place_id = b.block_id;
                 out_dmg = 0;
                 if (cur_id != 0 and b.block_id != cur_id) {
+                    // Stock hammer upgrade / wrench downgrade (Block.UpgradeBlock
+                    // / DowngradeBlock, blocks.xml data): accept only the
+                    // resolved upgrade OR downgrade target for the current
+                    // block, never an arbitrary swap.
                     const cur_name = self.maxdamage.idName(cur_id) orelse continue;
-                    const target_name = self.maxdamage.upgradeTarget(cur_name) orelse continue;
-                    const target_id = self.maxdamage.idByName(target_name) orelse continue;
-                    if (target_id != b.block_id) continue;
+                    const up_id: u16 = if (self.maxdamage.upgradeTarget(cur_name)) |u|
+                        (self.maxdamage.idByName(u) orelse 0)
+                    else
+                        0;
+                    const down_id: u16 = if (self.maxdamage.downgradeTarget(cur_name)) |d|
+                        (self.maxdamage.idByName(d) orelse 0)
+                    else
+                        0;
+                    if (up_id != b.block_id and down_id != b.block_id) continue;
                 }
                 self.clearBlockHp(b.x, b.y, b.z);
                 mutated = true;
@@ -193,7 +219,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     self.registerClaim(b.x, b.y, b.z, editor_ent);
                 }
             }
-            const place_raw: u32 = if (b.raw != 0 and (b.raw & 0xffff) == place_id) b.raw else place_id;
+            const place_raw: u32 = if (place_down_raw != 0)
+                place_down_raw
+            else if (b.raw != 0 and (b.raw & 0xffff) == place_id)
+                b.raw
+            else
+                place_id;
             try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
             if (place_id != 0 and self.blocks.isVending(place_id)) {
                 _ = self.vending.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, place_id, self.blocks.traderId(place_id));
@@ -210,7 +241,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             } else if (self.sim.power.removeAt(b.x, b.y, b.z)) {
                 self.sim.power.resolve();
             }
-            if (place_id != 0 and b.raw != 0) {
+            if (place_id != 0 and b.raw != 0 and place_down_raw == 0) {
                 self.setBlockRaw(b.x, b.y, b.z, b.raw);
             } else if (place_id == 0) {
                 self.clearBlockRaw(b.x, b.y, b.z);

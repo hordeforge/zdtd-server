@@ -89,6 +89,10 @@ pub const Table = struct {
     /// Stock Block.UpgradeBlock (property class) names the block a hammer
     /// upgrade turns this one into; absent means no upgrade path.
     upgrade_to: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// block name → resolved `DowngradeBlock` after the Extends chain. Stock
+    /// names the block a destroyed block turns into instead of being removed
+    /// (RE Block.OnBlockDamaged IL_021D-030D); absent means no downgrade.
+    downgrade_to: std.StringHashMapUnmanaged([]const u8) = .{},
     /// block name → resolved `IsDistantDecoration` (blocks.xml property, after
     /// the Extends chain). Only `true` entries are stored; absent means false,
     /// so an unparsed or unknown name fails closed out of the deco tables.
@@ -244,6 +248,13 @@ pub const Table = struct {
     /// hammer upgrade turns `name` into, or null when it has no upgrade path.
     pub fn upgradeTarget(self: *const Table, name: []const u8) ?[]const u8 {
         return self.upgrade_to.get(name);
+    }
+
+    /// blocks.xml `DowngradeBlock` after Extends resolution: the block a
+    /// destroyed block turns into (stock Block.OnBlockDamaged swap, rotation
+    /// and meta preserved) instead of being removed.
+    pub fn downgradeTarget(self: *const Table, name: []const u8) ?[]const u8 {
+        return self.downgrade_to.get(name);
     }
 
     /// blocks.xml `StabilityIgnore` after Extends resolution (default false):
@@ -540,6 +551,10 @@ const DecoFacts = struct {
     /// UpgradeBlock.ToBlock (resolved through Extends; stock upgrade chains
     /// inherit through the parent).
     upgrade_to: ?[]const u8 = null,
+    /// DowngradeBlock (resolved through Extends; the block a destroyed block
+    /// turns into instead of being removed, RE Block.OnBlockDamaged
+    /// IL_021D-030D: rotation/meta preserved, SetBlockRPC swap).
+    downgrade_to: ?[]const u8 = null,
     /// StabilitySupport / StabilityIgnore (resolved through Extends; null =
     /// "ask the parent", both default true/false when the chain is exhausted).
     stability_support: ?bool = null,
@@ -597,6 +612,20 @@ fn resolveUpgrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []c
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.upgrade_to) |tb| return tb;
+        cur = f.extends orelse return null;
+    }
+    return null;
+}
+
+/// DowngradeBlock resolved through Extends (same inheritance rule as
+/// UpgradeBlock: children without their own value ask the parent chain).
+fn resolveDowngrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?[]const u8 {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse return null;
+        if (f.downgrade_to) |db| return db;
         cur = f.extends orelse return null;
     }
     return null;
@@ -744,6 +773,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "ToBlock")) |tb| {
             facts.upgrade_to = try arena.dupe(u8, tb);
         }
+        // DowngradeBlock is a plain `<property name="DowngradeBlock"
+        // value="..."/>` (stock: the block a destroyed block turns into, e.g.
+        // cntWallSafeInsecure; RE Block.OnBlockDamaged IL_021D).
+        if (xml.propertyValue(body, "DowngradeBlock")) |db| {
+            facts.downgrade_to = try arena.dupe(u8, db);
+        }
         try own_facts.put(arena, kn, facts);
         i = body_end;
     }
@@ -754,6 +789,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
     var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{};
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
+    var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var sleeper_class_names: std.StringHashMapUnmanaged(void) = .{};
     var fit = own_facts.iterator();
     while (fit.next()) |e| {
@@ -770,6 +806,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         }
         if (resolveUpgrade(&own_facts, e.key_ptr.*)) |tb| {
             try upgrade_to_names.put(arena, e.key_ptr.*, tb);
+        }
+        if (resolveDowngrade(&own_facts, e.key_ptr.*)) |db| {
+            try downgrade_to_names.put(arena, e.key_ptr.*, db);
         }
         if (resolveSleeperClass(&own_facts, &power_class_by_name, e.key_ptr.*)) {
             try sleeper_class_names.put(arena, e.key_ptr.*, {});
@@ -798,6 +837,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .stability_ignore_names = stability_ignore_names,
         .no_show_model_on_fall = no_show_model_on_fall,
         .upgrade_to = upgrade_to_names,
+        .downgrade_to = downgrade_to_names,
         .arena_ptr = arena_holder,
     };
 }
@@ -872,6 +912,17 @@ test "blocks.xml LootList resolves per block after the AssignIds merge" {
     try std.testing.expectEqualStrings("smallSafes", t.lootListFor(t.idByName("cntDeskSafe").?).?);
     // A non-storage block has no LootList.
     try std.testing.expect(t.lootListFor(t.idByName("treeDeadTree02").?) == null);
+    // DowngradeBlock rows resolve (stock V3.1.4 chains: cntWallSafe ->
+    // cntWallSafeInsecure -> cntWallSafeOpen; cntDeskSafe extends cntWallSafe
+    // with its own cntDeskSafeInsecure).
+    try std.testing.expectEqualStrings("cntWallSafeInsecure", t.downgradeTarget("cntWallSafe").?);
+    try std.testing.expectEqualStrings("cntWallSafeOpen", t.downgradeTarget("cntWallSafeInsecure").?);
+    try std.testing.expectEqualStrings("cntDeskSafeInsecure", t.downgradeTarget("cntDeskSafe").?);
+    // cntWallSafeInsecure_Player is a standalone variant (no Extends, no
+    // DowngradeBlock): fail closed.
+    try std.testing.expect(t.downgradeTarget("cntWallSafeInsecure_Player") == null);
+    // A normal upgradeable block has no downgrade path.
+    try std.testing.expect(t.downgradeTarget("woodFrameBlock") == null);
 }
 
 test "deco facts follow Extends chains and fail closed" {
@@ -906,6 +957,12 @@ test "deco facts follow Extends chains and fail closed" {
         \\</block>
         \\<block name="woodFrameDerived">
         \\  <property name="Extends" value="woodFrameBlock" />
+        \\</block>
+        \\<block name="cntWallSafeInsecure">
+        \\  <property name="DowngradeBlock" value="cntWallSafeOpen" />
+        \\</block>
+        \\<block name="cntWallSafeInsecure_Player">
+        \\  <property name="Extends" value="cntWallSafeInsecure" />
         \\</block>
         \\</blocks>
     ;
@@ -943,6 +1000,13 @@ test "deco facts follow Extends chains and fail closed" {
     try std.testing.expectEqualStrings("cobbleUpgrade", t.upgradeTarget("woodFrameDerived").?);
     try std.testing.expect(t.upgradeTarget("treeMaster") == null);
     try std.testing.expect(t.upgradeTarget("noSuchBlock") == null);
+
+    // DowngradeBlock resolves directly and through Extends (the safe -> open
+    // pattern); unknown names have no downgrade path (fail closed).
+    try std.testing.expectEqualStrings("cntWallSafeOpen", t.downgradeTarget("cntWallSafeInsecure").?);
+    try std.testing.expectEqualStrings("cntWallSafeOpen", t.downgradeTarget("cntWallSafeInsecure_Player").?);
+    try std.testing.expect(t.downgradeTarget("woodFrameBlock") == null);
+    try std.testing.expect(t.downgradeTarget("noSuchBlock") == null);
 }
 
 test "MultiBlockDim parse rejects malformed dims" {

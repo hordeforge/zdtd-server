@@ -445,12 +445,24 @@ pub fn tickZombieBlockDamage(self: *Game) void {
         const max_hp = self.maxDamageForBlock(id);
         const total = self.addBlockDamage(bx, by, bz, dmg) catch continue;
         if (total >= max_hp) {
-            self.world.setBlockWorld(bx, by, bz, 0) catch continue;
-            self.clearBlockHp(bx, by, bz);
-            self.clearBlockRaw(bx, by, bz);
-            if (packages.buildSetBlockBody(&self.body_buf, bx, by, bz, 0)) |sb| {
-                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
-            } else |_| {}
+            // Downgrade swap (stock Block.OnBlockDamaged): a block with a
+            // DowngradeBlock turns into it instead of breaking.
+            const down_raw = self.downgradeBreakRaw(bx, by, bz, id);
+            if (down_raw != 0) {
+                _ = self.world.setBlockRawWorld(bx, by, bz, down_raw) catch continue;
+                self.clearBlockHp(bx, by, bz);
+                self.clearBlockRaw(bx, by, bz);
+                if (packages.buildSetBlockBodyRaw(&self.body_buf, bx, by, bz, down_raw, 0, -1, -1)) |sb| {
+                    self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
+                } else |_| {}
+            } else {
+                self.world.setBlockWorld(bx, by, bz, 0) catch continue;
+                self.clearBlockHp(bx, by, bz);
+                self.clearBlockRaw(bx, by, bz);
+                if (packages.buildSetBlockBody(&self.body_buf, bx, by, bz, 0)) |sb| {
+                    self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
+                } else |_| {}
+            }
         }
     }
 }
@@ -558,13 +570,26 @@ pub fn drainDigRequests(self: *Game) void {
         const max_hp = self.maxDamageForBlock(id);
         const total = self.addBlockDamage(d.x, d.y, d.z, dmg) catch continue;
         if (total >= max_hp) {
-            self.world.setBlockWorld(d.x, d.y, d.z, 0) catch continue;
-            self.clearBlockHp(d.x, d.y, d.z);
-            self.clearBlockRaw(d.x, d.y, d.z);
-            self.sim.zombie_ai[d.slot].digging = false;
-            if (packages.buildSetBlockBody(&self.body_buf, d.x, d.y, d.z, 0)) |sb| {
-                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(d.x), @floatFromInt(d.z), self.interest_range) catch {};
-            } else |_| {}
+            // Downgrade swap (stock Block.OnBlockDamaged): a block with a
+            // DowngradeBlock turns into it instead of breaking.
+            const down_raw = self.downgradeBreakRaw(d.x, d.y, d.z, id);
+            if (down_raw != 0) {
+                _ = self.world.setBlockRawWorld(d.x, d.y, d.z, down_raw) catch continue;
+                self.clearBlockHp(d.x, d.y, d.z);
+                self.clearBlockRaw(d.x, d.y, d.z);
+                self.sim.zombie_ai[d.slot].digging = false;
+                if (packages.buildSetBlockBodyRaw(&self.body_buf, d.x, d.y, d.z, down_raw, 0, -1, -1)) |sb| {
+                    self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(d.x), @floatFromInt(d.z), self.interest_range) catch {};
+                } else |_| {}
+            } else {
+                self.world.setBlockWorld(d.x, d.y, d.z, 0) catch continue;
+                self.clearBlockHp(d.x, d.y, d.z);
+                self.clearBlockRaw(d.x, d.y, d.z);
+                self.sim.zombie_ai[d.slot].digging = false;
+                if (packages.buildSetBlockBody(&self.body_buf, d.x, d.y, d.z, 0)) |sb| {
+                    self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(d.x), @floatFromInt(d.z), self.interest_range) catch {};
+                } else |_| {}
+            }
         }
     }
 }

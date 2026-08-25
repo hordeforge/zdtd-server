@@ -360,6 +360,14 @@ the materials.xml damage_category chain (stock cop: earth -> 0, terrain
 survives the blast); falloff + MaxDamage break already ran through the
 addBlockDamage choke point. World 30/12/6 -> **31/11/6**; total
 **232/63/38**.
+Then the downgrade-on-destroy row closed the block-damage row (WORKS
+2026-08-26): blocks.xml `DowngradeBlock` rows (611 stock, Extends-resolved)
+now parse, and a block that reaches max damage turns into its downgrade
+target (rotation/meta preserved, RE Block.OnBlockDamaged IL_021D-030D)
+instead of breaking - on every damage path (player dig, zombie chew/dig,
+explosion) - while the C2S swap report accepts the downgrade target like the
+upgrade target (no arbitrary swaps). World 31/11/6 -> **32/10/6**; total
+**233/62/38**.
 Then the prefab-authored-block-damage row went WORKS: the TTS damage plane
 (u16 absolute HP per cell, v>8) is no longer decoded-and-dropped - the paint
 path passes it through set_block into the chunk damage plane (both the world

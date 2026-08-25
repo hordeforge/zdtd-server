@@ -229,6 +229,20 @@ pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
     c.clearDmg(t.lx, y, t.lz);
 }
 
+/// Stock Block.OnBlockDamaged downgrade swap (RE IL_021D-030D): a block with
+/// a `DowngradeBlock` turns into that block (rotation/meta preserved via the
+/// SetBlockRPC swap) when destroyed by damage, instead of being removed.
+/// Returns the raw value to place (0 = no downgrade path; the caller breaks
+/// the block normally). Data-driven: blocks.xml `DowngradeBlock` rows.
+pub fn downgradeBreakRaw(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) u32 {
+    const name = self.maxdamage.idName(cur_id) orelse return 0;
+    const target = self.maxdamage.downgradeTarget(name) orelse return 0;
+    const target_id = self.maxdamage.idByName(target) orelse return 0;
+    const raw = self.world.rawWorld(x, y, z) catch return target_id;
+    if (raw == 0 or (raw & 0xffff) != cur_id) return target_id;
+    return (raw & 0xffff0000) | target_id;
+}
+
 /// Drain this tick's Demolition explode requests (RE entity-ai.md
 /// EntityZombieCop): the cop dies with the blast (SetDead, no loot), nearby
 /// entities take radius-falloff damage, and blocks in the sphere take
@@ -335,12 +349,25 @@ pub fn drainExplosions(self: *Game) void {
                     const max_hp = self.maxDamageForBlock(id);
                     const total = self.addBlockDamage(wx, wy, wz, dmg) catch continue;
                     if (total >= max_hp) {
-                        self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
-                        self.clearBlockHp(wx, wy, wz);
-                        self.clearBlockRaw(wx, wy, wz);
-                        if (packages.buildSetBlockBody(&self.body_buf, wx, wy, wz, 0)) |sb| {
-                            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
-                        } else |_| {}
+                        // Downgrade swap (stock Block.OnBlockDamaged; the
+                        // explosion routes through DamageBlock): a block with
+                        // a DowngradeBlock turns into it instead of breaking.
+                        const down_raw = self.downgradeBreakRaw(wx, wy, wz, id);
+                        if (down_raw != 0) {
+                            _ = self.world.setBlockRawWorld(wx, wy, wz, down_raw) catch continue;
+                            self.clearBlockHp(wx, wy, wz);
+                            self.clearBlockRaw(wx, wy, wz);
+                            if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, down_raw, 0, -1, -1)) |sb| {
+                                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+                            } else |_| {}
+                        } else {
+                            self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
+                            self.clearBlockHp(wx, wy, wz);
+                            self.clearBlockRaw(wx, wy, wz);
+                            if (packages.buildSetBlockBody(&self.body_buf, wx, wy, wz, 0)) |sb| {
+                                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+                            } else |_| {}
+                        }
                     }
                 }
             }

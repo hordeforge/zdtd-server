@@ -1710,6 +1710,12 @@ pub const Game = struct {
         return game_world.clearBlockHp(self, x, y, z);
     }
 
+    /// Stock Block.OnBlockDamaged downgrade swap raw (0 = no downgrade path;
+    /// the caller breaks the block normally). See game/world.zig.
+    pub fn downgradeBreakRaw(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) u32 {
+        return game_world.downgradeBreakRaw(self, x, y, z, cur_id);
+    }
+
     /// Drain Demolition explode requests (entity + block AoE). Runs after the
     /// sim AI pass each tick (Game.step).
     pub fn drainExplosions(self: *Game) void {
