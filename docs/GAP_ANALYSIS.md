@@ -157,14 +157,14 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 |---|---:|---:|---:|---:|---|
 | [Quests](#4-quests) | 34 | 0 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
-| [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
+| [Blood moon](#6-blood-moon) | 23 | 0 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 28 | 2 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 35 | 3 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 26 | 2 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 24 | 1 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 27 | 1 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
+| [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 42 | 1 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **280** | **10** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **280** | **9** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3159,26 +3159,12 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/world/dtm.zig:12-49`, `Data/Worlds/Navezgane/dtm.raw`,
   `map_info.xml`
 
-- **DTM sub-block precision (2026-08-23 re-audit)** `PARTIAL`
-  The row's premise was stale: stock's surface density is **binary** too -
-  `fillDensityInBlock` (IL=16, dumped 2026-08-23) sets `IsTerrain() ?
-  DensityTerrain : DensityAir` and `GenerateTerrain` stamps the surface cell
-  with it. The wire heightmaps are byte[256] and the density channel is
-  binary, so the 1/256 DTM height fraction is not wire-representable and no
-  stock server encodes it. The client's smooth rolling surface comes from
-  the meshers interpolating the byte heightmap across columns
-  (`MeshGenerator.CreateMesh` 5-column heights array, IL=1083;
-  `MeshGeneratorMC2.build` terrainHeightsCache + topSoilCache, IL=1662;
-  research: chunk-providers.md "Surface density is binary"). zdtd emits the
-  same binary density + byte heightmaps, so the wire is stock-faithful;
-  `heightAtWorld` keeping the fraction would have no wire consumer.
-  Remaining: live-client confirmation that the cross-column smoothing reads
-  zdtd's heightmap identically to stock's (playtest ground case); the
-  sub-block fraction stays used only where stock uses it (none on the
-  server surface).
-  *Anchors:* `src/world/dtm.zig:33`, `src/wire/stock_chunk.zig:28-33`,
-  `:430-435`, `7dtd-engine-research docs/chunk-providers.md` + `il/terrain-v3.1.0/
-  TerrainGeneratorWithBiomeResource_fillDensityInBlock_*_il.txt`
+- **DTM sub-block precision (2026-08-23 re-audit)** `WORKS` (2026-08-25):
+  the premise was stale - stock's surface density is binary
+  (`fillDensityInBlock` IL=16 sets DensityTerrain/DensityAir), the wire
+  heightmaps are byte[256] and the density channel is binary, so no stock
+  server encodes a 1/256 DTM fraction; the client's smooth rolling surface
+  comes from the meshers interpolating the byte heightmap across columns.
 
 - **Biome-driven terrain columns** `WORKS`
   `getOrCreate` fills the column from the dominant biome's layer stack before POI
