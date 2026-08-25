@@ -6,7 +6,7 @@ Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordefor
 
 | | |
 |---|---|
-| Workspace | [`../AGENTS.md`](../AGENTS.md) |
+| Workspace | [`hordeforge/.github` AGENTS.md](https://github.com/hordeforge/.github/blob/main/AGENTS.md) |
 | Architecture | [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) |
 | Wire | [`../7dtd-engine-research/docs/protocol.md`](../7dtd-engine-research/docs/protocol.md) |
 | **Status hub** | [`docs/STATUS.md`](docs/STATUS.md) |
