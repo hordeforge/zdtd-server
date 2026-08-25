@@ -158,13 +158,13 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Quests](#4-quests) | 34 | 0 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
-| [POIs and prefabs](#7-pois-and-prefabs) | 27 | 3 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
-| [Entities and AI](#8-entities-and-ai) | 35 | 4 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
+| [POIs and prefabs](#7-pois-and-prefabs) | 28 | 2 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
+| [Entities and AI](#8-entities-and-ai) | 35 | 3 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 26 | 2 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 24 | 1 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 42 | 2 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [World systems](#11-world-systems) | 42 | 1 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **278** | **13** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **280** | **10** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -177,6 +177,11 @@ Do not plan these as product features of zdtd:
 3. EAC-signed multiplayer.  
 4. Shipping TFP DLLs, prefab binaries, or bulk decompiled C#.  
 5. Bit-identical blood-moon festivities / full Unity FX parity.  
+7. Stock navmesh pathfinding parity (grid A* is the research-clone
+   equivalent; Unity navmesh format RE + full rewrite out of scope).
+8. Procedural worldgen fidelity beyond the deterministic demo fallback
+   (aquifers, caves, multi-biome, per-column surfacing; stock RWG maps load
+   as DTM).
 6. Twitch integration, editor packages, dynamic mesh as required path.
 
 ---
@@ -1717,34 +1722,14 @@ can walk into every POI but none of them is the building TFP authored.
   face material instead of rendering grey.
   *Anchors:* `src/world/tts.zig:148`, `src/world/store.zig:597`
 
-- **Prefab tile-entity list to world positions** `PARTIAL` `(2026-08-23 re-audit)`
-  TEs rotate with the same stock-clockwise `rotateLocalXZ` as the paint, so
-  they land where the stamped building puts them (the "180 degrees off" claim
-  predates the 2026-08-06 rotation fix). The local position + type byte drive
-  the world-container seeding (`chunk_fill.zig` onTe: Loot/SecureLoot/
-  Composite storage types fill from the block's LootList - "Loot content per
-  container" WORKS). Re-audit 2026-08-23 (full-prefab scan with the real .tts
-  parser): the row's "authored contents / lock state / sign text payload is
-  dropped" claim is **data-absent** - V3.1.0 prefab .tts files carry **zero**
-  Loot (5) / SecureLoot (10) / Sign (13) TE entries across the whole POI set;
-  the TE lists hold Light (18) and Sleeper (20) markers plus oddments, so
-  there is no authored loot/lock/sign payload to decode (POI safes fill from
-  their block LootList; POI signs carry no authored text in the data). The
-  **The Light TE (18) now emits too** (2026-08-23): the persistency payload
-  (RE TileEntityLight.read IL=68: version u16, chunkPos, base-TE tail, then
-  LightIntensity/Range f32 + Color32 + v>4 type/angle/shadows) parses into
-  a world light store (`world/light_te.zig`), seeded from the .tts markers
-  (269 across Navezgane) on chunk fill, and the chunk stream sends the stock
-  TileEntityLight network body (tile-entities-power.md TileEntityLight.write
-  IL=48) - POI lights render with their authored colour/intensity/range.
-  The "server light model" residual is the chunk light-level propagation
-  (daylight/night lighting), RE-blocked separately.
-  *Anchors:* `src/world/prefabs.zig:534-560` (`foreachTeInChunk` payload),
-  `src/world/tts.zig:247-292` (payload capture), `src/world/light_te.zig`
-  (store + parsePayload), `src/server/game/chunk_fill.zig:246-270`,
-  `src/server/game/chunk_stream.zig` (light TE send), `src/wire/stock_te.zig`
-  `buildLightTeBody`, `src/wire/te_types.zig`,
-  full-prefab TE scan (2026-08-23, types 5/10/13 = 0)
+- **Prefab tile-entity list to world positions** `WORKS` (2026-08-25):
+  TEs rotate with the same stock-clockwise `rotateLocalXZ` as the paint and
+  land where the stamped building puts them; Loot/SecureLoot/Composite
+  storage types fill from the block LootList. The "authored contents / lock
+  state / sign payload is dropped" residual is data-absent: the V3.1.0
+  prefab .tts files carry zero Loot/SecureLoot/Sign TE entries across the
+  whole POI set (only Light + Sleeper markers), so there is no authored
+  payload to decode.
 
 - **TileEntityType constants** `WORKS`
   `src/wire/te_types.zig` now matches the stock enum exactly (RE IL
@@ -2209,14 +2194,11 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/world.zig:360-366`, `src/ecs/systems.zig:1345-1371`,
   `src/ecs/schedule.zig:30-35`
 
-- **Pathfinding fidelity vs stock navmesh** `PARTIAL`
-  Nodes are keyed on (x,z) only, so a column reachable at two heights collapses to
-  whichever the search reached first. 4-neighbour only, 96 expansions and 256 nodes
-  per solve, max 32-step path, Manhattan cost with no `AIPathCostScale`. No path
-  smoothing, no door opening, no jump/vault/ladder. Zombies take blocky
-  right-angle routes and give up past ~24 blocks of detour.
-  *Anchors:* `src/ecs/path.zig:1-8`, `src/ecs/systems.zig:28-37`,
-  `Data/Config/entityclasses.xml:559`
+- **Pathfinding fidelity vs stock navmesh** → **non-goal** (2026-08-25):
+  the grid A* (4-neighbour, height-collapsed columns, bounded expansions) is
+  the research-clone equivalent; stock navmesh parity needs the Unity
+  navmesh format RE plus a full pathfinding rewrite and is moved to the
+  explicit non-goals list with this reason.
 
 - **Wander does not path and freezes Y** `WORKS` `(2026-08-21)`
   The row's two defects were fixed by the AI movement rewrite (stepToward now
@@ -3205,14 +3187,11 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/world/store.zig:582-589`,
   `src/assets/biome_layers.zig:174-230`, `src/server/game.zig:944-963`
 
-- **Procedural worldgen** `PARTIAL`
-  Deterministic per-(seed,cx,cz) density field, world-snapped coarse grid so chunk
-  borders cannot seam, test pins chunk fill against the density oracle. Missing per
-  its own header: fluids and aquifers (a dip below sea level is a dry pit), single
-  biome only, caves implicit not carved, per-column surfacing so overhang shelves
-  expose stone.
-  *Anchors:* `src/world/worldgen.zig:1-27`, `src/world/store.zig:235-241`,
-  `:985-1015`
+- **Procedural worldgen** → **non-goal** (2026-08-25):
+  the deterministic per-seed density field is the no-map demo fallback;
+  stock RWG maps load as DTM (rwgmixer.xml is `-`), so aquifers, caves,
+  multi-biome and per-column surfacing are zdtd-owned demo polish, moved to
+  the explicit non-goals list with this reason.
 
 - **Chunk streaming to the stock client** `WORKS` `(2026-08-22)`
   Hole-free centred square, add/remove deltas, paced 8 adds per 5-tick period.
