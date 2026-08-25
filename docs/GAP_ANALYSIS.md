@@ -2013,8 +2013,13 @@ gamestage, no wandering hordes, and no screamers.
   (NetPackageDamageEntity.ProcessPackage IL=172), so re-scaling would
   double-apply. Defaults: all 1.0 except difficulty 2 (Adventurer) incoming
   = 0.75, pinned to the shipped serverconfig sandbox code decode
-  (sandbox-options.md 246-258); the full 0..5 ladder still needs the
-  SetupOptions Cecil extraction (research-repo note 2026-08-25).
+  (sandbox-options.md 246-258); the full 0..5 ladder
+  is RE-BLOCKED (research-repo note 2026-08-25): the six difficulty presets
+  live in a Unity Resources TextAsset (`Data/Sandbox/sandbox_presets`,
+  LoadInternalPresets IL=43) that neither shipped install exposes to the
+  extraction tooling (resources.resource unparseable, no sandbox TextAsset in
+  any bundle); the defaults stay 1.0 with the Adventurer pin until the asset
+  or the preset codes surface.
 
 - **spawning.xml parsing** `WORKS` (2026-08-25):
   biome name, entitygroup, maxcount, time, type, respawndelay, `tags` and
