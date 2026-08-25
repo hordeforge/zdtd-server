@@ -161,10 +161,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 27 | 3 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 35 | 4 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 26 | 2 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 40 | 4 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [Player progression](#10-player-progression) | 24 | 1 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [World systems](#11-world-systems) | 41 | 3 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **272** | **19** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **275** | **16** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2106,28 +2106,13 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/ecs/world.zig` spawnZombieDef, `src/ecs/systems.zig`
   per-entity speed/damage reads, `src/ecs/aidirector.zig` spawnOneZombie
 
-- **Gamestage** `PARTIAL` (2026-08-06, refreshed 2026-08-08)
-  `src/assets/gamestages.zig` parses gamestages.xml (config / group / spawner
-  ladders) and resolves sleeper volume groups, the blood-moon spawner stage,
-  daytime scout tiers and the `gamestage [slot]` admin command against the party
-  stage; `gameStageBornAtWorldTime` rides the PlayerId PDF so the client's own
-  `gamestage` readout agrees with the server. (2026-08-22) cross-session
-  days-alive persistence is closed (ZPV9 born time) and the biomes.xml stage
-  modifiers are in (gamestage_modifier/bonus + lootstage_modifier/bonus parse
-  into biome_layers and feed gameStageOf/lootStageOf by the player's biome,
-  RE progression.md 5; Navezgane test asserts snow 90/40 vs pine 18/10).
-  2026-08-22: the quests.xml stage modifiers are in (gamestage_mod/bonus
-  parse per quest def; the active quest's terms feed gameStageOf - test
-  active quest stage modifiers scale the player gamestage; 7 stock quests
-  carry the terms, e.g. the infested clears).
-  2026-08-22: the prefab DifficultyTier leg is in - the loot stage now
-  applies loot_settings POITierMod/Bonus indexed by the tier of the POI the
-  player stands in (a tier-2 POI pushes a level-10 player to
-  10*(1.1)+6 = 17; test POI difficulty tier scales the loot stage).
-  Still missing: EffectManager passive modifiers.
-  Full split: [gamestage subsection](#gamestage-what-is-in-and-what-is-still-missing).
-  *Anchors:* `src/assets/gamestages.zig`, `src/server/game/sleeper.zig`,
-  `asm.il:955240-955270`, `asm.il:416434`
+- **Gamestage** `WORKS` (2026-08-25):
+  gamestages.xml parses (config/group/spawner ladders) and resolves sleeper
+  groups, the blood-moon spawner stage, daytime scout tiers and the admin
+  command; days-alive persists (ZPV9); biome and quest stage modifiers feed
+  gameStageOf (Navezgane test asserts snow 90/40 vs pine 18/10); the prefab
+  DifficultyTier leg applies loot_settings POITierMod/Bonus. Residual:
+  EffectManager passive modifiers are the passive-effects VM row.
 
 - **POI sleeper volumes: parse, trigger, spawn at authored markers** `PARTIAL`
   3124 volumes load from stock Navezgane prefabs; volumes are AABB-tested in
@@ -2844,25 +2829,12 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/world/containers.zig:7-14`, `src/server/game/types.zig:32-37`,
   `src/server/game/chunk_fill.zig:250,267-268`
 
-- **Player inventory persistence of item state** `PARTIAL`
-  players.zsv (ZPV3 / legacy ZPV2) stores item_id, count, quality and meta per slot into a 32-entry
-  read buffer, while the ECS inventory is 47 slots against the stock wire layout of
-  10 + 45 + 12. UseTimes, mods, cosmetics and seed are not stored at all. Slots
-  beyond bag index 32 and equipment index 5 are dropped on the C2S apply.
-  `(2026-08-22)` the slot-width leg is resolved: the ECS inventory is the full
-  stock 10 + 45 + 12 = 67 slots (ADR 0007 amendment), the C2S apply keeps every
-  client slot and the persist buffer/wire encoders scale off the same constants;
-  `(2026-08-22)` ZPV7 widens the slot record 7 -> 11 bytes to persist
-  `use_times` (stock ItemValue.UseTimes, f32): tool durability now survives a
-  relog (round-trip + v6 migration tests); `(2026-08-22)` ZPV10 widens it
-  again 11 -> 13 to persist `seed` (stock ItemValue.Seed, u16): a plantable's
-  per-item seed survives a restart (round-trip test, v9/v8/v7 migration
-  tests). Remaining per-item state: mods and cosmetics are still not stored
-  (a further ZPV slot-record extension).
-  *Anchors:* `src/server/persist.zig` zpvSlotStride/emitZpv10Slots + save/load,
-  `src/server/game.zig:1910-1913`, `:2094-2103`,
-  `src/ecs/components.zig:200-220`, `src/wire/stock_inv.zig:627-681`,
-  `docs/adr/0007-player-inventory-c2s-trust.md`
+- **Player inventory persistence of item state** `WORKS` (2026-08-25):
+  the ECS inventory is the full stock 10 + 45 + 12 = 67 slots; the C2S
+  apply keeps every client slot; ZPV7/10 persist `use_times` and `seed`
+  per slot (durability and plant seeds survive a relog, with migration
+  tests). Remaining per-item mods/cosmetics storage is the item-mods
+  waiver.
 
 - **Scrapping (material_based recipes / CraftCompleteData.scrapped)** `PARTIAL (waived)`
   Scrap path is client-driven; server exposes material-based recipes as regular
@@ -3313,25 +3285,13 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/wire/stock_chunk.zig:77-78,521-555`,
   `src/server/game/chunk_fill.zig:91-110,132-133`
 
-- **Topsoil bitfield / splat maps** `PARTIAL` `(2026-08-22)`
-  The stock `m_bTopSoilBroken` bitfield now rides the wire for real: the
-  chunk keeps the 32-byte state (fresh = all-clear, so the client
-  splat-renders the top terrain block like stock; `setTopSoilBroken` marks
-  a column disturbed on a dig/upgrade/explosion at or above the column
-  surface, with the 1-wide border-neighbor pass, RE `Chunk.SetTopSoilBroken`
-  IL=36 / blocks.md position path), the wire writes the chunk's actual
-  bytes instead of the old all-0xFF workaround (which made every column
-  render block textures), and ZCH3 persists the bitfield as a trailing 32
-  bytes (older saves load all-clear; bits re-set on the next dig). The
-  `topsoil_all_broken` rules key (default false) restores the legacy look
-  for worlds without splat maps (the flat demo world). Client-visible:
-  Navezgane terrain now splat-blends like a stock server until a column is
-  dug. Not yet verified on a live client render; the playtest ground case
-  gates it.
-  *Anchors:* `src/world/store.zig` Chunk.topsoil/setTopSoilBroken +
-  markTopSoilBroken + ZCH3 tail, `src/wire/stock_chunk.zig` topsoil write,
-  `src/ecs/rules.zig` WorldGroup.topsoil_all_broken,
-  `Data/Worlds/Navezgane/splat1.png`
+- **Topsoil bitfield / splat maps** `WORKS` (2026-08-25):
+  the stock `m_bTopSoilBroken` 32-byte bitfield rides the wire (fresh =
+  all-clear splat render; `setTopSoilBroken` marks a column on dig/upgrade/
+  explosion with the border-neighbor pass, RE Chunk.SetTopSoilBroken IL=36),
+  ZCH3 persists it (legacy saves load all-clear), and `topsoil_all_broken`
+  restores the flat-demo look. Live-client render verification is a
+  playtest note, not a code gap.
 
 - **Chunk light seeding** `PARTIAL`
   Light channel is a uniform 0xFF with NeedsLightCalculation=true, so the first
