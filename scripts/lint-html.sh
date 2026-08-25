@@ -9,7 +9,7 @@
 # scripts/lint-webui.sh type-checks (tsc) and lints (oxlint), so it is not
 # re-checked here.
 #
-# vnu runs through npx pinned by VNU_VERSION, the same convention as oxlint
+# vnu runs through bunx pinned by VNU_VERSION, the same convention as oxlint
 # (the repo does not track package.json / node_modules; see .gitignore
 # "opencode tooling only"). vnu-jar is a Java tool, so java is required.
 # Override locally: VNU_VERSION=26.8.20 bash scripts/lint-html.sh
@@ -37,4 +37,4 @@ if [ "${#html_files[@]}" -eq 0 ]; then
   exit 1
 fi
 
-npx --yes "vnu-jar@$vnu_version" --filterfile "$root/vnu-filter.txt" --also-check-css "${html_files[@]}"
+bunx "vnu-jar@$vnu_version" --filterfile "$root/vnu-filter.txt" --also-check-css "${html_files[@]}"

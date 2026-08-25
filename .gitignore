@@ -50,10 +50,11 @@ assets/fixtures/assignids_v314.txt
 .claude/
 .review-loop.lock
 
-# Installed npm packages (opencode tooling only; not part of the Zig build)
+# Installed bun/npm packages (opencode tooling only; not part of the Zig build)
 node_modules/
 package.json
 package-lock.json
+bun.lock
 
 # semcode index (rebuild with `semcode-index -s .`; not a product input)
 .semcode.db/

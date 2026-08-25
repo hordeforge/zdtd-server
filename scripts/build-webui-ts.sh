@@ -4,7 +4,7 @@
 # markers. Run this after editing a .ts source and commit the regenerated
 # pages; `make lint` fails when the committed pages are stale.
 #
-# tsc runs through npx pinned by TSC_VERSION (same convention as oxlint; the
+# tsc runs through bunx pinned by TSC_VERSION (same convention as oxlint; the
 # repo does not track package.json/node_modules). `zig build` never invokes
 # this script: the pages ship with the compiled JS inline (ADR 0018), so the
 # Zig build stays pure and offline.
@@ -12,7 +12,7 @@
 #
 # Usage: scripts/build-webui-ts.sh [--dest DIR]   (default: src/server/webui)
 #
-# Requires: node/npm (npx), python3 (already a make check requirement).
+# Requires: bun (bunx), python3 (already a make check requirement).
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 # Emit one classic script .js per source into $tmp (tsconfig: module none).
-npx --yes -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --outDir "$tmp"
+bunx -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --outDir "$tmp"
 
 python3 - "$tmp" "$dest" <<'PY'
 import pathlib

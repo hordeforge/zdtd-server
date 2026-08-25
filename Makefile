@@ -37,11 +37,11 @@ need-python3:
 	}
 
 # Webui JS gate: tsc type-check + oxlint over src/server/webui/ts, then page
-# freshness (scripts/lint-webui.sh). tsc/oxlint run through npx (version pins:
+# freshness (scripts/lint-webui.sh). tsc/oxlint run through bunx (version pins:
 # scripts/lint-webui.sh, scripts/build-webui-ts.sh).
 need-oxlint:
-	@command -v npx >/dev/null || { \
-	  echo "zdtd: missing required tool: npx (Node.js; for the webui TS/JS lint)" >&2; \
+	@command -v bunx >/dev/null || { \
+	  echo "zdtd: missing required tool: bunx (bun; for the webui TS/JS lint)" >&2; \
 	  exit 127; \
 	}
 
