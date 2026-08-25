@@ -474,9 +474,19 @@ area and the concrete work.
     `NetPackageEntitySpeeds`, lapsed by `sprint_stale_seconds`) drains Stamina,
     idle regenerates, and the changed value syncs as EntityStatChanged kind 1
     on the same throttle (`stamina_drain_per_second` /
-    `stamina_regen_per_second` tunables). Still open: core temperature,
-    wellness, and replacing the `applyEatProps` "drop food to 50% of max when
-    ≥ 85%" playtest workaround now that a real decrement loop exists.
+    `stamina_regen_per_second` tunables). **Core temperature RESOLVED
+    RE-informed (2026-08-25)**: stock splits temperature sharply - the server
+    owns the inputs and gates, the client owns the felt temperature and the
+    cold/hot buffs (`_coretemp`/`_outsidetemp`/`_sheltered` cvars +
+    weathersurvival.xml MinEvents on the local player, weather-environment.md
+    §4). The server leg is shipped: per-biome weather groups (with
+    temperature ranges, biomes.xml) roll into the NetPackageWeather slot-0
+    temperature and are sent on join + broadcast (weather.zig). A server-side
+    core-temp sim would diverge from stock - recorded as client-owned by
+    design, not a gap. Wellness likewise rides the client stat; the server's
+    role is the input gates. Still open: replacing the `applyEatProps` "drop
+    food to 50% of max when ≥ 85%" playtest workaround now that a real
+    decrement loop exists.
 
 23. ~~**Entities: add wandering hordes and the screamer heat map.**~~
     **DONE 2026-08-07** (verified against asm.il:416218 constants): the
