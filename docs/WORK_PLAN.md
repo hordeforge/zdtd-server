@@ -25,9 +25,10 @@ dispatch + challenges), T34 (crafting XP: verified near-zero in shipped
 data), T36 (BlockTrigger authority), T37 (bedroll respawn targeting;
 ownership persistence details are recorded PARTIAL/waived in the scorecard).
 Still open / recorded, not wired: T30 (drone companion — zero stock AITask
-uses, deferred), T35 (air-drop compass marker). T38 (always-on radius
-effects) shipped 2026-08-26. The per-task "Why" text below is historical;
-GAP/STATUS win on conflict.
+uses, deferred). T38 (always-on radius effects) shipped 2026-08-26; T35
+(air-drop marker) resolved 2026-08-26 (the entity-tied marker dies with the
+bag's EntityRemove). The per-task "Why" text below is historical; GAP/STATUS
+win on conflict.
 
 ---
 
@@ -845,13 +846,17 @@ likewise out of scope here.
 
 ## T35. Air-drop crates never get a compass marker
 
-**Status: landed 2026-08-10.** `tickAirDrop` (`src/server/game/tick.zig`)
-broadcasts `NetPackageNavObject` with the shipped `nav_object_classes.xml`
-`supply_drop` class alongside the existing loot-bag spawn, entity_id tied to
-the bag's net id. Covered by scenario "air drop pushes a supply_drop
-NavObject marker". Residual: the marker has no removal companion
-(`NetPackageEntityMapMarkerRemove`) when the crate is looted or expires, so
-it outlives the loot; not implemented, noted rather than silently dropped.
+**Status: DONE 2026-08-10 / residual resolved 2026-08-26.** `tickAirDrop`
+(`src/server/game/tick.zig`) broadcasts `NetPackageNavObject` with the
+shipped `nav_object_classes.xml` `supply_drop` class alongside the existing
+loot-bag spawn, entity_id tied to the bag's net id. Covered by scenario "air
+drop pushes a supply_drop NavObject marker". The former residual (no removal
+companion when the crate is looted or expires) is moot: the marker is an
+ENTITY-tied NavObject, and the client's NavObjectManager drops entity-tied
+nav objects when the tracked entity is removed - the bag's collect/expiry
+goes through the destroy path that sends EntityRemove, so the marker dies
+with the loot. `NetPackageEntityMapMarkerRemove` is the land-claim marker
+path (TEFeatureLandClaim / PersistentPlayerList), not the airdrop's.
 
 **Why:** `../../7dtd-engine-research/docs/map-objects.md` section 8: air-drop crates
 are stock's one server-push nav marker (`AIDirectorAirDropComponent.RefreshCrates`
