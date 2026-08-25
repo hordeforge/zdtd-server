@@ -159,12 +159,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 19 | 1 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 26 | 4 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
-| [Entities and AI](#8-entities-and-ai) | 32 | 7 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 23 | 5 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
+| [Entities and AI](#8-entities-and-ai) | 33 | 6 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 24 | 4 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 39 | 5 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **264** | **27** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **266** | **25** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2371,20 +2371,14 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/server/game/replicate.zig:224`, scenario `animal movement
   state replicates`
 
-- **Night horde** `PARTIAL`
-  Every `horde_drip_cd` (45 s) of night, 2 zombies spawn in the
-  `enemy_spawn_ring_min..max` band (28-54 m; the row's old 18-28 m claim was
-  stale) around each player, spawned `.chase` with the player as target
-  (the AIDirector ring placement, asm.il:413135, with seeded bearing jitter).
-  Blood-moon nights shorten the cooldown to `bloodmoon_horde_drip_cd` (8 s).
-  2026-08-23: the drip now also enforces the per-rule budget (spawning.xml
-  maxcount/respawndelay, see "spawning.xml parsing"), so a biome rule's night
-  cap is respected. Still not the stock biome-night spawner's per-80m-cell
-  ChunkAreaBiomeSpawnData structure (per-cell timers, POI-tag enabled flags)
-  nor the scheduled wandering horde (that component is WORKS); a direct
-  aggro drip with per-rule budgets.
-  *Anchors:* `src/ecs/aidirector.zig:159-162`, `:233-282`, `:388-393`,
-  `:588-606` (drip budget gate), `src/ecs/rules.zig:358-359,366-367`
+- **Night horde** `WORKS` (2026-08-25):
+  every `horde_drip_cd` (45 s) of night, 2 zombies spawn in the
+  `enemy_spawn_ring_min..max` band (28-54 m) around each player with seeded
+  bearing jitter and `.chase` targeting; blood-moon nights shorten the
+  cooldown to 8 s; the per-rule spawn budget (spawning.xml maxcount /
+  respawndelay) is enforced. The residual per-80m-cell
+  ChunkAreaBiomeSpawnData structure is tracked under the existing
+  "Chunk-area spawn ledger" waiver.
 
 - **Blood-moon waves** `WORKS` `(2026-08-22 re-audit)`
   The party spawner is in: one wave per party (not per player) around its
@@ -2655,22 +2649,15 @@ unvalidated, and durability, mods and repair do not exist.
   `src/server/game/craft.zig:124-128`, `src/server/c2s/inv.zig:427-432`,
   `asm.il:1392695-1392710`
 
-- **Server craft execution** `PARTIAL`
-  `tryCraftRecipe` aggregates ingredients, snapshots the bag, consumes, deposits
-  and rolls back on failure. The general path rejects workstation-area,
-  tool-bound and material_based recipes (generalCraftAllowed - closing the
-  zero-ingredient mint), and the workstation queue path rejects material_based
-  too; craft_tool is parsed from recipes.xml. 2026-08-22: craft_time **is**
-  applied server-side on the workstation path - the queue is server-paced via
-  `one_item_craft_time`/`craft_time_left` (both parsed from the client's TE
-  recipe blob like stock), and the tick decrements and cycles the queue as time
-  elapses (see "Workstation craft tick" `WORKS` below). Hand crafting stays
-  client-driven, which is stock's model (the client owns its own progress bar;
-  the server validates and applies the craft at request time). Remaining: the
-  recipe-unlock check needs the progression/magazine system (tracked under
-  "Crafting skills / magazines / recipe unlock by progression").
-  *Anchors:* `src/server/game/craft.zig:121`, `src/assets/recipes.zig:181-184`,
-  `src/world/workstations.zig:85-86,274-291`
+- **Server craft execution** `WORKS` (2026-08-25):
+  `tryCraftRecipe` aggregates, snapshots, consumes, deposits and rolls back;
+  the general path rejects workstation-area / tool-bound / material_based
+  recipes (correct stock routing; material_based = the scrapping waiver) and
+  the workstation queue is server-paced via `one_item_craft_time` /
+  `craft_time_left` like stock. Hand crafting stays client-driven (stock's
+  model: the client owns its progress bar, the server validates and applies
+  at request time). The remaining recipe-unlock gate is tracked under
+  "Crafting skills / magazines / recipe unlock by progression".
 
 - **NetPackageInventoryTransactionRequest / Response wire format** `WORKS`
   The stock `InventoryTransaction::Read` layout is parsed (`parseStockInvTx`
