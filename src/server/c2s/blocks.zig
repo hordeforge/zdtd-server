@@ -2,6 +2,7 @@
 //! Extracted from the old c2s/inv.zig tail (643-991) verbatim.
 
 const std = @import("std");
+const chunk_fill = @import("../game/chunk_fill.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -90,6 +91,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // (RE items.md AddLevelExp(material.Experience * count)).
                     const hxp = self.harvestXpForBlock(cur_id);
                     if (hxp > 0) self.awardXp(c.slot, hxp);
+                    // A broken container spills its pre-filled contents.
+                    chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                 }
             } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
                 const wire_abs = b.damage;
@@ -118,6 +121,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // Harvest XP: material.Experience for the broken block.
                     const hxp = self.harvestXpForBlock(base_cur);
                     if (hxp > 0) self.awardXp(c.slot, hxp);
+                    // A broken container spills its pre-filled contents.
+                    chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                     place_id = 0;
                     out_dmg = 0;
                     self.clearBlockHp(b.x, b.y, b.z);

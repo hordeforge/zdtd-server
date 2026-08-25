@@ -391,6 +391,32 @@ pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void 
 /// as an EntityLootContainer bag at +0.5,0.75,+0.5 and destroys the block.
 /// Fires from the C2S LockRequest unlock path; no-op for containers without
 /// a known loot def or a non-destroying def.
+/// A broken container spills its contents like the eviction path below
+/// ("Drop the remaining contents"): the pre-filled contents ARE the block's
+/// loot (all 449 LootList blocks are CompositeTileEntity containers; rolling
+/// the list again would double-loot, and maxdamage.lootListFor already
+/// resolves it for the pre-fill). No-op when the block has no live container.
+pub fn tryContainerSpill(self: *Game, x: i32, y: i32, z: i32) void {
+    const pos = containers_mod.PosKey{ .x = x, .y = y, .z = z };
+    const cont = self.containers.get(pos) orelse return;
+    var drop_inv: ecs.components.Inventory = .{};
+    var n: usize = 0;
+    for (cont.slots) |s| {
+        if (s.count > 0 and s.item_id != 0 and n < ecs.components.max_inv_slots) {
+            drop_inv.slots[n] = s;
+            n += 1;
+        }
+    }
+    self.containers.remove(pos);
+    if (n == 0) return;
+    const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+    const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
+    const fz: f32 = @as(f32, @floatFromInt(z)) + 0.5;
+    if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, n)) |bag_nid| {
+        self.broadcastLootSpawn(bag_nid) catch {};
+    }
+}
+
 pub fn maybeDestroyContainerOnClose(self: *Game, x: i32, y: i32, z: i32) void {
     const pos = containers_mod.PosKey{ .x = x, .y = y, .z = z };
     const cont = self.containers.get(pos) orelse return;

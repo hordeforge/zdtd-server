@@ -22,6 +22,8 @@ const wire_frame = @import("../../wire/frame.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const replicate_te = @import("../replicate_te.zig");
+const containers_mod = @import("../../world/containers.zig");
+const chunk_fill_mod = @import("../game/chunk_fill.zig");
 const c2s_misc = @import("../c2s/misc.zig");
 const plugin_api = @import("../../plugin/api.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
@@ -3517,4 +3519,35 @@ test "perk StaminaChangeOT joins the idle regen and StaminaMax applies" {
     const gained = g.sim.health[ps].stamina - before;
     // dt at 20 TPS = 0.05 s: (8 + 0.45) x 0.05 = 0.4225 per tick.
     try std.testing.expect(gained > 0.4 and gained < 0.45);
+}
+
+test "breaking a container spills its pre-filled contents" {
+    // 449 LootList blocks are CompositeTileEntity containers; their contents
+    // live in the sim container store and must drop on break (the eviction
+    // path spilled them; the break path dropped nothing).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&capture);
+    const pos = containers_mod.PosKey{ .x = 10, .y = 70, .z = 20 };
+    const cont = g.containers.getOrCreate(pos, 8, 1) orelse return error.TestUnexpectedResult;
+    cont.slots[0] = .{ .item_id = 2, .count = 3, .quality = 1 };
+    chunk_fill_mod.tryContainerSpill(g, 10, 70, 20);
+    // The store entry is gone and a loot bag carries the item.
+    try std.testing.expect(g.containers.get(pos) == null);
+    var found = false;
+    for (g.sim.alive, 0..) |alive, i| {
+        if (!alive or !g.sim.mask[i].loot_bag or !g.sim.mask[i].inventory) continue;
+        for (g.sim.inventory[i].slots) |sl| {
+            if (sl.item_id == 2 and sl.count == 3) found = true;
+        }
+    }
+    try std.testing.expect(found);
 }
