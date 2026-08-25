@@ -368,6 +368,12 @@ instead of breaking - on every damage path (player dig, zombie chew/dig,
 explosion) - while the C2S swap report accepts the downgrade target like the
 upgrade target (no arbitrary swaps). World 31/11/6 -> **32/10/6**; total
 **233/62/38**.
+Then the join-phase wire re-audit (2026-08-26) closed the PlayerId and
+PlayerSpawnedInWorld rows: both bodies match the stock write IL exactly
+(PlayerId = id, teamNumber, full PlayerDataFile.WriteNetwork, chunkViewDim;
+PlayerSpawnedInWorld = respawnReason, position Vector3i, entityId), and the
+RequestToSpawnPlayer row was re-scoped (chunkViewDim parsed; the client
+PlayerProfile blob skipped - the server owns the profile).
 Then the prefab-authored-block-damage row went WORKS: the TTS damage plane
 (u16 absolute HP per cell, v>8) is no longer decoded-and-dropped - the paint
 path passes it through set_block into the chunk damage plane (both the world

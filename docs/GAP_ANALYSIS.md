@@ -4571,9 +4571,9 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 | `NetPackagePackageIds` map | HAVE | **negotiated** 189-name list (full stock subset) |
 | `NetPackagePlayerLogin` parse | PARTIAL | full field walk (asm.il 832140): name + both `PlatformUserIdentifierAbs`; auth tokens skipped (no authorizer chain) |
 | `PlayerLoginAnswer` | HAVE | simple ok/fail string |
-| `PlayerId` | PARTIAL | may not match stock body |
-| `PlayerSpawnedInWorld` | PARTIAL | spawn coords; not full stock fields |
-| `RequestToSpawnPlayer` | PARTIAL | ignores chunk view dim / profile v5 |
+| `PlayerId` | WORKS (2026-08-26 re-audit: body matches stock write IL=21 exactly - id:i32, teamNumber:i16, full PlayerDataFile.WriteNetwork (quests, unlocked recipes, toolbelt, bag, gameStageBornAtWorldTime sentinel), chunkViewDim:i32; the production join sends the full PDF via buildPlayerIdBodyInvLoaded) |
+| `PlayerSpawnedInWorld` | WORKS (2026-08-26 re-audit: body matches stock write IL=16 exactly - respawnReason:i32, position Vector3i, entityId:i32) |
+| `RequestToSpawnPlayer` | PARTIAL (2026-08-26: chunkViewDim i16 parsed (stock read IL=13); the client's PlayerProfile blob is skipped - the server owns the profile, the client's copy is display-only - and nearEntityId is read from the tail as a best-effort (unused server-side)) |
 | Platform auth (EOS / Steam ticket) | PARTIAL - non-client-visible (documented 2026-08-21: the EAC-off direct-join flow needs no platform ticket; stock auth is a platform handshake the dedicated server performs, out of the client-observable surface) |
 | Server password | HAVE | LiteNet Connect key (`ConnectionRequestCheck`); rejectInvalidPassword `[0,0]` |
 | Encryption (`Encryption*`) | PARTIAL - non-client-visible (documented 2026-08-21: optional platform RSA+AES residual, not ServerPassword; the EAC-off join works without it) |
