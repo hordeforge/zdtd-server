@@ -416,9 +416,9 @@ pub const Client = struct {
     skill_points: u32 = 0,
     /// Purchased progression levels by name (attributes/perks). `name` must
     /// point to static/indefinite-lifetime data (the progression table
-    /// arena). NOT persisted yet: players.zsv carries level/XP only, so
-    /// purchases reset on restart (ZPV10 tracked in the player-progression
-    /// GAP row; the spend ledger is server-validated while the session runs).
+    /// arena). Persisted via the players.zsv ZPV11 skill tail (skill_points +
+    /// levels), restored by resolving names against the catalog (fail-closed
+    /// when a mod removed the perk).
     skill_levels: [max_skill_levels]SkillLevel = [_]SkillLevel{.{}} ** max_skill_levels,
     skill_level_n: u8 = 0,
     /// Per-player blood-moon-music eligibility edge state (stock

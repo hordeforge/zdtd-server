@@ -15,6 +15,7 @@ const io_fs = @import("../util/io_fs.zig");
 const wire_binary = @import("../wire/binary.zig");
 const ecs = @import("../ecs/root.zig");
 const clock = @import("../util/clock.zig");
+const assets_progression = @import("../assets/progression.zig");
 const util_sim = @import("../util/sim.zig");
 const max_land_claims = game_mod.max_land_claims;
 
@@ -81,7 +82,10 @@ pub const Zpv2Drop = struct {
 /// keeps the player's wounds; 9 (ZPV9) adds `born_world_time` (u64) so
 /// days-alive (and the gamestage) survives a restart. 10 (ZPV10) appends
 /// `seed` (u16) to each inventory slot record so a plantable's seed
-/// survives a restart (magic byte 'A' after "ZPV"). The bedroll field is
+/// survives a restart (magic byte 'A' after "ZPV"); 11 (ZPV11, magic byte
+/// 'B') appends the skill tail (`skill_points:u32 | skill_n:u8 |
+/// skill_n×(name_len:u8, name, level:u8)`) after the bedroll so purchased
+/// attribute/perk levels survive a restart. The bedroll field is
 /// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
@@ -185,6 +189,29 @@ fn emitZpv9Tail(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []co
     try out.appendSlice(allocator, old[rest..tail_end]);
 }
 
+/// ZPV11 skill tail: `skill_points:u32 | skill_n:u8 | skill_n×(name_len:u8,
+/// name, level:u8)`. Purchased attribute/perk levels survive a restart so
+/// the spend ledger and the level-scaled VM effects restore. Carried records
+/// (null client) emit the empty tail: they predate purchase persistence.
+fn emitZpv11Skills(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    var sp: u32 = 0;
+    var levels: []const assets_progression.SkillLevel = &.{};
+    if (cl) |c| {
+        sp = c.skill_points;
+        levels = c.skill_levels[0..c.skill_level_n];
+    }
+    var tmp: [4]u8 = undefined;
+    std.mem.writeInt(u32, &tmp, sp, .little);
+    try out.appendSlice(allocator, &tmp);
+    try out.append(allocator, @intCast(@min(levels.len, std.math.maxInt(u8))));
+    for (levels[0..@min(levels.len, std.math.maxInt(u8))]) |sl| {
+        const nl = @min(sl.name.len, 63);
+        try out.append(allocator, @intCast(nl));
+        try out.appendSlice(allocator, sl.name[0..nl]);
+        try out.append(allocator, sl.level);
+    }
+}
+
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
     if (off >= data.len) return error.CorruptPlayersFile;
     const nl: usize = data[off];
@@ -222,6 +249,19 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
                 if (bed_present == 1) {
                     if (p + 12 > data.len) return error.CorruptPlayersFile;
                     p += 12;
+                }
+            }
+            if (version >= 11) {
+                if (p + 5 > data.len) return error.CorruptPlayersFile;
+                p += 4; // skill_points
+                const skill_n: usize = data[p];
+                p += 1;
+                var si: usize = 0;
+                while (si < skill_n) : (si += 1) {
+                    if (p >= data.len) return error.CorruptPlayersFile;
+                    const snl: usize = data[p];
+                    if (snl > 63 or p + 1 + snl + 1 > data.len) return error.CorruptPlayersFile;
+                    p += 1 + snl + 1;
                 }
             }
         }
@@ -292,7 +332,8 @@ pub fn playersPath(self: *const Game, buf: []u8) ![]const u8 {
 ///   hp:f32 (v8+) | born_world_time:u64 (v9+) |
 ///   buff_n:u8 | buff_n×(def_id:u16, stack:u8, flags:u8, dur_ticks:u32,
 ///   upd_ticks:u16, upd_rate:i32, dur_max:f32, remove_on_death:u8) |
-///   bed_present:u8 (1 = present) | bed_present×(bed_x,bed_y,bed_z:i32)
+///   bed_present:u8 (1 = present) | bed_present×(bed_x,bed_y,bed_z:i32) |
+///   (v11+) skill_points:u32 | skill_n:u8 | skill_n×(name_len:u8, name, level:u8)
 /// v5 journal entries add the quest **name** (the stock Quest.Write identity,
 /// so a quests.xml edit no longer reshuffles a saved quest into a different
 /// one) and the POI rect (stock PositionData[2/3], so a restored quest keeps
@@ -320,9 +361,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B'))
             return error.CorruptPlayersFile;
-        old_version = if (old_data[3] == 'A') 10 else old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -335,7 +376,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'A', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'B', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -363,9 +404,12 @@ pub fn savePlayers(self: *Game) !void {
                 break;
             }
             if (rewritten) continue;
-            if (old_version == 10) {
-                // v10 records are the current shape: carry verbatim.
+            if (old_version >= 10) {
+                // v10 records are v11-shaped except the skill tail: carry
+                // verbatim, then emit the empty tail (predates purchases).
+                // v11 is the current shape - carried byte-for-byte.
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                if (old_version == 10 and had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -377,6 +421,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
                 try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..off]);
+                if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -391,6 +436,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 8);
+                if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -407,6 +453,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 7);
+                if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -421,6 +468,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 6);
+                if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -508,6 +556,7 @@ pub fn savePlayers(self: *Game) !void {
             } else if (old_version < 4 and had_prog_tail) {
                 try out.append(self.allocator, 0);
             }
+            if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
             written += 1;
         }
     }
@@ -598,7 +647,9 @@ pub fn savePlayers(self: *Game) !void {
         rec[j_start] = jn;
         // ZPV3 progression tail: level/xp/survival stats + active buffs.
         // Best-effort like inv/journal: a full record simply truncates.
+        var tail_has_prog = false;
         if (o + 2 + 8 + 16 + 1 <= rec.len) {
+            tail_has_prog = true;
             rec[o] = 1;
             o += 1;
             std.mem.writeInt(u16, rec[o..][0..2], cl.level, .little);
@@ -668,6 +719,10 @@ pub fn savePlayers(self: *Game) !void {
             o += 1;
         }
         try out.appendSlice(self.allocator, rec[0..o]);
+        // ZPV11 skill tail rides the progression tail: appended after the
+        // record bytes, only when prog == 1 (zpvRecordLen walks it the same
+        // way). Appending before the record would misalign the next record.
+        if (tail_has_prog) try emitZpv11Skills(&out, self.allocator, cl);
         written += 1;
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
@@ -706,12 +761,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = if (data[3] == 'A') 10 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -987,6 +1042,46 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                         off += 4;
                     } else {
                         c.has_bed = false;
+                    }
+                }
+                // ZPV11 skill tail: purchased attribute/perk levels restore so
+                // the spend ledger and the level-scaled VM effects survive.
+                // Names resolve against the progression catalog (arena
+                // lifetime); a name the catalog no longer carries is dropped
+                // fail-closed (a mod removed the perk).
+                if (version >= 11 and off + 5 <= data.len) {
+                    c.skill_points = std.mem.readInt(u32, data[off..][0..4], .little);
+                    off += 4;
+                    const skill_n: usize = data[off];
+                    off += 1;
+                    var si: usize = 0;
+                    while (si < skill_n and c.skill_level_n < c.skill_levels.len) : (si += 1) {
+                        if (off >= data.len) break;
+                        const snl: usize = data[off];
+                        off += 1;
+                        if (snl == 0 or snl > 63 or off + snl + 1 > data.len) break;
+                        const sname = data[off..][0..snl];
+                        off += snl;
+                        const slevel = data[off];
+                        off += 1;
+                        var resolved: ?[]const u8 = null;
+                        for (self.progression_table.attributes) |a| {
+                            if (std.mem.eql(u8, a.name, sname)) {
+                                resolved = a.name;
+                                break;
+                            }
+                        }
+                        if (resolved == null) {
+                            for (self.progression_table.perks) |pk| {
+                                if (std.mem.eql(u8, pk.name, sname)) {
+                                    resolved = pk.name;
+                                    break;
+                                }
+                            }
+                        }
+                        const rname = resolved orelse continue;
+                        c.skill_levels[c.skill_level_n] = .{ .name = rname, .level = slevel };
+                        c.skill_level_n += 1;
                     }
                 }
             }

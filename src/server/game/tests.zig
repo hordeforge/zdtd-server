@@ -23,6 +23,7 @@ const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const replicate_te = @import("../replicate_te.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
+const assets_progression = @import("../../assets/progression.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
@@ -225,7 +226,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -290,6 +291,123 @@ test "players zpv9 round-trips game-stage born time (days-alive) across restart"
     }
 }
 
+test "players zpv11 round-trips skill points and purchased perk levels" {
+    // The spend ledger (skill_points + skill_levels) must survive a restart
+    // so the level-scaled VM effects restore: purchases are no longer lost.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        cl.skill_points = 3;
+        cl.skill_levels[0] = .{ .name = "perkLightEater", .level = 2 };
+        cl.skill_levels[1] = .{ .name = "attGeneral", .level = 1 };
+        cl.skill_level_n = 2;
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        // The restore resolves ledger names against the progression catalog
+        // (arena lifetime); give the second Game the same tree.
+        const attrs = [_]assets_progression.AttrDef{
+            .{ .name = "attGeneral", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
+        };
+        const perks = [_]assets_progression.PerkDef{
+            .{ .name = "perkLightEater", .max_level = 5, .parent_attr = "attGeneral" },
+        };
+        g.progression_table.attributes = &attrs;
+        g.progression_table.perks = &perks;
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        try std.testing.expectEqual(@as(u32, 3), cl.skill_points);
+        try std.testing.expectEqual(@as(u8, 2), cl.skill_level_n);
+        try std.testing.expectEqualStrings("perkLightEater", cl.skill_levels[0].name);
+        try std.testing.expectEqual(@as(u8, 2), cl.skill_levels[0].level);
+        try std.testing.expectEqualStrings("attGeneral", cl.skill_levels[1].name);
+        try std.testing.expectEqual(@as(u8, 1), cl.skill_levels[1].level);
+    }
+}
+
+test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" {
+    // A v10 ('A') file has no skill tail; the save must append the empty
+    // tail (skill_points 0, skill_n 0) so the v11 record walk stays aligned
+    // and the record length is consistent across the carried boundary.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    // Hand-build the smallest v10 file: one record, no inventory/journal, a
+    // v3 tail (prog 0), no bedroll (v4+ presence byte 0).
+    var buf: [128]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[0..4], "ZPVA");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little); // record count
+    o += 4;
+    const name = "tester";
+    buf[o] = @intCast(name.len);
+    o += 1;
+    @memcpy(buf[o..][0..name.len], name);
+    o += name.len;
+    @memset(buf[o..][0..16], 0); // x,y,z f32s + coins
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 1; // prog 1: a real progression tail
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // level
+    o += 2;
+    std.mem.writeInt(u64, buf[o..][0..8], 12345, .little); // xp
+    o += 8;
+    @memset(buf[o..][0..16], 0); // food/max/water/max
+    o += 16;
+    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 1.0)), .little); // hp (v8+)
+    o += 4;
+    @memset(buf[o..][0..8], 0); // born_world_time (v9+)
+    o += 8;
+    buf[o] = 0; // buff_n
+    o += 1;
+    buf[o] = 0; // bed_present 0
+    o += 1;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        // Saving carries the v10 record (no joined client matches its name)
+        // and must re-emit it with the ZPV11 header + empty skill tail.
+        try g.savePlayers();
+    }
+    const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqual(@as(u8, 'B'), data[3]);
+    // Record length via the v11 walker: name(7) + 16 + inv(1) + jn(1) +
+    // prog(1) + level(2) + xp(8) + stats(16) + hp(4) + born(8) + buff_n(1) +
+    // bed(1) + skills(5).
+    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5), game_mod.zpvRecordLen(data, 8, 11));
+}
+
 test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     // Hand-built ZPV8 file with a tail (prog, level, xp, stats, hp). The save
     // must insert born_world_time=0 (the pre-ZPV9 days-alive behavior) so the
@@ -348,7 +466,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -434,7 +552,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -520,7 +638,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -824,7 +942,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVA", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.
