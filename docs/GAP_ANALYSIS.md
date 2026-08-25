@@ -1086,7 +1086,7 @@ parsed, and quest offering is unwired.
   (root `quality_mod` parses into `TraderInfo.quality_min/max_mod`; buy/sell
   prices lerp by the item quality at fill and on the non-stocked sell hook,
   so the transaction matches the client display; see the pricing row).
-  `PercentUsesLeft` (EffectManager MaxUseTimes) stays RE-blocked.
+  `PercentUsesLeft` is WIRED (2026-08-22+: hooks.percentUsesLeft computes 1 - use_times/max_use with the quality-lerped DegradationMax tier pair, RE get_MaxUseTimesBase IL=25 + ItemValue.PercentUsesLeft IL=17; the sell path multiplies the base by it, so a worn tool sells for less).
   2026-08-22: `quest_tier_mod` (stock root `0,0.05,...,0.3`) parses and
   feeds the quest reward roll - GetRewardItem rolls with gameStage =
   GetTraderStage(tier) = Level*(1+quest_tier_mod[tier-1]) (RE progression.md
@@ -3619,9 +3619,12 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Count, DeadZone and ExpiryTime are enforced at registration / day roll
   (`claimAllowed` + `expireClaims`); DecayMode and OfflineDelay parse from
   serverconfig with stock defaults and feed the GameStats blob the client
-  displays. The offline keystone-damage rate beyond expiry is RE-blocked
-  (not documented in 7dtd-engine-research), recorded here rather than
-  guessed.
+  displays. The offline keystone-damage rate beyond expiry stays RE-gapped
+  (2026-08-26 re-audit: EnumLandClaimDecayMode = DecaySlowly/DecayQuickly/
+  BuffedUntilExpired is pinned, but no reader of the stat or the claim-decay
+  executor is in the dump set - a targeted dump of the claim day-roll/decay
+  damage application is needed before wiring; recorded here rather than
+  guessed).
 
 - **Land claim owner_online tracking** `WORKS`
   `markClaimsForEntity` sets `owner_online` false on disconnect and true on join,
