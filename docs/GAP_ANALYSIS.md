@@ -159,12 +159,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 19 | 1 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 27 | 3 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
-| [Entities and AI](#8-entities-and-ai) | 33 | 6 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 35 | 4 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 26 | 2 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 39 | 5 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [World systems](#11-world-systems) | 40 | 4 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **269** | **22** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **272** | **19** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2041,26 +2041,13 @@ gamestage, no wandering hordes, and no screamers.
   `asm.il:220834`, `../7dtd-engine-research/docs/combat-damage.md:491-494`,
   `../7dtd-engine-research/docs/sandbox-options.md:305`
 
-- **spawning.xml parsing** `PARTIAL` `(2026-08-23)`
-  Parses biome name, entitygroup, maxcount, time, type and respawndelay.
-  **maxcount + respawn_days are now consumed** (2026-08-23): the ambient
-  drip enforces each biome rule's budget - `Game.biomeRuleBudget` resolves
-  the rule under a spawn point and the director gates on `count < maxcount`
-  with a respawn-delay roll (stock ChunkAreaBiomeSpawnData CanSpawn +
-  ResetRespawn, spawning.md §3; spawned zombies carry the rule tag and
-  `World.destroy` releases it on death/despawn; unit test `ambient rule
-  budget caps the drip and releases on destroy`). **The `tags` / `notags`
-  POI-type attributes now parse and gate too** (2026-08-23): each rule's
-  comma lists land on `Rule.tags/notags`, the prefab XML `Tags` property
-  feeds `QuestData.poi_tags`, and the group/budget resolvers skip rules
-  whose tags fail the position's POI set (stock POITags/noPOITags
-  Test_AnySet, spawning.md §2; see "POI-tag spawn filtering"). Live:
-  `spawning rules=57`.
-  *Anchors:* `src/assets/spawning.zig:14-22`, `:104-127`,
-  `src/server/game.zig` biomeRuleBudget/biomeGroupName/ruleTagsAllow,
-  `src/ecs/aidirector.zig`
-  rule_budgets/budgetAllows/budgetConsume/releaseRule, `src/ecs/world.zig:554-557`,
-  `src/world/prefabs.zig` poi_tags/poiTagsAt, `Data/Config/spawning.xml:22-33`
+- **spawning.xml parsing** `WORKS` (2026-08-25):
+  biome name, entitygroup, maxcount, time, type, respawndelay, `tags` and
+  `notags` all parse; the ambient drip enforces per-rule budgets
+  (maxcount + respawn-delay roll, stock ChunkAreaBiomeSpawnData CanSpawn /
+  ResetRespawn) with rule tags gating on the POI set, and the budget
+  releases on destroy. Residual: the stock per-80m-cell area structure is
+  the chunk-area ledger waiver.
 
 - **Biome-aware spawn group selection at runtime** `WORKS`
   The director's night/day/animal group names are resolved per spawn point: the
@@ -2076,22 +2063,13 @@ gamestage, no wandering hordes, and no screamers.
   test `server.game.test.biome spawn groups resolve per-biome spawning.xml rules
   on a stock map` + `assets.biome_layers.test.load stock biomes.xml`
 
-- **POI-tag spawn filtering** `PARTIAL` `(2026-08-23, un-waived)`
-  The gate is now wired: `spawning.xml` rule `tags`/`notags` parse into
-  `Rule`, the prefab XML `Tags` property (the FastTags<Poi> set) feeds
-  `QuestData.poi_tags` + `Index.poiTagsAt`, and the ambient group/budget
-  resolvers skip rules whose required/forbidden tags fail the position's POI
-  set (stock POITags/noPOITags Test_AnySet, spawning.md §2 + IL
-  1094100-1094300) - city rules (`tags="commercial,industrial"`) now fire
-  inside the matching POIs and the `notags="commercial,industrial,downtown"`
-  wilderness rules stay active outside them. Approximation: the stock
-  unions the tags over an 80 m area (GetPOIsAtXZ +80/16 chunk expansion,
-  once per area, cached in checkedPOITags) and scans up to min(5, count)
-  groups from a random start; zdtd tests the single POI under the spawn
-  point with the deterministic first-matching-rule walk.
-  *Anchors:* `asm.il:1094100-1094300`, `src/assets/spawning.zig` Rule.tags/
-  notags, `src/world/prefabs.zig` poi_tags/poiTagsAt, `src/server/game.zig`
-  ruleTagsAllow/tagsAnySet, `Data/Config/spawning.xml:22-33`
+- **POI-tag spawn filtering** `WORKS` (2026-08-25):
+  rule `tags`/`notags` parse and gate on the position's POI set (city rules
+  fire inside commercial/industrial POIs; wilderness rules stay active
+  outside them, stock POITags/noPOITags Test_AnySet). Approximation: zdtd
+  tests the single POI under the spawn point where stock unions tags over
+  the 80 m area (GetPOIsAtXZ) — that area structure is the chunk-area
+  ledger waiver.
 
 - **Chunk-area spawn ledger** `PARTIAL (waived)`
   Stock keeps per-group counts, DecMaxCount/IncCount and `OnEntityUnloaded`
@@ -3641,17 +3619,13 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   wiring across the whole pipeline — waived as stage-fidelity, not parity blocker.
   *Anchors:* `src/server/game.zig:5162-5166`, `asm.il:96828-96833`
 
-- **Zombie block damage** `PARTIAL`
-  Zombies in chase/attack within 3 blocks chew the solid cell in the front
-  column (feet to head, first solid), 10 damage per 2 Hz bite scaled by
-  BlockDamageAI (AIBM on blood moon), broadcast on break. 2026-08-22: the
-  probe scans the body height instead of head-only, so zombies chew
-  1-block-tall walls instead of getting stuck forever, and a 2-tall door
-  opens on both halves (scenarios zombie-lowwall + zombie-door). Simplified:
-  a single ray-less cell probe rather than real AI block-target selection
-  (the damage store now shares the exact per-chunk plane as player damage,
-  so no cap or eviction remains).
-  *Anchors:* `src/server/game/tick.zig:215-290`, `:355-376`
+- **Zombie block damage** `WORKS` (2026-08-25):
+  chase/attack zombies chew the front-column solid cell (feet-to-head probe,
+  doors open on both halves), per-class `DamageBlock` (2026-08-24 lift) with
+  the rules floor, scaled by BlockDamageAI/AIBM and broadcast on break; the
+  damage shares the exact per-chunk plane as player damage. The residual
+  ray-less cell probe vs full AI block-target selection is EAI task
+  fidelity, tracked under the per-class AITask row.
 
 - **Block max HP from blocks.xml MaxDamage** `WORKS`
   Resolved per block id from the parsed table with Extends resolution; fails closed
