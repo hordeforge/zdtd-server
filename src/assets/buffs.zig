@@ -163,7 +163,7 @@ pub const Table = struct {
     }
 };
 
-fn parseOp(s: []const u8) Op {
+pub fn parseOp(s: []const u8) Op {
     if (std.mem.eql(u8, s, "base_set")) return .base_set;
     if (std.mem.eql(u8, s, "base_add")) return .base_add;
     if (std.mem.eql(u8, s, "perc_set")) return .perc_set;
@@ -202,7 +202,7 @@ fn parseBoolAttr(s: []const u8, default: bool) bool {
     return default;
 }
 
-fn firstF32(s: []const u8) f32 {
+pub fn firstF32(s: []const u8) f32 {
     const comma = std.mem.findScalar(u8, s, ',') orelse s.len;
     return std.fmt.parseFloat(f32, std.mem.trim(u8, s[0..comma], " \t")) catch 0;
 }
@@ -515,15 +515,15 @@ fn addDeltas(a: *TrackedDeltas, b: TrackedDeltas) void {
     }
 }
 
-/// Fold one buff's passive_effect rows over the tracked surface.
+/// Fold a passive_effect list over the tracked surface.
 /// `base_add`/`base_subtract` are flat deltas; `perc_*` keep the raw XML
 /// fraction (the survival loop applies `fraction x base / 100` per second -
 /// the pre-VM arithmetic, unchanged). `base_set` and any other op over a
 /// tracked name are omitted: without the per-entity base value the delta is
 /// not defined (recorded, not guessed).
-pub fn trackedDeltas(def: *const BuffDef) TrackedDeltas {
+pub fn trackedDeltasFrom(passives: []const Passive) TrackedDeltas {
     var out: TrackedDeltas = .{};
-    for (def.passives) |p| {
+    for (passives) |p| {
         const field = blk: {
             for (tracked_names) |t| {
                 if (std.mem.eql(u8, t.name, p.name)) break :blk t.field;
@@ -539,6 +539,12 @@ pub fn trackedDeltas(def: *const BuffDef) TrackedDeltas {
         }
     }
     return out;
+}
+
+/// Fold one buff's passive_effect rows over the tracked surface (the buff
+/// variant of trackedDeltasFrom).
+pub fn trackedDeltas(def: *const BuffDef) TrackedDeltas {
+    return trackedDeltasFrom(def.passives);
 }
 
 /// Sum of the tracked deltas over an entity's active buffs (revertible by
@@ -604,6 +610,22 @@ pub fn hpLossPerSecond(def: *const BuffDef) f32 {
         return m.value / secs;
     }
     return 0;
+}
+
+/// Combined HP-loss rate (per real second) for the active stage-3 survival
+/// buffs: stock applies `ModifyStats Health subtract` on each stage-3 buff's
+/// update, so the rate is the active buff's row over its update interval.
+/// Stock names stay in the loader (xml-audit); the survival loop just passes
+/// its resolved stages.
+pub fn stage3HpLossPerSecond(t: *const Table, stages: SurvivalStages) f32 {
+    var per_s: f32 = 0;
+    if (stages.hungry == 3) {
+        if (t.byName("buffStatusHungry03")) |d| per_s = @max(per_s, hpLossPerSecond(&d));
+    }
+    if (stages.thirsty == 3) {
+        if (t.byName("buffStatusThirsty03")) |d| per_s = @max(per_s, hpLossPerSecond(&d));
+    }
+    return per_s;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {

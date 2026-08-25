@@ -1,15 +1,20 @@
-//! progression.xml: level curve + attribute/perk catalog (names, max levels, costs).
-//! Full perk requirement graphs / effect application is progressive; catalog is loaded.
+//! progression.xml: level curve + attribute/perk catalog (names, max levels,
+//! costs) + the perk/attribute passive_effect rows (the 649-row surface the
+//! passive-effects VM folds over its tracked stats). Perk requirement graphs
+//! and effect application are progressive; the catalog + effect rows are loaded.
 
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const buffs = @import("buffs.zig");
 
 pub const max_attrs: usize = 16;
 pub const max_perks: usize = 512;
 pub const max_skills: usize = 64; // crafting skills (stock 23)
+/// passive_effect rows per perk/attribute body (stock bodies stay well under).
+pub const max_passives_per_def: usize = 32;
 
 /// Level-curve defaults used before progression.xml loads (stock XML wins at
 /// runtime; assets/progression.zig parses the shipped curve). These mirror the
@@ -51,6 +56,10 @@ pub const AttrDef = struct {
     max_level: u8 = 10,
     base_cost: u16 = 1,
     cost_mult: f32 = 1.14,
+    /// passive_effect rows in the attribute body (progression.xml). The VM
+    /// folds the tracked subset (buffs.trackedDeltasFrom); attribute state is
+    /// not applied yet (perk runtime open), parsed so the surface is data.
+    passives: []const buffs.Passive = &.{},
 };
 
 /// Perk catalog row; max_level default 5 before progression.xml loads (stock
@@ -60,6 +69,10 @@ pub const PerkDef = struct {
     max_level: u8 = 5,
     /// Parent attribute name if nested under one; empty if free.
     parent_attr: []const u8 = "",
+    /// passive_effect rows in the perk body (progression.xml). The VM folds
+    /// the tracked subset (buffs.trackedDeltasFrom); perk state is not applied
+    /// yet (perk runtime open), parsed so the effect surface is data.
+    passives: []const buffs.Passive = &.{},
 };
 
 /// One `<unlock_entry item="a,b" unlock_tier="N"/>` row: the named items'
@@ -122,6 +135,34 @@ fn parseCurve(clean: []const u8) LevelCurve {
     return c;
 }
 
+/// Scan a perk/attribute body for `<passive_effect name operation value>`
+/// rows (mirror of buffs.zig's parse; curve values keep their first segment).
+fn scanPassives(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    pool: *std.ArrayList(buffs.Passive),
+) !usize {
+    const p0 = pool.items.len;
+    var j: usize = 0;
+    while (j < body.len and pool.items.len - p0 < max_passives_per_def) {
+        const pi = std.mem.findPos(u8, body, j, "<passive_effect ") orelse break;
+        const en = xml.attr(body, pi, "name") orelse {
+            j = pi + 16;
+            continue;
+        };
+        const op_s = xml.attr(body, pi, "operation") orelse "base_add";
+        const val_s = xml.attr(body, pi, "value") orelse "0";
+        try pool.append(allocator, .{
+            .name = try arena.dupe(u8, en),
+            .op = buffs.parseOp(op_s),
+            .value = buffs.firstF32(val_s),
+        });
+        j = pi + 16;
+    }
+    return pool.items.len - p0;
+}
+
 pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
@@ -139,6 +180,10 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     defer attrs.deinit(allocator);
     var perks: std.ArrayList(PerkDef) = .empty;
     defer perks.deinit(allocator);
+    var passives_list: std.ArrayList(buffs.Passive) = .empty;
+    defer passives_list.deinit(allocator);
+    var perk_ranges: std.ArrayList([2]usize) = .empty;
+    defer perk_ranges.deinit(allocator);
 
     // Default attribute costs from <attributes ...>
     var def_min: u8 = 1;
@@ -152,6 +197,8 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.attr(clean, ai, "cost_multiplier_per_level")) |v| def_mult = std.fmt.parseFloat(f32, v) catch def_mult;
     }
 
+    var attr_ranges: std.ArrayList([2]usize) = .empty;
+    defer attr_ranges.deinit(allocator);
     var i: usize = 0;
     while (i < clean.len and attrs.items.len < max_attrs) {
         const ai = std.mem.findPos(u8, clean, i, "<attribute ") orelse break;
@@ -159,6 +206,12 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
             i = ai + 11;
             continue;
         };
+        const agt = std.mem.findPos(u8, clean, ai, ">") orelse break;
+        // attBooks/attCrafting are self-closing (`/>`): no body to scan.
+        const aclose = if (agt > ai and clean[agt - 1] == '/')
+            agt + 1
+        else
+            std.mem.findPos(u8, clean, agt, "</attribute>") orelse break;
         try attrs.append(allocator, .{
             .name = try arena.dupe(u8, aname),
             // Per-attribute overrides win over the <attributes> defaults
@@ -169,6 +222,9 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
             .base_cost = if (xml.attr(clean, ai, "base_skill_point_cost")) |v| std.fmt.parseInt(u16, v, 10) catch def_cost else def_cost,
             .cost_mult = def_mult,
         });
+        const ar0 = passives_list.items.len;
+        _ = try scanPassives(allocator, arena, clean[agt + 1 .. aclose], &passives_list);
+        try attr_ranges.append(allocator, .{ ar0, passives_list.items.len - ar0 });
         i = ai + 11;
     }
 
@@ -189,18 +245,34 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         // resolved to the same wrong attribute.
         var parent: []const u8 = "";
         if (xml.attr(clean, pi, "parent")) |pn| parent = try arena.dupe(u8, pn);
+        const pgt = std.mem.findPos(u8, clean, pi, ">") orelse break;
+        const pclose = if (pgt > pi and clean[pgt - 1] == '/')
+            pgt + 1
+        else
+            std.mem.findPos(u8, clean, pgt, "</perk>") orelse break;
+        const pr0 = passives_list.items.len;
+        _ = try scanPassives(allocator, arena, clean[pgt + 1 .. pclose], &passives_list);
         try perks.append(allocator, .{
             .name = try arena.dupe(u8, pname),
             .max_level = max_l,
             .parent_attr = parent,
         });
+        try perk_ranges.append(allocator, .{ pr0, passives_list.items.len - pr0 });
         i = pi + 6;
     }
 
+    const passive_pool = try arena.alloc(buffs.Passive, passives_list.items.len);
+    @memcpy(passive_pool, passives_list.items);
     const aslice = try arena.alloc(AttrDef, attrs.items.len);
     @memcpy(aslice, attrs.items);
+    for (aslice, attr_ranges.items) |*a, rg| {
+        a.passives = passive_pool[rg[0] .. rg[0] + rg[1]];
+    }
     const pslice = try arena.alloc(PerkDef, perks.items.len);
     @memcpy(pslice, perks.items);
+    for (pslice, perk_ranges.items) |*p, rg| {
+        p.passives = passive_pool[rg[0] .. rg[0] + rg[1]];
+    }
 
     // Crafting skills + unlock_entry gates (99 rows in stock): the item
     // recipes unlock at the display_entry's mapped level per tier.
@@ -397,4 +469,25 @@ test "crafting skill unlock_entry gates parse and resolve tiers" {
     try std.testing.expectEqual(@as(u8, 1), req[1]);
     // Ungated items (always_unlocked) have no requirement.
     try std.testing.expect(unlockRequirement(&t, "resourceWood") == null);
+}
+
+test "perk/attribute passive_effect rows parse (the 649-row surface)" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadTableFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // Stock perk bodies carry passive rows (e.g. GeneralDamageResist on
+    // toughness perks, BlockDamage on SexRex); the parse must not truncate.
+    var total: usize = 0;
+    var tracked_hits: usize = 0;
+    for (t.perks) |p| {
+        total += p.passives.len;
+        const d = buffs.trackedDeltasFrom(p.passives);
+        if (d.general_resist != 0 or d.phys_resist != 0 or d.hp_max != 0 or d.stamina_ot != 0) tracked_hits += 1;
+    }
+    for (t.attributes) |a| total += a.passives.len;
+    try std.testing.expect(total > 100); // the 649 rows are mostly in effect_groups; perk+attr bodies hold hundreds
+    // A known tracked row: perkSexRex BlockDamage is untracked, but the
+    // toughness-tree GeneralDamageResist rows land in the VM's resist delta.
+    try std.testing.expect(tracked_hits > 0);
 }

@@ -342,16 +342,17 @@ pub const Bloodmoon = struct {
 
 /// Survival simulation tuning (GAP 22).
 ///
-/// **These are invented numbers and stock ships the real ones as data.** The
-/// values below reproduce the stock feel (a full Food bar drains in roughly two
-/// in-game days at 60-minute days), but stock drives survival from buffs.xml:
-/// `buffStatusHungry01/02/03` and `buffStatusThirsty01/02/03` carry
-/// `damage_type Starvation` / `Dehydration`, threshold requirements of the form
-/// `StatComparePercCurrentToMax stat="Food" operation="GT" value="0.52"`, and
-/// `FoodChangeOT` / `WaterChangeOT` / `HealthChangeOT` passive effects; stamina
-/// comes from `StaminaChangeOT` plus the items.xml `StaminaLoss` stats. The
-/// loader already exists (`assets/buffs.zig` parses passive_effect rows and
-/// `Game.buffs` holds the table), so this is wiring, not research.
+/// **The base depletion rates are invented numbers; stock ships the real ones
+/// as data.** The values below reproduce the stock feel (a full Food bar
+/// drains in roughly two in-game days at 60-minute days). The conditional
+/// legs are now stock data via the passive-effects VM (assets/buffs.zig):
+/// with a game-dir present, `tickSurvival` keeps the matching
+/// `buffStatusHungry/Thirsty01..03` stage buffs in the entity's BuffSet
+/// (revertibly; `survivalStages` resolves the `StatComparePercCurrentToMax`
+/// thresholds), reads the starvation HP loss off the active stage-3 buff's
+/// `ModifyStats Health` row, and applies the `StaminaChangeOT` penalty from
+/// the VM's tracked deltas. These fields are the fallback floor when
+/// buffs.xml is absent (offline/builtin data).
 ///
 /// Note the model differs too: `well_fed_threshold` is an absolute 0..100 value
 /// where stock compares a fraction of max. Tracked as WORK_PLAN T16; until then

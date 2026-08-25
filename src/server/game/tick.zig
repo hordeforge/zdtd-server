@@ -105,14 +105,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             if (starving or dehydrated) {
                 // HP-loss leg: stock is a triggered `ModifyStats Health
                 // subtract` on the active stage-3 buff's update (not a
-                // passive), so read it off the active stage def.
-                var per_s: f32 = 0;
-                if (starving) {
-                    if (self.buffs.byName("buffStatusHungry03")) |d| per_s = @max(per_s, assets_buffs.hpLossPerSecond(&d));
-                }
-                if (dehydrated) {
-                    if (self.buffs.byName("buffStatusThirsty03")) |d| per_s = @max(per_s, assets_buffs.hpLossPerSecond(&d));
-                }
+                // passive); the VM resolves the rate off the active stage.
+                const per_s = assets_buffs.stage3HpLossPerSecond(&self.buffs, stages);
                 if (per_s > 0) {
                     // Wasm-first (AGENTS rule 29): verdict with attacker -1,
                     // like drowning/radiation above.

@@ -183,9 +183,13 @@ Do not plan these as product features of zdtd:
    (aquifers, caves, multi-biome, per-column surfacing; stock RWG maps load
    as DTM).
 9. The full EffectManager passive-effects VM over progression.xml /
-   buffs.xml effect chains (the sim applies the live effects: armour
-   mitigation, survival buffs; a general effect runtime is a separate
-   system).
+   buffs.xml effect chains. **A bounded VM landed 2026-08-25**: the tracked
+   surface (health/food/water/stamina values + change-over-time, resist
+   percents) folds revertibly over active buffs (assets/buffs.zig
+   trackedDeltas/effectTotals) and drives the survival stage buffs; the
+   full triggered-effect engine (onSelf* actions beyond ModifyStats,
+   per-requirement eval, the untracked effect classes like
+   RecipeTagUnlocked/LootProb/CraftingTier) stays out of scope.
 6. Twitch integration, editor packages, dynamic mesh as required path.
 
 ---
@@ -405,10 +409,17 @@ area and the concrete work.
     (unknown names rejected with `buff_rejects`) and owner-gated; the sim
     `BuffSet` applies/removes by def id, ticks durations/expiry and
     `remove_on_death`, and the tick sweep relays adds/removes to observers
-    (`src/ecs/buff.zig`, `src/server/game.zig:10764`). Still open: buff
-    **effects** (FoodChangeOT/HealthChangeOT cvars and stat deltas - the
-    survival loop they feed is item 22), and persisting active buffs across
-    restart (they ride ZPV3 already; effect application is the gap).
+    (`src/ecs/buff.zig`, `src/server/game.zig:10764`). **PASSIVE-EFFECTS VM
+    SHIPPED 2026-08-25**: the tracked effect surface (Health/Food/Water/
+    Stamina ChangeOT + max values, Physical/General/ElementalDamageResist
+    percents) folds over active buffs (assets/buffs.zig `trackedDeltas` /
+    `effectTotals`, revertible by recomputation, `max_buffs_per_entity`
+    budget, no allocation) and the survival stage buffs
+    (buffStatusHungry/Thirsty01..03) are applied/removed as state, with the
+    `StaminaChangeOT` penalty and the stage-3 `ModifyStats Health` loss read
+    off the active buffs. Still open: the untracked effect classes, persisting
+    active buffs across restart (they ride ZPV3 already; effect application is
+    the gap).
 
 22. ~~**Progression: simulate survival.**~~ **PARTIAL → DEPLETION LOOP SHIPPED
     2026-08-07**: `Game.tickSurvival` (after tickAll, when the world clock
@@ -422,6 +433,15 @@ area and the concrete work.
     because the stock FoodChangeOT/WaterOT/HealthChangeOT passive-effect
     defaults are not in the V3.1.0 IL corpus (Stat.Tick is not dumped); the
     defaults reproduce the stock feel (full Food drains in ~2 in-game days).
+    **PASSIVE-EFFECTS VM SHIPPED 2026-08-25**: with a game-dir present the
+    conditional legs come from buffs.xml via the revertible effect VM
+    (assets/buffs.zig) - `tickSurvival` keeps the matching
+    `buffStatusHungry/Thirsty01..03` stage buffs in the entity's BuffSet
+    (relayed so the stock client shows the HUD icons), the starvation HP loss
+    reads the active stage-3 buff's `ModifyStats Health` row, and the sprint
+    penalty uses the VM's `StaminaChangeOT` total; these `[rules.progression]`
+    fields are the offline/builtin fallback floor. The stage-gate moved from
+    "food/water <= 0" to the stock 2% stage-3 threshold.
     **Stamina SHIPPED 2026-08-07**: sprinting (MovementState 3 from
     `NetPackageEntitySpeeds`, lapsed by `sprint_stale_seconds`) drains Stamina,
     idle regenerates, and the changed value syncs as EntityStatChanged kind 1
