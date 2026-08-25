@@ -328,6 +328,11 @@ pub const Director = struct {
     /// zombie hp (proxy for stock damage scaling) and picks the
     /// `[rules.difficulty] incoming_damage_N` ladder (comptime XML presets).
     difficulty: u8 = 1,
+    /// SandboxCode option 17 IncomingDamage flat override (0 = unset): a
+    /// custom operator code wins over the per-difficulty ladder, exactly
+    /// like stock's single IncomingDamageModifier static
+    /// (UpdateInGameValuesWithSandboxOptions).
+    sandbox_incoming: f32 = 0,
     /// ZombieMove / ZombieMoveNight / ZombieFeralMove / ZombieBMMove indices 0..4.
     zombie_move_day: u8 = 0,
     zombie_move_night: u8 = 3,
@@ -376,6 +381,9 @@ pub const Director = struct {
     ) f32 {
         if (attacker_client == target_client) return 1.0;
         if (attacker_client) return r.entityIncomingFor(self.difficulty);
+        // AI attacker vs a client entity: a SandboxCode IncomingDamage
+        // override wins; otherwise the per-difficulty ladder.
+        if (self.sandbox_incoming > 0) return self.sandbox_incoming;
         return r.incomingFor(self.difficulty);
     }
 
@@ -1737,4 +1745,11 @@ test "difficulty damage scale uses the comptime XML ladder" {
     // PvP and AI-vs-AI pairs never scale (stock difficultyModifier).
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), d.damageScale(true, true, r), 1e-4);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), d.damageScale(false, false, r), 1e-4);
+    // A SandboxCode IncomingDamage override (custom code) wins over the
+    // ladder regardless of the difficulty index (stock single static).
+    d.sandbox_incoming = 1.7;
+    d.difficulty = 0; // Scavenger ladder would be 0.5
+    try std.testing.expectApproxEqAbs(@as(f32, 1.7), d.damageScale(false, true, r), 1e-4);
+    d.sandbox_incoming = 0; // unset -> ladder back
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), d.damageScale(false, true, r), 1e-4);
 }

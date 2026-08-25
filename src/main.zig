@@ -682,6 +682,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .block_damage_player = cfg.block_damage_player,
         .block_damage_ai = cfg.block_damage_ai,
         .block_damage_ai_bm = cfg.block_damage_ai_bm,
+        .incoming_damage_modifier = cfg.incoming_damage_modifier,
         .max_spawned_animals = cfg.max_spawned_animals,
         .air_drop_frequency = cfg.air_drop_frequency,
         .drop_on_death = cfg.drop_on_death,

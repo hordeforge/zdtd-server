@@ -267,6 +267,9 @@ pub const InitOptions = struct {
     block_damage_player: u16 = 100,
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
+    /// SandboxCode option 17 IncomingDamage flat override (0 = unset ->
+    /// the [rules.difficulty] ladder drives the AI->player scale).
+    incoming_damage_modifier: f32 = 0,
     max_spawned_animals: u16 = 50,
     air_drop_frequency: u16 = 72,
     drop_on_death: u8 = 1,

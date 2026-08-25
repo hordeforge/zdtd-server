@@ -414,6 +414,9 @@ pub const Game = struct {
     block_damage_player: u16 = 100,
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
+    /// SandboxCode option 17 IncomingDamage flat override (0 = unset ->
+    /// the [rules.difficulty] ladder drives the AI->player scale).
+    incoming_damage_modifier: f32 = 0,
     drop_on_death: u8 = 1,
     death_penalty: u8 = 1,
     land_claim_size: u16 = 41,
@@ -681,6 +684,7 @@ pub const Game = struct {
             .block_damage_player = opts.block_damage_player,
             .block_damage_ai = opts.block_damage_ai,
             .block_damage_ai_bm = opts.block_damage_ai_bm,
+            .incoming_damage_modifier = opts.incoming_damage_modifier,
             .death_penalty = opts.death_penalty,
             .drop_on_death = opts.drop_on_death,
             .land_claim_size = opts.land_claim_size,
@@ -772,6 +776,10 @@ pub const Game = struct {
         };
         // Apply serverconfig gameplay options to the sim director/clock.
         self.sim.director.difficulty = opts.game_difficulty;
+        // SandboxCode option 17 IncomingDamage flat override (stock option ->
+        // ItemActionAttack.IncomingDamageModifier static; a custom code wins
+        // over the per-difficulty ladder).
+        self.sim.director.sandbox_incoming = opts.incoming_damage_modifier;
         self.sim.director.max_alive = opts.max_spawned_zombies;
         self.sim.director.max_alive_animals = opts.max_spawned_animals;
         self.sim.director.bloodmoon_enemy_count = opts.blood_moon_enemy_count;

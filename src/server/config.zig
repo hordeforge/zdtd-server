@@ -95,6 +95,12 @@ pub const Config = struct {
     block_damage_player: u16 = 100, // BlockDamagePlayer percent
     block_damage_ai: u16 = 100, // BlockDamageAI percent
     block_damage_ai_bm: u16 = 100, // BlockDamageAIBM percent (blood moon)
+    /// SandboxCode option 17 IncomingDamage (zombie -> player damage
+    /// multiplier): a flat override applied when the operator's code sets it
+    /// (stock UpdateInGameValuesWithSandboxOptions -> ItemActionAttack.
+    /// IncomingDamageModifier, one value regardless of the difficulty
+    /// ladder). 0 = unset -> the [rules.difficulty] ladder drives the scale.
+    incoming_damage_modifier: f32 = 0,
     max_spawned_animals: u16 = 50, // MaxSpawnedAnimals server-wide cap
     air_drop_frequency: u16 = 72, // AirDropFrequency in game hours (0 = off)
     drop_on_death: u8 = 1, // DropOnDeath 0=nothing 1=all 2=toolbelt 3=backpack 4=delete
@@ -330,6 +336,12 @@ fn applySandboxCode(cfg: *Config) void {
             cfg.block_damage_ai = sandboxPct(sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BlockDamageAIBM")) {
             cfg.block_damage_ai_bm = sandboxPct(sandbox.valueF(o, set, g.index));
+        } else if (std.mem.eql(u8, o.name, "IncomingDamage")) {
+            // Flat zombie->player damage override (stock option 17 -> the
+            // ItemActionAttack.IncomingDamageModifier static, one value
+            // regardless of GameDifficulty; the difficulty presets set the
+            // ladder, a custom code sets this flat).
+            cfg.incoming_damage_modifier = sandbox.valueF(o, set, g.index);
         } else if (std.mem.eql(u8, o.name, "GlobalLootCount")) {
             cfg.loot_abundance = sandboxPct(sandbox.valueF(o, set, g.index));
         } else if (std.mem.eql(u8, o.name, "BloodMoonFrequency")) {
@@ -577,8 +589,10 @@ test "parse config fixture" {
     try std.testing.expectEqualStrings("Adventurer", cfg.sandbox_preset);
     // The Adventurer code decodes to RangedDamage/MeleeDamage/BlockDamage/
     // TerrainDamage 1.5, IncomingDamage 0.75, ZombieFeralSense 2 (RE
-    // sandbox-options §3); the mapped fields apply (BlockDamage -> player).
+    // sandbox-options §3); the mapped fields apply (BlockDamage -> player,
+    // IncomingDamage -> the flat zombie->player override).
     try std.testing.expectEqual(@as(u16, 150), cfg.block_damage_player);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75), cfg.incoming_damage_modifier, 1e-4);
     // Unset gameplay options keep stock defaults.
     try std.testing.expectEqual(@as(u8, 1), cfg.game_difficulty);
     try std.testing.expectEqual(@as(u8, 7), cfg.blood_moon_frequency);
