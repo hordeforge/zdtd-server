@@ -442,9 +442,12 @@ area and the concrete work.
     the survival stage selection now runs through it (buffStatusCheck01's
     update rows pick the stage buffs, replacing the hand-rolled selector).
     Residual: the untracked effect classes
-    (RecipeTagUnlocked/LootProb/CraftingTier...), the other triggered actions
-    (ModifyCVar/PlaySound/...) and the perk stamina-OT consumer stay
-    recorded. **Perk/buff max-stat SHIPPED 2026-08-25**: the survival pass
+    (RecipeTagUnlocked/LootProb/CraftingTier...) and the other triggered
+    actions (ModifyCVar/PlaySound/...) stay recorded. **Perk/buff stamina-OT
+    SHIPPED 2026-08-25**: the VM's StaminaChangeOT total (perkRuleOneCardio
+    .1..3, buff well-rested legs) joins the idle regen as a perc fraction of
+    max per second, while the sprint branch keeps the stage-3 penalty -
+    stock applies the buff's OT continuously. **Perk/buff max-stat SHIPPED 2026-08-25**: the survival pass
     recomputes the max stats unconditionally from the spawn base + VM deltas
     (revertible recompute-from-set - Health.base_max_hp captured at spawn;
     perkFortitudeMastery HealthMax level 5 = max_hp 200, dropping the perk

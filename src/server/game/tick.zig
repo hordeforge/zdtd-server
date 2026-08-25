@@ -104,6 +104,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         // uses sv.hungry_frac[0] / thirsty_frac[0] (T16).
         var hp_delta: f32 = 0;
         var stamina_penalty: f32 = 0;
+        var stamina_ot_bonus: f32 = 0;
         if (use_buff) {
             // Passive-effects VM (assets/buffs.zig): keep the matching
             // conditional stage buffs (buffStatusHungry/Thirsty01..03) in the
@@ -170,6 +171,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // the starvation/regen branches above.
             const hp_ot = vm.hp_ot + pvm.hp_ot;
             if (hp_ot != 0) hp_delta += hp_ot * secs;
+            // Stamina OT consumer (perk/buff StaminaChangeOT): the VM's
+            // perc fraction of max per second joins the idle regen (stock
+            // applies the buff's OT continuously; perkRuleOneCardio .1..3
+            // adds a regen bonus, the stage-3 starvation buff drains while
+            // idle too). The sprint branch keeps the stage-3 penalty.
+            stamina_ot_bonus = (vm.stamina_ot + pvm.stamina_ot) * h.stamina_max / 100.0;
             // Stamina penalty: stock `StaminaChangeOT perc_subtract .1` on
             // buffStatusHungry03 while its stage holds. The gate moved from
             // "food/water <= 0" to "stage-3 buff active" (the stock 2%
@@ -205,7 +212,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
             }
         } else {
-            h.stamina = @min(h.stamina_max, h.stamina + prog.stamina_regen_per_second * dt);
+            h.stamina = @min(h.stamina_max, h.stamina + (prog.stamina_regen_per_second + stamina_ot_bonus) * dt);
         }
         const stamina_changed = h.stamina != stamina_was;
         // Stat-changed observer (ADR 0034): one bounded call per changed

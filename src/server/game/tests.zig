@@ -3483,3 +3483,38 @@ test "perk max-stat deltas recompute max_hp revertibly" {
     while (i < 6) : (i += 1) try g.step();
     try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
 }
+
+test "perk StaminaChangeOT joins the idle regen and StaminaMax applies" {
+    // perkRuleOneCardio: StaminaChangeOT .1,.2,.3,.3,.3 + StaminaMax 25,50
+    // (explicit 5-level anchors). At level 5 the max recomputes to 150 and
+    // the idle regen gains 0.3 x 150 / 100 = 0.45/s over the 8/s base.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.skill_levels[0] = .{ .name = "perkRuleOneCardio", .level = 5 };
+    cl.skill_level_n = 1;
+    // The max-stat recompute needs the survival pass; run it once to set the
+    // 150 cap, then measure the regen over one tick.
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].stamina_max, 0.001);
+    g.sim.health[ps].stamina = 10;
+    const before = g.sim.health[ps].stamina;
+    try g.step();
+    const gained = g.sim.health[ps].stamina - before;
+    // dt at 20 TPS = 0.05 s: (8 + 0.45) x 0.05 = 0.4225 per tick.
+    try std.testing.expect(gained > 0.4 and gained < 0.45);
+}
