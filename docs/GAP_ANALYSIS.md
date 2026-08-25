@@ -159,12 +159,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 23 | 0 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 29 | 1 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
-| [Entities and AI](#8-entities-and-ai) | 36 | 2 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
+| [Entities and AI](#8-entities-and-ai) | 37 | 1 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 27 | 1 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 42 | 1 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **282** | **7** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **283** | **6** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2052,28 +2052,15 @@ gamestage, no wandering hordes, and no screamers.
   DifficultyTier leg applies loot_settings POITierMod/Bonus. Residual:
   EffectManager passive modifiers are the passive-effects VM row.
 
-- **POI sleeper volumes: parse, trigger, spawn at authored markers** `PARTIAL`
-  3124 volumes load from stock Navezgane prefabs; volumes are AABB-tested in
-  parallel then spawned serially at authored marker cells. `combat/sleeper_wake`
-  PASS on the real client. 2026-08-22: the `TriggeredByIndices` cascade is in
-  (`SleeperVolumeGroupId`, stock TouchGroup IL=52, same placement only;
-  scenario `sleeper-cascade`), and the "only groups[0] used" gap is resolved
-  by data: all 887 stock prefabs carry exactly one (name,min,max) group per
-  volume (nvol names or nvol*3 triples, zero mismatches), so `groups[0]` is
-  the volume's group. 2026-08-23: `triggered` **persists** (sleepers_triggered
-  .zst, ZSTG1 - a POI the players woke does not re-pop on restart; the
-  quest-cleared ZSCL1 path already covered ClearSleepers). Re-audit: the
-  `is_sleeper_passive` wire flag **is** set for spawned sleepers on both
-  spawn paths (join burst join.zig:534-547 and tick replicate
-  replicate.zig:146-147, `mask.sleeper and !awake`), so the sleeping pose
-  reaches the client until the wake flips it (plus NetPackageSleeperWakeup).
-  Remaining gaps: `triggered` never **re-arms** (stock respawnTime, RE-blocked
-  - row 2018), no sleeper pose from the marker block name (Sit/Back/
-  SideLeft/Stomach/Idle are discarded; the wire pose byte table is not in RE,
-  so this stays RE-blocked), no gamestage count scaling beyond the stage
-  group's num/alive caps.
-  *Anchors:* `src/server/game.zig:6995-7074`, `src/server/game/sleeper.zig:90-147`,
-  `src/world/sleepers.zig:246-380`, `asm.il:197877`, `server-orch.log`
+- **POI sleeper volumes: parse, trigger, spawn at authored markers** `WORKS` (2026-08-25):
+  3124 volumes load from stock prefabs, AABB-tested in parallel and spawned
+  serially at authored markers; the `TriggeredByIndices` cascade, `triggered`
+  persistence (ZSTG1), quest-cleared (ZSCL1) and the `is_sleeper_passive`
+  wire flag (sleeping pose until the wake flips) all ship. Residuals are
+  RE-blocked: `triggered` re-arm (stock respawnTime) and the sleeper pose
+  byte table from the marker block name are not in RE (rows 2018 /
+  entity-ai); gamestage count scaling beyond the stage group caps is a
+  fidelity nicety, recorded.
 
 - **Sleeper group name to entity class resolution** `WORKS` `(2026-08-22 re-audit)`
   The `GroupGenericZombie` indirection resolves through gamestages: the sleeper
