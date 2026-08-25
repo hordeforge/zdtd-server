@@ -404,22 +404,23 @@ area and the concrete work.
     sent), bulk world data on channel 1, and multi-package envelopes
     (`src/server/game.zig` send path).
 
-21. **Progression: build a buff runtime.** `PARTIAL` (2026-08-07): buffs are
-    no longer inert. `NetPackageAddRemoveBuff` is decoded, catalog-checked
+21. **Progression: build a buff runtime + the passive-effects VM.** `WORKS`
+    (2026-08-25): buffs are no longer inert. `NetPackageAddRemoveBuff` is
+    decoded, catalog-checked
     (unknown names rejected with `buff_rejects`) and owner-gated; the sim
     `BuffSet` applies/removes by def id, ticks durations/expiry and
     `remove_on_death`, and the tick sweep relays adds/removes to observers
-    (`src/ecs/buff.zig`, `src/server/game.zig:10764`). **PASSIVE-EFFECTS VM
-    SHIPPED 2026-08-25**: the tracked effect surface (Health/Food/Water/
+    (`src/ecs/buff.zig`, `src/server/game.zig:10764`). The tracked effect
+    surface (Health/Food/Water/
     Stamina ChangeOT + max values, Physical/General/ElementalDamageResist
     percents) folds over active buffs (assets/buffs.zig `trackedDeltas` /
     `effectTotals`, revertible by recomputation, `max_buffs_per_entity`
     budget, no allocation) and the survival stage buffs
     (buffStatusHungry/Thirsty01..03) are applied/removed as state, with the
     `StaminaChangeOT` penalty and the stage-3 `ModifyStats Health` loss read
-    off the active buffs. Still open: the untracked effect classes, persisting
-    active buffs across restart (they ride ZPV3 already; effect application is
-    the gap).
+    off the active buffs. Residual: the untracked effect classes
+    (RecipeTagUnlocked/LootProb/CraftingTier...), persisting active buffs
+    across restart (they ride ZPV3 already; effect application is the gap).
 
 22. ~~**Progression: simulate survival.**~~ **PARTIAL → DEPLETION LOOP SHIPPED
     2026-08-07**: `Game.tickSurvival` (after tickAll, when the world clock
@@ -5128,7 +5129,7 @@ type coverage, power fuel/actuation, deco/AssignIds pin, M11 serialize-once.
 | vehicles.xml | PARTIAL (load + spawn HP/speed) |
 | gamestages / spawning | HAVE (`assets/gamestages.zig`; spawning.xml `<biome>` + `<entityspawner>`) |
 | buffs / progression | PARTIAL (catalog + passives + XP curve; no full VM) |
-| buffs / progression | PARTIAL (typed catalog + stack/duration/update_rate + passives + XP curve; no triggered_effect VM) |
+| buffs / progression | WORKS (typed catalog + stack/duration/update_rate + the tracked passive-effects VM over active buffs + survival stage buffs + progression perk/attribute passive rows as data; triggered_effect actions beyond ModifyStats and untracked effect classes stay recorded) |
 | recipes / loot | HAVE (`assets/recipes.zig`, `loot.zig`) |
 | Localization.csv | PARTIAL - non-client-visible (documented 2026-08-21: client-side content - the client ships its own Localization.txt and resolves the keys the server sends) |
 | materials / physicsbodies | PARTIAL (materials MaxDamage via maxdamage) |
