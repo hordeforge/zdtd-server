@@ -229,6 +229,20 @@ pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
     c.clearDmg(t.lx, y, t.lz);
 }
 
+/// Stock PersistentPlayerList.SpawnPointRemoved (IL=48): removing a placed
+/// bedroll clears the owner's respawn point (the client falls back to the
+/// default spawn). Scans the fixed client table for the bed position.
+pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
+    if (!self.isBedrollId(cur_id)) return;
+    for (&self.clients) |*cl| {
+        if (!cl.joined or !cl.has_bed) continue;
+        if (cl.bed_x == x and cl.bed_y == y and cl.bed_z == z) {
+            cl.has_bed = false;
+            return;
+        }
+    }
+}
+
 /// Stock Block.OnBlockDamaged downgrade swap (RE IL_021D-030D): a block with
 /// a `DowngradeBlock` turns into that block (rotation/meta preserved via the
 /// SetBlockRPC swap) when destroyed by damage, instead of being removed.
@@ -361,6 +375,8 @@ pub fn drainExplosions(self: *Game) void {
                                 self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
                             } else |_| {}
                         } else {
+                            // A removed bedroll clears the owner's respawn point.
+                            self.noteBlockRemoved(wx, wy, wz, id);
                             self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
                             self.clearBlockHp(wx, wy, wz);
                             self.clearBlockRaw(wx, wy, wz);

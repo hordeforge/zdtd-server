@@ -90,6 +90,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (cur_id != 0) {
                     self.noteBlockBreak(c);
                     self.removeClaimAt(b.x, b.y, b.z);
+                    // A removed bedroll clears the owner's respawn point
+                    // (stock PersistentPlayerList.SpawnPointRemoved).
+                    self.noteBlockRemoved(b.x, b.y, b.z, cur_id);
                     // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):
                     // the server rolls the block's Harvest rows into the
                     // breaker's inventory (overflow -> ground bag) and grants
@@ -144,6 +147,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     } else {
                         self.noteBlockBreak(c);
                         self.removeClaimAt(b.x, b.y, b.z);
+                        // A removed bedroll clears the owner's respawn point.
+                        self.noteBlockRemoved(b.x, b.y, b.z, base_cur);
                         // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):
                         // same server-side roll as the direct-dig break above.
                         const harvested = chunk_fill.tryBlockHarvestDrop(self, c.slot, b.x, b.y, b.z, base_cur);

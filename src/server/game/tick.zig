@@ -456,6 +456,8 @@ pub fn tickZombieBlockDamage(self: *Game) void {
                     self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(bx), @floatFromInt(bz), self.interest_range) catch {};
                 } else |_| {}
             } else {
+                // A removed bedroll clears the owner's respawn point.
+                self.noteBlockRemoved(bx, by, bz, id);
                 self.world.setBlockWorld(bx, by, bz, 0) catch continue;
                 self.clearBlockHp(bx, by, bz);
                 self.clearBlockRaw(bx, by, bz);
@@ -582,6 +584,8 @@ pub fn drainDigRequests(self: *Game) void {
                     self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(d.x), @floatFromInt(d.z), self.interest_range) catch {};
                 } else |_| {}
             } else {
+                // A removed bedroll clears the owner's respawn point.
+                self.noteBlockRemoved(d.x, d.y, d.z, id);
                 self.world.setBlockWorld(d.x, d.y, d.z, 0) catch continue;
                 self.clearBlockHp(d.x, d.y, d.z);
                 self.clearBlockRaw(d.x, d.y, d.z);

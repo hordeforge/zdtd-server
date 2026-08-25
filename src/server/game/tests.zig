@@ -3163,6 +3163,42 @@ test "poi lockout reports bedroll and land claim homes" {
     try std.testing.expectEqual(@as(u8, 0), bits);
 }
 
+test "breaking a bedroll clears the owner respawn point" {
+    // Stock PersistentPlayerList.SpawnPointRemoved: removing the placed
+    // bedroll block drops has_bed so the player respawns at the default.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const bed_id = g.maxdamage.idByName("bedroll") orelse return error.SkipZigTest;
+    g.clients[0].has_bed = true;
+    g.clients[0].bed_x = 100;
+    g.clients[0].bed_y = 70;
+    g.clients[0].bed_z = 200;
+    // The bedroll block at the bed position is removed: respawn clears.
+    g.noteBlockRemoved(100, 70, 200, bed_id);
+    try std.testing.expect(!g.clients[0].has_bed);
+    // A different block / position leaves an unrelated bed alone.
+    g.clients[0].has_bed = true;
+    g.clients[0].bed_x = 101;
+    g.noteBlockRemoved(100, 70, 200, bed_id);
+    try std.testing.expect(g.clients[0].has_bed);
+    g.noteBlockRemoved(101, 70, 200, bed_id);
+    try std.testing.expect(!g.clients[0].has_bed);
+    // A non-bedroll removal never touches the respawn.
+    g.clients[0].has_bed = true;
+    g.noteBlockRemoved(101, 70, 200, 42);
+    try std.testing.expect(g.clients[0].has_bed);
+    std.debug.print("PASS bedroll-break: removal clears the owner respawn point\n", .{});
+}
+
 test "active quest stage modifiers scale the player gamestage" {
     // Stock get_gameStage adds the active quest's QuestClass gamestage_mod /
     // gamestage_bonus onto the stage (progression.md 5): an infested clear
