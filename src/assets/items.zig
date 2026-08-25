@@ -5,8 +5,28 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const buffs = @import("buffs.zig");
 const io_fs = @import("../util/io_fs.zig");
+const components = @import("../ecs/components.zig");
 
 pub const max_items: usize = 8192;
+
+/// Stock FastTags match between a passive's tag list and a drop row's tag
+/// list: an untagged passive applies to every drop; a tagged passive needs
+/// a shared tag with the drop (an untagged drop is only matched by
+/// untagged passives).
+fn tagsIntersect(row_tags: []const u8, drop_tags: []const u8) bool {
+    if (row_tags.len == 0) return true;
+    if (drop_tags.len == 0) return false;
+    var it = std.mem.splitScalar(u8, row_tags, ',');
+    while (it.next()) |rt| {
+        const t = std.mem.trim(u8, rt, " \t");
+        if (t.len == 0) continue;
+        var it2 = std.mem.splitScalar(u8, drop_tags, ',');
+        while (it2.next()) |dt| {
+            if (std.mem.eql(u8, t, std.mem.trim(u8, dt, " \t"))) return true;
+        }
+    }
+    return false;
+}
 
 /// Matches Block.ItemsStartHere (MAX_BLOCKS). Catalog constant; wire stock_inv
 /// keeps the same pin for encode. Assets must not import wire for this alone.
@@ -22,6 +42,25 @@ fn typeFromBuiltinId(item_id: u16) i32 {
     if (item_id == 0) return 0;
     return items_start_here + @as(i32, item_id);
 }
+
+/// items.xml HarvestCount passive (141) row on a held tool (RE GameUtils.
+/// HarvestOnAttack IL=623 + items.xml ops): the harvest-yield modifier for
+/// drop rows whose tag set intersects `tags` ("" = untagged, applies to
+/// every drop). Ops fold over base 1 in row order: base_add -> base+value,
+/// base_set -> base=value, perc_add -> base*(1+value); a quality curve
+/// evaluates at the tool's quality (piecewise-linear, quality 1..6, RE
+/// PassiveEffect.ModValue IL=796).
+pub const HarvestOp = enum(u8) { base_add, base_set, perc_add };
+
+pub const HarvestCountRow = struct {
+    op: HarvestOp = .base_add,
+    /// Flat value, or curve anchors when curve_n > 0.
+    value: f32 = 0,
+    curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    curve_n: u8 = 0,
+    /// Comma list of gating tags ("" = applies to every drop row).
+    tags: []const u8 = "",
+};
 
 pub const ItemDef = struct {
     /// zdtd internal id (small, used in ECS inventory).
@@ -87,6 +126,14 @@ pub const ItemDef = struct {
     /// 0 / empty = no tagged row.
     target_armor_tagged: f32 = 0,
     target_armor_tag: []const u8 = "",
+    /// items.xml HarvestCount passive (141) rows on the HELD item: the
+    /// tool's harvest-yield modifier, tag-gated by the drop row's tag (RE
+    /// GameUtils.HarvestOnAttack IL=623: count = trunc(rolled * GetValue(
+    /// 141, tool, 1, holder, null, dropTag))). Empty = 1.0 (stock default).
+    /// The equipped-armor rows (farmer/lumberjack/miner/scavenger) need the
+    /// full EffectManager aggregation over worn items - the recorded
+    /// passive-effects-VM non-goal; only the held-tool leg is wired here.
+    harvest_rows: []const HarvestCountRow = &.{},
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -207,6 +254,33 @@ pub const ItemTable = struct {
     pub fn ecsIdByName(self: *const ItemTable, name: []const u8) u16 {
         if (self.byName(name)) |d| return d.id;
         return 0;
+    }
+
+    /// Held-tool HarvestCount multiplier for one drop row (RE GameUtils.
+    /// HarvestOnAttack IL=623: count = trunc(rolled * GetValue(141, tool,
+    /// 1, holder, null, dropTag))). Rows whose tag set intersects the drop
+    /// row's tag set (or untagged) fold in order over base 1: base_add ->
+    /// base+value, base_set -> base=value, perc_add -> base*(1+value); a
+    /// quality curve evaluates at the tool's quality. 1.0 when nothing
+    /// matches (the stock default; the equipped-armor aggregation is the
+    /// recorded non-goal).
+    pub fn harvestMultiplier(self: *const ItemTable, item_id: u16, quality: u8, drop_tags: []const u8) f32 {
+        const d = self.byId(item_id) orelse return 1.0;
+        if (d.harvest_rows.len == 0) return 1.0;
+        var base: f32 = 1.0;
+        for (d.harvest_rows) |r| {
+            if (!tagsIntersect(r.tags, drop_tags)) continue;
+            const v = if (r.curve_n > 0)
+                buffs.curveValueAt(quality, components.max_quality_tiers, r.curve[0..r.curve_n])
+            else
+                r.value;
+            switch (r.op) {
+                .base_add => base += v,
+                .base_set => base = v,
+                .perc_add => base *= 1.0 + v,
+            }
+        }
+        return base;
     }
 
     pub fn byStockName(self: *const ItemTable, name: []const u8) ?i32 {
@@ -574,6 +648,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_target_armor_tagged.deinit(allocator);
     var stock_target_armor_tag: std.ArrayList([]const u8) = .empty;
     defer stock_target_armor_tag.deinit(allocator);
+    var stock_harvest_rows: std.ArrayList([]const HarvestCountRow) = .empty;
+    defer stock_harvest_rows.deinit(allocator);
     defer stock_dradius.deinit(allocator);
     var stock_dlifetime: std.ArrayList(i32) = .empty;
     defer stock_dlifetime.deinit(allocator);
@@ -779,6 +855,50 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_target_armor.append(allocator, target_armor);
             try stock_target_armor_tagged.append(allocator, target_armor_tagged);
             try stock_target_armor_tag.append(allocator, target_armor_tag);
+            // HarvestCount (141): ALL rows on the item (tools carry one row
+            // per gating tag; the club/spear family carries three).
+            var harvest_rows: std.ArrayList(HarvestCountRow) = .empty;
+            defer harvest_rows.deinit(allocator);
+            var hp: usize = 0;
+            while (hp < body.len) {
+                const hi = std.mem.findPos(u8, body, hp, "<passive_effect") orelse break;
+                const hname = xml.attr(body, hi, "name") orelse {
+                    hp = hi + 15;
+                    continue;
+                };
+                if (std.mem.eql(u8, hname, "HarvestCount")) {
+                    const row: HarvestCountRow = .{
+                        .op = if (std.mem.eql(u8, xml.attr(body, hi, "operation") orelse "", "base_set"))
+                            .base_set
+                        else if (std.mem.eql(u8, xml.attr(body, hi, "operation") orelse "", "perc_add"))
+                            .perc_add
+                        else
+                            .base_add,
+                        .tags = if (xml.attr(body, hi, "tags")) |t| try arena.dupe(u8, t) else "",
+                    };
+                    if (xml.attr(body, hi, "value")) |v| {
+                        if (std.mem.findScalar(u8, v, ',')) |_| {
+                            var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+                            var curve_copy: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+                            const cn = buffs.parseCurveValue(v, &curve_copy);
+                            @memcpy(curve[0..cn], curve_copy[0..cn]);
+                            try harvest_rows.append(allocator, .{ .op = row.op, .curve = curve, .curve_n = @intCast(cn), .tags = row.tags });
+                        } else {
+                            try harvest_rows.append(allocator, .{ .op = row.op, .value = xml.parseF32(v) orelse 0, .tags = row.tags });
+                        }
+                    } else {
+                        try harvest_rows.append(allocator, row);
+                    }
+                }
+                hp = hi + 15;
+            }
+            if (harvest_rows.items.len > 0) {
+                const slice = try arena.alloc(HarvestCountRow, harvest_rows.items.len);
+                @memcpy(slice, harvest_rows.items);
+                try stock_harvest_rows.append(allocator, slice);
+            } else {
+                try stock_harvest_rows.append(allocator, &.{});
+            }
             var deat: i32 = 0;
             if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
                 deat = std.fmt.parseInt(i32, v, 10) catch 0;
@@ -946,6 +1066,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.target_armor = stock_target_armor.items[idx];
                 def.target_armor_tagged = stock_target_armor_tagged.items[idx];
                 def.target_armor_tag = stock_target_armor_tag.items[idx];
+                def.harvest_rows = stock_harvest_rows.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
@@ -1001,6 +1122,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .target_armor = stock_target_armor.items[idx],
             .target_armor_tagged = stock_target_armor_tagged.items[idx],
             .target_armor_tag = stock_target_armor_tag.items[idx],
+            .harvest_rows = stock_harvest_rows.items[idx],
             .distraction_lifetime = stock_dlifetime.items[idx],
             .distraction_strength = stock_dstrength.items[idx],
             .distraction_eat_ticks = stock_deat.items[idx],
@@ -1132,6 +1254,68 @@ test "DistractionTags + Distraction* effects parse (stock decoy shape)" {
     // Plain items are not distractions.
     const wood = t.byName("resourceWood").?;
     try std.testing.expect(t.distractionFor(wood.id) == null);
+}
+
+test "HarvestCount held-tool rows parse and fold over base 1" {
+    // RE GameUtils.HarvestOnAttack IL=623: count = trunc(rolled *
+    // GetValue(141, tool, 1, holder, null, dropTag)). Ops: base_add ->
+    // base+value, base_set -> base=value, perc_add -> base*(1+value);
+    // a curve evaluates at the tool quality. Tag-gated by the drop row.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="meleeToolPickT3Auger">
+        \\    <effect_group name="Auger">
+        \\      <passive_effect name="HarvestCount" operation="perc_add" value=".2"/>
+        \\    </effect_group>
+        \\  </item>
+        \\  <item name="meleeWpnClubT0WoodenClub">
+        \\    <effect_group name="Club">
+        \\      <passive_effect name="HarvestCount" operation="base_add" value="-.75" tags="allHarvest"/>
+        \\      <passive_effect name="HarvestCount" operation="base_add" value="-.75" tags="allToolsHarvest"/>
+        \\      <passive_effect name="HarvestCount" operation="base_add" value="-.75" tags="oreWoodHarvest"/>
+        \\    </effect_group>
+        \\  </item>
+        \\  <item name="meleeToolAxeT2SteelAxe">
+        \\    <effect_group name="Axe">
+        \\      <passive_effect name="HarvestCount" operation="base_set" value=".7" tags="butcherHarvest"/>
+        \\    </effect_group>
+        \\  </item>
+        \\  <item name="armorMinerHelmet">
+        \\    <effect_group name="Helmet">
+        \\      <passive_effect name="HarvestCount" operation="perc_add" value=".05,.1,.15,.20,.25,.30" tier="1,2,3,4,5,6" tags="oreWoodHarvest"/>
+        \\    </effect_group>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+
+    // Untagged perc_add applies to every drop: 1 + .2 = 1.2.
+    const auger = t.byName("meleeToolPickT3Auger").?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.2), t.harvestMultiplier(auger.id, 1, "oreWoodHarvest"), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.2), t.harvestMultiplier(auger.id, 1, ""), 1e-4);
+    // Club: base_add -.75 over base 1 -> 0.25 for a matching tag; no match
+    // (butcherHarvest) -> 1.0 (no row applies).
+    const club = t.byName("meleeWpnClubT0WoodenClub").?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), t.harvestMultiplier(club.id, 1, "oreWoodHarvest"), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), t.harvestMultiplier(club.id, 1, "allHarvest,lumberjackHarvest"), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), t.harvestMultiplier(club.id, 1, "butcherHarvest"), 1e-4);
+    // Axe: base_set .7 replaces the base for butcherHarvest only.
+    const axe = t.byName("meleeToolAxeT2SteelAxe").?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), t.harvestMultiplier(axe.id, 1, "butcherHarvest"), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), t.harvestMultiplier(axe.id, 1, "oreWoodHarvest"), 1e-4);
+    // Curve: quality 3 -> 1 + .15 = 1.15 (piecewise at quality 1..6).
+    const helmet = t.byName("armorMinerHelmet").?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.05), t.harvestMultiplier(helmet.id, 1, "oreWoodHarvest"), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.15), t.harvestMultiplier(helmet.id, 3, "oreWoodHarvest"), 1e-4);
+    // Unknown item / no rows -> 1.0.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), t.harvestMultiplier(9999, 1, "oreWoodHarvest"), 1e-4);
 }
 
 test "load stock items.xml when present" {

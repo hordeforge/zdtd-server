@@ -88,6 +88,11 @@ ALLOWLIST = {
     "generatorbank", "solarbank", "batterybank", "electricwirerelay",
     "electricfencepost", "electrictimerrelay", "switch", "pressureplate",
     "dartTrap", "bladeTrap",
+    # Forge smelt-completion sound gate (craft.zig onStationCraftDone):
+    # the block name is a data-bound selection key resolved through the
+    # loaded blocks table (stock TileEntityForge plays the ding; other
+    # workstations are silent — RE tile-entities-power.md).
+    "forge",
     # Offline class_table default (ecs/world.zig, stock ^healthNormalFeral 550).
     "zombieBoeFeral",
     # Offline loot-bag entity class default (ecs/world.zig class_table).

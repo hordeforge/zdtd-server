@@ -490,6 +490,24 @@ pub fn rollBlockDropEvent(
         if (prng.nextFloat() >= d.prob) continue;
         // Overall gate (IL_01ED / IL_024F: when _overallProb < 0.999).
         if (overall_prob < 0.999 and prng.nextFloat() >= overall_prob) continue;
+        // HarvestCount held-tool scaling (RE GameUtils.HarvestOnAttack
+        // IL=623: count = trunc(rolled * GetValue(141, tool, 1, holder,
+        // null, dropTag))): the breaker's held tool's tag-matched items.xml
+        // HarvestCount rows fold over base 1 (base_add/base_set/perc_add);
+        // a non-positive result suppresses the drop (clubs barely harvest).
+        if (event == .harvest) {
+            if (self.sim.playerByPeer(peer_slot)) |ps| {
+                if (self.sim.mask[ps].inventory) {
+                    const tool = self.sim.inventory[ps].slots[self.sim.inventory[ps].holding];
+                    if (tool.item_id != 0) {
+                        const mult = self.items.harvestMultiplier(tool.item_id, tool.quality, d.tag);
+                        if (mult <= 0) continue;
+                        count = @intFromFloat(@as(f64, @floatFromInt(count)) * @as(f64, mult));
+                        if (count == 0) continue;
+                    }
+                }
+            }
+        }
         // The IL "[recipe]" / "*" names appear on no V3.1.0 b14 drop row;
         // an unknown item fails closed to a skip (missing beats fake).
         const item = self.items.byName(d.item_name) orelse continue;

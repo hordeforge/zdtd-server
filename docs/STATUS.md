@@ -765,6 +765,17 @@ zdtd parses the embedded XML at comptime (`src/assets/sandbox_presets.zig`)
 into `[rules.difficulty] incoming_damage_0..5` defaults - never hardcoded -
 and applies them at the AI->player damage choke (`damageScale`, RE
 ItemActionAttack.difficultyModifier IL=44). The dashboard
+(docs/provenance.html) is synced. Then the HarvestCount item-passive leg
+went WIRED for the held tool: `GameUtils.HarvestOnAttack` IL=623 pins
+count = trunc(rolled x GetValue(141, tool, 1, holder, null, dropTag));
+items.xml rows fold over base 1 (base_add -> 1+X, base_set -> X, perc_add
+-> 1+Y; quality curves at the tool quality), tag-gated by the drop row's
+tag, and `items.harvestMultiplier` applies it in the dig roll - a wooden
+club yields 0.25x (terrStone 55 -> 13 rocks), the auger's untagged perc_add
+.2 yields 1.2x (55 -> 66). Scenario harvest-count drives both. The
+equipped-armor aggregation (farmer/lumberjack/miner/scavenger rows over
+worn items) and the XUiM_Recipes seed/crop/mining/harvest output modifiers
+(defaults 1.0) stay recorded. The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

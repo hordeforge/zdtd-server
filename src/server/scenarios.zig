@@ -7454,6 +7454,76 @@ test "scenario harvest drops roll into the breaker (terrStone → resourceRockSm
     std.debug.print("PASS harvest-drop: terrStone break rolls resourceRockSmall x55 into inventory\n", .{});
 }
 
+test "scenario harvest count scales by the held tool's HarvestCount passive" {
+    // RE GameUtils.HarvestOnAttack IL=623: count = trunc(rolled *
+    // GetValue(141, tool, 1, holder, null, dropTag)). terrStone's drop row
+    // carries tag "oreWoodHarvest": a wooden club (base_add -.75 x3 tags ->
+    // 0.25) yields trunc(55 x .25) = 13 rocks; the auger (untagged perc_add
+    // .2 -> 1.2) yields 55 x 1.2 = 66. The bare hand has no rows -> 55
+    // (covered by the harvest-drop scenario). Skipped without the game dir.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const stone_id = g.blocks.byName("terrStone").?.id;
+    const rock_id = g.items.byName("resourceRockSmall").?.id;
+    const club_id = g.items.byName("meleeWpnClubT0WoodenClub").?.id;
+    const auger_id = g.items.byName("meleeToolPickT3Auger").?.id;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const ap = g.sim.transform[ps];
+
+    const breakAt = struct {
+        fn call(gg: *game_mod.Game, cc: *game_mod.Client, bx: i32, by: i32, bz: i32, block_id: u16) !void {
+            var sb: [64]u8 = undefined;
+            var frame_buf: [128]u8 = undefined;
+            const d = try packages.buildSetBlockBodyDamage(&sb, bx, by, bz, block_id, 65000, cc.entity_id, 0);
+            try gg.injectFramed(cc, try packages.framed(&frame_buf, "NetPackageSetBlock", d));
+        }
+    }.call;
+
+    const countRocks = struct {
+        fn call(gg: *game_mod.Game, cslot: usize, rock: u16) u32 {
+            const p = gg.sim.playerByPeer(cslot).?;
+            var n: u32 = 0;
+            for (gg.sim.inventory[p].slots) |sl| {
+                if (sl.item_id == rock) n += sl.count;
+            }
+            return n;
+        }
+    }.call;
+
+    // Wooden club in hand: 0.25x on the oreWoodHarvest drop -> 13 rocks.
+    g.sim.inventory[ps].slots[g.sim.inventory[ps].holding] = .{ .item_id = club_id, .count = 1, .quality = 1 };
+    const bx: i32 = @intFromFloat(ap.x + 1);
+    const bz: i32 = @intFromFloat(ap.z);
+    const by: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    try g.world.setBlockWorld(bx, by, bz, stone_id);
+    try breakAt(g, c, bx, by, bz, stone_id);
+    try std.testing.expectEqual(@as(u32, 13), countRocks(g, c.slot, rock_id));
+
+    // Auger in hand: untagged perc_add .2 -> 1.2x -> 66 rocks.
+    for (&g.sim.inventory[ps].slots) |*sl| sl.* = .{}; // clear the club's rocks
+    g.sim.inventory[ps].slots[g.sim.inventory[ps].holding] = .{ .item_id = auger_id, .count = 1, .quality = 1 };
+    try g.world.setBlockWorld(bx + 2, by, bz, stone_id);
+    try breakAt(g, c, bx + 2, by, bz, stone_id);
+    try std.testing.expectEqual(@as(u32, 66), countRocks(g, c.slot, rock_id));
+    std.debug.print("PASS harvest-count: club 0.25x (13) and auger 1.2x (66) scale terrStone rocks\n", .{});
+}
+
 test "scenario fall-event drops re-place debris at landing (terrDirt)" {
     // Real blocks.xml (game-dir): a collapsed terrDirt column lands and the
     // Fall-event roll (RE EntityFallingBlock landing DropItemsOnEvent IL)

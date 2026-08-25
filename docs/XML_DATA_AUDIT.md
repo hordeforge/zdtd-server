@@ -118,7 +118,9 @@ values to a connected stock client:
   no is-bedroll property, the name list resolves through AssignIds), the
   `*bank`/`switch`/`dartTrap`/`bladeTrap` power-block pins (`powerblocks.zig`),
   `ZombiesAll` (director default group), `foodCanChili` (load probe), trader
-  currency `casinoCoin` (offline builtin map), and the
+  currency `casinoCoin` (offline builtin map), `forge` (`craft.zig`
+  onStationCraftDone — the stock TileEntityForge ding gate; other
+  workstations are silent, RE tile-entities-power.md), and the
   biome-name/`terr*` resolve keys (`store.zig`, `init_assets.zig`,
   `biomes.zig`).
 - **Machine gate:** `tools/check_xml_audit.py` (part of `make check` via
