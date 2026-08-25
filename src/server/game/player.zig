@@ -23,6 +23,7 @@ const max_clients = game_mod.max_clients;
 pub fn awardXp(self: *Game, slot: usize, base: u64) void {
     if (slot >= self.clients.len) return;
     const c = &self.clients[slot];
+    const before_xp = c.xp;
     // Widen before the multiply: base (verdict-scaled) times an operator
     // XPMultiplier can wrap u64 otherwise; the ledger add saturates.
     c.xp +|= @intCast(@min(@as(u128, base) * self.xp_multiplier / 100, @as(u128, std.math.maxInt(u64))));
@@ -45,6 +46,11 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
         // Level-up refreshes the EntityNetworkStats snapshot the peers hold:
         // stock's NED dirty path pushes PlayerStats when progression changes.
         broadcastPlayerStats(self, slot);
+    }
+    // Stat-changed observer (ADR 0034): the XP/level leg, one call per award.
+    if (c.xp != before_xp) {
+        const h = &self.sim.health[self.sim.playerByPeer(slot) orelse return];
+        self.statChangedObserver( c.entity_id, @intFromFloat(h.hp), @intFromFloat(h.food), @intFromFloat(h.water), @intFromFloat(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
     }
 }
 

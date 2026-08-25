@@ -37,6 +37,7 @@ pub const Hook = enum(u8) {
     on_mcp_frame = 17,
     on_trade_price = 18,
     on_perk_spend = 19,
+    on_stat_changed = 20,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
@@ -44,6 +45,7 @@ pub const Hook = enum(u8) {
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
         "on_trader_event",  "on_mcp_frame",     "on_trade_price",   "on_perk_spend",
+        "on_stat_changed",
     };
 };
 
@@ -431,6 +433,18 @@ pub const Plugin = struct {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_perk_spend disabled: {s}\n", .{ self.name, @errorName(err) });
             break :blk verdict_keep;
+        };
+    }
+
+    /// on_stat_changed(player: i32, hp: i32, food: i32, water: i32,
+    /// stamina: i32, level: i32, xp: i32) - observer (ADR 0034): the sim
+    /// stays the authority; plugins react/announce.
+    pub fn callStatChanged(self: *Plugin, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
+        if (self.disabled) return;
+        if (!self.hook_present[@intFromEnum(Hook.on_stat_changed)]) return;
+        self.instance.call(fn (i32, i32, i32, i32, i32, i32, i32) void, "on_stat_changed", .{ player, hp, food, water, stamina, level, xp }) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_stat_changed disabled: {s}\n", .{ self.name, @errorName(err) });
         };
     }
 
@@ -1007,6 +1021,11 @@ pub const WasmHost = struct {
             if (v != verdict_keep) return v;
         }
         return verdict_keep;
+    }
+
+    /// Player stat observer (ADR 0034): notify every plugin exporting it.
+    pub fn statChanged(self: *WasmHost, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
+        for (0..self.n) |i| self.slots[i].callStatChanged(player, hp, food, water, stamina, level, xp);
     }
 
     pub fn questAccept(self: *WasmHost, player: i32, def_id: i32) i32 {

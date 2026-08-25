@@ -1410,6 +1410,14 @@ pub const Game = struct {
         return if (sv != 0) sv else self.wasm_plugins.perkSpend(player, skill, level, cost);
     }
 
+    /// on_stat_changed observer (ADR 0034): fire both plugin hosts. The sim
+    /// stays the authority; plugins react/announce. Bounded: one call per
+    /// changed player per tick (the survival pass) or per XP award.
+    pub fn statChangedObserver(self: *Game, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
+        self.plugins.statChanged(player, hp, food, water, stamina, level, xp);
+        self.wasm_plugins.statChanged(player, hp, food, water, stamina, level, xp);
+    }
+
     pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
         return game_player.skillLevelOf(self, slot, skill);
     }

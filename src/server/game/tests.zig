@@ -3351,3 +3351,47 @@ test "on_perk_spend verdict denies and scales through the C2S spend handler" {
     g.plugins.shutdown();
     std.debug.print("PASS perk-spend verdict: deny + 200% scale through the C2S handler\n", .{});
 }
+
+// Test capture (module scope: the nested vtable fn cannot close over locals).
+var stat_obs_calls: usize = 0;
+
+test "on_stat_changed observer fires from the survival pass" {
+    // ADR 0034: the stat-changed observer is a pure observer - the sim stays
+    // authority. A food-depleted player triggers one call per tick.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    stat_obs_calls = 0;
+    const obs = plugin_api.PluginVTable{
+        .name = "statobs",
+        .on_stat_changed = struct {
+            fn f(_: *const plugin_api.Host, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
+                _ = player;
+                _ = hp;
+                _ = food;
+                _ = water;
+                _ = stamina;
+                _ = level;
+                _ = xp;
+                stat_obs_calls += 1;
+            }
+        }.f,
+    };
+    try std.testing.expect(g.plugins.register(&obs));
+    g.plugins.enableAll();
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // Deplete food so the survival pass changes it; a few ticks must fire.
+    g.sim.health[ps].food = 1;
+    var i: usize = 0;
+    while (i < 10) : (i += 1) try g.step();
+    try std.testing.expect(stat_obs_calls >= 5); // food keeps dropping each tick
+    g.plugins.shutdown();
+}

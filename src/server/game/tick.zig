@@ -187,6 +187,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             h.stamina = @min(h.stamina_max, h.stamina + prog.stamina_regen_per_second * dt);
         }
         const stamina_changed = h.stamina != stamina_was;
+        // Stat-changed observer (ADR 0034): one bounded call per changed
+        // player per tick - plugins react/announce; the sim stays authority.
+        if (survival_changed or stamina_changed) {
+            self.statChangedObserver( c.entity_id, @intFromFloat(h.hp), @intFromFloat(h.food), @intFromFloat(h.water), @intFromFloat(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+        }
         if (survival_changed or stamina_changed) {
             if (c.survival_sync_cd <= 0) {
                 c.survival_sync_cd = prog.survival_sync_seconds;

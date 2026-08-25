@@ -53,6 +53,11 @@ pub const PluginVTable = struct {
     /// Trader event observer (kind 0 open / 1 buy / 2 sell). Announcements
     /// react through a plugin; the trade has already executed.
     on_trader_event: ?*const fn (*const Host, player: i32, trader_entity: i32, kind: i32) void = null,
+    /// Player stat observer (on_stat_changed, ADR 0034): fired once per
+    /// player per tick when the survival/effects pass changed any tracked
+    /// stat (hp/food/water/stamina) and on XP awards (level/XP). Pure
+    /// observer - the sim stays the authority; plugins react/announce.
+    on_stat_changed: ?*const fn (*const Host, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void = null,
     on_shutdown: ?*const fn (*const Host) void = null,
     on_player_death: ?*const fn (*const Host, victim: i32) i32 = null,
     on_entity_killed: ?*const fn (*const Host, killed: i32, killer: i32) i32 = null,

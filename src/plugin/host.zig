@@ -75,6 +75,16 @@ pub const PluginHost = struct {
         }
     }
 
+    /// Player stat observer (ADR 0034): fired when the survival pass changed
+    /// a tracked stat or an XP award landed. Pure observer, void.
+    pub fn statChanged(self: *PluginHost, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_stat_changed) |f| f(&self.view, player, hp, food, water, stamina, level, xp);
+        }
+    }
+
     pub fn traderEvent(self: *PluginHost, player: i32, trader_entity: i32, kind: i32) void {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
@@ -393,5 +403,29 @@ test "host perkSpend verdict: deny, keep, and percent-scale first-wins" {
     try std.testing.expectEqual(@as(i32, -1), h.perkSpend(1, "perkForbidden", 1, 1));
     try std.testing.expectEqual(@as(i32, 150), h.perkSpend(1, "perkCostly", 2, 1));
     try std.testing.expectEqual(@as(i32, 0), h.perkSpend(1, "perkFine", 1, 1));
+    h.shutdown();
+}
+
+// Test capture (module scope: the nested vtable fn cannot close over locals).
+var stat_last: [7]i32 = .{0} ** 7;
+
+test "host stat-changed observer fires with the player snapshot" {
+    var h: PluginHost = .{ .sample_enabled = false };
+    stat_last = .{0} ** 7;
+    const obs = api.PluginVTable{
+        .name = "statobs",
+        .on_stat_changed = struct {
+            fn f(_: *const api.Host, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
+                stat_last = .{ player, hp, food, water, stamina, level, xp };
+            }
+        }.f,
+    };
+    try std.testing.expect(h.register(&obs));
+    h.enableAll();
+    h.statChanged(100, 50, 40, 30, 20, 5, 12345);
+    try std.testing.expectEqual(@as(i32, 100), stat_last[0]);
+    try std.testing.expectEqual(@as(i32, 50), stat_last[1]);
+    try std.testing.expectEqual(@as(i32, 40), stat_last[2]);
+    try std.testing.expectEqual(@as(i32, 5), stat_last[5]);
     h.shutdown();
 }
