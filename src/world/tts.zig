@@ -399,6 +399,11 @@ pub fn paintDecoration(
     /// placeholders; skipping them via live ids keeps modded dumps correct.
     filler_id: u16,
     filler_adaptive_id: u16,
+    /// Resolves the replacement block for a filler cell (stock
+    /// InitTerrainFillers/CopyIntoLocal: the cell takes the surrounding
+    /// terrain). Null = skip the filler cells (offline tests).
+    terrain_id: ?*const fn (?*anyopaque, i32, i32, i32) u16,
+    terrain_ctx: ?*anyopaque,
     set_block: SetBlockFn,
     ctx: ?*anyopaque,
 ) void {
@@ -422,7 +427,20 @@ pub fn paintDecoration(
         const raw = tts.types[@intCast(i)];
         if (raw == 0) continue;
         const typ: u16 = @truncate(raw & type_mask);
-        if (typ == filler_id or typ == filler_adaptive_id) continue;
+        if (typ == filler_id or typ == filler_adaptive_id) {
+            // Stock resolves fillers through InitTerrainFillers / CopyIntoLocal:
+            // the cell takes the surrounding terrain instead of staying a
+            // placeholder (adaptive fillers use the same surrounding material).
+            if (terrain_id) |tf| {
+                const tid = tf(terrain_ctx, wx, wy, wz);
+                if (tid != 0) {
+                    // Terrain cell: no paint, density or damage.
+                    set_block(ctx, wx, wy, wz, tid, 0, null, 0);
+                    continue;
+                }
+            }
+            continue;
+        }
         const tex: u64 = if (tts.textures.len > @as(usize, @intCast(i))) tts.textures[@intCast(i)] else 0;
         const dens: ?u8 = if (tts.density.len > @as(usize, @intCast(i))) tts.density[@intCast(i)] else null;
         // Authored block damage (u16 absolute HP, v>8 plane): POIs that stock
@@ -616,7 +634,7 @@ test "prefab water channel decodes and paints water blocks" {
         }
     };
     var p: Paint = .{};
-    paintDecoration(&t, 100, 60, 100, 0, 240, assignids.terrain_filler, assignids.terrain_filler_adaptive, Paint.put, &p);
+    paintDecoration(&t, 100, 60, 100, 0, 240, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Paint.put, &p);
     try std.testing.expectEqual(@as(usize, 1), p.blocks);
     const wcell = p.water.?;
     try std.testing.expectEqual(@as(i32, 101), wcell.wx);
@@ -625,7 +643,7 @@ test "prefab water channel decodes and paints water blocks" {
 
     // water_id 0 fails closed: no water painted.
     var p0: Paint = .{};
-    paintDecoration(&t, 100, 60, 100, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, Paint.put, &p0);
+    paintDecoration(&t, 100, 60, 100, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Paint.put, &p0);
     try std.testing.expectEqual(@as(usize, 0), p0.blocks);
 }
 
@@ -665,7 +683,7 @@ test "paintDecoration carries authored damage to the set callback" {
         }
     };
     var cap = Capture{};
-    paintDecoration(&t, 10, 50, 20, 0, 0, 0, 0, Capture.put, &cap);
+    paintDecoration(&t, 10, 50, 20, 0, 0, 0, 0, null, null, Capture.put, &cap);
     try std.testing.expectEqual(@as(usize, 3), cap.n); // air cell skipped
     try std.testing.expectEqual(@as(i32, 10), cap.hits[0].wx);
     try std.testing.expectEqual(@as(i32, 50), cap.hits[0].wy);

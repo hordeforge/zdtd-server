@@ -797,7 +797,23 @@ pub const World = struct {
                         .base_x = pos.x * 16,
                         .base_z = pos.z * 16,
                     };
-                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, PaintCtx.put, &pc);
+                    // Filler cells take the surrounding terrain (stock
+                    // InitTerrainFillers/CopyIntoLocal): the pre-stamp block at
+                    // the cell is the terrain the POI sits on.
+                    const TerrainCtx = struct {
+                        c: *const Chunk,
+                        base_x: i32,
+                        base_z: i32,
+                        fn at(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32) u16 {
+                            const s: *const @This() = @ptrCast(@alignCast(ctx.?));
+                            const lx = wx - s.base_x;
+                            const lz = wz - s.base_z;
+                            if (lx < 0 or lx >= 16 or lz < 0 or lz >= 16) return 0;
+                            return s.c.blockAt(lx, wy, lz);
+                        }
+                    };
+                    var terr_ctx: TerrainCtx = .{ .c = gop.value_ptr, .base_x = pos.x * 16, .base_z = pos.z * 16 };
+                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, TerrainCtx.at, &terr_ctx, PaintCtx.put, &pc);
                     if (pc.failed > 0) {
                         std.debug.print(
                             "zdtd: TTS paint dropped {d} blocks at chunk ({d},{d})\n",

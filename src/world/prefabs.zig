@@ -512,6 +512,8 @@ pub const Index = struct {
         water_id: u16,
         filler_id: u16,
         filler_adaptive_id: u16,
+        terrain_id: ?*const fn (?*anyopaque, i32, i32, i32) u16,
+        terrain_ctx: ?*anyopaque,
         set_block: tts.SetBlockFn,
         ctx: ?*anyopaque,
     ) void {
@@ -525,7 +527,7 @@ pub const Index = struct {
             // only the huge RWG clutter parts are skipped.
             if (!isPaintablePart(d)) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
-            tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, water_id, filler_id, filler_adaptive_id, set_block, ctx);
+            tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, water_id, filler_id, filler_adaptive_id, terrain_id, terrain_ctx, set_block, ctx);
         }
     }
 
@@ -921,13 +923,13 @@ test "stock cave_07 stamps its body below the declared ground" {
         }
     };
     var with_offset: Rec = .{};
-    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, Rec.onBlock, &with_offset);
+    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Rec.onBlock, &with_offset);
     try std.testing.expect(with_offset.min_wy < 60);
 
     // Same POI with the offset dropped: the delta is exactly the YOffset.
     var without: Rec = .{};
     idx.items[0].y_offset = 0;
-    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, Rec.onBlock, &without);
+    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Rec.onBlock, &without);
     try std.testing.expectEqual(without.min_wy - 33, with_offset.min_wy);
 }
 
@@ -944,7 +946,7 @@ test "navezgane paints a real POI into its chunk" {
 
     var c: TestPaintCount = .{};
     // abandoned_house_07 is at (-262,61,450): chunk (-17, 28).
-    idx.applyTtsPaintToChunk(-17, 28, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, TestPaintCount.put, &c);
+    idx.applyTtsPaintToChunk(-17, 28, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, TestPaintCount.put, &c);
     try std.testing.expect(c.n > 0);
 }
 
@@ -1089,7 +1091,7 @@ test "part decoration paints its blocks into the chunk" {
     , prefab_root);
     defer idx.deinit();
     var c: TestPaintCount = .{};
-    idx.applyTtsPaintToChunk(6, 6, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, TestPaintCount.put, &c); // chunk x96..112 overlaps the part
+    idx.applyTtsPaintToChunk(6, 6, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, TestPaintCount.put, &c); // chunk x96..112 overlaps the part
     try std.testing.expect(c.n > 0);
 }
 

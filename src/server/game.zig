@@ -1864,7 +1864,17 @@ pub const Game = struct {
                 } else |_| {}
             }
         };
-        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, Ctx.put, self);
+        const TerrCtx = struct {
+            g: *Game,
+            fn at(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32) u16 {
+                const s: *const @This() = @ptrCast(@alignCast(ctx.?));
+                const t = world_store.World.worldToChunk(bx, bz);
+                const c = s.g.world.chunkAt(t.pos) orelse return 0;
+                return c.blockAt(t.lx, by, t.lz);
+            }
+        };
+        var terr_ctx: TerrCtx = .{ .g = self };
+        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, TerrCtx.at, &terr_ctx, Ctx.put, self);
         std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
     }
 
