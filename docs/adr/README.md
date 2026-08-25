@@ -34,6 +34,7 @@ Status is one of: **accepted**, **superseded**, **deprecated** — a decision st
 | [0030](0030-plugin-spatiotemporal-composability.md) | Plugin spatiotemporal composability: reload (HMR), effect withdrawal, declarative `_zdtd_requires` dependencies | accepted |
 | [0031](0031-mcp-wasm-module.md) | MCP server as a Wasm module: guest protocol, host transport | accepted |
 | [0032](0032-module-tiers-and-override.md) | Module tiers and override: core / official mod / user mod, discovery, exclusive override points, mod-replaces-mod | accepted |
+| [0033](0033-perk-spend-verdict.md) | on_perk_spend verdict hook: plugins gate/scale perk spending; the VM stat deltas stay native | accepted |
 
 Numbers 0027–0029 were never assigned. Next free number is **0033**.
 

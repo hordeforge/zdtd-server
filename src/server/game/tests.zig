@@ -22,6 +22,8 @@ const wire_frame = @import("../../wire/frame.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const replicate_te = @import("../replicate_te.zig");
+const c2s_misc = @import("../c2s/misc.zig");
+const plugin_api = @import("../../plugin/api.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
@@ -3271,4 +3273,81 @@ test "quest reward stage scales by quest tier (GetTraderStage)" {
     var def0 = def;
     def0.difficulty_tier = 0;
     try std.testing.expectEqual(@as(i32, 10), g.questRewardStage(def0, cl.slot));
+}
+
+test "on_perk_spend verdict denies and scales through the C2S spend handler" {
+    // ADR 0033: the on_perk_spend verdict rides the spend request on top of
+    // the catalog validation - <0 denies (no SP spent, no echo), >0 scales
+    // the skill-point cost by percent. The stat deltas stay native.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const attrs = [_]assets_progression.AttrDef{
+        .{ .name = "attGeneral", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
+    };
+    const perks = [_]assets_progression.PerkDef{
+        .{ .name = "perkLightEater", .max_level = 5 },
+        .{ .name = "perkForbidden", .max_level = 5 },
+    };
+    g.progression_table.attributes = &attrs;
+    g.progression_table.perks = &perks;
+    g.progression.skill_points_per_level = 1;
+
+    // A verdict gate: deny perkForbidden, double the cost of everything else.
+    const gate = plugin_api.PluginVTable{
+        .name = "perkgate",
+        .on_perk_spend = struct {
+            fn f(_: *const plugin_api.Host, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
+                _ = player;
+                _ = level;
+                _ = cost;
+                if (std.mem.eql(u8, skill, "perkForbidden")) return -1;
+                if (std.mem.eql(u8, skill, "perkLightEater")) return 200;
+                return 0;
+            }
+        }.f,
+    };
+    try std.testing.expect(g.plugins.register(&gate));
+    g.plugins.enableAll();
+
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    cl.skill_points = 10;
+    try std.testing.expectEqual(@as(u16, 1), cl.level);
+
+    const body_of = struct {
+        fn build(skill: []const u8, level: i32) [64]u8 {
+            var b: [64]u8 = undefined;
+            var w = wire_binary.Writer{ .buf = &b };
+            w.writeString(skill) catch {};
+            w.writeI32(level) catch {};
+            return b;
+        }
+    };
+
+    // Denied: the purchase is refused, no SP spent, no level granted.
+    var body = body_of.build("perkForbidden", 1);
+    _ = try c2s_misc.handle(g, cl, cl.peer.?, "NetPackageEntitySetSkillLevelServer", body[0..]);
+    try std.testing.expectEqual(@as(u8, 0), g.skillLevelOf(cl.slot, "perkForbidden"));
+    try std.testing.expectEqual(@as(u32, 10), cl.skill_points);
+
+    // Scaled 200%: catalog cost 1 becomes 2, spent from the balance.
+    body = body_of.build("perkLightEater", 1);
+    _ = try c2s_misc.handle(g, cl, cl.peer.?, "NetPackageEntitySetSkillLevelServer", body[0..]);
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(cl.slot, "perkLightEater"));
+    try std.testing.expectEqual(@as(u32, 8), cl.skill_points);
+
+    // The native dispatch helper agrees.
+    try std.testing.expectEqual(@as(i32, -1), g.perkSpendVerdict(cl.entity_id, "perkForbidden", 1, 1));
+    try std.testing.expectEqual(@as(i32, 200), g.perkSpendVerdict(cl.entity_id, "perkLightEater", 1, 1));
+    try std.testing.expectEqual(@as(i32, 0), g.perkSpendVerdict(cl.entity_id, "otherPerk", 1, 1));
+    g.plugins.shutdown();
+    std.debug.print("PASS perk-spend verdict: deny + 200% scale through the C2S handler\n", .{});
 }

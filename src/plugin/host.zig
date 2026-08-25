@@ -121,6 +121,20 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    /// Pre-purchase perk verdict (on_perk_spend, ADR 0033): <0 deny, 0 keep,
+    /// >0 scales the skill-point cost by percent.
+    pub fn perkSpend(self: *PluginHost, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_perk_spend) |f| {
+                const v = f(&self.view, player, skill, level, cost);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     /// Pre-trade price verdict (on_trade_price): <0 deny, 0 keep, >0 percent.
     pub fn tradePrice(self: *PluginHost, player: i32, item: i32, unit_price: i32) i32 {
         var i: usize = 0;
@@ -356,4 +370,28 @@ test "host admin command hook first handler wins" {
     try std.testing.expectEqualStrings("pong\n", h.adminCommand("ping", &out).?);
     // p1 does not handle "other", so p2 wins.
     try std.testing.expectEqualStrings("p2\n", h.adminCommand("other", &out).?);
+}
+
+test "host perkSpend verdict: deny, keep, and percent-scale first-wins" {
+    var h: PluginHost = .{ .sample_enabled = false };
+    // Static lifetime: PluginHost keeps the vtable pointer.
+    const gate = api.PluginVTable{
+        .name = "perkgate",
+        .on_perk_spend = struct {
+            fn f(_: *const api.Host, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
+                if (std.mem.eql(u8, skill, "perkForbidden")) return -1; // deny
+                if (std.mem.eql(u8, skill, "perkCostly")) return 150; // scale cost x1.5
+                _ = player;
+                _ = level;
+                _ = cost;
+                return 0; // keep everything else
+            }
+        }.f,
+    };
+    try std.testing.expect(h.register(&gate));
+    h.enableAll();
+    try std.testing.expectEqual(@as(i32, -1), h.perkSpend(1, "perkForbidden", 1, 1));
+    try std.testing.expectEqual(@as(i32, 150), h.perkSpend(1, "perkCostly", 2, 1));
+    try std.testing.expectEqual(@as(i32, 0), h.perkSpend(1, "perkFine", 1, 1));
+    h.shutdown();
 }

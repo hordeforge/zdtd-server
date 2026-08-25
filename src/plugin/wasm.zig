@@ -36,13 +36,14 @@ pub const Hook = enum(u8) {
     on_trader_event = 16,
     on_mcp_frame = 17,
     on_trade_price = 18,
+    on_perk_spend = 19,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
         "on_player_death",  "on_entity_killed", "on_block_damage",  "on_quest_complete",
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
-        "on_trader_event",  "on_mcp_frame",     "on_trade_price",
+        "on_trader_event",  "on_mcp_frame",     "on_trade_price",   "on_perk_spend",
     };
 };
 
@@ -408,6 +409,27 @@ pub const Plugin = struct {
         ) catch |err| blk: {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_craft_request disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_perk_spend(player: i32, name_ptr: i32, name_len: i32, level: i32,
+    /// cost: i32) -> i32 (ADR 0033: <0 deny the spend, 0 keep, >0 scale the
+    /// skill-point cost by percent). The skill name is copied into the
+    /// guest's scratch like on_craft_request.
+    pub fn callPerkSpend(self: *Plugin, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_perk_spend)]) return verdict_keep;
+        const mem = self.instance.memory() orelse return verdict_keep;
+        const off = self.reserveScratch(mem, skill.len) orelse return verdict_keep;
+        @memcpy(mem.slice()[off..][0..skill.len], skill);
+        return self.instance.call(
+            fn (i32, i32, i32, i32, i32) i32,
+            "on_perk_spend",
+            .{ player, @intCast(off), @intCast(skill.len), level, cost },
+        ) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_perk_spend disabled: {s}\n", .{ self.name, @errorName(err) });
             break :blk verdict_keep;
         };
     }
@@ -972,6 +994,16 @@ pub const WasmHost = struct {
         if (c != no_claim and c < self.n) return self.slots[c].callPlayerDamage(attacker, victim, amount);
         for (0..self.n) |i| {
             const v = self.slots[i].callPlayerDamage(attacker, victim, amount);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    /// Perk-spend verdict (ADR 0033): every plugin exporting on_perk_spend is
+    /// consulted in slot order; the first non-keep verdict wins.
+    pub fn perkSpend(self: *WasmHost, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callPerkSpend(player, skill, level, cost);
             if (v != verdict_keep) return v;
         }
         return verdict_keep;
@@ -2373,5 +2405,28 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
         try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32602") != null);
     }
     // No module trapped or exhausted fuel through the whole sequence.
+    try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
+}
+
+test "core_perkgate.wasm denies forbidden_* perk spends via on_perk_spend" {
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+        fn queryFn(_: *HostCtx, _: []const u8, _: []u8) usize {
+            return 0;
+        }
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn, .query_fn = &Cap.queryFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_perkgate/core_perkgate.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_perk_spend)]);
+    // Deny a forbidden-named perk spend; keep everything else.
+    try std.testing.expectEqual(@as(i32, -1), host.perkSpend(100, "forbidden_evil", 1, 1));
+    try std.testing.expectEqual(@as(i32, 0), host.perkSpend(100, "perkLightEater", 1, 1));
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }

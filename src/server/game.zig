@@ -1389,6 +1389,21 @@ pub const Game = struct {
         return game_player.purchaseSkill(self, slot, skill, target_level);
     }
 
+    pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_level: u8, cost_override: ?u32) bool {
+        return game_player.purchaseSkillAtCost(self, slot, skill, target_level, cost_override);
+    }
+
+    pub fn skillCostOf(self: *const Game, slot: usize, skill: []const u8, target_level: u8) ?u32 {
+        return game_player.skillCostOf(self, slot, skill, target_level);
+    }
+
+    /// on_perk_spend verdict (ADR 0033): <0 denies the spend, 0 keeps, >0
+    /// scales the skill-point cost by percent. Native first, then wasm.
+    pub fn perkSpendVerdict(self: *Game, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
+        const sv = self.plugins.perkSpend(player, skill, level, cost);
+        return if (sv != 0) sv else self.wasm_plugins.perkSpend(player, skill, level, cost);
+    }
+
     pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
         return game_player.skillLevelOf(self, slot, skill);
     }

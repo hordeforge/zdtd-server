@@ -355,16 +355,15 @@ fn skillCostForLevel(def_cost: u16, mult: f32, level: u8) u32 {
     return @intCast(@max(1, @min(v, 65535)));
 }
 
-/// Purchase one progression level (NetPackageEntitySetSkillLevelServer,
-/// RE progression.md §3 SpendSkillPoints). Validates: known skill, one level
-/// at a time, max level, SP balance >= cost, and (for perks) the parent
-/// attribute purchased. Applies server-side and echoes
-/// NetPackageEntitySetSkillLevelClient. Returns false when denied.
-pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
-    if (slot >= self.clients.len) return false;
-    const c = &self.clients[slot];
+/// Catalog-validated cost of buying `skill` at `target_level`, or null when
+/// the purchase would be denied (unknown skill, not the next level, already
+/// maxed, unmet parent attribute). Mirrors the validation inside
+/// purchaseSkillAtCost so the on_perk_spend verdict can scale the cost
+/// before the purchase applies (ADR 0033).
+pub fn skillCostOf(self: *const Game, slot: usize, skill: []const u8, target_level: u8) ?u32 {
+    if (slot >= self.clients.len) return null;
     const cur = self.skillLevelOf(slot, skill);
-    if (target_level != cur + 1) return false; // one level per purchase
+    if (target_level != cur + 1) return null; // one level per purchase
     const pt = self.progression_table;
     // Resolve the skill: attributes first, then perks.
     var is_attr = false;
@@ -387,13 +386,31 @@ pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: 
             parent = pk.parent_attr;
             break;
         }
-        if (max_level == 0) return false; // unknown skill
-        if (parent.len > 0 and self.skillLevelOf(slot, parent) == 0) return false;
+        if (max_level == 0) return null; // unknown skill
+        if (parent.len > 0 and self.skillLevelOf(slot, parent) == 0) return null;
     }
-    if (cur >= max_level) return false;
-    const cost: u32 = skillCostForLevel(base_cost, cost_mult, target_level);
-    if (c.skill_points < cost) return false;
-    c.skill_points -= cost;
+    if (cur >= max_level) return null;
+    return skillCostForLevel(base_cost, cost_mult, target_level);
+}
+
+/// Purchase one progression level (NetPackageEntitySetSkillLevelServer,
+/// RE progression.md §3 SpendSkillPoints). Validates: known skill, one level
+/// at a time, max level, SP balance >= cost, and (for perks) the parent
+/// attribute purchased. Applies server-side and echoes
+/// NetPackageEntitySetSkillLevelClient. Returns false when denied.
+pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
+    return purchaseSkillAtCost(self, slot, skill, target_level, null);
+}
+
+/// Purchase with an explicit cost override (the on_perk_spend verdict may
+/// scale the catalog cost, ADR 0033); null keeps the catalog cost.
+pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_level: u8, cost_override: ?u32) bool {
+    if (slot >= self.clients.len) return false;
+    const c = &self.clients[slot];
+    const cost = self.skillCostOf(slot, skill, target_level) orelse return false;
+    const eff_cost = cost_override orelse cost;
+    if (c.skill_points < eff_cost) return false;
+    c.skill_points -= eff_cost;
     var i: usize = 0;
     while (i < c.skill_level_n) : (i += 1) {
         if (std.mem.eql(u8, c.skill_levels[i].name, skill)) {

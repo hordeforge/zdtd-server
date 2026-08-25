@@ -64,6 +64,11 @@ pub const PluginVTable = struct {
     on_quest_complete: ?*const fn (*const Host, player: i32, quest_def: i32) i32 = null,
     /// Pre-trade price verdict (on_trade_price): <0 deny, 0 keep, >0 percent.
     on_trade_price: ?*const fn (*const Host, player: i32, item: i32, unit_price: i32) i32 = null,
+    /// Pre-purchase perk verdict (on_perk_spend, ADR 0033): <0 denies the
+    /// spend, 0 keeps, >0 scales the skill-point cost by percent. The stat
+    /// deltas stay native (the passive-effects VM); this gates/customizes
+    /// spending only.
+    on_perk_spend: ?*const fn (*const Host, player: i32, skill: []const u8, level: i32, cost: i32) i32 = null,
     /// Admin command hook: receives the full console line (verb + args), writes
     /// a reply into `out` and returns the written slice. Null return means not
     /// handled — the next plugin is tried, then core reports unknown.

@@ -1,0 +1,5 @@
+name = "core_perkgate"
+version = "0.1.0"
+wasm = "core_perkgate.wasm"
+enabled = false
+description = "In-tree zdtd module: on_perk_spend reference verdict, enabled = false, load via [plugin] modules."
