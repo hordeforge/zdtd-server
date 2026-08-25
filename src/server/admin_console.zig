@@ -954,7 +954,7 @@ pub fn replyMem(self: *Game) void {
         }
     }
     self.adminWrite(admin_cmds.writeMem, .{admin_cmds.MemStats{
-        .minutes = clock.monoNs() / std.time.ns_per_min,
+        .minutes = (clock.monoNs() -% self.start_mono_ns) / std.time.ns_per_min,
         .fps = protocol.ticks_per_second,
         .heap_mb = 0,
         .max_mb = 0,

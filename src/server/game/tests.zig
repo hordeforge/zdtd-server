@@ -1083,6 +1083,26 @@ test "offline init records default DST run seed" {
     try std.testing.expectEqual(util_sim.default_seed, util_sim.getSeed());
 }
 
+test "mem uptime counts from Game init, not raw boot-relative mono" {
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const g = try Game.create(std.testing.allocator, ".zdtd_cfg_cache/mem_uptime", 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Offline init pins the virtual epoch at util_sim.default_start_ns (1 s).
+    // 89m59s of elapsed makes raw monoNs/60 round into the next minute, so the
+    // stock `mem` line must show the init-relative value (89m), not 90m.
+    clock.setVirtualNs(g.start_mono_ns + 89 * std.time.ns_per_min + 59 * std.time.ns_per_s);
+    var out: [256]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = &out;
+    defer g.admin_reply_sink = null;
+    g.replyMem();
+    const text = out[0..g.admin_reply_len];
+    try std.testing.expect(std.mem.startsWith(u8, text, "Time: 89m "));
+}
+
 test "offline steps replay same world_time for same seed" {
     io_fs.mkdirPath(".zdtd_cfg_cache");
     // Unique per invocation: concurrent test processes share .zdtd_cfg_cache,

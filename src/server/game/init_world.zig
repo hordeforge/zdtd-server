@@ -111,6 +111,11 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         // DST replay key: the single value that reproduces this run.
         util_log.info("zdtd: DST run seed={d}\n", .{seed});
     }
+    // Base for stock `mem` uptime (process elapsed). Captured after the clock
+    // mode is fixed above so offline games subtract virtual from virtual;
+    // CLOCK_MONOTONIC is boot-relative on Linux, so raw monoNs would report
+    // host uptime instead of this process's.
+    self.start_mono_ns = clock.monoNs();
     // A later init error (for example invalid WebUI configuration) must not
     // leak process-wide virtual time or forced-serial scheduling into the
     // next test. Successful construction transfers cleanup to deinit().

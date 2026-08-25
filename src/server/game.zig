@@ -359,6 +359,10 @@ pub const Game = struct {
     shed_until_tick: u64 = 0,
     tick_n: u64 = 0,
     running: bool = true,
+    /// Mono instant of Game init; base for stock `mem` uptime (process elapsed).
+    /// CLOCK_MONOTONIC is boot-relative on Linux, so raw monoNs would report
+    /// host uptime, not this process's.
+    start_mono_ns: u64 = 0,
     /// Stock PlayerLogin carries Steam/EOS tickets (multi-KiB). Truncating here
     /// drops login silently and the client hangs at "Connecting…".
     recv_buf: [65536]u8 = undefined,
