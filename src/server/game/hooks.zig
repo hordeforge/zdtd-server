@@ -558,7 +558,7 @@ pub fn questSpawnGsEnemy(
         const ox = px + @cos(ang) * dist;
         const oz = pz + @sin(ang) * dist;
         const oy = g.sim.groundY(ox, oz) orelse rect.y;
-        _ = g.sim.spawnSleeperDef(ox, oy, oz, g.entityClassOf(def));
+        _ = g.sim.spawnSleeperDef(ox, oy, oz, g.entityClassOf(def), 0);
     }
 }
 

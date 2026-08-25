@@ -787,6 +787,16 @@ harvest loot. The server payout now skips ischosen rewards exactly like the
 stock dedi (scenario core_rewardgate asserts the fixture's ischosen reward
 is not granted); the previous server-side roll granted every choice group.
 The dashboard
+(docs/provenance.html) is synced. Then the sleeper re-arm went WORKS: the
+previously RE-blocked `triggered` re-arm residual is wired from the
+research-pinned IL (ClearedUpdate IL=33: respawnTime = worldTime +
+LootRespawnDays x 24000 ticks when the volume's last sleeper zombie dies, 0
+days = never; CheckTrigger IL=136 re-triggers a cleared volume on player
+entry). SleeperVolume volumes carry respawn_time + spawned_alive, the ECS
+links sleeper entities to their volume, a per-tick recount fires the
+ClearedUpdate equivalent and the touch re-arm re-triggers the volume
+(scenario sleeper-rearm; respawn_time persists in the ZSTG1 v2 tail). The
+sleeper pose byte table residual stays recorded. The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

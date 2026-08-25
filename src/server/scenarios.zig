@@ -1516,6 +1516,95 @@ test "scenario combat noise wakes a sleeper volume before player entry" {
     std.debug.print("PASS sleeper-noise: volume woken by combat noise, spawned {d} sleepers\n", .{near});
 }
 
+test "scenario cleared sleeper volume re-arms after LootRespawnDays" {
+    // RE SleeperVolume.ClearedUpdate (IL=33) + Touch (IL_0100-0134): when a
+    // triggered volume's last sleeper zombie dies, respawnTime = worldTime +
+    // LootRespawnDays x 24000 ticks; a touch past that time re-arms the
+    // volume and the group respawns. LootRespawnDays 0 -> never re-arm.
+    freshScenarioDir("worlds/zdtd_sc_sleeperrearm");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_sleeperrearm", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const vols = try gpa.alloc(sleepers_mod.Volume, 1);
+    defer gpa.free(vols);
+    vols[0] = .{
+        .x0 = 100,
+        .y0 = 70,
+        .z0 = 100,
+        .x1 = 108,
+        .y1 = 76,
+        .z1 = 108,
+        .group_n = 1,
+    };
+    vols[0].groups[0] = .{ .class_name = "GroupGenericZombie", .min_count = 2, .max_count = 4 };
+    g.sleepers.volumes = vols;
+    g.sleepers.trigger_count = 0;
+
+    const spawnCount = struct {
+        fn call(gg: *game_mod.Game) usize {
+            var n: usize = 0;
+            for (gg.sim.kind_groups.slice(.zombie)) |zs| {
+                if (!gg.sim.alive[zs] or !gg.sim.mask[zs].sleeper) continue;
+                if (gg.sim.health[zs].hp <= 0) continue; // dead-but-lingering
+                const t = gg.sim.transform[zs];
+                if (t.x > 90 and t.x < 120 and t.z > 90 and t.z < 120) n += 1;
+            }
+            return n;
+        }
+    }.call;
+
+    // Wake the volume; the group spawns.
+    g.sim.pushNoise(104, 72, 104, 10);
+    try g.step();
+    try std.testing.expect(g.sleepers.volumes[0].triggered);
+    const first = spawnCount(g);
+    try std.testing.expect(first > 0);
+
+    // Kill every spawned sleeper; the recount fires ClearedUpdate.
+    for (g.sim.kind_groups.slice(.zombie)) |zs| {
+        if (!g.sim.alive[zs] or !g.sim.mask[zs].sleeper) continue;
+        const t = g.sim.transform[zs];
+        if (t.x < 90 or t.x > 120 or t.z < 90 or t.z > 120) continue;
+        _ = g.sim.damageFrom(g.sim.network_id[zs].id, 999_999, -1);
+    }
+    try g.step();
+    const vol = &g.sleepers.volumes[0];
+    try std.testing.expect(vol.respawn_time != 0);
+    try std.testing.expectEqual(@as(u8, 0), vol.spawned_alive);
+
+    // Advance the clock past respawn (default LootRespawnDays 7), then a
+    // fresh noise re-arms the volume: the group respawns.
+    g.sim.director.clock.day +%= 9;
+    g.sim.pushNoise(104, 72, 104, 10);
+    try g.step();
+    try std.testing.expect(g.sleepers.volumes[0].triggered);
+    try std.testing.expect(spawnCount(g) > 0);
+
+    // LootRespawnDays 0: a cleared volume never re-arms (respawnTime =
+    // cRespawnNever; every touch skips).
+    for (g.sim.kind_groups.slice(.zombie)) |zs| {
+        if (!g.sim.alive[zs] or !g.sim.mask[zs].sleeper) continue;
+        const t = g.sim.transform[zs];
+        if (t.x < 90 or t.x > 120 or t.z < 90 or t.z > 120) continue;
+        _ = g.sim.damageFrom(g.sim.network_id[zs].id, 999_999, -1);
+    }
+    g.loot_respawn_days = 0;
+    try g.step();
+    try std.testing.expectEqual(std.math.maxInt(u64), g.sleepers.volumes[0].respawn_time);
+    g.sim.director.clock.day +%= 9;
+    g.sim.pushNoise(104, 72, 104, 10);
+    try g.step();
+    try std.testing.expect(spawnCount(g) == 0);
+    std.debug.print("PASS sleeper-rearm: cleared volume respawns after LootRespawnDays; 0 days never re-arms\n", .{});
+}
+
 test "scenario group-id sleeper volumes cascade within one placement only" {
     // RE entity-ai.md TouchGroup (IL=52): a volume with a nonzero
     // SleeperVolumeGroupId wakes every other volume of the same prefab

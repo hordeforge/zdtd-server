@@ -230,6 +230,9 @@ pub const World = struct {
     class_id: [max_entities]c.ClassId = [_]c.ClassId{.{}} ** max_entities,
     loot_bag: [max_entities]c.LootBag = [_]c.LootBag{.{}} ** max_entities,
     sleeper: [max_entities]c.Sleeper = [_]c.Sleeper{.{}} ** max_entities,
+    /// Owning SleeperVolume index per entity (0 = not sleeper-spawned): the
+    /// volume re-arm alive-count recount (stock SleeperVolume.ClearedUpdate).
+    sleeper_vol: [max_entities]u16 = [_]u16{0} ** max_entities,
     flags: [max_entities]c.Flags = [_]c.Flags{.{}} ** max_entities,
     dirty: [max_entities]c.Dirty = [_]c.Dirty{.{}} ** max_entities,
     /// Lazily attached (see buffsMut): most entities never carry a buff, and
@@ -1039,12 +1042,15 @@ pub const World = struct {
     /// Sleeper spawn carrying the full resolved class stats on the entity (the
     /// same A35 path as spawnZombieDef): a sleeper class not preloaded into the
     /// fixed class_table still chases/bites as itself instead of the zombie row.
-    pub fn spawnSleeperDef(self: *World, x: f32, y: f32, z: f32, def: EntityClass) ?NetId {
+    /// `volume` links the entity to its SleeperVolume index (0 = none) for the
+    /// re-arm alive-count recount (stock ClearedUpdate / Touch re-arm).
+    pub fn spawnSleeperDef(self: *World, x: f32, y: f32, z: f32, def: EntityClass, volume: u16) ?NetId {
         const id = self.spawnZombieDef(x, y, z, def.max_hp, def) orelse return null;
         if (self.slotOfNetId(id)) |s| {
             self.mask[s].sleeper = true;
             self.sleeper[s] = .{ .awake = false, .home_x = x, .home_z = z, .volume_r = 20 };
             self.zombie_ai[s].state = .sleep;
+            self.sleeper_vol[s] = volume;
         }
         return id;
     }
@@ -1709,7 +1715,7 @@ test "spawnSleeperDef carries per-entity class stats" {
         .chase_speed = 1.1,
         .wander_speed = 0.3,
         .attack_damage = 25,
-    }).?;
+    }, 0).?;
     const s = w.slotOfNetId(id).?;
     try std.testing.expect(w.mask[s].sleeper);
     try std.testing.expect(w.sleeper[s].volume_r > 0);

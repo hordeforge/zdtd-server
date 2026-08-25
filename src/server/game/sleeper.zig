@@ -86,12 +86,30 @@ pub fn tickSleeperVolumes(self: *Game) void {
     }
 }
 
+/// Stock Touch/CheckTrigger re-arm (Touch IL_0100-0134, CheckTrigger
+/// IL_0109-014F): a cleared volume past its respawnTime becomes triggerable
+/// again (respawnTime = Max(respawnTime, worldTime + 1000), the group
+/// respawns on the next trigger; maxInt = never). Returns true when the
+/// volume is triggerable after the call (not latched, or re-armed now).
+fn rearmIfExpired(self: *Game, vi: usize) bool {
+    const vol = &self.sleepers.volumes[vi];
+    if (!vol.triggered) return true;
+    if (vol.respawn_time == 0) return false; // live trigger, not cleared
+    if (vol.respawn_time == std.math.maxInt(u64)) return false; // never re-arm
+    const wt = self.sim.director.clock.worldTimeBits();
+    if (wt < vol.respawn_time) return false;
+    vol.respawn_time = wt + 1000;
+    vol.triggered = false;
+    vol.spawned_alive = 0;
+    return true;
+}
+
 /// Spawn a sleeper volume's group (stock TouchGroup). Shared by the
 /// player-entry scan and the noise scan (CheckSleeperVolumeNoise).
 fn triggerVolume(self: *Game, vi: usize) void {
     if (vi >= self.sleepers.volumes.len) return;
+    if (!rearmIfExpired(self, vi)) return;
     var vol = &self.sleepers.volumes[vi];
-    if (vol.triggered) return;
     // A completed ClearSleepers quest suppressed this volume: it never
     // re-arms (stock removes the POI's sleeper data on SleepersCleared).
     if (vol.quest_cleared) return;
@@ -161,8 +179,10 @@ fn triggerVolume(self: *Game, vi: usize) void {
                 @floatFromInt(sp.y),
                 @floatFromInt(sp.z),
                 self.entityClassOf(def),
+                @intCast(vi + 1),
             );
         }
+        vol.spawned_alive = @intCast(@min(cap, 255));
         return;
     }
 
@@ -174,8 +194,9 @@ fn triggerVolume(self: *Game, vi: usize) void {
     while (n < count and n < alive_cap and n < 8) : (n += 1) {
         const ox: f32 = @floatFromInt(vol.x0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanx)))));
         const oz: f32 = @floatFromInt(vol.z0 + @as(i32, @intCast(prng.nextBounded(@intCast(spanz)))));
-        _ = self.sim.spawnSleeperDef(ox, cy, oz, self.entityClassOf(def));
+        _ = self.sim.spawnSleeperDef(ox, cy, oz, self.entityClassOf(def), @intCast(vi + 1));
     }
+    vol.spawned_alive = n;
 }
 
 /// Wake sleeper volumes whose AABB (+0.9 pad, stock SleeperVolume.CheckNoise)
@@ -190,8 +211,11 @@ pub fn triggerSleeperVolumesByNoise(self: *Game) void {
     const pad: f32 = 0.9;
     var vi: usize = 0;
     while (vi < self.sleepers.volumes.len) : (vi += 1) {
+        // A latched volume re-arms when its respawnTime passed (stock
+        // Touch/CheckTrigger re-arm); the noise can then re-trigger it.
+        if (!rearmIfExpired(self, vi)) continue;
         const vol = self.sleepers.volumes[vi];
-        if (vol.triggered) continue;
+        if (vol.quest_cleared) continue;
         var hit = false;
         var ni: usize = 0;
         while (ni < take and !hit) : (ni += 1) {
@@ -202,5 +226,40 @@ pub fn triggerSleeperVolumesByNoise(self: *Game) void {
             hit = true;
         }
         if (hit) triggerVolume(self, vi);
+    }
+}
+
+/// Stock SleeperVolume.ClearedUpdate (IL=33) + EntityDied (IL=31): when a
+/// triggered volume's last sleeper zombie dies (and it is not still
+/// spawning), respawnTime = worldTime + LootRespawnDays x 24000 ticks (or
+/// never when LootRespawnDays <= 0), so a later touch re-arms the volume
+/// and its group respawns. zdtd recounts the per-volume alive
+/// sleeper-spawned zombies each tick through the ECS `sleeper_vol` link
+/// instead of hooking every death; the transition from a positive count to
+/// zero is the ClearedUpdate event.
+pub fn tickSleeperRearm(self: *Game) void {
+    const vols = self.sleepers.volumes.len;
+    if (vols == 0) return;
+    var alive: [sleepers_mod.max_volumes]u8 = .{0} ** sleepers_mod.max_volumes;
+    for (self.sim.kind_groups.slice(.zombie)) |s| {
+        // Stock EntityDied fires on death (hp 0), not on the later destroy
+        // sweep: a dead-but-not-yet-reaped sleeper no longer counts.
+        if (!self.sim.alive[s] or !self.sim.mask[s].sleeper) continue;
+        if (self.sim.health[s].hp <= 0) continue;
+        const v = self.sim.sleeper_vol[s];
+        if (v == 0 or @as(usize, v) > vols) continue;
+        alive[v - 1] +|= 1;
+    }
+    const days = self.loot_respawn_days;
+    const wt = self.sim.director.clock.worldTimeBits();
+    var vi: usize = 0;
+    while (vi < vols) : (vi += 1) {
+        const vol = &self.sleepers.volumes[vi];
+        if (!vol.triggered or vol.quest_cleared) continue;
+        if (vol.spawned_alive == 0) continue; // not spawned / already cleared
+        if (alive[vi] != 0) continue; // the group is still alive
+        // The last zombie died: ClearedUpdate.
+        vol.respawn_time = if (days > 0) wt + @as(u64, days) * 24000 else std.math.maxInt(u64);
+        vol.spawned_alive = 0;
     }
 }

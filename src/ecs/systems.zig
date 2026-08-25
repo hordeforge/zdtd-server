@@ -5635,7 +5635,7 @@ test "stealth: crouched players do not wake sleepers beyond the close detect ran
     // volume_r 10 sleeper wakes it standing, not crouched.
     var w: World = .{ .rules = .{ .ai = .{ .crouch_sleeper_detect_range = 5.0 } } };
     defer w.deinit();
-    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }).?;
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
     const zs = w.slotOfNetId(z).?;
     w.sleeper[zs].volume_r = 10;
     const p = w.spawnPlayer(8, 70, 0, 0).?;
@@ -5681,7 +5681,7 @@ test "group AI: combat noise wakes sleepers within radius" {
     var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4, .combat_noise_radius = 24.0 } } };
     defer w.deinit();
     _ = w.spawnZombie(0, 70, 0, 40).?;
-    const z = w.spawnSleeperDef(12, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }).?;
+    const z = w.spawnSleeperDef(12, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
     const zs = w.slotOfNetId(z).?;
     w.sleeper[zs].volume_r = 16;
     _ = w.spawnPlayer(1, 70, 0, 0).?;
@@ -5707,7 +5707,7 @@ test "damage wakes a sleeper and pushes the wakeup event" {
     // NetPackageSleeperWakeup from the drained ring.
     var w: World = .{};
     defer w.deinit();
-    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }).?;
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
     const zs = w.slotOfNetId(z).?;
     try std.testing.expect(!w.sleeper[zs].awake);
     _ = w.damageFrom(z, 10.0, -1);

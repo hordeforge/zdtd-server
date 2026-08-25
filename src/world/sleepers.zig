@@ -35,8 +35,19 @@ pub const Volume = struct {
     z1: i32 = 0,
     groups: [max_group_classes]VolumeGroup = [_]VolumeGroup{.{}} ** max_group_classes,
     group_n: u8 = 0,
-    /// Once players trigger, stay triggered (no re-spawn spam).
+    /// Once players trigger, stay triggered (no re-spawn spam) until the
+    /// stock re-arm: when the group dies, `respawn_time` is set to
+    /// worldTime + LootRespawnDays x 24000 ticks (ClearedUpdate IL=33); a
+    /// later Touch past that time re-arms the volume (Touch IL_0100-0134,
+    /// respawnTime = Max(respawnTime, worldTime+1000)) and the group
+    /// respawns on the next trigger. 0 = not cleared; maxInt(u64) = never
+    /// re-arm (LootRespawnDays <= 0).
     triggered: bool = false,
+    /// Re-arm time in world ticks (see triggered); persisted in ZSTG1.
+    respawn_time: u64 = 0,
+    /// Alive sleeper-spawned zombies the volume last spawned (ClearedUpdate
+    /// fires when this drops to 0 and no zombies remain).
+    spawned_alive: u8 = 0,
     /// SleeperVolumeGroupId: a nonzero id links volumes of the same prefab
     /// placement - triggering one wakes the others (stock TouchGroup cascade,
     /// entity-ai.md TouchGroup IL=52). 0 = standalone.
@@ -185,6 +196,19 @@ pub const Store = struct {
         }
     }
 
+    /// MarkTriggeredRect plus the persisted re-arm time (ZSTG1 v2 tail).
+    pub fn markTriggeredRectRespawn(self: *Store, x: f32, y: f32, z: f32, size_x: f32, size_y: f32, size_z: f32, respawn_time: u64) void {
+        _ = y;
+        _ = size_y;
+        for (self.volumes) |*v| {
+            if (@as(f32, @floatFromInt(v.x1)) <= x or @as(f32, @floatFromInt(v.x0)) >= x + size_x or
+                @as(f32, @floatFromInt(v.z1)) <= z or @as(f32, @floatFromInt(v.z0)) >= z + size_z)
+                continue;
+            v.triggered = true;
+            if (respawn_time != 0) v.respawn_time = respawn_time;
+        }
+    }
+
     /// Persist triggered volumes (sleepers_triggered.zst, ZSTG1): the rects of
     /// volumes the players already woke, so a restart does not re-pop them.
     /// Quest-cleared volumes already live in ZSCL1 and are excluded here
@@ -209,6 +233,12 @@ pub const Store = struct {
                 std.mem.writeInt(u32, &fb, @bitCast(f), .little);
                 try out.appendSlice(allocator, &fb);
             }
+            // Re-arm time (u64 world ticks; 0 = not cleared): appended after
+            // the 24-byte rect, absent in pre-re-arm saves (the loader guards
+            // on remaining length, so old files load with respawn_time 0).
+            var tb: [8]u8 = undefined;
+            std.mem.writeInt(u64, &tb, v.respawn_time, .little);
+            try out.appendSlice(allocator, &tb);
         }
         try io_fs.writeFile(path, out.items);
     }
@@ -236,7 +266,13 @@ pub const Store = struct {
                 f.* = @bitCast(std.mem.readInt(u32, raw[off..][0..4], .little));
                 off += 4;
             }
-            self.markTriggeredRect(x, y, z, sx, sy, sz);
+            // Optional v2 tail: u64 respawn_time after the 24-byte rect.
+            var respawn_time: u64 = 0;
+            if (off + 8 <= raw.len) {
+                respawn_time = std.mem.readInt(u64, raw[off..][0..8], .little);
+                off += 8;
+            }
+            self.markTriggeredRectRespawn(x, y, z, sx, sy, sz, respawn_time);
         }
     }
 };

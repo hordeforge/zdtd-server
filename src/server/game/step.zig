@@ -100,6 +100,10 @@ pub fn step(self: *Game) !void {
         const r = systems.tickAll(&self.sim, dt);
         self.harness.counters.add(.path_replans, r.path_replans);
         self.harness.counters.add(.path_replans_denied, r.path_replans_denied);
+        // Sleeper re-arm (stock ClearedUpdate IL=33): recount the per-volume
+        // alive sleeper zombies; a group that died sets the volume's
+        // respawn_time (LootRespawnDays x 24000 ticks) for the touch re-arm.
+        self.tickSleeperRearm();
         // Water leveling: pour basins opened by this tick's block edits (dig
         // beside a lake, placed water). Budgeted per tick; the fills mark
         // chunks dirty and the chunk stream broadcasts them.
