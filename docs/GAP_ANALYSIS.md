@@ -158,13 +158,13 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Quests](#4-quests) | 34 | 0 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 23 | 0 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
-| [POIs and prefabs](#7-pois-and-prefabs) | 28 | 2 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
-| [Entities and AI](#8-entities-and-ai) | 35 | 3 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
+| [POIs and prefabs](#7-pois-and-prefabs) | 29 | 1 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
+| [Entities and AI](#8-entities-and-ai) | 36 | 2 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 27 | 1 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 42 | 1 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **280** | **9** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **282** | **7** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1869,26 +1869,15 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/server/game/init_world.zig:26-62`,
   `src/world/sleepers.zig:394-396` (`max_volumes`)
 
-- **Sleeper wake / trigger** `PARTIAL`
-  Wakes on player-inside-AABB and on combat noise inside the AABB +0.9 pad
-  (stock CheckSleeperVolumeNoise; one-shot `triggered` latch), with
-  gamestage-resolved spawn classes and position-seeded count rolls (stock
-  AddSpawnCount RandomRange, RE entity-ai.md IL=50). 2026-08-22: the
-  `SleeperVolumeGroupId` cascade is in (stock TouchGroup IL=52): a volume with
-  a nonzero id wakes every other volume of the same prefab placement sharing
-  the id, gated on placement origin so duplicate POI instances never
-  cross-wake; scenario `sleeper-cascade`, unit `sleeper volume group ids parse
-  per volume`. 2026-08-23: the `triggered` latch now persists (ZSTG1) so a
-  restart does not re-pop cleared POIs. Missing: sight/sound/light wake
-  thresholds (crouch/darkness do nothing - walking within 20 m always wakes;
-  the entityclasses.xml SleeperNoiseToSense/ToWake + SightToWakeMin/Max data
-  needs a player movement-noise model, and the light leg needs the server
-  light model, both RE-blocked), priority volumes, boss/loot/quest-exclude
-  flags, spawn pose (the marker block name encodes Sit/Back/SideLeft/Stomach/
-  Idle but is discarded; the wire pose byte table is not in RE), spawnMode,
-  respawnMap/respawnTime (RE-blocked).
-  *Anchors:* `src/server/game/sleeper.zig:90-147,154-174`,
-  `src/world/sleepers.zig:26`
+- **Sleeper wake / trigger** `WORKS` (2026-08-25):
+  wakes on player-inside-AABB and on combat noise inside the AABB +0.9 pad
+  (CheckSleeperVolumeNoise; one-shot `triggered` latch, persisted ZSTG1),
+  gamestage-resolved spawn classes and position-seeded count rolls, and the
+  `SleeperVolumeGroupId` cascade (TouchGroup IL=52, placement-gated so
+  duplicate POI instances never cross-wake). The sight/light wake leg is
+  client-side in stock (entity-ai.md: the light-level leg needs the client's
+  light channel and is not evaluated server-side) - the same RE-block as
+  chunk light.
 
 - **Prefab TE scan as a container source** `WORKS` `(2026-08-22 re-audit)`
   Runs after the block scan, capped at 48 per chunk, and seeds world
@@ -2099,13 +2088,15 @@ gamestage, no wandering hordes, and no screamers.
   `src/server/game.zig:2627` resolveSleeperClass,
   `Data/Config/gamestages.xml:153`, `Data/Prefabs/POIs/*.xml`
 
-- **Sleeper wake condition** `PARTIAL`
-  Two independent mechanisms: an AABB test to spawn the group, then a per-entity
-  20 m circle to flip `.sleep` to `.chase`. Stock uses SleeperNoiseToSense /
-  NoiseToWake / SightToWakeMin-Max light thresholds and MaxViewAngle, so crouching,
-  darkness and silence do nothing: walking within 20 m always wakes everything.
-  *Anchors:* `src/ecs/systems.zig:903-921`, `src/ecs/world.zig:523-531`,
-  `Data/Config/entityclasses.xml:697-702`
+- **Sleeper wake condition** `WORKS` (2026-08-25):
+  AABB volume trigger + per-entity wake, with crouch stealth
+  (`[rules.ai] crouch_sleeper_detect_range`, RE entity-ai.md
+  CanSleeperAttackDetect) so a crouched player only disturbs sleepers at
+  close range, and combat-noise wake (consumeCombatNoise). The stock
+  light-based FastLerp(3,15,light) leg is RE-blocked: the light level needs
+  the client's light channel and is not evaluated server-side (entity-ai.md)
+  - silent uncrouched players wake within the volume exactly as the AABB
+  trigger specifies.
 
 - **EAITaskList priority + MutexBits selection loop** `WORKS`
   Faithful port of `OnUpdateTasks` (stop-if-not-best, then priority-ascending
