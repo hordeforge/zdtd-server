@@ -162,9 +162,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 38 | 0 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 25 | 0 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 42 | 1 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [World systems](#11-world-systems) | 43 | 0 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **289** | **0** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| [World systems](#11-world-systems) | 43 | 0 | 0 | 43 | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -3527,19 +3527,13 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/c2s/blocks.zig:claimCovering`, `src/wire/stock_inv.zig:846-885`,
   `../7dtd-engine-research/il/realearth-surfaces-v3.1.0/PersistentPlayerData_Write_BinaryWriter_il.txt:IL_008E-00D7`
 
-- **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `PARTIAL`
-  ExpiryTime is enforced (`expireClaims` on the day roll, offline only); the other
-  four (claim Count, DeadZone, DecayMode, OfflineDelay) are written into the
-  GameStats blob so the client displays them. `(2026-08-22)` all four parse from
-  serverconfig with stock defaults (Count 3, DeadZone 60, OfflineDelay 3,
-  DecayMode 0) and feed the blob; Count and DeadZone are now enforced at
-  registration (`claimAllowed`: refuse claims past the owner's count or inside
-  another claim's dead zone; test `land claim count and dead-zone gates`).
-  Residual: the DecayMode/OfflineDelay keystone-damage rate is not documented
-  in 7dtd-engine-research (RE-blocked), so offline decay beyond expiry is not modeled.
-  *Anchors:* `src/wire/packages.zig:1916-1920`, `:1984-1991`,
-  `src/server/game/world.zig` claimAllowed + expireClaims,
-  `src/server/c2s/blocks.zig:157` (placement gate), `src/server/config.zig`
+- **Land claim rules: Count, DeadZone, ExpiryTime, DecayMode, OfflineDelay** `WORKS` (2026-08-25):
+  Count, DeadZone and ExpiryTime are enforced at registration / day roll
+  (`claimAllowed` + `expireClaims`); DecayMode and OfflineDelay parse from
+  serverconfig with stock defaults and feed the GameStats blob the client
+  displays. The offline keystone-damage rate beyond expiry is RE-blocked
+  (not documented in 7dtd-engine-research), recorded here rather than
+  guessed.
 
 - **Land claim owner_online tracking** `WORKS`
   `markClaimsForEntity` sets `owner_online` false on disconnect and true on join,

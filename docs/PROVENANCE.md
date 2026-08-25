@@ -482,3 +482,14 @@ below is therefore the surviving record of the final live statuses.
   then re-verify the R rows against the new pin (see RE_GAP_CLOSURE §4).
 - Divergences are tracked in GAP_ANALYSIS / WORK_PLAN; the audit's per-finding
   table lives in `archive/HARDCODE_AUDIT_2026-08-08.md` (re-verify on change).
+### 3.7 Recent additions (2026-08-25 lift + gap sweeps)
+
+| Constant | Value | B | Stock source |
+|---|--:|:-:|---|
+| `workstations.default_fuel_burn_seconds` | 10.0 | A | **Offline fallback** for `items.xml` FuelValue (production wires the XML via `craft.zig`; RULES_CONFIG "STOCK fallbacks") |
+| `bot.bot_spawn_spread` / `bot_spawn_y` | 2.0 / 70 | Z | zdtd-owned `[bots]` config defaults (ADR 0026 host policy knobs; `spawn_spread`/`spawn_y` binder keys) |
+| `bot.sense_kind_bot` | 2 | R | Sense contract kind tag for bots (RFC 0001 §3: 0 player, 1 zombie, 2 bot; the guest reads it in the ZBS3 records) |
+| `bot.sense_kind_bot_info` | 4 | R | Sense record kind for the host-assigned weapon info row (RFC 0001 §3) |
+| `systems.dmg_scale` | 100 | R | Fixed-point damage unit (1.0 hp = 100); the sim's internal damage integer |
+| `worldgen.noise_weight` / `y_scale` | 0.85 / 2.0 | Z | zdtd-owned procedural worldgen shaping (non-goal #8; the demo fallback density field) |
+| `sys_metrics.load_scale` | 65536 | Z | sysinfo load-average fixed-point fraction (16-bit); zdtd-owned metrics |

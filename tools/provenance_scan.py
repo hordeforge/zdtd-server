@@ -102,6 +102,71 @@ def audit_finding_ids():
     return FROZEN_AUDIT_IDS
 
 
+# File-scope constants that are structural (array sizes, wire/persistence
+# layout, parser caps) - covered by their file's section-2 row, not repeated
+# in the constants ledger. Behavioral constants MUST be ledgered (section 3);
+# a constant that changes game behavior here is a misclassification.
+STRUCTURAL_CONSTANTS = {
+    "inflate_cap", "max_inflate_ratio", "world_coord_limit", "world_coord_limit_i32",
+    "block_change_flag_value", "block_change_flag_damage", "block_change_flag_density",
+    "block_change_flag_force_density", "block_change_flag_update_light",
+    "block_change_flag_texture", "block_change_flags_known",
+    "layers_n", "cells_per_layer", "simd_u8_w", "simd_u32_w", "simd_u64_w", "simd_u16_w",
+    "class_player_male", "class_player_female",
+    "max_ws_slots", "max_ws_queue", "max_ws_melt", "max_craft_complete",
+    "last_input_blob_max", "recipe_queue_item_version", "craft_complete_version",
+    "max_recipe_ingredients", "wire_name_max",
+    "pending_cap", "pending_bytes", "max_frag_parts", "assemble_cap", "extra_q_len",
+    "ack_bitmap_bytes", "resend_ns", "ack_yield_ns",
+    "persisted_container_size", "save_capacity", "meta_shift", "meta2_shift",
+    "rot_meta3_shift", "nibble", "six_bits", "max_step", "rotation_shift", "rotation_mask",
+    "save_header_bytes", "persisted_workstation_size", "samples_x", "samples_y",
+    "max_serverconfig_bytes", "max_req", "max_token", "max_client_polls", "max_mode_bytes",
+    "max_test_resp", "readiness_stale_ns", "max_toml_bytes", "lock_target_opaque_len",
+    "max_poi_candidates", "map_batch", "map_walk_above", "warn_at", "trigger_type_none",
+    "entity_warn_at", "max_quest_vars", "max_seat_scan", "max_wasm_module_bytes",
+    "u64_digits", "mib_bytes",
+    "density_p", "tx_lanes", "section_locs", "log_only",
+    "connecting_allow", "joined_allow", "director_defaults",
+    "shocked", "on_fire", "harvest", "bleeding",
+}
+
+
+def src_constants(src_dir):
+    """(relpath, lineno, name) for every file-scope `const name:` outside test
+    blocks and the wire package (wire constants are covered by file rows)."""
+    out = []
+    for root, _dirs, files in os.walk(src_dir):
+        rel = os.path.relpath(root, src_dir)
+        if rel == "wire" or rel.startswith("wire" + os.sep):
+            continue
+        for fname in sorted(files):
+            if not fname.endswith(".zig"):
+                continue
+            path = os.path.join(root, fname)
+            if os.path.normpath(path) == os.path.normpath(os.path.join(src_dir, "fuzz.zig")):
+                continue
+            in_test = False
+            depth = 0
+            with open(path, "r", errors="replace") as fh:
+                for lineno, raw in enumerate(fh, 1):
+                    if not in_test:
+                        if re.match(r"^\s*test\b", raw):
+                            in_test = True
+                            depth = 0
+                        else:
+                            m = re.match(r"^const\s+([a-z_][a-z0-9_]*)\s*:\s*", raw)
+                            if m:
+                                out.append((os.path.relpath(path, src_dir), lineno, m.group(1)))
+                    if in_test:
+                        stripped = re.sub(r"//.*$", "", raw)
+                        depth += stripped.count("{") - stripped.count("}")
+                        if depth <= 0:
+                            in_test = False
+                            depth = 0
+    return out
+
+
 def main():
     files = src_files()
     parsed = ledger_rows()
@@ -226,6 +291,15 @@ def main():
             bad_const.append(f"{anchor}: anchor file {afile} missing")
     if bad_const:
         failures.append(f"constant ledger issues ({len(bad_const)}): " + "; ".join(bad_const[:8]))
+
+    # 6. CONSTANT COVERAGE: every non-structural file-scope constant must be
+    #    ledgered (behavioral constants without a row fail; structural ones
+    #    are excluded by STRUCTURAL_CONSTANTS).
+    ledger_text = open(LEDGER, encoding="utf-8").read()
+    ledgered = set(m.split(".")[-1] for m in re.findall(r"`([A-Za-z_][A-Za-z0-9_.]*)`", ledger_text))
+    unledgered = [(rel, ln, n) for rel, ln, n in src_constants(SRC) if n not in STRUCTURAL_CONSTANTS and n not in ledgered]
+    if unledgered:
+        failures.append("behavioral constants not in the ledger: " + "; ".join(f"{rel}:{ln} {n}" for rel, ln, n in unledgered[:8]))
 
     if failures:
         for f in failures:
