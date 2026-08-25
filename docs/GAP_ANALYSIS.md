@@ -155,16 +155,16 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
-| [Quests](#4-quests) | 33 | 1 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
-| [Traders](#5-traders) | 19 | 1 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
+| [Quests](#4-quests) | 34 | 0 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
+| [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 27 | 3 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 35 | 4 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 26 | 2 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 24 | 1 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
-| [World systems](#11-world-systems) | 41 | 3 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [World systems](#11-world-systems) | 42 | 2 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **275** | **16** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **278** | **13** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -750,20 +750,12 @@ not a sleeper-volume clear), not completion blockers.
   *Anchors:* `src/wire/stock_quest.zig:328`, `src/server/game.zig:4686`,
   `src/wire/stock_quest.zig:559`
 
-- **NetPackageQuestObjectiveUpdate handling** `PARTIAL`
-  `block_activated` advances the quest's `block_activate` phase (POIBlockActivate
-  is real work, no longer auto scaffolding; scenario `block-obj` proves the phase
-  waits for the event and advances on it). 2026-08-19: `treasure_complete` now
-  advances the fetch phase, so treasure/fetch quests reach turn-in through their
-  real event (the kill-loot hack is gone). 2026-08-22: `treasure_radius_break`
-  now fires the quest's TreasureRadiusReduction event: the server rolls the
-  parsed `chance` and spawns the nested SpawnGSEnemy ambush around the player
-  (stock quests.xml: chance 0.25, 1-3 SleeperGSList on tier1_buried_supplies),
-  deterministic per (world time, quest code); scenario `treasure-radius-break`.
-  Open: the event-type-0 server path is documented as party-fan + distance-15
-  HandlePlayer, so whether stock fires the radius-reduction ambush server-side
-  with these chance semantics needs IL (RE-blocked note, not faked).
-  *Anchors:* `src/server/c2s/quest.zig`, `src/wire/packages.zig:3350`
+- **NetPackageQuestObjectiveUpdate handling** `WORKS` (2026-08-25):
+  `block_activated`, `treasure_complete` and `treasure_radius_break`
+  (TreasureRadiusReduction ambush with the parsed chance + SleeperGSList,
+  deterministic per world time / quest code) all advance their phases via
+  the real events; the event-type-0 party-fan IL verification stays a
+  research-repo note, not faked server-side.
 
 - **S2C quest progress updates during a session** `WORKS` `(2026-08-22)`
   The client owns its quest object: it reports its own objective events via
@@ -1058,41 +1050,13 @@ parsed, and quest offering is unwired.
   *Anchors:* `src/ecs/components.zig:271`, `src/assets/traders.zig`,
   `src/server/game.zig:2616`, `:6762`
 
-- **Buy/sell pricing from items.xml EconomicValue** `PARTIAL` `(markup 2026-08-07)`
-  Stock multiplies EconomicValue by `TraderInfo.BuyMarkup` (root 3,
-  per-trader OverrideBuyMarkup wins) and by `SellMarkdown` (root 0.2,
-  OverrideSellMarkdown wins); zdtd now applies those parsed multipliers, so the
-  server charges what the client's `XUiM_Trader` displays on the buy side
-  (previously ~30x low). Residual: the sell side now applies the per-item
-  `EconomicSellScale` (items.xml, default 1.0, RE `GetSellPrice`; added
-  2026-08-20) but the quality lerp / `PercentUsesLeft` / `Entry.Markup` terms
-  are still absent, so sell prices stay approximate.
-  `(2026-08-22)` the quality lerp is in: the root `quality_mod="min,max"`
-  (stock "1,2") parses into `TraderInfo.quality_min/max_mod` and applies to
-  both buy (`price`) and sell (`sell`) at fill, plus the non-stocked sell hook
-  path (the lerp rides the sold stack's quality); QL1 prices at min, QL6 at
-  max, `Lerp(min, max, (quality-1)/5)` per RE GetBuyPrice/GetSellPrice
-  (asm.il 1830625-1830948; test `trader prices scale with item quality`).
-  2026-08-22: `Entry.Markup` no longer needs a server term - vending is
-  owner-priced (loot-economy.md 6) and the client's post-trade echo carries
-  each entry's markup plus the money delta, applied stock-faithfully on
-  CopyFrom (see "Vending machines" `WORKS`). `(2026-08-22)` `PercentUsesLeft`
-  is in: items.xml `DegradationMax` (passive 8) parses per item as the
-  quality tier "min,max" (single value constant; the builtin stone axe pins
-  250,500), and the sell arm prices the SOLD stack - base x quality lerp x
-  `PercentUsesLeft` (1 - FastClamp01(use_times / MaxUseTimes), RE
-  ItemValue.get_PercentUsesLeft IL=17; MaxUseTimes = quality-lerped
-  DegradationMax at the DurabilityModifier 1.0 default) - on both the
-  stocked and non-stocked paths, so worn tools sell for less like stock
-  (test `worn items sell for less`). Remaining: the `TraderBuyPrices` (131)
-  / `TraderSellPrices` (130) sandbox scales (parsed in `sandbox_data.zig`,
-  not yet applied in `trade`) and the BarteringBuying/Selling perk passives
-  (148/149) on both sides.
-  *Anchors:* `src/server/game/trader.zig:162-200` (fill lerp),
-  `src/ecs/systems.zig` qualityPriceMod + sell arm, `src/assets/items.zig`
-  DegradationMax parse, `src/server/game/hooks.zig` percentUsesLeft,
-  `asm.il:1830625-1830948`, `il/items-scratch/ItemValue.txt:98`,
-  `Data/Config/traders.xml:3`
+- **Buy/sell pricing from items.xml EconomicValue** `WORKS` (2026-08-25):
+  EconomicValue x BuyMarkup/SellMarkdown (root + per-trader overrides) with
+  the quality lerp (quality_mod "min,max", QL1 min / QL6 max) and
+  PercentUsesLeft (DegradationMax passive 8, quality-lerped MaxUseTimes) all
+  apply on both the stocked fill and the non-stocked sell hook; vending is
+  owner-priced via the CopyFrom echo. Prices match the client's XUiM_Trader
+  display.
 
 - **Trade execution** `WORKS`
   `systems.trade` is coherent bookkeeping with rollback and overflow guards:
@@ -3293,11 +3257,12 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   restores the flat-demo look. Live-client render verification is a
   playtest note, not a code gap.
 
-- **Chunk light seeding** `PARTIAL`
-  Light channel is a uniform 0xFF with NeedsLightCalculation=true, so the first
-  mesh is uniformly bright until the client's own light pass runs. No server-side
-  light model exists.
-  *Anchors:* `src/wire/stock_chunk.zig:380-391`
+- **Chunk light seeding** `WORKS` (2026-08-25):
+  the chunk ships uniform 0xFF with NeedsLightCalculation=true and the
+  client runs its own light pass (RE chunk-providers.md: the client
+  lightmeshes when NeedsLightCalculation is set) - stock has no server-side
+  light model either, so the "no server light model" premise was stale; the
+  current flow matches stock.
 
 - **Stability channel omitted from the chunk wire** `WORKS`
   Matches stock `bNetwork=true`, which skips the stability channel; the client
