@@ -4652,7 +4652,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 #### Blocks / building
 | Package | Priority |
 |---|---|
-| `NetPackageSetBlock` multi-block / shape / rotation | PARTIAL (multi parse; rotation meta sparse) |
+| `NetPackageSetBlock` multi-block / shape / rotation | WORKS (2026-08-26: the handler parses ALL BlockChangeInfos (i16 changeCount) and places each cell with its raw - rotation/meta/ischild preserved; the stock client sends the anchor + MultiBlockDim children in one package (BlockValue.ischild, raw bit 0x40000000; GameManager.ChangeBlocks applies the list as-is, only non-child cells get TileEntity handling); scenario pins a 2-change cntAmmoPileLarge placement) |
 | Block damage / upgrade / paint | WORKS (2026-08-26: HP accumulate on the chunk damage plane; upgrade validates the blocks.xml `UpgradeBlock` chain on the SetBlock swap; **downgrade-on-destroy wired** - blocks.xml `DowngradeBlock` rows parse through Extends (611 stock rows) and a block that reaches max damage turns into its downgrade target (rotation/meta preserved, RE Block.OnBlockDamaged IL_021D-030D) instead of breaking, on every damage path (player dig, zombie chew/dig, explosion); the client swap report accepts the downgrade target like the upgrade target; paint applies the face texture via SetBlockTexture with the textureFull packing) |
 | `NetPackageAnimateBlock` / `BlockTrigger` | PARTIAL (BlockTrigger C2S handled) |
 | Stability / support collapse | WORKS (2026-08-20: stability plane, see STATUS wave 2026-08-08) |

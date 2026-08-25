@@ -1056,6 +1056,67 @@ test "scenario downgrade swap: DowngradeBlock target accepted, break turns into 
     std.debug.print("PASS downgrade: cntWallSafeInsecure -> cntWallSafeOpen accepted, forged swap rejected, break swaps\n", .{});
 }
 
+test "scenario multi-block SetBlock places anchor + ischild children" {
+    // Stock client multi-block placement sends one NetPackageSetBlock with the
+    // anchor AND the MultiBlockDim children (BlockValue.ischild set, raw bit
+    // 0x40000000): GameManager.ChangeBlocks applies the list as-is, only
+    // non-child cells get TileEntity handling. The handler must place every
+    // cell with its raw (rotation/ischild preserved), not just the first.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_multiblock");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_multiblock", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
+    mt.tryMergeBundledAssignIds(gpa);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+    // cntAmmoPileLarge: MultiBlockDim 2,1,1 (stock V3.1.4 blocks.xml:3384).
+    const ammo_id = g.maxdamage.idByName("cntAmmoPileLarge") orelse return error.SkipZigTest;
+    const dim = g.maxdamage.multiBlockDim("cntAmmoPileLarge");
+    try std.testing.expect(dim.x == 2 and dim.y == 1 and dim.z == 1);
+
+    // Hand-build a 2-change SetBlock body mirroring buildSetBlockBodyRaw:
+    // anchor at (250,150,250) + child at (251,150,250) carrying ischild bit.
+    const ischild_bit: u32 = 0x40000000;
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try packages.platform_user.write(&w, null);
+    try w.writeI16(2);
+    var i: usize = 0;
+    while (i < 2) : (i += 1) {
+        const cx: i32 = 250 + @as(i32, @intCast(i));
+        try w.writeByte(1); // BlockValueRef type 1 = BlockPosition
+        try w.writeI32(cx);
+        try w.writeI32(150);
+        try w.writeI32(250);
+        try w.writeI32(0); // changedByEntityId
+        try w.writeByte(1); // block_change_flag_value
+        try w.writeU32(if (i == 0) @as(u32, ammo_id) else @as(u32, ammo_id) | ischild_bit);
+        try w.writeU16(0);
+    }
+    try w.writeI32(0); // localPlayerThatChanged
+
+    var frame_buf: [512]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", w.written()));
+    // Both cells placed (the id low 16 bits of the child raw; ischild is bit 30).
+    try std.testing.expect((try g.world.blockWorld(250, 150, 250)) == ammo_id);
+    try std.testing.expect((try g.world.blockWorld(251, 150, 250)) == ammo_id);
+    try std.testing.expect((try g.world.rawWorld(251, 150, 250)) & ischild_bit != 0);
+    try std.testing.expect((try g.world.rawWorld(250, 150, 250)) & ischild_bit == 0);
+
+    std.debug.print("PASS multiblock: 2-change SetBlock places anchor + ischild child\n", .{});
+}
+
+
 
 test "scenario demolish blast uses per-class ExplosionData and the earth DamageBonus" {
     // drainExplosions: the blast params come from the class's <property

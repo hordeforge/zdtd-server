@@ -374,6 +374,12 @@ PlayerSpawnedInWorld rows: both bodies match the stock write IL exactly
 PlayerSpawnedInWorld = respawnReason, position Vector3i, entityId), and the
 RequestToSpawnPlayer row was re-scoped (chunkViewDim parsed; the client
 PlayerProfile blob skipped - the server owns the profile).
+Then the multi-block SetBlock row went WORKS (2026-08-26): the handler
+parses ALL BlockChangeInfos and places each cell with its raw
+(rotation/meta/ischild preserved) - the stock client sends the anchor +
+MultiBlockDim children in one package (BlockValue.ischild, raw bit
+0x40000000, GameManager.ChangeBlocks applies the list as-is) - pinned by a
+2-change cntAmmoPileLarge scenario.
 Then the prefab-authored-block-damage row went WORKS: the TTS damage plane
 (u16 absolute HP per cell, v>8) is no longer decoded-and-dropped - the paint
 path passes it through set_block into the chunk damage plane (both the world
