@@ -87,10 +87,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (cur_id != 0) {
                     self.noteBlockBreak(c);
                     self.removeClaimAt(b.x, b.y, b.z);
-                    // Harvest XP: material.Experience for the broken block
-                    // (RE items.md AddLevelExp(material.Experience * count)).
+                    // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):
+                    // the server rolls the block's Harvest rows into the
+                    // breaker's inventory (overflow -> ground bag) and grants
+                    // material.Experience * rolled count. A block with no
+                    // Harvest rows drops itself once (count 1); with rows the
+                    // count is the roll total (0 when nothing rolled).
+                    const harvested = chunk_fill.tryBlockHarvestDrop(self, c.slot, b.x, b.y, b.z, cur_id);
                     const hxp = self.harvestXpForBlock(cur_id);
-                    if (hxp > 0) self.awardXp(c.slot, hxp);
+                    if (hxp > 0) {
+                        var count: u32 = 1;
+                        if (self.blocks.byId(cur_id)) |bd| {
+                            if (bd.harvest_drops.len > 0) count = harvested;
+                        }
+                        if (count > 0) self.awardXp(c.slot, hxp *| count);
+                    }
                     // A broken container spills its pre-filled contents.
                     chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                 }
@@ -118,9 +129,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (abs >= max_hp) {
                     self.noteBlockBreak(c);
                     self.removeClaimAt(b.x, b.y, b.z);
-                    // Harvest XP: material.Experience for the broken block.
+                    // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):
+                    // same server-side roll as the direct-dig break above.
+                    const harvested = chunk_fill.tryBlockHarvestDrop(self, c.slot, b.x, b.y, b.z, base_cur);
                     const hxp = self.harvestXpForBlock(base_cur);
-                    if (hxp > 0) self.awardXp(c.slot, hxp);
+                    if (hxp > 0) {
+                        var count: u32 = 1;
+                        if (self.blocks.byId(base_cur)) |bd| {
+                            if (bd.harvest_drops.len > 0) count = harvested;
+                        }
+                        if (count > 0) self.awardXp(c.slot, hxp *| count);
+                    }
                     // A broken container spills its pre-filled contents.
                     chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                     place_id = 0;

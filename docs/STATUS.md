@@ -726,6 +726,23 @@ total **251/40/0**. The destroy_on_close row gained RE evidence: the stock
 path is server-side (`CheckDestroyTileEntity` IL=37) not client-gated, so the
 row's claim was corrected and the missing trigger caller marked RE-blocked.
 The dashboard
+(docs/provenance.html) is synced. Then the terrain harvest-drop path went
+WORKS (2026-08-26): the server rolls the broken block's
+`<drop event="Harvest">` rows at the dig choke — `BlockDef.harvest_drops`
+parses count/prob/stick_chance/tool_category/tag from blocks.xml (count via
+ParseMinMaxCount, prob × the block's ResourceScale property, Extends
+inheritance per CopyDroppedFrom IL=89 own-wins-per-name), and the roll is
+stock `Block.DropItemsOnEvent` IL=246 (RandomRange(min,max+1), skip 0, drop
+when random < prob) + `GameUtils.HarvestOnAttack` IL=623 (stacks grant to
+the breaker's inventory, overflow → ground bag; XP = material.Experience ×
+rolled count). Scenario harvest-drop drives the wire end to end (terrStone
+break → resourceRockSmall ×55 in the breaker's bag). The Fall/Destroy
+debris events, the `[recipe]`/`*` drop names (absent from b14 Harvest
+rows), and the item-side HarvestCount scaling stay recorded. This also
+fixed a latent P0 the scenario exposed: the stability plane computes lazily
+on the first dig after the handler aired the block, so `removed_stab` was 0
+and `cur_stab - 1` underflowed (first dig in any fresh chunk panicked);
+`removeBlockAt` now guards the u8 underflow. The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

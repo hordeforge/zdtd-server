@@ -12,11 +12,14 @@ const ln_peer = @import("../../litenet/peer.zig");
 const apm = @import("../../apm/root.zig");
 const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
+const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
 const containers_mod = @import("../../world/containers.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
+const invsys = @import("../../ecs/inventory.zig");
+const rng_util = @import("../../util/rng.zig");
 const replicate_te = @import("../replicate_te.zig");
 
 const te_types = packages.te_types;
@@ -415,6 +418,74 @@ pub fn tryContainerSpill(self: *Game, x: i32, y: i32, z: i32) void {
     if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, n)) |bag_nid| {
         self.broadcastLootSpawn(bag_nid) catch {};
     }
+}
+
+/// Roll the broken block's Harvest drop rows (RE Block.DropItemsOnEvent
+/// IL=246 + GameUtils.HarvestOnAttack IL=623) into the breaker's inventory:
+/// per row, count = RandomRange(min, max+1), skip 0, drop when
+/// random < prob; each rolled stack is granted to the breaking player, and
+/// a stack that does not fit becomes a loot bag at the block (stock
+/// ItemDropServer lifetime 60 when full). The roll ignores tool_category /
+/// tag exactly like stock (the IL never reads them; they feed the
+/// item-side bonus legs, recorded). Deterministic: position + tick-seeded
+/// stream (the one sim PRNG policy; stock seeds GameUtils.random from a
+/// timestamp, which zdtd deliberately replaces per rule 22). Returns the
+/// total rolled count — the `count` of stock
+/// AddLevelExp(material.Experience * count).
+pub fn tryBlockHarvestDrop(self: *Game, peer_slot: usize, x: i32, y: i32, z: i32, block_id: u16) u32 {
+    const drops = self.blocks.harvestDrops(block_id);
+    if (drops.len == 0) return 0;
+    var prng = rng_util.XorShift32.initFromU64(
+        @as(u64, @bitCast(@as(i64, x))) *% 0x9E37_79B1_7F4A_7C15 ^
+            @as(u64, @bitCast(@as(i64, y))) *% 0xBF58_476D_1CE4_E5B9 ^
+            @as(u64, @bitCast(@as(i64, z))) *% 0x94D0_49BB_1331_11EB ^
+            self.tick_n,
+    );
+    var stacks: [assets_blocks.max_harvest_drops]struct { id: u16, count: u16 } = undefined;
+    var sn: usize = 0;
+    var total: u32 = 0;
+    for (drops) |d| {
+        // RandomRange(minCount, maxCount+1): uniform count in [min, max].
+        var count: u32 = d.count_min;
+        if (d.count_max > d.count_min) {
+            const span: f64 = @as(f64, @floatFromInt(d.count_max)) + 1.0 -
+                @as(f64, @floatFromInt(d.count_min));
+            count = d.count_min + @as(u32, @intFromFloat(span * @as(f64, @floatCast(prng.nextFloat()))));
+        }
+        if (count == 0) continue; // IL: skip if 0 (the count="0" rows).
+        // Prob gate: drop when random < prob (IL `ble.un` on prob <= random).
+        if (prng.nextFloat() >= d.prob) continue;
+        // The IL "[recipe]" / "*" names appear on no V3.1.0 b14 Harvest row;
+        // an unknown item fails closed to a skip (missing beats fake).
+        const item = self.items.byName(d.item_name) orelse continue;
+        if (item.id == 0) continue;
+        total +|= count;
+        if (sn < stacks.len) {
+            stacks[sn] = .{ .id = item.id, .count = @intCast(@min(count, 65535)) };
+            sn += 1;
+        }
+    }
+    if (total == 0) return 0;
+    // Grant to the breaker; a full inventory (stock: ItemDropServer on the
+    // ground) becomes a loot bag at the block.
+    var drop_inv: ecs.components.Inventory = .{};
+    var dn: usize = 0;
+    for (stacks[0..sn]) |st| {
+        if (invsys.give(&self.sim, peer_slot, st.id, st.count)) continue;
+        if (dn < ecs.components.max_inv_slots) {
+            drop_inv.slots[dn] = .{ .item_id = st.id, .count = st.count, .quality = 1, .meta = 0 };
+            dn += 1;
+        }
+    }
+    if (dn > 0) {
+        const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+        const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
+        const fz: f32 = @as(f32, @floatFromInt(z)) + 0.5;
+        if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, dn)) |bag_nid| {
+            self.broadcastLootSpawn(bag_nid) catch {};
+        }
+    }
+    return total;
 }
 
 pub fn maybeDestroyContainerOnClose(self: *Game, x: i32, y: i32, z: i32) void {

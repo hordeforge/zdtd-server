@@ -349,7 +349,11 @@ pub fn removeBlockAt(
             v_n += 1;
             // Stock recursion: descend into the dependency chain (the cell was
             // supported by this level's cell), otherwise queue a recompute.
-            if (nbr_stab == cur_stab - 1 or (d[1] == 1 and nbr_stab == cur_stab)) {
+            // `cur_stab > 0` guards the u8 underflow when the removed cell's
+            // plane was computed after the caller aired it (the lazy first
+            // computation sees the cell empty, so removed_stab is 0; nothing
+            // can be "one less than" the bottom).
+            if ((cur_stab > 0 and nbr_stab == cur_stab - 1) or (d[1] == 1 and nbr_stab == cur_stab)) {
                 if (sp >= stack.len) return n_fallen;
                 stack[sp] = .{ .pos = .{ .x = nx, .y = ny, .z = nz }, .stab = nbr_stab };
                 sp += 1;
@@ -594,4 +598,34 @@ test "stability: non-support blocks cap at 1 and never carry support" {
     try testing.expectEqual(@as(i32, 4), fallen[0].x);
     try testing.expectEqual(@as(i32, 61), fallen[0].y);
     try testing.expectEqual(@as(i32, 4), fallen[0].z);
+}
+
+test "stability: a dig whose plane computes after the cell is air does not underflow" {
+    // The C2S dig handler airs the block (setBlockRawWorld) BEFORE the first
+    // stability touch, so the lazy plane computes with the dug cell empty and
+    // removed_stab reads 0. removeBlockAt must treat that as "nothing was
+    // supported from below" instead of underflowing `cur_stab - 1` (the
+    // pre-fix behaviour panicked on the first dig in any fresh chunk).
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(testing.io, &dir_buf)];
+
+    const w = testWorld(gpa, 60, dir);
+    defer {
+        w.deinit();
+        gpa.destroy(w);
+    }
+    w.setBlockWorld(4, 61, 4, 1) catch unreachable;
+    // Air the cell first, exactly like the dig handler does before
+    // stabilityAfterSetBlock, then remove: no crash, nothing falls (the
+    // plane cell was computed empty).
+    w.setBlockWorld(4, 61, 4, 0) catch unreachable;
+    var fallen: [max_fallen]Pos = undefined;
+    const n = removeBlockAt(w, 4, 61, 4, gpa, null, testFacts, &fallen);
+    try testing.expectEqual(@as(usize, 0), n);
 }

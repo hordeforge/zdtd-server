@@ -7396,6 +7396,64 @@ test "scenario player dig routes the on_block_damage verdict (plugin_rules doubl
     std.debug.print("PASS dig-verdict: player dig scales through on_block_damage (10 -> 30)\n", .{});
 }
 
+test "scenario harvest drops roll into the breaker (terrStone → resourceRockSmall x55)" {
+    // Real blocks.xml (game-dir): the server rolls the broken block's
+    // Harvest rows at the break choke (Block.DropItemsOnEvent IL=246 +
+    // GameUtils.HarvestOnAttack IL=623) and grants the stacks to the
+    // breaker's inventory. terrStone carries one Harvest row:
+    // resourceRockSmall count="55" prob=1 → exactly 55 on the floor of the
+    // deterministic roll. Skipped when the stock game dir is absent.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    const stone_id = g.blocks.byName("terrStone").?.id;
+    const drops = g.blocks.harvestDrops(stone_id);
+    try std.testing.expectEqual(@as(usize, 1), drops.len);
+    try std.testing.expectEqualStrings("resourceRockSmall", drops[0].item_name);
+    try std.testing.expectEqual(@as(u32, 55), drops[0].count_min);
+    try std.testing.expectEqual(@as(u32, 55), drops[0].count_max);
+    const rock_id = g.items.byName("resourceRockSmall").?.id;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const pa = g.sim.playerByPeer(c.slot).?;
+    const ap = g.sim.transform[pa];
+    const bx: i32 = @intFromFloat(ap.x + 1);
+    const bz: i32 = @intFromFloat(ap.z);
+    const by: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    try g.world.setBlockWorld(bx, by, bz, stone_id);
+
+    // A dig claiming far beyond MaxDamage breaks the block in one swing.
+    var sb: [64]u8 = undefined;
+    var frame_buf: [128]u8 = undefined;
+    const d = try packages.buildSetBlockBodyDamage(&sb, bx, by, bz, stone_id, 65000, c.entity_id, 0);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", d));
+
+    // Block gone, and the rolled Harvest stack sits in the breaker's
+    // inventory (55 rocks, prob 1 — the deterministic roll cannot miss).
+    try std.testing.expectEqual(@as(u16, 0), g.world.blockWorld(bx, by, bz) catch 0);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    var found: u32 = 0;
+    for (g.sim.inventory[ps].slots) |sl| {
+        if (sl.item_id == rock_id) found += sl.count;
+    }
+    try std.testing.expectEqual(@as(u32, 55), found);
+    std.debug.print("PASS harvest-drop: terrStone break rolls resourceRockSmall x55 into inventory\n", .{});
+}
+
 test "scenario on_quest_accept verdict gates acceptance (real core_questgate)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

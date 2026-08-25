@@ -10,6 +10,45 @@ const assignids = @import("assignids_comptime.zig");
 
 pub const max_blocks: usize = 8192;
 
+/// Max `<drop>` rows a block may resolve (own + Extends-inherited; the
+/// largest stock block carries 16 Harvest rows, 1,748 Harvest rows total).
+pub const max_harvest_drops: usize = 16;
+
+/// One `<drop event="Harvest" .../>` row from a block's body. Roll
+/// semantics are pinned by Block.DropItemsOnEvent IL=246 (count in
+/// [minCount, maxCount+1), skip 0, drop when random < prob) and
+/// GameUtils.HarvestOnAttack IL=623 (harvested stacks go to the breaker's
+/// inventory, overflow to the ground). The `tool_category` / `tag` fields
+/// are stored but never read by the roll (stock IL only reads name/count/
+/// prob/stickChance); they are the item-side bonus legs, recorded.
+pub const HarvestDrop = struct {
+    /// Item name resolved via the item catalog. The IL specials "[recipe]"
+    /// and "*" appear on no V3.1.0 b14 Harvest row and fail closed to a
+    /// skip here (missing beats fake).
+    item_name: []const u8 = "",
+    /// Inclusive count bounds (ParseMinMaxCount on the `count` attr;
+    /// "55" → 55..55, "3,6" → 3..6; absent → 1..1). Roll is
+    /// RandomRange(min, max+1).
+    count_min: u32 = 1,
+    count_max: u32 = 1,
+    /// Per-entry drop probability, already scaled by the block's
+    /// ResourceScale property (BlocksFromXml: `prob * ResourceScale`;
+    /// zero V3.1.0 b14 blocks set it, so stock rows are unmodified).
+    prob: f32 = 1,
+    /// stick_chance attr. Every stock row with stick_chance set is a
+    /// Fall-event debris row (terrDestroyedStone/scrapMetalPile...); b14
+    /// Harvest rows carry none. Stored for fidelity; the Fall slice is a
+    /// separate gap row.
+    stick_chance: f32 = 0,
+    /// tool_category attr (e.g. "Disassemble"). Recorded leg, not a roll
+    /// gate (the harvest drop list's toolCategory feeds the item-side
+    /// Bonuses.Damage scaling, items.md; out of this slice).
+    tool_category: []const u8 = "",
+    /// tag attr (e.g. "allHarvest,perkJunkMiner"). Same recorded leg
+    /// (HarvestCount passive scaling anchor).
+    tag: []const u8 = "",
+};
+
 pub const BlockDef = struct {
     id: u16 = 0,
     name: []const u8 = "",
@@ -72,6 +111,11 @@ pub const BlockDef = struct {
     /// use this directly in Block.GetMapColor, skipping the atlas (RE
     /// texture-atlas.md; the terrain blocks all carry it).
     map_color: u16 = 0,
+    /// Resolved `<drop event="Harvest">` rows (own + Extends-inherited,
+    /// own wins per item name, RE CopyDroppedFrom IL=89). Empty = the block
+    /// drops itself once when harvested (stock HarvestOnAttack
+    /// ToItemValue x1).
+    harvest_drops: []const HarvestDrop = &.{},
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -105,6 +149,13 @@ pub const BlockTable = struct {
             if (std.mem.eql(u8, d.name, name)) return d;
         }
         return null;
+    }
+
+    /// Resolved Harvest drop rows for a block (empty when none; unknown
+    /// blocks fail closed to nothing, matching stock HasItemsToDropForEvent).
+    pub fn harvestDrops(self: *const BlockTable, id: u16) []const HarvestDrop {
+        if (self.byId(id)) |d| return d.harvest_drops;
+        return &.{};
     }
 
     pub fn isSolid(self: *const BlockTable, id: u16) bool {
@@ -221,6 +272,22 @@ fn parseMapColor5(v: []const u8) u16 {
     return (c.cc(r) << 10) | (c.cc(g) << 5) | c.cc(b);
 }
 
+/// Inclusive count bounds (StringParsers.ParseMinMaxCount result).
+pub const CountRange = struct { min: u32, max: u32 };
+
+/// Parse a stock `count` attribute into inclusive bounds (StringParsers.
+/// ParseMinMaxCount): "55" → 55..55, "3,6" → 3..6, "0,3" → 0..3. Malformed
+/// or absent values fall back to the IL default 1..1.
+fn parseMinMaxCount(v: []const u8) CountRange {
+    if (std.mem.findScalar(u8, v, ',')) |comma| {
+        const a = std.fmt.parseInt(u32, std.mem.trim(u8, v[0..comma], " \t"), 10) catch 1;
+        const b = std.fmt.parseInt(u32, std.mem.trim(u8, v[comma + 1 ..], " \t"), 10) catch a;
+        return .{ .min = @min(a, b), .max = @max(a, b) };
+    }
+    const n = std.fmt.parseInt(u32, std.mem.trim(u8, v, " \t"), 10) catch 1;
+    return .{ .min = n, .max = n };
+}
+
 fn isSolidName(name: []const u8) bool {
     if (std.mem.eql(u8, name, "air")) return false;
     if (std.mem.startsWith(u8, name, "water")) return false;
@@ -270,6 +337,8 @@ pub fn loadFromPath(
         mesh: ?[]const u8 = null,
         texture_top: u16 = 0,
         map_color: u16 = 0,
+        /// Own (non-inherited) Harvest drop rows, arena-backed.
+        harvest_drops: []const HarvestDrop = &.{},
     };
     var parsed: std.ArrayList(Parsed) = .empty;
     defer parsed.deinit(allocator);
@@ -308,11 +377,49 @@ pub fn loadFromPath(
         var mesh: ?[]const u8 = null;
         var texture_top: u16 = 0;
         var map_color: u16 = 0;
+        var resource_scale: f32 = 1;
+        var own_drops: std.ArrayList(HarvestDrop) = .empty;
+        defer own_drops.deinit(allocator);
         const body_end = if (std.mem.findPos(u8, clean, bi, "</block>")) |e| e else clean.len;
         var p = bi + 7;
         while (p < body_end) : (p += 1) {
-            const pi = std.mem.findPos(u8, clean, p, "<property ") orelse break;
-            if (pi > body_end) break;
+            // Both <property> and <drop> live in the block body, interleaved;
+            // process whichever starts first. The drop parse mirrors
+            // BlocksFromXml LoadItemsToDrop IL (event/name/count/prob/
+            // stick_chance/tool_category/tag -> SItemDropProb).
+            const pi = std.mem.findPos(u8, clean, p, "<property ") orelse body_end;
+            const di = std.mem.findPos(u8, clean, p, "<drop ") orelse body_end;
+            const at = @min(pi, di);
+            if (at >= body_end) break;
+            if (di < pi) {
+                if (std.mem.eql(u8, xml.attr(clean, di, "event") orelse "", "Harvest") and
+                    own_drops.items.len < max_harvest_drops)
+                {
+                    const nm = xml.attr(clean, di, "name") orelse {
+                        p = di + 6;
+                        continue;
+                    };
+                    const mc = if (xml.attr(clean, di, "count")) |cnt|
+                        parseMinMaxCount(cnt)
+                    else
+                        CountRange{ .min = 1, .max = 1 };
+                    var prob: f32 = 1;
+                    if (xml.attr(clean, di, "prob")) |pr| prob = std.fmt.parseFloat(f32, pr) catch 1;
+                    var stick: f32 = 0;
+                    if (xml.attr(clean, di, "stick_chance")) |sc| stick = std.fmt.parseFloat(f32, sc) catch 0;
+                    try own_drops.append(allocator, .{
+                        .item_name = try arena.dupe(u8, nm),
+                        .count_min = mc.min,
+                        .count_max = mc.max,
+                        .prob = prob,
+                        .stick_chance = stick,
+                        .tool_category = if (xml.attr(clean, di, "tool_category")) |tc| try arena.dupe(u8, tc) else "",
+                        .tag = if (xml.attr(clean, di, "tag")) |tg| try arena.dupe(u8, tg) else "",
+                    });
+                }
+                p = di + 6;
+                continue;
+            }
             const pname = xml.attr(clean, pi, "name") orelse {
                 p = pi + 10;
                 continue;
@@ -371,8 +478,24 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| {
                     map_color = parseMapColor5(v);
                 }
+            } else if (std.mem.eql(u8, pname, "ResourceScale")) {
+                // Block-level drop probability multiplier (BlocksFromXml:
+                // each drop's prob is scaled by ResourceScale). Zero V3.1.0
+                // b14 blocks set it, so stock rows are unmodified; a modded
+                // blocks.xml is honoured rather than hardcoded.
+                if (xml.attr(clean, pi, "value")) |v| resource_scale = std.fmt.parseFloat(f32, v) catch 1;
             }
             p = pi + 10;
+        }
+        // Own rows into arena memory (prob already scaled by ResourceScale).
+        var own_drop_slice: []const HarvestDrop = &.{};
+        if (own_drops.items.len > 0) {
+            const ds = try arena.alloc(HarvestDrop, own_drops.items.len);
+            for (own_drops.items, 0..) |d, dd| {
+                ds[dd] = d;
+                if (resource_scale != 1) ds[dd].prob = d.prob * resource_scale;
+            }
+            own_drop_slice = ds;
         }
         const idx = parsed.items.len;
         try name_idx.put(allocator, kn, idx);
@@ -393,6 +516,7 @@ pub fn loadFromPath(
             .mesh = if (mesh) |m| try arena.dupe(u8, m) else "",
             .texture_top = texture_top,
             .map_color = map_color,
+            .harvest_drops = own_drop_slice,
         });
         i = bi + 7;
     }
@@ -404,9 +528,10 @@ pub fn loadFromPath(
         return BlockTable.builtin();
     }
 
-    // Resolve the Extends chain for Class / TraderID (own props win). Depth-capped
-    // so a corrupt cycle cannot spin; a block inheriting a VendingMachine class is
-    // itself treated as vending (cntVendingMachineTrader extends cntVendingMachine).
+    // Resolve the Extends chain for Class / TraderID / drops (own props win).
+    // Depth-capped so a corrupt cycle cannot spin; a block inheriting a
+    // VendingMachine class is itself treated as vending
+    // (cntVendingMachineTrader extends cntVendingMachine).
     const max_extends_depth: usize = 8;
     for (parsed.items, 0..) |*pb, idx_cur| {
         var depth: usize = 0;
@@ -417,11 +542,12 @@ pub fn loadFromPath(
         var own_mesh = pb.mesh;
         var own_texture = pb.texture_top;
         var own_map_color = pb.map_color;
+        var own_drops = pb.harvest_drops;
         var ext = pb.extends;
         while (ext) |e| : (depth += 1) {
             if (depth >= max_extends_depth) break;
             if (own_class != null and own_trader >= 0 and own_mesh != null and
-                own_texture > 0 and own_map_color > 0) break;
+                own_texture > 0 and own_map_color > 0 and own_drops.len >= max_harvest_drops) break;
             var dup = false;
             for (seen_chain[0..chain_n]) |s| {
                 if (s == idx_cur) dup = true;
@@ -436,6 +562,32 @@ pub fn loadFromPath(
             if (own_mesh == null) own_mesh = base_p.mesh;
             if (own_texture == 0) own_texture = base_p.texture_top;
             if (own_map_color == 0) own_map_color = base_p.map_color;
+            // CopyDroppedFrom (IL=89): base Harvest rows append unless the
+            // item name is already present (own wins), so a block that
+            // declares its own wood row still inherits the base's stone row.
+            // Bounded by max_harvest_drops like the own-row parse cap.
+            if (base_p.harvest_drops.len > 0 and own_drops.len < max_harvest_drops) {
+                const merged = try arena.alloc(
+                    HarvestDrop,
+                    @min(own_drops.len + base_p.harvest_drops.len, max_harvest_drops),
+                );
+                @memcpy(merged[0..own_drops.len], own_drops);
+                var n = own_drops.len;
+                for (base_p.harvest_drops) |bd| {
+                    if (n >= max_harvest_drops) break;
+                    var dup_name = false;
+                    for (merged[0..n]) |od| {
+                        if (std.mem.eql(u8, od.item_name, bd.item_name)) {
+                            dup_name = true;
+                            break;
+                        }
+                    }
+                    if (dup_name) continue;
+                    merged[n] = bd;
+                    n += 1;
+                }
+                own_drops = merged[0..n];
+            }
             ext = base_p.extends;
         }
         pb.class = own_class;
@@ -443,6 +595,7 @@ pub fn loadFromPath(
         pb.mesh = own_mesh;
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;
+        pb.harvest_drops = own_drops;
     }
 
     const defs = try arena.alloc(BlockDef, parsed.items.len);
@@ -463,6 +616,7 @@ pub fn loadFromPath(
             .mesh = if (pb.mesh) |m| try arena.dupe(u8, m) else "",
             .texture_top = pb.texture_top,
             .map_color = pb.map_color,
+            .harvest_drops = pb.harvest_drops,
         };
     }
     return .{ .defs = defs, .arena_ptr = arena_holder, .source = .xml };
@@ -674,9 +828,98 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "torch_wall", 109 },
         .{ "barrelRadiated", 110 },
         .{ "crafted_bad", 111 },
+        .{ "terrStone", 200 },
+        .{ "terrDirt", 201 },
+        .{ "cntOreBase", 202 },
+        .{ "cntOreChild", 203 },
+        .{ "scaledBlock", 204 },
+        .{ "destroyOnly", 205 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];
     }
     return null;
+}
+
+test "Harvest drop rows parse with Extends inheritance" {
+    // Fixture mirrors stock shapes: terrStone carries one Harvest row
+    // (count "55" → 55..55), terrDirt a range row, the ore child extends a
+    // base (CopyDroppedFrom merges, own wins per item name), ResourceScale
+    // scales prob, and a Destroy-only block keeps no Harvest rows.
+    const src =
+        \\<blocks>
+        \\<block name="terrStone">
+        \\  <drop event="Harvest" name="resourceRockSmall" count="55" tag="oreWoodHarvest"/>
+        \\</block>
+        \\<block name="terrDirt">
+        \\  <drop event="Harvest" name="resourceClayLump" count="22" tag="oreWoodHarvest"/>
+        \\  <drop event="Harvest" name="resourceScrapIron" count="3,6" prob="0.5" stick_chance="0" tool_category="Disassemble"/>
+        \\  <drop event="Harvest" name="resourceScrapIron" count="0" tag="salvageHarvest"/>
+        \\</block>
+        \\<block name="cntOreBase">
+        \\  <drop event="Harvest" name="resourceWood" count="2" tag="allHarvest"/>
+        \\  <drop event="Harvest" name="terrStone" count="1" prob="0.25"/>
+        \\</block>
+        \\<block name="cntOreChild">
+        \\  <property name="Extends" value="cntOreBase"/>
+        \\  <drop event="Harvest" name="resourceWood" count="5" tag="lumberjackHarvest"/>
+        \\</block>
+        \\<block name="scaledBlock">
+        \\  <property name="ResourceScale" value="0.5"/>
+        \\  <drop event="Harvest" name="resourceScrapIron" count="10" prob="0.8"/>
+        \\</block>
+        \\<block name="destroyOnly">
+        \\  <drop event="Destroy" name="terrDirt" count="1" prob="0.75" stick_chance="1"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_drops.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+
+    // Single fixed-count row: count "55" → 55..55, prob default 1, tag kept.
+    const stone = t.byName("terrStone").?;
+    const sd = t.harvestDrops(stone.id);
+    try std.testing.expectEqual(@as(usize, 1), sd.len);
+    try std.testing.expectEqualStrings("resourceRockSmall", sd[0].item_name);
+    try std.testing.expectEqual(@as(u32, 55), sd[0].count_min);
+    try std.testing.expectEqual(@as(u32, 55), sd[0].count_max);
+    try std.testing.expectEqual(@as(f32, 1), sd[0].prob);
+    try std.testing.expectEqualStrings("oreWoodHarvest", sd[0].tag);
+
+    // Range row "3,6" + prob + stick_chance + tool_category; the duplicate
+    // item name with count 0 parses too (the roll skips count 0).
+    const dirt = t.byName("terrDirt").?;
+    const dd = t.harvestDrops(dirt.id);
+    try std.testing.expectEqual(@as(usize, 3), dd.len);
+    try std.testing.expectEqualStrings("resourceScrapIron", dd[1].item_name);
+    try std.testing.expectEqual(@as(u32, 3), dd[1].count_min);
+    try std.testing.expectEqual(@as(u32, 6), dd[1].count_max);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), dd[1].prob, 1e-4);
+    try std.testing.expectEqualStrings("Disassemble", dd[1].tool_category);
+    try std.testing.expectEqual(@as(u32, 0), dd[2].count_max);
+
+    // Extends inheritance (CopyDroppedFrom): the child's own resourceWood
+    // wins; the base's terrStone row appends. No duplicates.
+    const child = t.byName("cntOreChild").?;
+    const cd = t.harvestDrops(child.id);
+    try std.testing.expectEqual(@as(usize, 2), cd.len);
+    try std.testing.expectEqualStrings("resourceWood", cd[0].item_name);
+    try std.testing.expectEqual(@as(u32, 5), cd[0].count_min); // own, not base 2
+    try std.testing.expectEqualStrings("lumberjackHarvest", cd[0].tag);
+    try std.testing.expectEqualStrings("terrStone", cd[1].item_name);
+    try std.testing.expectEqual(@as(f32, 0.25), cd[1].prob);
+
+    // ResourceScale multiplies the row prob (0.8 * 0.5 = 0.4).
+    const scaled = t.byName("scaledBlock").?;
+    const sc = t.harvestDrops(scaled.id);
+    try std.testing.expectEqual(@as(usize, 1), sc.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.4), sc[0].prob, 1e-4);
+
+    // Destroy-only rows are not Harvest drops (bounded slice).
+    const dstr = t.byName("destroyOnly").?;
+    try std.testing.expectEqual(@as(usize, 0), t.harvestDrops(dstr.id).len);
 }

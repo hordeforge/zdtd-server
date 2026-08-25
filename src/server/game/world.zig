@@ -159,9 +159,16 @@ pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
 }
 
 /// materials.xml Experience for a broken block (harvest XP; stock
-/// AddLevelExp(material.Experience * count), RE items.md; one block = one
-/// count here). Resolves via AssignIds id → name → Material → Experience;
-/// 0 = no harvest XP (offline catalog, air, or material without Experience).
+/// AddLevelExp(material.Experience * count), RE items.md HarvestOnAttack;
+/// the caller multiplies by the harvested count — 1 for a block with no
+/// Harvest rows, the rolled total otherwise). Resolves via AssignIds id →
+/// name → Material → Experience; 0 = no harvest XP (offline catalog, air,
+/// or material without Experience).
+pub fn harvestXpForBlock(self: *const Game, block_id: u16) u32 {
+    if (block_id == 0) return 0;
+    return @intFromFloat(@max(0, self.maxdamage.harvestExpFor(block_id)));
+}
+
 /// Wire damage for a block: Stage2Health caps the displayed value (RE
 /// blocks.md §5: "Stage2Health, if set, caps the applied value at the
 /// stage-2 threshold") while the internal damage plane keeps accumulating
@@ -172,11 +179,6 @@ pub fn wireBlockDamage(self: *const Game, block_id: u16, stored: u16) u16 {
     const cap = self.maxdamage.stage2For(block_id);
     if (cap == 0) return stored;
     return @min(stored, cap);
-}
-
-pub fn harvestXpForBlock(self: *const Game, block_id: u16) u32 {
-    if (block_id == 0) return 0;
-    return @intFromFloat(@max(0, self.maxdamage.harvestExpFor(block_id)));
 }
 
 pub fn packBlockKey(x: i32, y: i32, z: i32) u64 {
