@@ -265,6 +265,9 @@ test, so a retune cannot land silently).
 | `bloodmoon_hp_mult` | 1.5 | Blood-moon HP floor for classes the gamestage ladder cannot resolve (offline/builtin data). Stock has no flat multiplier: with stock data the ladder's feral/radiated classes carry their own HP |
 | `difficulty_hp_0`, `difficulty_hp_1`, `difficulty_hp_2`, `difficulty_hp_3`, `difficulty_hp_4`, `difficulty_hp_5` | 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 | GameDifficulty 0..5 → zombie HP multiplier (Scavenger..Insane). Stock tier semantic; numbers zdtd-tuned (R9, no RE pin) — operator policy |
 | `move_scale_0`, `move_scale_1`, `move_scale_2`, `move_scale_3`, `move_scale_4` | 0.5 / 0.75 / 1.0 / 1.4 / 1.7 | ZombieMove 0..4 → speed multiplier (walk/jog/run/sprint/nightmare). Stock tier semantic; numbers zdtd-tuned (R9) |
+| `[rules.difficulty]` | | GameDifficulty damage scaling (RE: ItemActionAttack.difficultyModifier, combat-damage.md; provenance PROVENANCE.md §3.7) |
+| `incoming_damage_0`, `incoming_damage_1`, `incoming_damage_2`, `incoming_damage_3`, `incoming_damage_4`, `incoming_damage_5` | 1.0 / 1.0 / 0.75 / 1.0 / 1.0 / 1.0 | GameDifficulty 0..5 → damage multiplier when a server (AI) attacker hits a client entity (stock `IncomingDamageModifier`; difficulty 2 = Adventurer pins the shipped serverconfig code `AAAJABJACJADJARFBNC` decode 0.75; the rest of the ladder waits on a SetupOptions Cecil extraction) |
+| `entity_incoming_damage_0`, `entity_incoming_damage_1`, `entity_incoming_damage_2`, `entity_incoming_damage_3`, `entity_incoming_damage_4`, `entity_incoming_damage_5` | 1.0 (all) | GameDifficulty 0..5 → multiplier for a client hitting a server entity (stock `EntityIncomingDamageModifier`). Stock applies it client-side; the server trusts the claimed strength, so this ladder is config/operator policy and the RE-pin reference, not a server-side re-scale |
 
 `[rules.world]` / `[rules.vehicle]` (ADR 0021):
 

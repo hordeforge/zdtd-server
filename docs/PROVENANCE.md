@@ -299,6 +299,7 @@ field-by-field provenance.
 | `Ai.revenge_window_s` | 20.0 | R | Revenge target window, 400 ticks @ 20 Hz (RE: entity-ai.md) |
 | `Ai.gravity` | -1.6 | R | Stock `World::Gravity` **0.08** blocks/tick (World cctor, World.il.txt:96) integrated `(motion.y - Gravity) * 0.98` per tick (entity-movement.md) -> ~1.6 blocks/s², self-capping ~ -3.9 |
 | `Bloodmoon.party_*` | 80/150/40/30 | R | `AIDirectorBloodMoonParty` (asm.il 413090-413140) |
+| `Difficulty.*` | 1.0 (all), `incoming_damage_2` 0.75 | R | `ItemActionAttack.difficultyModifier` mixed-control PvE scalers (combat-damage.md): server/AI→client × `IncomingDamage`, client→server × `EntityIncomingDamage` (client-side in stock; server trusts the claimed strength, ProcessPackage IL=172). Adventurer 0.75 pinned to the shipped serverconfig sandbox-code decode (sandbox-options.md 246-258); full 0..5 ladder awaits the SetupOptions Cecil extraction (research-repo 2026-08-25) |
 | `Progression.*` | see fields | Z | **Invented placeholders** (WORK_PLAN T16); stock ships survival from buffs.xml `buffStatusHungry01-03` / `Thirsty01-03` damage + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT`/`StaminaChangeOT` + items.xml `StaminaLoss` |
 
 ### 3.2 AIDirector (`src/ecs/aidirector.zig`)

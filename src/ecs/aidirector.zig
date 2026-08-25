@@ -359,6 +359,24 @@ pub const Director = struct {
         };
     }
 
+    /// Damage multiplier for a GameDifficulty-matched attack pair, mirroring
+    /// stock `ItemActionAttack.difficultyModifier` (RE, combat-damage.md):
+    /// same-control pairs (PvP, AI-vs-AI) are unchanged; a server attacker
+    /// vs a client entity scales by `[rules.difficulty] incoming_damage_0..5`,
+    /// a client attacker vs a server entity by `entity_incoming_damage_0..5`
+    /// (carried as config for operator policy; stock applies it client-side
+    /// and the server trusts the claimed strength, so no server re-scale).
+    pub fn damageScale(
+        self: *const Director,
+        attacker_client: bool,
+        target_client: bool,
+        r: *const rules_mod.Difficulty,
+    ) f32 {
+        if (attacker_client == target_client) return 1.0;
+        if (attacker_client) return r.entityIncomingFor(self.difficulty);
+        return r.incomingFor(self.difficulty);
+    }
+
     /// ZombieMove index 0..4 → speed multiplier (walk/jog/run/sprint/nightmare).
     /// Values from `[rules.director] move_scale_0..4` (zdtd-tuned R9).
     fn moveScale(idx: u8, r: *const rules_mod.Director) f32 {

@@ -530,6 +530,15 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         // The attacker is not tracked here, so it reads -1 (unknown).
         var dmg = amount;
         if (w.kind[i] == .player) {
+            // GameDifficulty (RE `ItemActionAttack.difficultyModifier`,
+            // combat-damage.md): a server (AI) attacker hitting a client-
+            // controlled entity scales by IncomingDamage,
+            // `round(strength x modifier)`; PvP and AI-vs-AI are unchanged.
+            // The deferred accumulator's attackers are AI (zombie melee,
+            // turret fire) and only player victims reach this branch, so the
+            // mixed-control condition holds by construction. The scale runs
+            // before the plugin verdict, matching the C2S path's order.
+            dmg = @round(dmg * w.director.damageScale(false, true, &w.rules.difficulty));
             if (w.player_damage_verdict_fn) |vdf| {
                 const v = vdf(w.player_damage_verdict_ctx, w.network_id[i].id, dmg);
                 if (v < 0) continue;
@@ -5044,6 +5053,44 @@ test "deferred damage that kills a player leaves a dirty corpse at hp 0" {
     w.dirty[ps].hp = false;
     try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, dmg_fp[0..]));
     try std.testing.expect(!w.dirty[ps].hp);
+}
+
+test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred choke" {
+    // RE `ItemActionAttack.difficultyModifier` (combat-damage.md): a server
+    // (AI) attacker vs a client entity scales by IncomingDamageModifier,
+    // `round(strength x modifier)`; PvP and AI-vs-AI leave strength
+    // unchanged. The default world is Adventurer (difficulty 2), whose
+    // shipped serverconfig preset (`AAAJABJACJADJARFBNC`) pins IncomingDamage
+    // 0.75 (sandbox-options.md 246-258).
+    var w: World = .{};
+    defer w.deinit();
+    try std.testing.expectEqual(@as(u8, 2), w.director.difficulty);
+    // Same-control pairs unchanged; mixed pairs read the config ladders.
+    try std.testing.expectEqual(@as(f32, 1.0), w.director.damageScale(false, false, &w.rules.difficulty));
+    try std.testing.expectEqual(@as(f32, 1.0), w.director.damageScale(true, true, &w.rules.difficulty));
+    try std.testing.expectEqual(@as(f32, 0.75), w.director.damageScale(false, true, &w.rules.difficulty));
+    try std.testing.expectEqual(@as(f32, 1.0), w.director.damageScale(true, false, &w.rules.difficulty));
+    // AI -> player: round(8.0 x 0.75) = 6.0.
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.health[ps].hp = 100;
+    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    dmg_fp[ps] = 800; // 8.0 hp
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
+    // Config wins: an operator raising the Adventurer incoming scale lifts it.
+    w.rules.difficulty.incoming_damage_2 = 1.25;
+    w.health[ps].hp = 100;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(f32, 90.0), w.health[ps].hp); // 8 x 1.25 = 10
+    // AI -> AI (turret fire on a zombie) is unchanged by the difficulty scale.
+    const z = w.spawnZombie(1, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.health[zs].hp = 100;
+    var zfp: [max_entities]u32 = .{0} ** max_entities;
+    zfp[zs] = 800;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, zfp[0..]));
+    try std.testing.expectEqual(@as(f32, 92.0), w.health[zs].hp); // 8.0 flat
 }
 test "multi-seat: four riders fill a truck, the fifth is refused" {
     var w: World = .{};

@@ -266,6 +266,65 @@ pub const Ai = struct {
 /// `party_join_dist` share one party focus; horde zombies beyond
 /// `party_teleport_dist` teleport back; waves spawn ~`party_spawn_dist` out;
 /// the per-party alive ceiling is `party_enemy_max`.
+/// GameDifficulty 0..5 -> damage multipliers (RE `ItemActionAttack.
+/// difficultyModifier`, il/full-v3.1.0/_global/ItemActionAttack.il.txt:2722;
+/// call site IL_0A4A inside ItemActionAttack.Hit). The PvE scalers apply only
+/// in mixed client/server matchups: a server (AI) attacker hitting a client
+/// entity scales its strength by `IncomingDamageModifier`, a client hitting a
+/// server entity by `EntityIncomingDamageModifier`; PvP and AI-vs-AI are
+/// unchanged, and the stock server never re-scales the client's claimed
+/// strength (NetPackageDamageEntity::ProcessPackage IL=172 stores it verbatim
+/// into DamageResponse::Strength). Both statics default to 1.0
+/// (ItemActionAttack .cctor); the stock Adventurer preset (the default game)
+/// sets IncomingDamage to 0.75 - the shipped serverconfig code
+/// `AAAJABJACJADJARFBNC` decodes option 17 index 5 = 0.75
+/// (sandbox-options.md 246-258), so difficulty 2 here pins 0.75. The full
+/// per-difficulty ladder lives in SandboxOptionManager.SetupOptions IL (not
+/// literal preset codes); extracting it is a research-repo task, so the
+/// remaining defaults stay 1.0 until RE lands them.
+pub const Difficulty = struct {
+    /// Server (AI) attacker -> client entity damage multiplier, per difficulty.
+    incoming_damage_0: f32 = 1.0,
+    incoming_damage_1: f32 = 1.0,
+    incoming_damage_2: f32 = 0.75,
+    incoming_damage_3: f32 = 1.0,
+    incoming_damage_4: f32 = 1.0,
+    incoming_damage_5: f32 = 1.0,
+    /// Client attacker -> server entity damage multiplier, per difficulty.
+    /// Stock applies this client-side in the attacker's local ItemActionAttack
+    /// Hit; the server trusts the claimed strength, so the server never
+    /// re-applies it (double-scaling). Carried here as config for operator
+    /// policy and for the RE ladder when it lands.
+    entity_incoming_damage_0: f32 = 1.0,
+    entity_incoming_damage_1: f32 = 1.0,
+    entity_incoming_damage_2: f32 = 1.0,
+    entity_incoming_damage_3: f32 = 1.0,
+    entity_incoming_damage_4: f32 = 1.0,
+    entity_incoming_damage_5: f32 = 1.0,
+    /// Difficulty index 0..5 (clamped) -> incoming-damage multiplier.
+    pub fn incomingFor(self: *const Difficulty, d: u8) f32 {
+        return switch (@min(d, 5)) {
+            0 => self.incoming_damage_0,
+            1 => self.incoming_damage_1,
+            2 => self.incoming_damage_2,
+            3 => self.incoming_damage_3,
+            4 => self.incoming_damage_4,
+            else => self.incoming_damage_5,
+        };
+    }
+    /// Difficulty index 0..5 (clamped) -> entity-incoming-damage multiplier.
+    pub fn entityIncomingFor(self: *const Difficulty, d: u8) f32 {
+        return switch (@min(d, 5)) {
+            0 => self.entity_incoming_damage_0,
+            1 => self.entity_incoming_damage_1,
+            2 => self.entity_incoming_damage_2,
+            3 => self.entity_incoming_damage_3,
+            4 => self.entity_incoming_damage_4,
+            else => self.entity_incoming_damage_5,
+        };
+    }
+};
+
 pub const Bloodmoon = struct {
     party_join_dist: f32 = 80.0,
     party_teleport_dist: f32 = 150.0,
@@ -502,6 +561,7 @@ pub const Rules = struct {
     world: WorldGroup = .{},
     vehicle: Vehicle = .{},
     director: Director = .{},
+    difficulty: Difficulty = .{},
     water: Water = .{},
     power: Power = .{},
 };
@@ -583,6 +643,21 @@ pub const AiOverlay = struct {
     push_shove: ?f32 = null,
     dig_windup_ticks: ?u8 = null,
     dig_budget_ticks: ?u8 = null,
+};
+
+pub const DifficultyOverlay = struct {
+    incoming_damage_0: ?f32 = null,
+    incoming_damage_1: ?f32 = null,
+    incoming_damage_2: ?f32 = null,
+    incoming_damage_3: ?f32 = null,
+    incoming_damage_4: ?f32 = null,
+    incoming_damage_5: ?f32 = null,
+    entity_incoming_damage_0: ?f32 = null,
+    entity_incoming_damage_1: ?f32 = null,
+    entity_incoming_damage_2: ?f32 = null,
+    entity_incoming_damage_3: ?f32 = null,
+    entity_incoming_damage_4: ?f32 = null,
+    entity_incoming_damage_5: ?f32 = null,
 };
 
 pub const BloodmoonOverlay = struct {
@@ -708,6 +783,7 @@ pub const RulesOverlay = struct {
     world: WorldGroupOverlay = .{},
     vehicle: VehicleOverlay = .{},
     director: DirectorOverlay = .{},
+    difficulty: DifficultyOverlay = .{},
     water: WaterOverlay = .{},
     power: PowerOverlay = .{},
 };

@@ -1970,13 +1970,21 @@ gamestage, no wandering hordes, and no screamers.
 
 - **GameDifficulty HP scaling** `WORKS` (2026-08-25):
   `hpScale()` applies the per-difficulty spawn HP curve (0.5..2.0, blood moon
-  +1.5x) from `[rules.director] difficulty_hp_0..5`. Stock additionally scales
-  incoming/outgoing *damage* via `IncomingDamageModifier` /
-  `EntityIncomingDamageModifier` (sandbox options, combat-damage.md); the
-  per-difficulty modifier values are an RE-extraction dependency
-  (SandboxOptionManager.SetupOptions IL, research repo) - the HP curve
-  approximates the difficulty ladder until that extraction lands, recorded
-  here rather than guessed.
+  +1.5x) from `[rules.director] difficulty_hp_0..5`. The per-difficulty damage
+  leg is also in: `Director.damageScale()` + `[rules.difficulty]`
+  `incoming_damage_0..5` / `entity_incoming_damage_0..5` implement RE
+  `ItemActionAttack.difficultyModifier` (combat-damage.md) - a server (AI)
+  attacker vs a client entity scales by IncomingDamage (`round(strength x
+  modifier)`), applied at the ECS deferred-damage player choke
+  (`systems.zig applyDeferredDamage`); PvP and AI-vs-AI are unchanged. The
+  client-attack direction is NOT re-scaled server-side by design: stock
+  applies `EntityIncomingDamageModifier` in the client's own Hit and the
+  server stores the claimed strength verbatim
+  (NetPackageDamageEntity.ProcessPackage IL=172), so re-scaling would
+  double-apply. Defaults: all 1.0 except difficulty 2 (Adventurer) incoming
+  = 0.75, pinned to the shipped serverconfig sandbox code decode
+  (sandbox-options.md 246-258); the full 0..5 ladder still needs the
+  SetupOptions Cecil extraction (research-repo note 2026-08-25).
 
 - **spawning.xml parsing** `WORKS` (2026-08-25):
   biome name, entitygroup, maxcount, time, type, respawndelay, `tags` and
