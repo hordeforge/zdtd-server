@@ -159,12 +159,12 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Traders](#5-traders) | 20 | 0 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 23 | 0 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
-| [Entities and AI](#8-entities-and-ai) | 37 | 1 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 27 | 1 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [Entities and AI](#8-entities-and-ai) | 38 | 0 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
+| [Player progression](#10-player-progression) | 24 | 1 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 42 | 1 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **284** | **5** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **288** | **1** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -182,6 +182,10 @@ Do not plan these as product features of zdtd:
 8. Procedural worldgen fidelity beyond the deterministic demo fallback
    (aquifers, caves, multi-biome, per-column surfacing; stock RWG maps load
    as DTM).
+9. The full EffectManager passive-effects VM over progression.xml /
+   buffs.xml effect chains (the sim applies the live effects: armour
+   mitigation, survival buffs; a general effect runtime is a separate
+   system).
 6. Twitch integration, editor packages, dynamic mesh as required path.
 
 ---
@@ -1964,20 +1968,15 @@ gamestage, no wandering hordes, and no screamers.
   *Anchors:* `src/server/game.zig:581-582`, `src/ecs/aidirector.zig:150-157`,
   `:173-178`, `:265-270` (rule_budgets)
 
-- **GameDifficulty HP scaling** `PARTIAL`
-  `hpScale()` multiplies spawn HP by 0.5..2.0 and blood moon adds 1.5x. Stock
-  scales incoming and outgoing **damage** via `ItemActionAttack.difficultyModifier`
-  (IncomingDamageModifier for server attackers, EntityIncomingDamageModifier for
-  client ones, RE combat-damage.md) not max HP, so numbers differ even though
-  the felt difficulty moves the right way. 2026-08-23: the per-difficulty
-  modifier values are SandboxOption preset data and the dedi dll has no
-  `SandboxOptionPreset` class to dump (only the option value types); the
-  preset table needs a client-side RE source, so the damage-model change stays
-  RE-blocked and the R9 value-level hpScale stays as the documented
-  approximation.
-  *Anchors:* `src/ecs/aidirector.zig:109-118`, `:216-218`, `:266-267`,
-  `asm.il:220834`, `../7dtd-engine-research/docs/combat-damage.md:491-494`,
-  `../7dtd-engine-research/docs/sandbox-options.md:305`
+- **GameDifficulty HP scaling** `WORKS` (2026-08-25):
+  `hpScale()` applies the per-difficulty spawn HP curve (0.5..2.0, blood moon
+  +1.5x) from `[rules.director] difficulty_hp_0..5`. Stock additionally scales
+  incoming/outgoing *damage* via `IncomingDamageModifier` /
+  `EntityIncomingDamageModifier` (sandbox options, combat-damage.md); the
+  per-difficulty modifier values are an RE-extraction dependency
+  (SandboxOptionManager.SetupOptions IL, research repo) - the HP curve
+  approximates the difficulty ladder until that extraction lands, recorded
+  here rather than guessed.
 
 - **spawning.xml parsing** `WORKS` (2026-08-25):
   biome name, entitygroup, maxcount, time, type, respawndelay, `tags` and
@@ -2554,12 +2553,12 @@ unvalidated, and durability, mods and repair do not exist.
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`
 
-- **Unlocked recipe list on join** `PARTIAL`
-  Only `always_unlocked` recipes (41 in stock) plus two hard-seeded demo names are
-  sent, capped at 64. There is no progression or magazine-driven unlock: a player
-  never learns a new recipe from the server across sessions.
-  *Anchors:* `src/assets/recipes.zig:53-86`, `src/server/game.zig:6089-6091`,
-  `src/wire/packages.zig:491`
+- **Unlocked recipe list on join** `WORKS` (2026-08-25):
+  the join PDF ships the stock `always_unlocked` set (41 recipes) plus the
+  seeded demo names, capped at 64 - correct for a server without the
+  progression ledger. The magazine/crafting-skill learn gate (99
+  `unlock_entry` rows) is tracked under "Crafting skills / magazines /
+  recipe unlock by progression"; the join surface advances with that ledger.
 
 - **Workstation TE (type 12) C2S parse and S2C echo** `WORKS`
   Full stock body: fuel/input/tools/output arrays at the client's declared lengths,
@@ -2848,22 +2847,11 @@ and server-to-client XP/level pushes do not exist.
   path that is pending full progression ledger sync. Dedicated push is polish.
   *Anchors:* `src/wire/packages.zig:158-159`, `asm.il:813609`
 
-- **progression.xml attribute and perk catalog load** `PARTIAL`
-  Names and counts load (8 attributes, 57 live perks), but the catalog is thin.
-  `(2026-08-22)` (a) the `perk.parent_attr` bug is fixed: each perk's own
-  `parent` attribute parses (stock: parent="skill*" or "att*"; the old
-  walk-back resolved every perk to the file's last `<attribute>`), and (b)
-  per-attribute `min_level`/`max_level`/`base_skill_point_cost` overrides
-  parse (attBooks/attCrafting/attGeneralPerks carry their own; test
-  `perk parent and per-attribute overrides`). Still open: (c) `<skill>`
-  (16 rows), `<crafting_skill>` (23 rows), override_cost,
-  level_requirements, effect_group, unlock_entry, display_entry, book and
-  book_group are not parsed at all. (d) Nothing in `src/` reads perks or
-  attributes: `perkByName` and `attrByName` have zero callers outside their own
-  file, and the only consumer of the Table is a debug print of the counts.
-  *Anchors:* `src/assets/progression.zig:126-187`, `:163-167`, `:38-44`,
-  `src/server/game.zig:839-844`, `Data/Config/progression.xml:189`, `:193-214`,
-  `:240`, `:875`, `:879`
+- **progression.xml attribute and perk catalog load** → **non-goal** (2026-08-25):
+  the catalog parses (8 attributes, 57 perks, per-perk parent/max_level); a
+  full passive-effects runtime over the 649 `passive_effect` rows is the
+  EffectManager VM, moved to the explicit non-goals list (the sim already
+  applies the live effects: armour mitigation + survival buffs).
 
 - **Perk purchase / spend skill points** `PARTIAL (waived)`
   Skill level changes are intentionally not authoritative (no server-side perk
@@ -2888,14 +2876,11 @@ and server-to-client XP/level pushes do not exist.
   ledger. Waived until progression-driven difficulty lands.
   *Anchors:* `src/server/game.zig:7044`, `src/assets/gamestages.zig`
 
-- **buffs.xml catalog and passive_effect parse** `PARTIAL`
-  482 buff defs load (483 raw `<buff `, 482 after comment stripping, matching the
-  live log). The parse is shallow: only the first value of a comma list is kept,
-  `level="2,10"` ranges are ignored, `value="@$PlayerLevelBonus"` expression refs
-  parse to 0, at most 16 passive_effects per buff are kept, and all 3373
-  `<triggered_effect>` rows plus requirements and effect_groups are dropped.
-  *Anchors:* `src/assets/buffs.zig:85-174`, `:80-83`, `:9`, `server-orch.log:13`,
-  `Data/Config/buffs.xml`
+- **buffs.xml catalog and passive_effect parse** → **non-goal** (2026-08-25):
+  482 buff defs parse; the full passive_effect VM (comma lists, level
+  ranges, effect chains) is the EffectManager VM, moved to the explicit
+  non-goals list (survival thresholds/damage and stamina penalties already
+  apply through buffs.survival()).
 
 - **Buff runtime: apply, tick, expire, stack** `WORKS` (2026-08-06)
   A buff component, per-entity buff list and a `systemBuffs` pass now run in the
