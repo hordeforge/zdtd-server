@@ -9,6 +9,7 @@ const paths = @import("paths.zig");
 
 pub const max_attrs: usize = 16;
 pub const max_perks: usize = 512;
+pub const max_skills: usize = 64; // crafting skills (stock 23)
 
 /// Level-curve defaults used before progression.xml loads (stock XML wins at
 /// runtime; assets/progression.zig parses the shipped curve). These mirror the
@@ -61,10 +62,29 @@ pub const PerkDef = struct {
     parent_attr: []const u8 = "",
 };
 
+/// One `<unlock_entry item="a,b" unlock_tier="N"/>` row: the named items'
+/// recipes unlock when the parent crafting skill reaches `level` (the tier
+/// resolved through its own display_entry's `unlock_level` comma list).
+pub const UnlockEntry = struct {
+    items: []const u8 = "",
+    /// Required crafting-skill level (resolved from the display_entry tier).
+    level: u8 = 0,
+};
+
+/// One `<crafting_skill name max_level parent>` block with its unlock_entry
+/// gates.
+pub const CraftingSkill = struct {
+    name: []const u8 = "",
+    max_level: u16 = 100,
+    entries: []const UnlockEntry = &.{},
+};
+
 pub const Table = struct {
     curve: LevelCurve = .{},
     attributes: []const AttrDef = &.{},
     perks: []const PerkDef = &.{},
+    /// crafting_skill blocks with their unlock_entry gates (progression.xml).
+    crafting_skills: []const CraftingSkill = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn empty() Table {
@@ -182,12 +202,94 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     const pslice = try arena.alloc(PerkDef, perks.items.len);
     @memcpy(pslice, perks.items);
 
+    // Crafting skills + unlock_entry gates (99 rows in stock): the item
+    // recipes unlock at the display_entry's mapped level per tier.
+    var skills: std.ArrayList(CraftingSkill) = .empty;
+    defer skills.deinit(allocator);
+    var si: usize = 0;
+    while (si < clean.len and skills.items.len < max_skills) {
+        const ski = std.mem.findPos(u8, clean, si, "<crafting_skill ") orelse break;
+        const sk_name = xml.attr(clean, ski, "name") orelse {
+            si = ski + 17;
+            continue;
+        };
+        const gt = std.mem.findPos(u8, clean, ski, ">") orelse break;
+        const close = std.mem.findPos(u8, clean, gt, "</crafting_skill>") orelse break;
+        const body = clean[gt + 1 .. close];
+        var sk: CraftingSkill = .{
+            .name = try arena.dupe(u8, sk_name),
+        };
+        if (xml.attr(clean, ski, "max_level")) |ml| sk.max_level = std.fmt.parseInt(u16, ml, 10) catch sk.max_level;
+        var entries: std.ArrayList(UnlockEntry) = .empty;
+        defer entries.deinit(allocator);
+        var ei: usize = 0;
+        while (ei < body.len) {
+            const di = std.mem.findPos(u8, body, ei, "<display_entry ") orelse break;
+            const dgt = std.mem.findPos(u8, body, di, ">") orelse break;
+            // Each display_entry owns its tier->level list; its unlock_entries
+            // resolve against it (a later display_entry's list does not leak).
+            var tier_levels: [8]u8 = .{0} ** 8;
+            if (xml.attr(body, di, "unlock_level")) |ul| {
+                var t: usize = 0;
+                var it = std.mem.splitScalar(u8, ul, ',');
+                while (it.next()) |seg| {
+                    if (t >= tier_levels.len) break;
+                    const v = std.mem.trim(u8, seg, " \t");
+                    if (v.len > 0) tier_levels[t] = std.fmt.parseInt(u8, v, 10) catch 0;
+                    t += 1;
+                }
+            }
+            var uj = dgt + 1;
+            while (uj < body.len) {
+                const uni = std.mem.findPos(u8, body, uj, "<unlock_entry ") orelse break;
+                const ugt = std.mem.findPos(u8, body, uni, ">") orelse break;
+                if (std.mem.find(u8, body[dgt..uni], "</display_entry>") != null) break;
+                const item_s = xml.attr(body, uni, "item") orelse "";
+                var tier: u8 = 0;
+                if (xml.attr(body, uni, "unlock_tier")) |tv| tier = std.fmt.parseInt(u8, tv, 10) catch 0;
+                const lvl: u8 = if (tier > 0 and tier <= tier_levels.len) tier_levels[tier - 1] else 0;
+                try entries.append(allocator, .{
+                    .items = try arena.dupe(u8, item_s),
+                    .level = lvl,
+                });
+                uj = ugt + 1;
+            }
+            ei = dgt + 1;
+        }
+        const entries_slice = try arena.alloc(UnlockEntry, entries.items.len);
+        @memcpy(entries_slice, entries.items);
+        sk.entries = entries_slice;
+        try skills.append(allocator, sk);
+        si = close + 18;
+    }
+    const sk_slice = try arena.alloc(CraftingSkill, skills.items.len);
+    @memcpy(sk_slice, skills.items);
+
     return .{
         .curve = curve,
         .attributes = aslice,
         .perks = pslice,
+        .crafting_skills = sk_slice,
         .arena_ptr = arena_holder,
     };
+}
+
+/// Unlock requirement for an item: (crafting skill name, required level), or
+/// null when no unlock_entry gates it (always_unlocked). The gate is inert
+/// until a crafting-skill level source lands (magazines / crafting XP); the
+/// data is read so the join list can honour it.
+pub fn unlockRequirement(self: *const Table, item_name: []const u8) ?struct { []const u8, u8 } {
+    for (self.crafting_skills) |sk| {
+        for (sk.entries) |e| {
+            var it = std.mem.splitScalar(u8, e.items, ',');
+            while (it.next()) |n| {
+                const t = std.mem.trim(u8, n, " \t");
+                if (!std.mem.eql(u8, t, item_name)) continue;
+                return .{ sk.name, e.level };
+            }
+        }
+    }
+    return null;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?LevelCurve {
@@ -280,4 +382,19 @@ test "perk parent and per-attribute overrides parse from stock progression.xml" 
     }
     try std.testing.expect(att_books);
     try std.testing.expect(att_perception);
+}
+
+test "crafting skill unlock_entry gates parse and resolve tiers" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadTableFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(t.crafting_skills.len >= 20);
+    // The stone axe unlocks at craftingHarvestingTools tier 1 -> level 1
+    // (display_entry unlock_levels "1,2,4,6,8,10").
+    const req = unlockRequirement(&t, "meleeToolRepairT0StoneAxe").?;
+    try std.testing.expectEqualStrings("craftingHarvestingTools", req[0]);
+    try std.testing.expectEqual(@as(u8, 1), req[1]);
+    // Ungated items (always_unlocked) have no requirement.
+    try std.testing.expect(unlockRequirement(&t, "resourceWood") == null);
 }
