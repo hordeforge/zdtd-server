@@ -484,9 +484,11 @@ area and the concrete work.
     temperature and are sent on join + broadcast (weather.zig). A server-side
     core-temp sim would diverge from stock - recorded as client-owned by
     design, not a gap. Wellness likewise rides the client stat; the server's
-    role is the input gates. Still open: replacing the `applyEatProps` "drop
-    food to 50% of max when ≥ 85%" playtest workaround now that a real
-    decrement loop exists.
+    role is the input gates. The `applyEatProps` "drop food to 50% of max
+    when ≥ 85%" playtest workaround is DONE (removed 2026-08-21, commit
+    "survival: eating adds and caps like stock (demo drain hack removed)":
+    eating adds and caps at max like stock buffProcessConsumables, verified
+    by the cap test).
 
 23. ~~**Entities: add wandering hordes and the screamer heat map.**~~
     **DONE 2026-08-07** (verified against asm.il:416218 constants): the
