@@ -550,6 +550,13 @@ fn parseRewardKinds(arena: std.mem.Allocator, body: []const u8, has_item: *[ques
         const open = body[at .. gt + 1];
         const typ = xml.attr(open, 0, "type") orelse "";
         var spec: quest.RewardSpec = .{};
+        // ischosen/isfixed gate the stock CloseQuest payout regardless of the
+        // reward kind (BaseReward.isChosenReward; every stock caller passes a
+        // null rewardChoice, so chosen rewards never pay server-side - the
+        // player's pick rides the client inventory sync). Parsed generically
+        // so a modded quests.xml marking any reward ischosen is skipped too.
+        spec.is_chosen = xml.attr(open, 0, "ischosen") != null;
+        spec.is_fixed = xml.attr(open, 0, "isfixed") != null;
         if (std.mem.eql(u8, typ, "Item") or std.mem.eql(u8, typ, "LootItem")) {
             spec.kind = if (std.mem.eql(u8, typ, "Item")) .item else .loot_item;
             has_item[n] = true;
@@ -558,10 +565,7 @@ fn parseRewardKinds(arena: std.mem.Allocator, body: []const u8, has_item: *[ques
             // name is arena-duped: the quest body dies when parseCatalog ends.
             if (xml.attr(open, 0, "id")) |rid| spec.item_name = arena.dupe(u8, rid) catch "";
             if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;
-            // LootItem group rewards: ischosen selects `value` prob-weighted
-            // picks from the loot group; isfixed forces the first entries.
-            spec.is_chosen = xml.attr(open, 0, "ischosen") != null;
-            spec.is_fixed = xml.attr(open, 0, "isfixed") != null;
+            // ischosen/isfixed parsed generically above (all reward kinds).
         } else if (std.mem.eql(u8, typ, "Exp")) {
             spec.kind = .exp;
             if (xml.attr(open, 0, "value")) |v| spec.value = xml.parseU32(v) orelse 0;

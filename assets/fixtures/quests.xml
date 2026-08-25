@@ -11,6 +11,10 @@
   <objective type="InteractWithNPC" phase="2"/>
   <reward type="Exp" value="500"/>
   <reward type="Item" id="casinoCoin" value="100"/>
+  <!-- ischosen reward: the pick-one-of-N choice, NOT granted by the stock
+       dedi (every CloseQuest caller passes a null rewardChoice); the
+       player's pick rides the client inventory sync. -->
+  <reward type="Item" id="resourceWood" value="5" ischosen="true"/>
 </quest>
 
 <quest id="tier1_clear">

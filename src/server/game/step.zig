@@ -339,6 +339,15 @@ pub fn step(self: *Game) !void {
             var ri: usize = 0;
             while (ri < @min(@as(usize, d.reward_n), ecs.quest.max_reward_flags)) : (ri += 1) {
                 const spec = d.rewards[ri];
+                // ischosen rewards are the pick-one-of-N choices and are NOT
+                // granted by the stock dedi: every CloseQuest/RefreshQuest
+                // Completion caller passes a null rewardChoice, so CloseQuest's
+                // ischosen gate (IL_034B-038B) skips them; the player's pick is
+                // applied in the CLIENT's local sim (XUiC_QuestTurnInRewards
+                // Window.BtnAccept_OnPress builds the chosen list) and rides the
+                // inventory sync - the same trust model as harvest loot. The
+                // server rolling the choice groups would grant every option.
+                if (spec.is_chosen) continue;
                 const scaled: u32 = @intCast(@min(
                     @as(u64, spec.value) * @as(u64, pct) / 100,
                     @as(u64, std.math.maxInt(u32)),

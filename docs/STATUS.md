@@ -775,7 +775,18 @@ club yields 0.25x (terrStone 55 -> 13 rocks), the auger's untagged perc_add
 .2 yields 1.2x (55 -> 66). Scenario harvest-count drives both. The
 equipped-armor aggregation (farmer/lumberjack/miner/scavenger rows over
 worn items) and the XUiM_Recipes seed/crop/mining/harvest output modifiers
-(defaults 1.0) stay recorded. The dashboard
+(defaults 1.0) stay recorded. Then the quest reward-choice row went WORKS:
+fresh DLL dumps prove the C2S choice field does not exist in V3.1.0 b14 -
+every CloseQuest/RefreshQuestCompletion caller passes a null rewardChoice
+(dialog DialogActionCompleteQuest.Value is parsed then discarded;
+NetPackageQuestEvent's 17 event types carry no choice field), and the
+player's pick is applied in the CLIENT's local sim
+(XUiC_QuestTurnInRewardsWindow.BtnAccept_OnPress builds the chosen
+BaseReward list) and rides the inventory sync, the same trust model as
+harvest loot. The server payout now skips ischosen rewards exactly like the
+stock dedi (scenario core_rewardgate asserts the fixture's ischosen reward
+is not granted); the previous server-side roll granted every choice group.
+The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

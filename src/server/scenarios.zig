@@ -7225,6 +7225,13 @@ test "scenario core_rewardgate scales quest item rewards (1.5x)" {
     // wallet before completing (fixture starter has reward_coin=100).
     const ps0 = g.sim.playerByPeer(c.slot).?;
     const wallet_before = g.sim.wallet[ps0].coins;
+    // Baseline the ischosen reward's item too: the fixture's ischosen reward
+    // (resourceWood x5) must NOT be granted by the server - the stock dedi's
+    // CloseQuest receives a null rewardChoice and skips ischosen rewards (RE
+    // quests-challenges.md; the player's pick rides the client inventory
+    // sync). Count must be unchanged after the payout.
+    const wood_id = g.items.ecsIdByName("resourceWood");
+    const wood_before: u32 = g.sim.inventory[ps0].countItem(wood_id);
     // Complete the starter quest (Goto -> Interact -> TurnIn).
     systems.questOnTraderOpen(&g.sim, c.slot);
     systems.questOnTraderOpen(&g.sim, c.slot);
@@ -7240,7 +7247,9 @@ test "scenario core_rewardgate scales quest item rewards (1.5x)" {
     // verdict (was paid before the verdict in completeQuest; deny/scaling
     // must reach it).
     try std.testing.expect(g.sim.wallet[ps].coins >= wallet_before + 150);
-    std.debug.print("PASS rewardgate: item reward scaled 100 -> {d}, coin leg +{d}\n", .{ coins, g.sim.wallet[ps].coins - wallet_before });
+    // ischosen reward skipped (baseline captured before completion).
+    try std.testing.expectEqual(wood_before, g.sim.inventory[ps].countItem(wood_id));
+    std.debug.print("PASS rewardgate: item reward scaled 100 -> {d}, coin leg +{d}, ischosen reward skipped\n", .{ coins, g.sim.wallet[ps].coins - wallet_before });
 }
 
 test "scenario core_pricegate scales trader buy prices (1.5x)" {
