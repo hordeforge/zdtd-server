@@ -47,10 +47,20 @@ pub fn itemDegradation(ctx: ?*anyopaque, item_id: u16) f32 {
 
 /// ECS penetration hook: the held item's TargetArmor fraction (negative
 /// perc_add; GetTotalPhysicalArmorRating IL=47 applies passive 163 on the
-/// attacking item to the wearer's passive-41 rating base). 0 = no row.
-pub fn itemPenetration(ctx: ?*anyopaque, item_id: u16) f32 {
+/// attacking item to the wearer's passive-41 rating base). Perk-tag-gated
+/// rows (perkJavelinMaster etc.) add their value only when the attacker owns
+/// the tagged perk (level >= 1).
+pub fn itemPenetration(ctx: ?*anyopaque, item_id: u16, attacker_peer: ?usize) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
-    if (g.items.byId(item_id)) |d| return d.target_armor;
+    if (g.items.byId(item_id)) |d| {
+        var pen = d.target_armor;
+        if (d.target_armor_tag.len > 0 and pen == 0) {
+            if (attacker_peer) |slot| {
+                if (g.skillLevelOf(slot, d.target_armor_tag) >= 1) pen = d.target_armor_tagged;
+            }
+        }
+        return pen;
+    }
     return 0;
 }
 

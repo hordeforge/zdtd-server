@@ -9,8 +9,12 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: 263 `WORKS`,
-28 `PARTIAL`, 0 `MISSING` (see its scorecard for the per-area breakdown).
+owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: **289 `WORKS`,
+0 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
+53 bullets carry ad-hoc labels and are not counted). Residuals are recorded
+inline per the "missing beats fake" rule - the honest frontier is the
+RE-blocked items (difficulty presets asset, per-action stamina costs) and
+the recorded-not-wired effect classes.
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 **Conflict rule:** this document wins where it disagrees with GAP_ANALYSIS or IMPLEMENTATION_PLAN on whether a gate shipped.
 

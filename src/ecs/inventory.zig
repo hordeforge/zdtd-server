@@ -299,7 +299,11 @@ pub fn armorMitigationVs(w: *const World, victim_peer: usize, attacker_slot: ?Sl
     if (attacker_slot) |as| {
         if (w.mask[as].inventory and w.item_penetration_fn != null) {
             const held = w.inventory[as].slots[w.inventory[as].holding];
-            const pen = w.item_penetration_fn.?(w.item_penetration_ctx, held.item_id);
+            const attacker_peer: ?usize = if (w.mask[as].player and w.player[as].peer_slot >= 0)
+                @intCast(w.player[as].peer_slot)
+            else
+                null;
+            const pen = w.item_penetration_fn.?(w.item_penetration_ctx, held.item_id, attacker_peer);
             if (pen < 0) mit *= 1.0 + pen;
         }
     }
@@ -900,6 +904,37 @@ fn testDegrad(_: ?*anyopaque, _: u16) f32 {
     return 0.35;
 }
 
-fn testPen(_: ?*anyopaque, _: u16) f32 {
+fn testPen(_: ?*anyopaque, _: u16, _: ?usize) f32 {
     return -0.5;
+}
+
+test "perk-tag-gated TargetArmor applies only when the attacker owns the perk" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].inventory = true;
+    w.mask[ps].player = true;
+    w.player[ps].peer_slot = 0;
+    w.inventory[ps].slots[c.inv_equip_start] = .{ .item_id = 11, .count = 1, .quality = 1 };
+    w.armor_pdr_ctx = null;
+    w.armor_pdr_fn = &testPdr; // 4% per piece
+    w.item_penetration_ctx = null;
+    w.item_penetration_fn = &testTaggedPen;
+    // Without the perk: only the untagged value (0 here) applies.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.04), armorMitigationVs(&w, 0, ps), 0.001);
+    // Perk owned (peer slot 0, tag "perkJavelinMaster"): the tagged -0.5 lands.
+    test_perk_level = 1;
+    defer test_perk_level = 0;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.02), armorMitigationVs(&w, 0, ps), 0.001);
+}
+
+var test_perk_level: u8 = 0;
+
+fn testTaggedPen(ctx: ?*anyopaque, item_id: u16, attacker_peer: ?usize) f32 {
+    _ = ctx;
+    _ = item_id;
+    if (attacker_peer != null and test_perk_level >= 1) return -0.5;
+    return 0;
 }

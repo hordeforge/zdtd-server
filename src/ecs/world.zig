@@ -381,7 +381,10 @@ pub const World = struct {
     item_degradation_ctx: ?*anyopaque = null,
     item_degradation_fn: ?*const fn (?*anyopaque, u16) f32 = null,
     item_penetration_ctx: ?*anyopaque = null,
-    item_penetration_fn: ?*const fn (?*anyopaque, u16) f32 = null,
+    /// `peer_slot` = the attacker's client slot (null for AI/environment):
+    /// perk-tag-gated TargetArmor rows apply only when the attacker owns the
+    /// tagged perk.
+    item_penetration_fn: ?*const fn (?*anyopaque, u16, ?usize) f32 = null,
     /// Optional kill verdict hook (T15 / ADR 0021 decision 4): (ctx, kind,
     /// victim_id, attacker_id) -> i32. Below 0 denies the death: the victim
     /// survives at 1 hp and the fatal hit's side effects (loot, corpse,

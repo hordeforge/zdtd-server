@@ -74,9 +74,13 @@ pub const ItemDef = struct {
     /// items.xml TargetArmor passive (163, perc_add, UNTAGGED rows only):
     /// armor penetration fraction applied to the target's mitigation
     /// (GetTotalPhysicalArmorRating IL=47: passive 163 on the attacking item
-    /// modifies the wearer's passive-41 rating base). The perk-tag-gated rows
-    /// (perkJavelinMaster etc.) need tag evaluation - recorded.
+    /// modifies the wearer's passive-41 rating base).
     target_armor: f32 = 0,
+    /// The first perk-tag-gated TargetArmor row (e.g. `-.3` tagged
+    /// perkJavelinMaster): applies only when the attacker owns that perk.
+    /// 0 / empty = no tagged row.
+    target_armor_tagged: f32 = 0,
+    target_armor_tag: []const u8 = "",
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -558,6 +562,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_degrad_per_use.deinit(allocator);
     var stock_target_armor: std.ArrayList(f32) = .empty;
     defer stock_target_armor.deinit(allocator);
+    var stock_target_armor_tagged: std.ArrayList(f32) = .empty;
+    defer stock_target_armor_tagged.deinit(allocator);
+    var stock_target_armor_tag: std.ArrayList([]const u8) = .empty;
+    defer stock_target_armor_tag.deinit(allocator);
     defer stock_dradius.deinit(allocator);
     var stock_dlifetime: std.ArrayList(i32) = .empty;
     defer stock_dlifetime.deinit(allocator);
@@ -741,13 +749,23 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             // rows apply without perk-tag evaluation (the perkJavelinMaster
             // rows are the recorded tag-gated leg).
             var target_armor: f32 = 0;
+            var target_armor_tagged: f32 = 0;
+            var target_armor_tag: []const u8 = "";
+            // First row wins for each class: untagged applies always, the
+            // tagged row applies only when the attacker owns the perk (the
+            // tag is the perk name, e.g. perkJavelinMaster).
             if (xml.passiveEffectRow(body, "TargetArmor")) |row| {
                 if (xml.attr(row, 0, "tags") == null) {
                     if (xml.attr(row, 0, "value")) |v| target_armor = xml.parseF32(v) orelse 0;
+                } else {
+                    if (xml.attr(row, 0, "value")) |v| target_armor_tagged = xml.parseF32(v) orelse 0;
+                    if (xml.attr(row, 0, "tags")) |t| target_armor_tag = try arena.dupe(u8, t);
                 }
             }
             try stock_degrad_per_use.append(allocator, degrad_per_use);
             try stock_target_armor.append(allocator, target_armor);
+            try stock_target_armor_tagged.append(allocator, target_armor_tagged);
+            try stock_target_armor_tag.append(allocator, target_armor_tag);
             var deat: i32 = 0;
             if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
                 deat = std.fmt.parseInt(i32, v, 10) catch 0;
@@ -912,6 +930,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.elem_resist_n = stock_edr_n.items[idx];
                 def.degradation_per_use = stock_degrad_per_use.items[idx];
                 def.target_armor = stock_target_armor.items[idx];
+                def.target_armor_tagged = stock_target_armor_tagged.items[idx];
+                def.target_armor_tag = stock_target_armor_tag.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
@@ -964,6 +984,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .elem_resist_n = stock_edr_n.items[idx],
             .degradation_per_use = stock_degrad_per_use.items[idx],
             .target_armor = stock_target_armor.items[idx],
+            .target_armor_tagged = stock_target_armor_tagged.items[idx],
+            .target_armor_tag = stock_target_armor_tag.items[idx],
             .distraction_lifetime = stock_dlifetime.items[idx],
             .distraction_strength = stock_dstrength.items[idx],
             .distraction_eat_ticks = stock_deat.items[idx],
@@ -1236,6 +1258,7 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
     // untagged rows (ammo9mmBulletAP, the armor-piercing round).
     var stone_axe = false;
     var ap_ammo = false;
+    var javelin = false;
     for (t.defs) |d| {
         if (std.mem.eql(u8, d.name, "meleeToolRepairT0StoneAxe")) {
             try std.testing.expectApproxEqAbs(@as(f32, 1), d.degradation_per_use, 0.001);
@@ -1245,7 +1268,14 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
             try std.testing.expectApproxEqAbs(@as(f32, -0.5), d.target_armor, 0.001);
             ap_ammo = true;
         }
+        // perk-tag-gated TargetArmor: the javelin carries `-.3` tagged
+        // perkJavelinMaster (applies only when the attacker owns the perk).
+        if (std.mem.startsWith(u8, d.name, "meleeWpnSpear") and d.target_armor_tagged != 0) {
+            try std.testing.expectEqualStrings("perkJavelinMaster", d.target_armor_tag);
+            javelin = true;
+        }
     }
     try std.testing.expect(stone_axe);
     try std.testing.expect(ap_ammo);
+    try std.testing.expect(javelin);
 }

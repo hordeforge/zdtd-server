@@ -25,6 +25,8 @@ const replicate_te = @import("../replicate_te.zig");
 const c2s_misc = @import("../c2s/misc.zig");
 const plugin_api = @import("../../plugin/api.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
+const assets_buffs = @import("../../assets/buffs.zig");
+const ecs_buff = @import("../../ecs/buff.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_traders = @import("../../assets/traders.zig");
@@ -3394,4 +3396,55 @@ test "on_stat_changed observer fires from the survival pass" {
     while (i < 10) : (i += 1) try g.step();
     try std.testing.expect(stat_obs_calls >= 5); // food keeps dropping each tick
     g.plugins.shutdown();
+}
+
+test "restored buffs re-apply through the effects VM (recompute-from-set)" {
+    // ZPV3 carries active buffs; the passive-effects VM folds the active set
+    // every survival tick, so a restored buff's tracked deltas apply with no
+    // re-application pass - the revertible recompute shape pays for the
+    // restart for free.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const defs = [_]assets_buffs.BuffDef{
+        .{
+            .name = "testRegen",
+            .passives = &.{.{ .name = "HealthChangeOT", .op = .base_add, .value = 2 }},
+        },
+    };
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        g.buffs = assets_buffs.Table{ .defs = &defs };
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        const set = g.sim.buffsMut(ps);
+        _ = ecs_buff.add(set, .{
+            .def_id = 0,
+            .duration = 0,
+            .stack_type = ecs_buff.StackType.ignore,
+            .update_rate_ticks = 20,
+            .remove_on_death = true,
+        }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+        try g.savePlayers();
+    }
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        g.buffs = assets_buffs.Table{ .defs = &defs };
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        // The restored buff folds through the VM without any re-apply pass.
+        const totals = assets_buffs.effectTotals(&g.buffs, &g.sim.buffs[ps]);
+        try std.testing.expectApproxEqAbs(@as(f32, 2), totals.hp_ot, 0.0001);
+    }
 }
