@@ -424,12 +424,18 @@ area and the concrete work.
     attribute/perk levels fold through the same VM (progression.xml
     `value="v1,v2,..."` curves, level-scaled via `curveAt`/`trackedDeltasAt`;
     `progression.perkTotals` over the spend ledger) into armor
-    PhysicalDamageResist and the HealthChangeOT regen leg. Residual: the
-    untracked effect classes
-    (RecipeTagUnlocked/LootProb/CraftingTier...), perk max-stat and
-    stamina-OT consumers (recorded), and persisting active buffs
-    across restart (ZPV3 carries buffs; purchased perk levels + skill points
-    persist via the ZPV11 skill tail).
+    PhysicalDamageResist and the HealthChangeOT regen leg. **Triggered-effect
+    engine SHIPPED 2026-08-25**: the full onSelf* surface parses
+    (trigger/action/stat/buff + the nested StatComparePercCurrentToMax LT/GT
+    gate) and `evaluateTriggered` dispatches the bounded actions
+    (ModifyStats/AddBuff/RemoveBuff) requirement-gated with no allocation;
+    the survival stage selection now runs through it (buffStatusCheck01's
+    update rows pick the stage buffs, replacing the hand-rolled selector).
+    Residual: the untracked effect classes
+    (RecipeTagUnlocked/LootProb/CraftingTier...), the other triggered actions
+    (ModifyCVar/PlaySound/...) and perk max-stat / stamina-OT consumers stay
+    recorded; persisting active buffs across restart (ZPV3 carries buffs;
+    purchased perk levels + skill points persist via the ZPV11 skill tail).
 
 22. ~~**Progression: simulate survival.**~~ **PARTIAL → DEPLETION LOOP SHIPPED
     2026-08-07**: `Game.tickSurvival` (after tickAll, when the world clock

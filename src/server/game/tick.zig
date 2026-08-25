@@ -30,6 +30,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     const prog = self.sim.rules.progression;
     const sv = assets_buffs.survival(&self.buffs);
     const use_buff = sv.ok();
+    const check01_id = assets_buffs.survivalCheckId(&self.buffs);
     if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
     if (self.sim.director.clock.seconds_per_hour <= 0) return;
     const game_hours = dt / self.sim.director.clock.seconds_per_hour;
@@ -97,8 +98,19 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // and drive the stamina penalty from the VM's StaminaChangeOT
             // total. Revertible: removing a stage buff recomputes the deltas
             // without it (additive deltas, recompute-from-set).
-            const stages = assets_buffs.survivalStages(sv, h);
-            syncStageBuffs(self, c.entity_id, ps, stages);
+            //
+            // Triggered-effect engine (P3): buffStatusCheck01's onSelfBuffUpdate
+            // AddBuff rows, gated by StatComparePercCurrentToMax (fractions of
+            // max), select the wanted stage buffs - the data replaces the
+            // hand-rolled survivalStages selector.
+            const cid = check01_id orelse continue;
+            const check_res = assets_buffs.evaluateTriggered(&self.buffs, cid, .update, .{
+                .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
+                .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
+            });
+            const wanted = check_res.add_buffs[0..check_res.add_n];
+            syncStageBuffs(self, c.entity_id, ps, wanted);
+            const stages = assets_buffs.stagesFromWanted(wanted);
             const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps]);
             // Perk leg (level-scaled): purchased attribute/perk passives fold
             // through the same VM surface, revertible by recompute-from-set.
@@ -203,9 +215,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
 /// stock client shows the same HUD state. Revertible: a stage change removes
 /// the stale buff (flagged; the buff tick relays the removal) and the VM
 /// recomputes its deltas without it. No-op when the stages already match.
-fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, stages: assets_buffs.SurvivalStages) void {
+fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, wanted: []const []const u8) void {
     const set = self.sim.buffsMut(ps);
-    var present: [2]bool = .{ false, false }; // hungry, thirsty
     var remove_ids: [4]u16 = undefined;
     var n_rem: usize = 0;
     for (&set.slots) |*slot| {
@@ -214,16 +225,14 @@ fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, stages: assets_buff
         const is_hungry = std.mem.startsWith(u8, def.name, "buffStatusHungry");
         const is_thirsty = std.mem.startsWith(u8, def.name, "buffStatusThirsty");
         if (!is_hungry and !is_thirsty) continue;
-        const stage: u8 = if (std.mem.endsWith(u8, def.name, "01"))
-            1
-        else if (std.mem.endsWith(u8, def.name, "02"))
-            2
-        else
-            3;
-        const wanted = if (is_hungry) stages.hungry == stage else stages.thirsty == stage;
-        if (wanted) {
-            if (is_hungry) present[0] = true else present[1] = true;
-        } else if (n_rem < remove_ids.len) {
+        var is_wanted = false;
+        for (wanted) |w| {
+            if (std.mem.eql(u8, w, def.name)) {
+                is_wanted = true;
+                break;
+            }
+        }
+        if (!is_wanted and n_rem < remove_ids.len) {
             remove_ids[n_rem] = slot.def_id;
             n_rem += 1;
         }
@@ -231,13 +240,12 @@ fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, stages: assets_buff
     for (remove_ids[0..n_rem]) |id| {
         _ = ecs.buff.remove(set, id);
     }
-    const wants: [2]?[]const u8 = .{
-        assets_buffs.stageBuffName(stages.hungry, false),
-        assets_buffs.stageBuffName(stages.thirsty, true),
-    };
-    for (wants, 0..) |name, i| {
-        if (name == null or present[i]) continue;
-        const def_id = self.buffs.indexOfName(name.?) orelse continue;
+    // The engine may select several stage buffs at once (boundary fractions
+    // pass two hungry + two thirsty rows); each is added unless already
+    // active (buff.zig stacking keeps repeats idempotent).
+    for (wanted) |name| {
+        const def_id = self.buffs.indexOfName(name) orelse continue;
+        if (set.find(def_id) != null) continue;
         const def = self.buffs.byId(def_id) orelse continue;
         _ = ecs.buff.add(set, .{
             .def_id = def_id,

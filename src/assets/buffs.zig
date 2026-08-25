@@ -67,6 +67,48 @@ pub const StatMod = struct {
     value: f32 = 0,
 };
 
+/// Triggered rows per buff and in total (the onSelf* surface; only
+/// ModifyStats/AddBuff/RemoveBuff are evaluated - the other actions are
+/// recorded and skipped).
+pub const max_triggered_per_buff: usize = 32;
+pub const max_triggered_total: usize = 8192;
+
+/// Stock onSelf* trigger names (buffStatusCheck01 uses onSelfBuffUpdate).
+pub const Trigger = enum(u8) {
+    start,
+    update,
+    remove,
+    entered_game,
+    first_spawn,
+    other,
+};
+
+/// The bounded action set the engine evaluates.
+pub const TriggeredAction = enum(u8) {
+    modify_stats,
+    add_buff,
+    remove_buff,
+    other,
+};
+
+/// One `<triggered_effect trigger=... action=...>` row with its nested
+/// StatComparePercCurrentToMax requirement (the survival-surface gate).
+pub const Triggered = struct {
+    trigger: Trigger = .other,
+    action: TriggeredAction = .other,
+    /// ModifyStats target (case-insensitive compare like StatMod).
+    stat: []const u8 = "",
+    op: Op = .unknown,
+    value: f32 = 0,
+    /// AddBuff/RemoveBuff target.
+    buff: []const u8 = "",
+    /// Requirement gate (stock compares a fraction of max).
+    req_stat: []const u8 = "",
+    req_op: std.math.CompareOperator = .lt,
+    req_value: f32 = 0,
+    has_req: bool = false,
+};
+
 /// One `<requirement name="StatComparePercCurrentToMax" .../>` gate. Stock
 /// compares a **fraction of max**, not an absolute 0..100 value.
 pub const StatThreshold = struct {
@@ -88,6 +130,9 @@ pub const BuffDef = struct {
     passives: []const Passive = &.{},
     stat_mods: []const StatMod = &.{},
     thresholds: []const StatThreshold = &.{},
+    /// The full onSelf* triggered surface (the passive-effects VM evaluates
+    /// the bounded action set; the rest is recorded).
+    triggered: []const Triggered = &.{},
 };
 
 /// Fallback catalog when buffs.xml is absent (headless tests, no game dir).
@@ -290,6 +335,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     defer thresholds_list.deinit(allocator);
     var thr_ranges: std.ArrayList(struct { usize, usize }) = .empty;
     defer thr_ranges.deinit(allocator);
+    var triggered_list: std.ArrayList(Triggered) = .empty;
+    defer triggered_list.deinit(allocator);
+    var trig_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer trig_ranges.deinit(allocator);
 
     var i: usize = 0;
     while (i < clean.len and metas.items.len < max_buffs) {
@@ -358,6 +407,57 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             tn += 1;
         }
 
+        // Full onSelf* surface: trigger/action/stat/buff + the nested
+        // StatComparePercCurrentToMax requirement (LT/GT).
+        const tr0 = triggered_list.items.len;
+        var trj: usize = 0;
+        var trn: usize = 0;
+        while (trj < body.len and trn < max_triggered_per_buff and triggered_list.items.len < max_triggered_total) {
+            const ri = std.mem.findPos(u8, body, trj, "<triggered_effect ") orelse break;
+            const trig_s = xml.attr(body, ri, "trigger") orelse {
+                trj = ri + 18;
+                continue;
+            };
+            const act_s = xml.attr(body, ri, "action") orelse {
+                trj = ri + 18;
+                continue;
+            };
+            const close = std.mem.findPos(u8, body, ri, "</triggered_effect>");
+            const sc = std.mem.findPos(u8, body, ri, "/>");
+            const row_end = if (sc != null and (close == null or sc.? < close.?))
+                sc.? + 2
+            else if (close) |c2|
+                c2
+            else blk: {
+                trj = ri + 18;
+                break :blk 0;
+            };
+            if (row_end == 0) break;
+            var tr: Triggered = .{
+                .trigger = parseTrigger(trig_s),
+                .action = parseTriggeredAction(act_s),
+                .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
+                .stat = try arena.dupe(u8, xml.attr(body, ri, "stat") orelse ""),
+                .op = parseOp(xml.attr(body, ri, "operation") orelse "add"),
+                .value = firstF32(xml.attr(body, ri, "value") orelse "0"),
+            };
+            // Nested requirement gate (StatComparePercCurrentToMax).
+            const row = body[ri..row_end];
+            if (std.mem.find(u8, row, "StatComparePercCurrentToMax")) |qi| {
+                const qtag = std.mem.findScalarLast(u8, row[0..qi], '<') orelse 0;
+                if (xml.attr(row, qtag, "stat")) |st| {
+                    tr.req_stat = try arena.dupe(u8, st);
+                    tr.req_value = firstF32(xml.attr(row, qtag, "value") orelse "0");
+                    tr.req_op = parseReqOp(xml.attr(row, qtag, "operation") orelse "LT");
+                    tr.has_req = true;
+                }
+            }
+            try triggered_list.append(allocator, tr);
+            trn += 1;
+            trj = row_end;
+        }
+        try trig_ranges.append(allocator, .{ tr0, triggered_list.items.len - tr0 });
+
         const p0 = passives_list.items.len;
         var j: usize = 0;
         var pn: usize = 0;
@@ -396,6 +496,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     @memcpy(mod_pool, mods_list.items);
     const thr_pool = try arena.alloc(StatThreshold, thresholds_list.items.len);
     @memcpy(thr_pool, thresholds_list.items);
+    const trig_pool = try arena.alloc(Triggered, triggered_list.items.len);
+    @memcpy(trig_pool, triggered_list.items);
     const defs = try arena.alloc(BuffDef, metas.items.len);
     for (metas.items, ranges.items, 0..) |meta, rg, di| {
         defs[di] = meta;
@@ -404,6 +506,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         defs[di].stat_mods = mod_pool[mr[0] .. mr[0] + mr[1]];
         const tr = thr_ranges.items[di];
         defs[di].thresholds = thr_pool[tr[0] .. tr[0] + tr[1]];
+        const tg = trig_ranges.items[di];
+        defs[di].triggered = trig_pool[tg[0] .. tg[0] + tg[1]];
     }
     var name_index: std.StringHashMapUnmanaged(u16) = .{};
     try name_index.ensureTotalCapacity(arena, @intCast(defs.len));
@@ -672,6 +776,120 @@ pub fn stageBuffName(stage: u8, thirsty: bool) ?[]const u8 {
     };
 }
 
+fn parseTrigger(s: []const u8) Trigger {
+    if (std.mem.eql(u8, s, "onSelfBuffStart")) return .start;
+    if (std.mem.eql(u8, s, "onSelfBuffUpdate")) return .update;
+    if (std.mem.eql(u8, s, "onSelfBuffRemove")) return .remove;
+    if (std.mem.eql(u8, s, "onSelfEnteredGame")) return .entered_game;
+    if (std.mem.eql(u8, s, "onSelfFirstSpawn")) return .first_spawn;
+    return .other;
+}
+
+fn parseTriggeredAction(s: []const u8) TriggeredAction {
+    if (std.mem.eql(u8, s, "ModifyStats")) return .modify_stats;
+    if (std.mem.eql(u8, s, "AddBuff")) return .add_buff;
+    if (std.mem.eql(u8, s, "RemoveBuff")) return .remove_buff;
+    return .other;
+}
+
+/// StatComparePercCurrentToMax operation (LT/GT; unknown ops fail the gate).
+fn parseReqOp(s: []const u8) std.math.CompareOperator {
+    if (std.mem.eql(u8, s, "GT")) return .gt;
+    return .lt;
+}
+
+/// Requirement context for the engine's gates (fractions of max).
+pub const TriggeredCtx = struct {
+    food_frac: f32 = 0,
+    water_frac: f32 = 0,
+};
+
+/// The engine's outcome for one buff event: the ModifyStats deltas and the
+/// AddBuff/RemoveBuff requests. Bounded arrays; the caller owns the BuffSet
+/// and the wire relay.
+pub const TriggeredResult = struct {
+    mods: [4]StatMod = [_]StatMod{.{}} ** 4,
+    mod_n: u8 = 0,
+    add_buffs: [4][]const u8 = .{ "", "", "", "" },
+    remove_buffs: [4][]const u8 = .{ "", "", "", "" },
+    add_n: u8 = 0,
+    remove_n: u8 = 0,
+};
+
+/// The triggered-effect engine: evaluate one buff's `onSelf*` rows for
+/// `event`, gated by the nested StatComparePercCurrentToMax requirements.
+/// Unknown triggers/actions/requirements are skipped (fail closed, recorded).
+/// Bounded: the result arrays cap the outcome; no allocation.
+pub fn evaluateTriggered(t: *const Table, def_id: u16, event: Trigger, ctx: TriggeredCtx) TriggeredResult {
+    var out: TriggeredResult = .{};
+    const def = t.byId(def_id) orelse return out;
+    for (def.triggered) |tr| {
+        if (tr.trigger != event) continue;
+        if (tr.has_req) {
+            const frac = if (eqIgnoreCase(tr.req_stat, "Food"))
+                ctx.food_frac
+            else if (eqIgnoreCase(tr.req_stat, "Water"))
+                ctx.water_frac
+            else
+                continue; // unknown requirement stat: fail closed
+            const pass = switch (tr.req_op) {
+                .lt => frac < tr.req_value,
+                .gt => frac > tr.req_value,
+                else => continue,
+            };
+            if (!pass) continue;
+        }
+        switch (tr.action) {
+            .modify_stats => {
+                if (tr.op != .unknown and out.mod_n < out.mods.len) {
+                    out.mods[out.mod_n] = .{ .stat = tr.stat, .op = tr.op, .value = tr.value };
+                    out.mod_n += 1;
+                }
+            },
+            .add_buff => {
+                if (tr.buff.len > 0 and out.add_n < out.add_buffs.len) {
+                    out.add_buffs[out.add_n] = tr.buff;
+                    out.add_n += 1;
+                }
+            },
+            .remove_buff => {
+                if (tr.buff.len > 0 and out.remove_n < out.remove_buffs.len) {
+                    out.remove_buffs[out.remove_n] = tr.buff;
+                    out.remove_n += 1;
+                }
+            },
+            .other => continue,
+        }
+    }
+    return out;
+}
+
+/// Survival stage (1..3) of a conditional buff name, or null.
+pub fn stageOfBuffName(name: []const u8) ?u8 {
+    if (std.mem.endsWith(u8, name, "01")) return 1;
+    if (std.mem.endsWith(u8, name, "02")) return 2;
+    if (std.mem.endsWith(u8, name, "03")) return 3;
+    return null;
+}
+
+/// SurvivalStages from the engine's wanted stage-buff names (hungry/thirsty
+/// stage, 0 = none).
+pub fn stagesFromWanted(wanted: []const []const u8) SurvivalStages {
+    var out: SurvivalStages = .{};
+    for (wanted) |name| {
+        const stage = stageOfBuffName(name) orelse continue;
+        if (std.mem.startsWith(u8, name, "buffStatusHungry")) out.hungry = stage;
+        if (std.mem.startsWith(u8, name, "buffStatusThirsty")) out.thirsty = stage;
+    }
+    return out;
+}
+
+/// The buffStatusCheck01 def id (the survival stage selector's update rows),
+/// or null when the table has no such buff.
+pub fn survivalCheckId(t: *const Table) ?u16 {
+    return t.indexOfName("buffStatusCheck01");
+}
+
 /// Health lost per real second by a buff's `ModifyStats Health subtract`
 /// triggered row (stock applies it once per update_rate; this is value / the
 /// update interval in seconds, the same conversion healthLossPerSecond used).
@@ -688,17 +906,38 @@ pub fn hpLossPerSecond(def: *const BuffDef) f32 {
 }
 
 /// Combined HP-loss rate (per real second) for the active stage-3 survival
-/// buffs: stock applies `ModifyStats Health subtract` on each stage-3 buff's
-/// update, so the rate is the active buff's row over its update interval.
-/// Stock names stay in the loader (xml-audit); the survival loop just passes
-/// its resolved stages.
+/// buffs, evaluated through the triggered engine: each stage-3 buff's
+/// `onSelfBuffUpdate` ModifyStats Health rows (requirement-gated) convert to
+/// a per-second rate over the buff's update interval. Stock names stay in
+/// the loader (xml-audit); the survival loop passes its resolved stages.
 pub fn stage3HpLossPerSecond(t: *const Table, stages: SurvivalStages) f32 {
     var per_s: f32 = 0;
     if (stages.hungry == 3) {
-        if (t.byName("buffStatusHungry03")) |d| per_s = @max(per_s, hpLossPerSecond(&d));
+        if (t.byName("buffStatusHungry03")) |d| {
+            const r = evaluateTriggered(t, t.indexOfName("buffStatusHungry03").?, .update, .{});
+            per_s = @max(per_s, triggeredHealthPerSecond(&d, &r));
+        }
     }
     if (stages.thirsty == 3) {
-        if (t.byName("buffStatusThirsty03")) |d| per_s = @max(per_s, hpLossPerSecond(&d));
+        if (t.byName("buffStatusThirsty03")) |d| {
+            const r = evaluateTriggered(t, t.indexOfName("buffStatusThirsty03").?, .update, .{});
+            per_s = @max(per_s, triggeredHealthPerSecond(&d, &r));
+        }
+    }
+    return per_s;
+}
+
+/// Sum of a triggered result's ModifyStats Health subtract rows, converted to
+/// a per-second rate over the buff's update interval (value / (rate/20)).
+fn triggeredHealthPerSecond(def: *const BuffDef, r: *const TriggeredResult) f32 {
+    const rate_ticks: f32 = @floatFromInt(@max(1, def.update_rate_ticks));
+    const secs = rate_ticks / 20.0;
+    var per_s: f32 = 0;
+    for (r.mods[0..r.mod_n]) |m| {
+        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (m.op != .base_subtract and m.op != .subtract) continue;
+        if (m.value <= 0 or secs <= 0) continue;
+        per_s += m.value / secs;
     }
     return per_s;
 }
@@ -821,6 +1060,18 @@ test "survival numbers resolve from the shipped buffs.xml" {
     const st = survivalStages(sv, &hh);
     try std.testing.expectEqual(@as(u8, 3), st.hungry);
     try std.testing.expectEqual(@as(u8, 3), st.thirsty);
+    // The triggered engine selects the same stage from check01's update rows
+    // (the raw result also carries check01's other update AddBuff rows, so
+    // assert the survival-relevant selection via stagesFromWanted).
+    const cid = survivalCheckId(&t).?;
+    const well = evaluateTriggered(&t, cid, .update, .{ .food_frac = 0.6, .water_frac = 0.6 });
+    const well_st = stagesFromWanted(well.add_buffs[0..well.add_n]);
+    try std.testing.expectEqual(@as(u8, 0), well_st.hungry);
+    try std.testing.expectEqual(@as(u8, 0), well_st.thirsty);
+    const mid = evaluateTriggered(&t, cid, .update, .{ .food_frac = 0.4, .water_frac = 0.01 });
+    const mid_st = stagesFromWanted(mid.add_buffs[0..mid.add_n]);
+    try std.testing.expectEqual(@as(u8, 1), mid_st.hungry);
+    try std.testing.expectEqual(@as(u8, 3), mid_st.thirsty);
 }
 
 test "an empty table resolves to not-ok rather than to zeros that look real" {
@@ -971,4 +1222,56 @@ test "curveValueAt interpolates the stock quality curve (Q1..Q6)" {
     try std.testing.expectApproxEqAbs(@as(f32, 5), curveValueAt(4, 6, &one), 0.001);
     try std.testing.expectEqual(@as(f32, 0), curveValueAt(0, 6, &two));
     try std.testing.expectEqual(@as(f32, 0), curveValueAt(3, 6, &.{}));
+}
+
+test "evaluateTriggered gates, filters events, and caps the bounded actions" {
+    const defs = [_]BuffDef{
+        .{
+            .name = "check01",
+            .triggered = &.{
+                .{ .trigger = .update, .action = .add_buff, .buff = "hungry01", .has_req = true, .req_stat = "Food", .req_op = .lt, .req_value = 0.5 },
+                .{ .trigger = .update, .action = .add_buff, .buff = "hungry03", .has_req = true, .req_stat = "Food", .req_op = .lt, .req_value = 0.02 },
+                .{ .trigger = .start, .action = .remove_buff, .buff = "sibling" },
+                .{ .trigger = .update, .action = .other }, // recorded action: skipped
+            },
+        },
+        .{
+            .name = "buffStatusHungry03",
+            .update_rate_ticks = 44,
+            .triggered = &.{
+                .{ .trigger = .update, .action = .modify_stats, .stat = "Health", .op = .subtract, .value = 0.25 },
+            },
+        },
+    };
+    const t = Table{ .defs = defs[0..] };
+    // Food 40%: hungry01 passes, hungry03 (2%) fails; event filter skips start.
+    const r1 = evaluateTriggered(&t, 0, .update, .{ .food_frac = 0.4 });
+    try std.testing.expectEqual(@as(u8, 1), r1.add_n);
+    try std.testing.expectEqualStrings("hungry01", r1.add_buffs[0]);
+    try std.testing.expectEqual(@as(u8, 0), r1.remove_n);
+    // Food 1%: both rows pass (bounded result keeps both).
+    const r2 = evaluateTriggered(&t, 0, .update, .{ .food_frac = 0.01 });
+    try std.testing.expectEqual(@as(u8, 2), r2.add_n);
+    // The start event fires the sibling removal only.
+    const r3 = evaluateTriggered(&t, 0, .start, .{});
+    try std.testing.expectEqual(@as(u8, 0), r3.add_n);
+    try std.testing.expectEqual(@as(u8, 1), r3.remove_n);
+    try std.testing.expectEqualStrings("sibling", r3.remove_buffs[0]);
+    // ModifyStats on the stage-3 buff's update.
+    const r4 = evaluateTriggered(&t, 1, .update, .{});
+    try std.testing.expectEqual(@as(u8, 1), r4.mod_n);
+    try std.testing.expectEqualStrings("Health", r4.mods[0].stat);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), r4.mods[0].value, 0.0001);
+    // stage3HpLossPerSecond converts through the engine: 0.25 / 2.2s.
+    const sv = SurvivalStages{ .hungry = 3, .thirsty = 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25 / 2.2), stage3HpLossPerSecond(&t, sv), 0.0001);
+}
+
+test "stagesFromWanted derives the stage set from engine names" {
+    const wanted = [_][]const u8{ "buffStatusHungry02", "buffStatusThirsty03" };
+    const st = stagesFromWanted(&wanted);
+    try std.testing.expectEqual(@as(u8, 2), st.hungry);
+    try std.testing.expectEqual(@as(u8, 3), st.thirsty);
+    try std.testing.expectEqual(@as(u8, 1), stageOfBuffName("buffStatusHungry01").?);
+    try std.testing.expect(stageOfBuffName("buffShocked") == null);
 }
