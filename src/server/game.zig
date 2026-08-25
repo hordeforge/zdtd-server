@@ -288,18 +288,33 @@ pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, 
 }
 
 /// Last-sent EntityLookAt look target (world coords) for one entity slot.
+/// `gen` pins the entry to the slot's current occupant (network_id[].gen):
+/// a recycled slot must not inherit the previous entity's last-sent state,
+/// or the stale 0.0016 sqr-delta gate can swallow the new entity's look.
 const EntityLookSent = struct {
     x: f32 = 0,
     y: f32 = 0,
     z: f32 = 0,
     sent: bool = false,
+    gen: u32 = 0,
 };
 
 /// Last-sent TurretSync state (RE EntityTurret.lastTargetEntityId/lastIsOn).
+/// `gen` pins the entry to the slot's current occupant: a stale target/on
+/// pair that coincides with the new turret's initial state must not
+/// suppress its first TurretSync.
 const TurretSyncSent = struct {
     target: i32 = -1,
     on: bool = false,
     sent: bool = false,
+    gen: u32 = 0,
+};
+
+/// Last-sent EntityVelocity vy for one entity slot. `gen` pins the entry to
+/// the slot's current occupant (recycled slots start fresh).
+const VelYSent = struct {
+    vy: f32 = 0,
+    gen: u32 = 0,
 };
 
 pub const Game = struct {
@@ -492,8 +507,8 @@ pub const Game = struct {
     client_info_timer: u16 = 0,
     /// Last-sent EntityVelocity vy per entity slot (RE NetEntityDistributionEntry
     /// motion updates): re-sends only when the vertical velocity moves past
-    /// 0.1, so falls/jumps stream while rest stays quiet.
-    entity_vel_sent_y: [ecs.max_entities]f32 = [_]f32{0} ** ecs.max_entities,
+    /// 0.1, so falls/jumps stream while rest stays quiet. Gen-pinned per slot.
+    entity_vel_sent: [ecs.max_entities]VelYSent = [_]VelYSent{.{}} ** ecs.max_entities,
     /// Last-sent TurretSync (target, on) per entity slot (RE EntityTurret:
     /// re-broadcasts when the target/on state changes, so turrets aim live).
     turret_sync_sent: [ecs.max_entities]TurretSyncSent = [_]TurretSyncSent{.{}} ** ecs.max_entities,
@@ -2944,9 +2959,9 @@ pub const Game = struct {
             self.broadcastLootSpawn(bag_nid) catch {};
             if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
                 vic.has_backpack = true;
-                vic.backpack_x = @intFromFloat(@trunc(t.x));
-                vic.backpack_y = @intFromFloat(@trunc(t.y));
-                vic.backpack_z = @intFromFloat(@trunc(t.z));
+                vic.backpack_x = @trunc(t.x);
+                vic.backpack_y = @trunc(t.y);
+                vic.backpack_z = @trunc(t.z);
                 self.broadcastPlayerBackpack(vic) catch {};
             }
         }

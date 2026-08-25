@@ -473,5 +473,5 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     // 2^31 is exactly representable in f32; anything at or above it
     // truncates out of i32 range.
     if (base >= 2147483648.0) return std.math.maxInt(i32);
-    return @max(1, @as(i32, @intFromFloat(@floor(base))));
+    return @max(1, @as(i32, @floor(base)));
 }

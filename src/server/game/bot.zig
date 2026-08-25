@@ -227,7 +227,7 @@ pub const BotManager = struct {
         while (slot < max_bots and self.bots[slot].alive) : (slot += 1) {}
         if (slot >= max_bots) return null;
         const id = g.allocBotNetId();
-        const gy = g.groundHeight(@intFromFloat(@floor(x)), @intFromFloat(@floor(z)));
+        const gy = g.groundHeight(@floor(x), @floor(z));
         // Deterministic mixed-loadout pick from pool (clanker LoadoutPool parity)
         var prng: u32 = @as(u32, @bitCast(id)) *% 2654435761 +% @as(u32, @truncate(@as(u64, @bitCast(g.tick_n))));
         prng = prng *% 1103515245 +% 12345;
@@ -648,9 +648,9 @@ fn stepMove(b: *Bot, dt: f32) void {
 /// wall here — the caller grounds y onto the surface first — so only true
 /// obstacles (walls, cliffs' faces) block.
 fn botSolidAt(g: *Game, x: f32, y: f32, z: f32) bool {
-    const ix: i32 = @intFromFloat(@floor(x));
-    const iy: i32 = @intFromFloat(@floor(y));
-    const iz: i32 = @intFromFloat(@floor(z));
+    const ix: i32 = @floor(x);
+    const iy: i32 = @floor(y);
+    const iz: i32 = @floor(z);
     if (g.world.isSolidWorld(ix, iy, iz) catch false) return true;
     if (g.world.isSolidWorld(ix, iy + 1, iz) catch false) return true;
     return false;
@@ -683,7 +683,7 @@ fn stepMoveCollide(b: *Bot, g: *Game, dt: f32, max_step_up: f32) void {
     const nx = if (step_dist >= dist) b.dest_x else ox + dx * (step_dist / dist);
     const nz = if (step_dist >= dist) b.dest_z else oz + dz * (step_dist / dist);
 
-    const new_ground = g.groundHeight(@intFromFloat(@floor(nx)), @intFromFloat(@floor(nz)));
+    const new_ground = g.groundHeight(@floor(nx), @floor(nz));
     const step_up = new_ground - b.y;
     const blocked = (step_up > max_step_up) or botSolidAt(g, nx, b.y, nz);
     if (!blocked) {
@@ -691,14 +691,14 @@ fn stepMoveCollide(b: *Bot, g: *Game, dt: f32, max_step_up: f32) void {
         b.z = nz;
     } else {
         // Slide along the free axis.
-        const xg = g.groundHeight(@intFromFloat(@floor(nx)), @intFromFloat(@floor(oz)));
-        const zg = g.groundHeight(@intFromFloat(@floor(ox)), @intFromFloat(@floor(nz)));
+        const xg = g.groundHeight(@floor(nx), @floor(oz));
+        const zg = g.groundHeight(@floor(ox), @floor(nz));
         const x_free = (xg - b.y <= max_step_up) and !botSolidAt(g, nx, b.y, oz);
         const z_free = (zg - b.y <= max_step_up) and !botSolidAt(g, ox, b.y, nz);
         if (x_free) b.x = nx;
         if (z_free) b.z = nz;
     }
-    b.y = g.groundHeight(@intFromFloat(@floor(b.x)), @intFromFloat(@floor(b.z)));
+    b.y = g.groundHeight(@floor(b.x), @floor(b.z));
 }
 
 test "BotManager find/move/look/remove/removeAll on hand-seeded bots" {

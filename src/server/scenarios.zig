@@ -7541,7 +7541,7 @@ test "scenario bots are grounded to terrain height on spawn and move" {
     g.bots.tick(g, 0.05);
     const b = &g.bots.bots[bs];
     try std.testing.expectApproxEqAbs(
-        g.groundHeight(@intFromFloat(@floor(b.x)), @intFromFloat(@floor(b.z))),
+        g.groundHeight(@floor(b.x), @floor(b.z)),
         b.y,
         0.01,
     );
@@ -7823,7 +7823,7 @@ test "scenario bots collide with walls and slide instead of phasing through" {
     const bid = g.bots.spawn(g, 8, 70, 8, 100).?;
     const bs = g.bots.find(bid).?;
     const by = g.bots.bots[bs].y;
-    const wy: i32 = @intFromFloat(@floor(by));
+    const wy: i32 = @floor(by);
     try g.world.setBlockWorld(10, wy, 8, world_store.block_stone);
     try g.world.setBlockWorld(10, wy + 1, 8, world_store.block_stone);
 

@@ -351,7 +351,7 @@ fn skillCostForLevel(def_cost: u16, mult: f32, level: u8) u32 {
     var acc: f64 = @as(f64, @floatFromInt(def_cost));
     var i: u8 = 1;
     while (i < level) : (i += 1) acc *= @as(f64, mult);
-    const v: u64 = @intFromFloat(@round(acc));
+    const v: u64 = @round(acc);
     return @intCast(@max(1, @min(v, 65535)));
 }
 

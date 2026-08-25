@@ -127,9 +127,9 @@ pub fn tickPlayerPositions(self: *Game) void {
         if (n >= entries.len) break;
         entries[n] = .{
             .id = c.puid_primary.get(),
-            .x = @intFromFloat(@trunc(self.sim.transform[si].x)),
-            .y = @intFromFloat(@trunc(self.sim.transform[si].y)),
-            .z = @intFromFloat(@trunc(self.sim.transform[si].z)),
+            .x = @trunc(self.sim.transform[si].x),
+            .y = @trunc(self.sim.transform[si].y),
+            .z = @trunc(self.sim.transform[si].z),
         };
         n += 1;
     }

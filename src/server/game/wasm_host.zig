@@ -280,8 +280,8 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
     const fz = std.fmt.parseFloat(f32, sz) catch return 0;
     const thx = std.fmt.parseFloat(f32, tx) catch return 0;
     const thz = std.fmt.parseFloat(f32, tz) catch return 0;
-    const from: [3]f32 = .{ fx, g.groundHeight(@intFromFloat(@floor(fx)), @intFromFloat(@floor(fz))), fz };
-    const threat: [3]f32 = .{ thx, g.groundHeight(@intFromFloat(@floor(thx)), @intFromFloat(@floor(thz))), thz };
+    const from: [3]f32 = .{ fx, g.groundHeight(@floor(fx), @floor(fz)), fz };
+    const threat: [3]f32 = .{ thx, g.groundHeight(@floor(thx), @floor(thz)), thz };
     const cv = g.findCover(from, threat, 10.0) orelse return 0;
     const s = std.fmt.bufPrint(out, "{d} {d}", .{ cv[0], cv[2] }) catch return 0;
     return s.len;

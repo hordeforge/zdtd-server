@@ -659,7 +659,7 @@ pub const Director = struct {
         const st = &self.rule_budgets[i];
         st.count +|= 1;
         if (st.count == 1 and st.next_respawn_wt == std.math.maxInt(u64)) {
-            const days: u64 = @intFromFloat(@floor(budget.respawn_days));
+            const days: u64 = @floor(budget.respawn_days);
             st.next_respawn_wt = w.director.clock.worldTimeBits() + days *% ticks_per_day;
         }
     }
@@ -973,7 +973,7 @@ pub const Director = struct {
             // roll = round(1/chance): default 0.2 -> 1-in-5, exactly as before.
             const chance = w.rules.director.heat_feral_chance;
             const roll: u32 = if (chance > 0 and std.math.isFinite(chance))
-                @max(1, @as(u32, @intFromFloat(@round(1.0 / chance))))
+                @max(1, @as(u32, @round(1.0 / chance)))
             else
                 std.math.maxInt(u32);
             const feral = (self.total_spawned +% @as(u32, @intCast(ci))) % roll == 0;

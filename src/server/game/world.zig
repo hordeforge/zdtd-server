@@ -287,10 +287,10 @@ pub fn drainExplosions(self: *Game) void {
         // falloff block damage through the choke point, scaled by the class's
         // DamageBonus material multipliers (stock cop: earth category → 0, so
         // terrain survives the blast); break like the chew.
-        const ir: i32 = @intFromFloat(@ceil(radius));
-        const bx: i32 = @intFromFloat(@floor(ex.x));
-        const by: i32 = @intFromFloat(@floor(ex.y));
-        const bz: i32 = @intFromFloat(@floor(ex.z));
+        const ir: i32 = @ceil(radius);
+        const bx: i32 = @floor(ex.x);
+        const by: i32 = @floor(ex.y);
+        const bz: i32 = @floor(ex.z);
         var dy2: i32 = -ir;
         while (dy2 <= ir) : (dy2 += 1) {
             var dz2: i32 = -ir;
@@ -394,13 +394,13 @@ pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
     const dist = @sqrt(dx * dx + dy * dy + dz * dz);
     if (dist < 0.5) return true;
     const step: f32 = 0.5;
-    const n = @as(usize, @intFromFloat(@floor(dist / step)));
+    const n = @as(usize, @floor(dist / step));
     var i: usize = 1;
     while (i <= n) : (i += 1) {
         const t = (@as(f32, @floatFromInt(i)) * step) / dist;
-        const ix: i32 = @intFromFloat(@floor(from[0] + dx * t));
-        const iy: i32 = @intFromFloat(@floor(from[1] + dy * t));
-        const iz: i32 = @intFromFloat(@floor(from[2] + dz * t));
+        const ix: i32 = @floor(from[0] + dx * t);
+        const iy: i32 = @floor(from[1] + dy * t);
+        const iz: i32 = @floor(from[2] + dz * t);
         if (self.world.isSolidWorld(ix, iy, iz) catch continue) return false;
     }
     return true;
@@ -423,9 +423,9 @@ pub fn groundHeight(self: *Game, x: i32, z: i32) f32 {
 /// feet sit in and the one above (head). Chunk-probe errors fail OPEN (treated
 /// as clear) so a cover search is not blocked by an unloaded chunk border.
 fn coverSolidAt(self: *Game, p: [3]f32) bool {
-    const ix: i32 = @intFromFloat(@floor(p[0]));
-    const iy: i32 = @intFromFloat(@floor(p[1]));
-    const iz: i32 = @intFromFloat(@floor(p[2]));
+    const ix: i32 = @floor(p[0]);
+    const iy: i32 = @floor(p[1]);
+    const iz: i32 = @floor(p[2]);
     if (self.world.isSolidWorld(ix, iy, iz) catch false) return true;
     if (self.world.isSolidWorld(ix, iy + 1, iz) catch false) return true;
     return false;
@@ -445,7 +445,7 @@ pub fn findCover(self: *Game, from: [3]f32, threat: [3]f32, dist: f32) ?[3]f32 {
         const ang = @as(f32, @floatFromInt(i)) * std.math.pi / 4.0;
         const cx = from[0] + @cos(ang) * dist;
         const cz = from[2] + @sin(ang) * dist;
-        const cy = self.groundHeight(@intFromFloat(@floor(cx)), @intFromFloat(@floor(cz)));
+        const cy = self.groundHeight(@floor(cx), @floor(cz));
         const cand: [3]f32 = .{ cx, cy, cz };
         // Reachable: not inside solid at feet/head height.
         if (coverSolidAt(self, cand)) continue;

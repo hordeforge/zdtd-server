@@ -1032,9 +1032,9 @@ test "SleeperPassiveChange body is the target entity id" {
 pub fn buildEntityLookAtBody(buf: []u8, entity_id: i32, lx: f32, ly: f32, lz: f32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
-    try w.writeI32(@intFromFloat(@trunc(lx)));
-    try w.writeI32(@intFromFloat(@trunc(ly)));
-    try w.writeI32(@intFromFloat(@trunc(lz)));
+    try w.writeI32(@trunc(lx));
+    try w.writeI32(@trunc(ly));
+    try w.writeI32(@trunc(lz));
     return w.written();
 }
 

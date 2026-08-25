@@ -272,7 +272,7 @@ fn selectQuestPoi(
         } else if (p.biome_type == ecs.quest.biome_filter_only) {
             if (name == null or !biomeInList(name.?, p.biome_filter)) return null;
         } else if (p.biome_type == ecs.quest.biome_filter_same) {
-            const a_name = biomeNameAt(g, @intFromFloat(@floor(p.anchor_x)), @intFromFloat(@floor(p.anchor_z)));
+            const a_name = biomeNameAt(g, @floor(p.anchor_x), @floor(p.anchor_z));
             if (!std.mem.eql(u8, name orelse "", a_name orelse "")) return null;
         }
     }
@@ -618,7 +618,7 @@ pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
     // divides by the bundle; the caller multiplies unit × qty.
     const bundle: f64 = @floatFromInt(@max(1, d.econ_bundle_size));
     const scaled: f64 = @as(f64, d.econ) * @as(f64, d.econ_sell_scale) * @as(f64, sell_markup) / bundle;
-    return @max(1, @as(u32, @intCast(@min(@as(u64, @intFromFloat(@floor(scaled))), 65535))));
+    return @max(1, @as(u32, @intCast(@min(@as(u64, @floor(scaled)), 65535))));
 }
 
 /// Stock ItemValue.PercentUsesLeft (ItemValue.get_PercentUsesLeft IL=17):

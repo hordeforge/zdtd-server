@@ -250,10 +250,14 @@ pub fn replicate(self: *Game) !void {
             } else |_| {}
             // Vertical motion (RE NetEntityDistributionEntry velocity updates):
             // a falling/jumping zombie streams its vy so the client renders the
-            // fall instead of gliding; delta-gated per slot.
+            // fall instead of gliding; delta-gated per slot. The gen gate
+            // clears a recycled slot's stale last-sent vy so the new entity's
+            // first fall streams instead of being swallowed by the delta.
             const vy = self.sim.zombie_ai[i].vy;
-            if (@abs(vy - self.entity_vel_sent_y[i]) > 0.1) {
-                self.entity_vel_sent_y[i] = vy;
+            const vs = &self.entity_vel_sent[i];
+            if (vs.gen != self.sim.network_id[i].gen) vs.* = .{ .gen = self.sim.network_id[i].gen };
+            if (@abs(vy - vs.vy) > 0.1) {
+                vs.vy = vy;
                 if (packages.buildEntityVelocityBody(self.body_buf[game_mod.flags_body_off .. game_mod.flags_body_off + 32], nid, false, 0, vy, 0)) |vb| {
                     if (packages.framed(&vel_frame_buf, "NetPackageEntityVelocity", vb)) |vf| {
                         vel_framed = vf;
@@ -270,6 +274,10 @@ pub fn replicate(self: *Game) !void {
             const t = self.sim.turret[i];
             const is_on = t.target_id >= 0;
             const st = &self.turret_sync_sent[i];
+            // Slot recycled onto a new turret: a stale target/on pair equal to
+            // the new turret's initial state must not suppress its first sync
+            // (the client never saw this net id's TurretSync yet).
+            if (st.gen != self.sim.network_id[i].gen) st.* = .{ .gen = self.sim.network_id[i].gen };
             if (!st.sent or st.target != t.target_id or st.on != is_on) {
                 st.target = t.target_id;
                 st.on = is_on;

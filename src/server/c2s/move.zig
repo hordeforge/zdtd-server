@@ -90,9 +90,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // Collected the player's own death bag: clear the backpack
                 // marker and tell every client (RE EntityBackpack).
                 if (self.clients[c.slot].has_backpack and
-                    self.clients[c.slot].backpack_x == @as(i32, @intFromFloat(@trunc(bx))) and
-                    self.clients[c.slot].backpack_y == @as(i32, @intFromFloat(@trunc(by))) and
-                    self.clients[c.slot].backpack_z == @as(i32, @intFromFloat(@trunc(bz))))
+                    self.clients[c.slot].backpack_x == @as(i32, @trunc(bx)) and
+                    self.clients[c.slot].backpack_y == @as(i32, @trunc(by)) and
+                    self.clients[c.slot].backpack_z == @as(i32, @trunc(bz)))
                 {
                     self.clients[c.slot].has_backpack = false;
                     try self.broadcastPlayerBackpack(&self.clients[c.slot]);

@@ -88,7 +88,7 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
         const sx = zx + dx * t;
         const sy = zy2 + dy * t;
         const sz = zz + dz * t;
-        if (solid_fn(solid_ctx, @intFromFloat(@floor(sx)), @intFromFloat(@floor(sy)), @intFromFloat(@floor(sz)))) return false;
+        if (solid_fn(solid_ctx, @floor(sx), @floor(sy), @floor(sz))) return false;
     }
     return true;
 }
@@ -283,14 +283,14 @@ fn bodyClearAt(
     r: f32,
 ) bool {
     const inset: f32 = 0.001;
-    const mid: i32 = @intFromFloat(@floor(y + 0.5));
-    const head: i32 = @intFromFloat(@floor(y + h - 0.1));
-    const cx: i32 = @intFromFloat(@floor(x));
-    const cz: i32 = @intFromFloat(@floor(z));
+    const mid: i32 = @floor(y + 0.5);
+    const head: i32 = @floor(y + h - 0.1);
+    const cx: i32 = @floor(x);
+    const cz: i32 = @floor(z);
     for ([_]f32{ -1.0, 1.0 }) |sx| {
         for ([_]f32{ -1.0, 1.0 }) |sz| {
-            const px: i32 = @intFromFloat(@floor(x + sx * (r - inset)));
-            const pz: i32 = @intFromFloat(@floor(z + sz * (r - inset)));
+            const px: i32 = @floor(x + sx * (r - inset));
+            const pz: i32 = @floor(z + sz * (r - inset));
             // Degenerate corner inside the center cell: probing it at mid/head
             // would block standing on a 1-wide ledge.
             if (px == cx and pz == cz) continue;
@@ -317,7 +317,7 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     const inv = 1.0 / @sqrt(d2);
     // Swimming halves the horizontal speed (stock swimSpeed < moveSpeed).
     const swim = w.water_fn != null and
-        w.water_fn.?(w.water_ctx, @intFromFloat(@floor(t.x)), @intFromFloat(@floor(t.y + 0.5)), @intFromFloat(@floor(t.z)));
+        w.water_fn.?(w.water_ctx, @floor(t.x), @floor(t.y + 0.5), @floor(t.z));
     const spd: f32 = if (swim) speed * w.rules.ai.swim_speed_frac else speed;
     const mx = dx * inv * spd * dt;
     const mz = dz * inv * spd * dt;
@@ -409,13 +409,13 @@ fn stepToward(w: *World, s: Slot, tx: f32, tz: f32, speed: f32, dt: f32) void {
     if (!moved and w.mask[s].zombie_ai) {
         const ai = &w.zombie_ai[s];
         if (ai.vy != 0) return;
-        const bx: i32 = @intFromFloat(@floor(t.x + dx * inv));
-        const bz: i32 = @intFromFloat(@floor(t.z + dz * inv));
-        const by_mid: i32 = @intFromFloat(@floor(t.y + 0.5));
+        const bx: i32 = @floor(t.x + dx * inv);
+        const bz: i32 = @floor(t.z + dz * inv);
+        const by_mid: i32 = @floor(t.y + 0.5);
         const by: i32 = if (solid_fn(w.solid_ctx, bx, by_mid, bz))
             by_mid
         else
-            @intFromFloat(@floor(t.y + 1));
+            @floor(t.y + 1);
         const blocking = solid_fn(w.solid_ctx, bx, by, bz);
         if (blocking) {
             // Top of the contiguous solid run above the blocking cell: the
@@ -482,15 +482,15 @@ fn applyGravity(w: *World, s: Slot, dt: f32) void {
     const t = &w.transform[s];
     const ai = &w.zombie_ai[s];
     if (ai.jump_cd > 0) ai.jump_cd -= dt;
-    const below: i32 = @intFromFloat(@floor(t.y - 0.05));
+    const below: i32 = @floor(t.y - 0.05);
     const rising = ai.jumping and ai.vy > 0;
     // Swim: a submerged body (mid cell is water) floats - gravity scaled by
     // cSwimGravityPer and the 0.91 y-drag (RE entity-ai.md cctor), so it sinks
     // slowly instead of dropping. The ground snap still applies on the bed.
-    const sub_y: i32 = @intFromFloat(@floor(t.y + 0.5));
+    const sub_y: i32 = @floor(t.y + 0.5);
     const swimming = w.water_fn != null and
-        w.water_fn.?(w.water_ctx, @intFromFloat(@floor(t.x)), sub_y, @intFromFloat(@floor(t.z)));
-    if (!rising and solid_fn(w.solid_ctx, @intFromFloat(@floor(t.x)), below, @intFromFloat(@floor(t.z)))) {
+        w.water_fn.?(w.water_ctx, @floor(t.x), sub_y, @floor(t.z));
+    if (!rising and solid_fn(w.solid_ctx, @floor(t.x), below, @floor(t.z))) {
         t.y = @as(f32, @floatFromInt(below)) + 1.0;
         ai.vy = 0;
     } else {
@@ -2664,14 +2664,14 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
         // leak into the fall pace); a group's cells each move by the entity
         // delta from their own positions.
         if (f.n == 1) {
-            f.cells[0].x = @intFromFloat(@floor(t.x));
-            f.cells[0].y = @intFromFloat(@floor(t.y));
-            f.cells[0].z = @intFromFloat(@floor(t.z));
+            f.cells[0].x = @floor(t.x);
+            f.cells[0].y = @floor(t.y);
+            f.cells[0].z = @floor(t.z);
         } else {
             for (f.cells[0..f.n]) |*cell| {
-                cell.x = @intFromFloat(@floor(@as(f32, @floatFromInt(cell.x)) + f.vx * dt));
-                cell.z = @intFromFloat(@floor(@as(f32, @floatFromInt(cell.z)) + f.vz * dt));
-                cell.y = @intFromFloat(@floor(@as(f32, @floatFromInt(cell.y)) + dy));
+                cell.x = @floor(@as(f32, @floatFromInt(cell.x)) + f.vx * dt);
+                cell.z = @floor(@as(f32, @floatFromInt(cell.z)) + f.vz * dt);
+                cell.y = @floor(@as(f32, @floatFromInt(cell.y)) + dy);
             }
         }
     }

@@ -495,6 +495,9 @@ pub fn tickEntityLookAt(self: *Game) void {
         }
         if (!have) continue;
         const st = &self.entity_look_sent[s];
+        // Slot recycled onto a new entity: the previous occupant's last-sent
+        // target must not gate this one's first look (spawnBase bumped gen).
+        if (st.gen != self.sim.network_id[s].gen) st.* = .{ .gen = self.sim.network_id[s].gen };
         const dx = lx - st.x;
         const dy = ly - st.y;
         const dz = lz - st.z;
@@ -570,4 +573,43 @@ pub fn tickClientInfo(self: *Game) void {
     if (packages.buildClientInfoBody(&self.body_buf, entries[0..n])) |body| {
         self.broadcast("NetPackageClientInfo", body) catch {};
     } else |_| {}
+}
+
+test "per-slot look cache resets when the slot is recycled" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lookcache", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const aid = g.sim.spawnZombie(5, 70, 5, 40).?;
+    const s = g.sim.slotOfNetId(aid).?;
+    // allocSlot picks the lowest free slot, so every slot below s is occupied
+    // by init entities and stays occupied: after the destroy below, s is the
+    // lowest free slot again and the next spawn reuses it.
+    g.sim.zombie_ai[s].alert = true;
+    g.sim.zombie_ai[s].has_spot = true;
+    g.sim.zombie_ai[s].spot_x = 10;
+    g.sim.zombie_ai[s].spot_z = 20;
+    g.tickEntityLookAt();
+    try std.testing.expect(g.entity_look_sent[s].sent);
+    const old_gen = g.sim.network_id[s].gen;
+    try std.testing.expectEqual(old_gen, g.entity_look_sent[s].gen);
+
+    // Recycle the slot onto a new zombie whose first look target equals the
+    // previous occupant's last-sent one. The stale entry must not gate the
+    // new entity's look: the gen mismatch resets the cache, so the pass
+    // re-sends and re-pins to the new generation.
+    g.sim.destroy(s);
+    g.sim.beginTick();
+    const bid = g.sim.spawnZombie(5, 70, 5, 40).?;
+    const s2 = g.sim.slotOfNetId(bid).?;
+    try std.testing.expectEqual(s, s2);
+    g.sim.zombie_ai[s2].alert = true;
+    g.sim.zombie_ai[s2].has_spot = true;
+    g.sim.zombie_ai[s2].spot_x = 10;
+    g.sim.zombie_ai[s2].spot_z = 20;
+    g.tickEntityLookAt();
+    try std.testing.expectEqual(old_gen + 1, g.entity_look_sent[s2].gen);
+    try std.testing.expect(g.entity_look_sent[s2].sent);
 }
