@@ -1,6 +1,6 @@
 # ⚡ BloodWire (ZDTD Server)
 
-> **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
+> **Part of [HordeForge](https://github.com/hordeforge)**: High-Performance Systems Engineering for 7 Days to Die.
 
 ![CI](https://github.com/hordeforge/zdtd-server/actions/workflows/ci.yml/badge.svg)
 ![quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=maci0_zdtd)
