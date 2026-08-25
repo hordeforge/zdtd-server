@@ -54,6 +54,11 @@ pub const Passive = struct {
     /// at level i+1, clamped past the end). Filled for every parsed row.
     curve: [max_curve_len]f32 = .{0} ** max_curve_len,
     curve_len: u8 = 0,
+    /// Explicit level anchors (`level="1,5" value="2,10"` - the dominant form
+    /// in progression.xml, 640/649 perk rows): value[i] sits at level[i],
+    /// piecewise-linear between (curveValueAtLevels). 0 anchors = implicit.
+    curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len,
+    curve_levels_len: u8 = 0,
 };
 
 /// One `<triggered_effect action="ModifyStats" .../>` row. Stock drives
@@ -301,13 +306,49 @@ pub fn curveValueAt(level: u8, max_level: u8, curve: []const f32) f32 {
     return 0;
 }
 
-/// Value of a passive at `level` (1-based): curve segment `level-1`, clamped
-/// past the end; level 0 (unpurchased) is 0; single-segment rows repeat.
-/// Hand-built rows that set only `value` (curve_len 0) repeat that value.
+/// Explicit-level curve evaluation (stock PassiveEffect.ModValue over the
+/// `level="..."`/`value="..."` anchor pairs): piecewise-linear between
+/// (levels[i], values[i]); a level outside every segment applies nothing (0),
+/// matching ModValue's fall-through.
+pub fn curveValueAtLevels(level: u8, levels: []const f32, values: []const f32) f32 {
+    if (level == 0 or levels.len == 0 or values.len != levels.len) return 0;
+    const l: f32 = @floatFromInt(level);
+    for (1..levels.len) |i| {
+        const l0 = levels[i - 1];
+        const l1 = levels[i];
+        if (l >= l0 and l <= l1) {
+            const t: f32 = if (l1 > l0) (l - l0) / (l1 - l0) else 0;
+            return values[i - 1] + (values[i] - values[i - 1]) * t;
+        }
+    }
+    return 0;
+}
+
+/// Value of a passive at `level` (1-based): with explicit `level=` anchors the
+/// value interpolates between the pairs (progression.xml's dominant form);
+/// otherwise the implicit segment `level-1` clamped past the end. Level 0
+/// (unpurchased) is 0; hand-built rows with only `value` repeat it.
 pub fn curveAt(p: Passive, level: u8) f32 {
     if (level == 0) return 0;
+    if (p.curve_levels_len > 0) {
+        return curveValueAtLevels(level, p.curve_levels[0..p.curve_levels_len], p.curve[0..p.curve_levels_len]);
+    }
     if (p.curve_len == 0) return p.value;
     return p.curve[@min(@as(usize, level - 1), @as(usize, p.curve_len) - 1)];
+}
+
+/// Parse the explicit `level="a,b,..."` anchors (parallel to the value curve).
+pub fn parseCurveLevels(s: []const u8, out: *[max_curve_len]f32) u8 {
+    var n: u8 = 0;
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |seg| {
+        const seg_t = std.mem.trim(u8, seg, " \t");
+        if (seg_t.len == 0) continue;
+        if (n >= max_curve_len) break;
+        out[n] = std.fmt.parseFloat(f32, seg_t) catch 0;
+        n += 1;
+    }
+    return n;
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
@@ -472,6 +513,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             const tags = xml.attr(body, pi, "tags") orelse "";
             var curve: [max_curve_len]f32 = .{0} ** max_curve_len;
             const curve_len = parseCurveValue(val_s, &curve);
+            var curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len;
+            const curve_levels_len = if (xml.attr(body, pi, "level")) |lv|
+                parseCurveLevels(lv, &curve_levels)
+            else
+                0;
             try passives_list.append(allocator, .{
                 .name = try arena.dupe(u8, en),
                 .op = parseOp(op_s),
@@ -479,6 +525,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                 .tags = try arena.dupe(u8, tags),
                 .curve = curve,
                 .curve_len = curve_len,
+                .curve_levels = curve_levels,
+                .curve_levels_len = curve_levels_len,
             });
             pn += 1;
             j = pi + 16;
@@ -1274,4 +1322,25 @@ test "stagesFromWanted derives the stage set from engine names" {
     try std.testing.expectEqual(@as(u8, 3), st.thirsty);
     try std.testing.expectEqual(@as(u8, 1), stageOfBuffName("buffStatusHungry01").?);
     try std.testing.expect(stageOfBuffName("buffShocked") == null);
+}
+
+test "explicit level= curve pairs evaluate piecewise-linearly" {
+    // progression.xml's dominant form: level="1,5" value="2,10".
+    var lv: [max_curve_len]f32 = .{0} ** max_curve_len;
+    const n = parseCurveLevels("1,5", &lv);
+    try std.testing.expectEqual(@as(u8, 2), n);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), lv[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), lv[1], 0.001);
+    const vals = [_]f32{ 2, 10 };
+    const ls = lv[0..n];
+    try std.testing.expectApproxEqAbs(@as(f32, 2), curveValueAtLevels(1, ls, &vals), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), curveValueAtLevels(5, ls, &vals), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), curveValueAtLevels(3, ls, &vals), 0.001); // interpolated
+    try std.testing.expectEqual(@as(f32, 0), curveValueAtLevels(0, ls, &vals));
+    try std.testing.expectEqual(@as(f32, 0), curveValueAtLevels(6, ls, &vals)); // out of range
+    // curveAt honors the anchors: a 4,5-anchored row applies nothing below 4.
+    const p = Passive{ .curve = .{ 50, 100, 0, 0, 0, 0, 0, 0 }, .curve_len = 2, .curve_levels = .{ 4, 5, 0, 0, 0, 0, 0, 0 }, .curve_levels_len = 2 };
+    try std.testing.expectEqual(@as(f32, 0), curveAt(p, 1));
+    try std.testing.expectApproxEqAbs(@as(f32, 50), curveAt(p, 4), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), curveAt(p, 5), 0.001);
 }

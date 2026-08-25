@@ -197,12 +197,19 @@ fn scanPassives(
         const val_s = xml.attr(body, pi, "value") orelse "0";
         var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
         const curve_len = buffs.parseCurveValue(val_s, &curve);
+        var curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+        const curve_levels_len = if (xml.attr(body, pi, "level")) |lv|
+            buffs.parseCurveLevels(lv, &curve_levels)
+        else
+            0;
         try pool.append(allocator, .{
             .name = try arena.dupe(u8, en),
             .op = buffs.parseOp(op_s),
             .value = curve[0],
             .curve = curve,
             .curve_len = curve_len,
+            .curve_levels = curve_levels,
+            .curve_levels_len = curve_levels_len,
         });
         j = pi + 16;
     }
@@ -552,6 +559,22 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
         try std.testing.expectApproxEqAbs(@as(f32, 0.16), d5.hp_ot, 0.0001);
         const d0 = buffs.trackedDeltasAt(h.passives, 0);
         try std.testing.expect(!d0.any());
+    }
+    // Explicit level= anchors: perkFortitudeMastery HealthMax is level="4,5"
+    // value="50,100" - the fold applies nothing below level 4 (the old
+    // implicit scaling would have given level 1 -> 50).
+    var fort: ?PerkDef = null;
+    for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkFortitudeMastery")) {
+            fort = pk;
+            break;
+        }
+    }
+    if (fort) |f2| {
+        const d1 = buffs.trackedDeltasAt(f2.passives, 1);
+        try std.testing.expectEqual(@as(f32, 0), d1.hp_max);
+        const d5 = buffs.trackedDeltasAt(f2.passives, 5);
+        try std.testing.expectApproxEqAbs(@as(f32, 100), d5.hp_max, 0.0001);
     }
 }
 
