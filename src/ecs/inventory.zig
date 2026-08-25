@@ -276,10 +276,34 @@ pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
     if (slot >= c.max_inv_slots) return false;
     const s = &w.inventory[ps].slots[slot];
     if (s.count == 0 or s.item_id == 0) return false;
+    // The item's DegradationPerUse (items.xml, base_set) is the wear per use
+    // when a row exists; the caller's amount (1.0) is the no-row default.
+    var use_amount = amount;
+    if (w.item_degradation_fn) |f| {
+        const d = f(w.item_degradation_ctx, s.item_id);
+        if (d > 0) use_amount = d;
+    }
     const before = s.use_times;
-    s.use_times = if (s.use_times > amount) s.use_times - amount else 0;
+    s.use_times = if (s.use_times > use_amount) s.use_times - use_amount else 0;
     if (s.use_times != before) markInv(w, ps);
     return true;
+}
+
+/// armorMitigation adjusted for the attacker's held-item TargetArmor
+/// penetration (negative perc_add; RE GetTotalPhysicalArmorRating IL=47
+/// applies passive 163 on the attacking item to the wearer's passive-41
+/// rating base, so the mitigation scales by (1 + pen)). `attacker_slot` null
+/// (AI/environment) leaves the mitigation unchanged.
+pub fn armorMitigationVs(w: *const World, victim_peer: usize, attacker_slot: ?Slot) f32 {
+    var mit = armorMitigation(w, victim_peer);
+    if (attacker_slot) |as| {
+        if (w.mask[as].inventory and w.item_penetration_fn != null) {
+            const held = w.inventory[as].slots[w.inventory[as].holding];
+            const pen = w.item_penetration_fn.?(w.item_penetration_ctx, held.item_id);
+            if (pen < 0) mit *= 1.0 + pen;
+        }
+    }
+    return @max(0, mit);
 }
 
 /// Apply one consumable unit's Food/Water/HP (no inventory take). Shared by InvTx use
@@ -841,4 +865,41 @@ test "armorMitigation folds the equipped PDR percent; floor only when no XML row
 
 fn testPdr(_: ?*anyopaque, _: u16, _: u8) f32 {
     return 4;
+}
+
+test "degradeUse wears the item's DegradationPerUse; armorMitigationVs applies held-item penetration" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    w.mask[ps].inventory = true;
+    // A tool with use_times; no hook -> the caller amount (1.0) stands.
+    const tool = w.inventory[ps].slots.len - 1;
+    w.inventory[ps].slots[tool] = .{ .item_id = 2, .count = 1, .use_times = 10 };
+    try std.testing.expect(degradeUse(&w, 0, tool, 1));
+    try std.testing.expectApproxEqAbs(@as(f32, 9), w.inventory[ps].slots[tool].use_times, 0.001);
+    // Hooked: the item's DegradationPerUse (0.35) is the wear.
+    w.item_degradation_fn = &testDegrad;
+    w.item_degradation_ctx = null;
+    w.inventory[ps].slots[tool].use_times = 10;
+    try std.testing.expect(degradeUse(&w, 0, tool, 1));
+    try std.testing.expectApproxEqAbs(@as(f32, 9.65), w.inventory[ps].slots[tool].use_times, 0.001);
+    // Penetration: 0.2 mitigation vs a -0.5 held-item TargetArmor -> 0.1.
+    w.inventory[ps].slots[c.inv_equip_start] = .{ .item_id = 11, .count = 1, .quality = 1 };
+    w.armor_pdr_ctx = null;
+    w.armor_pdr_fn = &testPdr; // 4% per piece
+    w.item_penetration_fn = &testPen;
+    w.item_penetration_ctx = null;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.04), armorMitigation(&w, 0), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.02), armorMitigationVs(&w, 0, ps), 0.001); // x0.5
+    try std.testing.expectApproxEqAbs(@as(f32, 0.04), armorMitigationVs(&w, 0, null), 0.001); // no attacker
+}
+
+fn testDegrad(_: ?*anyopaque, _: u16) f32 {
+    return 0.35;
+}
+
+fn testPen(_: ?*anyopaque, _: u16) f32 {
+    return -0.5;
 }

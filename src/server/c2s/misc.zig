@@ -425,7 +425,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
                 if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
                     return true;
-                const mit = invsys.armorMitigation(&self.sim, @intCast(self.sim.player[ei].peer_slot));
+                // Armor mitigation, less the attacker's held-item TargetArmor
+                // penetration (RE GetTotalPhysicalArmorRating IL=47).
+                const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
                 amount *= (1.0 - mit);
             }
         }

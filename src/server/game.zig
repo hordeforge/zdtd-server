@@ -853,6 +853,10 @@ pub const Game = struct {
         self.sim.is_armor_fn = &itemIsArmor;
         self.sim.armor_pdr_ctx = self;
         self.sim.armor_pdr_fn = &game_craft.armorPdr;
+        self.sim.item_degradation_ctx = self;
+        self.sim.item_degradation_fn = &game_craft.itemDegradation;
+        self.sim.item_penetration_ctx = self;
+        self.sim.item_penetration_fn = &game_craft.itemPenetration;
         // Quest POI placement: rally objectives need a real prefab footprint.
         self.sim.poi_ctx = self;
         self.sim.poi_fn = &poiRectAtWorld;

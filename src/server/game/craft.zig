@@ -37,6 +37,23 @@ pub fn armorPdr(ctx: ?*anyopaque, item_id: u16, quality: u8) f32 {
     return 0;
 }
 
+/// ECS degradation hook: the held item's DegradationPerUse (per-use
+/// durability wear; stock ItemValue.UseTimes). 0 = no row.
+pub fn itemDegradation(ctx: ?*anyopaque, item_id: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.items.byId(item_id)) |d| return d.degradation_per_use;
+    return 0;
+}
+
+/// ECS penetration hook: the held item's TargetArmor fraction (negative
+/// perc_add; GetTotalPhysicalArmorRating IL=47 applies passive 163 on the
+/// attacking item to the wearer's passive-41 rating base). 0 = no row.
+pub fn itemPenetration(ctx: ?*anyopaque, item_id: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.items.byId(item_id)) |d| return d.target_armor;
+    return 0;
+}
+
 /// ECS armor hook: stock/builtin name starts with "armor".
 pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));

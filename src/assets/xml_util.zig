@@ -106,6 +106,30 @@ pub fn passiveEffectValue(body: []const u8, name: []const u8) ?[]const u8 {
     return null;
 }
 
+/// First `<passive_effect name="X" .../>` row slice (for extra attrs like
+/// operation/tags), or null. `value`/`operation` via attr(row, ...).
+pub fn passiveEffectRow(body: []const u8, name: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (i < body.len) {
+        const pi = std.mem.findPos(u8, body, i, "<passive_effect") orelse break;
+        const name_v = attr(body, pi, "name") orelse {
+            i = pi + 15;
+            continue;
+        };
+        if (std.mem.eql(u8, name_v, name)) {
+            return body[pi..];
+        }
+        i = pi + 15;
+    }
+    return null;
+}
+
+/// First `<passive_effect name="X" .../>` operation attr (default base_add).
+pub fn passiveOperation(body: []const u8, name: []const u8) ?[]const u8 {
+    const row = passiveEffectRow(body, name) orelse return null;
+    return attr(row, 0, "operation") orelse "base_add";
+}
+
 pub fn parseU16(s: []const u8) ?u16 {
     return std.fmt.parseInt(u16, s, 10) catch null;
 }

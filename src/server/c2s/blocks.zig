@@ -448,7 +448,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const victim_slot: usize = @intCast(self.sim.player[es].peer_slot);
                 if (self.pvp_mode == 0 and victim_slot != c.slot) continue;
                 if (victim_slot != c.slot) {
-                    const mit = invsys.armorMitigation(&self.sim, victim_slot);
+                    // Armor mitigation, less the blaster's held-item TargetArmor
+                    // penetration (RE GetTotalPhysicalArmorRating IL=47).
+                    const mit = invsys.armorMitigationVs(&self.sim, victim_slot, self.sim.playerByPeer(c.slot));
                     amount *= (1.0 - mit);
                 }
                 // Wasm-first (AGENTS rule 29): the on_player_damage verdict

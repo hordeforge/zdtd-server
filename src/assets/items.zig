@@ -67,6 +67,16 @@ pub const ItemDef = struct {
     /// chokes are physical-only today, so the PDR leg is the live one.
     elem_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     elem_resist_n: u8 = 0,
+    /// items.xml DegradationPerUse passive (base_set, stock
+    /// ItemValue.UseTimes wear per use): the durability consumed by one use.
+    /// 0 = no row -> the callers' 1.0 default (the pre-XML behavior).
+    degradation_per_use: f32 = 0,
+    /// items.xml TargetArmor passive (163, perc_add, UNTAGGED rows only):
+    /// armor penetration fraction applied to the target's mitigation
+    /// (GetTotalPhysicalArmorRating IL=47: passive 163 on the attacking item
+    /// modifies the wearer's passive-41 rating base). The perk-tag-gated rows
+    /// (perkJavelinMaster etc.) need tag evaluation - recorded.
+    target_armor: f32 = 0,
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -544,6 +554,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_edr_curves.deinit(allocator);
     var stock_edr_n: std.ArrayList(u8) = .empty;
     defer stock_edr_n.deinit(allocator);
+    var stock_degrad_per_use: std.ArrayList(f32) = .empty;
+    defer stock_degrad_per_use.deinit(allocator);
+    var stock_target_armor: std.ArrayList(f32) = .empty;
+    defer stock_target_armor.deinit(allocator);
     defer stock_dradius.deinit(allocator);
     var stock_dlifetime: std.ArrayList(i32) = .empty;
     defer stock_dlifetime.deinit(allocator);
@@ -713,6 +727,27 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_pdr_n.append(allocator, pdr_n);
             try stock_edr_curves.append(allocator, edr_curve);
             try stock_edr_n.append(allocator, edr_n);
+            // DegradationPerUse (base_set): the per-use durability wear.
+            // The 3 perc_add rows are the modifier form - recorded.
+            var degrad_per_use: f32 = 0;
+            if (xml.passiveEffectValue(body, "DegradationPerUse")) |v| {
+                if (xml.passiveOperation(body, "DegradationPerUse") == null or
+                    std.mem.eql(u8, xml.passiveOperation(body, "DegradationPerUse").?, "base_set"))
+                {
+                    degrad_per_use = xml.parseF32(v) orelse 0;
+                }
+            }
+            // TargetArmor (163, perc_add): armor penetration. Only UNTAGGED
+            // rows apply without perk-tag evaluation (the perkJavelinMaster
+            // rows are the recorded tag-gated leg).
+            var target_armor: f32 = 0;
+            if (xml.passiveEffectRow(body, "TargetArmor")) |row| {
+                if (xml.attr(row, 0, "tags") == null) {
+                    if (xml.attr(row, 0, "value")) |v| target_armor = xml.parseF32(v) orelse 0;
+                }
+            }
+            try stock_degrad_per_use.append(allocator, degrad_per_use);
+            try stock_target_armor.append(allocator, target_armor);
             var deat: i32 = 0;
             if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
                 deat = std.fmt.parseInt(i32, v, 10) catch 0;
@@ -875,6 +910,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.phys_resist_n = stock_pdr_n.items[idx];
                 def.elem_resist_curve = stock_edr_curves.items[idx];
                 def.elem_resist_n = stock_edr_n.items[idx];
+                def.degradation_per_use = stock_degrad_per_use.items[idx];
+                def.target_armor = stock_target_armor.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
@@ -925,6 +962,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .phys_resist_n = stock_pdr_n.items[idx],
             .elem_resist_curve = stock_edr_curves.items[idx],
             .elem_resist_n = stock_edr_n.items[idx],
+            .degradation_per_use = stock_degrad_per_use.items[idx],
+            .target_armor = stock_target_armor.items[idx],
             .distraction_lifetime = stock_dlifetime.items[idx],
             .distraction_strength = stock_dstrength.items[idx],
             .distraction_eat_ticks = stock_deat.items[idx],
@@ -1193,4 +1232,20 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
     // The XML def table caps at max_items; the armor family (alphabetically
     // early) carries the bulk of the 134 PDR rows.
     try std.testing.expect(found >= 50);
+    // DegradationPerUse (base_set) on tools; TargetArmor (perc_add) only on
+    // untagged rows (ammo9mmBulletAP, the armor-piercing round).
+    var stone_axe = false;
+    var ap_ammo = false;
+    for (t.defs) |d| {
+        if (std.mem.eql(u8, d.name, "meleeToolRepairT0StoneAxe")) {
+            try std.testing.expectApproxEqAbs(@as(f32, 1), d.degradation_per_use, 0.001);
+            stone_axe = true;
+        }
+        if (std.mem.eql(u8, d.name, "ammo9mmBulletAP")) {
+            try std.testing.expectApproxEqAbs(@as(f32, -0.5), d.target_armor, 0.001);
+            ap_ammo = true;
+        }
+    }
+    try std.testing.expect(stone_axe);
+    try std.testing.expect(ap_ammo);
 }
