@@ -161,10 +161,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 38 | 0 | 0 | 38 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 24 | 1 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
+| [Player progression](#10-player-progression) | 25 | 0 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 42 | 1 | 0 | 43 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **288** | **1** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **289** | **0** | **0** | **289** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -2956,24 +2956,16 @@ and server-to-client XP/level pushes do not exist.
   `health.stamina` values, not hardcoded 100.
   *Anchors:* `src/server/game/tick.zig:125-150`, `src/server/game/join.zig:569-585`
 
-- **Health regeneration / wellness / core temperature** `PARTIAL`
-  Well-fed regen via `buffs.survival()` fraction-of-max gate is live; starvation
-  damage is live. 2026-08-23 re-audit (RE entity-stats.md 3 + weather-
-  environment.md 4): the **core-temperature server surface is present** - the
-  server ships the per-biome temperature (slot 0) in `NetPackageWeather`
-  (weather.zig buildWeatherBodyFromBiomes, from the live biome weather
-  state machine) and the stock dedicated build deliberately **stubs the
-  felt-temperature getters**: the client computes felt temp and applies the
-  cold/hot buffs from its own weathersurvival.xml MinEvents, gated on the
-  server's WeatherSurvivalEnabled. The stock weathersurvival.xml carries no
-  tuning (only `TemperatureHeight height="0" addDegrees="0"`), so a server
-  parse adds nothing. Remaining: **wellness** (the max-health-over-time
-  system - eating quality food/drink raises wellness toward a cap, feeding
-  `PlayerEntityStats.MaxHealth`; no consumer today).
-  *Anchors:* `src/server/game/tick.zig:78-107`, `src/server/game/weather.zig:23-69`,
-  `src/wire/packages.zig:2251-2295`, `../7dtd-engine-research/docs/entity-stats.md:141-166`,
-  `../7dtd-engine-research/docs/weather-environment.md:257-300`,
-  `Data/Config/weathersurvival.xml`
+- **Health regeneration / wellness / core temperature** `WORKS` (2026-08-25):
+  well-fed regen (buffs.survival() fraction-of-max gate) and starvation
+  damage are live; the core-temperature server surface ships the per-biome
+  temperature and stock stubs the felt getters (the client applies the
+  cold/hot buffs from its own weathersurvival.xml, gated on the server's
+  WeatherSurvivalEnabled). Wellness closed-with-reason: b14 carries no
+  wellness data (zero `wellness` rows in items.xml / buffs.xml) and no
+  food-to-wellness formula is pinned in the RE (EnumStats 5 is a cvar index
+  only), so the food eat path applies `foodHealthAmount` per stock's
+  data-driven model - recording rather than inventing a MaxHealth creep.
 
 - **Death detection and the dead-player entity** `WORKS`
   A kill through C2S DamageEntity is detected, and the player entity is
