@@ -799,6 +799,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         try self.broadcastExcept("NetPackageSoundAtPosition", body, c.slot);
+        // No AI-noise leg here: on a dedicated server the relay is audio-only.
+        // NetPackageSoundAtPosition.ProcessPackage -> PlaySoundAtPositionServer
+        // skips AIDirector.NotifyNoise when IsDedicatedServer (RE protocol
+        // doc 5.9, IL dump): the stock dedi only evaluates noise for sounds it
+        // plays itself (explosions, mines, animals, minibike via
+        // Audio.Manager.SignalAI / GameManager.explode). The movement-noise
+        // model (sounds.xml table + PlayerStealth fold, systems.systemStealth)
+        // consumes sim-side pushStealthNoise as those sources land.
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageTurretSpawn")) {

@@ -847,6 +847,61 @@ pub const NoiseEvent = struct {
 /// cap are dropped; the per-tick consume budget already throttles).
 pub const noise_events_cap: usize = 8;
 
+/// One entry in a player's stealth-noise list (RE PlayerStealth.noises:
+/// `(volume, ticks)` sorted descending by volume; AddNoise inserts by rank).
+pub const StealthNoise = struct {
+    volume: f32 = 0,
+    /// Remaining ticks before the entry expires (NoiseCleanup decrements).
+    ticks: i32 = 0,
+};
+
+/// Per-player stealth-noise state (RE entity-ai.md PlayerStealth TickServer).
+pub const stealth_noise_cap: usize = 8;
+
+pub const Stealth = struct {
+    /// Active noise entries (descending by volume; cap bounds the list).
+    noises: [stealth_noise_cap]StealthNoise = undefined,
+    noise_n: u8 = 0,
+    /// RE PlayerStealth CalcVolume: geometric-decay sum × 2.35^0.86 × 1.5 ×
+    /// Noise passive. Drives the per-enemy hearing test (attraction).
+    noise_volume: f32 = 0,
+    /// RE PlayerStealth.sleeperNoiseVolume: accumulated stealth noise feeding
+    /// sleeper wake (NotifyNoise returns true at the 360 cap, then the caller
+    /// wakes sleeper volumes at the noise position). Decays 2.5/tick after
+    /// sleeperNoiseWaitTicks elapses.
+    sleeper_noise_volume: f32 = 0,
+    /// Ticks to hold before the sleeperNoiseVolume decay resumes (stock sets
+    /// 20 when a loud noise (volume ≥ 11) lands).
+    sleeper_noise_wait_ticks: i32 = 0,
+};
+
+/// One player-attributed stealth-noise event (movement noise, stock
+/// AIDirector.NotifyNoise): the net thread resolves the relayed clip in the
+/// sounds.xml noise table and pushes the row + the package volumeScale; the
+/// sim applies the crouch muffle, accumulates the player's stealth list,
+/// wakes sleepers at the volume cap, and feeds the heat map. Cap bounds the
+/// ring like combat noise; beyond-cap events are dropped.
+pub const stealth_events_cap: usize = 8;
+
+pub const StealthNoiseEvent = struct {
+    /// Owning player entity slot (u16: components.zig cannot see world.zig's Slot).
+    slot: u16,
+    x: f32,
+    y: f32,
+    z: f32,
+    /// `noise` × package volumeScale (the client's NoiseScale already rides
+    /// the package, stock GameManager.PlaySoundAtPositionServer).
+    volume: f32,
+    /// `time` × 20 (stock NotifyNoise converts seconds to ticks).
+    duration_ticks: i32,
+    /// `muffled_when_crouched` — applied when the owner is crouching.
+    muffled_when_crouched: f32,
+    /// `heat_map_strength` (> 0 feeds NotifyActivity, the noise-to-heat leg).
+    heat_map_strength: f32,
+    /// `heat_map_time` seconds (stock ×10 ticks).
+    heat_map_time: f32,
+};
+
 /// One cell carried by a falling-blocks group entity (world coords + the
 /// block's raw value so the client renders the right block falling).
 pub const FallingCell = struct {

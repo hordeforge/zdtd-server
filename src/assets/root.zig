@@ -20,6 +20,7 @@ pub const loot = @import("loot.zig");
 pub const entitygroups = @import("entitygroups.zig");
 pub const gamestages = @import("gamestages.zig");
 pub const maxdamage = @import("maxdamage.zig");
+pub const noise = @import("noise.zig");
 pub const traders = @import("traders.zig");
 pub const npc = @import("npc.zig");
 pub const assignids_comptime = @import("assignids_comptime.zig");
@@ -53,6 +54,7 @@ test {
     _ = entitygroups;
     _ = gamestages;
     _ = maxdamage;
+    _ = noise;
     _ = traders;
     _ = npc;
     _ = assignids_comptime;

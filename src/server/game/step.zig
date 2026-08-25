@@ -104,6 +104,11 @@ pub fn step(self: *Game) !void {
         // alive sleeper zombies; a group that died sets the volume's
         // respawn_time (LootRespawnDays x 24000 ticks) for the touch re-arm.
         self.tickSleeperRearm();
+        // Movement-noise sleeper wake (stock PlayerStealth.NotifyNoise →
+        // World.CheckSleeperVolumeNoise): the stealth system queued points
+        // when a player's sleeperNoiseVolume hit the 360 cap; wake volumes
+        // whose AABB contains them (post-tick: the points landed mid-tick).
+        self.triggerSleeperVolumesByStealthNoise();
         // Water leveling: pour basins opened by this tick's block edits (dig
         // beside a lake, placed water). Budgeted per tick; the fills mark
         // chunks dirty and the chunk stream broadcasts them.

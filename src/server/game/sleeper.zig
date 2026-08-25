@@ -7,6 +7,7 @@ const apm = @import("../../apm/root.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const parallel_util = @import("../../util/parallel.zig");
 const jobs = @import("../../ecs/jobs.zig");
+const comps = @import("../../ecs/components.zig");
 const rng_util = @import("../../util/rng.zig");
 
 // Mirrors Game internals needed by the sleeper loop; kept here to avoid
@@ -208,6 +209,24 @@ pub fn triggerSleeperVolumesByNoise(self: *Game) void {
     if (self.sleepers.volumes.len == 0) return;
     const take = @min(self.sim.noise_n, self.sim.noise_events.len);
     if (take == 0) return;
+    wakeVolumesAt(self, self.sim.noise_events[0..take]);
+}
+
+/// Wake sleeper volumes at the movement-noise positions the stealth system
+/// queued (stock PlayerStealth.NotifyNoise hitting the 360 volume cap →
+/// World.CheckSleeperVolumeNoise). Runs AFTER the sim tick (the stealth
+/// system pushed the points mid-tick), then drains the ring.
+pub fn triggerSleeperVolumesByStealthNoise(self: *Game) void {
+    defer self.sim.sleeper_volume_noise_n = 0;
+    if (self.sleepers.volumes.len == 0) return;
+    const take = @min(self.sim.sleeper_volume_noise_n, self.sim.sleeper_volume_noise.len);
+    if (take == 0) return;
+    wakeVolumesAt(self, self.sim.sleeper_volume_noise[0..take]);
+}
+
+/// The AABB-containment wake shared by the combat-noise and stealth-noise
+/// rings (stock World.CheckSleeperVolumeNoise / SleeperVolume.CheckNoise).
+fn wakeVolumesAt(self: *Game, events: []const comps.NoiseEvent) void {
     const pad: f32 = 0.9;
     var vi: usize = 0;
     while (vi < self.sleepers.volumes.len) : (vi += 1) {
@@ -218,8 +237,8 @@ pub fn triggerSleeperVolumesByNoise(self: *Game) void {
         if (vol.quest_cleared) continue;
         var hit = false;
         var ni: usize = 0;
-        while (ni < take and !hit) : (ni += 1) {
-            const ev = self.sim.noise_events[ni];
+        while (ni < events.len and !hit) : (ni += 1) {
+            const ev = events[ni];
             if (ev.x < @as(f32, @floatFromInt(vol.x0)) - pad or ev.x > @as(f32, @floatFromInt(vol.x1)) + pad) continue;
             if (ev.z < @as(f32, @floatFromInt(vol.z0)) - pad or ev.z > @as(f32, @floatFromInt(vol.z1)) + pad) continue;
             if (ev.y < @as(f32, @floatFromInt(vol.y0)) - pad or ev.y > @as(f32, @floatFromInt(vol.y1)) + pad) continue;

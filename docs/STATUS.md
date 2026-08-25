@@ -36,7 +36,14 @@ then the AI senses row WORKS (smell + per-class cone), taking the total to
 flow dig-leveling both shipped, total **142/140/47**. Then crouch stealth
 (hear muffle + sleeper detect) went MISSING -> PARTIAL, total
 **142/141/46**. Then group AI (combat-noise alerts + sleeper wake) went
-MISSING -> PARTIAL, total **142/142/45**. Then falling blocks (collapse
+MISSING -> PARTIAL, total **142/142/45**. Then the movement-noise
+volume model shipped (sounds.xml `<Noise>` table as data + the
+PlayerStealth fold system: NotifyNoise accumulation, CalcVolume,
+sleeperNoiseVolume cap-360 volume wake, heat-map feed, and the
+attraction heard-test; noise-to-heat residual closed - the 1312-row
+sounds.xml table feeds notifyActivity via the stealth system; the
+C2S sound relay stays audio-only per the stock dedi emission map,
+entity-ai.md), Stealth stays PARTIAL (light + smoke/smell remain). Then falling blocks (collapse
 groups spawn EntityFallingBlock entities, fall + die on landing) went
 MISSING -> PARTIAL, total **142/143/44**. Then the Demolition (zombieCop)
 prime-and-explode shipped (RE entity-ai.md EntityZombieCop; entity + block
@@ -819,7 +826,7 @@ light-level leg stays RE-blocked, no server light channel)
 1. MoveHelper physics / collision (WORKS 2026-08-21 - collide-and-slide + step-up + stock gravity + blocked-grounded jump + door-opening + dig-through + swim physics + entity push; the stock elevator has no platform block, documented; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers 2026-08-20; multi-biome surfaces + terrain-tile relief blend 2026-08-21 - the stock 6-axis climate model and carved caves remain)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water; placed water now cascades down its column and puddles, bounded 2026-08-21; no mass-flow engine, no evap/drain)
-4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; light-level leg RE-blocked 2026-08-20)
+4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; movement-noise volume model wired 2026-08-26 (sounds.xml `<Noise>` table + PlayerStealth fold: NotifyNoise accumulation, CalcVolume, sleeper wake at 360, heat, attraction heard-test; stock-dedi inputs are server-side sounds only - the C2S sound relay is audio-only on a dedi); light-level leg RE-blocked 2026-08-20)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; pack hunting/horde directives RE-BLOCKED - no group-attack IL in the corpus)
 6. Falling blocks (PARTIAL - per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall + crush damage via materials.xml Hardness/Mass 2026-08-21; Fall-event item drops, landing audio and the opt-in group mode open)
 7. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; spider/crawler variant behaviors thin-RE - bCanClimbVertical pinned, the climb mechanics are not)

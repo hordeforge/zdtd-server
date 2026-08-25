@@ -148,6 +148,7 @@ test, so a retune cannot land silently).
 | `vehicles` | true | |
 | `turrets` | true | |
 | `despawn` | true | Off means spawns accumulate; pair with `director = false` or a lower cap |
+| `stealth` | true | Player stealth-noise model (RE entity-ai.md PlayerStealth): consumes the movement-noise ring, accumulates per-player noise volume, wakes sleepers at the volume cap, feeds the heat map. Off means relayed/server sounds never alert AI |
 | `commands` | true | Off means queued `SimCommand`s (plugins, admin) are never applied. Leave on unless the mode owns the queue |
 | `[rules.combat]` | | |
 | `attack_damage` | 8.0 | **Floor**: `entityclasses.xml` `HandItem` → `items.xml` `DamageEntity` wins when non-zero |
@@ -164,10 +165,20 @@ test, so a retune cannot land silently).
 | `view_cone_half_deg` | 90.0 | Sight view-cone half-angle. Stock `EntityAlive.maxViewAngle` cctor default 180 (half 90 = only excludes targets strictly behind), per-class `MaxViewAngle` in entityclasses.xml halves and wins via `viewHalfDeg`; this is the floor when unset. RE entity-ai.md EntityAlive cctor |
 | `smell_radius` | 10.0 | Smell radius: a player within it is sensed regardless of sight or hearing (smell passes walls). RE entity-ai.md PlayerStealth `cSmellRadiusMin` |
 | `smell_bleed_radius` | 25.0 | Smell radius while the player carries `buffInjuryBleeding`. RE entity-ai.md PlayerStealth `cSmellRadiusBleed` |
-| `crouch_hear_scale` | 0.5 | Hearing multiplier while the player crouches (stealth). Stock mutes tracked-player noise per clip via `muffledWhenCrouched` (noisysounds.xml, data-driven, not ported); this flat scale is the floor on `hear_range`. RE entity-ai.md NotifyNoise |
+| `crouch_hear_scale` | 0.5 | Hearing multiplier while the player crouches (stealth). Stock mutes tracked-player noise per clip via `muffledWhenCrouched` (sounds.xml `<Noise>`, now loaded by assets/noise.zig and applied in the movement-noise model); this flat scale is the floor on `hear_range`. RE entity-ai.md NotifyNoise |
 | `crouch_sleeper_detect_range` | 5.0 | Sleeper attack-detect range while the target crouches. Stock `CanSleeperAttackDetect` crouch is light-based `FastLerp(3,15,light)` (light leg RE-blocked); this close range is the floor |
-| `combat_noise_radius` | 24.0 | Combat-noise radius, blocks: a landed melee hit or ranged damage alerts zombies and wakes sleepers within it (stock NotifyNoise; per-clip noisysounds.xml volumes are data-driven, not ported - flat floor). Group-AI PARTIAL |
+| `combat_noise_radius` | 24.0 | Combat-noise radius, blocks: a landed melee hit or ranged damage alerts zombies and wakes sleepers within it (flat floor; per-clip sounds.xml `<Noise>` volumes now feed the movement-noise model instead). Group-AI PARTIAL |
 | `noise_events_per_tick` | 2 | Combat-noise events the AI consume pass drains per tick (bursts dropped; ring holds one tick's worth) |
+| `stealth_noise_decay` | 0.6 | Movement-noise geometric decay per stealth-list slot (stock PlayerStealth CalcVolume weight `0.6^i`) |
+| `stealth_noise_curve_a` / `stealth_noise_curve_b` / `stealth_noise_scale` | 2.35 / 0.86 / 1.5 | CalcVolume curve: `(sum x 2.35)^0.86 x 1.5` (RE entity-ai.md CalcVolume IL=68) |
+| `stealth_noise_passive` | 1.0 | `EffectManager.GetValue(Noise passive 88)` analog: the sim carries no equipment passives, so stock's no-items value is 1.0; servers scale all player noise here instead of patching data |
+| `stealth_attract_sense_scale` | 0.0 | `EAIManager.CalcSenseScale` analog in the attraction radius (`min(sum x 0.6 x (1 + sense x 1.6), 40 + 15 x sense)`); stock default 0 |
+| `stealth_attract_radius_cap_a` / `stealth_attract_radius_cap_b` | 40.0 / 15.0 | Attraction radius cap shape (RE TickServer IL_01EF-01FF) |
+| `stealth_hear_feral_sense` | 0.0 | Per-enemy `feralSense` in the heard test (`noiseVolume x (1 + feralSense)`); stock per-entity value not modeled, floor 0 |
+| `stealth_hear_detect_us` | 1.0 | `EntityPlayer.DetectUsScale` in the heard test; stock returns 0.3 for POI-resident sleepers (>60 s in a tier>=1 prefab) — not modeled, floor 1.0 |
+| `stealth_sleeper_wake_volume` | 360.0 | Sleeper wake cap: `sleeperNoiseVolume` accumulation at 360 queues a volume wake at the noise position (stock NotifyNoise + CheckSleeperVolumeNoise) |
+| `stealth_sleeper_volume_decay` | 2.5 | `sleeperNoiseVolume` decay per tick once the loud-noise wait window elapses (RE TickServer IL_0195-01BA) |
+| `stealth_loud_volume` / `stealth_loud_wait_ticks` | 11.0 / 20 | A noise at/above this volume holds the sleeper-volume decay for this many ticks (stock NotifyNoise IL_001F-002A) |
 | `body_radius` | 0.35 | Move-body half-width, blocks (stock CharacterController radius ~0.35); the AI collide-and-slide keeps this much of the body out of solid cells. Policy floor (RE entity-movement.md) |
 | `body_height` | 1.8 | Move-body height, blocks (stock zombie CC height ~1.8); the head probe so a body does not duck through 1-high gaps. Policy floor |
 | `step_height` | 1.0 | Step-up limit, blocks: a blocked horizontal move is retried with the feet lifted by this much (stock CC stepOffset; zombies climb a full block). Policy floor |

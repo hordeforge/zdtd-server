@@ -67,6 +67,7 @@ const assets_loot = @import("../assets/loot.zig");
 const assets_entitygroups = @import("../assets/entitygroups.zig");
 const assets_gamestages = @import("../assets/gamestages.zig");
 const assets_maxdamage = @import("../assets/maxdamage.zig");
+const assets_noise = @import("../assets/noise.zig");
 const assets_traders = @import("../assets/traders.zig");
 const assets_npc = @import("../assets/npc.zig");
 const assets_block_textures = @import("../assets/block_textures.zig");
@@ -456,6 +457,11 @@ pub const Game = struct {
     entitygroups: assets_entitygroups.GroupTable = assets_entitygroups.GroupTable.builtin(),
     gamestages: assets_gamestages.Table = assets_gamestages.Table.empty(),
     maxdamage: assets_maxdamage.Table = assets_maxdamage.Table.empty(),
+    /// sounds.xml `<Noise>` rows keyed by sound-group name (the movement-noise
+    /// model's per-clip volume/time/muffle/heat; empty without a game-dir —
+    /// the relay then passes sound through with no AI noise, matching stock
+    /// with no data).
+    noise_table: assets_noise.Table = assets_noise.Table.empty(),
     /// blocks.xml Texture → textureFull defaults (unpainted cells).
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
     painting: assets_painting.Table = assets_painting.Table.empty(),
@@ -2965,6 +2971,10 @@ pub const Game = struct {
 
     pub fn triggerSleeperVolumesByNoise(self: *Game) void {
         return game_sleeper.triggerSleeperVolumesByNoise(self);
+    }
+
+    pub fn triggerSleeperVolumesByStealthNoise(self: *Game) void {
+        return game_sleeper.triggerSleeperVolumesByStealthNoise(self);
     }
 
     pub fn tickSleeperRearm(self: *Game) void {

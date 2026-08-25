@@ -192,6 +192,10 @@ pub const World = struct {
     network_id: [max_entities]c.NetworkId = [_]c.NetworkId{.{}} ** max_entities,
     kind: [max_entities]c.Kind = [_]c.Kind{.zombie} ** max_entities,
     player: [max_entities]c.Player = [_]c.Player{.{}} ** max_entities,
+    /// Per-player stealth-noise state (RE entity-ai.md PlayerStealth): the
+    /// movement-noise volume model (sounds.xml noise table → NotifyNoise →
+    /// CalcVolume → attraction/hearing). Only meaningful for .player slots.
+    stealth: [max_entities]c.Stealth = [_]c.Stealth{.{}} ** max_entities,
     zombie_ai: [max_entities]c.ZombieAi = [_]c.ZombieAi{.{}} ** max_entities,
     /// Combat-noise ring (group AI): melee/ranged hits push events (atomic
     /// counter; parallel AI workers + the net thread), the AI consume pass
@@ -199,6 +203,19 @@ pub const World = struct {
     /// budget bound the pass so a busy fight cannot stall the tick.
     noise_events: [c.noise_events_cap]c.NoiseEvent = undefined,
     noise_n: usize = 0,
+    /// Player movement-noise ring (stock AIDirector.NotifyNoise): the net
+    /// thread resolves relayed NetPackageSoundAtPosition clips in the
+    /// sounds.xml noise table and pushes rows; the stealth system consumes
+    /// them (crouch muffle, stealth-list accumulation, sleeper wake at the
+    /// volume cap, heat map). Consume-owns-drain like combat noise.
+    stealth_noise_events: [c.stealth_events_cap]c.StealthNoiseEvent = undefined,
+    stealth_noise_n: usize = 0,
+    /// Sleeper-volume wake requests by noise position (stock
+    /// World.CheckSleeperVolumeNoise): pushed by the stealth system when a
+    /// player's sleeperNoiseVolume hits the 360 cap; the Game drains the ring
+    /// after the tick and wakes volumes whose AABB contains the point.
+    sleeper_volume_noise: [c.stealth_events_cap]c.NoiseEvent = undefined,
+    sleeper_volume_noise_n: usize = 0,
     /// Demolition explode requests (RE entity-ai.md): pushed by parallel AI
     /// workers when a primed cop's countdown hits zero; the Game drains the
     /// ring and applies entity + block AoE. Consume-owns-drain like noise.
@@ -739,6 +756,45 @@ pub const World = struct {
         self.noise_events[n] = .{ .x = x, .y = y, .z = z, .radius = radius };
     }
 
+    /// Push a player movement-noise event (stock AIDirector.NotifyNoise from
+    /// the sound relay). Called from the net thread, so the ring index is an
+    /// atomic RMW; events beyond the cap are dropped.
+    pub fn pushStealthNoise(
+        self: *World,
+        slot: Slot,
+        x: f32,
+        y: f32,
+        z: f32,
+        volume: f32,
+        duration_ticks: i32,
+        muffled_when_crouched: f32,
+        heat_map_strength: f32,
+        heat_map_time: f32,
+    ) void {
+        const n = @atomicRmw(usize, &self.stealth_noise_n, .Add, 1, .monotonic);
+        if (n >= c.stealth_events_cap) return;
+        self.stealth_noise_events[n] = .{
+            .slot = @intCast(slot),
+            .x = x,
+            .y = y,
+            .z = z,
+            .volume = volume,
+            .duration_ticks = duration_ticks,
+            .muffled_when_crouched = muffled_when_crouched,
+            .heat_map_strength = heat_map_strength,
+            .heat_map_time = heat_map_time,
+        };
+    }
+
+    /// Push a sleeper-volume wake by noise position (stock
+    /// World.CheckSleeperVolumeNoise from PlayerStealth.NotifyNoise hitting
+    /// the volume cap). The Game drains the ring after the tick.
+    pub fn pushSleeperVolumeNoise(self: *World, x: f32, y: f32, z: f32) void {
+        const n = @atomicRmw(usize, &self.sleeper_volume_noise_n, .Add, 1, .monotonic);
+        if (n >= c.stealth_events_cap) return;
+        self.sleeper_volume_noise[n] = .{ .x = x, .y = y, .z = z, .radius = 0 };
+    }
+
     /// Push a Demolition explode request (RE entity-ai.md EntityZombieCop).
     /// Parallel AI workers push; the Game drains in step (consume-owns-drain).
     pub fn pushExplode(self: *World, slot: Slot) void {
@@ -1068,6 +1124,9 @@ pub const World = struct {
         self.mask[s].wallet = true;
         self.mask[s].inventory = true;
         self.player[s] = .{ .peer_slot = peer_slot };
+        // Fresh stealth-noise state (slot reuse must not carry a previous
+        // occupant's noise list / sleeper volume into the new body).
+        self.stealth[s] = .{};
         if (peer_slot >= 0 and peer_slot < @as(i32, @intCast(self.peer_to_player.len))) {
             self.peer_to_player[@intCast(peer_slot)] = s;
         }

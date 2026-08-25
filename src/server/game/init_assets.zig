@@ -21,6 +21,7 @@ const assets_loot = @import("../../assets/loot.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_maxdamage = @import("../../assets/maxdamage.zig");
+const assets_noise = @import("../../assets/noise.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
@@ -109,6 +110,16 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     } else {
         self.maxdamage.tryMergeBundledAssignIds(allocator);
         util_log.info("zdtd: assignids-only names={d}\n", .{self.maxdamage.id_by_name.count()});
+    }
+    // Movement-noise model data (sounds.xml `<Noise>` rows): the per-clip
+    // volume/time/muffle/heat the sound relay feeds into player stealth.
+    // Empty without a game-dir: sounds relay with no AI noise (data-gated,
+    // matching stock with no data — the table comes from the game's own
+    // Data/Config/sounds.xml, never hardcoded values in code).
+    if (logged("sounds.xml noise table", assets_noise.tryLoad(allocator, opts.game_dir, opts.config_dir))) |nt| {
+        self.noise_table.deinit();
+        self.noise_table = nt;
+        util_log.info("zdtd: sounds.xml noise groups={d}\n", .{self.noise_table.map.count()});
     }
     // A05: live terrain type ids from AssignIds (World.terrain_ids; pins remain offline defaults).
     {

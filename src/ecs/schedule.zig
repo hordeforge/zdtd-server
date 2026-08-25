@@ -11,6 +11,10 @@ pub const Phase = enum(u8) {
     /// Before ai so movement and damage read this tick's buff state.
     buffs,
     director,
+    /// Player stealth-noise (movement noise): before ai so zombies react to
+    /// this tick's noise the same tick (stock entity update order: players
+    /// before enemies).
+    stealth,
     ai,
     vehicles,
     turrets,
@@ -49,7 +53,7 @@ pub const TickResult = struct {
 /// real dependency (buffs before ai so movement and damage read this tick's
 /// buff state), so reordering would break determinism rather than customise it.
 pub const order = [_][]const u8{
-    "buffs", "director", "animals", "ai", "vehicles", "turrets", "despawn", "commands",
+    "buffs", "director", "animals", "stealth", "ai", "vehicles", "turrets", "despawn", "commands",
 };
 
 /// Run full sim tick: beginTick → buffs → director → ai → vehicles → turrets →
@@ -69,6 +73,7 @@ pub fn run(w: *World, dt: f32) TickResult {
     // Always run: the director owns the world clock and the daily restock, so
     // the `director` toggle is applied inside it (spawning only), not here.
     const dr = systems.systemDirector(w, dt);
+    if (on.stealth) systems.systemStealth(w);
     const hits = if (on.ai) systems.systemZombieAi(w, dt) else 0;
     if (on.ai) systems.systemDigUpdate(w);
     if (on.vehicles) systems.systemVehicles(w, dt);
@@ -124,8 +129,8 @@ test "schedule.run drains commands and clears locals" {
 test "default pipeline order is pinned" {
     // The order encodes a dependency (buffs before ai). A reorder is a
     // behaviour change and must fail here rather than pass silently.
-    try std.testing.expectEqual(@as(usize, 8), order.len);
-    const want = [_][]const u8{ "buffs", "director", "animals", "ai", "vehicles", "turrets", "despawn", "commands" };
+    try std.testing.expectEqual(@as(usize, 9), order.len);
+    const want = [_][]const u8{ "buffs", "director", "animals", "stealth", "ai", "vehicles", "turrets", "despawn", "commands" };
     for (order, want) |got, exp| try std.testing.expectEqualStrings(exp, got);
     // Every entry has a toggle, and every toggle defaults on.
     const Systems = @import("rules.zig").Systems;

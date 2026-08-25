@@ -2494,6 +2494,151 @@ fn tickItemDistractions(w: *World) void {
     }
 }
 
+/// Player movement-noise model (RE entity-ai.md PlayerStealth): consumes the
+/// stealth-noise ring pushed by the sound relay, folds each event into the
+/// owning player's stealth state (stock PlayerStealth.NotifyNoise), then runs
+/// the per-player noise decay/CalcVolume + attraction pass (stock TickServer).
+/// Single-threaded (players are few); runs before the parallel AI pass so
+/// zombies react to this tick's noise the same tick (stock entity update
+/// order: players before enemies). Ring consume-owns-drain like combat noise.
+pub fn systemStealth(w: *World) void {
+    const take = @min(w.stealth_noise_n, c.stealth_events_cap);
+    var i: usize = 0;
+    while (i < take) : (i += 1) {
+        const ev = w.stealth_noise_events[i];
+        const s: Slot = @intCast(ev.slot);
+        if (!w.alive[s] or !w.mask[s].player or !w.mask[s].transform) continue;
+        stealthNotifyNoise(w, s, ev);
+    }
+    w.stealth_noise_n = 0;
+    for (query.groupSlice(w, .player)) |s| {
+        if (!w.alive[s] or !w.mask[s].player or !w.mask[s].transform) continue;
+        stealthTick(w, s);
+    }
+}
+
+/// Stock AIDirector.NotifyNoise (IL=84) + PlayerStealth.NotifyNoise (IL=71):
+/// a relayed sound with a sounds.xml `<Noise>` row folds into the owning
+/// player's stealth list, sleeper-noise volume (wake at the cap) and heat map.
+fn stealthNotifyNoise(w: *World, s: Slot, ev: c.StealthNoiseEvent) void {
+    const r = w.rules.ai;
+    // The crouched instigator's volumeScale is muffled by the clip's
+    // muffled_when_crouched (stock IL_0074-008A); the same scaled factor
+    // rides the heat leg below (stock re-reads the overwritten arg).
+    var scale: f32 = 1.0;
+    if (w.player[s].crouching) scale = ev.muffled_when_crouched;
+    const volume = ev.volume * scale;
+    if (volume <= 0) return;
+    const st = &w.stealth[s];
+    // PlayerStealth.AddNoise: insert (volume, ticks) descending by volume.
+    var idx: u8 = 0;
+    while (idx < st.noise_n and st.noises[idx].volume >= volume) : (idx += 1) {}
+    if (idx < c.stealth_noise_cap) {
+        var j = @min(st.noise_n, c.stealth_noise_cap - 1);
+        while (j > idx) : (j -= 1) st.noises[j] = st.noises[j - 1];
+        st.noises[idx] = .{ .volume = volume, .ticks = ev.duration_ticks };
+        if (st.noise_n < c.stealth_noise_cap) st.noise_n += 1;
+    }
+    // A loud noise (volume >= 11) pauses the sleeper-volume decay window.
+    if (volume >= r.stealth_loud_volume) st.sleeper_noise_wait_ticks = r.stealth_loud_wait_ticks;
+    // NotifyNoise curve: > 60 becomes 60 + (v-60)^1.4, then the Noise passive.
+    var eff = volume;
+    if (volume > 60) eff = 60 + std.math.pow(f32, volume - 60, 1.4);
+    eff *= r.stealth_noise_passive;
+    st.sleeper_noise_volume += eff;
+    if (st.sleeper_noise_volume >= r.stealth_sleeper_wake_volume) {
+        st.sleeper_noise_volume = r.stealth_sleeper_wake_volume;
+        // Stock World.CheckSleeperVolumeNoise(pos): the Game wakes volumes
+        // whose AABB contains the point (post-tick drain of this ring).
+        w.pushSleeperVolumeNoise(ev.x, ev.y, ev.z);
+    }
+    // Heat map (stock AIDirector.NotifyActivity): heatMapStrength x the
+    // (muffled) volumeScale, held for heat_map_time x 10 ticks.
+    if (ev.heat_map_strength > 0) {
+        w.director.notifyActivity(ev.x, ev.z, ev.heat_map_strength * scale, ev.heat_map_time * 10.0);
+    }
+}
+
+/// Stock PlayerStealth.TickServer (IL=430): per-tick noise decay (NoiseCleanup
+/// + CalcVolume), sleeper-volume decay, and the attraction pass — a zombie
+/// hears when `noiseVolume x (1+feralSense) / (dist x 0.6 + 0.4) x
+/// detectUsScale >= 1` inside the attraction radius.
+fn stealthTick(w: *World, s: Slot) void {
+    const r = w.rules.ai;
+    const st = &w.stealth[s];
+    // NoiseCleanup: decrement ticks, drop expired entries.
+    var i: u8 = 0;
+    while (i < st.noise_n) {
+        if (st.noises[i].ticks <= 1) {
+            var j = i;
+            while (j + 1 < st.noise_n) : (j += 1) st.noises[j] = st.noises[j + 1];
+            st.noise_n -= 1;
+        } else {
+            st.noises[i].ticks -= 1;
+            i += 1;
+        }
+    }
+    // CalcVolume: geometric-decay sum (0.6^i), then (sum x 2.35)^0.86 x 1.5
+    // x the Noise passive.
+    var sum: f32 = 0;
+    var wgt: f32 = 1;
+    for (st.noises[0..st.noise_n]) |n| {
+        sum += n.volume * wgt;
+        wgt *= r.stealth_noise_decay;
+    }
+    const vol = std.math.pow(f32, sum * r.stealth_noise_curve_a, r.stealth_noise_curve_b) *
+        r.stealth_noise_scale * r.stealth_noise_passive;
+    st.noise_volume = vol;
+    // Sleeper-volume decay: 2.5/tick once the loud-noise wait window elapses.
+    if (st.sleeper_noise_wait_ticks > 0) {
+        st.sleeper_noise_wait_ticks -= 1;
+    } else if (st.sleeper_noise_volume > 0) {
+        st.sleeper_noise_volume -= r.stealth_sleeper_volume_decay;
+        if (st.sleeper_noise_volume < 0) st.sleeper_noise_volume = 0;
+    }
+    // Attraction (stock TickServer IL_01BF+): while the raw sum is non-zero,
+    // scan the attraction radius around the player for hearing zombies.
+    if (sum <= 0) return;
+    const sense = r.stealth_attract_sense_scale;
+    var radius = sum * r.stealth_noise_decay * (1 + sense * 1.6);
+    radius = @min(radius, r.stealth_attract_radius_cap_a + r.stealth_attract_radius_cap_b * sense);
+    if (radius <= 0) return;
+    const px = w.transform[s].x;
+    const pz = w.transform[s].z;
+    const r2 = radius * radius;
+    for (query.groupSlice(w, .zombie)) |zs| {
+        if (!w.alive[zs] or !w.mask[zs].zombie_ai or !w.mask[zs].transform) continue;
+        const dx = w.transform[zs].x - px;
+        const dz = w.transform[zs].z - pz;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > r2) continue;
+        const dist = @sqrt(d2);
+        // Stock heard test (TickServer IL_0254-02B4): noiseVolume x
+        // (1 + feralSense) / (dist x 0.6 + 0.4) x detectUsScale >= 1.
+        const heard = vol * (1 + r.stealth_hear_feral_sense) /
+            (dist * 0.6 + 0.4) * r.stealth_hear_detect_us;
+        if (heard < 1) continue;
+        const ai = &w.zombie_ai[zs];
+        if (w.mask[zs].sleeper and !w.sleeper[zs].awake) {
+            // A sleeping zombie that hears wakes and investigates (stock
+            // sleeper wake; the 360-cap volume wake is the separate
+            // CheckSleeperVolumeNoise leg).
+            w.sleeper[zs].awake = true;
+            ai.state = .chase;
+            ai.alert = true;
+            w.pushSleeperWake(zs);
+        }
+        if (ai.state == .idle or ai.state == .wander) {
+            ai.alert = true;
+            ai.state = .chase;
+            ai.target_id = -1;
+            ai.spot_x = px;
+            ai.spot_z = pz;
+            ai.has_spot = true;
+        }
+    }
+}
+
 pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // Zombie AI also drives animal wander (kind.animal reuses zombie_ai mask).
     if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
@@ -6141,4 +6286,115 @@ test "worn items sell for less (PercentUsesLeft rides the sold stack)" {
     w.inventory[ps].slots[0] = .{ .item_id = 77, .count = 2, .quality = 1 };
     try std.testing.expect(trade(&w, 0, trader_id, 77, 2, 1, 6));
     try std.testing.expectEqual(@as(u32, 350), w.wallet[ps].coins);
+}
+
+test "stealth noise: a loud clip folds into the player and alerts a zombie" {
+    // RE entity-ai.md PlayerStealth: a relayed sound with a sounds.xml Noise
+    // row accumulates into the player's stealth list; CalcVolume + the heard
+    // test alert an idle zombie within the attraction radius (it investigates
+    // the player's spot, same tick — stealth runs before the AI pass).
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4 } } };
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    const z = w.spawnZombie(10, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(!w.zombie_ai[zs].alert);
+    // pipe_pistol_fire (stock V3.1.4): volume 62, 2 s = 40 ticks, muffle 0.8.
+    w.pushStealthNoise(ps, 0, 70, 0, 62, 40, 0.8, 0, 0);
+    systemStealth(&w);
+    // Radius = min(62 x 0.6, 40) = 37.2 covers 10 m; heard = 108.8 / 6.4 >= 1.
+    try std.testing.expect(w.zombie_ai[zs].alert);
+    try std.testing.expect(w.zombie_ai[zs].state == .chase);
+    try std.testing.expect(w.zombie_ai[zs].has_spot);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), w.zombie_ai[zs].spot_x, 0.01);
+    // Ring consumed (consume-owns-drain), noise volume is the CalcVolume fold.
+    try std.testing.expectEqual(@as(usize, 0), w.stealth_noise_n);
+    try std.testing.expect(w.stealth[ps].noise_volume > 50.0);
+}
+
+test "stealth noise: crouch muffle scales the noise volume" {
+    // RE AIDirector.NotifyNoise: a crouched instigator's volumeScale is
+    // multiplied by the clip's muffled_when_crouched before the fold.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // stepdirt (V3.1.4): volume 5, muffle 0.507.
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0, 0);
+    systemStealth(&w);
+    const standing = w.stealth[ps].noise_volume;
+    // The entry itself is unfolded (5); the muffle scales the fold.
+    try std.testing.expectApproxEqAbs(@as(f32, 5), w.stealth[ps].noises[0].volume, 0.001);
+    w.stealth[ps] = .{};
+    w.player[ps].crouching = true;
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0, 0);
+    systemStealth(&w);
+    const crouched = w.stealth[ps].noise_volume;
+    try std.testing.expect(crouched < standing);
+    // Entry volume carries the muffle: 5 x 0.507.
+    try std.testing.expectApproxEqAbs(@as(f32, 5 * 0.507), w.stealth[ps].noises[0].volume, 0.001);
+}
+
+test "stealth noise: sleeper-volume cap queues a volume wake, then decays" {
+    // RE PlayerStealth.NotifyNoise: the curved volume accumulates into
+    // sleeperNoiseVolume (cap 360 → World.CheckSleeperVolumeNoise) and decays
+    // 2.5/tick once the loud-noise wait window elapses.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Loud: volume 120 → eff = 60 + 60^1.4 ~ 368.5 > 360 → cap + wake.
+    w.pushStealthNoise(ps, 0, 70, 0, 120, 80, 1.0, 0, 0);
+    systemStealth(&w);
+    try std.testing.expectEqual(@as(f32, 360.0), w.stealth[ps].sleeper_noise_volume);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_volume_noise_n);
+    // Loud noise holds the decay for the wait window (stock 20 ticks).
+    for (0..10) |_| systemStealth(&w);
+    try std.testing.expectEqual(@as(f32, 360.0), w.stealth[ps].sleeper_noise_volume);
+    for (0..10) |_| systemStealth(&w);
+    try std.testing.expect(w.stealth[ps].sleeper_noise_volume < 360.0);
+    // Quiet noise (stepcloth 3 < loud 11) decays immediately: 3 - 2.5 = 0.5.
+    w.stealth[ps] = .{};
+    w.pushStealthNoise(ps, 0, 70, 0, 3, 20, 1.0, 0, 0);
+    systemStealth(&w);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), w.stealth[ps].sleeper_noise_volume, 0.001);
+    systemStealth(&w);
+    try std.testing.expectEqual(@as(f32, 0.0), w.stealth[ps].sleeper_noise_volume);
+}
+
+test "stealth noise: a sleeping zombie that hears wakes" {
+    // RE PlayerStealth attraction: a sleeping zombie inside the attraction
+    // radius that passes the heard test wakes and investigates (the separate
+    // 360-cap volume wake covers whole volumes).
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4 } } };
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    const z = w.spawnSleeperDef(5, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    try std.testing.expect(!w.sleeper[zs].awake);
+    // stepbush (V3.1.4): volume 11 — radius 6.6 covers 5 m, heard ~ 7 >= 1.
+    w.pushStealthNoise(ps, 0, 70, 0, 11, 60, 0.507, 0, 0);
+    systemStealth(&w);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+}
+
+test "stealth noise: heat rows feed the activity map" {
+    // RE AIDirector.NotifyNoise: heat_map_strength > 0 adds activity to the
+    // heat map for the region (x10 ticks, stock AddAudioData heatMapTime).
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Auger_Fire_Start (V3.1.4): heat 1.0 for 90 s.
+    w.pushStealthNoise(ps, 0, 70, 0, 60, 40, 1.0, 1.0, 90);
+    systemStealth(&w);
+    try std.testing.expectEqual(@as(usize, 1), w.director.heat_n);
+    // notifyActivity: activity = value, decay = value / (duration_ticks / 20)
+    // per second — 90 s x 10 ticks = 900 ticks → 1.0 / 45 s.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.director.heat[0].activity, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 45.0), w.director.heat[0].decay, 0.0001);
 }

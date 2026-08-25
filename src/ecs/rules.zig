@@ -31,6 +31,11 @@ pub const Systems = struct {
     /// AIDirector, spawning.md section 2): off stops animals; independent of
     /// `director` so a no-zombie mode can keep wandering wildlife.
     animals: bool = true,
+    /// Player stealth-noise model (RE entity-ai.md PlayerStealth): consumes
+    /// the movement-noise ring (sound relay), accumulates per-player noise
+    /// volume, wakes sleepers at the volume cap, and feeds the AI hearing
+    /// test. Off means relayed sounds never alert AI.
+    stealth: bool = true,
     /// Zombie AI task selection and movement.
     ai: bool = true,
     vehicles: bool = true,
@@ -124,6 +129,39 @@ pub const Ai = struct {
     /// Noise events the consume pass drains per tick (bursts beyond the cap
     /// are dropped; the ring holds one tick's worth).
     noise_events_per_tick: u8 = 2,
+    /// --- Movement-noise volume model (RE entity-ai.md PlayerStealth) ---
+    /// The per-clip volumes/decays themselves are game data (sounds.xml
+    /// `<Noise>` rows, loaded by assets/noise.zig); these are the stock model
+    /// constants, all configurable via mode packs.
+    /// Geometric decay per stealth-list slot in CalcVolume (0.6^i weighting).
+    stealth_noise_decay: f32 = 0.6,
+    /// CalcVolume curve: (sum × 2.35)^0.86, then × 1.5.
+    stealth_noise_curve_a: f32 = 2.35,
+    stealth_noise_curve_b: f32 = 0.86,
+    stealth_noise_scale: f32 = 1.5,
+    /// EffectManager.GetValue(Noise) analog: the sim carries no equipment
+    /// passives, so stock's value with no items is 1.0; a server can scale
+    /// all player noise through this knob instead of patching data.
+    stealth_noise_passive: f32 = 1.0,
+    /// Attraction radius: min(sum × 0.6 × (1 + senseScale × 1.6), 40 +
+    /// 15 × senseScale); EAIManager.CalcSenseScale defaults to 0 here.
+    stealth_attract_sense_scale: f32 = 0.0,
+    stealth_attract_radius_cap_a: f32 = 40.0,
+    stealth_attract_radius_cap_b: f32 = 15.0,
+    /// Per-enemy hearing test: heard when noiseVolume × (1 + feralSense) /
+    /// (dist × 0.6 + 0.4) × detectUsScale ≥ 1. Stock per-entity feralSense
+    /// (bloodmoon/feral) and the 0.3 POI-resident DetectUsScale are not
+    /// modeled; these floors replace them.
+    stealth_hear_feral_sense: f32 = 0.0,
+    stealth_hear_detect_us: f32 = 1.0,
+    /// Sleeper wake: NotifyNoise accumulates the (curved) volume into
+    /// sleeperNoiseVolume, capped at 360; reaching the cap wakes sleeper
+    /// volumes at the noise position. The cap decays 2.5/tick once the
+    /// wait window (20 ticks after a volume ≥ 11 noise) elapses.
+    stealth_sleeper_wake_volume: f32 = 360.0,
+    stealth_sleeper_volume_decay: f32 = 2.5,
+    stealth_loud_volume: f32 = 11.0,
+    stealth_loud_wait_ticks: i32 = 20,
     /// Demolition explosion effect floors (RE entity-ai.md EntityZombieCop:
     /// the stock values live in the class's ExplosionData value string, which
     /// is data-driven and not parsed - these floors bound the AoE). Radius in
@@ -596,6 +634,20 @@ pub const AiOverlay = struct {
     crouch_sleeper_detect_range: ?f32 = null,
     combat_noise_radius: ?f32 = null,
     noise_events_per_tick: ?u8 = null,
+    stealth_noise_decay: ?f32 = null,
+    stealth_noise_curve_a: ?f32 = null,
+    stealth_noise_curve_b: ?f32 = null,
+    stealth_noise_scale: ?f32 = null,
+    stealth_noise_passive: ?f32 = null,
+    stealth_attract_sense_scale: ?f32 = null,
+    stealth_attract_radius_cap_a: ?f32 = null,
+    stealth_attract_radius_cap_b: ?f32 = null,
+    stealth_hear_feral_sense: ?f32 = null,
+    stealth_hear_detect_us: ?f32 = null,
+    stealth_sleeper_wake_volume: ?f32 = null,
+    stealth_sleeper_volume_decay: ?f32 = null,
+    stealth_loud_volume: ?f32 = null,
+    stealth_loud_wait_ticks: ?i32 = null,
     explosion_radius: ?f32 = null,
     explosion_block_damage: ?u16 = null,
     explosion_entity_damage: ?f32 = null,
@@ -757,6 +809,7 @@ pub const SystemsOverlay = struct {
     buffs: ?bool = null,
     director: ?bool = null,
     animals: ?bool = null,
+    stealth: ?bool = null,
     ai: ?bool = null,
     vehicles: ?bool = null,
     turrets: ?bool = null,
