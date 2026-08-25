@@ -441,6 +441,171 @@ pub fn survival(t: *const Table) Survival {
     return out;
 }
 
+/// --- Revertible passive-effects VM (bounded EffectManager surface) ---
+///
+/// Stock evaluates every active buff's passive_effect rows against the entity
+/// on each buff update (EffectManager.GetValue); this VM folds the rows of a
+/// tracked surface into one additive delta set per buff and sums the active
+/// set. Removing a buff reverses its contribution exactly - the total is a
+/// pure recomputation over the active set (the paper's revertible-effects
+/// discipline, no stale inverse records). The pass is bounded:
+/// `max_buffs_per_entity` active slots, no allocation, no table writes.
+/// The tracked surface is the stats the sim owns: health/food/water/stamina
+/// (values and change-over-time) and the damage-resist percents. Rows outside
+/// it are counted but not simulated (recorded, not guessed).
+pub const TrackedDeltas = struct {
+    hp_max: f32 = 0,
+    hp_ot: f32 = 0,
+    food_max: f32 = 0,
+    food_ot: f32 = 0,
+    water_max: f32 = 0,
+    water_ot: f32 = 0,
+    stamina_max: f32 = 0,
+    stamina_ot: f32 = 0,
+    /// PhysicalDamageResist percent (stock passive 41, GetTotalPhysicalArmorRating).
+    phys_resist: f32 = 0,
+    general_resist: f32 = 0,
+    elem_resist: f32 = 0,
+
+    pub fn any(self: TrackedDeltas) bool {
+        return self.hp_max != 0 or self.hp_ot != 0 or self.food_max != 0 or
+            self.food_ot != 0 or self.water_max != 0 or self.water_ot != 0 or
+            self.stamina_max != 0 or self.stamina_ot != 0 or
+            self.phys_resist != 0 or self.general_resist != 0 or self.elem_resist != 0;
+    }
+};
+
+const TrackedField = enum(u8) {
+    hp_max,
+    hp_ot,
+    food_max,
+    food_ot,
+    water_max,
+    water_ot,
+    stamina_max,
+    stamina_ot,
+    phys_resist,
+    general_resist,
+    elem_resist,
+};
+
+const tracked_names = [_]struct { name: []const u8, field: TrackedField }{
+    .{ .name = "HealthChangeOT", .field = .hp_ot },
+    .{ .name = "FoodChangeOT", .field = .food_ot },
+    .{ .name = "WaterChangeOT", .field = .water_ot },
+    .{ .name = "StaminaChangeOT", .field = .stamina_ot },
+    .{ .name = "HealthMax", .field = .hp_max },
+    .{ .name = "FoodMax", .field = .food_max },
+    .{ .name = "WaterMax", .field = .water_max },
+    .{ .name = "StaminaMax", .field = .stamina_max },
+    .{ .name = "PhysicalDamageResist", .field = .phys_resist },
+    .{ .name = "GeneralDamageResist", .field = .general_resist },
+    .{ .name = "ElementalDamageResist", .field = .elem_resist },
+};
+
+fn addTo(out: *TrackedDeltas, field: TrackedField, v: f32) void {
+    switch (field) {
+        inline else => |f| @field(out, @tagName(f)) += v,
+    }
+}
+
+fn addDeltas(a: *TrackedDeltas, b: TrackedDeltas) void {
+    inline for (@typeInfo(TrackedDeltas).@"struct".fields) |f| {
+        @field(a, f.name) += @field(b, f.name);
+    }
+}
+
+/// Fold one buff's passive_effect rows over the tracked surface.
+/// `base_add`/`base_subtract` are flat deltas; `perc_*` keep the raw XML
+/// fraction (the survival loop applies `fraction x base / 100` per second -
+/// the pre-VM arithmetic, unchanged). `base_set` and any other op over a
+/// tracked name are omitted: without the per-entity base value the delta is
+/// not defined (recorded, not guessed).
+pub fn trackedDeltas(def: *const BuffDef) TrackedDeltas {
+    var out: TrackedDeltas = .{};
+    for (def.passives) |p| {
+        const field = blk: {
+            for (tracked_names) |t| {
+                if (std.mem.eql(u8, t.name, p.name)) break :blk t.field;
+            }
+            break :blk null;
+        } orelse continue;
+        switch (p.op) {
+            .base_add => addTo(&out, field, p.value),
+            .base_subtract => addTo(&out, field, -p.value),
+            .perc_add => addTo(&out, field, p.value),
+            .perc_subtract => addTo(&out, field, -p.value),
+            else => continue,
+        }
+    }
+    return out;
+}
+
+/// Sum of the tracked deltas over an entity's active buffs (revertible by
+/// recomputation: removing a buff drops its contribution exactly).
+pub fn effectTotals(t: *const Table, set: *const components.BuffSet) TrackedDeltas {
+    var out: TrackedDeltas = .{};
+    for (&set.slots) |*slot| {
+        if (!slot.active) continue;
+        if (t.byId(slot.def_id)) |def| {
+            addDeltas(&out, trackedDeltas(&def));
+        }
+    }
+    return out;
+}
+
+/// Active survival-stage state: which buffStatusHungry/Thirsty stage is in
+/// effect, from buffStatusCheck01's StatComparePercCurrentToMax thresholds
+/// (fractions of max). 0 = none; 1/2/3 = the buffStatus*0{1,2,3} stage.
+pub const SurvivalStages = struct {
+    hungry: u8 = 0,
+    thirsty: u8 = 0,
+};
+
+fn stageFor(frac: f32, s0: f32, s1: f32, s2: f32) u8 {
+    if (s2 > 0 and frac <= s2) return 3;
+    if (s1 > 0 and frac <= s1) return 2;
+    if (s0 > 0 and frac <= s0) return 1;
+    return 0;
+}
+
+/// Stock drives starvation/dehydration from conditional buffs, not a fixed
+/// rule: buffStatusCheck01 applies the matching stage buff on its 2 s update.
+/// Stage 3 (<= 2% of max) is the damaging stage the survival loop reacts to.
+pub fn survivalStages(sv: Survival, h: *const components.Health) SurvivalStages {
+    const f = if (h.food_max > 0) h.food / h.food_max else 0;
+    const w = if (h.water_max > 0) h.water / h.water_max else 0;
+    return .{
+        .hungry = stageFor(f, sv.hungry_frac[0], sv.hungry_frac[1], sv.hungry_frac[2]),
+        .thirsty = stageFor(w, sv.thirsty_frac[0], sv.thirsty_frac[1], sv.thirsty_frac[2]),
+    };
+}
+
+/// Name of the conditional survival buff for a stage, or null for stage 0.
+pub fn stageBuffName(stage: u8, thirsty: bool) ?[]const u8 {
+    if (stage < 1 or stage > 3) return null;
+    return switch (stage) {
+        1 => if (thirsty) "buffStatusThirsty01" else "buffStatusHungry01",
+        2 => if (thirsty) "buffStatusThirsty02" else "buffStatusHungry02",
+        else => if (thirsty) "buffStatusThirsty03" else "buffStatusHungry03",
+    };
+}
+
+/// Health lost per real second by a buff's `ModifyStats Health subtract`
+/// triggered row (stock applies it once per update_rate; this is value / the
+/// update interval in seconds, the same conversion healthLossPerSecond used).
+pub fn hpLossPerSecond(def: *const BuffDef) f32 {
+    const rate_ticks: f32 = @floatFromInt(@max(1, def.update_rate_ticks));
+    const secs = rate_ticks / 20.0;
+    for (def.stat_mods) |m| {
+        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (m.op != .base_subtract and m.op != .subtract) continue;
+        if (m.value <= 0 or secs <= 0) continue;
+        return m.value / secs;
+    }
+    return 0;
+}
+
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
     return paths.tryLoadConfig("buffs.xml", Table, loadFromPath, allocator, game_dir, config_dir);
 }
@@ -547,6 +712,18 @@ test "survival numbers resolve from the shipped buffs.xml" {
     // buffStatusHungry03: ModifyStats Health subtract .25 per update.
     try std.testing.expect(sv.starve_hp_per_s > 0);
     try std.testing.expect(sv.dehydrate_hp_per_s > 0);
+    // The VM folds the real rows: Hungry03's StaminaChangeOT perc_subtract
+    // lands in the tracked deltas and its stage-3 Health loss rate reads off
+    // the def.
+    const h3 = t.byName("buffStatusHungry03").?;
+    const d3 = trackedDeltas(&h3);
+    try std.testing.expectApproxEqAbs(@as(f32, -0.1), d3.stamina_ot, 0.001);
+    try std.testing.expectApproxEqAbs(sv.starve_hp_per_s, hpLossPerSecond(&h3), 0.0001);
+    // A starved player resolves to stage 3 for both bars.
+    var hh: components.Health = .{ .food_max = 100, .water_max = 100, .food = 1, .water = 1 };
+    const st = survivalStages(sv, &hh);
+    try std.testing.expectEqual(@as(u8, 3), st.hungry);
+    try std.testing.expectEqual(@as(u8, 3), st.thirsty);
 }
 
 test "an empty table resolves to not-ok rather than to zeros that look real" {
@@ -555,3 +732,93 @@ test "an empty table resolves to not-ok rather than to zeros that look real" {
     const sv = survival(&t);
     try std.testing.expect(!sv.ok());
 }
+
+test "trackedDeltas folds the tracked surface, omits base_set and untracked names" {
+    const def = BuffDef{
+        .name = "testBuff",
+        .passives = &.{
+            .{ .name = "HealthChangeOT", .op = .base_add, .value = 2 },
+            .{ .name = "StaminaChangeOT", .op = .perc_subtract, .value = 0.1 },
+            .{ .name = "PhysicalDamageResist", .op = .base_add, .value = 8 },
+            .{ .name = "GeneralDamageResist", .op = .base_subtract, .value = 3 },
+            .{ .name = "HealthMax", .op = .base_set, .value = 150 }, // no base -> omitted
+            .{ .name = "HarvestCount", .op = .base_add, .value = 3 }, // untracked
+        },
+    };
+    const d = trackedDeltas(&def);
+    try std.testing.expectEqual(@as(f32, 2), d.hp_ot);
+    try std.testing.expectEqual(@as(f32, -0.1), d.stamina_ot);
+    try std.testing.expectEqual(@as(f32, 8), d.phys_resist);
+    try std.testing.expectEqual(@as(f32, -3), d.general_resist);
+    try std.testing.expectEqual(@as(f32, 0), d.hp_max); // base_set omitted
+    try std.testing.expect(d.any());
+}
+
+test "effectTotals sums active buffs and reverts exactly on removal" {
+    const def = BuffDef{
+        .name = "testBuff",
+        .passives = &.{
+            .{ .name = "HealthChangeOT", .op = .base_add, .value = 2 },
+            .{ .name = "StaminaMax", .op = .base_add, .value = 10 },
+        },
+    };
+    const defs = [_]BuffDef{def};
+    const t = Table{ .defs = defs[0..] };
+    var set: components.BuffSet = .{};
+    set.slots[0] = .{ .active = true, .def_id = 0 };
+    const one = effectTotals(&t, &set);
+    try std.testing.expectEqual(@as(f32, 2), one.hp_ot);
+    try std.testing.expectEqual(@as(f32, 10), one.stamina_max);
+    // A second active slot of the same def doubles the sum (additive deltas).
+    set.slots[1] = .{ .active = true, .def_id = 0 };
+    const two = effectTotals(&t, &set);
+    try std.testing.expectEqual(@as(f32, 4), two.hp_ot);
+    try std.testing.expectEqual(@as(f32, 20), two.stamina_max);
+    // Removal recomputes without it: reverts exactly (revertible effects).
+    set.slots[1].active = false;
+    const back = effectTotals(&t, &set);
+    try std.testing.expectEqual(@as(f32, 2), back.hp_ot);
+    try std.testing.expectEqual(@as(f32, 10), back.stamina_max);
+    set.slots[0].active = false;
+    try std.testing.expect(!effectTotals(&t, &set).any());
+}
+
+test "survivalStages selects the stock stage thresholds (0.5 / 0.25 / 0.02)" {
+    const sv = Survival{
+        .hungry_frac = .{ 0.5, 0.25, 0.02 },
+        .thirsty_frac = .{ 0.5, 0.25, 0.02 },
+    };
+    const expect = struct {
+        fn stages(sv_in: Survival, food: f32, water: f32, want_h: u8, want_w: u8) !void {
+            var hh: components.Health = .{ .food_max = 100, .water_max = 100, .food = food, .water = water };
+            const s = survivalStages(sv_in, &hh);
+            try std.testing.expectEqual(@as(u8, want_h), s.hungry);
+            try std.testing.expectEqual(@as(u8, want_w), s.thirsty);
+        }
+    };
+    try expect.stages(sv, 60, 60, 0, 0);
+    try expect.stages(sv, 50, 50, 1, 1); // <= 0.5
+    try expect.stages(sv, 25, 25, 2, 2); // <= 0.25
+    try expect.stages(sv, 2, 2, 3, 3); // <= 0.02
+    try expect.stages(sv, 1, 99, 3, 0);
+}
+
+test "hpLossPerSecond converts the ModifyStats Health row to a per-second rate" {
+    const def = BuffDef{
+        .name = "buffStatusHungry03",
+        .update_rate_ticks = 44, // stock update_rate 2.2 s
+        .stat_mods = &.{ .{ .stat = "Health", .op = .base_subtract, .value = 0.25 } },
+    };
+    const per_s = hpLossPerSecond(&def);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25 / 2.2), per_s, 0.0001);
+}
+
+test "stageBuffName maps stages to the stock conditional buff names" {
+    try std.testing.expectEqualStrings("buffStatusHungry01", stageBuffName(1, false).?);
+    try std.testing.expectEqualStrings("buffStatusHungry02", stageBuffName(2, false).?);
+    try std.testing.expectEqualStrings("buffStatusHungry03", stageBuffName(3, false).?);
+    try std.testing.expectEqualStrings("buffStatusThirsty01", stageBuffName(1, true).?);
+    try std.testing.expectEqualStrings("buffStatusThirsty03", stageBuffName(3, true).?);
+    try std.testing.expect(stageBuffName(0, false) == null);
+}
+

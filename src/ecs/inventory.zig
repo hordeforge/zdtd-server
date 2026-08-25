@@ -121,7 +121,10 @@ fn itemIsArmor(w: *const World, item_id: u16) bool {
     return isArmorOffline(item_id);
 }
 
-/// Armor in equip slots reduces incoming damage (0..0.5).
+/// Armor in equip slots reduces incoming damage (0..0.5), plus the buff-side
+/// PhysicalDamageResist percent from the passive-effects VM (stock
+/// GetTotalPhysicalArmorRating sums the wearer's passive 41 - buffs carry the
+/// same effect as items, so the VM's active-buff total joins the item floor).
 pub fn armorMitigation(w: *const World, peer: usize) f32 {
     const ps = w.playerByPeer(peer) orelse return 0;
     if (!w.mask[ps].inventory) return 0;
@@ -132,7 +135,7 @@ pub fn armorMitigation(w: *const World, peer: usize) f32 {
             pieces += 1;
         }
     }
-    return @min(w.rules.combat.armor_mitigation_cap, pieces * w.rules.combat.armor_mitigation_per_piece);
+    return @min(w.rules.combat.armor_mitigation_cap, pieces * w.rules.combat.armor_mitigation_per_piece + w.buff_phys_resist[ps] / 100.0);
 }
 
 pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {

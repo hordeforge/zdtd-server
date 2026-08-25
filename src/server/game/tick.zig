@@ -15,6 +15,7 @@ const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
 const admin_cmds = @import("../admin_cmds.zig");
 const admin_xml = @import("../admin_xml.zig");
+const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
@@ -87,25 +88,49 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         // is still parsed for offline worlds, but with stock data the regen gate
         // uses sv.hungry_frac[0] / thirsty_frac[0] (T16).
         var hp_delta: f32 = 0;
+        var stamina_penalty: f32 = 0;
         if (use_buff) {
-            const starving = (sv.hungry_frac[2] > 0 and h.food <= sv.hungry_frac[2] * h.food_max) or h.food <= 0;
-            const dehydrated = (sv.thirsty_frac[2] > 0 and h.water <= sv.thirsty_frac[2] * h.water_max) or h.water <= 0;
+            // Passive-effects VM (assets/buffs.zig): keep the matching
+            // conditional stage buffs (buffStatusHungry/Thirsty01..03) in the
+            // entity's BuffSet - the stage IS the starving/dehydrated state -
+            // and drive the stamina penalty from the VM's StaminaChangeOT
+            // total. Revertible: removing a stage buff recomputes the deltas
+            // without it (additive deltas, recompute-from-set).
+            const stages = assets_buffs.survivalStages(sv, h);
+            syncStageBuffs(self, c.entity_id, ps, stages);
+            const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps]);
+            self.sim.buff_phys_resist[ps] = vm.phys_resist;
+            const starving = stages.hungry == 3;
+            const dehydrated = stages.thirsty == 3;
             if (starving or dehydrated) {
-                const per_s = if (starving and dehydrated)
-                    @max(sv.starve_hp_per_s, sv.dehydrate_hp_per_s)
-                else if (starving)
-                    sv.starve_hp_per_s
-                else
-                    sv.dehydrate_hp_per_s;
-                // Wasm-first (AGENTS rule 29): verdict with attacker -1, like
-                // drowning/radiation above.
-                hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, per_s * secs);
+                // HP-loss leg: stock is a triggered `ModifyStats Health
+                // subtract` on the active stage-3 buff's update (not a
+                // passive), so read it off the active stage def.
+                var per_s: f32 = 0;
+                if (starving) {
+                    if (self.buffs.byName("buffStatusHungry03")) |d| per_s = @max(per_s, assets_buffs.hpLossPerSecond(&d));
+                }
+                if (dehydrated) {
+                    if (self.buffs.byName("buffStatusThirsty03")) |d| per_s = @max(per_s, assets_buffs.hpLossPerSecond(&d));
+                }
+                if (per_s > 0) {
+                    // Wasm-first (AGENTS rule 29): verdict with attacker -1,
+                    // like drowning/radiation above.
+                    hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, per_s * secs);
+                }
             } else if (sv.hungry_frac[0] > 0 and sv.thirsty_frac[0] > 0) {
                 if (h.food >= sv.hungry_frac[0] * h.food_max and h.water >= sv.thirsty_frac[0] * h.water_max) {
                     hp_delta += prog.well_fed_regen_per_hour * game_hours;
                 }
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
+            }
+            // Stamina penalty: stock `StaminaChangeOT perc_subtract .1` on
+            // buffStatusHungry03 while its stage holds. The gate moved from
+            // "food/water <= 0" to "stage-3 buff active" (the stock 2%
+            // threshold); the arithmetic is unchanged.
+            if (c.sprint_speed > 0 and vm.stamina_ot != 0 and (stages.hungry == 3 or stages.thirsty == 3)) {
+                stamina_penalty = @abs(vm.stamina_ot) * h.stamina_max / 100.0 * secs;
             }
         } else {
             if (h.food <= 0 or h.water <= 0) {
@@ -127,10 +152,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         }
         const stamina_was = h.stamina;
         if (c.sprint_speed > 0) {
-            if (use_buff and sv.starve_stamina_perc != 0 and (h.food <= 0 or h.water <= 0)) {
-                // Stock StaminaChangeOT perc_subtract is on the buff; apply as a
-                // fraction of max per second while the relevant stage holds.
-                h.stamina = @max(0, h.stamina - @abs(sv.starve_stamina_perc) * h.stamina_max / 100.0 * secs);
+            if (stamina_penalty > 0) {
+                h.stamina = @max(0, h.stamina - stamina_penalty);
             } else {
                 h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
             }
@@ -167,6 +190,58 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 c.survival_sync_cd -= dt;
             }
         }
+    }
+}
+
+/// Keep the conditional survival stage buffs (buffStatusHungry/Thirsty01..03)
+/// in the entity's BuffSet matching the resolved stages, relaying adds so the
+/// stock client shows the same HUD state. Revertible: a stage change removes
+/// the stale buff (flagged; the buff tick relays the removal) and the VM
+/// recomputes its deltas without it. No-op when the stages already match.
+fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, stages: assets_buffs.SurvivalStages) void {
+    const set = self.sim.buffsMut(ps);
+    var present: [2]bool = .{ false, false }; // hungry, thirsty
+    var remove_ids: [4]u16 = undefined;
+    var n_rem: usize = 0;
+    for (&set.slots) |*slot| {
+        if (!slot.active) continue;
+        const def = self.buffs.byId(slot.def_id) orelse continue;
+        const is_hungry = std.mem.startsWith(u8, def.name, "buffStatusHungry");
+        const is_thirsty = std.mem.startsWith(u8, def.name, "buffStatusThirsty");
+        if (!is_hungry and !is_thirsty) continue;
+        const stage: u8 = if (std.mem.endsWith(u8, def.name, "01"))
+            1
+        else if (std.mem.endsWith(u8, def.name, "02"))
+            2
+        else
+            3;
+        const wanted = if (is_hungry) stages.hungry == stage else stages.thirsty == stage;
+        if (wanted) {
+            if (is_hungry) present[0] = true else present[1] = true;
+        } else if (n_rem < remove_ids.len) {
+            remove_ids[n_rem] = slot.def_id;
+            n_rem += 1;
+        }
+    }
+    for (remove_ids[0..n_rem]) |id| {
+        _ = ecs.buff.remove(set, id);
+    }
+    const wants: [2]?[]const u8 = .{
+        assets_buffs.stageBuffName(stages.hungry, false),
+        assets_buffs.stageBuffName(stages.thirsty, true),
+    };
+    for (wants, 0..) |name, i| {
+        if (name == null or present[i]) continue;
+        const def_id = self.buffs.indexOfName(name.?) orelse continue;
+        const def = self.buffs.byId(def_id) orelse continue;
+        _ = ecs.buff.add(set, .{
+            .def_id = def_id,
+            .duration = def.duration,
+            .stack_type = def.stack_type,
+            .update_rate_ticks = def.update_rate_ticks,
+            .remove_on_death = def.remove_on_death,
+        }, ecs.buff.duration_from_class, -1, 0, 0, 0);
+        game_social.relayBuff(self, entity_id, def.name, true, -1, null) catch {};
     }
 }
 

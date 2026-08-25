@@ -235,6 +235,11 @@ pub const World = struct {
     /// Lazily attached (see buffsMut): most entities never carry a buff, and
     /// spawnBase resets mask[s] wholesale, so a stale set can never be read.
     buffs: [max_entities]c.BuffSet = [_]c.BuffSet{.{}} ** max_entities,
+    /// Buff-side PhysicalDamageResist percent summed over the entity's active
+    /// buffs (the passive-effects VM, assets/buffs.zig effectTotals), refreshed
+    /// by the survival tick. Feeds armorMitigation like stock
+    /// GetTotalPhysicalArmorRating sums the wearer's passive 41.
+    buff_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
 
     /// Peer slots are bounded by the server's fixed client table. Keeping the
     /// reverse index here avoids a full entity scan in every C2S inventory,
