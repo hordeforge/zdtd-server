@@ -3448,3 +3448,38 @@ test "restored buffs re-apply through the effects VM (recompute-from-set)" {
         try std.testing.expectApproxEqAbs(@as(f32, 2), totals.hp_ot, 0.0001);
     }
 }
+
+test "perk max-stat deltas recompute max_hp revertibly" {
+    // perkFortitudeMastery HealthMax is level="4,5" value="50,100": with the
+    // perk at level 5 the survival pass recomputes max_hp = 100 + 100 = 200;
+    // dropping the perk restores the 100 base (recompute-from-set).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.health[ps].base_max_hp = 100;
+    g.sim.health[ps].max_hp = 100;
+    // Own FortitudeMastery at level 5 (the ledger drives the VM fold).
+    cl.skill_levels[0] = .{ .name = "perkFortitudeMastery", .level = 5 };
+    cl.skill_level_n = 1;
+    var i: usize = 0;
+    while (i < 3) : (i += 1) try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 200), g.sim.health[ps].max_hp, 0.001);
+    // Revertible: dropping the perk restores the base on the next fold.
+    cl.skill_level_n = 0;
+    while (i < 6) : (i += 1) try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+}

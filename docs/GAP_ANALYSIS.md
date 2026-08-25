@@ -443,8 +443,12 @@ area and the concrete work.
     update rows pick the stage buffs, replacing the hand-rolled selector).
     Residual: the untracked effect classes
     (RecipeTagUnlocked/LootProb/CraftingTier...), the other triggered actions
-    (ModifyCVar/PlaySound/...) and perk max-stat / stamina-OT consumers stay
-    recorded. Buffs persist across restart (ZPV3) and re-apply through the VM
+    (ModifyCVar/PlaySound/...) and the perk stamina-OT consumer stay
+    recorded. **Perk/buff max-stat SHIPPED 2026-08-25**: the survival pass
+    recomputes the max stats unconditionally from the spawn base + VM deltas
+    (revertible recompute-from-set - Health.base_max_hp captured at spawn;
+    perkFortitudeMastery HealthMax level 5 = max_hp 200, dropping the perk
+    restores 100), with the changed maxes folded into the survival sync. Buffs persist across restart (ZPV3) and re-apply through the VM
     with no re-application pass - the recompute-from-set fold covers a
     restored BuffSet automatically (round-trip test proves it); purchased
     perk levels + skill points persist via the ZPV11 skill tail.

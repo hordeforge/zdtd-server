@@ -30,6 +30,10 @@ pub const max_quality_tiers: u8 = 6;
 pub const Health = struct {
     hp: f32 = 0,
     max_hp: f32 = 0,
+    /// The spawn max (players 100, class-resolved otherwise): the passive-
+    /// effects VM recomputes `max_hp = base_max_hp + deltas` revertibly
+    /// every survival tick, so removing a perk/buff restores the base.
+    base_max_hp: f32 = 0,
     /// PlayerEntityStats Food/Water (0..max). Zombies leave at 0.
     food: f32 = 0,
     food_max: f32 = 100,

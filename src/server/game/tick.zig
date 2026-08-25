@@ -91,6 +91,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         }
         const food_was = h.food;
         const water_was = h.water;
+        const max_hp_was = h.max_hp;
+        const food_max_was = h.food_max;
+        const water_max_was = h.water_max;
+        const stamina_max_was = h.stamina_max;
         h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
         h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
         // Well-fed regen and starvation: when buffs.xml is present the
@@ -127,6 +131,21 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // Armor: buff + perk PhysicalDamageResist join the mitigation like
             // stock GetTotalPhysicalArmorRating sums passive 41 on the wearer.
             self.sim.buff_phys_resist[ps] = vm.phys_resist + pvm.phys_resist;
+            // Perk/buff max-stat deltas: unconditional recompute from the
+            // bases every tick (revertible recompute-from-set - a zero delta
+            // restores the spawn max; the values are stable so no churn).
+            const mhp = vm.hp_max + pvm.hp_max;
+            h.max_hp = @max(1, h.base_max_hp + mhp);
+            if (h.hp > h.max_hp) {
+                h.hp = h.max_hp;
+                self.sim.markDirty(ps, .{ .hp = true });
+            }
+            const mfood = vm.food_max + pvm.food_max;
+            h.food_max = @max(1, 100 + mfood);
+            const mwater = vm.water_max + pvm.water_max;
+            h.water_max = @max(1, 100 + mwater);
+            const mstam = vm.stamina_max + pvm.stamina_max;
+            h.stamina_max = @max(1, 100 + mstam);
             const starving = stages.hungry == 3;
             const dehydrated = stages.thirsty == 3;
             if (starving or dehydrated) {
@@ -171,7 +190,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             h.hp = @min(h.max_hp, @max(0, h.hp + hp_delta));
             self.sim.markDirty(ps, .{ .hp = true });
         }
-        const survival_changed = h.food != food_was or h.water != water_was or hp_delta != 0;
+        const survival_changed = h.food != food_was or h.water != water_was or hp_delta != 0 or
+            h.max_hp != max_hp_was or h.food_max != food_max_was or h.water_max != water_max_was or
+            h.stamina_max != stamina_max_was;
         if (c.sprint_stale_cd > 0) {
             c.sprint_stale_cd -= dt;
             if (c.sprint_stale_cd <= 0) c.sprint_speed = 0;

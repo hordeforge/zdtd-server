@@ -672,6 +672,7 @@ pub const World = struct {
         var h = self.health[slot];
         h.hp = 100;
         h.max_hp = 100;
+        h.base_max_hp = 100;
         // Keep food/water/stamina on respawn; stock does not zero them
         // (the bug did `Health{hp=100,max=100}` which zeroed food=0/water=0).
         if (h.food == 0 and h.food_max == 0) h.food_max = 100;
@@ -873,7 +874,7 @@ pub const World = struct {
             .class_id = true,
         };
         self.transform[s] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
-        self.health[s] = .{ .hp = hp, .max_hp = hp };
+        self.health[s] = .{ .hp = hp, .max_hp = hp, .base_max_hp = hp };
         self.slot_gen[s] +%= 1;
         self.network_id[s] = .{ .id = nid, .gen = self.slot_gen[s] };
         self.kind[s] = kind;
