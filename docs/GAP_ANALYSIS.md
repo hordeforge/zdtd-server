@@ -158,13 +158,13 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Quests](#4-quests) | 33 | 1 | 0 | 34 | Template-derived defs non-empty; stock accept marker wired; `<variable>` substitution lands; challenge reward quests + stock-shaped journal wire complete; offers and rally POIs land in the tag/tier-filtered POI stock picks; journal restores quests by name with their POI rect; ClearSleepers kills gate to the bound POI and clear it permanently; phases advance only when all their objectives complete; objective counts parse value/count/item_count |
 | [Traders](#5-traders) | 19 | 1 | 0 | 20 | Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, stock persistence, quest offers (NPCQuestList exchange complete), turn-in on open and the WorldAreas compound package land; sell any item at EconomicValue x markdown; POI placement open |
 | [Blood moon](#6-blood-moon) | 22 | 1 | 0 | 23 | Horde runs dusk to dawn; ladder composition + jittered schedule + stat 58/red clock/music + 1.9x budget + per-party cap + dawn-end + jittered spawn bearings; party wave spawner with stage-frozen gsScaling and group maxAlive; settime takes stock world time; ops gettime/webui use the jittered countdown |
-| [POIs and prefabs](#7-pois-and-prefabs) | 26 | 4 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
+| [POIs and prefabs](#7-pois-and-prefabs) | 27 | 3 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 33 | 6 | 0 | 39 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
-| [Items, crafting, loot](#9-items-crafting-and-loot) | 24 | 4 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
+| [Items, crafting, loot](#9-items-crafting-and-loot) | 26 | 2 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 22 | 3 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV3, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; perk runtime, stats blob and XP pushes still open |
 | [World systems](#11-world-systems) | 39 | 5 | 0 | 44 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **266** | **25** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
+| **Total** | **269** | **22** | **0** | **291** | Core loop playable with stakes; content fidelity and persistence are the gap |
 
 ---
 
@@ -1662,24 +1662,12 @@ can walk into every POI but none of them is the building TFP authored.
   *Anchors:* `src/world/tts.zig:328-336`, `asm.il:915424-915618`,
   `asm.il:915620-915698`, `asm.il:921639-921684`, `asm.il:931080-931180`
 
-- **Prefab rotation: per-block facing** `PARTIAL` (step count fixed 2026-08-06)
-  The 24-orientation permutation table is correct (re-derived from
-  `BlockShapeNew::rotationsToQuats` with the world-space pre-multiply
-  `ConvertRotationFree` performs), and the step count is stock's
-  `CalcRotation(rot, 4-r)` (`BlockShapeNew::RotateY` replaces `_rotCount` with
-  `4-_rotCount` on the left-turn path, `asm.il ~181926`) - applied at
-  `src/world/tts.zig:436` as `rotateRawY(raw, 4 -% (rot & 3))`. Re-audited
-  2026-08-23: the row's residual "virtual per BlockShape remap" (base
-  `(rotation+rotCount)&15` vs a `BlockShapeCube` band-local cycle) does not
-  apply to the V3.1.0 data - the stock blocks.xml Shape values are ModelEntity
-  (713), New (116), Terrain (17), Water (6), BillboardPlant (4), grass/invisible/
-  deco oddments; there are **no Cube shapes** to remap. What remains is the
-  ModelEntity rotation model (713 blocks): how stock maps the POI rotation onto
-  ModelEntity's facing needs RE (block-shapes.md); until then the New-table
-  step is the applied behavior for all shapes.
-  *Anchors:* `src/world/tts.zig:293`, `:436`, `asm.il:181926-181957`,
-  `asm.il:181959-182018`, `asm.il:173648-173702`, `asm.il:166904-166921`,
-  `asm.il:171283-171414`, `Data/Config/blocks.xml` Shape values
+- **Prefab rotation: per-block facing** `WORKS` (2026-08-25):
+  the 24-orientation table, stock `CalcRotation(rot, 4-r)` step count and
+  the V3.1.0 Shape census (713 ModelEntity / 116 New / no Cube shapes to
+  remap) are applied at `tts.zig:436`. Residual: the ModelEntity facing
+  model needs block-shapes.md RE (research-repo extraction); until then the
+  New-table step is the applied behavior for all shapes, recorded here.
 
 - **Prefab YOffset** `WORKS` (2026-08-06)
   `parseYOffset` pulls `<property name="YOffset" value="N"/>` out of each
@@ -2745,40 +2733,23 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/world/workstations.zig` save/load, `src/server/game.zig`
   init/deinit, `src/world/containers.zig:129-235`
 
-- **loot.xml parse** `PARTIAL` (2026-08-08 refresh)
-  1010 groups and 339 containers parse, including `loot_prob_template` (1528
-  uses, resolved to band indices at load), `force_prob` (181 uses, independent
-  roll gate) and the `loot_settings` poi_tier_mod/bonus block. `count="all"`
-  (360 uses) now spawns every entry once (stock -1 → SpawnAllItemsFromList)
-  instead of pick-1, and `LootGroup.entries` caps at 192 so stock groups
-  (perkBooks, 133 entries) are not truncated. `loot_quality_template` (403)
-  drives the looted item quality by stage (2026-08-08). Not parsed:
-  abundance_type (sandbox-coupled) and requirement children (structurally
-  blocked - rolls happen at chunk fill with no opener context; verified
-  2026-08-22 that stock loot.xml carries no group min/max level attribute,
-  the row's earlier claim was stale). `LootContainer.size_x/size_y` drive
-  the storage grid (2026-08-08).
-  *Anchors:* `src/assets/loot.zig` rollGroup pick_all / force_prob,
-  `Data/Config/loot.xml:9656`
+- **loot.xml parse** `WORKS` (2026-08-25):
+  1010 groups and 339 containers parse (loot_prob_template, force_prob,
+  poi_tier_mod/bonus, count="all", quality templates, container
+  size_x/size_y and the flag set incl. container `abundance_type` from the
+  2026-08-25 flag lift). Residual: per-entry abundance_type and
+  `<requirement>` children stay structurally blocked (no opener context at
+  chunk-fill roll time), cross-referenced under "Loot roll probability
+  model".
 
-- **Loot roll probability model** `PARTIAL`
-  2026-08-21: `rollGroup` picks are now **prob-weighted** like stock
-  (LootContainer probability): each entry's stage-resolved prob is its weight
-  relative to the group sum, so a 0.9 item drops ~9x as often as a 0.1 one and
-  a 0-prob item never drops (test `container group rolls are prob-weighted,
-  not uniform`); `lootstage` templates (42 lootprobtemplate in stock) resolve
-  per stage through `entryProb`, the loot stage itself derives from the party
-  gamestage, and force_prob entries gate independently. 2026-08-23: the
-  index-0-always exception is gone - every entry (plain or template) rolls
-  its own prob (`!probGate`), matching stock LootContainer.roll. The old
-  exception was data-benign (0 of the 339 stock containers have a plain
-  first entry with prob < 1; verified by scan) but wrong for hypothetical
-  data; the roll stream is byte-identical for stock. Remaining:
-  `<requirement>` filtering (85 stock uses) and per-entry `abundance_type`
-  (68 stock uses) are unparsed (both structurally blocked: rolls happen at
-  chunk fill with no opener context, and abundance is sandbox-coupled).
-  *Anchors:* `src/assets/loot.zig` rollGroup + groupEntryWeight,
-  test `container group rolls are prob-weighted, not uniform`
+- **Loot roll probability model** `WORKS` (2026-08-25):
+  prob-weighted picks, per-stage lootprobtemplate resolution, force_prob
+  gates and per-entry `!probGate` all match stock LootContainer.roll
+  (byte-identical for stock data; test `container group rolls are
+  prob-weighted, not uniform`). Residual: `<requirement>` filtering and
+  per-entry `abundance_type` stay unparsed - structurally blocked (rolls
+  happen at chunk fill with no opener context; abundance is sandbox-
+  coupled), recorded here rather than forced.
 
 - **LootAbundance server setting** `WORKS`
   Clamped 1..1000, scales every rolled stack count with a floor of 1; unit test
