@@ -2914,6 +2914,10 @@ pub const Game = struct {
         return game_craft.tickBlockRadiusEffects(self);
     }
 
+    pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
+        return game_craft.tickAlwaysOnRadiusEffects(self);
+    }
+
     pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
         return game_loot.ecsIdFromItemName(self, name);
     }

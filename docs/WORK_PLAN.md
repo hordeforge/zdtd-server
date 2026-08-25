@@ -25,10 +25,9 @@ dispatch + challenges), T34 (crafting XP: verified near-zero in shipped
 data), T36 (BlockTrigger authority), T37 (bedroll respawn targeting;
 ownership persistence details are recorded PARTIAL/waived in the scorecard).
 Still open / recorded, not wired: T30 (drone companion — zero stock AITask
-uses, deferred), T35 (air-drop compass marker), T38 (radius effects for
-always-on light sources), plus the sandbox/drop/sound items recorded in the
-scorecard rows. The per-task "Why" text below is historical; GAP/STATUS win
-on conflict.
+uses, deferred), T35 (air-drop compass marker). T38 (always-on radius
+effects) shipped 2026-08-26. The per-task "Why" text below is historical;
+GAP/STATUS win on conflict.
 
 ---
 
@@ -967,10 +966,20 @@ elsewhere; this task is only the persistence gap.
 
 ## T38. `ActiveRadiusEffects` for always-on light sources (torch, candle, radiated barrel)
 
-**Status: partially landed 2026-08-10.** Workstation-backed radius-effect
-blocks (campfire, burning barrel) work: see [HARDCODE_AUDIT A36](archive/HARDCODE_AUDIT_2026-08-08.md).
-This task is the residual: blocks that carry `ActiveRadiusEffects` but have
-no fuel module and therefore no workstation record.
+**Status: DONE 2026-08-26.** Workstation-backed radius-effect blocks
+(campfire, burning barrel) work (HARDCODE_AUDIT A36) and the always-on
+no-fuel residual is wired: `tickAlwaysOnRadiusEffects`
+(`src/server/game/craft.zig`) scans each player's local 5x5x5 block
+neighborhood for the seven stock no-fuel radius blocks (wallTorchLight /
+wallTorchLightPlayer / candleWallLight / burningBarrel / burningBarrelPlayer
+/ cntBarrelRadiatedSingle00 / decoPumpkinJackOLantern) and grants their
+ActiveRadiusEffects buff (buffCampfireAOE warmth, buffCandleAOE,
+buffRadiation01) to players within radius, refreshing while in range.
+The scan replaces the placed-block index the original task called for: the
+source set is seven blocks with radius <= 3, so a per-player local scan is
+bounded (125 lookups/player/tick) and needs no index maintenance across
+setBlock/prefab stamps. Scenario radius-alwayson covers the radiated
+barrel -> buffRadiation01 grant.
 
 **Why:** `dedicated-misc-systems.md` "BlockRadiusEffect" describes the scan
 as walking `TileEntity` instances generically, not specifically workstations.

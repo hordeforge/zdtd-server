@@ -1605,6 +1605,49 @@ test "scenario cleared sleeper volume re-arms after LootRespawnDays" {
     std.debug.print("PASS sleeper-rearm: cleared volume respawns after LootRespawnDays; 0 days never re-arms\n", .{});
 }
 
+test "scenario always-on radius effect: radiated barrel grants buffRadiation01" {
+    // WORK_PLAN T38 (RE dedicated-misc-systems.md BlockRadiusEffect):
+    // always-on no-fuel sources (wallTorchLight, candleWallLight,
+    // burningBarrel, cntBarrelRadiatedSingle00, decoPumpkinJackOLantern)
+    // grant their ActiveRadiusEffects buff to players within radius; the
+    // per-player local 5x5x5 scan applies them each tick. Real game-dir
+    // blocks/buffs. Skipped without the game dir.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const barrel_id = g.blocks.byName("cntBarrelRadiatedSingle00").?.id;
+    const buff_id = g.buffs.indexOfName("buffRadiation01").?;
+    // The radius scan runs in the 2 Hz side-work block; run it every step.
+    g.sleeper_tick_ticks = 1;
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const ap = g.sim.transform[ps];
+    const bx: i32 = @intFromFloat(ap.x + 1);
+    const by: i32 = @intFromFloat(ap.y);
+    const bz: i32 = @intFromFloat(ap.z);
+    try g.world.setBlockWorld(bx, by, bz, barrel_id);
+
+    var t: u64 = 0;
+    while (t < 3) : (t += 1) try g.step();
+    try std.testing.expect(g.sim.mask[ps].buffs);
+    try std.testing.expect(g.sim.buffs[ps].find(buff_id) != null);
+    std.debug.print("PASS radius-alwayson: radiated barrel grants buffRadiation01 to nearby players\n", .{});
+}
+
 test "scenario group-id sleeper volumes cascade within one placement only" {
     // RE entity-ai.md TouchGroup (IL=52): a volume with a nonzero
     // SleeperVolumeGroupId wakes every other volume of the same prefab

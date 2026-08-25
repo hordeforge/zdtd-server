@@ -194,6 +194,9 @@ pub fn step(self: *Game) !void {
                 std.debug.print("zdtd: {s} broadcastDirtyWorkstations failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
             };
             self.tickBlockRadiusEffects();
+            // Always-on radius sources (torch/candle/radiated barrel/pumpkin,
+            // no fuel module): per-player local scan, WORK_PLAN T38.
+            self.tickAlwaysOnRadiusEffects();
         }
         const daylight = !self.sim.director.clock.isNight();
         _ = self.sim.power.tick(dt, daylight);

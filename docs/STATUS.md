@@ -797,6 +797,14 @@ links sleeper entities to their volume, a per-tick recount fires the
 ClearedUpdate equivalent and the touch re-arm re-triggers the volume
 (scenario sleeper-rearm; respawn_time persists in the ZSTG1 v2 tail). The
 sleeper pose byte table residual stays recorded. The dashboard
+(docs/provenance.html) is synced. Then WORK_PLAN T38 shipped: always-on
+no-fuel radius-effect blocks (torch/candle/burning barrel/radiated
+barrel/pumpkin) now grant their ActiveRadiusEffects buff to players within
+radius - tickAlwaysOnRadiusEffects scans each player's local 5x5x5 block
+neighborhood (seven stock source blocks, radius <= 3) instead of a
+placed-block index, refreshing while in range like the workstation pass
+(scenario radius-alwayson: cntBarrelRadiatedSingle00 grants
+buffRadiation01). The dashboard
 (docs/provenance.html) is synced.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client

@@ -402,6 +402,66 @@ pub fn tickBlockRadiusEffects(self: *Game) void {
     }
 }
 
+/// Always-on BlockRadiusEffect sources with no fuel module (WORK_PLAN T38;
+/// RE dedicated-misc-systems.md BlockRadiusEffect / EntityPlayerLocal.
+/// BlockRadiusEffectsTick IL=83): wallTorchLight(+Player) / candleWallLight /
+/// burningBarrel(+Player) / cntBarrelRadiatedSingle00 /
+/// decoPumpkinJackOLantern grant their ActiveRadiusEffects buff
+/// (buffCampfireAOE warmth, buffCandleAOE, buffRadiation01) to every player
+/// within radius, refreshing while in range (ecs.buff.add refresh; the S2C
+/// relay fires only on a fresh grant like the workstation pass). Stock runs
+/// the radius scan per player tick; zdtd scans the player's local 5x5x5
+/// block neighborhood for no-fuel radius blocks instead of a placed-block
+/// index (the source set is seven blocks, radius <= 3; the fuel-module
+/// workstations stay on tickBlockRadiusEffects, so no double application).
+pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
+    for (&self.clients) |*cl| {
+        if (!cl.joined) continue;
+        const ps = self.sim.playerByPeer(cl.slot) orelse continue;
+        if (!self.sim.mask[ps].transform) continue;
+        const t = self.sim.transform[ps];
+        const px: i32 = @intFromFloat(@floor(t.x));
+        const py: i32 = @intFromFloat(@floor(t.y));
+        const pz: i32 = @intFromFloat(@floor(t.z));
+        var dx: i32 = -2;
+        while (dx <= 2) : (dx += 1) {
+            var dy: i32 = -2;
+            while (dy <= 2) : (dy += 1) {
+                var dz: i32 = -2;
+                while (dz <= 2) : (dz += 1) {
+                    const bx = px + dx;
+                    const by = py + dy;
+                    const bz = pz + dz;
+                    const bid = self.world.blockWorld(bx, by, bz) catch continue;
+                    if (bid == 0) continue;
+                    if (self.blocks.hasFuelModule(bid)) continue; // workstation path owns these
+                    const eff = self.blocks.radiusEffect(bid) orelse continue;
+                    const wx: f32 = @floatFromInt(bx);
+                    const wy: f32 = @floatFromInt(by);
+                    const wz: f32 = @floatFromInt(bz);
+                    const fdx = t.x - wx;
+                    const fdy = t.y - wy;
+                    const fdz = t.z - wz;
+                    if (fdx * fdx + fdy * fdy + fdz * fdz > eff.radius_sq) continue;
+                    const def_id = self.buffs.indexOfName(eff.buff) orelse continue;
+                    const def = self.buffs.byId(def_id) orelse continue;
+                    const set = self.sim.buffsMut(ps);
+                    const res = ecs.buff.add(set, .{
+                        .def_id = def_id,
+                        .duration = def.duration,
+                        .stack_type = def.stack_type,
+                        .update_rate_ticks = def.update_rate_ticks,
+                        .remove_on_death = def.remove_on_death,
+                    }, ecs.buff.duration_from_class, -1, bx, by, bz);
+                    if (res == .added) {
+                        game_social.relayBuff(self, cl.entity_id, def.name, true, -1, null) catch {};
+                    }
+                }
+            }
+        }
+    }
+}
+
 test "general craft path rejects workstation/tool/material recipes" {
     // GAP "Server craft execution": the inventory craft path must not accept
     // forge/campfire-area recipes (they need a station), tool-bound recipes,
