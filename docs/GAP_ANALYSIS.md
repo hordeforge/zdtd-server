@@ -4664,7 +4664,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | Horde / blood moon client FX (`BloodmoonMusic`, `HordeEvent`, `BossEvent`) | PARTIAL (BloodmoonMusic wired; HordeEvent builder unwired, stock has no sender) |
 | Sleeper volume activate | PARTIAL (AABB wake + authored markers) |
-| Game events (`GameEventRequest/Response`) | PARTIAL (ack path) |
+| Game events (`GameEventRequest/Response`) | PARTIAL (2026-08-26 re-scoped: the C2S request is parsed and answered with a stock-shaped APPROVED response (ResponseTypes 1, flags 192) - wire-correct body, but the event itself (GameEventManager.HandleAction, stock ProcessPackage IL=211: sender-player + party-target validation then execution) is NOT executed, so an approved-but-unrun event is a documented divergence on a dormant surface: zero stock data uses GameEvent actions (only the format comment) and Twitch events are off by default, so a stock dedi never receives one; execution is a recorded plugin-surface follow-on (behavioral add-on) |
 | Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` + `Party` state machine and `PartyData` snapshots; kill XP split WORKS (2026-08-26 re-audit: `startingXP x (1 - 0.1 x inRangeMates)`, `NetPackageSharedPartyKill` flags 192, RE parties-factions.md §2.3); 2026-08-26: an in-range party mate's shared quest advances on the killer's kill (stock SharedKillServer -> SharedKillClient EntityKilled, same GameStats[54] range). Still open: party quest auto-sharing (`PartyQuests.ShareAllQuestsWithParty`) and `NetPackagePartyQuestChange` fan-out, see §AUTHGATE) |
 
 #### Quests / traders / dialog (stock)
