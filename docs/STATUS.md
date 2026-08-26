@@ -378,6 +378,13 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the craft/recipe/unlock row went WORKS on re-audit (2026-08-26):
+the PDF unlock list is stock-correct - stock UnlockRecipe feeds a GLOBAL
+CraftingManager.UnlockedRecipeList (all players share it) plus the player's
+recipe cvar, the list rides every PDF (u16 count + names), and zdtd writes
+the recipes.xml always_unlocked set; per-player schematic learning is
+client-side cvars with no C2S package, and stock quests.xml never uses
+RewardRecipe (0 rows), so no server-side per-player unlock state is missing.
 Then the ChunkRemoveAll row closed (2026-08-26): the package is N/A
 (parity) - write IL=4 is an empty body and the only stock sender is the
 client-side PrefabEditModeManager, which a dedicated server never runs.

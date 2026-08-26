@@ -4644,7 +4644,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Player inventory sync family | HAVE (PDF + C2S PlayerInventory; client-authoritative hold) |
 | `NetPackageHoldingItem` | HAVE (S2C echo) |
 | Drop / pickup / bag containers | HAVE (loot ECD bag; Bag C2S-only) |
-| Craft / recipe / unlock | PARTIAL (InvTx + workstation TE + unlock list) |
+| Craft / recipe / unlock | WORKS (2026-08-26 re-audit: InvTx crafting + workstation TEs ship; the PDF unlock list is stock-correct - stock UnlockRecipe adds to the GLOBAL CraftingManager.UnlockedRecipeList (all players share it) + sets the player's recipe cvar, the list rides every PDF (PlayerDataFile.Write IL_015E: u16 count + names), and zdtd writes the recipes.xml `always_unlocked` set (data-driven, builtin-only starter seed documented); per-player schematic learning is CLIENT-side cvars (ItemActionLearnRecipe.OnHoldingUpdate IL=121) with no C2S package, and stock quests.xml never uses RewardRecipe (0 rows), so there is no server-side per-player unlock state to miss) |
 | Toolbelt / bag / equipment slots | HAVE |
 | Item quality / mods / durability | PARTIAL (quality/meta in players.zsv ZPV3; durability wear per use; mods: the ItemValue wire carries the Modifications/CosmeticMods arrays (stock ItemValue.Write IL=323) and zdtd writes them EMPTY - wire-correct, so a modded weapon loses its mods on reload; server-side mod state (item_modifiers.xml catalog, mod-slot validation on attachment, mod persistence in the item stack) is a recorded feature, not a quick fix) |
 | Loot container open/close | HAVE (LockRequest + TE stream) |
