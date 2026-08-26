@@ -378,6 +378,10 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the DamageEntity row went WORKS on re-audit (2026-08-26): the
+builder emits the FULL stock body (all 31 fields in read-IL order, verified
+against protocol-packages.md 6.11) and parseDamageHead consumes the head,
+validating the acted-on fields - the 'head parse/build' note was stale.
 Then the explosion-FX row went WORKS (2026-08-26): zombie-cop blasts now
 broadcast NetPackageExplosionClient (stock GameManager.explode IL_021D sends
 it for EVERY explosion, cops included) so the observing client plays the

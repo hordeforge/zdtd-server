@@ -4632,7 +4632,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 #### Combat / hazards
 | Package | Priority |
 |---|---|
-| `NetPackageDamageEntity` full field semantics | PARTIAL (head parse/build) |
+| `NetPackageDamageEntity` full field semantics | WORKS (2026-08-26 re-audit: the builder emits the FULL stock body - all 31 fields in read-IL order (entityId, damageSrc/Typ, strength, hitDirection, hitBodyPart, movementState, pain/fatal/critical, attacker, dirV, blockPos, hitTransform, uvHit, damageMultiplier, random, ignoreConsecutive/buff/dismember/cripple/crawler flags, bonusDamageType, StunType/Duration, bFromBuff, ArmorSlot/Group/Damage, optional ItemValue); parseDamageHead consumes the head and validates the acted-on fields (entityId/source/type/strength/fatal), the rest are hit-info cosmetics the server ignores) |
 | `NetPackageExplosionInitiate` / `ExplosionClient` | WORKS (2026-08-26: C2S ExplosionInitiate parse + server blast + client FX relay; zombie-cop blasts now also broadcast NetPackageExplosionClient (stock GameManager.explode IL_021D sends it for EVERY explosion, cops included) - the observing client plays the flash/sound at the blast center) |
 | `NetPackageAddRemoveBuff` / `EntityStatsBuff` | PARTIAL (AddRemoveBuff C2S validated + S2C relay/expiry; EntityStatsBuff full-list sync on join; PDF `buffData` still empty, no cvar section) |
 | `NetPackageEmitSmell` | P3 |
