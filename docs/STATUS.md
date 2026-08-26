@@ -378,6 +378,12 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the EntityVelocity/EntityPhysics row was re-scoped (2026-08-26):
+EntityPhysics is the physics-master optimization
+(PhysicsMasterSetupBroadcast IL=31, view-entry send gated on >0.05u / 1 deg
+motion, one client runs the physics) - a client-interpolation nicety, not an
+authoritative sim channel; the PosAndRot frames carry the motion and the
+momentum ragdoll is client-visual, so the residual is recorded not blocking.
 Then the ClientInfo/version-gate row went WORKS on re-audit (2026-08-26):
 the login gate is hard - compatibilityVersion must equal stock_wire_comp
 (ordinal ignore-case) or the client is denied with
