@@ -29,15 +29,16 @@ Status is one of: **accepted**, **superseded**, **deprecated** — a decision st
 | [0022](0022-anti-cheat-architecture.md) | Anti-cheat: authority first; native gates, Wasm detectors, native policy | accepted |
 | [0023](0023-perk-attribute-system.md) | Perk/attribute progression: per-player levels, scoped requirement evaluator, generic passive-effect resolver | accepted |
 | [0024](0024-passive-effect-stack-layers.md) | Passive-effect stack: name the item/equipment/progression/buffs layers once, one resolver for all of them | accepted |
-| [0025](0025-gameevent-scoped-interpreter.md) | GameEvent sequence engine: a scoped, bounded dispatch table, not the full 132-verb VM | accepted |
+| [0025](0025-gameevent-scoped-interpreter.md) | GameEvent sequence engine: a scoped, bounded dispatch table, not the full 132-verb VM | accepted (execution location superseded by [0035](0035-game-event-verdict.md); scoping + fail-closed philosophy carry over) |
 | [0026](0026-fps-bot-wasm-module.md) | FPS bots as a Wasm module: host sense/act boundary, not a core bot brain | accepted (amended 2026-08-12: bots are not ECS entities) |
 | [0030](0030-plugin-spatiotemporal-composability.md) | Plugin spatiotemporal composability: reload (HMR), effect withdrawal, declarative `_zdtd_requires` dependencies | accepted |
 | [0031](0031-mcp-wasm-module.md) | MCP server as a Wasm module: guest protocol, host transport | accepted |
 | [0032](0032-module-tiers-and-override.md) | Module tiers and override: core / official mod / user mod, discovery, exclusive override points, mod-replaces-mod | accepted |
 | [0033](0033-perk-spend-verdict.md) | on_perk_spend verdict hook: plugins gate/scale perk spending; the VM stat deltas stay native | accepted |
 | [0034](0034-stat-changed-observer.md) | on_stat_changed observer: plugins observe player stats (survival pass + XP); the sim stays the single authority | accepted |
+| [0035](0035-game-event-verdict.md) | on_game_event verdict hook: plugins gate/customize GameEvents; the IL=211 sender/party gate lands native (supersedes ADR 0025's execution location) | accepted |
 
-Numbers 0027–0029 were never assigned. Next free number is **0033**.
+Numbers 0027–0029 were never assigned. Next free number is **0036**.
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),

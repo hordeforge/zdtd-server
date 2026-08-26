@@ -38,6 +38,7 @@ pub const Hook = enum(u8) {
     on_trade_price = 18,
     on_perk_spend = 19,
     on_stat_changed = 20,
+    on_game_event = 21,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
@@ -45,7 +46,7 @@ pub const Hook = enum(u8) {
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
         "on_trader_event",  "on_mcp_frame",     "on_trade_price",   "on_perk_spend",
-        "on_stat_changed",
+        "on_stat_changed",  "on_game_event",
     };
 };
 
@@ -432,6 +433,27 @@ pub const Plugin = struct {
         ) catch |err| blk: {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_perk_spend disabled: {s}\n", .{ self.name, @errorName(err) });
+            break :blk verdict_keep;
+        };
+    }
+
+    /// on_game_event(player: i32, name_ptr: i32, name_len: i32, target: i32,
+    /// var_count: i32) -> i32 (ADR 0035: <0 deny the event, 0 keep the stock
+    /// APPROVED ack, >0 keep). The event name is copied into the guest's
+    /// scratch like on_craft_request.
+    pub fn callGameEvent(self: *Plugin, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
+        if (self.disabled) return verdict_keep;
+        if (!self.hook_present[@intFromEnum(Hook.on_game_event)]) return verdict_keep;
+        const mem = self.instance.memory() orelse return verdict_keep;
+        const off = self.reserveScratch(mem, event.len) orelse return verdict_keep;
+        @memcpy(mem.slice()[off..][0..event.len], event);
+        return self.instance.call(
+            fn (i32, i32, i32, i32, i32) i32,
+            "on_game_event",
+            .{ player, @intCast(off), @intCast(event.len), target, var_count },
+        ) catch |err| blk: {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_game_event disabled: {s}\n", .{ self.name, @errorName(err) });
             break :blk verdict_keep;
         };
     }
@@ -1018,6 +1040,16 @@ pub const WasmHost = struct {
     pub fn perkSpend(self: *WasmHost, player: i32, skill: []const u8, level: i32, cost: i32) i32 {
         for (0..self.n) |i| {
             const v = self.slots[i].callPerkSpend(player, skill, level, cost);
+            if (v != verdict_keep) return v;
+        }
+        return verdict_keep;
+    }
+
+    /// GameEvent verdict (ADR 0035): every plugin exporting on_game_event is
+    /// consulted in slot order; the first non-keep verdict wins.
+    pub fn gameEvent(self: *WasmHost, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
+        for (0..self.n) |i| {
+            const v = self.slots[i].callGameEvent(player, event, target, var_count);
             if (v != verdict_keep) return v;
         }
         return verdict_keep;

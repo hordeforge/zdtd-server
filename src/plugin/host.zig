@@ -145,6 +145,20 @@ pub const PluginHost = struct {
         return 0;
     }
 
+    /// Pre-fire GameEvent verdict (on_game_event, ADR 0035): <0 deny, 0 keep,
+    /// >0 keep (first non-keep wins).
+    pub fn gameEvent(self: *PluginHost, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_game_event) |f| {
+                const v = f(&self.view, player, event, target, var_count);
+                if (v != 0) return v;
+            }
+        }
+        return 0;
+    }
+
     /// Pre-trade price verdict (on_trade_price): <0 deny, 0 keep, >0 percent.
     pub fn tradePrice(self: *PluginHost, player: i32, item: i32, unit_price: i32) i32 {
         var i: usize = 0;
@@ -403,6 +417,30 @@ test "host perkSpend verdict: deny, keep, and percent-scale first-wins" {
     try std.testing.expectEqual(@as(i32, -1), h.perkSpend(1, "perkForbidden", 1, 1));
     try std.testing.expectEqual(@as(i32, 150), h.perkSpend(1, "perkCostly", 2, 1));
     try std.testing.expectEqual(@as(i32, 0), h.perkSpend(1, "perkFine", 1, 1));
+    h.shutdown();
+}
+
+test "host gameEvent verdict: deny and keep first-wins" {
+    var h: PluginHost = .{ .sample_enabled = false };
+    // Static lifetime: PluginHost keeps the vtable pointer.
+    const gate = api.PluginVTable{
+        .name = "gameeventgate",
+        .on_game_event = struct {
+            fn f(_: *const api.Host, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
+                if (std.mem.eql(u8, event, "denied_event")) return -1; // deny
+                if (std.mem.eql(u8, event, "blocked_event")) return 1; // keep but claim
+                _ = player;
+                _ = target;
+                _ = var_count;
+                return 0; // keep everything else
+            }
+        }.f,
+    };
+    try std.testing.expect(h.register(&gate));
+    h.enableAll();
+    try std.testing.expectEqual(@as(i32, -1), h.gameEvent(1, "denied_event", 7, 0));
+    try std.testing.expectEqual(@as(i32, 1), h.gameEvent(1, "blocked_event", 7, 2));
+    try std.testing.expectEqual(@as(i32, 0), h.gameEvent(1, "other_event", 7, 1));
     h.shutdown();
 }
 

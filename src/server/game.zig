@@ -1431,6 +1431,14 @@ pub const Game = struct {
         return if (sv != 0) sv else self.wasm_plugins.perkSpend(player, skill, level, cost);
     }
 
+    /// on_game_event verdict (ADR 0035): <0 denies the event (no response),
+    /// 0 keeps the stock APPROVED ack, >0 keeps it too. Native first, then
+    /// wasm; the gameevents.xml phase-machine engine is plugin territory.
+    pub fn gameEventVerdict(self: *Game, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
+        const sv = self.plugins.gameEvent(player, event, target, var_count);
+        return if (sv != 0) sv else self.wasm_plugins.gameEvent(player, event, target, var_count);
+    }
+
     /// on_stat_changed observer (ADR 0034): fire both plugin hosts. The sim
     /// stays the authority; plugins react/announce. Bounded: one call per
     /// changed player per tick (the survival pass) or per XP award.

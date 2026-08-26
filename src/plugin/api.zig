@@ -74,6 +74,10 @@ pub const PluginVTable = struct {
     /// deltas stay native (the passive-effects VM); this gates/customizes
     /// spending only.
     on_perk_spend: ?*const fn (*const Host, player: i32, skill: []const u8, level: i32, cost: i32) i32 = null,
+    /// Pre-fire GameEvent verdict (on_game_event, ADR 0035): <0 denies the
+    /// event (no response), 0 keeps the stock APPROVED ack, >0 keeps it too
+    /// (first non-keep wins). `var_count` is the request's variables count.
+    on_game_event: ?*const fn (*const Host, player: i32, event: []const u8, target: i32, var_count: i32) i32 = null,
     /// Admin command hook: receives the full console line (verb + args), writes
     /// a reply into `out` and returns the written slice. Null return means not
     /// handled — the next plugin is tried, then core reports unknown.

@@ -16,14 +16,19 @@ Active planning is now tracked in the living docs:
 
 For handoff-ready task shape and house rules, see the archived plan's "How to work a task" § — same grounding/proof/commit expectations apply.
 
-**Status 2026-08-26:** most tasks below shipped and are rescored WORKS in
+**Status 2026-08-27:** most tasks below shipped and are rescored WORKS in
 [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) (scorecard: all 289 features WORKS,
 residuals recorded inline) — do not re-open them as gaps. Specifically
 done: T24/T25/T26/T27/T28 (progression + perk spend + VM passives, scorecard
-row 10), T29 (stealth/noise/smell — AI senses row), T32/T33 (GameEvent
-dispatch + challenges), T34 (crafting XP: verified near-zero in shipped
-data), T36 (BlockTrigger authority), T37 (bedroll respawn targeting;
-ownership persistence details are recorded PARTIAL/waived in the scorecard).
+row 10), T29 (stealth/noise/smell, the AI senses row), T33 (challenges,
+resolved via the client-tracked re-scope, no server challenge wire), T34
+(crafting XP: verified near-zero in shipped data), T36 (BlockTrigger
+authority), T37 (bedroll respawn targeting; ownership persistence details
+are recorded PARTIAL/waived in the scorecard). T32 (GameEvent native
+dispatch engine) is **superseded by ADR 0035**: its consumers were re-scoped
+away (challenges client-tracked, zero stock GameEvent data uses, hordes
+native) and execution policy is now plugin-owned via the on_game_event
+verdict; the IL=211 sender/party gate shipped 2026-08-27.
 Still open / recorded, not wired: T30 (drone companion — zero stock AITask
 uses, deferred). T38 (always-on radius effects) shipped 2026-08-26; T35
 (air-drop marker) resolved 2026-08-26 (the entity-tied marker dies with the
@@ -698,6 +703,16 @@ cheap, but re-auditing every claim is a separate, much larger task.
 
 ## T32. The GameEvent dispatch engine (scoped, per ADR 0025)
 
+> **Superseded 2026-08-27 by [ADR 0035](adr/0035-game-event-verdict.md).**
+> The three named consumers re-scoped away: challenges are client-tracked
+> (no server-required challenge wire, scorecard WORKS 2026-08-21), quest
+> `<action type=GameEvent>` elements have zero stock uses, and blood-moon
+> hordes already run through the native director. Per AGENTS rule 29 the
+> remaining execution policy is plugin territory: the boundary now carries
+> the on_game_event verdict hook, and the stock IL=211 sender/party gate
+> landed in the native handler. No native phase machine is built (missing
+> beats fake). The task text below is historical.
+
 **Why:** [ADR 0025](adr/0025-gameevent-scoped-interpreter.md). The entire
 `NetPackageGameEventRequest` handler is an echo (`src/server/c2s/misc.zig`
 calls `buildGameEventResponse(body)` and sends the input back); there is no
@@ -741,6 +756,11 @@ client-side HUD/boss-bar presentation of a running sequence.
 ---
 
 ## T33. Challenge system
+
+> **Resolved 2026-08-21:** the RE re-scope (quests-challenges.md section 5)
+> shows challenges are client-tracked; the server surface is the
+> challengegroup_reward_* quests plus GameEventRequest acks (scorecard
+> WORKS). T32's dependency is gone; the task text below is historical.
 
 **Why:** `../../7dtd-engine-research/docs/quests-challenges.md` sections 6-9
 document a full engine (`ChallengeStates`, staged objective groups,

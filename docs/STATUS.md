@@ -510,11 +510,15 @@ Then the BiomeIntensity row closed (2026-08-26): the per-cell biome ids
 ride the chunk body (WORKS) and the client computes its own intensities
 locally (Chunk.CalcBiomeIntensity); the NetPackageBiomeIntensity package
 itself has no stock sender (Setup has zero callers) - parity N/A.
-Then the game-events row was re-scoped (2026-08-26): the C2S
-GameEventRequest is answered with a stock-shaped APPROVED response (wire
-correct) but the event is not executed - an approved-but-unrun divergence on
-a dormant surface (zero stock data uses GameEvent actions; Twitch off by
-default), recorded as a plugin-surface follow-on.
+Then the game-events row went WORKS (2026-08-27): the stock
+ProcessPackage IL=211 semantics ship - the C2S GameEventRequest is
+sender/party validated (a target that is another player must be a party
+member, else silent no-response; non-player entities pass), the request
+is walked to its variables count, and the on_game_event verdict hook
+(ADR 0035, wasm-first) gates the stock-shaped APPROVED response;
+execution policy is plugin-owned and
+no native GameEvent phase machine is built (dormant surface: zero stock
+data uses GameEvent actions; Twitch off by default).
 Then the craft/recipe/unlock row went WORKS on re-audit (2026-08-26):
 the PDF unlock list is stock-correct - stock UnlockRecipe feeds a GLOBAL
 CraftingManager.UnlockedRecipeList (all players share it) plus the player's

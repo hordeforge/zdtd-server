@@ -3437,6 +3437,89 @@ test "on_perk_spend verdict denies and scales through the C2S spend handler" {
     std.debug.print("PASS perk-spend verdict: deny + 200% scale through the C2S handler\n", .{});
 }
 
+test "GameEventRequest: IL=211 party gate + on_game_event verdict through the C2S handler" {
+    // ADR 0035: stock ProcessPackage IL=211 sender/party validation, then
+    // the on_game_event verdict (plugin-owned execution policy) - <0 denies
+    // the event (no response), 0 keeps the stock APPROVED ack. The
+    // gameevents.xml phase-machine engine stays plugin territory.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    const gate = plugin_api.PluginVTable{
+        .name = "gameeventgate",
+        .on_game_event = struct {
+            fn f(_: *const plugin_api.Host, player: i32, event: []const u8, target: i32, var_count: i32) i32 {
+                _ = player;
+                _ = target;
+                _ = var_count;
+                if (std.mem.eql(u8, event, "denied_event")) return -1;
+                return 0;
+            }
+        }.f,
+    };
+    try std.testing.expect(g.plugins.register(&gate));
+    g.plugins.enableAll();
+
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    const cb = try g.attachJoinedClient(&cap);
+    const resp_id = packages.idOf("NetPackageGameEventResponse").?;
+
+    const req_of = struct {
+        fn build(event: []const u8, target: i32) [160]u8 {
+            var b: [160]u8 = undefined;
+            var w = wire_binary.Writer{ .buf = &b };
+            w.writeString(event) catch {};
+            w.writeI32(target) catch {}; // entityID
+            w.writeString("") catch {}; // extraData
+            w.writeString("") catch {}; // tag
+            w.writeBool(false) catch {}; // isTwitchEvent
+            w.writeBool(false) catch {}; // crateShare
+            w.writeBool(false) catch {}; // allowRefunds
+            w.writeString("") catch {}; // sequenceLink
+            w.writeByte(0) catch {}; // variables count
+            return b;
+        }
+    };
+
+    // Another player not in the party: silently dropped, no response.
+    var body = req_of.build("cross_event", cb.entity_id);
+    cap.clear();
+    _ = try c2s_misc.handle(g, ca, ca.peer.?, "NetPackageGameEventRequest", body[0..]);
+    try std.testing.expect(cap.findPkgId(resp_id) == null);
+
+    // Party target: allowed by the IL=211 gate, APPROVED ack sent.
+    try std.testing.expect(g.parties.acceptInvite(ca.entity_id, cb.entity_id) != null);
+    body = req_of.build("party_event", cb.entity_id);
+    cap.clear();
+    _ = try c2s_misc.handle(g, ca, ca.peer.?, "NetPackageGameEventRequest", body[0..]);
+    try std.testing.expect(cap.findPkgId(resp_id) != null);
+
+    // Non-player target (unknown id): stock gates only on EntityPlayer
+    // targets, so the ack still fires.
+    body = req_of.build("entity_event", 7777);
+    cap.clear();
+    _ = try c2s_misc.handle(g, ca, ca.peer.?, "NetPackageGameEventRequest", body[0..]);
+    try std.testing.expect(cap.findPkgId(resp_id) != null);
+
+    // Plugin deny: no response even for the sender's own target.
+    body = req_of.build("denied_event", ca.entity_id);
+    cap.clear();
+    _ = try c2s_misc.handle(g, ca, ca.peer.?, "NetPackageGameEventRequest", body[0..]);
+    try std.testing.expect(cap.findPkgId(resp_id) == null);
+
+    g.plugins.shutdown();
+    std.debug.print("PASS GameEventRequest: IL=211 party gate + on_game_event verdict\n", .{});
+}
+
 // Test capture (module scope: the nested vtable fn cannot close over locals).
 var stat_obs_calls: usize = 0;
 
