@@ -1082,7 +1082,12 @@ chunk_gen, save_io) and tick_total wraps the loop in report.zig. A tenth
 pass (2026-08-27) verified the streaming caps (rule 20): the per-client
 chunk queue is bounded by max_streamed_chunks_cap with FIFO eviction at
 cap, an 80% warning, a spawn-area radius cap, and the raster scan
-shrinks to the budget - one peer cannot stall the tick or OOM.
+shrinks to the budget - one peer cannot stall the tick or OOM. An
+eleventh pass (2026-08-27) verified the join phase gates (rule 18):
+dispatch.zig enforces phase_gate.allowed(phaseOf(joined, entered), name)
+on every C2S package - connecting admits only PlayerLogin/
+PlayerDisconnect, joined only the handshake set, playing admits all with
+typed handlers still validating ownership/bounds.
 GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
