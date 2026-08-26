@@ -97,19 +97,44 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageSoundAtPosition")) {
-        // Stock NetPackageSoundAtPosition (write IL=25): pos 3xf32 | clip
-        // string | mode u8 | distance i32 | entityId i32 | volumeScale f32.
+        // Positional-audio relay (RE NetPackageSoundAtPosition write IL=25 /
+        // read IL=21: pos 3xf32 | clip string | mode u8 | distance i32 |
+        // entityId i32; volumeScale is Setup-only, never on the wire).
         // GameManager.PlaySoundAtPositionServer (IL=60, dedicated branch)
         // re-broadcasts the Setup body with allButAttachedToEntityId =
         // entityId, so every client except the owning player hears the sound
         // (the owner already played it locally); the distance field drives
         // the receiving client's rolloff, not the fan-out. Verbatim relay
-        // excludes that entity's client, like stock.
+        // excludes that entity's client, like stock. Same rate gate as
+        // SetBlock: an unthrottled spam loop would fan a broadcast out to
+        // every other peer for free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         const snd = packages.parseSoundAtPosition(body) catch {
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        relayBodyExcept(self,"NetPackageSoundAtPosition", body, snd.entity_id, "SoundAtPosition");
+        // The owning entity must be the sender (a spoofed id would silence a
+        // different player instead of the sender); NaN positions are forged.
+        if (snd.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        if (!std.math.isFinite(snd.pos[0]) or !std.math.isFinite(snd.pos[1]) or !std.math.isFinite(snd.pos[2])) {
+            self.harness.counters.inc(.bounds_rejects);
+            return true;
+        }
+        relayBodyExcept(self, "NetPackageSoundAtPosition", body, snd.entity_id, "SoundAtPosition");
+        // No AI-noise leg here: on a dedicated server the relay is audio-only.
+        // NetPackageSoundAtPosition.ProcessPackage -> PlaySoundAtPositionServer
+        // skips AIDirector.NotifyNoise when IsDedicatedServer (RE protocol
+        // doc 5.9, IL dump): the stock dedi only evaluates noise for sounds it
+        // plays itself (explosions, mines, animals, minibike via
+        // Audio.Manager.SignalAI / GameManager.explode). The movement-noise
+        // model (sounds.xml table + PlayerStealth fold, systems.systemStealth)
+        // consumes sim-side pushStealthNoise as those sources land.
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageParticleEffect")) {
@@ -878,39 +903,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const eid = std.mem.readInt(i32, body[0..4], .little);
         if (eid != c.entity_id) return true;
         relayBodyExcept(self, "NetPackageEntityAnimationData", body, eid, "EntityAnimationData");
-        return true;
-    }
-    if (std.mem.eql(u8, name, "NetPackageSoundAtPosition")) {
-        // Positional-audio relay (RE NetPackageSoundAtPosition ProcessPackage
-        // IL=36 + GameManager.PlaySoundAtPositionServer IL=60): the dedi
-        // re-broadcasts the client's sound to every client EXCEPT the owning
-        // player's (allButAttachedToEntityId = entityId; the owner already
-        // played it locally). Same rate gate as SetBlock: an unthrottled spam
-        // loop would fan a broadcast out to every other peer for free.
-        if (!self.takeBlockToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        const s = packages.parseSoundAtPosition(body) catch return true;
-        // The owning entity must be the sender (a spoofed id would silence a
-        // different player instead of the sender); NaN positions are forged.
-        if (s.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
-        if (!std.math.isFinite(s.pos[0]) or !std.math.isFinite(s.pos[1]) or !std.math.isFinite(s.pos[2])) {
-            self.harness.counters.inc(.bounds_rejects);
-            return true;
-        }
-        try self.broadcastExcept("NetPackageSoundAtPosition", body, c.slot);
-        // No AI-noise leg here: on a dedicated server the relay is audio-only.
-        // NetPackageSoundAtPosition.ProcessPackage -> PlaySoundAtPositionServer
-        // skips AIDirector.NotifyNoise when IsDedicatedServer (RE protocol
-        // doc 5.9, IL dump): the stock dedi only evaluates noise for sounds it
-        // plays itself (explosions, mines, animals, minibike via
-        // Audio.Manager.SignalAI / GameManager.explode). The movement-noise
-        // model (sounds.xml table + PlayerStealth fold, systems.systemStealth)
-        // consumes sim-side pushStealthNoise as those sources land.
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageTurretSpawn")) {

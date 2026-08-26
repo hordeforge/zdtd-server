@@ -2639,7 +2639,6 @@ test "sound at position relays to all clients except the owning player" {
     try w.writeByte(0);
     try w.writeI32(30);
     try w.writeI32(ca.entity_id); // the owner (sender) must NOT hear the echo
-    try w.writeF32(1);
     var frame_buf: [256]u8 = undefined;
     const framed = try packages.framed(&frame_buf, "NetPackageSoundAtPosition", w.written());
     cap_a.clear();

@@ -2642,12 +2642,15 @@ pub fn parseStockChat(body: []const u8) !StockChat {
 
 /// Stock `NetPackageSoundAtPosition` (write IL=25, read IL=21): pos Vector3
 /// (3xf32) | audioClipName string | mode u8 (UnityEngine.AudioRolloffMode
-/// Logarithmic=0/Linear=1/Custom=2) | distance i32 | entityId i32 |
-/// volumeScale f32. The dedicated-server relay (GameManager
-/// PlaySoundAtPositionServer IL=60) re-broadcasts Setup(...) with
-/// allButAttachedToEntityId = entityId, so every client except the owning
-/// player hears the sound (the owner already played it locally); the
-/// `distance` field drives the receiving client's rolloff, not the fan-out.
+/// Logarithmic=0/Linear=1/Custom=2) | distance i32 | entityId i32. The
+/// dedicated-server relay (GameManager PlaySoundAtPositionServer IL=60)
+/// re-broadcasts Setup(...) with allButAttachedToEntityId = entityId, so
+/// every client except the owning player hears the sound (the owner already
+/// played it locally); the `distance` field drives the receiving client's
+/// rolloff, not the fan-out. Note: `volumeScale` is a Setup-only field that
+/// stock never puts on the wire (write stops after entityId, read stops
+/// after entityId; the client-side receiver gets the field default 0) - it
+/// is kept on the struct for API symmetry but must not be encoded/decoded.
 pub const SoundAtPosition = struct {
     pos: [3]f32,
     clip: [max_audio_clip_len]u8 = .{0} ** max_audio_clip_len,
@@ -2666,7 +2669,7 @@ pub const SoundAtPosition = struct {
 pub const max_audio_clip_len: usize = 256;
 
 pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflow})!SoundAtPosition {
-    if (body.len < 26) return error.EndOfStream; // 12 pos + 1 clip-len + 1 mode + 4 + 4 + 4 vol
+    if (body.len < 22) return error.EndOfStream; // 12 pos + 1 clip-len + 1 mode + 4 + 4
     var r: binary.Reader = .{ .data = body };
     var out: SoundAtPosition = .{
         .pos = .{ try r.readF32(), try r.readF32(), try r.readF32() },
@@ -2679,13 +2682,13 @@ pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflo
     out.mode = try r.readByte();
     out.distance = try r.readI32();
     out.entity_id = try r.readI32();
-    out.volume_scale = try r.readF32();
     return out;
 }
 
 /// Encode the stock body (write IL=25): pos Vector3 | clip string | mode u8 |
-/// distance i32 | entityId i32 | volumeScale f32. Server-initiated sounds
-/// carry entityId -1 (the dedicated relay's allButAttachedToEntityId).
+/// distance i32 | entityId i32. Server-initiated sounds carry entityId -1
+/// (the dedicated relay's allButAttachedToEntityId). volumeScale is never
+/// encoded: stock's write stops after entityId (see SoundAtPosition note).
 pub fn buildSoundAtPosition(buf: []u8, s: SoundAtPosition) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeF32(s.pos[0]);
@@ -2695,11 +2698,12 @@ pub fn buildSoundAtPosition(buf: []u8, s: SoundAtPosition) ![]u8 {
     try w.writeByte(s.mode);
     try w.writeI32(s.distance);
     try w.writeI32(s.entity_id);
-    try w.writeF32(s.volume_scale);
     return w.written();
 }
 
-test "sound at position parses the stock body" {
+test "sound at position parses the stock 5-field body" {
+    // write IL=25 / read IL=21: pos 3xf32 | clip string | mode u8 | distance
+    // i32 | entityId i32. volumeScale is Setup-only and never on the wire.
     var body: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &body };
     try w.writeF32(100.5);
@@ -2709,7 +2713,6 @@ test "sound at position parses the stock body" {
     try w.writeByte(1); // Linear
     try w.writeI32(30);
     try w.writeI32(42);
-    try w.writeF32(0.8);
     const s = try parseSoundAtPosition(w.written());
     try std.testing.expectApproxEqAbs(@as(f32, 100.5), s.pos[0], 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, -50.25), s.pos[2], 0.001);
@@ -2717,7 +2720,22 @@ test "sound at position parses the stock body" {
     try std.testing.expectEqual(@as(u8, 1), s.mode);
     try std.testing.expectEqual(@as(i32, 30), s.distance);
     try std.testing.expectEqual(@as(i32, 42), s.entity_id);
-    try std.testing.expectApproxEqAbs(@as(f32, 0.8), s.volume_scale, 0.001);
+    try std.testing.expectEqual(@as(f32, 0), s.volume_scale); // Setup-only default
+
+    // A trailing volumeScale byte is not part of the wire: the parser stops
+    // after entityId and the builder emits exactly 5 fields (a stock client
+    // reader would desync on a 6-field body).
+    const built = try buildSoundAtPosition(&body, .{ .pos = .{ 100.5, 0, -50.25 }, .mode = 1, .distance = 30, .entity_id = 42 });
+    var br: binary.Reader = .{ .data = built };
+    _ = try br.readF32();
+    _ = try br.readF32();
+    _ = try br.readF32();
+    var nb: [64]u8 = undefined;
+    _ = try br.readString(&nb);
+    _ = try br.readByte();
+    _ = try br.readI32();
+    _ = try br.readI32();
+    try std.testing.expectError(error.EndOfStream, br.readF32()); // no 6th field
 }
 
 /// Stock `NetPackageParticleEffect` (write IL=20): a `ParticleEffect`

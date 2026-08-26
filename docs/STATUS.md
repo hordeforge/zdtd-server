@@ -13,9 +13,10 @@ owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: **289 `WORKS`,
 0 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
 53 bullets carry ad-hoc labels and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
-RE-blocked NetPackageSoundAtPosition wire pin and the recorded-not-wired
-effect classes (block-light/moon/shade light slices, client-local consume
-buffs, group AI, RWG caves/water, animal distress, vehicle storage).
+recorded-not-wired effect classes (block-light/moon/shade light slices,
+client-local consume buffs, group AI, RWG caves/water, animal distress,
+vehicle storage) and the recorded RE-gated rows; the last RE-blocked wire
+pin (NetPackageSoundAtPosition) closed 2026-08-27.
 The difficulty-presets ladder and the item stamina-loss legs are wired
 (sandbox_presets.zig comptime parse, 2026-08-26; StaminaLoss choke).
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
