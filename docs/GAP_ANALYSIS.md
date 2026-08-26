@@ -4673,7 +4673,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Full quest journal packages (not zdtd-native shapes) | PARTIAL (`stock_quest.zig` Quest.Write + NPCQuestList FetchList + SharedQuest; per-objective CurrentValue emitted from the phase graph; see §6.1 gaps) |
 | Trader inventory stock format (stock TraderData) | WORKS (2026-08-26 re-audit: the Traders section scores 20/20 - per-trader stock with direct + group rolls, hours, live wallet, lazy full-reroll restock, stock persistence, quest offers complete, and the C2S stock ToServer body (isEntity + id/pos + TraderData) parses + CopyFrom's; the 'gaps below' note was stale) |
 | Dialog / NPC interaction | P1 |
-| Quest POI marker / rally | PARTIAL (`NetPackageQuestEvent` rally-marker + Lock/UnlockPOI handled; POIPosition/POISize on Quest.Write; rally engages only for quests placed in a prefab) |
+| Quest POI marker / rally | WORKS (2026-08-26 re-audit: try_rally_marker runs the full stock chain - poi lockout check, reason-to-reply-event switch (asm.il 835696), questOnRallyActivated, questPoiLock + ResetBlocksAndRebuild restore, shared-quest broadcast; lock_poi/unlock_poi handled; POIPosition/POISize ride Quest.Write; the 'only for quests placed in a prefab' note is the stock-correct gate - the rally marker IS the placed prefab's marker, and questAccept's POI selection places every quest) |
 
 #### Vehicles / mounts
 | Package | Priority |
