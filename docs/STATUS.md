@@ -1054,7 +1054,11 @@ the pinned wire. A fourth pass (2026-08-27) verified the foundational
 v9 version byte, the flags byte (0x01 item / 0x02 stats), u16 type,
 UseTimes, Quality, Meta u16, metadata count, the bool+nested mods loop,
 cosmetics, activated, ammo_index, seed and texture flag all match - the
-layout every inventory/equipment/bag/container body rides on. GAP
+layout every inventory/equipment/bag/container body rides on. A fifth
+pass (2026-08-27) verified the PlayerInventory body against write IL=107:
+the toolbelt/bag/equipment/drag conditionals, the Equipment block
+(WriteItemValueArray + per-slot cosmetic i32s with implied length +
+m_unlockedCosmetics count) and the Bag.Write all match. GAP
 sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
