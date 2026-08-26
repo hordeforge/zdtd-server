@@ -378,6 +378,12 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the deco pipe row went WORKS on re-audit (2026-08-26): the join
+burst + deco streaming with newly entered chunks (sendDecoForStreamedChunk)
+was already covered by the 'Join-time deco burst' WORKS row - the stale
+pipe row's 'ONE deco window' claim was wrong (the client ADDS post-join
+firstPackage=false updates); the four residuals (PRNG, CheckOreNoiseAt,
+rotation, subbiome noise) stay documented.
 Then the stealth-meter S2C went in (2026-08-26): the server broadcasts
 NetPackageEntityStealth (id + packed data: noise 7-bit, alert, crouch) every
 16 ticks on change per stock PlayerStealth.TickServer IL_0470, so observers
