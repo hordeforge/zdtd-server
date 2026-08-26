@@ -1532,6 +1532,9 @@ pub const Game = struct {
     pub fn tickZombieBlockDamage(self: *Game) void {
         return game_tick.tickZombieBlockDamage(self);
     }
+    pub fn actuatePoweredDoors(self: *Game) void {
+        return game_tick.actuatePoweredDoors(self);
+    }
 
     pub fn drainDigRequests(self: *Game) void {
         return game_tick.drainDigRequests(self);

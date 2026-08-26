@@ -9163,3 +9163,56 @@ test "scenario mod scrub rejects illegal attachments server-authoritatively" {
     try std.testing.expectEqual(@as(u8, 0), g.sim.inventory[ps].slots[2].mod_n);
     try std.testing.expectEqual(@as(u8, 0), g.sim.inventory[ps].slots[3].mod_n);
 }
+
+test "scenario powered door opens while powered, closes on power loss" {
+    // RE tile-entities-power.md PowerConsumer.HandlePowerUpdate →
+    // Block.ActivateBlock(isPowered, ...): a powered door opens while its
+    // circuit delivers power (the open meta bit + SetBlock broadcast, same as
+    // the zombie door-open path) and closes when the power drops.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cfg_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var xml_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const xml_path = try std.fmt.bufPrint(&xml_buf, "{s}/blocks.xml", .{cfg_dir});
+    try io_fs.writeFile(xml_path,
+        \\<blocks>
+        \\  <block name="doorWoodLargeGate">
+        \\    <property name="Class" value="Door"/>
+        \\  </block>
+        \\</blocks>
+    );
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_pwrdoor");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_pwrdoor", 0, .{ .config_dir = cfg_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    const door = g.blocks.byName("doorWoodLargeGate") orelse return error.TestExpectedEqual;
+    try std.testing.expect(door.is_door);
+    try g.world.setBlockRawWorld(5, 70, 5, door.id);
+    const gen = g.sim.power.addNodeAt(.generator, 100, 70, 100, 100).?;
+    const dnode = g.sim.power.addNodeAt(.consumer, 5, 70, 5, 5).?;
+    try std.testing.expect(g.sim.power.connect(gen, dnode));
+    g.sim.power.resolve();
+    const di = g.sim.power.indexOfId(dnode).?;
+    try std.testing.expect(g.sim.power.nodes[di].powered);
+    try g.step(); // the tick runs actuatePoweredDoors
+    const raw = try g.world.rawWorld(5, 70, 5);
+    try std.testing.expect((packages.blockMeta(raw) & packages.block_meta_on) != 0);
+    // Kill the generator: the consumer loses power and the door closes.
+    const gi = g.sim.power.indexOfId(gen).?;
+    g.sim.power.nodes[gi].on = false;
+    g.sim.power.resolve();
+    try g.step();
+    const raw2 = try g.world.rawWorld(5, 70, 5);
+    try std.testing.expect((packages.blockMeta(raw2) & packages.block_meta_on) == 0);
+    std.debug.print("PASS powered-door: opens on power, closes on power loss\n", .{});
+}

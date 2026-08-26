@@ -301,8 +301,45 @@ fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, wanted: []const []c
 }
 
 /// Current whole world-hour (day*24 + hour), for time-based scheduling.
-pub fn worldHour(self: *const Game) u64 {
-    const clk = self.sim.director.clock;
+/// Power consumer actuation (RE tile-entities-power.md PowerConsumer
+/// HandlePowerUpdate → `Block.ActivateBlock(world, pos, bv, IsPowered, ...)`):
+/// a powered door block opens while its circuit delivers power and closes when
+/// the power drops (load shed, fuel out, switch off). Uses the same open/close
+/// meta bit + SetBlock broadcast as the zombie door-open path (tickZombieBlockDamage);
+/// the per-node `net_powered` flip (previously never written) drives the
+/// one-shot so a settled circuit does not re-broadcast every tick. The
+/// powered-state echo for other consumer kinds (lights, traps) stays recorded
+/// in GAP 4693.
+pub fn actuatePoweredDoors(self: *Game) void {
+    const grid = &self.sim.power;
+    var i: usize = 0;
+    while (i < grid.node_n) : (i += 1) {
+        const n = &grid.nodes[i];
+        if (n.kind != .consumer) continue;
+        if (n.powered == n.net_powered) continue;
+        n.net_powered = n.powered;
+        const id = self.blockIdAtWorld(n.x, n.y, n.z);
+        const def = self.blocks.byId(id) orelse continue;
+        if (!def.is_door) continue;
+        // A 2-tall door spans two cells; the vertical partner gets the same
+        // open bit (the consumer node may sit on either half).
+        const door_dys = [_]i32{ 0, 1, -1 };
+        for (door_dys) |dy| {
+            const yy = n.y + dy;
+            if (self.blockIdAtWorld(n.x, yy, n.z) != id) continue;
+            const raw = self.world.rawWorld(n.x, yy, n.z) catch continue;
+            const open = (packages.blockMeta(raw) & packages.block_meta_on) != 0;
+            if (open == n.powered) continue;
+            const new_raw = packages.withBlockMeta(raw, if (n.powered) packages.block_meta_on else 0);
+            self.world.setBlockRawWorld(n.x, yy, n.z, new_raw) catch continue;
+            if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], n.x, yy, n.z, new_raw, 0, -1, -1)) |sb| {
+                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(n.x), @floatFromInt(n.z), self.interest_range) catch {};
+            } else |_| {}
+        }
+    }
+}
+
+pub fn worldHour(self: *const Game) u64 {    const clk = self.sim.director.clock;
     return @as(u64, clk.day) * 24 + @as(u64, @trunc(clk.hours));
 }
 

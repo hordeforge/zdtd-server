@@ -4690,7 +4690,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Stock `NetPackageWireActions` SetParent/RemoveParent → parent/child wiring | HAVE |
 | Wired powered state (BFS flood from generators) | HAVE |
 | `NetPackageWireToolActions` (visual handshake) | PARTIAL (peer rebroadcast only) |
-| Powered door / light / trap blocks | PARTIAL (registered as consumers, no actuation) |
+| Powered door / light / trap blocks | PARTIAL (registered as consumers; powered DOOR actuation SHIPPED 2026-08-26 - a consumer door opens while its circuit delivers power and closes when the power drops (load shed/fuel out/switch off), the open meta bit + SetBlock broadcast reused from the zombie door-open path, driven by the per-node net_powered flip (RE tile-entities-power.md PowerConsumer.HandlePowerUpdate → Block.ActivateBlock isPowered); light on/off and trap firing stay recorded) |
 | Battery charge state | P2 |
 
 **Landed (Electrical block placement parity):** when a player `SetBlock`s a

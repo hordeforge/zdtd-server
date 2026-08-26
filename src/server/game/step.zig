@@ -220,6 +220,7 @@ pub fn step(self: *Game) !void {
         }
         const daylight = !self.sim.director.clock.isNight();
         _ = self.sim.power.tick(dt, daylight);
+        self.actuatePoweredDoors();
         replicate_te.broadcastPowerVisuals(self);
         self.reapStaleLocks();
         {

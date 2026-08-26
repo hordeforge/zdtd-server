@@ -1352,7 +1352,13 @@ entities.zen gains a kind-3 record writing each live power edge
 by endpoint positions (node ids are per-session), and the loader queues
 them as pending wires that reconnectPending drains as scanChunkPower
 rebuilds both endpoint nodes. A generator/consumer wiring survives
-restart. Trader/NPC quest offers carry no separate state to save: the
+restart. Powered door actuation shipped 2026-08-26 (GAP 4693): a consumer
+door opens while its circuit delivers power and closes when the power drops
+(load shed/fuel out/switch off), reusing the zombie door-open meta bit +
+SetBlock broadcast and driven by the per-node net_powered flip (RE
+tile-entities-power.md PowerConsumer.HandlePowerUpdate → ActivateBlock);
+the powered-state echo for lights/traps stays recorded. Trader/NPC quest
+offers carry no separate state to save: the
 offer list derives from npc.xml quest_list plus the player's active
 journal at request time (buildTraderQuestOffers, tier filter + accept
 marker), reconstructing identically after a restart - a documented design
