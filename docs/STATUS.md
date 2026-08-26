@@ -1098,6 +1098,11 @@ A thirteenth pass (2026-08-27) verified the not-a-mod-host boundary
 detects a top-level DLL and warns "code part not hosted, XML patches
 still apply" instead of ever loading one, and never reads Bundles/
 content (stock assetbundle modlets load as data via the patch catalogs).
+A fourteenth pass (2026-08-27) verified persistence via store (rule 21):
+player data saves on reap (tick.zig) through persist.savePlayers, the
+block world is the ZCH3 store (per-cell damage via hdr flag 15, atomic
+parallel chunk saves), and traders/claims/clock ride their own stores -
+mutations that must survive restart all route through world/* save paths.
 GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
