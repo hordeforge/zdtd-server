@@ -378,6 +378,11 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the explosion-FX row went WORKS (2026-08-26): zombie-cop blasts now
+broadcast NetPackageExplosionClient (stock GameManager.explode IL_021D sends
+it for EVERY explosion, cops included) so the observing client plays the
+flash/sound at the blast center; the C2S ExplosionInitiate relay already
+carried player-initiated blasts.
 Then the multi-block SetBlock row went WORKS (2026-08-26): the handler
 parses ALL BlockChangeInfos and places each cell with its raw
 (rotation/meta/ischild preserved) - the stock client sends the anchor +

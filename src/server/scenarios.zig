@@ -1241,6 +1241,10 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
     try std.testing.expect((try g.world.blockWorld(gx + 3, gy, gz + 3)) == 0); // stone broken
     try std.testing.expect((try g.world.blockWorld(gx + 2, gy, gz + 2)) != 0); // dirt survived
     try std.testing.expect(!g.sim.alive[sa]); // the cop died with the blast
+    // Blast FX: stock GameManager.explode sends NetPackageExplosionClient for
+    // every explosion (cops included); the observing client must receive it.
+    const fxc = peer_cap.findPkgId(packages.idOf("NetPackageExplosionClient").?) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(fxc.len >= 24);
 
     // Cop B: radius 1 (per-entity wins over the rules floor 4): the same stone
     // cell at distance 1.414 is outside the blast and survives.

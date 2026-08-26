@@ -390,6 +390,23 @@ pub fn drainExplosions(self: *Game) void {
         }
         // Combat noise so nearby zombies react to the blast.
         self.sim.pushNoise(ex.x, ex.y, ex.z, self.sim.rules.ai.combat_noise_radius);
+        // Blast FX (stock GameManager.explode IL_021D sends
+        // NetPackageExplosionClient for EVERY explosion, cops included): the
+        // client plays the flash/sound at the blast center. Same builder and
+        // near-range fan as the C2S ExplosionInitiate relay.
+        if (packages.buildExplosionClient(
+            self.body_buf[96..288],
+            ex.x,
+            ex.y,
+            ex.z,
+            0,
+            @intFromFloat(@min(block_dmg, 65535.0)),
+            @intCast(@max(1, @as(u32, @intFromFloat(radius)))),
+            @intFromFloat(@min(block_dmg, 65535.0)),
+            nid,
+        )) |fxb| {
+            self.broadcastNear("NetPackageExplosionClient", fxb, ex.x, ex.z, self.interest_range) catch {};
+        } else |_| {}
     }
 }
 

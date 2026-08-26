@@ -4633,7 +4633,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Package | Priority |
 |---|---|
 | `NetPackageDamageEntity` full field semantics | PARTIAL (head parse/build) |
-| `NetPackageExplosionInitiate` / `ExplosionClient` | PARTIAL (initiate dig + client FX; nested blob shallow) |
+| `NetPackageExplosionInitiate` / `ExplosionClient` | WORKS (2026-08-26: C2S ExplosionInitiate parse + server blast + client FX relay; zombie-cop blasts now also broadcast NetPackageExplosionClient (stock GameManager.explode IL_021D sends it for EVERY explosion, cops included) - the observing client plays the flash/sound at the blast center) |
 | `NetPackageAddRemoveBuff` / `EntityStatsBuff` | PARTIAL (AddRemoveBuff C2S validated + S2C relay/expiry; EntityStatsBuff full-list sync on join; PDF `buffData` still empty, no cvar section) |
 | `NetPackageEmitSmell` | P3 |
 | Blood / infection / wetness packages | P2 |
