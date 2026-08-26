@@ -255,7 +255,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
-    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient") or std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
+    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
+        // Stock C2S ProcessPackage IL=24 (research protocol-packages.md
+        // 6.21.2): sender-own-id gate (ValidEntityIdForSender(entityId,
+        // allowSelf=false)), then PersistentPlayerData.QuestPositions.Clear()
+        // + AddRange(client's QuestPositionData list). The list is a
+        // PPD-persisted quest map-marker cache (binary Write/Read + XML
+        // Write/ReadXML) re-broadcast S2C via Setup(entityId, ppd) for client
+        // map rendering; no server sim behavior reads it. Accepting+storing
+        // would be a dead store with zero consumers, so it is dropped as a
+        // documented low-value cache (YAGNI; missing beats fake).
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerEquipment")) {
