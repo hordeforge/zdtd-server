@@ -674,17 +674,12 @@ test "parse rules overlay sections" {
         \\sense_dist_sq = 2500.0
         \\[rules.bloodmoon]
         \\max_parties = 4
-        \\[rules.sky]
-        \\dawn_hour = 6
-        \\dusk_hour = 20
     );
     defer f.deinit();
     try std.testing.expectEqual(@as(?f32, 12.0), f.rules.combat.attack_damage);
     try std.testing.expectEqual(@as(?f32, null), f.rules.combat.attack_range_sq);
     try std.testing.expectEqual(@as(?f32, 2500.0), f.rules.ai.sense_dist_sq);
     try std.testing.expectEqual(@as(?u32, 4), f.rules.bloodmoon.max_parties);
-    try std.testing.expectEqual(@as(?u8, 6), f.rules.sky.dawn_hour);
-    try std.testing.expectEqual(@as(?u8, 20), f.rules.sky.dusk_hour);
 }
 
 test "parse [quests] objective_kinds section" {

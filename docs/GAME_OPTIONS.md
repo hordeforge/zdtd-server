@@ -191,8 +191,8 @@ test, so a retune cannot land silently).
 | `swim_speed_frac` | 0.5 | Horizontal speed fraction while swimming (stock swimSpeed < moveSpeed) |
 | `gravity` | -1.6 | Vertical acceleration, blocks/s². RE: `World::Gravity` 0.08 blocks/tick (World cctor) integrated `(motion.y - Gravity) * 0.98` per tick (entity-movement.md) → ~1.6 blocks/s², self-capping ~ -3.9 |
 | `despawn_dist_sq` | 40000.0 | Policy (far-despawn range) |
-| `chase_speed` | 2.2 | **Floor**: `entityclasses.xml` `MoveSpeedAggro` wins when non-zero |
-| `wander_speed` | 0.8 | **Floor**: `entityclasses.xml` `MoveSpeed` wins when non-zero |
+| `chase_speed` | 2.2 | **Floor** (night chase): `entityclasses.xml` `MoveSpeedAggro` max wins when non-zero; the day chase uses `MoveSpeedAggro` min (`chase_speed_day`). Stock `GetMoveSpeedAggro`: dark → aggroMax (passive 134), day → aggro (passive 133); the XML comment "min/max (like day or night)" pins the split |
+| `wander_speed` | 0.8 | **Floor** (day shamble): `entityclasses.xml` `MoveSpeed` wins when non-zero; the night shamble uses `MoveSpeedNight` (`wander_speed_night`, seeded from `MoveSpeed` when absent, entity-ai.md 3312). Stock `GetMoveSpeed`: dark → `moveSpeedNight` (passive 133), day → `moveSpeed` (passive 135) |
 | `path_replan_interval_s` | 0.35 | Policy: A* replan throttle (s) |
 | `path_max_expand` | 96 | Policy: A* node budget per replan |
 | `path_wp_arrive` | 0.55 | Policy: waypoint snap radius (blocks) |
@@ -305,15 +305,6 @@ test, so a retune cannot land silently).
 | `battery_capacity_scale` | 10.0 | Battery capacity fallback scale (× MaxPower) when a battery block only exposes MaxPower |
 | `battery_initial_charge_frac` | 0.5 | Initial battery charge as a fraction of capacity on fresh placement |
 | `trigger_pulse_s` | 0.5 | Trigger-plate / tripwire pulse duration (s) when the block sets duration=Triggered |
-
-`[rules.sky]` (day/night sky model, world-light slice 1, RE entity-ai.md
-SkyManager; the stock `SkyManager` cctor pins 4/22, `world/sky.zig` applies
-the curve):
-
-| Key | Default | Meaning |
-|---|---|---|
-| `dawn_hour` | 4 | Dawn hour bounding the `UpdateSunMoonAngles` sun-target day window |
-| `dusk_hour` | 22 | Dusk hour bounding the `UpdateSunMoonAngles` sun-target day window |
 
 `[rules.water]` (water-leveling budgets, GAP "Water flow / physics" PARTIAL;
 the stock sim is a jobified mass-flow engine, light-mesh-water.md §4):

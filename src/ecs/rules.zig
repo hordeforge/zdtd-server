@@ -602,15 +602,6 @@ pub const Power = struct {
     trigger_pulse_s: f32 = 0.5,
 };
 
-/// Sky day/night model (RE entity-ai.md SkyManager): the dawn/dusk hours
-/// bounding the sun-target curve. Stock SkyManager cctor pins 4/22; operators
-/// shift the day window without touching data. The curve itself is computed
-/// by `world/sky.zig` (slice 1 of the world-light model).
-pub const Sky = struct {
-    dawn_hour: u8 = 4,
-    dusk_hour: u8 = 22,
-};
-
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
 /// field (RulesOverlay) and mergeOverlay applies the non-null subset.
 pub const Rules = struct {
@@ -625,7 +616,6 @@ pub const Rules = struct {
     difficulty: Difficulty = .{},
     water: Water = .{},
     power: Power = .{},
-    sky: Sky = .{},
 };
 
 pub const CombatOverlay = struct {
@@ -850,11 +840,6 @@ pub const PowerOverlay = struct {
     trigger_pulse_s: ?f32 = null,
 };
 
-pub const SkyOverlay = struct {
-    dawn_hour: ?u8 = null,
-    dusk_hour: ?u8 = null,
-};
-
 /// All-optional mirror of Rules for mode-pack / zdtd.toml `[rules.*]` sections
 /// (ADR 0021 decision 3). Hand-written next to Rules because Zig 0.16's
 /// `@Struct` cannot lay out a recursive anonymous overlay type; the parity test
@@ -871,7 +856,6 @@ pub const RulesOverlay = struct {
     difficulty: DifficultyOverlay = .{},
     water: WaterOverlay = .{},
     power: PowerOverlay = .{},
-    sky: SkyOverlay = .{},
 };
 
 /// Apply a RulesOverlay onto a concrete Rules: only non-null fields override.

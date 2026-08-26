@@ -136,10 +136,14 @@ pub const EntityClass = struct {
     loot_list: []const u8 = "",
     /// Chance a death drops the loot bag (entityclasses LootDropProb). 1.0 default.
     drop_prob: f32 = 1.0,
-    /// XML MoveSpeedAggro max scaled to sim m/s; 0 = use systems default.
+    /// XML MoveSpeedAggro max (night chase) scaled to sim m/s; 0 = use systems default.
     chase_speed: f32 = 0,
-    /// XML MoveSpeed scaled; 0 = use systems default.
+    /// XML MoveSpeedAggro min (day chase); 0 = falls to chase_speed then default.
+    chase_speed_day: f32 = 0,
+    /// XML MoveSpeed (day shamble) scaled; 0 = use systems default.
     wander_speed: f32 = 0,
+    /// XML MoveSpeedNight (night shamble); 0 = falls to wander_speed then default.
+    wander_speed_night: f32 = 0,
     /// HandItem Action0 DamageEntity from items.xml; 0 = use systems default.
     attack_damage: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
@@ -212,7 +216,7 @@ pub const World = struct {
     stealth_noise_n: usize = 0,
     /// Day/night ambient light (0..1, slice-1 world-light model
     /// world/sky.zig ambientLuma): the Game computes it once per tick from the
-    /// world clock + [rules.sky] before tickAll; the sim's stealth light legs
+    /// world clock before tickAll; the sim's stealth light legs
     /// (CanSleeperAttackDetect crouch range) read it. Tests set it directly.
     ambient_light: f32 = 0,
     /// Sleeper-volume wake requests by noise position (stock
@@ -1010,7 +1014,9 @@ pub const World = struct {
             self.class_id[s].drop_prob = def.drop_prob;
             self.class_id[s].time_stay = def.time_stay;
             self.class_id[s].chase_speed = def.chase_speed;
+            self.class_id[s].chase_speed_day = def.chase_speed_day;
             self.class_id[s].wander_speed = def.wander_speed;
+            self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].block_chew = def.block_chew;
             self.class_id[s].melee_range = def.melee_range;
@@ -1088,7 +1094,9 @@ pub const World = struct {
             self.class_id[s].drop_prob = def.drop_prob;
             self.class_id[s].time_stay = def.time_stay;
             self.class_id[s].chase_speed = def.chase_speed;
+            self.class_id[s].chase_speed_day = def.chase_speed_day;
             self.class_id[s].wander_speed = def.wander_speed;
+            self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].block_chew = def.block_chew;
             self.class_id[s].melee_range = def.melee_range;

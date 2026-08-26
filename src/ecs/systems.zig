@@ -1764,7 +1764,12 @@ const AiCtx = struct {
                 const sscale = ctx.zombie_speed_scale;
                 const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
                 const pws = ctx.w.class_id[s].wander_speed;
-                const wspd: f32 = (if (pws > 0) pws * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
+                const pwsn = ctx.w.class_id[s].wander_speed_night;
+                // Stock GetMoveSpeed (entity-ai.md): dark → MoveSpeedNight
+                // (passive 133) else MoveSpeed (passive 135); a class without
+                // MoveSpeedNight seeds it from MoveSpeed (entity-ai.md 3312).
+                const night = ctx.w.director.clock.isNight();
+                const wspd: f32 = (if (night and pwsn > 0) pwsn * 10.0 else if (pws > 0) pws * 10.0 else if (night and ct.wander_speed_night > 0) ct.wander_speed_night * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
                 ai.active_task = .wander;
                 ai.decision_cd = ctx.w.rules.ai.sleep_wander_interval_s;
                 wanderUpdate(ctx.w, s, ai, wspd * ctx.w.rules.ai.sleep_wander_speed_frac, ctx.dt);
@@ -1776,12 +1781,24 @@ const AiCtx = struct {
             // full entityclasses row for classes not in the fixed table); the
             // class_table row is the fallback, then the Rules floor.
             // MoveSpeed ~0.08 shamble → x10; MoveSpeedAggro max ~1.35 → x1.6.
+            // Day/night split (entity-ai.md GetMoveSpeed/GetMoveSpeedAggro):
+            // dark → MoveSpeedNight + MoveSpeedAggro max (passives 133/134),
+            // day → MoveSpeed + MoveSpeedAggro min (passives 135/133); the
+            // stock XML comment on MoveSpeedAggro ("min/max (like day or
+            // night)") pins the split. A class without MoveSpeedNight seeds
+            // it from MoveSpeed (entity-ai.md 3312).
             const ct = &ctx.w.class_table[ctx.w.class_id[s].id];
             const pws = ctx.w.class_id[s].wander_speed;
+            const pwsn = ctx.w.class_id[s].wander_speed_night;
             const pcs = ctx.w.class_id[s].chase_speed;
+            const pcsd = ctx.w.class_id[s].chase_speed_day;
             const sscale = ctx.zombie_speed_scale;
-            const wspd: f32 = (if (pws > 0) pws * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
-            const cspd: f32 = (if (pcs > 0) pcs * 1.6 else if (ct.chase_speed > 0) ct.chase_speed * 1.6 else ctx.w.rules.ai.chase_speed) * sscale;
+            const night = ctx.w.director.clock.isNight();
+            const wspd: f32 = (if (night and pwsn > 0) pwsn * 10.0 else if (pws > 0) pws * 10.0 else if (night and ct.wander_speed_night > 0) ct.wander_speed_night * 10.0 else if (ct.wander_speed > 0) ct.wander_speed * 10.0 else ctx.w.rules.ai.wander_speed) * sscale;
+            const cspd: f32 = (if (night)
+                (if (pcs > 0) pcs * 1.6 else if (ct.chase_speed > 0) ct.chase_speed * 1.6 else ctx.w.rules.ai.chase_speed)
+            else
+                (if (pcsd > 0) pcsd * 1.6 else if (ct.chase_speed_day > 0) ct.chase_speed_day * 1.6 else ctx.w.rules.ai.chase_speed)) * sscale;
 
             // EAITaskList::OnUpdateTasks step 1 (asm.il:437713): stop the
             // executing task when it is no longer best or its Continue() fails.
@@ -3521,6 +3538,49 @@ test "system zombie chases" {
     try std.testing.expect(w.zombie_ai[zs].alert);
 }
 
+test "zombies chase faster at night (stock GetMoveSpeedAggro day/night split)" {
+    // RE entity-ai.md GetMoveSpeedAggro: dark → MoveSpeedAggro max (passive
+    // 134) else min (passive 133); the stock XML comment on the prop ("min/max
+    // (like day or night)") pins the split. A zombie with aggro 0.2/1.25
+    // closes on a far player faster at night (hour 1, dark) than at day
+    // (hour 12); World.IsDark IL=31 bounds night as hour < dawn || hour > dusk.
+    var day_x: f32 = 0;
+    var night_x: f32 = 0;
+    {
+        var w: World = .{};
+        defer w.deinit();
+        w.director.clock.hours = 12;
+        const z = w.spawnZombieDef(0, 70, 0, 40, .{
+            .name = "zombieBoe", .hash = 1, .kind = .zombie,
+            .chase_speed = 1.25, .chase_speed_day = 0.2, .wander_speed = 0.08,
+        }).?;
+        _ = w.spawnPlayer(8, 70, 0, 0);
+        const zs = w.slotOfNetId(z).?;
+        var t: f32 = 0;
+        while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+        day_x = w.transform[zs].x;
+    }
+    {
+        var w: World = .{};
+        defer w.deinit();
+        w.director.clock.hours = 1;
+        const z = w.spawnZombieDef(0, 70, 0, 40, .{
+            .name = "zombieBoe", .hash = 1, .kind = .zombie,
+            .chase_speed = 1.25, .chase_speed_day = 0.2, .wander_speed = 0.08,
+        }).?;
+        _ = w.spawnPlayer(8, 70, 0, 0);
+        const zs = w.slotOfNetId(z).?;
+        var t: f32 = 0;
+        while (t < 2.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+        night_x = w.transform[zs].x;
+    }
+    // Night chase (aggro max 1.25 ×1.6 ≈ 2 m/s) outpaces day chase (aggro min
+    // 0.2 ×1.6 ≈ 0.32 m/s) by a wide margin over the same 2 s window; day
+    // still closes (the chase task is active, not frozen).
+    try std.testing.expect(night_x > day_x * 2.0);
+    try std.testing.expect(day_x > 0.1);
+}
+
 /// Wall at x=2, z=-2..2: passable everywhere else at the caller's own height.
 fn testWallStep(_: ?*anyopaque, _: i32, _: i32, from_y: i32, x: i32, z: i32) ?i32 {
     if (x == 2 and z >= -2 and z <= 2) return null;
@@ -4071,7 +4131,8 @@ test "class_table attack/chase floors only when field is zero" {
     var w: World = .{};
     defer w.deinit();
     w.class_table[1].attack_damage = 20;
-    w.class_table[1].chase_speed = 1.0; // XML-scale; sim uses *1.6
+    w.class_table[1].chase_speed_day = 1.0; // XML-scale day chase (aggro min); sim *1.6
+    w.class_table[1].chase_speed = 1.0; // XML-scale night chase (aggro max); sim *1.6
     w.class_table[1].wander_speed = 0.2;
     const z = w.spawnZombie(0, 70, 0, 40).?;
     _ = w.spawnPlayer(1.2, 70, 0, 0);
@@ -4139,7 +4200,10 @@ test "configured attack floor never beats the entityclasses value" {
 test "configured chase floor never beats the entityclasses MoveSpeedAggro" {
     var w: World = .{ .rules = .{ .ai = .{ .chase_speed = 100.0 } } };
     defer w.deinit();
-    w.class_table[1].chase_speed = 1.0; // XML-scale; sim uses *1.6
+    // XML-scale aggro pair: min (day) 1.0 / max (night) 1.0 → sim ×1.6.
+    // The stock pair always carries both (entity-ai.md 3313-3314 ParseVec).
+    w.class_table[1].chase_speed_day = 1.0;
+    w.class_table[1].chase_speed = 1.0;
     const z = w.spawnZombie(0, 70, 0, 40).?;
     _ = w.spawnPlayer(30, 70, 0, 0);
     const zs = w.slotOfNetId(z).?;

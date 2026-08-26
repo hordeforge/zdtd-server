@@ -84,7 +84,13 @@ pub const ClassId = struct {
     /// back to class_table[id] then the Rules floor, so a class that was not
     /// preloaded into the 16-slot table still behaves like itself.
     chase_speed: f32 = 0,
+    /// MoveSpeedAggro min (day chase; stock GetMoveSpeedAggro day branch).
+    /// 0 = class_table then the Rules floor.
+    chase_speed_day: f32 = 0,
     wander_speed: f32 = 0,
+    /// MoveSpeedNight (night shamble; stock GetMoveSpeed dark branch).
+    /// 0 = falls to wander_speed then the floor.
+    wander_speed_night: f32 = 0,
     attack_damage: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
     /// feral 24); 0 = class_table[id] then the Rules chew floor.

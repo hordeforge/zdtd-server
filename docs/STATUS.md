@@ -442,8 +442,8 @@ model lands); the EntityStatChanged row's cvar-sync residual closed.
 Then the world-light slice 1 landed (2026-08-26): world/sky.zig ships the
 stock SkyManager day/night model (TimeOfDay, UpdateSunMoonAngles sun target,
 CalcDayPercent curve, GetLightLevel ambient term; RE pinned in entity-ai.md),
-driving the EntityStealth light byte from the world clock ([rules.sky]
-dawn/dusk hours, stock 4/22) - night drops the meter light toward 0, day
+driving the EntityStealth light byte from the world clock (clock dawn/dusk
+from DayLightLength, stock 4/22 at 18 h) - night drops the meter light toward 0, day
 raises it; block light, moving lights, moon and shade stay recorded slices
 2+. The same ambient then fed the sim's sleeper crouch leg (2026-08-26):
 CanSleeperAttackDetect's FastLerp(3, 15, lightAttackPercent) replaces the
@@ -451,6 +451,15 @@ flat 5-m floor (lightAttackPercent = 0.89 passive in deep dark else 1,
 [rules.ai] crouch_sleeper_detect_min/max + stealth_light_passive), so
 crouched players now slip past sleepers only beyond the stock light-scaled
 range.
+Then the zombie day/night speed split landed (2026-08-26): the sim resolves
+GetMoveSpeed/GetMoveSpeedAggro per World.IsDark (entity-ai.md IL=45; the
+stock XML comment on MoveSpeedAggro "min/max (like day or night)" pins the
+split) - day chase uses MoveSpeedAggro min + MoveSpeed (shamble), night uses
+MoveSpeedAggro max + MoveSpeedNight, parsed from entityclasses.xml
+([rules.ai] chase_speed/wander_speed stay the fallback floors). Night
+zombies now outpace day zombies ~6x (stock ratio), where the sim previously
+chased at night speed around the clock. The absolute day scale (min x1.6
+~0.3 m/s for zombieBoe) is a recorded live-measurement follow-on.
 Then the AnimateBlock/BlockTrigger row went WORKS on re-audit
 (2026-08-26): BlockTrigger C2S is handled + rebroadcast, and
 NetPackageAnimateBlock's only stock sender is the GameEvent block-animate

@@ -95,13 +95,15 @@ pub fn step(self: *Game) !void {
         }
         self.sim.director.party_stage = self.partyHighestGameStage();
         // Day/night ambient (world/sky.zig slice 1): one value per tick from
-        // the world clock + [rules.sky] feeds the sim's stealth light legs
-        // (CanSleeperAttackDetect crouch range) and the stealth-meter S2C byte.
-        const sr = self.sim.rules.sky;
+        // the world clock + its dawn/dusk boundary (WorldClock dawn/dusk =
+        // stock GameUtils::CalcDuskDawnHours(DayLightLength)) feeds the sim's
+        // stealth light legs (CanSleeperAttackDetect crouch range) and the
+        // stealth-meter S2C byte.
+        const clk = &self.sim.director.clock;
         self.sim.ambient_light = sky.ambientLuma(sky.dayPercent(
-            self.sim.director.clock.worldTimeBits(),
-            @floatFromInt(sr.dawn_hour),
-            @floatFromInt(sr.dusk_hour),
+            clk.worldTimeBits(),
+            clk.dawn,
+            clk.dusk,
         ));
         // Wake sleeper volumes whose AABB contains this tick's combat noise
         // (stock World.CheckSleeperVolumeNoise; player-independent) - must run
