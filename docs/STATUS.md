@@ -378,6 +378,11 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the ClientInfo/version-gate row went WORKS on re-audit (2026-08-26):
+the login gate is hard - compatibilityVersion must equal stock_wire_comp
+(ordinal ignore-case) or the client is denied with
+EKickReason.VersionMismatch(4) via NetPackagePlayerDenied, matching stock
+VersionAuthorizer; the 'soft version strings' note was stale.
 Then the quest POI-marker/rally row went WORKS on re-audit (2026-08-26):
 try_rally_marker runs the full stock chain (lockout -> reply event ->
 questOnRallyActivated -> questPoiLock + POI block restore), lock/unlock POI

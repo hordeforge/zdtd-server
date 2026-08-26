@@ -4579,7 +4579,7 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 | Encryption (`Encryption*`) | PARTIAL - non-client-visible (documented 2026-08-21: optional platform RSA+AES residual, not ServerPassword; the EAC-off join works without it) |
 | Permission / admin flags | PARTIAL | admin TCP path; no in-game permission levels |
 | Kick / ban / whitelist | PARTIAL | kick/ban/unban on admin TCP; `admins.zsv`/`whitelist.zsv`/`bans.zsv` persist beside `players.zsv` (this row was stale, see §12.1) |
-| `ClientInfo` / version gate strictness | PARTIAL | soft version strings |
+| `ClientInfo` / version gate strictness | WORKS (2026-08-26 re-audit: the login gate is HARD - the client's compatibilityVersion must equal `stock_wire_comp` (ordinal ignore-case) or the server denies with EKickReason.VersionMismatch(4) via NetPackagePlayerDenied, matching stock VersionAuthorizer; a different client build cannot join and desync silently) |
 | Reconnect resume | PARTIAL | players.zsv ZPV3 keyed **by login name** (ADR 0017), not by platform identity: a client can claim another player's save by picking their name. Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration (ZPV4 or flagged extension); tracked in §10 |
 | Crossplay platform users | PARTIAL | both identities decoded and stored per client; `InternalId` = crossplatform else native (asm.il 783909); no platform verification (EAC off) | |
 
