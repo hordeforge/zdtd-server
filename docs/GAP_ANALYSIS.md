@@ -2213,10 +2213,14 @@ gamestage, no wandering hordes, and no screamers.
   `Data/Config/entityclasses.xml:562-571`, `asm.il` EAI* class list
 
 - **Per-class AITask/AITarget lists from entityclasses.xml** `PARTIAL (waived)`
-  Per-class `AITask/AITarget` strings (+ AIFeralSense, NoiseSeekDist, etc.) not
-  yet parsed; all entities share one `zombie_tasks` table. Needs full
-  `entityclasses.xml` task-graph loader — waived as EAI completeness vs wire.
-  *Anchors:* `src/assets/entities.zig:230-272`, `src/ecs/systems.zig:731-750`
+  The attack-task leg ships (2026-08-22): the inherited `AITask-*` list is
+  parsed per class (resolvedAiAttacks, stock name set = ApproachAndAttackTarget)
+  and gates whether the entity hunts (timid animals never attack). The full
+  per-class task graph is still one shared `zombie_tasks` table: the
+  wander/look/approach-spot/territorial task *selection* is not class-specific
+  beyond the attack discriminator. Waived as EAI completeness vs wire.
+  *Anchors:* `src/assets/entities.zig:317-341` (resolvedAiAttacks),
+  `src/ecs/systems.zig:731-750`, `src/ecs/systems.zig:1341` zombie_tasks
 
 - **Timid animals run the zombie task table** `WORKS` `(2026-08-22)`
   `approach_attack` is now gated by the class's inherited AITask-* list:
