@@ -305,6 +305,15 @@ test, so a retune cannot land silently).
 | `battery_initial_charge_frac` | 0.5 | Initial battery charge as a fraction of capacity on fresh placement |
 | `trigger_pulse_s` | 0.5 | Trigger-plate / tripwire pulse duration (s) when the block sets duration=Triggered |
 
+`[rules.sky]` (day/night sky model, world-light slice 1, RE entity-ai.md
+SkyManager; the stock `SkyManager` cctor pins 4/22, `world/sky.zig` applies
+the curve):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `dawn_hour` | 4 | Dawn hour bounding the `UpdateSunMoonAngles` sun-target day window |
+| `dusk_hour` | 22 | Dusk hour bounding the `UpdateSunMoonAngles` sun-target day window |
+
 `[rules.water]` (water-leveling budgets, GAP "Water flow / physics" PARTIAL;
 the stock sim is a jobified mass-flow engine, light-mesh-water.md §4):
 

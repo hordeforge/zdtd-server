@@ -439,6 +439,13 @@ NetPackageEntityStealth (id + packed data: noise 7-bit, alert, crouch) every
 16 ticks on change per stock PlayerStealth.TickServer IL_0470, so observers
 render other players' stealth meters (light stays 0 until the world-light
 model lands); the EntityStatChanged row's cvar-sync residual closed.
+Then the world-light slice 1 landed (2026-08-26): world/sky.zig ships the
+stock SkyManager day/night model (TimeOfDay, UpdateSunMoonAngles sun target,
+CalcDayPercent curve, GetLightLevel ambient term; RE pinned in entity-ai.md),
+driving the EntityStealth light byte from the world clock ([rules.sky]
+dawn/dusk hours, stock 4/22) - night drops the meter light toward 0, day
+raises it; block light, moving lights, moon and shade stay recorded slices
+2+.
 Then the AnimateBlock/BlockTrigger row went WORKS on re-audit
 (2026-08-26): BlockTrigger C2S is handled + rebroadcast, and
 NetPackageAnimateBlock's only stock sender is the GameEvent block-animate
@@ -958,12 +965,14 @@ surface is the DamageEntity C2S claim, which is complete; AI senses shipped
 WORKS - per-class view cone (entityclasses MaxViewAngle, stock 180 default
 halved), block-LOS sight, hearing through walls, and smell with a bleeding
 extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
-light-level leg stays RE-blocked, no server light channel)
+light-level leg ships slice 1 (2026-08-26, world/sky.zig day/night ambient
+driving the EntityStealth S2C light byte; block light / moving lights / moon
+/ shade recorded as later slices))
 
 1. MoveHelper physics / collision (WORKS 2026-08-21 - collide-and-slide + step-up + stock gravity + blocked-grounded jump + door-opening + dig-through + swim physics + entity push; the stock elevator has no platform block, documented; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers 2026-08-20; multi-biome surfaces + terrain-tile relief blend 2026-08-21 - the stock 6-axis climate model and carved caves remain)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water; placed water now cascades down its column and puddles, bounded 2026-08-21; no mass-flow engine, no evap/drain)
-4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; movement-noise volume model wired 2026-08-26 (sounds.xml `<Noise>` table + PlayerStealth fold: NotifyNoise accumulation, CalcVolume, sleeper wake at 360, heat, attraction heard-test; stock-dedi inputs are server-side sounds only - the C2S sound relay is audio-only on a dedi); light-level leg RE-blocked 2026-08-20)
+4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x, sleeper detect 5; movement-noise volume model wired 2026-08-26 (sounds.xml `<Noise>` table + PlayerStealth fold: NotifyNoise accumulation, CalcVolume, sleeper wake at 360, heat, attraction heard-test; stock-dedi inputs are server-side sounds only - the C2S sound relay is audio-only on a dedi); world-light slice 1 shipped 2026-08-26 (world/sky.zig day/night ambient → EntityStealth S2C light byte); block light/moon/shade slices recorded)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; pack hunting/horde directives RE-BLOCKED - no group-attack IL in the corpus)
 6. Falling blocks (PARTIAL - per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall + crush damage via materials.xml Hardness/Mass 2026-08-21; Fall-event item drops, landing audio and the opt-in group mode open)
 7. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; spider/crawler variant behaviors thin-RE - bCanClimbVertical pinned, the climb mechanics are not)

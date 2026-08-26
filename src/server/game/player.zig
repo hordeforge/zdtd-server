@@ -14,6 +14,7 @@ const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
+const sky = @import("../../world/sky.zig");
 
 const max_clients = game_mod.max_clients;
 
@@ -199,10 +200,18 @@ pub fn questKillForParty(self: *Game, killer_slot: usize, vx: f32, vz: f32) void
 /// packed stealth state changed, broadcast NetPackageEntityStealth for the
 /// player so other clients render the stealth meter. Noise is the sim's
 /// CalcVolume fold; alert = any alert zombie within 12 m (stock scan); light
-/// stays 0 until the clone-side world-light model lands (RE-blocked,
-/// documented).
+/// is the clone-side world-light model slice 1 (world/sky.zig): the
+/// day/night ambient from the world clock (position-independent until the
+/// block-light/moon/shade terms land, documented).
 pub fn tickStealthBroadcast(self: *Game) void {
     if ((self.tick_n % 16) != 0) return;
+    const r = self.sim.rules;
+    const day_pct = sky.dayPercent(
+        self.sim.director.clock.worldTimeBits(),
+        @floatFromInt(r.sky.dawn_hour),
+        @floatFromInt(r.sky.dusk_hour),
+    );
+    const light8: u8 = @intFromFloat(@min(sky.ambientLuma(day_pct) * 255.0, 255.0));
     for (&self.clients) |*c| {
         if (!c.joined or c.entity_id <= 0) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -223,11 +232,12 @@ pub fn tickStealthBroadcast(self: *Game) void {
                 break;
             }
         }
-        if (noise8 == c.stealth_noise_sent and crouch == c.stealth_crouch_sent and alert == c.stealth_alert_sent) continue;
+        if (noise8 == c.stealth_noise_sent and crouch == c.stealth_crouch_sent and alert == c.stealth_alert_sent and light8 == c.stealth_light_sent) continue;
         c.stealth_noise_sent = noise8;
         c.stealth_crouch_sent = crouch;
         c.stealth_alert_sent = alert;
-        if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, 0, noise8, alert, crouch)) |sb| {
+        c.stealth_light_sent = light8;
+        if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, light8, noise8, alert, crouch)) |sb| {
             self.broadcastExcept("NetPackageEntityStealth", sb, null) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
                 std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});

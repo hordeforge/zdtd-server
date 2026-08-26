@@ -21,6 +21,7 @@ pub const tts = @import("tts.zig");
 pub const water = @import("water.zig");
 pub const biomes = @import("biomes.zig");
 pub const weather = @import("weather.zig");
+pub const sky = @import("sky.zig");
 pub const worldgen = @import("worldgen.zig");
 pub const noise = @import("noise.zig");
 pub const deco_mirror = @import("deco_mirror.zig");
@@ -44,6 +45,7 @@ test {
     _ = water;
     _ = biomes;
     _ = weather;
+    _ = sky;
     _ = worldgen;
     _ = noise;
     _ = deco_mirror;

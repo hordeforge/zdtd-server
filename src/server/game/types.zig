@@ -423,6 +423,7 @@ pub const Client = struct {
     stealth_noise_sent: u8 = 0,
     stealth_crouch_sent: bool = false,
     stealth_alert_sent: bool = false,
+    stealth_light_sent: u8 = 0,
     /// Purchased progression levels by name (attributes/perks). `name` must
     /// point to static/indefinite-lifetime data (the progression table
     /// arena). Persisted via the players.zsv ZPV11 skill tail (skill_points +
