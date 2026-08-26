@@ -1070,8 +1070,12 @@ rate token (block/inv/damage buckets on SetBlock, WireActions,
 TurretSpawn, SoundAtPosition, EntityAnimationData, DamageEntity,
 PlayerEquipment, InvTx, LandClaimRepair), while the low-rate sim actions
 (EntityAttach, quest events, GameEvent ack) are owner-gated and
-idempotent without one. GAP sounds row WORKS; the last RE-blocked
-wire pin is closed.
+idempotent without one. An eighth pass (2026-08-27) verified the
+interest/no-self-echo rule on the movement replication path
+(replicate.zig): player PosAndRot goes to `in_range & ~own peer slot`
+with `needsPosSend` dirty/tick gating, and zombie/animal frames go to
+all in-range peers - no self-echo, interest-scoped encodes.
+GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
