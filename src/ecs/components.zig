@@ -102,10 +102,18 @@ pub const ClassId = struct {
     /// sense floor (systems.senseDistSq).
     sight_range: f32 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
-    /// zombie template; cctor default 30/100); 0,0 = class_table[id] then the
+    /// zombie template; cctor default 30/100). 0,0 = class_table[id] then the
     /// Rules floor (systems.sightLightThreshold).
     sight_light_min: f32 = 0,
     sight_light_max: f32 = 0,
+    /// entityclasses SleeperSightToWakeMin/Max "min,max" roll ranges
+    /// (stock zombieTemplateMale "-40,5" / "340,480"): each sleeping zombie
+    /// rolls its wake threshold pair from these at spawn. 0 = unset (falls to
+    /// the stock default ranges in world.spawnSleeperDef).
+    sleeper_wake_near_min: f32 = 0,
+    sleeper_wake_near_max: f32 = 0,
+    sleeper_wake_far_min: f32 = 0,
+    sleeper_wake_far_max: f32 = 0,
     /// entityclasses MaxViewAngle in degrees, full cone; 0 = class_table[id]
     /// then the Rules cone floor (systems.viewHalfDeg).
     view_angle_deg: f32 = 0,
@@ -849,6 +857,15 @@ pub const Sleeper = struct {
     volume_r: f32 = 16,
     home_x: f32 = 0,
     home_z: f32 = 0,
+    /// RE UpdateSleeper wake scan (entity-ai.md GetSleeperDisturbedLevel
+    /// IL=38): the per-entity rolled wake-threshold pair - wake =
+    /// Lerp(wake_light_near, wake_light_far, dist/sightRangeBase), the
+    /// sleeper wakes the nearest player with lightLevel > wake. Rolled at
+    /// spawn from the class SleeperSightToWakeMin/Max ranges (stock
+    /// zombieTemplateMale "-40,5" / "340,480"); these defaults sit at the
+    /// stock roll midpoints for direct-constructed test sleepers.
+    wake_light_near: f32 = -17.5,
+    wake_light_far: f32 = 410.0,
 };
 
 /// A combat-noise event (melee hit / ranged damage): alerts nearby zombies

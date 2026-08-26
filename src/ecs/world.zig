@@ -121,6 +121,14 @@ pub const AtomicBits = struct {
     }
 };
 
+/// Stock zombieTemplateMale SleeperSightToWakeMin/Max (entityclasses.xml):
+/// the per-entity wake-threshold ROLL ranges used when a class carries no
+/// sleeper wake props (offline table). RE entity-ai.md D8.6 step 5.
+const sleeper_wake_near_min_default: f32 = -40.0;
+const sleeper_wake_near_max_default: f32 = 5.0;
+const sleeper_wake_far_min_default: f32 = 340.0;
+const sleeper_wake_far_max_default: f32 = 480.0;
+
 pub const EntityClass = struct {
     /// Class name for logging/debug. Must point to static/indefinite-lifetime
     /// data (comptime literal or binary-embedded table). Never assign an
@@ -160,6 +168,12 @@ pub const EntityClass = struct {
     /// zombie template; cctor default 30/100). 0,0 = use the Rules floor.
     sight_light_min: f32 = 0,
     sight_light_max: f32 = 0,
+    /// entityclasses SleeperSightToWakeMin/Max roll ranges (stock "-40,5" /
+    /// "340,480"); 0 = unset → the stock default ranges at spawn.
+    sleeper_wake_near_min: f32 = 0,
+    sleeper_wake_near_max: f32 = 0,
+    sleeper_wake_far_min: f32 = 0,
+    sleeper_wake_far_max: f32 = 0,
     /// entityclasses MaxViewAngle in degrees, full cone (stock default 180);
     /// the sense gate halves it. 0 = use the Rules cone floor.
     view_angle_deg: f32 = 0,
@@ -1027,6 +1041,10 @@ pub const World = struct {
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
+            self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
+            self.class_id[s].sleeper_wake_near_max = def.sleeper_wake_near_max;
+            self.class_id[s].sleeper_wake_far_min = def.sleeper_wake_far_min;
+            self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
             self.class_id[s].xp_gain = def.xp_gain;
@@ -1109,6 +1127,10 @@ pub const World = struct {
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
+            self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
+            self.class_id[s].sleeper_wake_near_max = def.sleeper_wake_near_max;
+            self.class_id[s].sleeper_wake_far_min = def.sleeper_wake_far_min;
+            self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
             self.class_id[s].xp_gain = def.xp_gain;
@@ -1126,6 +1148,32 @@ pub const World = struct {
         if (self.slotOfNetId(id)) |s| {
             self.mask[s].sleeper = true;
             self.sleeper[s] = .{ .awake = false, .home_x = x, .home_z = z, .volume_r = 20 };
+            // RE entity-ai.md D8.6 step 5: each sleeping zombie rolls its
+            // GetSleeperDisturbedLevel wake-threshold pair from the class
+            // SleeperSightToWakeMin/Max ranges (stock zombieTemplateMale
+            // "-40,5" / "340,480"). Deterministic per spawn: a hash of the
+            // position + class seeds both rolls (the sim has no ad-hoc RNG).
+            const near_min = if (def.sleeper_wake_near_min != 0 or def.sleeper_wake_near_max != 0)
+                def.sleeper_wake_near_min
+            else
+                sleeper_wake_near_min_default;
+            const near_max = if (def.sleeper_wake_near_min != 0 or def.sleeper_wake_near_max != 0)
+                def.sleeper_wake_near_max
+            else
+                sleeper_wake_near_max_default;
+            const far_min = if (def.sleeper_wake_far_min != 0 or def.sleeper_wake_far_max != 0)
+                def.sleeper_wake_far_min
+            else
+                sleeper_wake_far_min_default;
+            const far_max = if (def.sleeper_wake_far_min != 0 or def.sleeper_wake_far_max != 0)
+                def.sleeper_wake_far_max
+            else
+                sleeper_wake_far_max_default;
+            const h = std.hash.Wyhash.hash(0, std.mem.asBytes(&.{ x, z, @as(f32, @floatFromInt(def.hash)) }));
+            const frac_a = @as(f32, @floatFromInt(h >> 32)) / @as(f32, @floatFromInt(std.math.maxInt(u32)));
+            const frac_b = @as(f32, @floatFromInt(h & 0xffffffff)) / @as(f32, @floatFromInt(std.math.maxInt(u32)));
+            self.sleeper[s].wake_light_near = near_min + (near_max - near_min) * frac_a;
+            self.sleeper[s].wake_light_far = far_min + (far_max - far_min) * frac_b;
             self.zombie_ai[s].state = .sleep;
             self.sleeper_vol[s] = volume;
         }
@@ -1808,6 +1856,32 @@ test "spawnSleeperDef carries per-entity class stats" {
     try std.testing.expectEqual(@as(f32, 60), w.health[s].max_hp);
     try std.testing.expectEqual(@as(i32, 12345), w.class_id[s].hash);
     try std.testing.expectEqualStrings("EntityLootContainerStrong", w.class_id[s].loot_list);
+    // The wake-threshold roll: a class without SleeperSightToWake* uses the
+    // stock default ranges (-40..5 / 340..480) and the roll is deterministic
+    // per spawn (same position + class → same thresholds, inside the ranges).
+    const near0 = w.sleeper[s].wake_light_near;
+    const far0 = w.sleeper[s].wake_light_far;
+    try std.testing.expect(near0 >= -40.0 and near0 <= 5.0);
+    try std.testing.expect(far0 >= 340.0 and far0 <= 480.0);
+    const id2 = w.spawnSleeperDef(3, 70, 4, .{
+        .name = "zombieFeral",
+        .max_hp = 60,
+        .kind = .zombie,
+        .hash = 12345,
+        .loot_list = "EntityLootContainerStrong",
+    }, 0).?;
+    const s2 = w.slotOfNetId(id2).?;
+    try std.testing.expectEqual(near0, w.sleeper[s2].wake_light_near);
+    try std.testing.expectEqual(far0, w.sleeper[s2].wake_light_far);
+    // A class carrying the ranges rolls inside them.
+    const id3 = w.spawnSleeperDef(9, 70, 9, .{
+        .name = "custom", .hash = 7, .kind = .zombie,
+        .sleeper_wake_near_min = 0.0, .sleeper_wake_near_max = 0.0,
+        .sleeper_wake_far_min = 10.0, .sleeper_wake_far_max = 20.0,
+    }, 0).?;
+    const s3 = w.slotOfNetId(id3).?;
+    try std.testing.expect(w.sleeper[s3].wake_light_near >= -40.0 and w.sleeper[s3].wake_light_near <= 5.0);
+    try std.testing.expect(w.sleeper[s3].wake_light_far >= 10.0 and w.sleeper[s3].wake_light_far <= 20.0);
 }
 
 test "beginTick clears locals" {

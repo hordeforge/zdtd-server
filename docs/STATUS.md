@@ -463,6 +463,14 @@ default 30/100 is the [rules.ai] floor) - night blinds sight except point
 blank, crouching shrinks the lit reach, hearing and smell are untouched.
 The selfLight and speedAverage (movement-visibility) terms of the chain stay
 0 until item lights land (recorded).
+Then the sleeper wake light gate landed (2026-08-26): the proximity wake scan
+now applies GetSleeperDisturbedLevel (IL=38, level >= 2) - each sleeping
+zombie rolls its wake threshold from the class SleeperSightToWakeMin/Max
+ranges at spawn (stock zombieTemplateMale "-40,5" / "340,480", a
+deterministic position+class hash roll) and wakes the nearest player whose
+lightLevel > Lerp(rolledNear, rolledFar, dist/sightRangeBase) - POI sleepers
+wake within ~15% of sightRange at noon and ~1 m at night, so darkness and
+crouch let you slip past; the 360-cap noise wake path is unchanged.
 Then the zombie day/night speed split landed (2026-08-26): the sim resolves
 GetMoveSpeed/GetMoveSpeedAggro per World.IsDark (entity-ai.md IL=45; the
 stock XML comment on MoveSpeedAggro "min/max (like day or night)" pins the
@@ -1002,7 +1010,7 @@ selfLight/speedAverage lightLevel terms stay recorded))
 1. MoveHelper physics / collision (WORKS 2026-08-21 - collide-and-slide + step-up + stock gravity + blocked-grounded jump + door-opening + dig-through + swim physics + entity push; the stock elevator has no platform block, documented; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers 2026-08-20; multi-biome surfaces + terrain-tile relief blend 2026-08-21 - the stock 6-axis climate model and carved caves remain)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water; placed water now cascades down its column and puddles, bounded 2026-08-21; no mass-flow engine, no evap/drain)
-4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x; movement-noise volume model wired 2026-08-26 (sounds.xml `<Noise>` table + PlayerStealth fold: NotifyNoise accumulation, CalcVolume, sleeper wake at 360, heat, attraction heard-test; stock-dedi inputs are server-side sounds only - the C2S sound relay is audio-only on a dedi); the sleeper crouch leg uses the stock FastLerp(3,15,lightAttackPercent) with lightAttackPercent = passive-89 when selfLight (held-item light) < 0.1 per the exact TickServer IL_010B (no item-light model → constant 13.68, `[rules.ai] crouch_sleeper_detect_min/max` + `stealth_light_passive`); CanSeeStealth sight-light leg SHIPS 2026-08-26 (TickServer lightLevel chain → S2C light byte + sight gate vs per-class SightLightThreshold, night blinds sight except point blank, crouch shrinks the lit reach); block light/moon/shade + the selfLight/speedAverage terms + the wake/groan ladder recorded)
+4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x; movement-noise volume model wired 2026-08-26 (sounds.xml `<Noise>` table + PlayerStealth fold: NotifyNoise accumulation, CalcVolume, sleeper wake at 360, heat, attraction heard-test; stock-dedi inputs are server-side sounds only - the C2S sound relay is audio-only on a dedi); the sleeper crouch leg uses the stock FastLerp(3,15,lightAttackPercent) with lightAttackPercent = passive-89 when selfLight (held-item light) < 0.1 per the exact TickServer IL_010B (no item-light model → constant 13.68, `[rules.ai] crouch_sleeper_detect_min/max` + `stealth_light_passive`); CanSeeStealth sight-light leg SHIPS 2026-08-26 (TickServer lightLevel chain → S2C light byte + sight gate vs per-class SightLightThreshold, night blinds sight except point blank, crouch shrinks the lit reach); sleeper wake light gate SHIPS 2026-08-26 (GetSleeperDisturbedLevel IL=38: wake = Lerp(rolled SleeperSightToWakeMin/Max, dist/sightRangeBase) vs the player lightLevel, per-entity deterministic rolls at spawn - POI sleepers wake within ~15% of sightRange at noon, ~1 m at night); block light/moon/shade + the selfLight/speedAverage terms + the groan-level ladder recorded)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; pack hunting/horde directives RE-BLOCKED - no group-attack IL in the corpus)
 6. Falling blocks (PARTIAL - per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall + crush damage via materials.xml Hardness/Mass 2026-08-21; Fall-event item drops, landing audio and the opt-in group mode open)
 7. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; spider/crawler variant behaviors thin-RE - bCanClimbVertical pinned, the climb mechanics are not)

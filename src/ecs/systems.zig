@@ -1722,9 +1722,12 @@ const AiCtx = struct {
             // Sleepers: stay sleep until player in volume. Stealth (RE
             // entity-ai.md CanSleeperAttackDetect): a crouched player only
             // disturbs sleepers within FastLerp(3, 15, lightAttackPercent)
-            // (stock lightAttackPercent: 0.89 passive in deep-dark ambient
-            // < 0.1, else 1; the light is the per-tick slice-1 ambient, see
-            // world/sky.zig); standing players wake at the volume radius.
+            // (lightAttackPercent = passive-89: selfLight < 0.1 per TickServer
+            // IL_010B, no item-light model → 13.68); standing players wake at
+            // the volume radius. RE UpdateSleeper adds the disturbed-level
+            // light gate: wake = Lerp(rolledWakeNear, rolledWakeFar,
+            // dist/sightRangeBase), woken iff the player's lightLevel > wake
+            // (GetSleeperDisturbedLevel IL=38, level >= 2).
             if (ctx.w.mask[s].sleeper and !ctx.w.sleeper[s].awake) {
                 const sl = ctx.w.sleeper[s];
                 const ar = ctx.w.rules.ai;
@@ -1734,15 +1737,22 @@ const AiCtx = struct {
                 const lap = stealthLightAttackPercent(0, ar.stealth_light_passive);
                 const crouch_reach = ar.crouch_sleeper_detect_min +
                     (ar.crouch_sleeper_detect_max - ar.crouch_sleeper_detect_min) * lap;
+                const sr = @sqrt(senseDistSq(ctx.w, s)); // sightRangeBase
                 var near = false;
                 for (ctx.players) |pl| {
                     const dx = pl.x - sl.home_x;
                     const dz = pl.z - sl.home_z;
+                    const dist = @sqrt(dx * dx + dz * dz);
                     const reach = if (pl.crouching) @min(sl.volume_r, crouch_reach) else sl.volume_r;
-                    if (dx * dx + dz * dz <= reach * reach) {
-                        near = true;
-                        break;
+                    if (dist > reach) continue;
+                    if (sr > 0.001) {
+                        const pct = dist / sr;
+                        if (pct > 1.0) continue; // GetSleeperDisturbedLevel: pct > 1 → 0
+                        const wake = sl.wake_light_near + (sl.wake_light_far - sl.wake_light_near) * pct;
+                        if (!(pl.light_level > wake)) continue;
                     }
+                    near = true;
+                    break;
                 }
                 if (!near) {
                     ai.state = .sleep;
@@ -5976,6 +5986,10 @@ test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" 
     const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
     const zs = w.slotOfNetId(z).?;
     w.sleeper[zs].volume_r = 20;
+    // Open the disturbed-level light gate (this test isolates the crouch leg;
+    // the light gate itself is covered by the next test).
+    w.sleeper[zs].wake_light_near = -1000;
+    w.sleeper[zs].wake_light_far = -500;
     const p = w.spawnPlayer(16, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.player[ps].crouching = true;
@@ -5993,7 +6007,7 @@ test "stealth: standing players wake sleepers at the full volume radius" {
     // RE entity-ai.md CanSleeperAttackDetect: not crouching → true, so the
     // volume radius gates the wake (no FastLerp shrink). The crouch leg only
     // protects beyond FastLerp(3,15,0.89) = 13.68: 16 m crouched is out,
-    // uncrouching wakes the 20 m volume.
+    // uncrouching wakes the 20 m volume. The disturbed-level gate is open.
     var w: World = .{ .rules = .{ .ai = .{
         .crouch_sleeper_detect_min = 3.0,
         .crouch_sleeper_detect_max = 15.0,
@@ -6003,12 +6017,49 @@ test "stealth: standing players wake sleepers at the full volume radius" {
     const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
     const zs = w.slotOfNetId(z).?;
     w.sleeper[zs].volume_r = 20;
+    w.sleeper[zs].wake_light_near = -1000;
+    w.sleeper[zs].wake_light_far = -500;
     const p = w.spawnPlayer(16, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.player[ps].crouching = true;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.sleeper[zs].awake);
     w.player[ps].crouching = false;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+}
+
+test "stealth: sleepers wake inside the GetSleeperDisturbedLevel light gate" {
+    // RE UpdateSleeper wake scan (entity-ai.md): a sleeping zombie wakes the
+    // nearest player with GetSleeperDisturbedLevel(dist, lightLevel) >= 2 -
+    // wake = Lerp(rolledWakeNear, rolledWakeFar, dist/sightRangeBase) and
+    // lightLevel > wake. With the stock roll midpoints (-17.5 / 410) over a
+    // 30 m sightRange, noon (lightLevel 46.26) wakes within ~14.8% of the
+    // range (4 m wakes, wake 39.4); night (0) wakes only within ~1.2 m
+    // (0.04 pct, wake -0.4); a 2 m night player stays hidden.
+    var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 48 * 48 } } };
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie, .sight_range = 30.0 }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 20;
+    w.sleeper[zs].wake_light_near = -17.5;
+    w.sleeper[zs].wake_light_far = 410.0;
+    const p = w.spawnPlayer(4, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    // Day (ambient 0.5 → lightLevel 46.26): 4 m wakes (threshold 39.4).
+    w.ambient_light = 0.5;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.sleeper[zs].awake);
+    w.sleeper[zs].awake = false; // re-arm for the night case
+    w.sleeper_wake_n = 0;
+    // Night (lightLevel 0): 4 m hidden (threshold 39.4), 1 m wakes (-3.9).
+    w.ambient_light = 0;
+    w.transform[ps].x = 4;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
+    w.transform[ps].x = 1;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.sleeper[zs].awake);
     try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);

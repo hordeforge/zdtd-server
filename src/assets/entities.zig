@@ -78,6 +78,14 @@ pub const EntityDef = struct {
     /// Rules floor.
     sight_light_min: f32 = 0,
     sight_light_max: f32 = 0,
+    /// entityclasses SleeperSightToWakeMin/Max "min,max" roll ranges (stock
+    /// zombieTemplateMale "-40,5" / "340,480"): each sleeping zombie rolls
+    /// its GetSleeperDisturbedLevel wake-threshold pair from these at spawn.
+    /// 0 = unset → the stock default ranges (world.spawnSleeperDef).
+    sleeper_wake_near_min: f32 = 0,
+    sleeper_wake_near_max: f32 = 0,
+    sleeper_wake_far_min: f32 = 0,
+    sleeper_wake_far_max: f32 = 0,
     /// entityclasses MaxViewAngle in degrees, full cone angle (stock default
     /// 180 = only excludes targets strictly behind; the sense gate halves it
     /// like EntityAlive.IsInFrontOfMe). 0 = unset → Rules floor.
@@ -599,6 +607,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             if (xml.parseF32(lo)) |f| sight_light_min = f;
             if (xml.parseF32(hi)) |f| sight_light_max = f;
         }
+        // SleeperSightToWakeMin/Max: per-entity wake-threshold ROLL RANGES
+        // (RE entity-ai.md D8.6 step 5 + GetSleeperDisturbedLevel IL=38):
+        // each sleeping zombie rolls `wake = Lerp(roll(Min), roll(Max),
+        // dist/sightRangeBase)` once at spawn. Stock zombieTemplateMale ships
+        // "-40,5" (light value at point blank) / "340,480" (at SightRange).
+        // Unbounded: the rolls feed a lightLevel (0..200) comparison only.
+        var sw_near_min: f32 = 0;
+        var sw_near_max: f32 = 0;
+        var sw_far_min: f32 = 0;
+        var sw_far_max: f32 = 0;
+        if (resolveProp(&classes, name, "SleeperSightToWakeMin", 0)) |swn| {
+            const comma = std.mem.findScalar(u8, swn, ',');
+            const lo = if (comma) |ci| std.mem.trim(u8, swn[0..ci], " ") else swn;
+            const hi = if (comma) |ci| std.mem.trim(u8, swn[ci + 1 ..], " ") else swn;
+            if (xml.parseF32(lo)) |f| sw_near_min = f;
+            if (xml.parseF32(hi)) |f| sw_near_max = f;
+        }
+        if (resolveProp(&classes, name, "SleeperSightToWakeMax", 0)) |swf| {
+            const comma = std.mem.findScalar(u8, swf, ',');
+            const lo = if (comma) |ci| std.mem.trim(u8, swf[0..ci], " ") else swf;
+            const hi = if (comma) |ci| std.mem.trim(u8, swf[ci + 1 ..], " ") else swf;
+            if (xml.parseF32(lo)) |f| sw_far_min = f;
+            if (xml.parseF32(hi)) |f| sw_far_max = f;
+        }
         // MaxViewAngle: full cone angle, stock EntityAlive cctor default 180
         // (RE entity-ai.md), per-class property overrides. Bounded: a crafted
         // value must not exceed a full 360. 0 stays "unset" → Rules floor.
@@ -669,6 +701,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .sight_range = sight,
             .sight_light_min = sight_light_min,
             .sight_light_max = sight_light_max,
+            .sleeper_wake_near_min = sw_near_min,
+            .sleeper_wake_near_max = sw_near_max,
+            .sleeper_wake_far_min = sw_far_min,
+            .sleeper_wake_far_max = sw_far_max,
             .view_angle_deg = view_angle,
             .explode_threshold = explode_threshold,
             .explode_delay_s = explode_delay,
@@ -754,6 +790,13 @@ test "load stock entityclasses when present" {
     // 0,0 → the Rules (30,100) cctor-default floor.
     try std.testing.expectEqual(@as(f32, -2.0), boe.sight_light_min);
     try std.testing.expectEqual(@as(f32, 150.0), boe.sight_light_max);
+    // SleeperSightToWakeMin/Max (the sleeping zombie's wake-threshold ROLL
+    // ranges, RE entity-ai.md D8.6 step 5): zombieBoe inherits the template's
+    // "-40,5" / "340,480".
+    try std.testing.expectEqual(@as(f32, -40.0), boe.sleeper_wake_near_min);
+    try std.testing.expectEqual(@as(f32, 5.0), boe.sleeper_wake_near_max);
+    try std.testing.expectEqual(@as(f32, 340.0), boe.sleeper_wake_far_min);
+    try std.testing.expectEqual(@as(f32, 480.0), boe.sleeper_wake_far_max);
     const stag = t.byName("animalStag") orelse return error.TestExpectedEqual;
     try std.testing.expectEqual(components.Kind.animal, stag.kind);
     try std.testing.expect(stag.spawnable);
@@ -798,6 +841,8 @@ test "day/night speeds parse from entityclasses XML" {
         \\    <property name="MoveSpeed" value="0.08"/>
         \\    <property name="MoveSpeedAggro" value="0.2, 1.25"/>
         \\    <property name="SightLightThreshold" value="-2,150"/>
+        \\    <property name="SleeperSightToWakeMin" value="-40,5"/>
+        \\    <property name="SleeperSightToWakeMax" value="340,480"/>
         \\  </entity_class>
         \\  <entity_class name="zombieBoe" extends="ZombieBase">
         \\  </entity_class>
@@ -823,6 +868,11 @@ test "day/night speeds parse from entityclasses XML" {
     // SightLightThreshold inherits through extends (stock "-2,150").
     try std.testing.expectEqual(@as(f32, -2.0), boe.sight_light_min);
     try std.testing.expectEqual(@as(f32, 150.0), boe.sight_light_max);
+    // SleeperSightToWakeMin/Max roll ranges (stock "-40,5" / "340,480").
+    try std.testing.expectEqual(@as(f32, -40.0), boe.sleeper_wake_near_min);
+    try std.testing.expectEqual(@as(f32, 5.0), boe.sleeper_wake_near_max);
+    try std.testing.expectEqual(@as(f32, 340.0), boe.sleeper_wake_far_min);
+    try std.testing.expectEqual(@as(f32, 480.0), boe.sleeper_wake_far_max);
     const dog = t.byName("animalZombieDog").?;
     try std.testing.expectEqual(@as(f32, 0.45), dog.wander_speed);
     try std.testing.expectEqual(@as(f32, 0.3), dog.wander_speed_night);
