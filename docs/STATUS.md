@@ -378,6 +378,10 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the kick/ban/whitelist row went WORKS on re-audit (2026-08-26):
+kick/ban/unban run on the admin console (matching stock ConsoleCmdBan) with
+admins/whitelist/bans .zsv persistence - the row's own note admitted it was
+stale.
 Then the PlayerLogin parse row went WORKS on re-audit (2026-08-26): the
 parser walks the full stock body (name + both platform ids + both auth
 tokens skipped + version + compat + discord id); the token skip is the
