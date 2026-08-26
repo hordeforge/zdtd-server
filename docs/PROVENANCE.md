@@ -111,7 +111,7 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/aidirector.zig` | R | Lightweight AIDirector as ECS resource (world clock, horde, blood moon) |
 | `src/ecs/buff.zig` | R | Buff runtime rules: stacking, duration ticks, expiry. Pure over BuffSet, no World and no wire. Every rule mirrors stock EntityBuffs/BuffClass/BuffValu |
 | `src/ecs/command.zig` | Z | Fixed tick command buffer: systems/plugins enqueue, drain once per tick. Cap 64; drop when full (no heap, no grow). Soft warn once past ~80% |
-| `src/ecs/components.zig` | Z | All sim component types (plain data; no behavior). SoA columns live on World |
+| `src/ecs/components.zig` | Z | All sim component types (plain data; no behavior). SoA columns live on World. `Sleeper.groan_sent` + the `SleeperWakeRequest.groan` flag back the SetSleeperActive stir (RE entity-ai.md) |
 | `src/ecs/electric.zig` | R | Electricity / power graph: generators, wires, consumers (turrets, lights, …). Simplified from stock PowerManager concepts (not full wiring UI parity). `net_powered` per-node flip drives the Game's powered-door actuation (RE tile-entities-power.md PowerConsumer.HandlePowerUpdate → Block.ActivateBlock isPowered) |
 | `src/ecs/entity.zig` | Z | Entity handles for the sim ECS |
 | `src/ecs/group.zig` | Z | Cached per-Kind dense slot lists (entt-style non-owning groups). |

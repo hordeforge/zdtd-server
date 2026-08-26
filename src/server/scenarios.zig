@@ -9216,3 +9216,38 @@ test "scenario powered door opens while powered, closes on power loss" {
     try std.testing.expect((packages.blockMeta(raw2) & packages.block_meta_on) == 0);
     std.debug.print("PASS powered-door: opens on power, closes on power loss\n", .{});
 }
+
+test "scenario stirred sleeper broadcasts NetPackageSleeperPassiveChange" {
+    // RE EntityAlive.SetSleeperActive (IL=26): an in-volume player that does
+    // not wake a sleeper (dark: the wake light gate fails) stirs it - the
+    // server broadcasts NetPackageSleeperPassiveChange (entityId i32, flags
+    // 192) so the client clears IsSleeperPassive and plays the groan.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    g.sim.director.clock.hours = 1; // night: the slice-1 ambient is 0
+    const z = g.sim.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie, .sight_range = 30.0 }, 0).?;
+    const zs = g.sim.slotOfNetId(z).?;
+    g.sim.sleeper[zs].volume_r = 20;
+    g.sim.sleeper[zs].wake_light_near = -17.5;
+    g.sim.sleeper[zs].wake_light_far = 410.0;
+    _ = g.sim.spawnPlayer(4, 70, 0, 0); // 4 m in the volume, dark
+    try g.step();
+    try std.testing.expect(!g.sim.sleeper[zs].awake);
+    try std.testing.expect(g.sim.sleeper[zs].groan_sent);
+    if (packages.idOf("NetPackageSleeperPassiveChange")) |pc_id| {
+        try std.testing.expect(cap.findPkgIdEntity(pc_id, g.sim.network_id[zs].id) != null);
+    }
+    std.debug.print("PASS sleeper-stir: dark in-volume player broadcasts PassiveChange\n", .{});
+}

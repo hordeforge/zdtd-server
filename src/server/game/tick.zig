@@ -649,6 +649,15 @@ pub fn drainSleeperWakeups(self: *Game) void {
         const s: u16 = self.sim.sleeper_wake_reqs[i].slot;
         if (!self.sim.alive[s] or !self.sim.mask[s].network_id) continue;
         const nid = self.sim.network_id[s].id;
+        // RE EntityAlive.SetSleeperActive (IL=26): a stirred sleeper sends
+        // NetPackageSleeperPassiveChange (the client clears IsSleeperPassive
+        // and plays the groan); a woken one gets NetPackageSleeperWakeup.
+        if (self.sim.sleeper_wake_reqs[i].groan) {
+            if (packages.buildSleeperPassiveChangeBody(&self.body_buf, nid)) |body| {
+                self.broadcast("NetPackageSleeperPassiveChange", body) catch {};
+            } else |_| {}
+            continue;
+        }
         if (packages.buildSleeperWakeupBody(&self.body_buf, nid)) |body| {
             self.broadcast("NetPackageSleeperWakeup", body) catch {};
         } else |_| {}

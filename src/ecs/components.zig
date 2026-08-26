@@ -860,6 +860,10 @@ pub const Sleeper = struct {
     volume_r: f32 = 16,
     home_x: f32 = 0,
     home_z: f32 = 0,
+    /// One-shot: the sleeper already stirred (SetSleeperActive) for an
+    /// in-volume player that did not wake it, and the PassiveChange wire was
+    /// sent. RE EntityAlive.SetSleeperActive (IL=26).
+    groan_sent: bool = false,
     /// RE UpdateSleeper wake scan (entity-ai.md GetSleeperDisturbedLevel
     /// IL=38): the per-entity rolled wake-threshold pair - wake =
     /// Lerp(wake_light_near, wake_light_far, dist/sightRangeBase), the
@@ -981,6 +985,9 @@ pub const sleeper_wake_cap: usize = 16;
 pub const SleeperWakeRequest = struct {
     /// Entity slot (u16: components.zig cannot see world.zig's Slot type).
     slot: u16,
+    /// True = the sleeper STIRRED (SetSleeperActive, NetPackageSleeperPassiveChange
+    /// wire) instead of fully waking; false = the wakeup broadcast.
+    groan: bool = false,
 };
 
 /// Group cap for one falling-blocks entity. Stock `GroupBounds.IsWithinSize`

@@ -1743,16 +1743,32 @@ const AiCtx = struct {
                     const dx = pl.x - sl.home_x;
                     const dz = pl.z - sl.home_z;
                     const dist = @sqrt(dx * dx + dz * dz);
-                    const reach = if (pl.crouching) @min(sl.volume_r, crouch_reach) else sl.volume_r;
-                    if (dist > reach) continue;
-                    if (sr > 0.001) {
-                        const pct = dist / sr;
-                        if (pct > 1.0) continue; // GetSleeperDisturbedLevel: pct > 1 → 0
-                        const wake = sl.wake_light_near + (sl.wake_light_far - sl.wake_light_near) * pct;
-                        if (!(pl.light_level > wake)) continue;
+                    if (dist > sl.volume_r) continue; // out of the volume entirely
+                    const wake_reach = if (pl.crouching) @min(sl.volume_r, crouch_reach) else sl.volume_r;
+                    if (dist <= wake_reach) {
+                        if (sr > 0.001) {
+                            const pct = dist / sr;
+                            if (pct <= 1.0) { // GetSleeperDisturbedLevel: pct > 1 → 0
+                                const wake = sl.wake_light_near + (sl.wake_light_far - sl.wake_light_near) * pct;
+                                if (pl.light_level > wake) {
+                                    near = true;
+                                    break;
+                                }
+                            }
+                        } else {
+                            near = true; // no sightRangeBase: gate open (fallback)
+                            break;
+                        }
                     }
-                    near = true;
-                    break;
+                    // In the volume but not waking (dark/crouched beyond the
+                    // wake reach): the sleeper STIRS - RE EntityAlive.
+                    // SetSleeperActive (IL=26) clears IsSleeperPassive and
+                    // broadcasts NetPackageSleeperPassiveChange so the client
+                    // plays the groan. One-shot per sleeper.
+                    if (!sl.groan_sent) {
+                        ctx.w.sleeper[s].groan_sent = true;
+                        ctx.w.pushSleeperGroan(s);
+                    }
                 }
                 if (!near) {
                     ai.state = .sleep;
@@ -5995,12 +6011,19 @@ test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" 
     w.player[ps].crouching = true;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.sleeper[zs].awake);
+    // In the volume beyond the crouch wake reach: the sleeper STIRS (the
+    // one-shot SetSleeperActive / PassiveChange) but stays asleep.
+    try std.testing.expect(w.sleeper[zs].groan_sent);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+    try std.testing.expect(w.sleeper_wake_reqs[0].groan);
     // A crouched player 12 m inside the volume wakes it (13.68 > 12).
     w.transform[ps].x = 12;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.sleeper[zs].awake);
-    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
-    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+    try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
+    try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
 }
 
 test "stealth: standing players wake sleepers at the full volume radius" {
@@ -6024,11 +6047,15 @@ test "stealth: standing players wake sleepers at the full volume radius" {
     w.player[ps].crouching = true;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.sleeper[zs].awake);
+    // In the volume beyond the crouch wake reach: the sleeper stirs once.
+    try std.testing.expect(w.sleeper[zs].groan_sent);
     w.player[ps].crouching = false;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.sleeper[zs].awake);
-    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
-    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+    try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
+    try std.testing.expect(w.sleeper_wake_reqs[0].groan);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
+    try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
 }
 
 test "stealth: sleepers wake inside the GetSleeperDisturbedLevel light gate" {
@@ -6054,16 +6081,21 @@ test "stealth: sleepers wake inside the GetSleeperDisturbedLevel light gate" {
     try std.testing.expect(w.sleeper[zs].awake);
     w.sleeper[zs].awake = false; // re-arm for the night case
     w.sleeper_wake_n = 0;
-    // Night (lightLevel 0): 4 m hidden (threshold 39.4), 1 m wakes (-3.9).
+    // Night (lightLevel 0): 4 m hidden (threshold 39.4) - the sleeper STIRS
+    // (SetSleeperActive one-shot) but stays asleep; 1 m wakes (-3.9).
     w.ambient_light = 0;
     w.transform[ps].x = 4;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.sleeper[zs].awake);
+    try std.testing.expect(w.sleeper[zs].groan_sent);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expect(w.sleeper_wake_reqs[0].groan);
     w.transform[ps].x = 1;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.sleeper[zs].awake);
-    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
-    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+    try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
+    try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
 }
 
 test "stealth: lightAttackPercent folds the passive-89 below 0.1 selfLight" {
@@ -6118,9 +6150,14 @@ test "group AI: combat noise wakes sleepers within radius" {
     // noise radius 24 covers it) wakes and investigates.
     try std.testing.expect(w.sleeper[zs].awake);
     try std.testing.expect(w.zombie_ai[zs].has_spot);
-    // The noise wake also pushed the SleeperWakeup wire event.
-    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
-    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+    // The noise wake also pushed the SleeperWakeup wire event; the player at
+    // 11 m was in the volume (16) first, so the sleeper stirred (groan req)
+    // before the noise woke it (wake req).
+    try std.testing.expect(w.sleeper[zs].groan_sent);
+    try std.testing.expectEqual(@as(usize, 2), w.sleeper_wake_n);
+    try std.testing.expect(w.sleeper_wake_reqs[0].groan);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[1].slot);
+    try std.testing.expect(!w.sleeper_wake_reqs[1].groan);
 }
 
 test "damage wakes a sleeper and pushes the wakeup event" {

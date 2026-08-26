@@ -870,6 +870,16 @@ pub const World = struct {
         self.sleeper_wake_reqs[n] = .{ .slot = @intCast(slot) };
     }
 
+    /// Push a sleeper STIR request (RE EntityAlive.SetSleeperActive IL=26):
+    /// an in-volume player that did not wake the sleeper clears its passive
+    /// flag and the Game broadcasts NetPackageSleeperPassiveChange so the
+    /// client plays the groan. One-shot per sleeper (groan_sent).
+    pub fn pushSleeperGroan(self: *World, slot: Slot) void {
+        const n = @atomicRmw(usize, &self.sleeper_wake_n, .Add, 1, .monotonic);
+        if (n >= c.sleeper_wake_cap) return;
+        self.sleeper_wake_reqs[n] = .{ .slot = @intCast(slot), .groan = true };
+    }
+
     /// Resting terrain height at world (x,z) via the optional ground hook, or
     /// null when unset (no terrain data; caller skips physics).
     pub fn groundY(self: *const World, x: f32, z: f32) ?f32 {
