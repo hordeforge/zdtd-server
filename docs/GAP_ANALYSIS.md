@@ -104,10 +104,13 @@ counts now come from the `lootcontainer` size attribute).
 
 **What you are is mostly saved now.** Level, XP, survival stats (food/water)
 and active buffs survive a restart via `players.zsv` v3 (the server-side ledger
-`awardXp` feeds it; login-name keyed per ADR 0017). Still open: the client's
-`NetPackagePlayerStats` blob is dropped (other players never see your level),
-perk/skill-point spending is client-owned with no server model, and there is no
-server-to-client XP/level push.
+`awardXp` feeds it; login-name keyed per ADR 0017). Progression ships
+2026-08-26: `NetPackagePlayerStats` S2C snapshots go to every peer (join +
+level-up push, so other players see your level), attribute/perk spending is
+server-authoritative (`NetPackageEntitySetSkillLevelServer` C2S validated
+against the catalog + gated by the on_perk_spend Wasm verdict, ADR 0033) with
+the S2C client echo; the 23 crafting skills' by-use advancement stays
+recorded.
 
 **The world is bald, dry and stepped.** The join deco burst produced 3 objects for
 an entire 13x13-chunk window. Terrain is hard voxel stairs because the DTM's
@@ -3149,9 +3152,11 @@ and server-to-client XP/level pushes do not exist.
 - **Progression persistence across restart or relog** `WORKS` (server ledger;
   PDF/wire residuals open)
   ZPV3 progression tail stores `Client.level` / `Client.xp` (the server-side
-  `awardXp` ledger) and restores them on rejoin. Perk/skill-point spending remains
-  client-owned with no server model; join PDF `progressionData` length and
-  PlayerMetaInfo level may still under-report to the UI relative to the ledger.
+  `awardXp` ledger) and restores them on rejoin. Attribute/perk spending is
+  server-authoritative since 2026-08-26 (`NetPackageEntitySetSkillLevelServer`
+  C2S + the on_perk_spend Wasm verdict, ADR 0033); join PDF `progressionData`
+  length and PlayerMetaInfo level may still under-report to the UI relative to
+  the ledger.
   C2S PlayerData still does not ingest the client's progressionsData blob.
   *Anchors:* `src/server/game.zig` (ZPV3 tail write/read), STATUS T5,
   [ADR 0011](adr/0011-custom-zch-world-overlay.md)
@@ -4830,7 +4835,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24; leaving a client's interest box now sends that client `EntityRemove(Unloaded)` and drops the `known_entities` bit, matching `NetEntityDistributionEntry::updatePlayerEntity`) |
 | Entity pooling / soft cap policies | PARTIAL (MaxSpawnedZombies/Animals options) |
 | Ragdoll / death loot bags | PARTIAL (loot ECD bag; no ragdoll) |
-| XP / progression / skills | PARTIAL (awardXp ledger; skills MISSING) |
+| XP / progression / skills | PARTIAL (awardXp ledger; attribute + perk spending SHIPPED 2026-08-26: NetPackageEntitySetSkillLevelServer C2S is server-validated (one level per purchase, max level, parent-attribute gate, SP balance) and gated by the on_perk_spend Wasm verdict (ADR 0033) with the S2C client echo; the 23 crafting skills level by use in stock and their by-use advancement stays MISSING) |
 | Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; disease/temp effects MISSING) |
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
 | Equipment / armor mitigation | WORKS (equip slots; with stock items.xml the mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality - the items.xml quality curves via `curveValueAt` (RE PassiveEffect.ModValue IL=796: piecewise-linear over levels scaled Q1..Q6, item quality is the effect level, EffectManager.GetValue IL_0393; GetTotalPhysicalArmorRating sums passive 41 on the wearer, Equipment.CalcDamage reduces physical damage by rating/100, combat-damage.md), plus the buff/perk resist leg from the effects VM; the `[rules.combat] armor_mitigation_per_piece` floor stands only for the offline/builtin catalog) |
