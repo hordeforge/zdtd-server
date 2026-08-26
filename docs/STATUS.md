@@ -1064,7 +1064,13 @@ parse (platform identity skip + i16 change count + BlockChangeInfo rows),
 the platform-user identity serializer (bool + version + platform/id
 strings, null-identity path) and the `[rules.difficulty]` ladder, which
 derives from the comptime-parsed sandbox_presets.xml (golden-pinned
-0.5..2.5), never hardcoded. GAP sounds row WORKS; the last RE-blocked
+0.5..2.5), never hardcoded. A seventh pass (2026-08-27) audited the C2S
+abuse posture: every fan-out or high-rate mutation handler carries a
+rate token (block/inv/damage buckets on SetBlock, WireActions,
+TurretSpawn, SoundAtPosition, EntityAnimationData, DamageEntity,
+PlayerEquipment, InvTx, LandClaimRepair), while the low-rate sim actions
+(EntityAttach, quest events, GameEvent ack) are owner-gated and
+idempotent without one. GAP sounds row WORKS; the last RE-blocked
 wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
