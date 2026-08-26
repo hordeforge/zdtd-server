@@ -62,6 +62,12 @@ pub const EntityDef = struct {
     /// passive 133); stock seeds moveSpeedNight from moveSpeed when the prop
     /// is absent (entity-ai.md 3312). 0 = unset (falls to wander_speed).
     wander_speed_night: f32 = 0,
+    /// entityclasses MoveSpeedRand "min,max" (stock zombieTemplateMale
+    /// "-.2, .25"): the per-entity roll ADDED to the day chase speed when
+    /// moveSpeedAggro < 1 (clamped min 0.1, capped at the aggro max; RE
+    /// entity-ai.md 3318-3320). 0,0 = unset (no roll).
+    move_speed_rand_min: f32 = 0,
+    move_speed_rand_max: f32 = 0,
     /// TimeStayAfterDeath seconds a corpse lingers (30 zombies, 300 animals).
     time_stay: f32 = 0,
     /// HandItem name (items.xml melee hand); empty = unset.
@@ -584,6 +590,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         if (resolveProp(&classes, name, "MoveSpeedNight", 0)) |msn| {
             if (xml.parseF32(msn)) |f| wander_night = f;
         }
+        // MoveSpeedRand "min,max" (stock zombieTemplateMale "-.2, .25"): the
+        // per-entity roll added to the day chase when moveSpeedAggro < 1
+        // (entity-ai.md 3318-3320). 0,0 = unset.
+        var rand_min: f32 = 0;
+        var rand_max: f32 = 0;
+        if (resolveProp(&classes, name, "MoveSpeedRand", 0)) |msr| {
+            const comma = std.mem.findScalar(u8, msr, ',');
+            const lo = if (comma) |ci| std.mem.trim(u8, msr[0..ci], " ") else msr;
+            const hi = if (comma) |ci| std.mem.trim(u8, msr[ci + 1 ..], " ") else msr;
+            if (xml.parseF32(lo)) |f| rand_min = f;
+            if (xml.parseF32(hi)) |f| rand_max = f;
+        }
         // SightRange is per class in stock (zombies 27-40 m). Bounded: a
         // crafted value must not make one zombie sense the whole world.
         var sight: f32 = 0;
@@ -697,6 +715,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .chase_speed_day = chase_day,
             .wander_speed = wander,
             .wander_speed_night = wander_night,
+            .move_speed_rand_min = rand_min,
+            .move_speed_rand_max = rand_max,
             .time_stay = time_stay,
             .sight_range = sight,
             .sight_light_min = sight_light_min,
@@ -797,6 +817,9 @@ test "load stock entityclasses when present" {
     try std.testing.expectEqual(@as(f32, 5.0), boe.sleeper_wake_near_max);
     try std.testing.expectEqual(@as(f32, 340.0), boe.sleeper_wake_far_min);
     try std.testing.expectEqual(@as(f32, 480.0), boe.sleeper_wake_far_max);
+    // MoveSpeedRand (entity-ai.md 3318-3320): the template's "-.2, .25".
+    try std.testing.expectEqual(@as(f32, -0.2), boe.move_speed_rand_min);
+    try std.testing.expectEqual(@as(f32, 0.25), boe.move_speed_rand_max);
     const stag = t.byName("animalStag") orelse return error.TestExpectedEqual;
     try std.testing.expectEqual(components.Kind.animal, stag.kind);
     try std.testing.expect(stag.spawnable);
@@ -840,6 +863,7 @@ test "day/night speeds parse from entityclasses XML" {
         \\  <entity_class name="ZombieBase">
         \\    <property name="MoveSpeed" value="0.08"/>
         \\    <property name="MoveSpeedAggro" value="0.2, 1.25"/>
+        \\    <property name="MoveSpeedRand" value="-.2, .25"/>
         \\    <property name="SightLightThreshold" value="-2,150"/>
         \\    <property name="SleeperSightToWakeMin" value="-40,5"/>
         \\    <property name="SleeperSightToWakeMax" value="340,480"/>
@@ -873,6 +897,9 @@ test "day/night speeds parse from entityclasses XML" {
     try std.testing.expectEqual(@as(f32, 5.0), boe.sleeper_wake_near_max);
     try std.testing.expectEqual(@as(f32, 340.0), boe.sleeper_wake_far_min);
     try std.testing.expectEqual(@as(f32, 480.0), boe.sleeper_wake_far_max);
+    // MoveSpeedRand roll range (stock "-.2, .25", entity-ai.md 3318-3320).
+    try std.testing.expectEqual(@as(f32, -0.2), boe.move_speed_rand_min);
+    try std.testing.expectEqual(@as(f32, 0.25), boe.move_speed_rand_max);
     const dog = t.byName("animalZombieDog").?;
     try std.testing.expectEqual(@as(f32, 0.45), dog.wander_speed);
     try std.testing.expectEqual(@as(f32, 0.3), dog.wander_speed_night);
@@ -883,6 +910,8 @@ test "day/night speeds parse from entityclasses XML" {
     const flat = t.byName("zombieFlat").?;
     try std.testing.expectEqual(@as(f32, 0.5), flat.chase_speed); // single value -> both
     try std.testing.expectEqual(@as(f32, 0.5), flat.chase_speed_day);
+    try std.testing.expectEqual(@as(f32, 0.0), flat.move_speed_rand_min); // no prop -> no roll
+    try std.testing.expectEqual(@as(f32, 0.0), flat.move_speed_rand_max);
     try std.testing.expectEqual(@as(f32, 0.0), flat.sight_light_min); // no prop -> 0,0 -> Rules floor
     try std.testing.expectEqual(@as(f32, 0.0), flat.sight_light_max);
 }

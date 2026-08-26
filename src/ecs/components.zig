@@ -91,6 +91,9 @@ pub const ClassId = struct {
     /// MoveSpeedNight (night shamble; stock GetMoveSpeed dark branch).
     /// 0 = falls to wander_speed then the floor.
     wander_speed_night: f32 = 0,
+    /// entityclasses MoveSpeedRand "min,max" roll range; 0,0 = no roll.
+    move_speed_rand_min: f32 = 0,
+    move_speed_rand_max: f32 = 0,
     attack_damage: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
     /// feral 24); 0 = class_table[id] then the Rules chew floor.

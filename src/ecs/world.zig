@@ -129,6 +129,24 @@ const sleeper_wake_near_max_default: f32 = 5.0;
 const sleeper_wake_far_min_default: f32 = 340.0;
 const sleeper_wake_far_max_default: f32 = 480.0;
 
+/// RE entity-ai.md 3318-3320 (CopyPropertiesFromEntityClass): the
+/// MoveSpeedRand per-entity roll on the day chase speed. When the class has a
+/// roll range and a day aggro value < 1, add the roll, clamp min 0.1 and cap
+/// at the aggro max; stock rolls once per entity. Deterministic per spawn: a
+/// hash of the position + class + a salt seeds the roll (the sim has no
+/// ad-hoc RNG). A class with no MoveSpeedRand or no day aggro keeps the
+/// unrolled value (the sim's 0 = fall-to-floor convention).
+fn rollChaseDay(def: EntityClass, x: f32, z: f32) f32 {
+    const day = def.chase_speed_day;
+    if ((def.move_speed_rand_min == 0 and def.move_speed_rand_max == 0) or day <= 0 or day >= 1.0) return day;
+    const h = std.hash.Wyhash.hash(0x5eed, std.mem.asBytes(&.{ x, z, @as(f32, @floatFromInt(def.hash)) }));
+    const frac = @as(f32, @floatFromInt(h >> 32)) / @as(f32, @floatFromInt(std.math.maxInt(u32)));
+    const roll = def.move_speed_rand_min + (def.move_speed_rand_max - def.move_speed_rand_min) * frac;
+    var out = @max(day + roll, 0.1);
+    if (def.chase_speed > 0) out = @min(out, def.chase_speed);
+    return out;
+}
+
 pub const EntityClass = struct {
     /// Class name for logging/debug. Must point to static/indefinite-lifetime
     /// data (comptime literal or binary-embedded table). Never assign an
@@ -152,6 +170,10 @@ pub const EntityClass = struct {
     wander_speed: f32 = 0,
     /// XML MoveSpeedNight (night shamble); 0 = falls to wander_speed then default.
     wander_speed_night: f32 = 0,
+    /// entityclasses MoveSpeedRand "min,max" roll range (stock "-.2, .25");
+    /// 0,0 = unset (no roll).
+    move_speed_rand_min: f32 = 0,
+    move_speed_rand_max: f32 = 0,
     /// HandItem Action0 DamageEntity from items.xml; 0 = use systems default.
     attack_damage: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
@@ -1032,7 +1054,7 @@ pub const World = struct {
             self.class_id[s].drop_prob = def.drop_prob;
             self.class_id[s].time_stay = def.time_stay;
             self.class_id[s].chase_speed = def.chase_speed;
-            self.class_id[s].chase_speed_day = def.chase_speed_day;
+            self.class_id[s].chase_speed_day = rollChaseDay(def, x, z);
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
@@ -1118,7 +1140,7 @@ pub const World = struct {
             self.class_id[s].drop_prob = def.drop_prob;
             self.class_id[s].time_stay = def.time_stay;
             self.class_id[s].chase_speed = def.chase_speed;
-            self.class_id[s].chase_speed_day = def.chase_speed_day;
+            self.class_id[s].chase_speed_day = rollChaseDay(def, x, z);
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
@@ -1882,6 +1904,42 @@ test "spawnSleeperDef carries per-entity class stats" {
     const s3 = w.slotOfNetId(id3).?;
     try std.testing.expect(w.sleeper[s3].wake_light_near >= -40.0 and w.sleeper[s3].wake_light_near <= 5.0);
     try std.testing.expect(w.sleeper[s3].wake_light_far >= 10.0 and w.sleeper[s3].wake_light_far <= 20.0);
+}
+
+test "MoveSpeedRand rolls the day chase per entity, deterministically" {
+    // RE entity-ai.md 3318-3320: moveSpeedRand adds a per-entity roll to the
+    // day chase when aggro < 1 (clamp min 0.1, cap at aggro max). The roll is
+    // deterministic per spawn (position + class hash) and lands in
+    // [0.1, aggroMax]; a class without the prop keeps the unrolled value.
+    var w: World = .{};
+    defer w.deinit();
+    const def = EntityClass{
+        .name = "zombieBoe", .hash = 1, .kind = .zombie,
+        .chase_speed_day = 0.2, .chase_speed = 1.25,
+        .move_speed_rand_min = -0.2, .move_speed_rand_max = 0.25,
+    };
+    const z = w.spawnZombieDef(0, 70, 0, 40, def).?;
+    const s = w.slotOfNetId(z).?;
+    const rolled = w.class_id[s].chase_speed_day;
+    try std.testing.expect(rolled >= 0.1 and rolled <= 1.25);
+    // Same position + class → same roll (deterministic); a different
+    // position rolls differently in general.
+    const z2 = w.spawnZombieDef(0, 70, 0, 40, def).?;
+    const s2 = w.slotOfNetId(z2).?;
+    try std.testing.expectEqual(rolled, w.class_id[s2].chase_speed_day);
+    // No MoveSpeedRand prop: unrolled.
+    const plain = w.spawnZombieDef(5, 70, 5, 40, .{
+        .name = "zombieBoe", .hash = 1, .kind = .zombie,
+        .chase_speed_day = 0.2, .chase_speed = 1.25,
+    }).?;
+    try std.testing.expectEqual(@as(f32, 0.2), w.class_id[w.slotOfNetId(plain).?].chase_speed_day);
+    // An aggro >= 1 day value is not rolled (the stock `aggro < 1` gate).
+    const dog = w.spawnZombieDef(7, 70, 7, 40, .{
+        .name = "dog", .hash = 2, .kind = .zombie,
+        .chase_speed_day = 1.2, .chase_speed = 1.3,
+        .move_speed_rand_min = -0.2, .move_speed_rand_max = 0.25,
+    }).?;
+    try std.testing.expectEqual(@as(f32, 1.2), w.class_id[w.slotOfNetId(dog).?].chase_speed_day);
 }
 
 test "beginTick clears locals" {

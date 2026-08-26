@@ -478,7 +478,10 @@ split) - day chase uses MoveSpeedAggro min + MoveSpeed (shamble), night uses
 MoveSpeedAggro max + MoveSpeedNight, parsed from entityclasses.xml
 ([rules.ai] chase_speed/wander_speed stay the fallback floors). Night
 zombies now outpace day zombies ~6x (stock ratio), where the sim previously
-chased at night speed around the clock. The absolute day scale (min x1.6
+chased at night speed around the clock; MoveSpeedRand (stock "-.2, .25")
+adds a deterministic per-entity roll to the day chase (clamp 0.1, cap at
+the aggro max, RE entity-ai.md 3318-3320) so every zombie is a bit
+different. The absolute day scale (min x1.6
 ~0.3 m/s for zombieBoe) is a recorded live-measurement follow-on.
 Then the AnimateBlock/BlockTrigger row went WORKS on re-audit
 (2026-08-26): BlockTrigger C2S is handled + rebroadcast, and
