@@ -378,6 +378,11 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the AnimateBlock/BlockTrigger row went WORKS on re-audit
+(2026-08-26): BlockTrigger C2S is handled + rebroadcast, and
+NetPackageAnimateBlock's only stock sender is the GameEvent block-animate
+action (ActionBlockAnimateBlock) - zero stock GameEvent data uses it, so a
+stock dedi never sends it (parity N/A, same dormant GameEvent surface).
 Then the sleeper-volume-activate row went WORKS on re-audit (2026-08-26):
 player-in-AABB wake + noise wake + gamestage-ladder group spawn at the
 authored Class=Sleeper marker cells (rotated to world) + ClearedUpdate
