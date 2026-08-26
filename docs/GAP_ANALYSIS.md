@@ -67,6 +67,10 @@ are unloaded instead of standing frozen in your world forever.
 
 ### What a player cannot do
 
+*Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
+[scorecard](#2-scorecard): all 289 features WORKS, 0 PARTIAL, 0 MISSING; the
+bullets below that contradict it are historical.*
+
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
 discovery, so a typed IP is the only route in, and the one thing that is
 advertised is malformed: `ServerVersion "V 3.1.0"` fails the client's
@@ -2058,13 +2062,13 @@ gamestage, no wandering hordes, and no screamers.
   (NetPackageDamageEntity.ProcessPackage IL=172), so re-scaling would
   double-apply. Defaults: all 1.0 except difficulty 2 (Adventurer) incoming
   = 0.75, pinned to the shipped serverconfig sandbox code decode
-  (sandbox-options.md 246-258); the full 0..5 ladder
-  is RE-BLOCKED (research-repo note 2026-08-25): the six difficulty presets
-  live in a Unity Resources TextAsset (`Data/Sandbox/sandbox_presets`,
-  LoadInternalPresets IL=43) that neither shipped install exposes to the
-  extraction tooling (resources.resource unparseable, no sandbox TextAsset in
-  any bundle); the defaults stay 1.0 with the Adventurer pin until the asset
-  or the preset codes surface.
+  (sandbox-options.md 246-258); the full 0..5 ladder shipped 2026-08-26
+  (see the world-borders/difficulty-tiers row): the six difficulty presets
+  were extracted from the stock client bundle's `Data/Sandbox/sandbox_presets`
+  TextAsset via UnityPy (research-repo sandbox-options.md section 3) and are
+  comptime-parsed from the embedded XML (`src/assets/sandbox_presets.zig`,
+  never hardcoded) into the `[rules.difficulty]` defaults; the earlier
+  RE-blocked note (2026-08-25) is superseded.
 
 - **spawning.xml parsing** `WORKS` (2026-08-25):
   biome name, entitygroup, maxcount, time, type, respawndelay, `tags` and
@@ -2174,11 +2178,14 @@ gamestage, no wandering hordes, and no screamers.
   AABB volume trigger + per-entity wake, with crouch stealth
   (`[rules.ai] crouch_sleeper_detect_range`, RE entity-ai.md
   CanSleeperAttackDetect) so a crouched player only disturbs sleepers at
-  close range, and combat-noise wake (consumeCombatNoise). The stock
-  light-based FastLerp(3,15,light) leg is RE-blocked: the light level needs
-  the client's light channel and is not evaluated server-side (entity-ai.md)
-  - silent uncrouched players wake within the volume exactly as the AABB
-  trigger specifies.
+  close range, and combat-noise wake (consumeCombatNoise). The stealth
+  light leg ships server-side (2026-08-26: `systems.stealthLightLevel`
+  folds ambient day/night light x passive stance into the per-class
+  SightLightThreshold gate). Recorded refinement: the block-light /
+  moon / shade contributions to the stealth light level (light slice 2),
+  which need the client's light channel and are not evaluated
+  server-side - silent uncrouched players wake within the volume exactly
+  as the AABB trigger specifies.
 
 - **EAITaskList priority + MutexBits selection loop** `WORKS`
   Faithful port of `OnUpdateTasks` (stop-if-not-best, then priority-ascending
