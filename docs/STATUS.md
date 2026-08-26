@@ -378,6 +378,11 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the sleeper-volume-activate row went WORKS on re-audit (2026-08-26):
+player-in-AABB wake + noise wake + gamestage-ladder group spawn at the
+authored Class=Sleeper marker cells (rotated to world) + ClearedUpdate
+re-arm all ship; the residuals (sleeper-pose byte table, CanSpawn 2.1 gate)
+were already documented elsewhere.
 Then the BiomeIntensity row closed (2026-08-26): the per-cell biome ids
 ride the chunk body (WORKS) and the client computes its own intensities
 locally (Chunk.CalcBiomeIntensity); the NetPackageBiomeIntensity package
