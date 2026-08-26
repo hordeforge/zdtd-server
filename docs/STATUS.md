@@ -1087,7 +1087,12 @@ eleventh pass (2026-08-27) verified the join phase gates (rule 18):
 dispatch.zig enforces phase_gate.allowed(phaseOf(joined, entered), name)
 on every C2S package - connecting admits only PlayerLogin/
 PlayerDisconnect, joined only the handshake set, playing admits all with
-typed handlers still validating ownership/bounds.
+typed handlers still validating ownership/bounds. A twelfth pass
+(2026-08-27) verified the deterministic sim (rule 22): util/rng.zig is a
+single xorshift32 with explicit seeding (initFromU64 for worldgen seeds,
+initFromNetId for per-entity wander streams, hash-seeded per-spawn rolls
+for MoveSpeedRand/chase); the sim paths never touch OS entropy or
+std.crypto.random, so same seed + same call sequence -> same outcomes.
 GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
