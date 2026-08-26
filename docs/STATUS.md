@@ -394,8 +394,15 @@ Then the item-mods round-trip shipped (2026-08-26): the ItemValue wire
 captures + emits the Modifications array (nested modifier items skip their
 own mod arrays per stock IL) and ZPV12 appends the 4 mod ids to each
 inventory slot record (stride 21), so a modded weapon survives a relog -
-tested at the wire, ECS-conversion and save levels; the item_modifiers.xml
-catalog + attachment validation + per-mod quality remain recorded.
+tested at the wire, ECS-conversion and save levels. Then the mod
+attachment validation landed (2026-08-26): the item_modifiers.xml catalog
+(installable/blocked/modifier tags, RE items.md ParseModifier IL=63) loads
+through the standard config path, the items.xml `Tags` property + the
+`ModSlots` quality curve (CalcModSlotCount IL=29) parse alongside, and the
+C2S inventory write scrubs attachments that exceed the ModSlots budget or
+violate the tag gates (fail closed on unknown item/mod/missing data) -
+the round-trip is still id-only (mod stats stay client-side); per-mod
+quality remains recorded.
 Then the kick/ban/whitelist row went WORKS on re-audit (2026-08-26):
 kick/ban/unban run on the admin console (matching stock ConsoleCmdBan) with
 admins/whitelist/bans .zsv persistence - the row's own note admitted it was

@@ -25,6 +25,9 @@ const world_weather = @import("../world/weather.zig");
 const binary = @import("../wire/binary.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
+const assets_items = @import("../assets/items.zig");
+const assets_item_modifiers = @import("../assets/item_modifiers.zig");
+const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const util_log = @import("../util/log.zig");
@@ -9107,4 +9110,56 @@ test "scenario mods AC8: discovered mods run under the standard budget and attri
     try std.testing.expect(g.wasm_plugins.slots[0].disabled);
     try std.testing.expect(!g.wasm_plugins.slots[1].disabled);
     std.debug.print("PASS mods AC8: shared budget disables the looper, other mod survives\n", .{});
+}
+
+test "scenario mod scrub rejects illegal attachments server-authoritatively" {
+    // RE items.md CalcModSlotCount (IL=29) + ItemClassModifier suitability:
+    // after an inventory write the server clears mods that exceed the item's
+    // ModSlots quality budget or violate the installable/blocked tag gates
+    // (fail closed). The client's next inventory sync corrects its view.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Static catalog: a gun (2 mod slots at every tier) tagged for barrel
+    // mods, a knife (1 slot, melee-only), and the two mod items.
+    var gun: assets_items.ItemDef = .{ .id = 100, .name = "testGun", .tags = "T0,gun,barrelAttachments", .mod_slots_n = 6 };
+    @memcpy(gun.mod_slots_curve[0..6], &[_]f32{2} ** 6);
+    var knife: assets_items.ItemDef = .{ .id = 101, .name = "testKnife", .tags = "T0,melee,blade", .mod_slots_n = 6 };
+    @memcpy(knife.mod_slots_curve[0..6], &[_]f32{1} ** 6);
+    const defs = [_]assets_items.ItemDef{
+        gun,
+        knife,
+        .{ .id = 102, .name = "modMeleeCrafted04" },
+        .{ .id = 103, .name = "modGunBarrelExtender" },
+    };
+    g.items = .{ .defs = &defs, .source = .builtin };
+    g.item_mods = .{ .defs = &[_]assets_item_modifiers.ModDef{
+        .{ .name = "modMeleeCrafted04", .installable = "melee,stabbing", .blocked = "noMods,blunt" },
+        .{ .name = "modGunBarrelExtender", .installable = "barrelAttachments,turretRanged", .blocked = "noMods,shotgun" },
+    } };
+    const p = g.sim.spawnPlayer(0, 70, 0, 0).?;
+    const ps = g.sim.slotOfNetId(p).?;
+    // Legal: gun + barrel mod (tags intersect, count 1 <= budget 2).
+    g.sim.inventory[ps].slots[0] = .{ .item_id = 100, .count = 1, .quality = 1, .mods = .{ 103, 0, 0, 0 }, .mod_n = 1 };
+    // Illegal: barrel mod on the knife (installable misses melee).
+    g.sim.inventory[ps].slots[1] = .{ .item_id = 101, .count = 1, .quality = 1, .mods = .{ 103, 0, 0, 0 }, .mod_n = 1 };
+    // Illegal: three barrel mods on the gun (budget 2).
+    g.sim.inventory[ps].slots[2] = .{ .item_id = 100, .count = 1, .quality = 1, .mods = .{ 103, 103, 103, 0 }, .mod_n = 3 };
+    // Illegal: melee mod on the gun (installable misses gun).
+    g.sim.inventory[ps].slots[3] = .{ .item_id = 100, .count = 1, .quality = 1, .mods = .{ 102, 0, 0, 0 }, .mod_n = 1 };
+    inv_c2s.scrubIllegalMods(g, ps);
+    try std.testing.expectEqual(@as(u8, 1), g.sim.inventory[ps].slots[0].mod_n);
+    try std.testing.expectEqual(@as(u16, 103), g.sim.inventory[ps].slots[0].mods[0]);
+    try std.testing.expectEqual(@as(u8, 0), g.sim.inventory[ps].slots[1].mod_n);
+    try std.testing.expectEqual(@as(u8, 0), g.sim.inventory[ps].slots[2].mod_n);
+    try std.testing.expectEqual(@as(u8, 0), g.sim.inventory[ps].slots[3].mod_n);
 }

@@ -49,6 +49,7 @@ pub fn deinitStores(self: *Game) void {
     self.sim.deinit();
     self.blocks.deinit();
     self.items.deinit();
+    self.item_mods.deinit();
     self.signs.deinit();
     self.entities.deinit();
     self.recipes.deinit();

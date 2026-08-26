@@ -25,6 +25,46 @@ const reverseItemType = game_mod.Game.reverseItemType;
 const resolveItemType = game_mod.Game.resolveItemType;
 const eatProps = game_mod.Game.eatProps;
 
+/// Server-authoritative mod attachment scrub (RE items.md CalcModSlotCount
+/// IL=29 + ItemClassModifier suitability): after an inventory write, a slot's
+/// attached mods must fit the item's ModSlots quality curve (count ≤
+/// curve[quality]) and tag gates (the mod's installable_tags intersects the
+/// item's Tags, blocked_tags disjoint). Fail closed: unknown item, unknown
+/// mod, empty installable gate, or count over budget → the slot's mods are
+/// cleared (the client's next inventory sync corrects its view).
+pub fn scrubIllegalMods(self: *Game, ps: ecs.Slot) void {
+    const inv = &self.sim.inventory[ps];
+    for (&inv.slots) |*sl| {
+        if (sl.item_id == 0 or sl.mod_n == 0) continue;
+        const item = self.items.byId(sl.item_id) orelse {
+            sl.mod_n = 0;
+            sl.mods = .{0} ** 4;
+            continue;
+        };
+        if (sl.mod_n > self.items.modSlotsFor(sl.item_id, sl.quality)) {
+            sl.mod_n = 0;
+            sl.mods = .{0} ** 4;
+            continue;
+        }
+        var ok = true;
+        for (sl.mods[0..sl.mod_n]) |mid| {
+            if (mid == 0) continue;
+            const mod = self.items.byId(mid) orelse {
+                ok = false;
+                break;
+            };
+            if (!self.item_mods.isSuitable(mod.name, item.tags)) {
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) {
+            sl.mod_n = 0;
+            sl.mods = .{0} ** 4;
+        }
+    }
+}
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageItemReload")) {
@@ -79,6 +119,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             std.debug.print("zdtd: PlayerInventory apply err={s} body={d} peer={d}\n", .{ @errorName(err), body.len, c.slot });
         };
         self.clampInventoryStacks(&self.sim.inventory[ps]);
+        scrubIllegalMods(self, ps);
         var after_total: u32 = 0;
         var first_eat_id: u16 = 0;
         for (self.sim.inventory[ps].slots) |sl| {

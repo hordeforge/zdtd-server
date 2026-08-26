@@ -15,6 +15,7 @@ const assets_quests = @import("../../assets/quests.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_signs = @import("../../assets/signs.zig");
+const assets_item_modifiers = @import("../../assets/item_modifiers.zig");
 const assets_entities = @import("../../assets/entities.zig");
 const assets_recipes = @import("../../assets/recipes.zig");
 const assets_loot = @import("../../assets/loot.zig");
@@ -189,6 +190,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         }
     } else if (self.stock_catalogs_requested) {
         util_log.warn("zdtd: items.xml failed to load; item-dependent actions fail closed\n", .{});
+    }
+    if (logged("item_modifiers.xml", assets_item_modifiers.tryLoad(allocator, opts.game_dir, opts.config_dir))) |mt| {
+        self.item_mods = mt;
+        util_log.info("zdtd: item_modifiers entries={d}\n", .{self.item_mods.defs.len});
     }
     if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();

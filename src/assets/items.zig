@@ -106,6 +106,18 @@ pub const ItemDef = struct {
     /// chokes are physical-only today, so the PDR leg is the live one.
     elem_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     elem_resist_n: u8 = 0,
+    /// items.xml `Tags` property (comma list): the item's mod-attachment tag
+    /// surface. A mod fits when its installable_tags intersects Tags and its
+    /// blocked_tags is disjoint (RE items.md ItemClassModifier suitability).
+    /// "" = untagged → no mods can attach (fail closed).
+    tags: []const u8 = "",
+    /// items.xml ModSlots passive (quality curve: value "1,1,1,2,2,3" sits at
+    /// quality 1..6; RE items.md CalcModSlotCount IL=29 =
+    /// FastMin(255, EffectManager.GetValue(ModSlots, item, Quality-1))). The
+    /// max attached mods for a slot at a given quality. 0 segments = the item
+    /// carries no row → no mods allowed (fail closed).
+    mod_slots_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    mod_slots_n: u8 = 0,
     /// items.xml DegradationPerUse passive (base_set, stock
     /// ItemValue.UseTimes wear per use): the durability consumed by one use.
     /// 0 = no row -> the callers' 1.0 default (the pre-XML behavior).
@@ -237,6 +249,21 @@ pub const ItemTable = struct {
             if (self.byId(id)) |d| return d;
         }
         return null;
+    }
+
+    /// Stock `ItemValue.CalcModSlotCount` (IL=29, items.md): the mod budget
+    /// for an item at a quality tier = FastMin(255, EffectManager.GetValue(
+    /// ModSlots, item, FastMax(0, Quality-1))) - the item's ModSlots quality
+    /// curve value (tier 1..6 → curve[0..5]). 0 = no row → no mods (fail
+    /// closed in the attachment scrub). Quality 0 (unset) treats as tier 1.
+    pub fn modSlotsFor(self: *const ItemTable, item_id: u16, quality: u8) u8 {
+        const d = self.byId(item_id) orelse return 0;
+        if (d.mod_slots_n == 0) return 0;
+        const q: usize = if (quality == 0) 1 else quality;
+        const idx = @min(q, @as(usize, d.mod_slots_n)) - 1;
+        const v = d.mod_slots_curve[idx];
+        if (v <= 0) return 0;
+        return @intFromFloat(@min(v, 255.0));
     }
 
     /// Stock ItemValue.type → item name (reverse of stockTypeFor). Walks the
@@ -638,6 +665,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_edr_curves.deinit(allocator);
     var stock_edr_n: std.ArrayList(u8) = .empty;
     defer stock_edr_n.deinit(allocator);
+    var stock_mslots_curves: std.ArrayList([buffs.max_curve_len]f32) = .empty;
+    defer stock_mslots_curves.deinit(allocator);
+    var stock_mslots_n: std.ArrayList(u8) = .empty;
+    defer stock_mslots_n.deinit(allocator);
+    var stock_tags: std.ArrayList([]const u8) = .empty;
+    defer stock_tags.deinit(allocator);
     var stock_degrad_per_use: std.ArrayList(f32) = .empty;
     defer stock_degrad_per_use.deinit(allocator);
     var stock_stamina_loss: std.ArrayList(f32) = .empty;
@@ -819,6 +852,20 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_pdr_n.append(allocator, pdr_n);
             try stock_edr_curves.append(allocator, edr_curve);
             try stock_edr_n.append(allocator, edr_n);
+            // ModSlots passive (quality curve, RE items.md CalcModSlotCount):
+            // the mod-capacity budget per quality tier; 0 = no row (fail
+            // closed in the mod scrub).
+            var mslots_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var mslots_n: u8 = 0;
+            const mslots_v = xml.passiveEffectValue(body, "ModSlots");
+            if (mslots_v) |v| {
+                mslots_n = buffs.parseCurveValue(v, &mslots_curve);
+            }
+            try stock_mslots_curves.append(allocator, mslots_curve);
+            try stock_mslots_n.append(allocator, mslots_n);
+            // Tags property: the mod-attachment tag surface (comma list).
+            const tags = xml.propertyValue(body, "Tags") orelse "";
+            try stock_tags.append(allocator, tags);
             // DegradationPerUse (base_set): the per-use durability wear.
             // The 3 perc_add rows are the modifier form - recorded.
             var degrad_per_use: f32 = 0;
@@ -1034,6 +1081,32 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     cur = ext_map.get(cur) orelse break;
                 }
             }
+            // ModSlots inherits through Extends like the resist curves: an
+            // item that only overrides damage keeps its base's mod budget.
+            {
+                var own_mslots_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+                defer own_mslots_map.deinit(allocator);
+                var own_mslotsn_map: std.StringHashMapUnmanaged(u8) = .{};
+                defer own_mslotsn_map.deinit(allocator);
+                for (stock_names.items, 0..) |n, idx| {
+                    if (stock_mslots_n.items[idx] > 0) {
+                        try own_mslots_map.put(allocator, n, stock_mslots_curves.items[idx]);
+                        try own_mslotsn_map.put(allocator, n, stock_mslots_n.items[idx]);
+                    }
+                }
+                for (stock_names.items, 0..) |n, idx| {
+                    var cur = n;
+                    var hops: usize = 0;
+                    while (hops < max_hops) : (hops += 1) {
+                        if (own_mslotsn_map.get(cur)) |cn| {
+                            stock_mslots_n.items[idx] = cn;
+                            stock_mslots_curves.items[idx] = own_mslots_map.get(cur).?;
+                            break;
+                        }
+                        cur = ext_map.get(cur) orelse break;
+                    }
+                }
+            }
         }
     }
 
@@ -1061,6 +1134,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.phys_resist_n = stock_pdr_n.items[idx];
                 def.elem_resist_curve = stock_edr_curves.items[idx];
                 def.elem_resist_n = stock_edr_n.items[idx];
+                def.tags = try arena.dupe(u8, stock_tags.items[idx]);
+                def.mod_slots_curve = stock_mslots_curves.items[idx];
+                def.mod_slots_n = stock_mslots_n.items[idx];
                 def.degradation_per_use = stock_degrad_per_use.items[idx];
                 def.stamina_loss = stock_stamina_loss.items[idx];
                 def.target_armor = stock_target_armor.items[idx];
@@ -1117,6 +1193,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .phys_resist_n = stock_pdr_n.items[idx],
             .elem_resist_curve = stock_edr_curves.items[idx],
             .elem_resist_n = stock_edr_n.items[idx],
+            .tags = try arena.dupe(u8, stock_tags.items[idx]),
+            .mod_slots_curve = stock_mslots_curves.items[idx],
+            .mod_slots_n = stock_mslots_n.items[idx],
             .degradation_per_use = stock_degrad_per_use.items[idx],
             .stamina_loss = stock_stamina_loss.items[idx],
             .target_armor = stock_target_armor.items[idx],
@@ -1204,6 +1283,44 @@ test "XML item table fails closed instead of using builtin balance or ids" {
     const builtin = ItemTable.builtin();
     try std.testing.expectEqual(@as(i32, items_start_here + 7), builtin.stockTypeFor(7));
     try std.testing.expectEqual(@as(f32, 15), builtin.foodAmountFor(2));
+}
+
+test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {
+    // RE items.md: the item's Tags surface (mod-attachment gates) + the
+    // ModSlots quality curve (CalcModSlotCount IL=29 = GetValue(ModSlots,
+    // item, Quality-1)); an item without ModSlots allows no mods (fail
+    // closed in the attachment scrub).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path, "<items>\n" ++
+        "  <item name=\"testGun\">\n" ++
+        "    <property name=\"Tags\" value=\"T0,weapon,gun,barrelAttachments\"/>\n" ++
+        "    <effect_group name=\"testGun\">\n" ++
+        "      <passive_effect name=\"ModSlots\" operation=\"base_set\" value=\"1,1,1,2,2,3\" tier=\"1,2,3,4,5,6\"/>\n" ++
+        "    </effect_group>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"resourceWood\">\n" ++
+        "    <property name=\"Stacknumber\" value=\"100\"/>\n" ++
+        "  </item>\n" ++
+        "</items>\n");
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const gun = t.byName("testGun") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqualStrings("T0,weapon,gun,barrelAttachments", gun.tags);
+    try std.testing.expectEqual(@as(u8, 6), gun.mod_slots_n);
+    // Quality 1..3 → budget 1; quality 4..5 → 2; quality 6 → 3 (stock tier
+    // curve). Quality 0 (unset) treats as tier 1.
+    try std.testing.expectEqual(@as(u8, 1), t.modSlotsFor(gun.id, 1));
+    try std.testing.expectEqual(@as(u8, 2), t.modSlotsFor(gun.id, 4));
+    try std.testing.expectEqual(@as(u8, 3), t.modSlotsFor(gun.id, 6));
+    try std.testing.expectEqual(@as(u8, 1), t.modSlotsFor(gun.id, 0));
+    const wood = t.byName("resourceWood") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(u8, 0), t.modSlotsFor(wood.id, 3)); // no ModSlots → 0
+    try std.testing.expectEqual(@as(u8, 0), t.modSlotsFor(9999, 3)); // unknown item → 0
 }
 
 test "DistractionTags + Distraction* effects parse (stock decoy shape)" {

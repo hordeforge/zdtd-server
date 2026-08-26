@@ -60,6 +60,7 @@ const ConsoleOut = admin_console.ConsoleOut;
 const TargetResult = admin_console.TargetResult;
 const assets_blocks = @import("../assets/blocks.zig");
 const assets_items = @import("../assets/items.zig");
+const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_signs = @import("../assets/signs.zig");
 const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
@@ -447,6 +448,9 @@ pub const Game = struct {
     authority_mode: AuthorityMode = .correct,
     blocks: assets_blocks.BlockTable = assets_blocks.BlockTable.builtin(),
     items: assets_items.ItemTable = assets_items.ItemTable.builtin(),
+    /// item_modifiers.xml catalog (RE items.md ItemClassModifier): the tag
+    /// gates for mod attachment validation (assets/item_modifiers.zig).
+    item_mods: assets_item_modifiers.ModTable = .{},
     /// A stock/config catalog root was requested. Builtin item aliases remain
     /// available only for explicit offline runs; load failures fail closed.
     stock_catalogs_requested: bool = false,
