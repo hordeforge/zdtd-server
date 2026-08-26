@@ -378,6 +378,14 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the door open-state row went WORKS on re-audit (2026-08-26): the
+client opens/closes via the SetBlock raw flip (open bit, broadcast), zombies
+open doors on their path (CheckForDoorAndOpen, scenario-pinned), the open
+state rides the chunk raw (ZCH3-persisted), and open doors are passable for
+the AI; the mods row was re-scoped with the IL evidence (ItemValue.Write
+IL=323 Modifications/CosmeticMods arrays - zdtd writes them empty, so a
+modded weapon loses its mods on reload; server-side mod state is a recorded
+feature).
 Then the DamageEntity row went WORKS on re-audit (2026-08-26): the
 builder emits the FULL stock body (all 31 fields in read-IL order, verified
 against protocol-packages.md 6.11) and parseDamageHead consumes the head,

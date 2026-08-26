@@ -4646,7 +4646,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Drop / pickup / bag containers | HAVE (loot ECD bag; Bag C2S-only) |
 | Craft / recipe / unlock | PARTIAL (InvTx + workstation TE + unlock list) |
 | Toolbelt / bag / equipment slots | HAVE |
-| Item quality / mods / durability | PARTIAL (quality/meta in players.zsv ZPV3; mods shallow) |
+| Item quality / mods / durability | PARTIAL (quality/meta in players.zsv ZPV3; durability wear per use; mods: the ItemValue wire carries the Modifications/CosmeticMods arrays (stock ItemValue.Write IL=323) and zdtd writes them EMPTY - wire-correct, so a modded weapon loses its mods on reload; server-side mod state (item_modifiers.xml catalog, mod-slot validation on attachment, mod persistence in the item stack) is a recorded feature, not a quick fix) |
 | Loot container open/close | HAVE (LockRequest + TE stream) |
 
 #### Blocks / building
@@ -4657,7 +4657,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageAnimateBlock` / `BlockTrigger` | PARTIAL (BlockTrigger C2S handled) |
 | Stability / support collapse | WORKS (2026-08-20: stability plane, see STATUS wave 2026-08-08) |
 | Land claim / bedroll / keystones | WORKS (LandClaim options + keystone registration/deny/durability + bedroll respawn point; 2026-08-26: a removed bedroll clears the owner's respawn point, stock PersistentPlayerList.SpawnPointRemoved - see the 'Land claim / bedroll spawn' row) |
-| Door / hatch / storage open state | PARTIAL (chest open pair; generic door shallow) |
+| Door / hatch / storage open state | WORKS (2026-08-26 re-audit: the client opens/closes a door via the SetBlock raw flip (blocks.zig switch/meta path - open bit 1 of the 22..25 nibble, broadcast with the raw), zombies open doors on their path (tick.zig: set the open bit + broadcast, RE CheckForDoorAndOpen/TEFeatureDoor), the open state rides the chunk raw (persisted by ZCH3), and open doors are passable for the AI (world.store isSolid door predicate); the chest open/close pair ships too) |
 
 #### AI director / events / sleepers
 | Package | Priority |
