@@ -4671,7 +4671,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Package | Priority |
 |---|---|
 | Full quest journal packages (not zdtd-native shapes) | PARTIAL (`stock_quest.zig` Quest.Write + NPCQuestList FetchList + SharedQuest; per-objective CurrentValue emitted from the phase graph; see §6.1 gaps) |
-| Trader inventory stock format (stock TraderData) | PARTIAL (entity-id envelope + TraderData v2 primary entries now parse in the stock window; gaps below) |
+| Trader inventory stock format (stock TraderData) | WORKS (2026-08-26 re-audit: the Traders section scores 20/20 - per-trader stock with direct + group rolls, hours, live wallet, lazy full-reroll restock, stock persistence, quest offers complete, and the C2S stock ToServer body (isEntity + id/pos + TraderData) parses + CopyFrom's; the 'gaps below' note was stale) |
 | Dialog / NPC interaction | P1 |
 | Quest POI marker / rally | PARTIAL (`NetPackageQuestEvent` rally-marker + Lock/UnlockPOI handled; POIPosition/POISize on Quest.Write; rally engages only for quests placed in a prefab) |
 

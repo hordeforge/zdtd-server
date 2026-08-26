@@ -378,6 +378,10 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the trader-stock pipe row went WORKS on re-audit (2026-08-26): the
+Traders section scores 20/20 (per-trader stock, hours, wallet, restock,
+persistence, quest offers, and the C2S stock ToServer body parses + CopyFrom)
+- the 'gaps below' note was stale.
 Then the deco pipe row went WORKS on re-audit (2026-08-26): the join
 burst + deco streaming with newly entered chunks (sendDecoForStreamedChunk)
 was already covered by the 'Join-time deco burst' WORKS row - the stale
