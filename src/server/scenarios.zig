@@ -1215,9 +1215,12 @@ test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
     }
     try std.testing.expect(has_buff);
 
-    // Rejoin: drop + attach again (a fresh spawn gets a NEW entity id; the
-    // buffs ride the ZPV3 save and restore on the post-spawn pass). The new
-    // capture must carry the player's own AddRemoveBuff(adding) bundle.
+    // Rejoin: save (the real quit/reap flows save before dropping; the
+    // harness drop is a bare removal) then drop + attach again. A fresh
+    // spawn gets a NEW entity id; the buffs ride the ZPV3 save and restore
+    // on the post-spawn pass. The new capture must carry the player's own
+    // AddRemoveBuff(adding) bundle.
+    try g.savePlayers();
     g.dropClientSlot(c1.slot, "rejoin drop");
     var cap2: ln_peer.Capture = .{};
     const c2 = try g.attachJoinedClient(&cap2);
@@ -1233,16 +1236,29 @@ test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
         }
     }
     try std.testing.expect(restored);
+    // The join steps may expire the restored buff (its expiry relay is an
+    // adding=false package), so scan EVERY AddRemoveBuff for the entity and
+    // require the re-add bundle (the sendOwnBuffs join send).
     const ab_id = packages.idOf("NetPackageAddRemoveBuff").?;
-    const ab_body = cap2.findPkgIdEntity(ab_id, eid) orelse return error.TestUnexpectedResult;
-    var r = binary.Reader{ .data = ab_body };
-    const ent = try r.readI32();
-    var name_buf: [64]u8 = undefined;
-    const name = try r.readString(&name_buf);
-    const adding = try r.readBool();
-    try std.testing.expect(ent == eid);
-    try std.testing.expect(adding);
-    try std.testing.expectEqualStrings("buffShocked", name);
+    var found = false;
+    var si: usize = 0;
+    while (si < cap2.n) : (si += 1) {
+        const msg = cap2.slots[si].data[0..cap2.slots[si].len];
+        var pkgs: [8]@import("../wire/frame.zig").Package = undefined;
+        const pn = @import("../wire/frame.zig").parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id != ab_id) continue;
+            var r = binary.Reader{ .data = pkgs[j].body };
+            const ent = try r.readI32();
+            var name_buf: [64]u8 = undefined;
+            const name = try r.readString(&name_buf);
+            _ = try r.readF32(); // duration
+            const adding = try r.readBool();
+            if (ent == eid and adding and std.mem.eql(u8, name, "buffShocked")) found = true;
+        }
+    }
+    try std.testing.expect(found);
     std.debug.print("PASS rejoin-buffs: own active buffs re-synced via AddRemoveBuff\n", .{});
 }
 

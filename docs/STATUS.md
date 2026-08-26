@@ -378,6 +378,12 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the AddRemoveBuff/EntityStatsBuff row went WORKS (2026-08-26): the
+joining player's OWN active buffs now re-sync via an AddRemoveBuff(adding)
+bundle in the join bundle - the PDF `buffData` section stays empty by design
+(fresh-PlayerDataFile form) but the explicit bundle replaces it, so buff
+icons survive a rejoin (the server kept the state; the client lost the
+icons); scenario-pinned with a save + drop + reattach round trip.
 Then the door open-state row went WORKS on re-audit (2026-08-26): the
 client opens/closes via the SetBlock raw flip (open bit, broadcast), zombies
 open doors on their path (CheckForDoorAndOpen, scenario-pinned), the open
