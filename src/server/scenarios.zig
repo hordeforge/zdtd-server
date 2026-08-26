@@ -1116,6 +1116,62 @@ test "scenario multi-block SetBlock places anchor + ischild children" {
     std.debug.print("PASS multiblock: 2-change SetBlock places anchor + ischild child\n", .{});
 }
 
+test "scenario party mate's shared quest advances on the killer's kill" {
+    // Stock SharedKillServer -> SharedKillClient (IL=65): an in-range party
+    // mate's EntityKilled quest event fires for the same kill (their shared
+    // quest copies advance; same GameStats[54] range as the XP share).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    var pbody: [32]u8 = undefined;
+    var fbuf: [128]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
+    try std.testing.expect(g.parties.partyByMember(cb.entity_id) != null);
+    // Both members carry the same kill quest (builtin def 1 =
+    // clear_the_noise, 3 kills): the harness join auto-grants the starter
+    // (questAcceptStarter would refuse the duplicate).
+    const pa = g.sim.playerByPeer(ca.slot).?;
+    const pb = g.sim.playerByPeer(cb.slot).?;
+    const findStarter = struct {
+        fn f(g2: *game_mod.Game, ps: usize) usize {
+            for (g2.sim.journal[ps].slots, 0..) |sl, i| {
+                if (sl.def_id == 1 and sl.active) return i;
+            }
+            return std.math.maxInt(usize);
+        }
+    }.f;
+    const ja = findStarter(g, pa);
+    const jb = findStarter(g, pb);
+    try std.testing.expect(ja != std.math.maxInt(usize));
+    try std.testing.expect(jb != std.math.maxInt(usize));
+    try std.testing.expectEqual(@as(u16, 0), g.sim.journal[pa].slots[ja].progress);
+    try std.testing.expectEqual(@as(u16, 0), g.sim.journal[pb].slots[jb].progress);
+    // A kills a zombie (B in range at the (256,70,256) sim origin).
+    const zid = g.sim.spawnZombie(258, 70, 258, 10).?;
+    var dmg: [256]u8 = undefined;
+    const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 100, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
+    try std.testing.expect(g.sim.health[g.sim.slotOfNetId(zid).?].hp <= 0);
+    // Both journals advanced one kill (the mate via SharedKillServer).
+    try std.testing.expectEqual(@as(u16, 1), g.sim.journal[pa].slots[ja].progress);
+    try std.testing.expectEqual(@as(u16, 1), g.sim.journal[pb].slots[jb].progress);
+    std.debug.print("PASS party-quest-kill: in-range mate's shared quest advances\n", .{});
+}
+
+
 
 
 test "scenario demolish blast uses per-class ExplosionData and the earth DamageBonus" {

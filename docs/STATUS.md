@@ -374,6 +374,10 @@ PlayerSpawnedInWorld rows: both bodies match the stock write IL exactly
 PlayerSpawnedInWorld = respawnReason, position Vector3i, entityId), and the
 RequestToSpawnPlayer row was re-scoped (chunkViewDim parsed; the client
 PlayerProfile blob skipped - the server owns the profile).
+Then the party shared-quest-kill went in (2026-08-26): an in-range party
+mate's shared quest advances on the killer's kill (stock SharedKillServer ->
+SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
+kill-XP split itself was re-audited against the RE and already matched.
 Then the multi-block SetBlock row went WORKS (2026-08-26): the handler
 parses ALL BlockChangeInfos and places each cell with its raw
 (rotation/meta/ischild preserved) - the stock client sends the anchor +

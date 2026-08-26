@@ -13,6 +13,7 @@ const packages = @import("../../wire/packages.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const ecs_party = @import("../../ecs/party.zig");
+const systems = @import("../../ecs/systems.zig");
 
 const max_clients = game_mod.max_clients;
 
@@ -163,6 +164,32 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32) v
                         };
                     } else |_| {}
                 }
+            }
+        }
+    }
+}
+
+/// Stock SharedKillServer -> SharedKillClient (IL=65): an in-range party
+/// mate's EntityKilled quest event fires for the same kill, so their shared
+/// quest copies advance (the same GameStats[54] range as the XP share gates
+/// the mate). zdtd journals are per-player; a mate advances when they hold
+/// the same quest def active. Wire: the mate's own journal write reaches
+/// their client through the regular progress path.
+pub fn questKillForParty(self: *Game, killer_slot: usize, vx: f32, vz: f32) void {
+    const killer = &self.clients[killer_slot];
+    const party = self.parties.partyByMember(killer.entity_id) orelse return;
+    if (self.sim.playerByPeer(killer_slot)) |ks| {
+        const kt = self.sim.transform[ks];
+        for (party.members[0..party.n]) |m| {
+            if (m == killer.entity_id) continue;
+            const ms = self.sim.slotOfNetId(m) orelse continue;
+            if (!self.sim.mask[ms].transform) continue;
+            const dx = self.sim.transform[ms].x - kt.x;
+            const dz = self.sim.transform[ms].z - kt.z;
+            if (dx * dx + dz * dz > self.party_shared_kill_range * self.party_shared_kill_range) continue;
+            const mate_peer = self.sim.player[ms].peer_slot;
+            if (mate_peer >= 0) {
+                systems.questOnZombieKilled(&self.sim, @intCast(mate_peer), vx, vz);
             }
         }
     }

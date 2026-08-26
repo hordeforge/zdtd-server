@@ -4665,7 +4665,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Horde / blood moon client FX (`BloodmoonMusic`, `HordeEvent`, `BossEvent`) | PARTIAL (BloodmoonMusic wired; HordeEvent builder unwired, stock has no sender) |
 | Sleeper volume activate | PARTIAL (AABB wake + authored markers) |
 | Game events (`GameEventRequest/Response`) | PARTIAL (ack path) |
-| Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` + `Party` state machine and `PartyData` snapshots; shared party scope - kill XP split, shared quests - still open, see §AUTHGATE) |
+| Party / ally (`AllyRequest/Response`) | PARTIAL (real `AllyStore` + `Party` state machine and `PartyData` snapshots; kill XP split WORKS (2026-08-26 re-audit: `startingXP x (1 - 0.1 x inRangeMates)`, `NetPackageSharedPartyKill` flags 192, RE parties-factions.md §2.3); 2026-08-26: an in-range party mate's shared quest advances on the killer's kill (stock SharedKillServer -> SharedKillClient EntityKilled, same GameStats[54] range). Still open: party quest auto-sharing (`PartyQuests.ShareAllQuestsWithParty`) and `NetPackagePartyQuestChange` fan-out, see §AUTHGATE) |
 
 #### Quests / traders / dialog (stock)
 | Package | Priority |
