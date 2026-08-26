@@ -4670,7 +4670,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 #### Quests / traders / dialog (stock)
 | Package | Priority |
 |---|---|
-| Full quest journal packages (not zdtd-native shapes) | PARTIAL (`stock_quest.zig` Quest.Write + NPCQuestList FetchList + SharedQuest; per-objective CurrentValue emitted from the phase graph; see §6.1 gaps) |
+| Full quest journal packages (not zdtd-native shapes) | PARTIAL (`stock_quest.zig` Quest.Write + NPCQuestList FetchList + SharedQuest; per-objective CurrentValue emitted from the phase graph; §6.1 re-audited 2026-08-26 - the all-objectives-per-phase and phase-0-always-active gaps closed with tests, the scaffolding auto-complete approximation remains) |
 | Trader inventory stock format (stock TraderData) | WORKS (2026-08-26 re-audit: the Traders section scores 20/20 - per-trader stock with direct + group rolls, hours, live wallet, lazy full-reroll restock, stock persistence, quest offers complete, and the C2S stock ToServer body (isEntity + id/pos + TraderData) parses + CopyFrom's; the 'gaps below' note was stale) |
 | Dialog / NPC interaction | P1 |
 | Quest POI marker / rally | WORKS (2026-08-26 re-audit: try_rally_marker runs the full stock chain - poi lockout check, reason-to-reply-event switch (asm.il 835696), questOnRallyActivated, questPoiLock + ResetBlocksAndRebuild restore, shared-quest broadcast; lock_poi/unlock_poi handled; POIPosition/POISize ride Quest.Write; the 'only for quests placed in a prefab' note is the stock-correct gate - the rally marker IS the placed prefab's marker, and questAccept's POI selection places every quest) |
@@ -5076,15 +5076,9 @@ mirroring stock `Quest.refreshQuestCompletion` / `Quest.AdvancePhase`
 objective reaches the required value, then the sim advances; at the highest phase
 a `TurnIn` quest becomes ready-turn-in (completed on trader interact) and an
 `AutoComplete` quest completes. Legacy phase-less defs keep the single-kind path.
-Remaining gaps:
+Remaining gaps (2026-08-26 re-audit: the first two closed - per-objective
+tracking landed and is tested):
 
-- **One advancing objective per phase.** Stock `refreshQuestCompletion` requires
-  ALL non-optional current-phase objectives complete. We track a single progress
-  counter per phase (the highest-scored non-auto objective, e.g. `tier1_clear`
-  phase 3 collapses ClearSleepers + POIStayWithin to ClearSleepers).
-- **Phase-0 always-active objectives.** Stock counts `Phase==0` in every phase's
-  check; missing-phase objectives are approximated as phase 1, not active across
-  all phases.
 - **Scaffolding phases auto-complete.** POIStayWithin and empty intermediate
   phases map to `PhaseKind.auto` and complete on entry. RallyPoint is now
   `PhaseKind.rally` and waits for the client's `TryRallyMarker`, but only when

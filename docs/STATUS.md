@@ -378,6 +378,11 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the quest §6.1 phase gaps were re-audited (2026-08-26): per-objective
+phase tracking (obj_progress per objective, all-objectives completion gate,
+phase-0 always-active) landed and is tested ('phase advances only when all
+its objectives complete', 'phase-0 objectives gate every phase'); only the
+scaffolding auto-complete approximation remains.
 Then the kick/ban/whitelist row went WORKS on re-audit (2026-08-26):
 kick/ban/unban run on the admin console (matching stock ConsoleCmdBan) with
 admins/whitelist/bans .zsv persistence - the row's own note admitted it was
