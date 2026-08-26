@@ -154,28 +154,29 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityStealth")) {
-        // Stock NetPackageEntityStealth (read IL=9): id i32, six u16 stealth
-        // flags, data u16, cSmellRadiusMin i32 - the client reports its
+        // Stock NetPackageEntityStealth (read IL=9: id i32 | data u16 - the
+        // write IL=12 ships the same two fields). The client reports its
         // stealth state for AI detection (crouch/smell/eating/sheltered/
-        // alert). zdtd computes stealth server-side (the crouch flag rides the
-        // movement frames and the AI senses row derives smell from buffs), so
-        // the report is a redundant echo: validate the body and drop.
-        if (body.len < 20) {
+        // alert packed into the u16). zdtd computes stealth server-side (the
+        // crouch flag rides the movement frames and the AI senses row
+        // derives smell from buffs), so the report is a redundant echo:
+        // validate the body and drop.
+        if (body.len < 6) {
             self.harness.counters.inc(.c2s_malformed);
             return true;
         }
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityPhysics")) {
-        // Stock NetPackageEntityPhysics (read IL=74): cFlagIsMaster u16,
-        // cFlagIsCollided u16, cFlagOnGround u16, EntityId i32, Pos 3xf32,
-        // QRot 4xf32, Velocity 3xf32, AngularVelocity 3xf32, Flags u16. The
-        // entity's physics master reports pos/rot/velocity so the server
-        // mirrors it (ProcessPackage gates on isPhysicsMaster). zdtd's
-        // movement, falling-block and vehicle sims are server-authoritative
-        // (broadcast PosAndRot / VehiclePositions / EntityVelocity), so the
-        // report is a redundant echo: validate the body and drop.
-        if (body.len < 70) {
+        // Stock NetPackageEntityPhysics (read IL=74): Flags u16, EntityId
+        // i32, then 14xf32 (pos 3, quat 4, velocity 3, angular 3, plus two
+        // more singles) = 62 bytes. The entity's physics master reports
+        // pos/rot/velocity so the server mirrors it (ProcessPackage gates on
+        // isPhysicsMaster). zdtd's movement, falling-block and vehicle sims
+        // are server-authoritative (broadcast PosAndRot / VehiclePositions /
+        // EntityVelocity), so the report is a redundant echo: validate the
+        // body and drop.
+        if (body.len < 62) {
             self.harness.counters.inc(.c2s_malformed);
             return true;
         }
