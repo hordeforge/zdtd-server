@@ -1093,6 +1093,11 @@ single xorshift32 with explicit seeding (initFromU64 for worldgen seeds,
 initFromNetId for per-entity wander streams, hash-seeded per-spawn rolls
 for MoveSpeedRand/chase); the sim paths never touch OS entropy or
 std.crypto.random, so same seed + same call sequence -> same outcomes.
+A thirteenth pass (2026-08-27) verified the not-a-mod-host boundary
+(rule 5): the modlet loader is the XML-only ModManager subset - it
+detects a top-level DLL and warns "code part not hosted, XML patches
+still apply" instead of ever loading one, and never reads Bundles/
+content (stock assetbundle modlets load as data via the patch catalogs).
 GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
