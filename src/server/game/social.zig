@@ -89,6 +89,34 @@ pub fn playerBuffBlob(self: *Game, peer_slot: usize, buf: []u8) []const u8 {
     return packages.stock_buff.writeEntityBuffs(buf, values[0..n]) catch &.{};
 }
 
+/// The joining player's OWN active buffs. Stock carries them in the PDF
+/// `buffData` section; zdtd writes that section empty (fresh-PlayerDataFile
+/// form), so without this bundle the client's buff icons vanish on rejoin
+/// even though the server kept the buff state. One AddRemoveBuff (adding)
+/// per active buff, the same body shape as the relay.
+pub fn sendOwnBuffs(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
+    const ps = self.sim.playerByPeer(c.slot) orelse return;
+    if (!self.sim.mask[ps].buffs) return;
+    for (self.sim.buffs[ps].slots) |b| {
+        if (!b.active) continue;
+        const def = self.buffs.byId(b.def_id) orelse continue;
+        const body = packages.stock_buff.buildAddRemoveBuffBody(&self.body_buf, .{
+            .entity_id = c.entity_id,
+            .name = def.name,
+            .duration = ecs.buff.duration_from_class,
+            .adding = true,
+            .instigator_id = b.instigator_id,
+            .instigator_x = b.instigator_x,
+            .instigator_y = b.instigator_y,
+            .instigator_z = b.instigator_z,
+        }) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        try self.sendGame(peer, "NetPackageAddRemoveBuff", body);
+    }
+}
+
 pub fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: bool, instigator_id: i32, except_slot: ?usize) !void {
     const b = packages.stock_buff.buildAddRemoveBuffBody(&self.body_buf, .{
         .entity_id = entity_id,

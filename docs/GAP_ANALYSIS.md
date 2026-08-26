@@ -4634,7 +4634,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | `NetPackageDamageEntity` full field semantics | WORKS (2026-08-26 re-audit: the builder emits the FULL stock body - all 31 fields in read-IL order (entityId, damageSrc/Typ, strength, hitDirection, hitBodyPart, movementState, pain/fatal/critical, attacker, dirV, blockPos, hitTransform, uvHit, damageMultiplier, random, ignoreConsecutive/buff/dismember/cripple/crawler flags, bonusDamageType, StunType/Duration, bFromBuff, ArmorSlot/Group/Damage, optional ItemValue); parseDamageHead consumes the head and validates the acted-on fields (entityId/source/type/strength/fatal), the rest are hit-info cosmetics the server ignores) |
 | `NetPackageExplosionInitiate` / `ExplosionClient` | WORKS (2026-08-26: C2S ExplosionInitiate parse + server blast + client FX relay; zombie-cop blasts now also broadcast NetPackageExplosionClient (stock GameManager.explode IL_021D sends it for EVERY explosion, cops included) - the observing client plays the flash/sound at the blast center) |
-| `NetPackageAddRemoveBuff` / `EntityStatsBuff` | PARTIAL (AddRemoveBuff C2S validated + S2C relay/expiry; EntityStatsBuff full-list sync on join; PDF `buffData` still empty, no cvar section) |
+| `NetPackageAddRemoveBuff` / `EntityStatsBuff` | WORKS (2026-08-26: AddRemoveBuff C2S validated + S2C relay/expiry, EntityStatsBuff full-list sync of OTHER players on join, and the joining player's OWN active buffs now re-sync via an AddRemoveBuff(adding) bundle - the PDF `buffData` section stays empty by design (fresh-PlayerDataFile form; the explicit bundle replaces it, so buff icons survive a rejoin; scenario-pinned)) |
 | `NetPackageEmitSmell` | P3 |
 | Blood / infection / wetness packages | P2 |
 

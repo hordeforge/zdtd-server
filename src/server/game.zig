@@ -2352,6 +2352,9 @@ pub const Game = struct {
             // Buffs already on the other players (their AddRemoveBuff relays
             // predate this peer).
             try self.sendBuffSync(peer, c);
+            // The joiner's own active buffs (the PDF buff section is written
+            // empty; the explicit bundle keeps buff icons across a rejoin).
+            try self.sendOwnBuffs(peer, c);
             try self.sendSeatedRiders(peer);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
@@ -3180,6 +3183,13 @@ pub const Game = struct {
 
     fn sendBuffSync(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
         return game_social.sendBuffSync(self, peer, c);
+    }
+
+    /// The joining player's OWN active buffs (the PDF buff section is empty
+    /// in zdtd; the client needs an explicit AddRemoveBuff bundle on rejoin).
+    /// See game/social.zig.
+    fn sendOwnBuffs(self: *Game, peer: *ln_peer.Peer, c: *const Client) !void {
+        return game_social.sendOwnBuffs(self, peer, c);
     }
 
     fn playerBuffBlob(self: *Game, peer_slot: usize, buf: []u8) []const u8 {

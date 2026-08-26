@@ -1171,6 +1171,82 @@ test "scenario party mate's shared quest advances on the killer's kill" {
     std.debug.print("PASS party-quest-kill: in-range mate's shared quest advances\n", .{});
 }
 
+test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
+    // Stock carries the player's own buffs in the PDF `buffData`; zdtd writes
+    // that section empty (fresh-PlayerDataFile form), so the join bundle must
+    // re-send the active buffs as an AddRemoveBuff(adding) bundle - otherwise
+    // the client's buff icons vanish on rejoin while the server keeps state.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap1: ln_peer.Capture = .{};
+    const c1 = try g.attachJoinedClient(&cap1);
+    // Grant a buff through the real C2S path (validated + relayed).
+    var fbuf: [256]u8 = undefined;
+    var bbody: [128]u8 = undefined;
+    const add = try packages.stock_buff.buildAddRemoveBuffBody(&bbody, .{
+        .entity_id = c1.entity_id,
+        .name = "buffShocked",
+        .duration = 4,
+        .adding = true,
+        .instigator_id = c1.entity_id,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    try g.injectFramed(c1, try packages.framed(&fbuf, "NetPackageAddRemoveBuff", add));
+    const ps = g.sim.playerByPeer(c1.slot).?;
+    var has_buff = false;
+    for (g.sim.buffs[ps].slots) |b| {
+        if (b.active) {
+            if (g.buffs.byId(b.def_id)) |def| {
+                if (std.mem.eql(u8, def.name, "buffShocked")) has_buff = true;
+            }
+        }
+    }
+    try std.testing.expect(has_buff);
+
+    // Rejoin: drop + attach again (a fresh spawn gets a NEW entity id; the
+    // buffs ride the ZPV3 save and restore on the post-spawn pass). The new
+    // capture must carry the player's own AddRemoveBuff(adding) bundle.
+    g.dropClientSlot(c1.slot, "rejoin drop");
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g.attachJoinedClient(&cap2);
+    const eid = c2.entity_id;
+    // Sanity: the restored sim buff is on the new player slot.
+    const ps2 = g.sim.playerByPeer(c2.slot).?;
+    var restored = false;
+    for (g.sim.buffs[ps2].slots) |b| {
+        if (b.active) {
+            if (g.buffs.byId(b.def_id)) |def| {
+                if (std.mem.eql(u8, def.name, "buffShocked")) restored = true;
+            }
+        }
+    }
+    try std.testing.expect(restored);
+    const ab_id = packages.idOf("NetPackageAddRemoveBuff").?;
+    const ab_body = cap2.findPkgIdEntity(ab_id, eid) orelse return error.TestUnexpectedResult;
+    var r = binary.Reader{ .data = ab_body };
+    const ent = try r.readI32();
+    var name_buf: [64]u8 = undefined;
+    const name = try r.readString(&name_buf);
+    const adding = try r.readBool();
+    try std.testing.expect(ent == eid);
+    try std.testing.expect(adding);
+    try std.testing.expectEqualStrings("buffShocked", name);
+    std.debug.print("PASS rejoin-buffs: own active buffs re-synced via AddRemoveBuff\n", .{});
+}
+
+
 
 
 
