@@ -1058,8 +1058,14 @@ layout every inventory/equipment/bag/container body rides on. A fifth
 pass (2026-08-27) verified the PlayerInventory body against write IL=107:
 the toolbelt/bag/equipment/drag conditionals, the Equipment block
 (WriteItemValueArray + per-slot cosmetic i32s with implied length +
-m_unlockedCosmetics count) and the Bag.Write all match. GAP
-sounds row WORKS; the last RE-blocked wire pin is closed.
+m_unlockedCosmetics count) and the Bag.Write all match. A sixth pass
+(2026-08-27) spot-checked the remaining live surfaces: the SetBlock C2S
+parse (platform identity skip + i16 change count + BlockChangeInfo rows),
+the platform-user identity serializer (bool + version + platform/id
+strings, null-identity path) and the `[rules.difficulty]` ladder, which
+derives from the comptime-parsed sandbox_presets.xml (golden-pinned
+0.5..2.5), never hardcoded. GAP sounds row WORKS; the last RE-blocked
+wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
