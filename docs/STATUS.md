@@ -1049,8 +1049,13 @@ header (bOverwriteExisting false + i32 dataLen + Chunk.write network
 blob, section 3.1), the deco burst (firstPackage bool + count-prefixed
 DecoObjects, Setup/SendDecosToClient) and the entity spawn
 (EntityCreationData.write v36 head with fail-closed branches) all match
-the pinned wire. GAP sounds row WORKS; the last RE-blocked wire pin is
-closed.
+the pinned wire. A fourth pass (2026-08-27) verified the foundational
+`ItemValue.Write` serializer against IL=323: the empty path (byte 0), the
+v9 version byte, the flags byte (0x01 item / 0x02 stats), u16 type,
+UseTimes, Quality, Meta u16, metadata count, the bool+nested mods loop,
+cosmetics, activated, ammo_index, seed and texture flag all match - the
+layout every inventory/equipment/bag/container body rides on. GAP
+sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
