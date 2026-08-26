@@ -1074,7 +1074,11 @@ idempotent without one. An eighth pass (2026-08-27) verified the
 interest/no-self-echo rule on the movement replication path
 (replicate.zig): player PosAndRot goes to `in_range & ~own peer slot`
 with `needsPosSend` dirty/tick gating, and zombie/animal frames go to
-all in-range peers - no self-echo, interest-scoped encodes.
+all in-range peers - no self-echo, interest-scoped encodes. A ninth
+pass (2026-08-27) checked the 20 TPS budget instrumentation (rule 6):
+the apm profiler sections cover every hot path (net_poll, sim_entities,
+replicate, chunk_stream, survival, terrain_snap, sleeper_scan, te_scan,
+chunk_gen, save_io) and tick_total wraps the loop in report.zig.
 GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
