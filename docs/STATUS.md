@@ -1078,7 +1078,11 @@ all in-range peers - no self-echo, interest-scoped encodes. A ninth
 pass (2026-08-27) checked the 20 TPS budget instrumentation (rule 6):
 the apm profiler sections cover every hot path (net_poll, sim_entities,
 replicate, chunk_stream, survival, terrain_snap, sleeper_scan, te_scan,
-chunk_gen, save_io) and tick_total wraps the loop in report.zig.
+chunk_gen, save_io) and tick_total wraps the loop in report.zig. A tenth
+pass (2026-08-27) verified the streaming caps (rule 20): the per-client
+chunk queue is bounded by max_streamed_chunks_cap with FIFO eviction at
+cap, an 80% warning, a spawn-area radius cap, and the raster scan
+shrinks to the budget - one peer cannot stall the tick or OOM.
 GAP sounds row WORKS; the last RE-blocked wire pin is closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
