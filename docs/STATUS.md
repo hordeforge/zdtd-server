@@ -378,6 +378,9 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the ChunkRemoveAll row closed (2026-08-26): the package is N/A
+(parity) - write IL=4 is an empty body and the only stock sender is the
+client-side PrefabEditModeManager, which a dedicated server never runs.
 Then the AddRemoveBuff/EntityStatsBuff row went WORKS (2026-08-26): the
 joining player's OWN active buffs now re-sync via an AddRemoveBuff(adding)
 bundle in the join bundle - the PDF `buffData` section stays empty by design

@@ -4601,7 +4601,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Package | Priority for stock client |
 |---|---|
 | `NetPackageChunk` **stock layout** | HAVE (`stock_chunk.zig` + upper24; DTM + TTS; CGO green) |
-| `NetPackageChunkRemove` / `ChunkRemoveAll` | PARTIAL (ChunkRemove key streaming; no RemoveAll) |
+| `NetPackageChunkRemove` / `ChunkRemoveAll` | WORKS (2026-08-26: ChunkRemove key streaming ships; ChunkRemoveAll is N/A (parity) - stock write IL=4 is an EMPTY body and the only sender is the client-side PrefabEditModeManager (RemoveAllChunksOnAllClients IL=99, flags 192), which a dedicated server never runs; the dedi has no stock world-reset that uses it) |
 | `NetPackageChunkClusterInfo` | HAVE (2026-08-21): sent right after WorldInfo in the enter bundle; fixed DTM maps carry the ChunkProviderDisc bounds formula ((-195,-198)/(195,195) for Navezgane), proc/flat send infinite (0,0)/(0,0) with bInfinite=true. Client b14 border-box methods are no-op stubs, so no visual risk; the chunkClusterLoaded gate the client applies before spawn points is satisfied by the stock ordering |
 | `NetPackageWorldInfo` / game mode / seed | HAVE (fixedSizeCC closes overlay gate) |
 | `NetPackageBiomeIntensity` | PARTIAL (interleaved in chunk path) |
