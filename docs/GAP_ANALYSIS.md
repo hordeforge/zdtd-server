@@ -4680,7 +4680,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 |---|---|
 | Stock vehicle packages (beyond simplified trio) | P1 |
 | Seats multi-occupant | HAVE (base seats from vehicles.xml; no seat-mod budget) |
-| Fuel / storage as items | PARTIAL (2026-08-09): vehicle fuel drains, persists, and the gas-can InvTx refuels the tank (capped, refund on full); generators refuel via the same path. Open: vehicle/turret storage TEs (ammo insert, parts) |
+| Fuel / storage as items | PARTIAL (2026-08-09): vehicle fuel drains, persists, and the gas-can InvTx refuels the tank (capped, refund on full); generators refuel via the same path. Open 2026-08-26 re-pin: the vehicle/turret storage - the minibike basket IS the vehicle entity's inventory (EntityVehicle.InitInventory IL=6 sets EntityAlive.inventory), but the basket S2C sync path for multiplayer observers is NOT pinned from the dump set (EntityVehicle.Write/WriteSyncData/ECD carry no inventory; the only inventory packages are the player's own + the GUID-keyed TransactionalInventory pair); a targeted dump of the entity-inventory distribution is needed before wiring - recorded in dedicated-misc-systems.md |
 | Vehicle damage / parts | P2 |
 
 #### Electricity / traps

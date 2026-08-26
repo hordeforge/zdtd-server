@@ -383,6 +383,13 @@ phase tracking (obj_progress per objective, all-objectives completion gate,
 phase-0 always-active) landed and is tested ('phase advances only when all
 its objectives complete', 'phase-0 objectives gate every phase'); only the
 scaffolding auto-complete approximation remains.
+Then the vehicle-storage row was re-pinned (2026-08-26): the minibike
+basket is the vehicle entity's inventory (InitInventory IL=6) but the basket
+S2C sync path for multiplayer observers is not in the dump set (the entity
+writes and ECD carry no inventory; only the player-inventory + GUID-keyed
+transactional packages exist) - a targeted dump of the entity-inventory
+distribution is needed before wiring (research note in
+dedicated-misc-systems.md).
 Then the item-mods round-trip shipped (2026-08-26): the ItemValue wire
 captures + emits the Modifications array (nested modifier items skip their
 own mod arrays per stock IL) and ZPV12 appends the 4 mod ids to each
