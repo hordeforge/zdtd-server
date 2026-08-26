@@ -255,7 +255,29 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
-    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerEquipment") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient") or std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
+    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient") or std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackagePlayerEquipment")) {
+        // Stock NetPackagePlayerEquipment (write: entityId i32 + Equipment
+        // body; ProcessPackage IL=56: Equipment.Apply + rebroadcast flags 192
+        // excluding the sender). The client sends it whenever
+        // bPlayerEquipmentChanged flips (an armor swap): the server applies
+        // the equipment to the sim's equip slots (the armor mitigation reads
+        // them) and relays the raw body to the other tracked players so they
+        // render the swapped armor.
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        if (body.len < 4) return true;
+        const eid = std.mem.readInt(i32, body[0..4], .little);
+        // Stock ValidEntityIdForSender: the equipment is the sender's own.
+        if (eid != c.entity_id) return true;
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        if (!self.sim.mask[ps].inventory) return true;
+        packages.stock_inv.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch return true;
+        relayBodyExcept(self, "NetPackagePlayerEquipment", body, eid, "PlayerEquipment");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer")) {

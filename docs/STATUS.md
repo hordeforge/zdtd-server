@@ -638,6 +638,14 @@ equipment 6..11 on the C2S apply, losing items on relog), the apply keeps
 every slot and the persist buffer/wire encoders scale off the same
 constants (ADR 0007 amended); the row stays PARTIAL for the per-item state
 beyond id/count/quality/meta (UseTimes durability resets on relog).
+Then the equipment C2S sync landed (2026-08-26): the standalone
+NetPackagePlayerEquipment package (sent on every bPlayerEquipmentChanged
+flip, i.e. an armor swap) was an accepted no-op, so armor swaps desynced the
+server's equip slots (stale mitigation + rendered armor); it now parses the
+Equipment.Read body (byte count-marker + N x ItemValue + cosmetics +
+unlocks, RE pinned in netpackage-bodies.md), applies it to the sim's equip
+slots, and relays the raw body to the other tracked players (stock
+ProcessPackage IL=56 Equipment.Apply + flags-192 rebroadcast).
 Then the DropOnDeath-backpack row went WORKS on re-audit: the server spawns
 the death bag itself on the lethal event (C2S DamageEntity death and the
 hp-replicate AI-kill detector both call spawnDeathBag, dropping the victim's

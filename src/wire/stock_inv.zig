@@ -747,6 +747,38 @@ pub fn applyPlayerInventoryBody(
     }
 }
 
+/// NetPackagePlayerEquipment body after the entityId (Equipment.Read IL=93):
+/// byte count-marker (5 slots when <= 2, 8 when == 3, else 12) | N x (byte
+/// present + ItemValue) | N x cosmetic i32 | i32 unlockedCount | N x i32.
+/// Applies the armor/equipment values to the ECS equip slots (the cosmetic +
+/// unlock tail is skipped: client-side cosmetics, recorded). Mirrors the
+/// embedded-equipment section of applyPlayerInventoryBody but with the
+/// byte marker + equipment_slots width.
+pub fn applyEquipmentBody(
+    body: []const u8,
+    inv: *components.Inventory,
+    reverse: ?ReverseResolver,
+    ctx: ?*anyopaque,
+) binary.ReadError!void {
+    var r: binary.Reader = .{ .data = body };
+    const marker = try r.readByte();
+    const eq_n: usize = if (marker <= 2) 5 else if (marker == 3) 8 else equipment_slots;
+    var i: usize = 0;
+    while (i < eq_n) : (i += 1) {
+        const present = try r.readBool();
+        var s: StockSlot = .{};
+        if (present) s = try readItemValue(&r);
+        if (i < components.inv_equip_count) {
+            inv.slots[components.inv_equip_start + i] = toEcs(s, reverse, ctx);
+        }
+    }
+    var ci: usize = 0;
+    while (ci < eq_n) : (ci += 1) _ = try r.readI32();
+    const unlocked = try r.readI32();
+    var ui: i32 = 0;
+    while (ui < unlocked) : (ui += 1) _ = try r.readI32();
+}
+
 /// PreferenceTracker.Write (IL): playerId:i32, then optional toolbelt stacks,
 /// equipment ItemValue array, bag stacks (each gated by a bool).
 /// Best-effort count of eatable units in a PlayerInventory body (toolbelt+bag).
@@ -1479,4 +1511,29 @@ test "item mods survive the ECS conversion both ways" {
     try std.testing.expectEqual(@as(u8, 2), back.mod_n);
     try std.testing.expectEqual(@as(u16, 12), back.mods[0]);
     try std.testing.expectEqual(@as(u16, 13), back.mods[1]);
+}
+
+test "applyEquipmentBody parses the standalone equipment body" {
+    // RE Equipment.Read IL=93: byte count-marker (>= 4 → 12 slots) | N x
+    // (bool present + ItemValue) | N x cosmetic i32 | i32 unlocked | N x i32.
+    var buf: [1024]u8 = undefined;
+    var w = binary.Writer{ .buf = &buf };
+    try w.writeByte(4); // count marker → 12 slots
+    for (0..12) |i| {
+        if (i == 2) {
+            try w.writeBool(true);
+            // Absolute stock type (items_start_here + relative); fallbackEcsId
+            // maps it back to the relative ECS id.
+            try writeItemValue(&w, .{ .type_id = items_start_here + 5, .count = 1 });
+        } else {
+            try w.writeBool(false);
+        }
+    }
+    for (0..12) |_| try w.writeI32(0); // cosmetics
+    try w.writeI32(0); // unlocked count
+    var inv: components.Inventory = .{};
+    try applyEquipmentBody(w.written(), &inv, null, null);
+    try std.testing.expectEqual(@as(u16, 5), inv.slots[components.inv_equip_start + 2].item_id);
+    try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 0].item_id);
+    try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 11].item_id);
 }
