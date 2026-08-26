@@ -1541,6 +1541,12 @@ pub const Game = struct {
         return game_tick.tickEntityLookAt(self);
     }
 
+    /// Stock PlayerStealth.TickServer S2C: broadcast NetPackageEntityStealth
+    /// every 16 ticks when the packed state changed. See game/player.zig.
+    pub fn tickStealthBroadcast(self: *Game) void {
+        return game_player.tickStealthBroadcast(self);
+    }
+
     pub fn tickMapChunks(self: *Game) void {
         return game_map.tickMapChunks(self);
     }

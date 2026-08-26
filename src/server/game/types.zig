@@ -417,6 +417,12 @@ pub const Client = struct {
     /// Unspent skill points (progression.xml skill_points_per_level per new
     /// level; ADR 0023 ledger).
     skill_points: u32 = 0,
+    /// Last-sent stealth-meter state (stock PlayerStealth.TickServer IL_0470:
+    /// every 16 ticks, when the packed values changed, broadcast
+    /// NetPackageEntityStealth so other clients render the meter).
+    stealth_noise_sent: u8 = 0,
+    stealth_crouch_sent: bool = false,
+    stealth_alert_sent: bool = false,
     /// Purchased progression levels by name (attributes/perks). `name` must
     /// point to static/indefinite-lifetime data (the progression table
     /// arena). Persisted via the players.zsv ZPV11 skill tail (skill_points +

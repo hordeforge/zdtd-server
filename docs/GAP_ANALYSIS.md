@@ -4621,7 +4621,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageEntityAnimationData` | P2 |
 | `NetPackageEntityRagdoll` | P2 |
 | `NetPackageEntityAttach` / detach | SHIPPED (vehicle multi-seat: seatRider/unseatRider broadcast attach/detach to observers; C2S seat requests resolved server-side) |
-| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health replicates from the tick pass on `dirty.hp` so AI melee, C2S damage and death reach the client per `EntityStats::TickWait` (asm.il:199393); buff set is server-owned via AddRemoveBuff with join sync; NPC stat-change and cvar sync deferred) |
+| `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health replicates from the tick pass on `dirty.hp` per `EntityStats::TickWait` (asm.il:199393); buff set is server-owned via AddRemoveBuff with join sync + own-buff rejoin bundle; stealth meter S2C wired 2026-08-26 - NetPackageEntityStealth (id:i32, data:u16: noise 7-bit <<8, alert<<15, crouch bit 0) every 16 ticks on change, stock PlayerStealth.TickServer IL_0470, light stays 0 until the world-light model lands; NPC stat-change stays deferred - traders are invulnerable, no stat they change) |
 
 | `NetPackageEntityStealth` | P2 |
 | `NetPackageEntityCollect` | SHIPPED (loot pickup: the C2S collect handler broadcasts the stock body to observers) |

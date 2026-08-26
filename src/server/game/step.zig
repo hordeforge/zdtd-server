@@ -134,6 +134,9 @@ pub fn step(self: *Game) !void {
         // Cosmetic head-aim (RE EntityAlive.SetLookPosition): broadcast
         // EntityLookAt to tracking players when a zombie's look target moves.
         self.tickEntityLookAt();
+        // Stealth meters (RE PlayerStealth.TickServer S2C): broadcast
+        // NetPackageEntityStealth for each player every 16 ticks on change.
+        self.tickStealthBroadcast();
         // In-game minimap (RE MapChunkDatabase.GetMapChunkPackagesToSend):
         // fill the 17x17 window around each client's map middle, batched.
         self.tickMapChunks();

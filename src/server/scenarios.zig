@@ -1262,6 +1262,53 @@ test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
     std.debug.print("PASS rejoin-buffs: own active buffs re-synced via AddRemoveBuff\n", .{});
 }
 
+test "scenario stealth meter broadcasts NetPackageEntityStealth to observers" {
+    // Stock PlayerStealth.TickServer S2C (IL_0470): every 16 ticks, when the
+    // packed stealth state changed, the server broadcasts
+    // NetPackageEntityStealth (id:i32 | data:u16, light | noise<<8 |
+    // alert<<15 | crouch bit 0) so other clients render the meter.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const pa = g.sim.playerByPeer(ca.slot).?;
+    // A makes noise (the sim fold; the C2S relay is audio-only on a dedi).
+    g.sim.pushStealthNoise(pa, g.sim.transform[pa].x, g.sim.transform[pa].y, g.sim.transform[pa].z, 60, 40, 0.8, 0, 0);
+    // Step until the 16-tick broadcast fires and the sim noise settles.
+    var t: usize = 0;
+    var got: ?u8 = null;
+    while (t < 64 and got == null) : (t += 1) {
+        cap_b.clear();
+        try g.step();
+        if (packages.idOf("NetPackageEntityStealth")) |st_id| {
+            if (cap_b.findPkgIdEntity(st_id, ca.entity_id)) |body| {
+                var r = binary.Reader{ .data = body };
+                const ent = try r.readI32();
+                const data = try r.readU16();
+                if (ent == ca.entity_id) got = @truncate((data >> 8) & 127);
+            }
+        }
+    }
+    const expect: u8 = @intFromFloat(@min(g.sim.stealth[pa].noise_volume, 127.0));
+    const got_v = got orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(expect, got_v);
+    try std.testing.expect(got_v > 0); // a real meter value, not a zero ping
+    std.debug.print("PASS stealth-meter: NetPackageEntityStealth carries the noise fold\n", .{});
+}
+
+
 
 
 

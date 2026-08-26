@@ -378,6 +378,11 @@ Then the party shared-quest-kill went in (2026-08-26): an in-range party
 mate's shared quest advances on the killer's kill (stock SharedKillServer ->
 SharedKillClient EntityKilled, same GameStats[54] range as the XP share); the
 kill-XP split itself was re-audited against the RE and already matched.
+Then the stealth-meter S2C went in (2026-08-26): the server broadcasts
+NetPackageEntityStealth (id + packed data: noise 7-bit, alert, crouch) every
+16 ticks on change per stock PlayerStealth.TickServer IL_0470, so observers
+render other players' stealth meters (light stays 0 until the world-light
+model lands); the EntityStatChanged row's cvar-sync residual closed.
 Then the AnimateBlock/BlockTrigger row went WORKS on re-audit
 (2026-08-26): BlockTrigger C2S is handled + rebroadcast, and
 NetPackageAnimateBlock's only stock sender is the GameEvent block-animate

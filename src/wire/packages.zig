@@ -1792,6 +1792,43 @@ pub fn buildEntityStatBody(buf: []u8, entity_id: i32, hp: f32, max_hp: f32) ![]u
     return buildEntityStatChangedBody(buf, entity_id, -1, .health, hp, max_hp, 0);
 }
 
+/// Stock NetPackageEntityStealth body (write IL=12): id:i32 | data:u16.
+/// The data packing matches the three Setup overloads + the client-branch
+/// read (ProcessPackage IL=92): bit 0 = crouching, bit 2 = eating, bit 3 =
+/// sheltered, bits 8..14 = 7-bit noise volume, bit 15 = alertEnemy, and the
+/// low byte doubles as the light level in the (light, noise, alert) variant
+/// the server's PlayerStealth.TickServer sends (IL_0470). The stealth system
+/// owns the values; light stays 0 until the clone-side world-light model
+/// lands (RE-blocked, documented).
+pub fn buildEntityStealthBody(
+    buf: []u8,
+    entity_id: i32,
+    light_level: u8,
+    noise_volume: u8,
+    is_alert: bool,
+    is_crouching: bool,
+) ![]u8 {
+    var data: u16 = @as(u16, light_level) | (@as(u16, noise_volume & 127) << 8);
+    if (is_alert) data |= 32768;
+    if (is_crouching) data |= 1;
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeU16(data);
+    return w.written();
+}
+
+test "entity stealth body packs the stock data bits" {
+    var buf: [16]u8 = undefined;
+    const body = try buildEntityStealthBody(&buf, 107, 5, 90, true, true);
+    try std.testing.expectEqual(@as(usize, 6), body.len);
+    try std.testing.expectEqual(@as(i32, 107), std.mem.readInt(i32, body[0..4], .little));
+    const data = std.mem.readInt(u16, body[4..6], .little);
+    try std.testing.expectEqual(@as(u16, 5), data & 0xff); // light
+    try std.testing.expectEqual(@as(u16, 90), (data >> 8) & 127); // noise
+    try std.testing.expect(data & 32768 != 0); // alert
+    try std.testing.expect(data & 1 != 0); // crouch
+}
+
 test "entity stat changed body size" {
     var buf: [32]u8 = undefined;
     const body = try buildEntityStatChangedBody(&buf, 106, -1, .health, 100, 100, 0);

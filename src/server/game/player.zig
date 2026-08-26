@@ -195,6 +195,47 @@ pub fn questKillForParty(self: *Game, killer_slot: usize, vx: f32, vz: f32) void
     }
 }
 
+/// Stock PlayerStealth.TickServer S2C (IL_0470): every 16 ticks, when the
+/// packed stealth state changed, broadcast NetPackageEntityStealth for the
+/// player so other clients render the stealth meter. Noise is the sim's
+/// CalcVolume fold; alert = any alert zombie within 12 m (stock scan); light
+/// stays 0 until the clone-side world-light model lands (RE-blocked,
+/// documented).
+pub fn tickStealthBroadcast(self: *Game) void {
+    if ((self.tick_n % 16) != 0) return;
+    for (&self.clients) |*c| {
+        if (!c.joined or c.entity_id <= 0) continue;
+        const ps = self.sim.playerByPeer(c.slot) orelse continue;
+        if (!self.sim.mask[ps].transform) continue;
+        const noise = self.sim.stealth[ps].noise_volume;
+        const noise8: u8 = @intFromFloat(@min(noise, 127.0));
+        const crouch = self.sim.player[ps].crouching;
+        var alert = false;
+        const px = self.sim.transform[ps].x;
+        const pz = self.sim.transform[ps].z;
+        for (self.sim.kind_groups.slice(.zombie)) |zs| {
+            if (!self.sim.alive[zs] or !self.sim.mask[zs].zombie_ai) continue;
+            if (!self.sim.mask[zs].transform or !self.sim.zombie_ai[zs].alert) continue;
+            const dx = self.sim.transform[zs].x - px;
+            const dz = self.sim.transform[zs].z - pz;
+            if (dx * dx + dz * dz <= 12.0 * 12.0) {
+                alert = true;
+                break;
+            }
+        }
+        if (noise8 == c.stealth_noise_sent and crouch == c.stealth_crouch_sent and alert == c.stealth_alert_sent) continue;
+        c.stealth_noise_sent = noise8;
+        c.stealth_crouch_sent = crouch;
+        c.stealth_alert_sent = alert;
+        if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, 0, noise8, alert, crouch)) |sb| {
+            self.broadcastExcept("NetPackageEntityStealth", sb, null) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
+            };
+        } else |_| {}
+    }
+}
+
 /// EntityPlayer::get_gameStage for one client (asm.il ~503972). The biome
 /// terms come from the player's current biome (biomes.xml gamestage_modifier
 /// / gamestage_bonus, progression.md 5) and the quest terms from the active
