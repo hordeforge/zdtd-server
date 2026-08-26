@@ -4623,8 +4623,8 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageEntitySpawnResponse` | SHIPPED (2026-08-09): the ItemDrop handler answers the thrower with success + the dropped ItemValue so the client DecItems its bag (the drop commit); empty ItemValue would NRE the client, so it is only sent on place/throw, never on join |
 | `NetPackageEntityTeleport` | HAVE (respawn at world spawn, admin teleportplayer/goto, void-fall recovery all send the stock body; `World.teleportTo` sim funnel) |
 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` | PARTIAL (2026-08-09): hit knockback shoves zombies/animals (8 blocks/s, 0.3 s, away from the attacker) and broadcasts `NetPackageEntityVelocity` (bAdd=true); `EntitySpeeds` ships in the motion frames (movementState + fwd/strafe). EntityPhysics re-scoped 2026-08-26: the package is the physics-master optimization (PhysicsMasterSetupBroadcast IL=31, sent on view-entry when the entity moved >0.05u/1 deg, one client runs the physics) - a client-interpolation nicety, not an authoritative sim channel; the PosAndRot frames carry the motion, and momentum-driven ragdoll is client-visual, so the residual is recorded not blocking |
-| `NetPackageEntityRotation` | P2 |
-| `NetPackageEntityAnimationData` | P2 |
+| `NetPackageEntityRotation` | SHIPPED (2026-08-26 re-audit: the PosAndRot motion frames carry the full rotation (rx/ry/rz, replicate.zig), so a turning entity's rotation rides the same channel - the dedicated package is the client's local-only rotation for itself, no separate server role) |
+| `NetPackageEntityAnimationData` | SHIPPED (2026-08-26: client-originated avatar anim params (the local AvatarController broadcasts; stock ProcessPackage IL=64 relays) - the server re-broadcasts the raw body to the entity's tracked players, gated on the sender's own entity id + rate-limited) |
 | `NetPackageEntityRagdoll` | P2 |
 | `NetPackageEntityAttach` / detach | SHIPPED (vehicle multi-seat: seatRider/unseatRider broadcast attach/detach to observers; C2S seat requests resolved server-side) |
 | `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health replicates from the tick pass on `dirty.hp` per `EntityStats::TickWait` (asm.il:199393); buff set is server-owned via AddRemoveBuff with join sync + own-buff rejoin bundle; the C2S NetPackageEntityStatsBuff (which in stock applies the client's full buff blob, EntityBuffs.Read IL=76) stays an accepted no-op - a documented trust divergence: the server never lets the client overwrite its buff set, so client-local consume buffs (onSelfPrimaryActionEnd AddBuff, e.g. buffProcessConsumables / the disease roll) don't sync server-side and the dysentery-dependent behaviors (smell extension) miss them; recorded. Stealth meter S2C wired 2026-08-26 - NetPackageEntityStealth (id:i32, data:u16: noise 7-bit <<8, alert<<15, crouch bit 0) every 16 ticks on change, stock PlayerStealth.TickServer IL_0470, light = slice-1 day/night ambient (2026-08-26, world/sky.zig; block-light/moon/shade slices recorded); NPC stat-change stays deferred - traders are invulnerable, no stat they change) |
@@ -4632,7 +4632,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageEntityStealth` | P2 |
 | `NetPackageEntityCollect` | SHIPPED (loot pickup: the C2S collect handler broadcasts the stock body to observers) |
 | `NetPackageEntityWaypointList` / map markers | P2 |
-| `NetPackageEntityAddExp*` / skills | P2 |
+| `NetPackageEntityAddExp*` / skills | SHIPPED (2026-08-26 re-audit: the S2C NetPackageEntityAddExpClient (xpType 0 = Kill) is broadcast on kill XP (player.zig, self excluded - the client derives its level locally); the C2S NetPackageEntityAddExpServer stays an accepted server-authoritative no-op - the server owns XP (the awardXp ledger) |
 | `NetPackageEntityAwardKillServer` | P2 |
 
 #### Combat / hazards

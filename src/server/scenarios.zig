@@ -9251,3 +9251,41 @@ test "scenario stirred sleeper broadcasts NetPackageSleeperPassiveChange" {
     }
     std.debug.print("PASS sleeper-stir: dark in-volume player broadcasts PassiveChange\n", .{});
 }
+
+test "scenario animation data relays to the other players" {
+    // Stock NetPackageEntityAnimationData (client-originated: the local
+    // AvatarController broadcasts the avatar anim params; ProcessPackage
+    // IL=64 re-Setups + relays to the other players): the server
+    // re-broadcasts the raw body to the entity's tracked players.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    try g.step(); // run the join sync so B tracks A's entity
+    // A's animation-data body (entityId + a param list - opaque for the relay).
+    var body: [32]u8 = undefined;
+    var bw = binary.Writer{ .buf = &body };
+    try bw.writeI32(ca.entity_id);
+    try bw.writeI32(1); // anim param count
+    try bw.writeI32(7); // one opaque param name hash
+    try bw.writeF32(0.5); // value
+    var fb: [64]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAnimationData", bw.written()));
+    // B received the relayed body for A.
+    if (packages.idOf("NetPackageEntityAnimationData")) |an_id| {
+        try std.testing.expect(cap_b.findPkgIdEntity(an_id, ca.entity_id) != null);
+    }
+    std.debug.print("PASS animation-relay: client anim params reach the other players\n", .{});
+}

@@ -802,6 +802,24 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageEntityAnimationData")) {
+        // Stock NetPackageEntityAnimationData (client-originated: the local
+        // AvatarController broadcasts the avatar anim params; ProcessPackage
+        // IL=64 re-Setups + relays to the other players). The server
+        // re-broadcasts the raw body to the entity's tracked players, gated
+        // on the sender's own entity id (the anim params describe its own
+        // avatar). Same rate gate as the wire tool: an unthrottled spam loop
+        // would fan a broadcast out to every other peer for free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        if (body.len < 4) return true;
+        const eid = std.mem.readInt(i32, body[0..4], .little);
+        if (eid != c.entity_id) return true;
+        relayBodyExcept(self, "NetPackageEntityAnimationData", body, eid, "EntityAnimationData");
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageSoundAtPosition")) {
         // Positional-audio relay (RE NetPackageSoundAtPosition ProcessPackage
         // IL=36 + GameManager.PlaySoundAtPositionServer IL=60): the dedi

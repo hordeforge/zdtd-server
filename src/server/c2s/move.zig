@@ -51,9 +51,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
         return true;
     }
-    if (std.mem.eql(u8, name, "NetPackageEntityAnimationData")) {
-        return true;
-    }
     if (std.mem.eql(u8, name, "NetPackageEntityCollect")) {
         const bag = packages.parseCollectBody(body) catch return true;
         // Transfer contents into server inv, then destroy. Wire order matches

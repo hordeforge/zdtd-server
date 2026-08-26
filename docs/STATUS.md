@@ -390,8 +390,14 @@ writes and ECD carry no inventory; only the player-inventory + GUID-keyed
 transactional packages exist) - a targeted dump of the entity-inventory
 distribution is needed before wiring (research note in
 dedicated-misc-systems.md).
-Then the item-mods round-trip shipped (2026-08-26): the ItemValue wire
-captures + emits the Modifications array (nested modifier items skip their
+Then the animation relay + the entity-lifecycle P2 audit landed (2026-08-26):
+NetPackageEntityAnimationData (client-originated avatar anim params, stock
+ProcessPackage IL=64) now re-broadcasts to the entity's tracked players
+(sender-owned id gate + rate limit), so reload/wave/sit animations reach the
+other players; NetPackageEntityRotation audited SHIPPED (the PosAndRot
+frames carry rx/ry/rz) and NetPackageEntityAddExp* audited SHIPPED (the S2C
+grant broadcasts on kill XP; the C2S stays a server-authoritative no-op).
+Then the item-mods round-trip shipped (2026-08-26): the ItemValue wirecaptures + emits the Modifications array (nested modifier items skip their
 own mod arrays per stock IL) and ZPV12 appends the 4 mod ids to each
 inventory slot record (stride 21), so a modded weapon survives a relog -
 tested at the wire, ECS-conversion and save levels. Then the mod
