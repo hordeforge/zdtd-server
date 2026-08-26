@@ -1024,6 +1024,23 @@ placed-block index, refreshing while in range like the workstation pass
 buffRadiation01). The dashboard
 (docs/provenance.html) is synced.
 
+Then (2026-08-27 wire sweep) the C2S relay parsers and the S2C builders
+were audited field-by-field against the RE wire catalog and the IL dumps:
+`NetPackageSoundAtPosition` was a genuine P0 (the parser read a 6th field
+stock never writes, so every real client sound was dropped, and the
+forge-completion S2C ding wrote one, desyncing a stock client's frame
+reader; fixed to the true 5-field body - pos 3xf32 | clip | mode u8 |
+distance | entityId, volumeScale is Setup-only), and a dead duplicate
+SoundAtPosition handler whose owner/rate/NaN gates never ran was merged
+into the live one. The drop-only validator minimums were corrected to the
+true read layouts (EntityStealth 6 bytes, EntityPhysics 62). The rest of
+the sweep came up clean: chat, ragdoll, particle-effect, shared-kill,
+add-remove-buff, entity-attach, weather (5-param rows, WeatherPackage
+ctor), console-cmd, player-denied, entity-collect, chunk-remove, quest
+event/list, trader-data (entityId-branch framing) and lock-response
+bodies all match the pinned wire. GAP sounds row WORKS; the last
+RE-blocked wire pin is closed.
+
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
 items.md:1097-1140: projectiles are client-side GameObjects, the server
