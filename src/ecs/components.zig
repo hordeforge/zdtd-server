@@ -574,6 +574,12 @@ pub const InvSlot = struct {
     /// so the same planted seed grows the same way (meta is durability/flags,
     /// not the seed).
     seed: u16 = 0,
+    /// Attached mod item ids (stock ItemValue.Modifications; 4 covers the
+    /// stock slot counts). The mods' stat effects are client-side; the ids
+    /// persist so a modded weapon survives a relog. 0 = empty slot.
+    mods: [4]u16 = .{0} ** 4,
+    /// Active mod count (<= mods.len).
+    mod_n: u8 = 0,
 };
 
 /// Offline stack caps when `World.stack_fn` is null. Must match

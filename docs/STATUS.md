@@ -383,6 +383,12 @@ phase tracking (obj_progress per objective, all-objectives completion gate,
 phase-0 always-active) landed and is tested ('phase advances only when all
 its objectives complete', 'phase-0 objectives gate every phase'); only the
 scaffolding auto-complete approximation remains.
+Then the item-mods round-trip shipped (2026-08-26): the ItemValue wire
+captures + emits the Modifications array (nested modifier items skip their
+own mod arrays per stock IL) and ZPV12 appends the 4 mod ids to each
+inventory slot record (stride 21), so a modded weapon survives a relog -
+tested at the wire, ECS-conversion and save levels; the item_modifiers.xml
+catalog + attachment validation + per-mod quality remain recorded.
 Then the kick/ban/whitelist row went WORKS on re-audit (2026-08-26):
 kick/ban/unban run on the admin console (matching stock ConsoleCmdBan) with
 admins/whitelist/bans .zsv persistence - the row's own note admitted it was

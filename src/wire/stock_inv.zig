@@ -52,6 +52,9 @@ pub const StockSlot = struct {
     seed: u16 = 0,
     activated: u8 = 0,
     ammo_index: u8 = 0,
+    /// Attached mod item ids (stock ItemValue.Modifications; 4 slots).
+    mods: [4]u16 = .{0} ** 4,
+    mod_n: u8 = 0,
 };
 
 /// Map relative item index (0..) to absolute type with ItemsStartHere offset.
@@ -94,11 +97,41 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
     try w.writeU16(s.meta);
     try w.writeByte(0); // metadata count
     // not ItemClassModifier path: write mod arrays
-    try w.writeByte(0); // Modifications.Length
+    try w.writeByte(s.mod_n); // Modifications.Length
+    var mi: u8 = 0;
+    while (mi < s.mod_n) : (mi += 1) {
+        const mod_id = s.mods[mi];
+        const has = mod_id != 0;
+        try w.writeBool(has);
+        if (has) try writeItemValueNested(w, mod_id);
+    }
     try w.writeByte(0); // CosmeticMods.Length
     try w.writeByte(s.activated);
     try w.writeByte(s.ammo_index);
     try w.writeU16(s.seed);
+    try w.writeBool(false); // TextureFullArray default
+}
+
+/// A mod slot's nested ItemValue (stock ItemValue.Write IL=323 recursively
+/// writes each Modifications entry): minimal v9 value with the mod item id
+/// and default quality. The mods' stat effects are client-side; the id rides
+/// so the client re-renders the attachment.
+fn writeItemValueNested(w: *binary.Writer, mod_id: u16) !void {
+    try w.writeByte(9); // item_value_save_version
+    // Mods are items: the item flag (bit 1) + the item index (the ECS id,
+    // which for items IS the index past ItemsStartHere).
+    try w.writeByte(1);
+    try w.writeU16(mod_id);
+    try w.writeF32(0); // use_times
+    try w.writeU16(1); // quality
+    try w.writeU16(0); // meta
+    try w.writeByte(0); // metadata count
+    // No nested mod arrays: ItemClassModifier items skip them (the stock
+    // ItemValue.Write isinst ItemClassModifier branch, IL_0194), and the
+    // modifier read path does not consume them.
+    try w.writeByte(0); // activated
+    try w.writeByte(0); // ammo_index
+    try w.writeU16(0); // seed
     try w.writeBool(false); // TextureFullArray default
 }
 
@@ -250,7 +283,7 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
     if (s.count == 0 or s.item_id == 0) return .{};
     const type_id: i32 = if (resolve) |r| r(ctx, s.item_id) else typeFromBuiltinId(s.item_id);
     if (type_id == 0) return .{};
-    return .{
+    var out: StockSlot = .{
         .type_id = type_id,
         .count = s.count,
         .quality = s.quality,
@@ -258,6 +291,9 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
         .use_times = s.use_times,
         .seed = s.seed,
     };
+    out.mods = s.mods;
+    out.mod_n = s.mod_n;
+    return out;
 }
 
 // --- C→S parsers (vanilla client sends these ToServer) ---
@@ -537,12 +573,24 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
     // Stock: skip mods when (v<=4 and !HasQuality) or ItemClass is
     // ItemClassModifier. We always speak v9, and nested mod-slot entries are
     // the modifier case, so top-level parses arrays unconditionally.
+    var out: StockSlot = .{};
     if (!is_modifier) {
         const mod_n = try r.readByte();
         var mi: u8 = 0;
         while (mi < mod_n) : (mi += 1) {
             const has = try r.readBool();
-            if (has) _ = try readItemValueNested(r);
+            if (has) {
+                const m = try readItemValueNested(r);
+                if (mi < out.mods.len) {
+                    // The mods array carries ECS item ids (u16); the parsed
+                    // absolute stock type converts like fallbackEcsId.
+                    out.mods[mi] = if (m.type_id >= items_start_here)
+                        @intCast(m.type_id - items_start_here)
+                    else
+                        @intCast(m.type_id);
+                    if (mi >= out.mod_n) out.mod_n = mi + 1;
+                }
+            }
         }
         const cos_n = try r.readByte();
         var ci: u8 = 0;
@@ -563,7 +611,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         if (has_tex) _ = try r.readU64(); // TextureFullArray.Read(br,1): one i64
     }
 
-    return .{
+    var out2: StockSlot = .{
         .type_id = type_id,
         .count = 1, // ItemValue alone; stack count is separate
         .quality = quality,
@@ -573,6 +621,11 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         .activated = activated,
         .ammo_index = ammo,
     };
+    if (!is_modifier) {
+        out2.mods = out.mods;
+        out2.mod_n = out.mod_n;
+    }
+    return out2;
 }
 
 fn skipTypedMetadata(r: *binary.Reader) binary.ReadError!void {
@@ -778,7 +831,7 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
     if (s.type_id == 0 or s.count == 0) return .{};
     const item_id: u16 = if (reverse) |rv| rv(ctx, s.type_id) else fallbackEcsId(s.type_id);
     if (item_id == 0) return .{};
-    return .{
+    var out: components.InvSlot = .{
         .item_id = item_id,
         .count = s.count,
         .quality = @min(s.quality, 255),
@@ -786,6 +839,9 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
         .use_times = s.use_times,
         .seed = s.seed,
     };
+    out.mods = s.mods;
+    out.mod_n = @min(s.mod_n, out.mods.len);
+    return out;
 }
 
 fn fallbackEcsId(stock_type: i32) u16 {
@@ -1385,4 +1441,42 @@ test "C2S apply keeps bag slots past the old 32-slot subset" {
     try std.testing.expectEqual(bag_slots, components.inv_bag_count);
     // Equip is the stock 12-wide too.
     try std.testing.expectEqual(@as(usize, 12), components.inv_equip_count);
+}
+
+test "item mods round-trip through the wire ItemValue" {
+    // Stock ItemValue.Write (IL=323) carries the Modifications array; zdtd
+    // now captures the mod ids on read and emits them on write, so a modded
+    // weapon keeps its attachments through the wire.
+    var src: StockSlot = .{
+        .type_id = items_start_here + 40,
+        .count = 1,
+        .quality = 5,
+    };
+    src.mods = .{ 10, 20, 0, 0 };
+    src.mod_n = 2;
+    var buf: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try writeItemValue(&w, src);
+    var r: binary.Reader = .{ .data = w.written() };
+    const out = try readItemValue(&r);
+    try std.testing.expectEqual(@as(u8, 2), out.mod_n);
+    try std.testing.expectEqual(@as(u16, 10), out.mods[0]);
+    try std.testing.expectEqual(@as(u16, 20), out.mods[1]);
+    try std.testing.expectEqual(@as(u16, 5), out.quality);
+}
+
+test "item mods survive the ECS conversion both ways" {
+    var inv: components.InvSlot = .{
+        .item_id = 30,
+        .count = 1,
+        .quality = 3,
+    };
+    inv.mods = .{ 12, 13, 0, 0 };
+    inv.mod_n = 2;
+    const wire = slotFromEcs(inv, null, null);
+    try std.testing.expectEqual(@as(u8, 2), wire.mod_n);
+    const back = toEcs(wire, null, null);
+    try std.testing.expectEqual(@as(u8, 2), back.mod_n);
+    try std.testing.expectEqual(@as(u16, 12), back.mods[0]);
+    try std.testing.expectEqual(@as(u16, 13), back.mods[1]);
 }

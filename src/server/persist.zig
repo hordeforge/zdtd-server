@@ -85,7 +85,10 @@ pub const Zpv2Drop = struct {
 /// survives a restart (magic byte 'A' after "ZPV"); 11 (ZPV11, magic byte
 /// 'B') appends the skill tail (`skill_points:u32 | skill_n:u8 |
 /// skill_n×(name_len:u8, name, level:u8)`) after the bedroll so purchased
-/// attribute/perk levels survive a restart. The bedroll field is
+/// attribute/perk levels survive a restart. 12 (ZPV12, magic byte 'C')
+/// appends the attached mod ids (4 x u16) to each inventory slot record so a
+/// modded weapon survives a restart (the mods' stat effects are client-side;
+/// the ids re-render the attachments). The bedroll field is
 /// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
@@ -97,6 +100,7 @@ pub const Zpv2Drop = struct {
 /// use_times: f32), 13 from v10 (plus seed:u16 - the stock ItemValue.Seed,
 /// so a plantable's per-item seed survives a restart).
 pub fn zpvSlotStride(version: u8) usize {
+    if (version >= 12) return 21; // 13 + 4 mod ids (ZPV12)
     if (version >= 10) return 13;
     return if (version >= 7) 11 else 7;
 }
@@ -361,9 +365,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C'))
             return error.CorruptPlayersFile;
-        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -376,7 +380,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'B', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'C', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -594,7 +598,12 @@ pub fn savePlayers(self: *Game) !void {
                 std.mem.writeInt(u16, rec[o + 5 ..][0..2], s.meta, .little);
                 std.mem.writeInt(u32, rec[o + 7 ..][0..4], @as(u32, @bitCast(s.use_times)), .little);
                 std.mem.writeInt(u16, rec[o + 11 ..][0..2], s.seed, .little);
-                o += 13;
+                // ZPV12: the attached mod ids (stock ItemValue.Modifications).
+                var mz: usize = 0;
+                while (mz < s.mods.len) : (mz += 1) {
+                    std.mem.writeInt(u16, rec[o + 13 + mz * 2 ..][0..2], s.mods[mz], .little);
+                }
+                o += 21;
                 inv_n += 1;
             }
         }
@@ -761,12 +770,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -807,6 +816,16 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 .use_times = if (slot_stride >= 11) @as(f32, @bitCast(std.mem.readInt(u32, ib[7..11], .little))) else 0,
                 .seed = if (slot_stride >= 13) std.mem.readInt(u16, ib[11..13], .little) else 0,
             };
+            // ZPV12: mod ids at bytes 13..21 (old saves read as empty).
+            if (slot_stride >= 21) {
+                var mz: usize = 0;
+                while (mz < inv[k].mods.len) : (mz += 1) {
+                    const mod_id = std.mem.readInt(u16, ib[13 + mz * 2 ..][0..2], .little);
+                    if (mod_id == 0) continue;
+                    inv[k].mods[mz] = mod_id;
+                    if (mz >= inv[k].mod_n) inv[k].mod_n = @intCast(mz + 1);
+                }
+            }
         }
         const jn: usize = data[off];
         off += 1;

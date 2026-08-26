@@ -232,7 +232,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -347,6 +347,50 @@ test "players zpv11 round-trips skill points and purchased perk levels" {
     }
 }
 
+test "players zpv12 round-trips item mods across restart" {
+    // ZPV12 appends the attached mod ids to each inventory slot record, so a
+    // modded weapon keeps its attachments through a relog (the mods' stat
+    // effects are client-side; the ids re-render the attachments).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        _ = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(0).?;
+        var slot = &g.sim.inventory[ps].slots[0];
+        slot.item_id = 30;
+        slot.count = 1;
+        slot.quality = 5;
+        slot.mods = .{ 12, 13, 0, 0 };
+        slot.mod_n = 2;
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        _ = try g.attachJoinedClient(&capture);
+        const ps = g.sim.playerByPeer(0).?;
+        const slot = g.sim.inventory[ps].slots[0];
+        try std.testing.expectEqual(@as(u16, 30), slot.item_id);
+        try std.testing.expectEqual(@as(u8, 2), slot.mod_n);
+        try std.testing.expectEqual(@as(u16, 12), slot.mods[0]);
+        try std.testing.expectEqual(@as(u16, 13), slot.mods[1]);
+    }
+}
+
 test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" {
     // A v10 ('A') file has no skill tail; the save must append the empty
     // tail (skill_points 0, skill_n 0) so the v11 record walk stays aligned
@@ -407,11 +451,12 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     }
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'B'), data[3]);
-    // Record length via the v11 walker: name(7) + 16 + inv(1) + jn(1) +
+    try std.testing.expectEqual(@as(u8, 'C'), data[3]);
+    // Record length via the v12 walker: name(7) + 16 + inv(1) + jn(1) +
     // prog(1) + level(2) + xp(8) + stats(16) + hp(4) + born(8) + buff_n(1) +
-    // bed(1) + skills(5).
-    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5), game_mod.zpvRecordLen(data, 8, 11));
+    // bed(1) + skills(5) (the fixture has no inventory slots, so the ZPV12
+    // slot-record widening does not change the length).
+    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5), game_mod.zpvRecordLen(data, 8, 12));
 }
 
 test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
@@ -472,7 +517,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -558,7 +603,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -644,7 +689,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
     }
     {
         const g = try Game.create(std.testing.allocator, world_dir, 0);
@@ -948,7 +993,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVB", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVC", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.
