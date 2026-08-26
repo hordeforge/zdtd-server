@@ -4569,7 +4569,7 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 |---|---|---|
 | Challenge `0xCA` + Guid16 echo | HAVE | |
 | `NetPackagePackageIds` map | HAVE | **negotiated** 189-name list (full stock subset) |
-| `NetPackagePlayerLogin` parse | PARTIAL | full field walk (asm.il 832140): name + both `PlatformUserIdentifierAbs`; auth tokens skipped (no authorizer chain) |
+| `NetPackagePlayerLogin` parse | WORKS (2026-08-26 re-audit: the parser walks the full stock body - name + both PlatformUserIdentifierAbs + both auth tokens (skipped) + version + compatibilityVersion + discord id, asm.il 832140; the auth-token skip is the documented EAC-off direct-join model - no platform authorizer chain, same as the Platform auth row) |
 | `PlayerLoginAnswer` | HAVE | simple ok/fail string |
 | `PlayerId` | WORKS (2026-08-26 re-audit: body matches stock write IL=21 exactly - id:i32, teamNumber:i16, full PlayerDataFile.WriteNetwork (quests, unlocked recipes, toolbelt, bag, gameStageBornAtWorldTime sentinel), chunkViewDim:i32; the production join sends the full PDF via buildPlayerIdBodyInvLoaded) |
 | `PlayerSpawnedInWorld` | WORKS (2026-08-26 re-audit: body matches stock write IL=16 exactly - respawnReason:i32, position Vector3i, entityId:i32) |
