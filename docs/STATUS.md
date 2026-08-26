@@ -1043,8 +1043,14 @@ the HUD/movement batch against the IL too: game-stats (i16 length prefix
 + GameStats.Write blob), entity-speeds (EntityTargeted base entityId +
 u8 + 2xf32), entity-spawn-response (success + ItemValue, empty value for
 the null case) and the movement frames (PosAndRot / RelPosAndRot /
-AliveFlags, previously pinned 2026-08-11) are all stock-exact. GAP
-sounds row WORKS; the last RE-blocked wire pin is closed.
+AliveFlags, previously pinned 2026-08-11) are all stock-exact. A third
+pass (2026-08-27) re-verified the heavy client-facing bodies: the chunk
+header (bOverwriteExisting false + i32 dataLen + Chunk.write network
+blob, section 3.1), the deco burst (firstPackage bool + count-prefixed
+DecoObjects, Setup/SendDecosToClient) and the entity spawn
+(EntityCreationData.write v36 head with fail-closed branches) all match
+the pinned wire. GAP sounds row WORKS; the last RE-blocked wire pin is
+closed.
 
 **Client-visible parity queue (goal: 100% surface parity), ranked by client
 impact:** (2026-08-20: projectile/ranged combat verified WORKS - RE
