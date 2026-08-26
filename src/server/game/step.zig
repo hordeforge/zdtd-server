@@ -18,6 +18,7 @@ const assets_loot = @import("../../assets/loot.zig");
 const game_stability = @import("stability.zig");
 const game_net = @import("net.zig");
 const util_sim = @import("../../util/sim.zig");
+const sky = @import("../../world/sky.zig");
 
 pub fn step(self: *Game) !void {
     const sc = apm.profiler.scope(&self.harness.prof, .tick_total);
@@ -93,6 +94,15 @@ pub fn step(self: *Game) !void {
             self.harness.counters.add(.terrain_snap_chunks, covered);
         }
         self.sim.director.party_stage = self.partyHighestGameStage();
+        // Day/night ambient (world/sky.zig slice 1): one value per tick from
+        // the world clock + [rules.sky] feeds the sim's stealth light legs
+        // (CanSleeperAttackDetect crouch range) and the stealth-meter S2C byte.
+        const sr = self.sim.rules.sky;
+        self.sim.ambient_light = sky.ambientLuma(sky.dayPercent(
+            self.sim.director.clock.worldTimeBits(),
+            @floatFromInt(sr.dawn_hour),
+            @floatFromInt(sr.dusk_hour),
+        ));
         // Wake sleeper volumes whose AABB contains this tick's combat noise
         // (stock World.CheckSleeperVolumeNoise; player-independent) - must run
         // before systems.tickAll consumes the noise ring.

@@ -306,6 +306,8 @@ field-by-field provenance.
 | `Difficulty.*` | 1.0 (all), `incoming_damage_2` 0.75 | R | `ItemActionAttack.difficultyModifier` mixed-control PvE scalers (combat-damage.md): server/AI→client × `IncomingDamage`, client→server × `EntityIncomingDamage` (client-side in stock; server trusts the claimed strength, ProcessPackage IL=172). Adventurer 0.75 pinned to the shipped serverconfig sandbox-code decode (sandbox-options.md 246-258); full 0..5 ladder awaits the SetupOptions Cecil extraction (research-repo 2026-08-25) |
 | `Progression.*` | see fields | Z | **Invented placeholders** (WORK_PLAN T16); stock ships survival from buffs.xml `buffStatusHungry01-03` / `Thirsty01-03` damage + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT`/`StaminaChangeOT` + items.xml `StaminaLoss` |
 | `Sky.dawn_hour` / `Sky.dusk_hour` | 4 / 22 | R | `SkyManager` cctor (IL_002C-0034); bounds of the `UpdateSunMoonAngles` day window (RE: entity-ai.md SkyManager pin 2026-08-26) |
+| `Ai.crouch_sleeper_detect_min/max` | 3 / 15 | R | `PlayerStealth.CanSleeperAttackDetect` FastLerp bounds (IL=20; entity-ai.md); t = `lightAttackPercent` from the slice-1 ambient |
+| `Ai.stealth_light_passive` | 0.89 | R | `PlayerStealth.TickServer` step 4 passive-89 fold for `lightAttackPercent` in deep dark (entity-ai.md) |
 | `world/sky.zig` day curve / ambient | 0.6 / 0.68, `^0.6 × 0.5` | R | `SkyManager.CalcDayPercent` (IL=54) + `LightManager.GetLightLevel` ambient term (IL=117); slice 1 collapses `AmbientTotal` to the day curve (block light / moving lights / moon / shade recorded as later slices) |
 
 ### 3.2 AIDirector (`src/ecs/aidirector.zig`)

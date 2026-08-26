@@ -116,11 +116,18 @@ pub const Ai = struct {
     /// ported; this flat scale is the floor applied to hear_range. RE
     /// entity-ai.md NotifyNoise.
     crouch_hear_scale: f32 = 0.5,
-    /// Sleeper attack-detect range, blocks, while the target crouches. Stock
-    /// `PlayerStealth.CanSleeperAttackDetect` crouch branch is
-    /// `FastLerp(3, 15, lightAttackPercent)` - light-based, so the light leg
-    /// is RE-blocked and this flat close range is the floor (RE entity-ai.md).
-    crouch_sleeper_detect_range: f32 = 5.0,
+    /// Sleeper attack-detect range while the target crouches (RE entity-ai.md
+    /// `PlayerStealth.CanSleeperAttackDetect`): `FastLerp(min, max,
+    /// lightAttackPercent)` where `lightAttackPercent` is 0.89
+    /// (`stealth_light_passive`) in deep-dark ambient (< 0.1) else 1; the
+    /// stock bounds are 3..15. Consumed by the sleeper wake scan in
+    /// systems.zig against the slice-1 ambient light (world/sky.zig).
+    crouch_sleeper_detect_min: f32 = 3.0,
+    crouch_sleeper_detect_max: f32 = 15.0,
+    /// `PlayerStealth.TickServer` passive-89 fold for `lightAttackPercent` in
+    /// deep dark (stock `EffectManager.GetValue(Passive89)` with no items =
+    /// 0.89; RE entity-ai.md TickServer step 4).
+    stealth_light_passive: f32 = 0.89,
     /// Combat-noise radius, blocks: a landed melee hit or ranged damage emits
     /// a noise event that alerts zombies and wakes sleepers within it (stock
     /// NotifyNoise; per-clip volumes from noisysounds.xml are data-driven and
@@ -641,7 +648,9 @@ pub const AiOverlay = struct {
     smell_radius: ?f32 = null,
     smell_bleed_radius: ?f32 = null,
     crouch_hear_scale: ?f32 = null,
-    crouch_sleeper_detect_range: ?f32 = null,
+    crouch_sleeper_detect_min: ?f32 = null,
+    crouch_sleeper_detect_max: ?f32 = null,
+    stealth_light_passive: ?f32 = null,
     combat_noise_radius: ?f32 = null,
     noise_events_per_tick: ?u8 = null,
     stealth_noise_decay: ?f32 = null,

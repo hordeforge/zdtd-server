@@ -93,6 +93,16 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
     return true;
 }
 
+/// Stock `PlayerStealth.TickServer` step 4 (RE entity-ai.md): the
+/// `lightAttackPercent` fed to `CanSleeperAttackDetect`'s `FastLerp(3, 15,
+/// t)` crouch range: 0.89 (passive-89) in deep-dark ambient (< 0.1), else
+/// 1. `ambient` is the per-tick slice-1 ambient light (world/sky.zig
+/// ambientLuma, set on World by the Game); `passive` is the rules.ai
+/// `stealth_light_passive` knob.
+fn stealthLightAttackPercent(ambient: f32, passive: f32) f32 {
+    return if (ambient < 0.1) passive else 1.0;
+}
+
 /// Stock sense gate (RE entity-ai.md CanEntityBeSeen + PlayerStealth): a
 /// player is sensed when heard (within `hear`; sound passes walls) or
 /// seen (within sense range, inside the view cone, block-LOS clear). Replaces
@@ -1655,18 +1665,21 @@ const AiCtx = struct {
             }
             // Sleepers: stay sleep until player in volume. Stealth (RE
             // entity-ai.md CanSleeperAttackDetect): a crouched player only
-            // disturbs sleepers within the close crouch_sleeper_detect_range
-            // (stock's light-based FastLerp(3,15,light) leg is RE-blocked).
+            // disturbs sleepers within FastLerp(3, 15, lightAttackPercent)
+            // (stock lightAttackPercent: 0.89 passive in deep-dark ambient
+            // < 0.1, else 1; the light is the per-tick slice-1 ambient, see
+            // world/sky.zig); standing players wake at the volume radius.
             if (ctx.w.mask[s].sleeper and !ctx.w.sleeper[s].awake) {
                 const sl = ctx.w.sleeper[s];
+                const ar = ctx.w.rules.ai;
+                const lap = stealthLightAttackPercent(ctx.w.ambient_light, ar.stealth_light_passive);
+                const crouch_reach = ar.crouch_sleeper_detect_min +
+                    (ar.crouch_sleeper_detect_max - ar.crouch_sleeper_detect_min) * lap;
                 var near = false;
                 for (ctx.players) |pl| {
                     const dx = pl.x - sl.home_x;
                     const dz = pl.z - sl.home_z;
-                    const reach = if (pl.crouching)
-                        @min(sl.volume_r, ctx.w.rules.ai.crouch_sleeper_detect_range)
-                    else
-                        sl.volume_r;
+                    const reach = if (pl.crouching) @min(sl.volume_r, crouch_reach) else sl.volume_r;
                     if (dx * dx + dz * dz <= reach * reach) {
                         near = true;
                         break;
@@ -5773,28 +5786,75 @@ test "stealth: crouch muffles the hearing gate through walls" {
     try std.testing.expectEqual(@as(i32, 100), t_close.id);
 }
 
-test "stealth: crouched players do not wake sleepers beyond the close detect range" {
+test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" {
     // RE entity-ai.md CanSleeperAttackDetect: crouching shrinks sleeper
-    // disturbance to a close range (stock light-based FastLerp(3,15,light);
-    // rules floor crouch_sleeper_detect_range 5). A player 8 m inside a
-    // volume_r 10 sleeper wakes it standing, not crouched.
-    var w: World = .{ .rules = .{ .ai = .{ .crouch_sleeper_detect_range = 5.0 } } };
+    // disturbance to FastLerp(3, 15, lightAttackPercent); lightAttackPercent
+    // is 0.89 (passive) in deep-dark ambient (< 0.1) else 1. Night ambient 0
+    // → crouch range 13.68: a crouched player 16 m inside a volume_r 20
+    // sleeper stays hidden, 12 m wakes it. Standing wakes at the volume
+    // radius regardless of distance within it.
+    var w: World = .{ .rules = .{ .ai = .{
+        .crouch_sleeper_detect_min = 3.0,
+        .crouch_sleeper_detect_max = 15.0,
+        .stealth_light_passive = 0.89,
+    } } };
     defer w.deinit();
     const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
     const zs = w.slotOfNetId(z).?;
-    w.sleeper[zs].volume_r = 10;
-    const p = w.spawnPlayer(8, 70, 0, 0).?;
+    w.sleeper[zs].volume_r = 20;
+    const p = w.spawnPlayer(16, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.player[ps].crouching = true;
+    // Deep-dark night (slice-1 ambient 0): crouch range 13.68, 16 m is out.
+    w.ambient_light = 0;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.sleeper[zs].awake);
-    // Standing at the same distance: the volume disturbs the sleeper.
+    // Same crouched distance at noon ambient (0.5): lightAttackPercent 1,
+    // crouch range 15, still out at 16 m.
+    w.ambient_light = 0.5;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
+    // A crouched player 12 m inside the volume wakes it (13.68 > 12).
+    w.transform[ps].x = 12;
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.sleeper[zs].awake);
+    try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
+    try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+}
+
+test "stealth: standing players wake sleepers at the full volume radius" {
+    // RE entity-ai.md CanSleeperAttackDetect: not crouching → true, so the
+    // volume radius gates the wake (no FastLerp shrink). The crouch leg only
+    // protects beyond FastLerp(3,15,light): 16 m crouched at night is out
+    // (13.68), uncrouching wakes the 20 m volume.
+    var w: World = .{ .rules = .{ .ai = .{
+        .crouch_sleeper_detect_min = 3.0,
+        .crouch_sleeper_detect_max = 15.0,
+        .stealth_light_passive = 0.89,
+    } } };
+    defer w.deinit();
+    const z = w.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
+    const zs = w.slotOfNetId(z).?;
+    w.sleeper[zs].volume_r = 20;
+    const p = w.spawnPlayer(16, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.player[ps].crouching = true;
+    w.ambient_light = 0; // deepest night: crouch range 13.68, 16 m hidden
+    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.sleeper[zs].awake);
     w.player[ps].crouching = false;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.sleeper[zs].awake);
-    // The wake pushed the SleeperWakeup wire event (Game drains + broadcasts).
     try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
     try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
+}
+
+test "stealth: lightAttackPercent folds the passive-89 at the dark threshold" {
+    // RE entity-ai.md TickServer step 4: ambient < 0.1 → passive, else 1.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0.0, 0.89), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0.099, 0.89), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), stealthLightAttackPercent(0.1, 0.89), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), stealthLightAttackPercent(0.5, 0.89), 0.0001);
 }
 
 test "group AI: combat noise alerts distant zombies to investigate" {

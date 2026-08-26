@@ -14,7 +14,6 @@ const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
-const sky = @import("../../world/sky.zig");
 
 const max_clients = game_mod.max_clients;
 
@@ -200,18 +199,12 @@ pub fn questKillForParty(self: *Game, killer_slot: usize, vx: f32, vz: f32) void
 /// packed stealth state changed, broadcast NetPackageEntityStealth for the
 /// player so other clients render the stealth meter. Noise is the sim's
 /// CalcVolume fold; alert = any alert zombie within 12 m (stock scan); light
-/// is the clone-side world-light model slice 1 (world/sky.zig): the
-/// day/night ambient from the world clock (position-independent until the
+/// is the per-tick day/night ambient computed in step.zig from the world
+/// clock (world/sky.zig slice 1, position-independent until the
 /// block-light/moon/shade terms land, documented).
 pub fn tickStealthBroadcast(self: *Game) void {
     if ((self.tick_n % 16) != 0) return;
-    const r = self.sim.rules;
-    const day_pct = sky.dayPercent(
-        self.sim.director.clock.worldTimeBits(),
-        @floatFromInt(r.sky.dawn_hour),
-        @floatFromInt(r.sky.dusk_hour),
-    );
-    const light8: u8 = @intFromFloat(@min(sky.ambientLuma(day_pct) * 255.0, 255.0));
+    const light8: u8 = @intFromFloat(@min(self.sim.ambient_light * 255.0, 255.0));
     for (&self.clients) |*c| {
         if (!c.joined or c.entity_id <= 0) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;

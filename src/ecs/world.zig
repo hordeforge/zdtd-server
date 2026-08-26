@@ -210,6 +210,11 @@ pub const World = struct {
     /// volume cap, heat map). Consume-owns-drain like combat noise.
     stealth_noise_events: [c.stealth_events_cap]c.StealthNoiseEvent = undefined,
     stealth_noise_n: usize = 0,
+    /// Day/night ambient light (0..1, slice-1 world-light model
+    /// world/sky.zig ambientLuma): the Game computes it once per tick from the
+    /// world clock + [rules.sky] before tickAll; the sim's stealth light legs
+    /// (CanSleeperAttackDetect crouch range) read it. Tests set it directly.
+    ambient_light: f32 = 0,
     /// Sleeper-volume wake requests by noise position (stock
     /// World.CheckSleeperVolumeNoise): pushed by the stealth system when a
     /// player's sleeperNoiseVolume hits the 360 cap; the Game drains the ring
