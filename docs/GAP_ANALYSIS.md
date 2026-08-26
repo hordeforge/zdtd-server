@@ -4556,14 +4556,14 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 |---|---|---|
 | UDP bind / poll | HAVE | `litenet/linux_udp.zig` |
 | ConnectRequest/Accept (game ordinals) | HAVE | property ids match game LiteNet |
-| Reliable ordered channel | PARTIAL | window/retransmit + ACK-pumped multi-frag; ordered hold buffer deferred |
-| Unreliable / sequenced channels | PARTIAL | unreliable send; sequenced first-cut channel 1 |
+| Reliable ordered channel | WORKS (2026-08-26 re-audit: window/retransmit + ACK-pumped multi-frag + the out-of-order reliable hold buffer for ordered delivery (peer.zig hold_len/hold_data, window-bounded) all ship - the 'ordered hold buffer deferred' residual was stale) |
+| Unreliable / sequenced channels | WORKS (2026-08-26 re-audit: the unreliable send path ships (sendUnreliable, Property.unreliable) with the high-frequency frames routed to it (PosAndRot/RelPosAndRot/Rotation/Speeds, droppable during play, retry budget on join); the chunk/map packages ride the sequenced channel 1) |
 | MTU / fragmentation | HAVE | large chunks via sendReliable resume + pump_fn (14-37 KB POI) |
 | C2S deflate envelope | HAVE | `frame.zig` inflates stock compressed batches (zlib/raw/gzip) |
 | LiteNet Merged packets | HAVE | unpack `[prop][u16 len][subpacket]*` |
-| Connect reject / full server | PARTIAL | peer slot limit; password reject `[0,0]` |
+| Connect reject / full server | WORKS (2026-08-26 re-audit: the peer slot limit rejects at the transport; ServerPassword is enforced at the LiteNet ConnectRequest; the join-time deferred rejects (banned etc.) send NetPackagePlayerDenied once the client has the name->id map - the PARTIAL label was stale) |
 | Per-IP join rate limit | HAVE | ~500 ms/IP; loopback exempt |
-| Disconnect / timeout cleanup | PARTIAL | alive flags; soft cleanup |
+| Disconnect / timeout cleanup | WORKS (2026-08-26 re-audit: the alive flags + the stale-peer reaping (reapStalePeers, peer_stale_ms) + the transport timeout all ship - the 'soft cleanup' wording understated the full cleanup) |
 | NAT punch / Steam relay | OUT | later / never for open clone |
 | EAC package path | OUT | residual RE only |
 
