@@ -109,7 +109,8 @@ and active buffs survive a restart via `players.zsv` v3 (the server-side ledger
 level-up push, so other players see your level), attribute/perk spending is
 server-authoritative (`NetPackageEntitySetSkillLevelServer` C2S validated
 against the catalog + gated by the on_perk_spend Wasm verdict, ADR 0033) with
-the S2C client echo; the 23 crafting skills' by-use advancement stays
+the S2C client echo; the 23 crafting skills are magazine-driven in stock
+(A21+ book system, RE residual) and their magazine advancement stays
 recorded.
 
 **The world is bald, dry and stepped.** The join deco burst produced 3 objects for
@@ -4834,8 +4835,8 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Group AI / pack behavior | PARTIAL (2026-08-20: combat-noise alerts - a landed melee hit or ranged damage pushes a noise event (ring, atomic from parallel AI + net thread) that alerts zombies within combat_noise_radius to investigate the spot and wakes sleepers, budgeted per tick (noise_events_per_tick), RE entity-ai.md NotifyNoise; per-clip sounds.xml `<Noise>` volumes are loaded (assets/noise.zig) and feed the movement-noise model. Missing: true pack hunting/coordination, horde group directives) |
 | Despawn / cull by observer | PARTIAL (LOD + far-despawn >200 + alive-cap 24; leaving a client's interest box now sends that client `EntityRemove(Unloaded)` and drops the `known_entities` bit, matching `NetEntityDistributionEntry::updatePlayerEntity`) |
 | Entity pooling / soft cap policies | PARTIAL (MaxSpawnedZombies/Animals options) |
-| Ragdoll / death loot bags | PARTIAL (loot ECD bag; no ragdoll) |
-| XP / progression / skills | PARTIAL (awardXp ledger; attribute + perk spending SHIPPED 2026-08-26: NetPackageEntitySetSkillLevelServer C2S is server-validated (one level per purchase, max level, parent-attribute gate, SP balance) and gated by the on_perk_spend Wasm verdict (ADR 0033) with the S2C client echo; the 23 crafting skills level by use in stock and their by-use advancement stays MISSING) |
+| Ragdoll / death loot bags | PARTIAL (loot ECD bag; ragdoll relay SHIPPED 2026-08-26 re-audit: the C2S NetPackageEntityRagdoll relays verbatim to the entity's tracked players (c2s/misc.zig, stock SendPacketToTrackedPlayersAndTrackedEntity) - stock's ragdoll is CLIENT-originated (EModelBase.DoRagdoll sends for remote entities, write IL=59), so the server never originates one and the old 'no ragdoll' residual was parity-N/A) |
+| XP / progression / skills | PARTIAL (awardXp ledger; attribute + perk spending SHIPPED 2026-08-26: NetPackageEntitySetSkillLevelServer C2S is server-validated (one level per purchase, max level, parent-attribute gate, SP balance) and gated by the on_perk_spend Wasm verdict (ADR 0033) with the S2C client echo; the 23 crafting skills are MAGAZINE-driven in stock (A21+ book system, max_level 20-100, RE progression.md §4 residual) and their magazine advancement stays MISSING) |
 | Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; disease/temp effects MISSING) |
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
 | Equipment / armor mitigation | WORKS (equip slots; with stock items.xml the mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality - the items.xml quality curves via `curveValueAt` (RE PassiveEffect.ModValue IL=796: piecewise-linear over levels scaled Q1..Q6, item quality is the effect level, EffectManager.GetValue IL_0393; GetTotalPhysicalArmorRating sums passive 41 on the wearer, Equipment.CalcDamage reduces physical damage by rating/100, combat-damage.md), plus the buff/perk resist leg from the effects VM; the `[rules.combat] armor_mitigation_per_piece` floor stands only for the offline/builtin catalog) |
