@@ -199,12 +199,13 @@ pub fn questKillForParty(self: *Game, killer_slot: usize, vx: f32, vz: f32) void
 /// packed stealth state changed, broadcast NetPackageEntityStealth for the
 /// player so other clients render the stealth meter. Noise is the sim's
 /// CalcVolume fold; alert = any alert zombie within 12 m (stock scan); light
-/// is the per-tick day/night ambient computed in step.zig from the world
-/// clock (world/sky.zig slice 1, position-independent until the
-/// block-light/moon/shade terms land, documented).
+/// is the player's TickServer lightLevel (0..200) from the per-tick ambient
+/// (step.zig) + crouch, folded exactly like the S2C Setup(lightLevel,
+/// noiseVolume, alert) IL=26 conv.u1 (systems.stealthLightLevel). The
+/// selfLight/movingLight and speedAverage terms are 0 until item lights +
+/// movement visibility land (documented).
 pub fn tickStealthBroadcast(self: *Game) void {
     if ((self.tick_n % 16) != 0) return;
-    const light8: u8 = @intFromFloat(@min(self.sim.ambient_light * 255.0, 255.0));
     for (&self.clients) |*c| {
         if (!c.joined or c.entity_id <= 0) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -212,6 +213,10 @@ pub fn tickStealthBroadcast(self: *Game) void {
         const noise = self.sim.stealth[ps].noise_volume;
         const noise8: u8 = @intFromFloat(@min(noise, 127.0));
         const crouch = self.sim.player[ps].crouching;
+        const light8: u8 = @intFromFloat(@min(
+            systems.stealthLightLevel(self.sim.ambient_light, crouch, self.sim.rules.ai.stealth_light_passive),
+            255.0,
+        ));
         var alert = false;
         const px = self.sim.transform[ps].x;
         const pz = self.sim.transform[ps].z;

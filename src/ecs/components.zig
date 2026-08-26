@@ -101,6 +101,11 @@ pub const ClassId = struct {
     /// entityclasses SightRange in metres; 0 = class_table[id] then the Rules
     /// sense floor (systems.senseDistSq).
     sight_range: f32 = 0,
+    /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
+    /// zombie template; cctor default 30/100); 0,0 = class_table[id] then the
+    /// Rules floor (systems.sightLightThreshold).
+    sight_light_min: f32 = 0,
+    sight_light_max: f32 = 0,
     /// entityclasses MaxViewAngle in degrees, full cone; 0 = class_table[id]
     /// then the Rules cone floor (systems.viewHalfDeg).
     view_angle_deg: f32 = 0,

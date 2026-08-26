@@ -102,6 +102,14 @@ pub const Ai = struct {
     /// entityclasses.xml `MaxViewAngle` — that per-class value wins here via
     /// `viewHalfDeg` (systems.zig). RE entity-ai.md EntityAlive cctor.
     view_cone_half_deg: f32 = 90.0,
+    /// CanSeeStealth light-threshold floor pair (RE entity-ai.md CanSeeStealth
+    /// IL=21 + EntityClass cctor): FastLerp(x, y, dist/sightRange) vs the
+    /// player's TickServer lightLevel (0..200). The stock EntityClass cctor
+    /// default is (30, 100); zombieTemplateMale overrides to "-2,150" (seen at
+    /// point blank even at night). Per-class entityclasses SightLightThreshold
+    /// wins; this is the floor when unset.
+    sight_light_threshold_min: f32 = 30.0,
+    sight_light_threshold_max: f32 = 100.0,
     /// Smell radius, blocks: players within this range are sensed regardless
     /// of sight or hearing (stock `cSmellRadiusMin` 10; the smell-emit/decay
     /// simulation is not ported, only the radius gate). RE entity-ai.md
@@ -119,14 +127,16 @@ pub const Ai = struct {
     /// Sleeper attack-detect range while the target crouches (RE entity-ai.md
     /// `PlayerStealth.CanSleeperAttackDetect`): `FastLerp(min, max,
     /// lightAttackPercent)` where `lightAttackPercent` is 0.89
-    /// (`stealth_light_passive`) in deep-dark ambient (< 0.1) else 1; the
-    /// stock bounds are 3..15. Consumed by the sleeper wake scan in
-    /// systems.zig against the slice-1 ambient light (world/sky.zig).
+    /// (`stealth_light_passive`) when the player's selfLight (held-item
+    /// light) < 0.1 else 1 (TickServer IL_010B; no item-light model, so the
+    /// passive always applies); the stock bounds are 3..15. Consumed by the
+    /// sleeper wake scan in systems.zig.
     crouch_sleeper_detect_min: f32 = 3.0,
     crouch_sleeper_detect_max: f32 = 15.0,
-    /// `PlayerStealth.TickServer` passive-89 fold for `lightAttackPercent` in
-    /// deep dark (stock `EffectManager.GetValue(Passive89)` with no items =
-    /// 0.89; RE entity-ai.md TickServer step 4).
+    /// `PlayerStealth.TickServer` passive-89 fold for `lightAttackPercent`
+    /// when the player's selfLight (the held-item light, GetStealthLightLevel
+    /// out) < 0.1 (stock `EffectManager.GetValue(Passive89)` with no items =
+    /// 0.89; RE entity-ai.md TickServer IL_010B).
     stealth_light_passive: f32 = 0.89,
     /// Combat-noise radius, blocks: a landed melee hit or ranged damage emits
     /// a noise event that alerts zombies and wakes sleepers within it (stock
@@ -635,6 +645,8 @@ pub const AiOverlay = struct {
     sense_dist_sq: ?f32 = null,
     hear_range: ?f32 = null,
     view_cone_half_deg: ?f32 = null,
+    sight_light_threshold_min: ?f32 = null,
+    sight_light_threshold_max: ?f32 = null,
     smell_radius: ?f32 = null,
     smell_bleed_radius: ?f32 = null,
     crouch_hear_scale: ?f32 = null,

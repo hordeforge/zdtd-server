@@ -447,10 +447,22 @@ from DayLightLength, stock 4/22 at 18 h) - night drops the meter light toward 0,
 raises it; block light, moving lights, moon and shade stay recorded slices
 2+. The same ambient then fed the sim's sleeper crouch leg (2026-08-26):
 CanSleeperAttackDetect's FastLerp(3, 15, lightAttackPercent) replaces the
-flat 5-m floor (lightAttackPercent = 0.89 passive in deep dark else 1,
-[rules.ai] crouch_sleeper_detect_min/max + stealth_light_passive), so
-crouched players now slip past sleepers only beyond the stock light-scaled
-range.
+flat 5-m floor; the exact TickServer IL re-pin (2026-08-26) showed
+lightAttackPercent checks the selfLight (held-item light, IL_010B) - with no
+item-light model it is the constant passive-89, so the crouch range is
+3 + 12 x 0.89 = 13.68 ([rules.ai] crouch_sleeper_detect_min/max +
+stealth_light_passive), and crouched players slip past sleepers only beyond
+it. Then the CanSeeStealth sight-light leg landed (2026-08-26): the exact
+TickServer chain (ratio = clamp(selfLight/(light+0.05), 0.5, 3.2), crouch
+x0.6, lightLevel = clamp(light x (0.32 + 0.68 x passive89) x 100, 0, 200))
+now drives both the EntityStealth S2C light byte (Setup IL=26 conv.u1, the
+byte is lightLevel not light x 255 - corrected) and the sense gate
+(CanSeeStealth IL=21: lightLevel > FastLerp(per-class SightLightThreshold,
+dist/sightRange); zombieTemplateMale ships "-2,150", the EntityClass cctor
+default 30/100 is the [rules.ai] floor) - night blinds sight except point
+blank, crouching shrinks the lit reach, hearing and smell are untouched.
+The selfLight and speedAverage (movement-visibility) terms of the chain stay
+0 until item lights land (recorded).
 Then the zombie day/night speed split landed (2026-08-26): the sim resolves
 GetMoveSpeed/GetMoveSpeedAggro per World.IsDark (entity-ai.md IL=45; the
 stock XML comment on MoveSpeedAggro "min/max (like day or night)" pins the
@@ -979,14 +991,18 @@ surface is the DamageEntity C2S claim, which is complete; AI senses shipped
 WORKS - per-class view cone (entityclasses MaxViewAngle, stock 180 default
 halved), block-LOS sight, hearing through walls, and smell with a bleeding
 extension, RE entity-ai.md CanEntityBeSeen + PlayerStealth; CanSeeStealth's
-light-level leg ships slice 1 (2026-08-26, world/sky.zig day/night ambient
-driving the EntityStealth S2C light byte; block light / moving lights / moon
-/ shade recorded as later slices))
+light-level leg SHIPS (2026-08-26: the exact TickServer lightLevel chain -
+crouch x0.6, clamp(light x (0.32 + 0.68 x passive89) x 100, 0, 200) - feeds
+the EntityStealth S2C light byte and the sense gate (lightLevel >
+FastLerp(per-class SightLightThreshold, dist/sightRange); stock zombie
+"-2,150" sees point blank at night, (30,100) cctor floor blinds night sight;
+hearing/smell untouched); block light / moving lights / moon / shade and the
+selfLight/speedAverage lightLevel terms stay recorded))
 
 1. MoveHelper physics / collision (WORKS 2026-08-21 - collide-and-slide + step-up + stock gravity + blocked-grounded jump + door-opening + dig-through + swim physics + entity push; the stock elevator has no platform block, documented; server-side only - a human client moves itself)
 2. RWG depth: climate/biomes, carved caves, POI/WFC placement (fluids/aquifers 2026-08-20; multi-biome surfaces + terrain-tile relief blend 2026-08-21 - the stock 6-axis climate model and carved caves remain)
 3. Water flow / physics (PARTIAL - dig-leveling pours basins beside existing water; placed water now cascades down its column and puddles, bounded 2026-08-21; no mass-flow engine, no evap/drain)
-4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x; movement-noise volume model wired 2026-08-26 (sounds.xml `<Noise>` table + PlayerStealth fold: NotifyNoise accumulation, CalcVolume, sleeper wake at 360, heat, attraction heard-test; stock-dedi inputs are server-side sounds only - the C2S sound relay is audio-only on a dedi); world-light slice 1 shipped 2026-08-26 (world/sky.zig day/night ambient → EntityStealth S2C light byte); the sleeper crouch leg now uses the stock FastLerp(3,15,lightAttackPercent) with the slice-1 ambient (0.89 passive in deep dark, `[rules.ai] crouch_sleeper_detect_min/max` + `stealth_light_passive`); block light/moon/shade + the CanSeeStealth sight-light threshold leg recorded)
+4. Stealth / crouch (PARTIAL - crouch replicates (flags bit 512), hearing muffled 0.5x; movement-noise volume model wired 2026-08-26 (sounds.xml `<Noise>` table + PlayerStealth fold: NotifyNoise accumulation, CalcVolume, sleeper wake at 360, heat, attraction heard-test; stock-dedi inputs are server-side sounds only - the C2S sound relay is audio-only on a dedi); the sleeper crouch leg uses the stock FastLerp(3,15,lightAttackPercent) with lightAttackPercent = passive-89 when selfLight (held-item light) < 0.1 per the exact TickServer IL_010B (no item-light model → constant 13.68, `[rules.ai] crouch_sleeper_detect_min/max` + `stealth_light_passive`); CanSeeStealth sight-light leg SHIPS 2026-08-26 (TickServer lightLevel chain → S2C light byte + sight gate vs per-class SightLightThreshold, night blinds sight except point blank, crouch shrinks the lit reach); block light/moon/shade + the selfLight/speedAverage terms + the wake/groan ladder recorded)
 5. Group AI / pack behavior (PARTIAL - combat-noise alerts + sleeper wake 2026-08-20; pack hunting/horde directives RE-BLOCKED - no group-attack IL in the corpus)
 6. Falling blocks (PARTIAL - per-cell singular fallingBlock entities gated on blocks.xml ShowModelOnFall + crush damage via materials.xml Hardness/Mass 2026-08-21; Fall-event item drops, landing audio and the opt-in group mode open)
 7. Bosses / special infected (PARTIAL - Demolition prime-and-explode shipped 2026-08-20; spider/crawler variant behaviors thin-RE - bCanClimbVertical pinned, the climb mechanics are not)

@@ -71,6 +71,13 @@ pub const EntityDef = struct {
     /// entityclasses SightRange in metres (stock ships 27, 30, 40 per class).
     /// 0 = unset, which leaves the sim on the Rules floor.
     sight_range: f32 = 0,
+    /// entityclasses SightLightThreshold "min,max" (stock zombieTemplateMale
+    /// "-2,150": "how well lit you have to be for the zombie to see you at
+    /// min,max range"; the EntityClass cctor default is 30/100). The pair
+    /// spans FastLerp over dist/sightRange in CanSeeStealth. 0,0 = unset →
+    /// Rules floor.
+    sight_light_min: f32 = 0,
+    sight_light_max: f32 = 0,
     /// entityclasses MaxViewAngle in degrees, full cone angle (stock default
     /// 180 = only excludes targets strictly behind; the sense gate halves it
     /// like EntityAlive.IsInFrontOfMe). 0 = unset → Rules floor.
@@ -577,6 +584,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (f > 0 and f <= 256) sight = f;
             }
         }
+        // SightLightThreshold "min,max" (RE entity-ai.md + CanSeeStealth IL:
+        // "how well lit you have to be for the zombie to see you at min,max
+        // range" - the stock XML comment on zombieTemplateMale "-2,150"; the
+        // EntityClass cctor default is 30/100). A single value applies to
+        // both. 0,0 stays "unset" → Rules floor. Negative min is legal
+        // (stock -2: always seen at point blank).
+        var sight_light_min: f32 = 0;
+        var sight_light_max: f32 = 0;
+        if (resolveProp(&classes, name, "SightLightThreshold", 0)) |slt| {
+            const comma = std.mem.findScalar(u8, slt, ',');
+            const lo = if (comma) |ci| std.mem.trim(u8, slt[0..ci], " ") else slt;
+            const hi = if (comma) |ci| std.mem.trim(u8, slt[ci + 1 ..], " ") else slt;
+            if (xml.parseF32(lo)) |f| sight_light_min = f;
+            if (xml.parseF32(hi)) |f| sight_light_max = f;
+        }
         // MaxViewAngle: full cone angle, stock EntityAlive cctor default 180
         // (RE entity-ai.md), per-class property overrides. Bounded: a crafted
         // value must not exceed a full 360. 0 stays "unset" → Rules floor.
@@ -645,6 +667,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .wander_speed_night = wander_night,
             .time_stay = time_stay,
             .sight_range = sight,
+            .sight_light_min = sight_light_min,
+            .sight_light_max = sight_light_max,
             .view_angle_deg = view_angle,
             .explode_threshold = explode_threshold,
             .explode_delay_s = explode_delay,
@@ -724,6 +748,12 @@ test "load stock entityclasses when present" {
     try std.testing.expectEqual(@as(f32, 0.3), dog.wander_speed_night);
     try std.testing.expectEqual(@as(f32, 1.3), dog.chase_speed);
     try std.testing.expectEqual(@as(f32, 1.2), dog.chase_speed_day);
+    // SightLightThreshold: zombieTemplateMale pins "-2,150" (the stock XML
+    // comment "how well lit you have to be for the zombie to see you at
+    // min,max range") and zombieBoe inherits it; a class with no prop keeps
+    // 0,0 → the Rules (30,100) cctor-default floor.
+    try std.testing.expectEqual(@as(f32, -2.0), boe.sight_light_min);
+    try std.testing.expectEqual(@as(f32, 150.0), boe.sight_light_max);
     const stag = t.byName("animalStag") orelse return error.TestExpectedEqual;
     try std.testing.expectEqual(components.Kind.animal, stag.kind);
     try std.testing.expect(stag.spawnable);
@@ -767,6 +797,7 @@ test "day/night speeds parse from entityclasses XML" {
         \\  <entity_class name="ZombieBase">
         \\    <property name="MoveSpeed" value="0.08"/>
         \\    <property name="MoveSpeedAggro" value="0.2, 1.25"/>
+        \\    <property name="SightLightThreshold" value="-2,150"/>
         \\  </entity_class>
         \\  <entity_class name="zombieBoe" extends="ZombieBase">
         \\  </entity_class>
@@ -774,6 +805,7 @@ test "day/night speeds parse from entityclasses XML" {
         \\    <property name="MoveSpeed" value=".45"/>
         \\    <property name="MoveSpeedNight" value=".3"/>
         \\    <property name="MoveSpeedAggro" value="1.2, 1.3"/>
+        \\    <property name="SightLightThreshold" value="0,200"/>
         \\  </entity_class>
         \\  <entity_class name="zombieFlat">
         \\    <property name="MoveSpeed" value="0.1"/>
@@ -788,14 +820,21 @@ test "day/night speeds parse from entityclasses XML" {
     try std.testing.expectEqual(@as(f32, 0), boe.wander_speed_night); // seeded from MoveSpeed at night
     try std.testing.expectEqual(@as(f32, 1.25), boe.chase_speed); // aggro max = night chase
     try std.testing.expectEqual(@as(f32, 0.2), boe.chase_speed_day); // aggro min = day chase
+    // SightLightThreshold inherits through extends (stock "-2,150").
+    try std.testing.expectEqual(@as(f32, -2.0), boe.sight_light_min);
+    try std.testing.expectEqual(@as(f32, 150.0), boe.sight_light_max);
     const dog = t.byName("animalZombieDog").?;
     try std.testing.expectEqual(@as(f32, 0.45), dog.wander_speed);
     try std.testing.expectEqual(@as(f32, 0.3), dog.wander_speed_night);
     try std.testing.expectEqual(@as(f32, 1.3), dog.chase_speed);
     try std.testing.expectEqual(@as(f32, 1.2), dog.chase_speed_day);
+    try std.testing.expectEqual(@as(f32, 0.0), dog.sight_light_min);
+    try std.testing.expectEqual(@as(f32, 200.0), dog.sight_light_max);
     const flat = t.byName("zombieFlat").?;
     try std.testing.expectEqual(@as(f32, 0.5), flat.chase_speed); // single value -> both
     try std.testing.expectEqual(@as(f32, 0.5), flat.chase_speed_day);
+    try std.testing.expectEqual(@as(f32, 0.0), flat.sight_light_min); // no prop -> 0,0 -> Rules floor
+    try std.testing.expectEqual(@as(f32, 0.0), flat.sight_light_max);
 }
 
 test "AITask attack gating parses from entityclasses XML" {

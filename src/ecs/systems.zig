@@ -34,6 +34,10 @@ const PlayerSnap = struct {
     /// Stock EntityPlayer.Crouching: muffles the hearing gate and shrinks
     /// sleeper attack-detect (RE entity-ai.md PlayerStealth).
     crouching: bool = false,
+    /// Stock PlayerStealth.TickServer lightLevel (0..200, see
+    /// stealthLightLevel): consumed by the CanSeeStealth sight gate. 0 =
+    /// darkest night (the World ambient default).
+    light_level: f32 = 0,
 };
 
 /// Player positions for AI targeting / despawn. When `skip_blood_moon_dead` is
@@ -57,6 +61,7 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
             .y = w.transform[j].y,
             .z = w.transform[j].z,
             .crouching = w.player[j].crouching,
+            .light_level = stealthLightLevel(w.ambient_light, w.player[j].crouching, w.rules.ai.stealth_light_passive),
         };
         n += 1;
     }
@@ -93,24 +98,51 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
     return true;
 }
 
-/// Stock `PlayerStealth.TickServer` step 4 (RE entity-ai.md): the
+/// Stock `PlayerStealth.TickServer` (IL=432, full-v3.1.0 dump): the
 /// `lightAttackPercent` fed to `CanSleeperAttackDetect`'s `FastLerp(3, 15,
-/// t)` crouch range: 0.89 (passive-89) in deep-dark ambient (< 0.1), else
-/// 1. `ambient` is the per-tick slice-1 ambient light (world/sky.zig
-/// ambientLuma, set on World by the Game); `passive` is the rules.ai
-/// `stealth_light_passive` knob.
-fn stealthLightAttackPercent(ambient: f32, passive: f32) f32 {
-    return if (ambient < 0.1) passive else 1.0;
+/// t)` crouch range. The IL check is on the **selfLight** out param of
+/// GetStealthLightLevel (the held-item light, IL_010B: `selfLight < 0.1` →
+/// passive-89 else 1) - not the day/night ambient. The sim carries no item
+/// lights, so selfLight is 0 and the passive applies; `self_light` is the
+/// input for when item lights land (recorded).
+fn stealthLightAttackPercent(self_light: f32, passive: f32) f32 {
+    return if (self_light < stealth_self_light_dark) passive else 1.0;
 }
+
+/// Stock `PlayerStealth.TickServer` lightLevel (IL=0131-014F): the stealth
+/// light byte consumed by both the NetPackageEntityStealth S2C (Setup IL=26
+/// conv.u1 of lightLevel) and the CanSeeStealth sight gate. Chain: light =
+/// GetStealthLightLevel (slice-1 ambient; the selfLight + movingLight terms
+/// are 0 until item lights land), crouch ×0.6 (IL_00A6), the speedAverage
+/// visibility scale (1 + speed×0.15, IL_00CD) is 0 for a standing player,
+/// then `lightLevel = clamp(light × (0.32 + 0.68 × passive89) × 100, 0,
+/// 200)`. passive89 = rules.ai.stealth_light_passive.
+pub fn stealthLightLevel(ambient_light: f32, crouching: bool, passive: f32) f32 {
+    const light = ambient_light * (if (crouching) stealth_crouch_light_scale else 1.0);
+    const folded = light * (stealth_light_passive_blend_a + stealth_light_passive_blend_b * passive) * 100.0;
+    return @min(folded, stealth_light_level_max);
+}
+
+/// RE PlayerStealth.TickServer constants (IL=432): crouch light ×0.6; the
+/// lightLevel fold (0.32 + 0.68 × passive89) × 100; clamp 0..200; the
+/// selfLight < 0.1 → passive89 lightAttackPercent threshold.
+const stealth_crouch_light_scale: f32 = 0.6;
+const stealth_light_passive_blend_a: f32 = 0.32;
+const stealth_light_passive_blend_b: f32 = 0.68;
+const stealth_light_level_max: f32 = 200.0;
+const stealth_self_light_dark: f32 = 0.1;
 
 /// Stock sense gate (RE entity-ai.md CanEntityBeSeen + PlayerStealth): a
 /// player is sensed when heard (within `hear`; sound passes walls) or
 /// seen (within sense range, inside the view cone, block-LOS clear). Replaces
 /// the old distance-only check so zombies stop seeing through solid geometry.
 /// `zslot` is the sensing zombie, for its per-class cone (entityclasses
-/// MaxViewAngle) — stock EntityAlive cctor defaults the full angle to 180.
+/// MaxViewAngle); stock EntityAlive cctor defaults the full angle to 180.
 /// `hear` is the effective hearing radius, already stealth-scaled by the
-/// caller (crouched players are muffled).
+/// caller (crouched players are muffled). `light_level` is the TARGET player's
+/// TickServer lightLevel (0..200): EAITarget.check (IL=71) requires a player
+/// target to pass BOTH CanSee AND CanSeeStealth (EntityAlive IL=21:
+/// lightLevel > FastLerp(sightLightThreshold.x, .y, dist/sightRange)).
 fn canSensePlayer(
     w: *const World,
     zslot: Slot,
@@ -122,6 +154,7 @@ fn canSensePlayer(
     py: f32,
     pz: f32,
     hear: f32,
+    light_level: f32,
 ) bool {
     const dx = px - zx;
     const dy = py - zy;
@@ -129,7 +162,8 @@ fn canSensePlayer(
     const d2 = dx * dx + dy * dy + dz * dz;
     if (d2 >= w.rules.ai.sense_dist_sq) return false;
     if (d2 < hear * hear) return true;
-    // Sight: view cone (yaw = atan2(dx, dz) degrees; forward = (sin, cos)) then LOS.
+    // Sight: view cone (yaw = atan2(dx, dz) degrees; forward = (sin, cos)),
+    // then the CanSeeStealth light gate, then LOS.
     const half = viewHalfDeg(w, zslot) * (std.math.pi / 180.0);
     const yaw_r = zyaw * (std.math.pi / 180.0);
     const hd = @sqrt(dx * dx + dz * dz);
@@ -137,7 +171,29 @@ fn canSensePlayer(
         const dot = (dx * @sin(yaw_r) + dz * @cos(yaw_r)) / hd;
         if (dot < @cos(half)) return false;
     }
+    // CanSeeStealth (EntityAlive IL=21): t = dist/sightRange (FastLerp clamps
+    // t), threshold = Lerp(sightLightThreshold.x, .y, t); seen iff
+    // lightLevel > threshold. The stock zombie threshold (-2, 150) sees at
+    // point blank even at night (lightLevel 0 > -2); the (30, 100) cctor
+    // default blinds night sight entirely. Hearing/smell are untouched.
+    const srange = @sqrt(senseDistSq(w, zslot));
+    const t = if (srange > 0.001) @min(@sqrt(d2) / srange, 1.0) else 0.0;
+    const th = sightLightThreshold(w, zslot);
+    if (light_level <= th[0] + (th[1] - th[0]) * t) return false;
     return losClear(w, zx, zy, zz, px, py, pz);
+}
+
+/// Per-zombie CanSeeStealth light threshold pair (RE entity-ai.md + IL):
+/// entityclasses `SightLightThreshold` "min,max" (stock zombieTemplateMale
+/// "-2,150"; the EntityClass cctor default 30/100), the x/y pair spanning
+/// FastLerp over dist/sightRange. Per-entity first (A35), then class_table,
+/// then the Rules floor.
+fn sightLightThreshold(w: *const World, s: Slot) [2]f32 {
+    const pe = w.class_id[s];
+    if (pe.sight_light_min != 0 or pe.sight_light_max != 0) return .{ pe.sight_light_min, pe.sight_light_max };
+    const ct = w.class_table[w.class_id[s].id];
+    if (ct.sight_light_min != 0 or ct.sight_light_max != 0) return .{ ct.sight_light_min, ct.sight_light_max };
+    return .{ w.rules.ai.sight_light_threshold_min, w.rules.ai.sight_light_threshold_max };
 }
 
 /// View-cone half-angle for one entity, degrees. **Per-class first**:
@@ -178,7 +234,7 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx
             // movement noise is muffled, so the hearing gate shrinks by
             // crouch_hear_scale.
             const hear = if (p.crouching) w.rules.ai.hear_range * w.rules.ai.crouch_hear_scale else w.rules.ai.hear_range;
-            if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z, hear)) continue;
+            if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z, hear, p.light_level)) continue;
             best_d = d;
             best_id = p.id;
             best_slot = p.slot;
@@ -1672,7 +1728,10 @@ const AiCtx = struct {
             if (ctx.w.mask[s].sleeper and !ctx.w.sleeper[s].awake) {
                 const sl = ctx.w.sleeper[s];
                 const ar = ctx.w.rules.ai;
-                const lap = stealthLightAttackPercent(ctx.w.ambient_light, ar.stealth_light_passive);
+                // selfLight 0 (no held-item light in the sim; RE TickServer
+                // IL_010B checks selfLight < 0.1) → lightAttackPercent is the
+                // passive-89 always: crouch range FastLerp(3, 15, 0.89) = 13.68.
+                const lap = stealthLightAttackPercent(0, ar.stealth_light_passive);
                 const crouch_reach = ar.crouch_sleeper_detect_min +
                     (ar.crouch_sleeper_detect_max - ar.crouch_sleeper_detect_min) * lap;
                 var near = false;
@@ -3640,6 +3699,9 @@ test "wandering zombie paths around a wall via A*" {
 test "chase reuses one solve for many steps instead of replanning per metre" {
     var w: World = .{};
     defer w.deinit();
+    w.ambient_light = 0.5; // daylight: the CanSeeStealth sight gate stays open
+    w.class_table[1].sight_light_min = -2.0; // stock zombie threshold (noon reach)
+    w.class_table[1].sight_light_max = 150.0;
     w.step_fn = path_mod.openStep;
     w.step_ctx = null;
     const z = w.spawnZombie(0, 70, 0, 40).?;
@@ -3689,6 +3751,9 @@ test "chase of a walking target stays under the replan throttle" {
 test "budget-denied tick still walks the buffered path" {
     var w: World = .{};
     defer w.deinit();
+    w.ambient_light = 0.5; // daylight: the CanSeeStealth sight gate stays open
+    w.class_table[1].sight_light_min = -2.0; // stock zombie threshold (noon reach)
+    w.class_table[1].sight_light_max = 150.0;
     w.step_fn = path_mod.openStep;
     w.step_ctx = null;
     const z = w.spawnZombie(0, 70, 0, 40).?;
@@ -3904,6 +3969,9 @@ test "timid animal near a player never attacks; a predator does" {
     const ws = w.slotOfNetId(wolf).?;
     w.class_id[ws].is_enemy = true; // predator hunts
     w.class_id[ws].ai_attack = true; // hostile template: ApproachAndAttackTarget
+    w.class_id[ws].sight_light_min = -2.0; // stock predator threshold: lit-reachable
+    w.class_id[ws].sight_light_max = 150.0;
+    w.ambient_light = 0.5; // daylight: the CanSeeStealth sight gate is open
     _ = w.spawnPlayer(0, 70, 10, 0).?; // 8-12 m from both, inside sense
     var t: f32 = 0;
     while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
@@ -4200,18 +4268,23 @@ test "configured attack floor never beats the entityclasses value" {
 test "configured chase floor never beats the entityclasses MoveSpeedAggro" {
     var w: World = .{ .rules = .{ .ai = .{ .chase_speed = 100.0 } } };
     defer w.deinit();
+    w.ambient_light = 0.5; // daylight: the CanSeeStealth sight gate is open
     // XML-scale aggro pair: min (day) 1.0 / max (night) 1.0 → sim ×1.6.
     // The stock pair always carries both (entity-ai.md 3313-3314 ParseVec).
     w.class_table[1].chase_speed_day = 1.0;
     w.class_table[1].chase_speed = 1.0;
+    // Stock zombie sight-light threshold so the 12 m player is seen at noon
+    // (the (30,100) floor would blind the gate beyond ~11 m).
+    w.class_table[1].sight_light_min = -2.0;
+    w.class_table[1].sight_light_max = 150.0;
     const z = w.spawnZombie(0, 70, 0, 40).?;
-    _ = w.spawnPlayer(30, 70, 0, 0);
+    _ = w.spawnPlayer(12, 70, 0, 0);
     const zs = w.slotOfNetId(z).?;
     w.transform[zs].yaw = 90.0; // face the player at +x (sense gate: view cone)
     var t: f32 = 0;
     while (t < 4.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     // Class 1.0 -> 1.6 blocks/s; 4 s closes only a few blocks. A 100 floor would
-    // have crossed 30 in under a second (160 blocks/s), so this bounds it.
+    // have crossed 12 in under a second (160 blocks/s), so this bounds it.
     try std.testing.expect(w.transform[zs].x < 25);
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[zs].active_task);
 }
@@ -5637,17 +5710,18 @@ test "AI senses: LOS and view cone gate sight; hearing ignores walls" {
     // Zombie at origin facing +x (yaw 90 = atan2(1, 0)).
     const zyaw: f32 = 90.0;
     // Far player (20 m, beyond hear 10) with a wall at x=10: not sensed.
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0, 10.0));
+    // light_level 200 (fully lit) so the CanSeeStealth gate stays open.
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0, 10.0, 200.0));
     // Same distance, no wall (y shifted so the wall cell is not on the ray):
     // sensed - LOS clear, in the cone.
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 4, 10.0));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 4, 10.0, 200.0));
     // Near player (5 m, within hear) with a wall: still sensed (hearing).
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 5, 70, 0, 10.0));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 5, 70, 0, 10.0, 200.0));
     // Behind the zombie (yaw 90 faces +x; player at -x): out of the cone at
     // 20 m, not sensed even without a wall.
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, -20, 70, 0, 10.0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, -20, 70, 0, 10.0, 200.0));
     // Beyond the sense range: never sensed.
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 100, 70, 0, 10.0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 100, 70, 0, 10.0, 200.0));
 }
 
 test "AI senses: per-class MaxViewAngle narrows the cone" {
@@ -5661,15 +5735,16 @@ test "AI senses: per-class MaxViewAngle narrows the cone" {
     const zyaw: f32 = 90.0; // faces +x.
     const off30 = std.math.pi / 6.0; // 30 degrees off-axis.
     // Default class table (rules floor 90 half): a player 30 deg off-axis at
-    // 20 m IS sensed (dot 0.866 > cos 90 = 0).
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0));
+    // 20 m IS sensed (dot 0.866 > cos 90 = 0); light_level 200 keeps the
+    // CanSeeStealth gate open.
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0, 200.0));
     // Per-class full angle 30 (half 15): the same target is now out of cone.
     w.class_table[0].view_angle_deg = 30.0;
-    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0, 200.0));
     // Per-entity layer beats the class table: class says 30 but the entity's
     // own view_angle_deg 360 (half 180) re-opens the cone.
     w.class_id[0].view_angle_deg = 360.0;
-    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20 * std.math.cos(off30), 70, 20 * std.math.sin(off30), 10.0, 200.0));
 }
 
 test "AI senses: smell radius gates through walls, bleeding extends it" {
@@ -5723,6 +5798,40 @@ test "AI senses: smell radius gates through walls, bleeding extends it" {
     w2.smell_fn = &FarSmell.radius;
     const t2 = nearestPlayerSnap(&w2, &far_snaps, 0, 0, 70, 0, 90.0);
     try std.testing.expectEqual(@as(i32, -1), t2.id);
+}
+
+test "stealth: CanSeeStealth light gate gates sight by the TickServer lightLevel" {
+    // EAITarget.check (IL=71): a player target must pass CanSee AND
+    // CanSeeStealth (EntityAlive IL=21): lightLevel > FastLerp(min, max,
+    // dist/sightRange). Stock zombieTemplateMale SightLightThreshold "-2,150":
+    // noon lightLevel (46.26) sees within ~31.6% of sightRange (8 m of a
+    // 30 m range, threshold 38.5); night (0) sees only point blank (threshold
+    // -2 at t=0); crouching (×0.6 → 27.76) drops the noon reach below 8 m.
+    // hear 0.1 keeps every assertion on the sight branch (beyond hearing).
+    var w: World = .{ .rules = .{ .ai = .{
+        .sense_dist_sq = 48 * 48,
+        .sight_light_threshold_min = 30.0,
+        .sight_light_threshold_max = 100.0,
+    } } };
+    defer w.deinit();
+    w.class_table[0].sight_range = 30.0;
+    w.class_table[0].sight_light_min = -2.0;
+    w.class_table[0].sight_light_max = 150.0;
+    const zyaw: f32 = 90.0; // faces +x; no walls (LOS clear).
+    const hear: f32 = 0.1;
+    const noon = stealthLightLevel(0.5, false, 0.89);
+    try std.testing.expectApproxEqAbs(@as(f32, 46.26), noon, 0.01);
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 8, 70, 0, hear, noon));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0, hear, noon));
+    const crouched = stealthLightLevel(0.5, true, 0.89);
+    try std.testing.expectApproxEqAbs(@as(f32, 27.76), crouched, 0.01);
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 8, 70, 0, hear, crouched));
+    // Night: lightLevel 0 sees only inside the threshold's -2 floor (t <
+    // 2/152 → < ~0.4 m); 5 m is hidden. Hearing is untouched by the light
+    // gate (a night 5 m player at hear 10 is still sensed by sound).
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 0.3, 70, 0, hear, 0.0));
+    try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 5, 70, 0, hear, 0.0));
+    try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 5, 70, 0, 10.0, 0.0));
 }
 
 test "AI move: collide-and-slide stops at a wall and slides along it" {
@@ -5852,9 +5961,10 @@ test "stealth: crouch muffles the hearing gate through walls" {
 
 test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" {
     // RE entity-ai.md CanSleeperAttackDetect: crouching shrinks sleeper
-    // disturbance to FastLerp(3, 15, lightAttackPercent); lightAttackPercent
-    // is 0.89 (passive) in deep-dark ambient (< 0.1) else 1. Night ambient 0
-    // → crouch range 13.68: a crouched player 16 m inside a volume_r 20
+    // disturbance to FastLerp(3, 15, lightAttackPercent). lightAttackPercent
+    // is the passive-89 when selfLight < 0.1 (TickServer IL_010B; the sim
+    // carries no held-item lights, so it always applies): crouch range
+    // 3 + 12×0.89 = 13.68. A crouched player 16 m inside a volume_r 20
     // sleeper stays hidden, 12 m wakes it. Standing wakes at the volume
     // radius regardless of distance within it.
     var w: World = .{ .rules = .{ .ai = .{
@@ -5869,13 +5979,6 @@ test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" 
     const p = w.spawnPlayer(16, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.player[ps].crouching = true;
-    // Deep-dark night (slice-1 ambient 0): crouch range 13.68, 16 m is out.
-    w.ambient_light = 0;
-    for (0..3) |_| _ = systemZombieAi(&w, 0.05);
-    try std.testing.expect(!w.sleeper[zs].awake);
-    // Same crouched distance at noon ambient (0.5): lightAttackPercent 1,
-    // crouch range 15, still out at 16 m.
-    w.ambient_light = 0.5;
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.sleeper[zs].awake);
     // A crouched player 12 m inside the volume wakes it (13.68 > 12).
@@ -5889,8 +5992,8 @@ test "stealth: crouched players only wake sleepers within FastLerp(3,15,light)" 
 test "stealth: standing players wake sleepers at the full volume radius" {
     // RE entity-ai.md CanSleeperAttackDetect: not crouching → true, so the
     // volume radius gates the wake (no FastLerp shrink). The crouch leg only
-    // protects beyond FastLerp(3,15,light): 16 m crouched at night is out
-    // (13.68), uncrouching wakes the 20 m volume.
+    // protects beyond FastLerp(3,15,0.89) = 13.68: 16 m crouched is out,
+    // uncrouching wakes the 20 m volume.
     var w: World = .{ .rules = .{ .ai = .{
         .crouch_sleeper_detect_min = 3.0,
         .crouch_sleeper_detect_max = 15.0,
@@ -5903,7 +6006,6 @@ test "stealth: standing players wake sleepers at the full volume radius" {
     const p = w.spawnPlayer(16, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     w.player[ps].crouching = true;
-    w.ambient_light = 0; // deepest night: crouch range 13.68, 16 m hidden
     for (0..3) |_| _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(!w.sleeper[zs].awake);
     w.player[ps].crouching = false;
@@ -5913,8 +6015,9 @@ test "stealth: standing players wake sleepers at the full volume radius" {
     try std.testing.expectEqual(zs, w.sleeper_wake_reqs[0].slot);
 }
 
-test "stealth: lightAttackPercent folds the passive-89 at the dark threshold" {
-    // RE entity-ai.md TickServer step 4: ambient < 0.1 → passive, else 1.
+test "stealth: lightAttackPercent folds the passive-89 below 0.1 selfLight" {
+    // RE PlayerStealth.TickServer IL_010B: selfLight (the held-item light,
+    // GetStealthLightLevel's out param) < 0.1 → passive-89, else 1.
     try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0.0, 0.89), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0.099, 0.89), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), stealthLightAttackPercent(0.1, 0.89), 0.0001);
