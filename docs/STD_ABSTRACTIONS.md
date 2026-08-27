@@ -11,12 +11,15 @@ Policy: **AGENTS rule 26** (stdlib / `std.Io` over raw `std.os.linux`).
 
 ```text
 app (server/ecs/world/assets)
-  → util/io_fs, util/clock, util/tcp_listen, litenet/udp_socket
+  → util/io_fs, util/clock, util/tcp_listen, util/sys_metrics, litenet/udp_socket
   → std.Io / std.Io.net / std.posix (thin)
   → OS
 ```
 
-**No application `std.os.linux` imports** (only forbid-comments remain).
+**No application `std.os.linux` imports** (only forbid-comments remain) - the
+single exception is `util/sys_metrics.zig`, a thin leaf whose two syscalls
+(sysinfo + getrusage) back the ops-dashboard `mem` metrics and stay out of the
+FS path (AGENTS rule 26 confinement list).
 
 ## Status by subsystem
 
