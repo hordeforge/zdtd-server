@@ -394,6 +394,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
   clamp, so a knockback beyond the stock band no longer ships non-stock motion
   to peers.
+- The inventory-ledger give delta is clamped to i16 (admin give with a
+  count above 32767 previously trapped the cast; the other ledger callers
+  already clamped).
 - Blood-moon spawn ceiling and wave-size casts clamp the config-scaled
   products in f64 (an unranged [rules.bloodmoon] budget_scale/wave_frac could
   trap the u32 cast).

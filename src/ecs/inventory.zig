@@ -154,7 +154,9 @@ pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
     const ok = w.inventory[ps].addItemStacked(item_id, count, w.maxStack(item_id));
     if (ok) {
         markInv(w, ps);
-        recordInv(w, peer, item_id, @intCast(count), .give);
+        // Ledger delta is i16; clamp like the other recordInv callers (admin
+        // give parses u16 counts up to 65535, which would trap the cast).
+        recordInv(w, peer, item_id, @intCast(@min(count, std.math.maxInt(i16))), .give);
     }
     return ok;
 }
