@@ -101,6 +101,35 @@ test "zpv2DropName removes matching player record only" {
     try std.testing.expect(none.blob == null);
 }
 
+test "zpv2DropName accepts the current ZPV12 save (wipeplayer on a v12 file)" {
+    // The wipe path must accept the current magic 'C' (v12) save, not just
+    // the pre-letter versions; a minimal v12 record has prog=0 (no progression
+    // tail, so the v11/v12 skill/mod tails are not walked).
+    var buf: [128]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[0..4], "ZPVC");
+    o = 8;
+    buf[o] = 5; // name_len
+    o += 1;
+    @memcpy(buf[o..][0..5], "Alice");
+    o += 5;
+    @memset(buf[o..][0..16], 0); // x,y,z,coins
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 0; // prog = 0 (no progression tail)
+    o += 1;
+    std.mem.writeInt(u32, buf[4..8], 1, .little);
+
+    const dropped = try zpv2DropName(std.testing.allocator, buf[0..o], "Alice");
+    defer if (dropped.blob) |b| std.testing.allocator.free(b);
+    try std.testing.expectEqual(@as(u32, 1), dropped.removed);
+    const out = dropped.blob.?;
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, out[4..8], .little));
+}
+
 test "players zpv7 round-trips use_times (tool durability) across restart" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
