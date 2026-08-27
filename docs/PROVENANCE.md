@@ -346,7 +346,7 @@ field-by-field provenance.
 
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
-| `max_horizontal_speed_mps` | 20.0 | R | Soft cap above sprint (~6 m/s) + vehicle margin; no stock key (audit B29; `[authority]` tunable planned) |
+| `max_horizontal_speed_mps` | 20.0 | R | Soft cap above sprint (~6 m/s) + vehicle margin; no stock key (audit B29); `[authority]` tunable (2026-08-27) |
 | `max_vertical_speed_mps` | 25.0 | R | Vertical envelope cap: rejects Y-only teleports (fly hacking) the horizontal clamp cannot see; above stock jump/fall (~7.5/9.8 m/s); `[authority]` tunable (2026-08-27) |
 
 ### 3.6 Guard policy (`src/server/guard_policy.zig`)
@@ -389,7 +389,7 @@ field-by-field provenance.
 | `ecs/systems.zig dmg_scale` | 100 | Z | Fixed-point damage accumulator scale (atomic-friendly); structural, not policy |
 | `ecs/systems.zig` TickServer light consts (`stealth_crouch_light_scale` 0.6, `stealth_light_passive_blend_a` 0.32, `stealth_light_passive_blend_b` 0.68, `stealth_light_level_max` 200, `stealth_self_light_dark` 0.1, `stealth_speed_visibility_scale` 0.15) | 0.6 / 0.32 / 0.68 / 200 / 0.1 / 0.15 | R | `PlayerStealth.TickServer` IL=432 exact chain (crouch x0.6 IL_00A6; the (0.32 + 0.68 x passive89) x 100 fold IL_0121-013F; FastClamp 0..200 IL_0140-014A; selfLight < 0.1 IL_010A; speedAverage x 0.15 IL_00CD) |
 | `world.zig` sleeper wake roll defaults (`sleeper_wake_near_min_default` -40, `sleeper_wake_near_max_default` 5, `sleeper_wake_far_min_default` 340, `sleeper_wake_far_max_default` 480) | -40 / 5 / 340 / 480 | R | Stock zombieTemplateMale `SleeperSightToWakeMin/Max` (entityclasses.xml); the fallback roll ranges for a sleeping class with no sleeper wake props (RE entity-ai.md D8.6 step 5) |
-| `ecs/aidirector.zig` wander_start_after / min_gap / max_gap, wandering_horde_size / spawn_dist, heat threshold / check / cooldowns / scout_dist | 28000 / 12000 / 24000 / 6 / 92 / 25 / 5 / 120 / 60 / 10 | R | AIDirector policy (RE: aidirector.md — horde spawn offset `RandomOnUnitCircle * 92f` IL_018B; horde schedule 12000-24000 world ticks; chunk-heat map asm.il 414504-415200; horde size is a fixed approximation of the gamestage-group-driven stock). Config: `[rules.director]` (ADR 0021). `heat_region_world`, `max_heat_regions`, `heat_scout_count` stay structural; `heat_event_ticks` (720) and `heat_feral_chance` (0.2) are doc-only until the heat-event duration / feral roll are modelled |
+| `ecs/aidirector.zig` wander_start_after / min_gap / max_gap, wandering_horde_size / spawn_dist, heat threshold / check / cooldowns / scout_dist | 28000 / 12000 / 24000 / 6 / 92 / 25 / 5 / 120 / 60 / 10 | R | AIDirector policy (RE: aidirector.md - horde spawn offset `RandomOnUnitCircle * 92f` IL_018B; horde schedule 12000-24000 world ticks; chunk-heat map asm.il 414504-415200; horde size is a fixed approximation of the gamestage-group-driven stock). Config: `[rules.director]` (ADR 0021). `heat_region_world`, `max_heat_regions`, `heat_scout_count` stay structural; `heat_event_ticks` (720) and `heat_feral_chance` (0.2) are live rules (2026-08-27): the heat-event duration stamps craft.zig notifyActivity and the feral roll doubles the cooldown (aidirector.zig, `heat_feral_cd_mult`) |
 | `game.zig isStockClientQuestName` prefix gate | quest_/tier/intro_/test_/challengegroup_reward_/treasure_ | A | Stock client quest-name families (client catalog proxy; a stock_xml catalog passes by construction, audit B28) — code gate, not tunable |
 | `assets/quests.zig objectiveScore` | 10..100 | Z | Phase "meat" pick heuristic for shared phases (ClearSleepers 100 .. unknown 10) — not a stock table; only affects which objective drives a phase when several share it |
 | `game/tick.zig tickAirDrop` | every N game-hours | Z | **Diverges**: stock schedules by day-count + fixed time-of-day (`SetupAirDropTimeRanges` IL=124 maps options 52/54 -> day-counts + TOD, `calcNextAirdrop` IL=39; default 3/3 days at 12:00; aidirector.md airdrop schedule, live-verified 2026-08-11). Also stock AirDropFrequency=0 does NOT disable (option default overrides the 0 pref) |
@@ -415,9 +415,9 @@ survives, see §3.10 for its caveats) unless noted.
 | Location | zdtd value | Stock value (source) | Sev | Tracking |
 |---|---|---|---:|---|
 | `ecs/aidirector.zig` heat cooldown | 120 s / 60 s | `AIDirectorChunkData` 240 s / 180-720 s (aidirector.md) | P2 | GAP_ANALYSIS (not in live audit) |
-| `server/game/trader.zig` sell | econ × sell_markdown | stock `XUiM_Trader.GetSellPrice` = econ × EconomicSellScale × SellMarkdown (loot-economy.md §5) | P1 | **live A29** (open) |
+| `server/game/trader.zig` sell | econ × EconomicSellScale × SellMarkdown × qmod / bundle | stock `XUiM_Trader.GetSellPrice` = econ × EconomicSellScale × SellMarkdown (loot-economy.md §5) | P1 | **Fixed 2026-08-27** (live A29 closed): `items.xml` EconomicSellScale + EconomicBundleSize parsed (`trader.zig:180-206`), quality mod + bundle divide applied |
 | `ecs/world.zig` class_table row `zombieFeral` | builtin (hash = zombie hash) | no stock class (0 hits entityclasses.xml) | P3 | not in live audit; tracked in GAP_ANALYSIS |
-| `ecs/inventory.zig` armorMitigation | flat 10%/piece, cap 50% | `items.xml` PhysicalDamageResist/ElementalDamageResist tier ranges + quality jitter | P1 | **live A35** (open) |
+| `ecs/inventory.zig` armorMitigation | quality-curve PhysicalDamageResist/ElementalDamageResist sum | `items.xml` PhysicalDamageResist/ElementalDamageResist tier ranges + quality jitter | P1 | **Fixed 2026-08-27** (live A35 closed): `items.xml` passive 41/42 quality curves parsed (`items.zig:855-861`, e.g. armorPrimitiveHelmet "8,12.3"), summed at quality through the passive VM; TargetArmor penetration applies |
 | `ecs/rules.zig Progression.*` base depletion | policy tunables | stock survival damage from buffs.xml `buffStatusHungry/Thirsty*` + `FoodChangeOT`/`WaterChangeOT`/`HealthChangeOT` | P3 | live A31 fixed (T16); base rates stay policy |
 | `world/tts.zig:418` filler skip | comptime pins | AssignIds `terrainFiller`/`terrainFillerAdaptive` (dump 2/3) | P3 | live A05/A06 class (Fixed); pin uses tracked |
 | `world/store.zig:310-313,370` no-blocks fallback | module pins | AssignIds terrain names | P3 | live A05 (Fixed); fallback pins tracked |
@@ -426,8 +426,8 @@ survives, see §3.10 for its caveats) unless noted.
 | `server/game/init_world.zig` ambient seeds | 11-12 entities at join (`listents`): 6 POI traders + 3 seed zombies/sleeper + 1 animal + 1 vehicle + 1 turret | stock spawns lazily: `listents` = players only (1-3) at join, animals/zombies later via AIDirector near players, traders on POI load | P3 | known divergence from SUT join-probe 2026-08-12 (7dtd-loadgen compare-sut); not in live audit |
 | `ecs/aidirector.zig` WorldClock rate | flat 0.39-0.44 game-min/s (DayNightLength 60 -> `seconds_per_hour` 150) | stock measured 0.33-0.37 game-min/s, Day 1 07:00-07:07 across 3 runs (DayNightLength 60 live stat; clock scaling differs from flat) | P2 | known divergence from SUT join-probe 2026-08-12 (7dtd-loadgen compare-sut, 3 runs); not in live audit |
 | C2S payload decode (litenet/net.zig) | `payload failed error=Overflow n=1` on EVERY pregen world (1/join); join FAILS on Pregen06k01, recovers on Pregen06k02/08k01/08k02 | stock joins all pregen worlds cleanly (0 overflows) | P1 | open bug from SUT world matrix 2026-08-12 (7dtd-loadgen compare-worlds, 5 worlds); not a deliberate divergence |
-| gameplay: `zombie_death_loot`, `item_drop_entity`, `loot_bag_pickup` (playtest demo) | zdtd FAIL | stock PASS | P2 | open gaps from playtest-compare demo 2026-08-12; not in live audit |
-| persistence: `persist_setup_blockmeta`, `persist_setup_te` (playtest persist) | zdtd FAIL | stock PASS | P2 | open gaps from playtest-compare persist 2026-08-12; not in live audit |
+| gameplay: `zombie_death_loot`, `item_drop_entity`, `loot_bag_pickup` (playtest demo) | zdtd FAIL | stock PASS | P2 | superseded 2026-08-22 recount: zombie_death_loot PASS (GAP_ANALYSIS entity-removal row); death bags carry the real inventory; the ItemDrop arm spawns the item entity and the Collect arm transfers + destroys the bag (2026-08-27 c2s/inv audit) |
+| persistence: `persist_setup_blockmeta`, `persist_setup_te` (playtest persist) | zdtd FAIL | stock PASS | P2 | superseded 2026-08-22 recount: placed-block rotation/meta rides the chunk raw plane + ZCH3 and TE state persists (GAP_ANALYSIS world-systems row); blockmeta/TE survive restart (2026-08-27) |
 | soak: seeded ambient zombies near spawn | zdtd player dies ~12s into the 15-min soak | stock player survives the full soak (900s) | P2 | ambient-seed divergence manifest (see ambient-seeds row); open from playtest-compare soak 2026-08-12 |
 
 **Resolved since the stale archive snapshot** (do not re-flag):
@@ -451,13 +451,13 @@ below is therefore the surviving record of the final live statuses.
 | A13/A14/A16/A18/A21/A24 | recipe unlock, quest builtins, dual ids, chunk pins, director/gamestages, NONE loaders | P2 open | file rows (§2); GAP_ANALYSIS |
 | A15/A17/A19/A20/A22/A23 | builtin leakage, name builtins, trader wallet, reward coin, deco skew, gameDir | Fixed | file rows (§2) |
 | A25-A28 | sleeper 5, weather, power OKs | OK | file rows (§2: sleepers/weather/powerblocks) |
-| A29 | trader price/sell ratios | **P1 open** | §3.9 divergence |
+| A29 | trader price/sell ratios | **Fixed 2026-08-27** | §3.9 divergence |
 | A30 | trader reset_interval unused | P3 | §3.9 divergence (restock cadence) |
 | A31 | loot respawn fallback | Fixed | §3.9 (resolved) |
 | A32 | Rules floors vs stock data | documented policy | §3.1 |
 | A33 | subbiome noise `_perm` literal | Residual | file row `world/subbiome_noise.zig` |
 | A34 | trap-kill XP (ElectricalTrapXP) | Fixed with floor | §3.1 `trap_kill_xp_frac` |
-| A35 | armor mitigation | **Open** | §3.9 divergence |
+| A35 | armor mitigation | **Fixed 2026-08-27** | §3.9 divergence |
 | A36 | ActiveRadiusEffects | Fixed (workstation-backed); residual T38 | file row `world/weather.zig` + WORK_PLAN T38 |
 | B01-B12 | zdtd policy caps | see live audit | file rows (§2) + GAME_OPTIONS.md |
 | B13 | tick throttles % N | Done | file rows (§2) |
