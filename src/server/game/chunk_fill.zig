@@ -474,12 +474,16 @@ pub fn rollBlockDropEvent(
     var total: u32 = 0;
     for (drops) |d| {
         // RandomRange(minCount, maxCount+1): uniform count in [min, max].
-        var count: u32 = d.count_min;
+        // Clamp at the roll: the final stack store is u16 and the XML count
+        // values parse as unbounded u32, so a modded row must not trap the
+        // @intFromFloat cast (same class as the explosion block-AoE clamp).
+        var count: u32 = @min(d.count_min, 65535);
         if (d.count_max > d.count_min) {
             const span: f64 = @as(f64, @floatFromInt(d.count_max)) + 1.0 -
                 @as(f64, @floatFromInt(d.count_min));
-            count = d.count_min + @as(u32, @intFromFloat(span * @as(f64, @floatCast(prng.nextFloat()))));
+            count += @as(u32, @intFromFloat(@min(span * @as(f64, @floatCast(prng.nextFloat())), 65535.0)));
         }
+        if (count > 65535) count = 65535;
         if (count == 0) continue; // IL: skip if 0 (the count="0" rows).
         // Stick path (IL_0078-0093): only rows with stick_chance >= 0.001
         // participate; the placement roll happens BEFORE the prob gate.
@@ -503,7 +507,9 @@ pub fn rollBlockDropEvent(
                     if (tool.item_id != 0) {
                         const mult = self.items.harvestMultiplier(tool.item_id, tool.quality, d.tag);
                         if (mult <= 0) continue;
-                        count = @intFromFloat(@as(f64, @floatFromInt(count)) * @as(f64, mult));
+                        // Clamp before the cast (modded HarvestCount rows can
+                        // multiply far past u32); the stack store is u16 anyway.
+                        count = @intFromFloat(@min(@as(f64, @floatFromInt(count)) * @as(f64, mult), 65535.0));
                         if (count == 0) continue;
                     }
                 }

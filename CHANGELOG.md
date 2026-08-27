@@ -394,6 +394,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
   clamp, so a knockback beyond the stock band no longer ships non-stock motion
   to peers.
+- Harvest drop rolls and the HarvestCount held-tool multiplier are clamped
+  to 65535 before their casts (modded drop/HarvestCount rows could exceed the
+  target type; the stack store is u16 anyway).
 - Explosion block damage is clamped to u16 per block (the loader allows
   BlockDamage up to 1e6; a modded blast times a DamageBonus multiplier could
   exceed 65535 and trap the cast - the chew path already clamped).
