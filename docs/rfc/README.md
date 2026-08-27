@@ -24,6 +24,8 @@ Status is one of: **draft**, **in review**, **decided**, **withdrawn**,
 
 Numbering: 4-digit, zero-padded, never reused — next is **RFC 0006**. RFC NNNN
 is the design counterpart of [PRD NNNN](../prd/README.md) for the same addon.
+RFC 0004 was never written: PRD 0004 (hot restart) shipped with its design
+carried by ADR 0011/0030 + WORK_PLAN T37 instead of a dedicated RFC.
 
 Adding an RFC: start from [TEMPLATE.md](TEMPLATE.md), take the next free
 number, name the file `NNNN-kebab-slug.md`, put `**Number:** RFC NNNN` in the
