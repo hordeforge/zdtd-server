@@ -51,7 +51,7 @@ header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:0.6r
 header::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--fg);opacity:.9}
 .hdr-left{display:flex;align-items:baseline;gap:0.65rem;min-width:0}
 .mark{width:20px;height:20px;display:grid;place-items:center;background:var(--fg);color:var(--bg);font-family:var(--mono);font-weight:800;font-size:0.56rem;letter-spacing:0.06em;line-height:1;flex:none}
-.word{font-family:var(--mono);font-size:0.74rem;font-weight:700;letter-spacing:0.05em;color:var(--fg);text-transform:uppercase}
+.word{display:inline;margin:0;font-family:var(--mono);font-size:0.74rem;font-weight:700;letter-spacing:0.05em;color:var(--fg);text-transform:uppercase}
 .ver{font-family:var(--mono);font-size:0.585rem;letter-spacing:0.025em;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30rem}
 .state{margin-left:0.2rem;display:inline-flex;align-items:center;gap:0.32rem;font-family:var(--mono);font-size:0.585rem;letter-spacing:0.07em;text-transform:uppercase;font-weight:600;color:var(--muted2);border-left:1px solid var(--line);padding-left:0.6rem}
 .state::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px var(--ok-soft)}
@@ -304,7 +304,7 @@ pre .in{color:var(--muted)} .err{color:var(--err)} .ok{color:var(--ok)} pre .met
 <a class="skip-link" href="#main-content">Skip to dashboard</a>
 <noscript><p class="noscript">JavaScript is required for live updates. Console commands still submit, but the response replaces this page.</p></noscript>
 <header>
-<div class="hdr-left"><span class="mark">ZD</span><span class="word">zdtd</span><span class="ver">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · operator console</span></div>
+<div class="hdr-left"><span class="mark">ZD</span><h1 class="word">zdtd</h1><span class="ver">__ZDTD_PRODUCT__ · __ZDTD_STOCK_WIRE__ · operator console</span></div>
 <span class="state" role="status" aria-label="Operator console live">operational</span>
 <div class="header-actions">
 <label class="refresh-ctrl" for="auto-refresh"><input type="checkbox" id="auto-refresh" checked> auto</label>
