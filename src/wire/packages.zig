@@ -3010,8 +3010,9 @@ test "world areas stock wire" {
 
 /// NetPackageEntityVelocity (write IL=23): entityId i32, bAdd bool, motion
 /// f32 x3, clamped to [-8, 8] per axis at Setup (protocol-packages.md §5.5.5).
-/// Sent by the replication path (NetEntityDistributionEntry) for entities
-/// with live motion so the client interpolates falls/knockback.
+/// The one builder for this package: the replication path
+/// (NetEntityDistributionEntry) sends live motion and the C2S hit-shove path
+/// sends knockback, both through here so every peer sees the stock clamp.
 pub fn buildEntityVelocityBody(buf: []u8, entity_id: i32, b_add: bool, vx: f32, vy: f32, vz: f32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);

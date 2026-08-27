@@ -1643,6 +1643,16 @@ encoding is one day high.
   `src/server/game/wasm_host.zig:97-115,282-323`,
   `src/server/game/bot.zig:494-530`
 
+- **NetPackageEntityVelocity has one builder** `WORKS` `(2026-08-27 re-audit)`
+  The knockback path used a second, unclamped encoder for the same package
+  (`wire/stock_xp.zig` VelocityArgs form); it was deleted and the C2S hit-shove
+  now goes through the canonical `packages.buildEntityVelocityBody`, which
+  applies stock's Setup clamp to [-8, 8] per axis (protocol-packages.md
+  §5.5.5). A knockback impulse beyond the stock band no longer ships
+  non-stock motion values to peers.
+  *Anchors:* `src/wire/packages.zig:3015-3030`,
+  `src/server/c2s/misc.zig:591-604`
+
 - **Where the blood-moon options come from** `WORKS` `(2026-08-23 re-audit)`
   The V3.1.0 SandboxCode path is implemented end to end (the row's
   "writes empty SandboxCode" claim was stale): the operator's
