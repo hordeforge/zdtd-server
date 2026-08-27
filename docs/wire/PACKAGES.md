@@ -7,7 +7,7 @@ Related: [WIRE_CHUNK.md](WIRE_CHUNK.md) · [INVENTORY.md](INVENTORY.md) · [WIRE
 Direction: ToServer=client→server (server MUST handle), ToClient=server→client
 (server may send), Both=either. `handled` = a dispatch arm in `c2s/*` (the join/move/inv/quest/misc domains, formerly game.zig onData);
 **Totals:** 190 stock catalog rows; 33 ToServer (all handled); handled cases 72; S2C emitted 46.  
-**Join map:** `packages.default_mappings` has **189** names (runtime `package_maps=189`). Catalog and fixture map can drift slightly; regenerate via parity tooling rather than hand-editing.
+**Join map:** `packages.default_mappings` has **190** names (runtime `package_maps=190`; 5 mapped names - NetPackageDroneDataSync, NetPackageDroneParticleEffect, NetPackageEntityFlags, NetPackageLight, NetPackageTreeFade - are not yet in this generated table; regenerate via the parity tooling below rather than hand-editing). Catalog and fixture map can drift slightly; regenerate via parity tooling rather than hand-editing.
 `sent` = zdtd emits it S2C. Regenerate with ../../../7dtd-engine-research/tools/parity + this script.
 
 The `read wire (head)` column lists `BinaryReader` virtual calls only, so it
