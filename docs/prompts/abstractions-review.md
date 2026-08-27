@@ -80,7 +80,7 @@ abstractions that match stock boundaries and stdlib.
 
 | Mode | Do |
 |---|---|
-| **Review only** | Verdict tables + `docs/reviews/ABSTRACTION_REVIEW.md`. No code. |
+| **Review only** | Verdict tables + `archive/` dated snapshot. No code. |
 | **Review + fix P0/P1** | Also delete/merge dual paths and mis-layered helpers; `make check` green. |
 | **Deep pass** | Full inventory of a named dir; score every public helper/facade. |
 
@@ -343,7 +343,7 @@ nothing → delete wrapper.
 
 ### 6. Deliverable (always)
 
-Write or update **`docs/reviews/ABSTRACTION_REVIEW.md`**:
+Write or update a dated snapshot **`archive/ABSTRACTION_REVIEW_<YYYY-MM-DD>.md`** (per INDEX.md "Review prompts and their findings": `docs/reviews/` was removed, snapshots live under `archive/`):
 
 - Scope and date
 - Table of findings (name, verdict, severity, action)

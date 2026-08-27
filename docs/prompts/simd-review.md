@@ -32,7 +32,7 @@ Scope modes (user picks one):
 
 | Mode | Do |
 |---|---|
-| **Review only** | Candidate table + `docs/reviews/SIMD_REVIEW.md`. No code. |
+| **Review only** | Candidate table + `archive/` dated snapshot. No code. |
 | **Implement P1** | Review + ship chosen kernels with scalar goldens; `make check` green. |
 | **Targeted files** | Either of the above, restricted to files the user lists. |
 
@@ -251,7 +251,7 @@ Prefer **ast-grep** for `for` over slice of numbers when helpful.
 
 ### 3. Deliverable
 
-Create/update **`docs/reviews/SIMD_REVIEW.md`**:
+Create/update a dated snapshot **`archive/SIMD_REVIEW_<YYYY-MM-DD>.md`** (per INDEX.md "Review prompts and their findings": `docs/reviews/` was removed, snapshots live under `archive/`):
 
 - Scope, date, Zig version
 - Existing `@Vector` usage (kernels already live in `wire/stock_chunk.zig` and
@@ -328,7 +328,7 @@ test "density simd matches scalar" {
 - [ ] Rejects explained
 - [ ] No recommendation that allocates on tick
 - [ ] If code shipped: identical (or documented) results + `make check` green
-- [ ] `docs/reviews/SIMD_REVIEW.md` written
+- [ ] `archive/` dated snapshot written
 - [ ] No em dashes / AI attribution
 
 ---

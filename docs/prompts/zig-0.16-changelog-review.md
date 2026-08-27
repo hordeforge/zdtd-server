@@ -95,7 +95,7 @@ cannot exist in the tree. The review hunts:
 
 | Mode | Do |
 |---|---|
-| **Review only** | Findings + `docs/reviews/ZIG_0_16_REVIEW.md`. No code changes. |
+| **Review only** | Findings + `archive/` dated snapshot. No code changes. |
 | **Fix** | Review + apply the rename/migration fixes; `make check` green. |
 
 Default if unspecified: **review only**, all of `src/`.
@@ -266,7 +266,7 @@ if found, the pin or the build is wrong).
 
 ### Always
 
-1. **`docs/reviews/ZIG_0_16_REVIEW.md`** (create or update) with:
+1. a dated snapshot **`archive/ZIG_0_16_REVIEW_<YYYY-MM-DD>.md`** (per INDEX.md "Review prompts and their findings": `docs/reviews/` was removed, snapshots live under `archive/`) (create or update) with:
    - Scope (paths, mode, date) and the release-notes URL
    - Per-section tables: location (`path:line`), changelog subsection, 0.15
      form, 0.16 form, severity

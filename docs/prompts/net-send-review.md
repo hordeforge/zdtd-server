@@ -86,7 +86,7 @@ wedged peer can stall the 50 ms tick.
 
 | Mode | Do |
 |---|---|
-| **Review only** | Findings + `docs/reviews/NET_SEND_REVIEW.md`. No code edits. |
+| **Review only** | Findings + `archive/` dated snapshot. No code edits. |
 | **Fix P0/P1** | Review + fix droppable/critical misclassification and hand-rolled retry loops; re-run tests. |
 | **Focus pass** | One checklist area (retry shape, enter bundle, compression, capture mode) on named paths. |
 
@@ -137,7 +137,7 @@ the send surface listed under "Read first".
 
 ## Deliverables
 
-1. **`docs/reviews/NET_SEND_REVIEW.md`** (create or update) with: scope (paths,
+1. a dated snapshot **`archive/NET_SEND_REVIEW_<YYYY-MM-DD>.md`** (per INDEX.md "Review prompts and their findings": `docs/reviews/` was removed, snapshots live under `archive/`) (create or update) with: scope (paths,
    mode, date), and a findings table where each row carries `path:line`, the
    violated rule (by number), the concrete failure mode (client wedged / tick
    stalled / counter drift), and severity.

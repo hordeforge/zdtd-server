@@ -73,7 +73,7 @@ questions) the langref sections for the specific builtins.
 
 | Mode | Do |
 |---|---|
-| **Review only** | Findings + `docs/reviews/ZIG_PRACTICES_REVIEW.md`. No code edits. |
+| **Review only** | Findings + `archive/` dated snapshot. No code edits. |
 | **Fix P0/P1** | Review + apply high-severity fixes (renames, builtin swaps); re-run tests. |
 | **Focus pass** | One checklist section (structure, naming, comptime, builtins, zero-cost) on named paths. |
 
@@ -332,7 +332,7 @@ Classify each hit: **canonical, leave** / **rename-only fix** /
 
 ### Always
 
-1. **`docs/reviews/ZIG_PRACTICES_REVIEW.md`** (create or update) with:
+1. a dated snapshot **`archive/ZIG_PRACTICES_REVIEW_<YYYY-MM-DD>.md`** (per INDEX.md "Review prompts and their findings": `docs/reviews/` was removed, snapshots live under `archive/`) (create or update) with:
    - Scope (paths, mode, date)
    - Per-section tables: location (`path:line`), current form, canonical
      form, severity
