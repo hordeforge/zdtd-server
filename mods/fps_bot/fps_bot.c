@@ -1,4 +1,4 @@
-// bot — FPS bot addon (ADR 0026, docs/BOTS_SPEC.md / BOTS_PRD.md).
+// bot — FPS bot addon (ADR 0026, RFC 0001 / PRD 0001).
 //
 // A WebAssembly plugin that commands player-mesh FPS bots through the host's
 // sense/act boundary. The servant (host) owns spawn/tick/replicate/kill/LOS
@@ -7,7 +7,7 @@
 // throttle, strafe/backpedal, low-health survival retreat, lost-sight combat
 // memory and hit retaliation — distilled from the Quake 3 / Doom 3 bot model,
 // cross-pollinated with the 7dtd-clanker C# port (docs/q3-inspiration-notes.md,
-// BOTS_SPEC §5.1). All inference is deterministic (per-slot LCG, no wall-clock
+// RFC 0001 §5.1). All inference is deterministic (per-slot LCG, no wall-clock
 // noise).
 //
 // Improvements cross-pollinated FROM 7dtd-clanker/mod (BotBrain/BotCombat/Bot):
@@ -155,7 +155,7 @@ static float parse_f(const char *p, const char **end) {
 }
 
 // ---------------------------------------------------------------------------
-// Reverse-direction host queries (zdtd.query; BOTS_SPEC §3). The guest writes
+// Reverse-direction host queries (zdtd.query; RFC 0001 §3). The guest writes
 // a text request, the host answers with a text response. Used for cover
 // seeking (Doom 3 idAASFindCover / clanker BotBrain.FindCover port).
 // ---------------------------------------------------------------------------
@@ -226,7 +226,7 @@ static int query_path(float bx, float bz, float tx, float tz, float *ox, float *
 // ---------------------------------------------------------------------------
 // Sense snapshot parsing.
 //
-// Layout (BOTS_SPEC §3, all little-endian): header 24 bytes, fixed-stride
+// Layout (RFC 0001 §3, all little-endian): header 24 bytes, fixed-stride
 // 32-byte entity records, then an optional 16-byte damage-event trailer.
 // Parsed by explicit offsets so a C struct can never drift from the Zig
 // packed records.
@@ -707,7 +707,7 @@ static void brain_tick(void) {
   }
 
   // Weapon map: kind-4 bot-info records pair each bot's net id with its
-  // host-assigned loadout (BOTS_SPEC §3); the per-bot loop adapts
+  // host-assigned loadout (RFC 0001 §3); the per-bot loop adapts
   // range/burst/lead to it (clanker WeaponProfile parity). A weapon change
   // (including the first record after spawn) re-seats the magazine.
   {
@@ -781,7 +781,7 @@ static void brain_tick(void) {
 
     // Retaliation (cross-pollinated FROM 7dtd-clanker Bot.OnDamaged: aggro
     // swap on being hit — quicker reaction when shot). Damage events ride the
-    // sense trailer (BOTS_SPEC §3); a victim that is this bot sets a grudge on
+    // sense trailer (RFC 0001 §3); a victim that is this bot sets a grudge on
     // the attacker. The grudge biases target selection below (GRUDGE_SCORE)
     // and decays after GRUDGE_TICKS. The dodge itself already fires from the
     // hp drop above; this adds *who* to hit back, and a heavy hit (sniper,
@@ -1361,7 +1361,7 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
       rn += st(reply_buf + rn, 599 - rn, "removed\n");
     } else if (slen == 5 && sub[0]=='s' && sub[1]=='k' && sub[2]=='i' && sub[3]=='l' && sub[4]=='l') {
       // bot skill <0-4> [id]: set the default skill for future bots, or, with
-      // an id, only that bot (per-bot override, BOTS_SPEC `bot cfg` spirit).
+      // an id, only that bot (per-bot override, RFC 0001 `bot cfg` spirit).
       char *sp3 = arg;
       while (*sp3 == ' ' || *sp3 == '\t') sp3++;
       long v = strtol_impl(sp3);
@@ -1387,7 +1387,7 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
         rn += st(reply_buf + rn, 599 - rn, "\n");
       }
     } else if (slen == 3 && sub[0]=='c' && sub[1]=='f' && sub[2]=='g') {
-      // bot cfg <id> <key> <val> — per-bot overrides (BOTS_SPEC `bot cfg`).
+      // bot cfg <id> <key> <val> — per-bot overrides (RFC 0001 `bot cfg`).
       // keys: vision | reaction | agg | selfpres | venge | camp | alert.
       // vision/reaction: 0 resets to the skill-derived default. Personality
       // keys (agg/selfpres/venge/camp/alert, 0..1): a negative value resets
