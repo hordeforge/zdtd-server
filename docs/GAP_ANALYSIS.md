@@ -4904,8 +4904,8 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | Projectile / ranged combat | WORKS (2026-08-20, RE items.md:1097-1140: projectiles are client-side GameObjects with ProjectileMoveScript, never server entities; the server surface is the C2S NetPackageDamageEntity claim, which zdtd validates range/cap/fatal/PvP/armor, applies, knocks back and kills) |
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |
 | Player respawn rules | HAVE (death → RequestToSpawnPlayer heal-when-dead) |
-| Death / backpack | PARTIAL (DropOnDeath loot bag modes) |
-| Party (membership) | PARTIAL (real `Party` state machine + `PartyData` snapshots; shared scope - kill-XP split, shared quests - open, §AUTHGATE) |
+| Death / backpack | WORKS (server spawns the death bag on the lethal event - C2S damage and hp-replicate AI-kill paths both call spawnDeathBag - with the victim's real inventory range by DropOnDeath mode (1 all, 2 toolbelt, 3 backpack) at preserved offsets, backpack map pin relayed; status.md DropOnDeath row) |
+| Party (membership) | WORKS (real `Party` state machine + `PartyData` snapshots; shared scope SHIPPED: kill-XP split (killer gets base x (1 - 0.1 x in-range members), GameStats[54] range, `killXpAward` + `NetPackageSharedPartyKill` tooltip), shared quests (in-range mate's shared quest advances on the killer's kill), party loot stage + highest game stage feed the director; §AUTHGATE) |
 | Allies | PARTIAL (identity-keyed AllyStore + AllyResponse, allies.zal persisted; no faction tiers) |
 | Spatial hash for queries | PARTIAL - non-client-visible (engineering; broadcastNear radius only, documented 2026-08-21) |
 | Dense free-list compaction | PARTIAL (scan free slots; cached per-Kind alive groups, `src/ecs/group.zig`) |
