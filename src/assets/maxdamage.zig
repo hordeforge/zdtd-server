@@ -38,7 +38,6 @@ pub const Dim = struct {
 
 /// Turret combat stats live in `components.TurretBlockStats` (pure shape;
 /// assets→ecs allowed, ecs→assets forbidden - production wiring uses hooks).
-
 pub const Table = struct {
     /// name → MaxDamage
     by_name: std.StringHashMapUnmanaged(u16) = .{},

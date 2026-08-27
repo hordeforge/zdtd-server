@@ -223,7 +223,6 @@ test "entity velocity body is the 17-byte stock shape" {
     try std.testing.expectEqual(@as(f32, -1), try r.readF32());
 }
 
-
 /// NetPackageEntitySetSkillLevelClient body: entityId i32 | skill string |
 /// level i32 (RE netpackage-bodies.md). Sent on a successful purchase.
 pub fn buildEntitySetSkillLevelBody(buf: []u8, entity_id: i32, skill: []const u8, level: i32) ![]u8 {

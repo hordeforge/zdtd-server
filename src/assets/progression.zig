@@ -579,18 +579,18 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
 }
 
 test "perkTotals folds purchased perk levels level-scaled and reverts" {
-    const attrs = [_]AttrDef{ .{ .name = "attFortitude", .max_level = 10 } };
+    const attrs = [_]AttrDef{.{ .name = "attFortitude", .max_level = 10 }};
     const perks = [_]PerkDef{
         .{
             .name = "perkHealingFactor",
             .max_level = 5,
             .parent_attr = "attFortitude",
-            .passives = &.{ .{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5 } },
+            .passives = &.{.{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5 }},
         },
         .{
             .name = "perkPackMule",
             .max_level = 5,
-            .passives = &.{ .{ .name = "GeneralDamageResist", .op = .base_add, .value = 1 } },
+            .passives = &.{.{ .name = "GeneralDamageResist", .op = .base_add, .value = 1 }},
         },
     };
     const pt = Table{ .attributes = attrs[0..], .perks = perks[0..] };

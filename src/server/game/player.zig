@@ -51,7 +51,7 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
     // Stat-changed observer (ADR 0034): the XP/level leg, one call per award.
     if (c.xp != before_xp) {
         const h = &self.sim.health[self.sim.playerByPeer(slot) orelse return];
-        self.statChangedObserver( c.entity_id, @intFromFloat(h.hp), @intFromFloat(h.food), @intFromFloat(h.water), @intFromFloat(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+        self.statChangedObserver(c.entity_id, @intFromFloat(h.hp), @intFromFloat(h.food), @intFromFloat(h.water), @intFromFloat(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
     }
 }
 
@@ -413,7 +413,6 @@ pub fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
     }
     return @max(1, lootStageOf(self, peer_slot));
 }
-
 
 /// Purchased level of a progression value (attribute/perk) for a client.
 pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {

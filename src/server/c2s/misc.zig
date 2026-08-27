@@ -99,7 +99,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         }
-        relayBodyAll(self,"NetPackageGameMessage", body, "GameMessage");
+        relayBodyAll(self, "NetPackageGameMessage", body, "GameMessage");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageSoundAtPosition")) {
@@ -156,7 +156,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        relayBodyExcept(self,"NetPackageParticleEffect", body, pe.entity_caused, "ParticleEffect");
+        relayBodyExcept(self, "NetPackageParticleEffect", body, pe.entity_caused, "ParticleEffect");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityStealth")) {
@@ -201,7 +201,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         };
         // Owner already ragdolled (SendPacketToTrackedPlayersAndTrackedEntity).
-        relayBodyExcept(self,"NetPackageEntityRagdoll", body, rg.entity_id, "EntityRagdoll");
+        relayBodyExcept(self, "NetPackageEntityRagdoll", body, rg.entity_id, "EntityRagdoll");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
@@ -991,7 +991,7 @@ fn nextLockTarget(r: *wire_binary.Reader) ?LockTarget {
 /// Relay `body` verbatim to every joined client, including the sender
 /// (stock GameMessageServer re-broadcasts to all peers, sender included).
 fn relayBodyAll(self: *Game, pkg: []const u8, body: []const u8, label: []const u8) void {
-    relayBodyExcept(self,pkg, body, null, label);
+    relayBodyExcept(self, pkg, body, null, label);
 }
 
 /// Relay `body` verbatim to every joined client except `except_entity_id`'s

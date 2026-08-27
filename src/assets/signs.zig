@@ -250,7 +250,6 @@ test "guid net order" {
     try std.testing.expectEqual(@as(u8, 0xaa), g[10]);
 }
 
-
 test "default [D] sign library loads from Data/Config/signs.xml" {
     const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.dirExists(gd)) return error.SkipZigTest;

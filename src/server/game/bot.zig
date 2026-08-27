@@ -84,7 +84,6 @@ const bot_spawn_spread: f32 = bot_host_defaults.spawn_spread;
 /// Config: `[bots] spawn_y`.
 const bot_spawn_y: f32 = bot_host_defaults.spawn_y;
 /// Horizontal arrival tolerance: move intent clears when within this distance.
-
 /// Sense record byte size (RFC 0001 §3): one fixed 32-byte record per entity.
 pub const sense_record_len: usize = 32;
 /// Sense kind value for a bot (RFC 0001 §3: 0 player, 1 zombie, 2 bot).

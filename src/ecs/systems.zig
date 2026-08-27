@@ -3665,8 +3665,12 @@ test "zombies chase faster at night (stock GetMoveSpeedAggro day/night split)" {
         defer w.deinit();
         w.director.clock.hours = 12;
         const z = w.spawnZombieDef(0, 70, 0, 40, .{
-            .name = "zombieBoe", .hash = 1, .kind = .zombie,
-            .chase_speed = 1.25, .chase_speed_day = 0.2, .wander_speed = 0.08,
+            .name = "zombieBoe",
+            .hash = 1,
+            .kind = .zombie,
+            .chase_speed = 1.25,
+            .chase_speed_day = 0.2,
+            .wander_speed = 0.08,
         }).?;
         _ = w.spawnPlayer(8, 70, 0, 0);
         const zs = w.slotOfNetId(z).?;
@@ -3679,8 +3683,12 @@ test "zombies chase faster at night (stock GetMoveSpeedAggro day/night split)" {
         defer w.deinit();
         w.director.clock.hours = 1;
         const z = w.spawnZombieDef(0, 70, 0, 40, .{
-            .name = "zombieBoe", .hash = 1, .kind = .zombie,
-            .chase_speed = 1.25, .chase_speed_day = 0.2, .wander_speed = 0.08,
+            .name = "zombieBoe",
+            .hash = 1,
+            .kind = .zombie,
+            .chase_speed = 1.25,
+            .chase_speed_day = 0.2,
+            .wander_speed = 0.08,
         }).?;
         _ = w.spawnPlayer(8, 70, 0, 0);
         const zs = w.slotOfNetId(z).?;

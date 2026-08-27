@@ -1939,9 +1939,13 @@ test "spawnSleeperDef carries per-entity class stats" {
     try std.testing.expectEqual(far0, w.sleeper[s2].wake_light_far);
     // A class carrying the ranges rolls inside them.
     const id3 = w.spawnSleeperDef(9, 70, 9, .{
-        .name = "custom", .hash = 7, .kind = .zombie,
-        .sleeper_wake_near_min = 0.0, .sleeper_wake_near_max = 0.0,
-        .sleeper_wake_far_min = 10.0, .sleeper_wake_far_max = 20.0,
+        .name = "custom",
+        .hash = 7,
+        .kind = .zombie,
+        .sleeper_wake_near_min = 0.0,
+        .sleeper_wake_near_max = 0.0,
+        .sleeper_wake_far_min = 10.0,
+        .sleeper_wake_far_max = 20.0,
     }, 0).?;
     const s3 = w.slotOfNetId(id3).?;
     try std.testing.expect(w.sleeper[s3].wake_light_near >= -40.0 and w.sleeper[s3].wake_light_near <= 5.0);
@@ -1956,9 +1960,13 @@ test "MoveSpeedRand rolls the day chase per entity, deterministically" {
     var w: World = .{};
     defer w.deinit();
     const def = EntityClass{
-        .name = "zombieBoe", .hash = 1, .kind = .zombie,
-        .chase_speed_day = 0.2, .chase_speed = 1.25,
-        .move_speed_rand_min = -0.2, .move_speed_rand_max = 0.25,
+        .name = "zombieBoe",
+        .hash = 1,
+        .kind = .zombie,
+        .chase_speed_day = 0.2,
+        .chase_speed = 1.25,
+        .move_speed_rand_min = -0.2,
+        .move_speed_rand_max = 0.25,
     };
     const z = w.spawnZombieDef(0, 70, 0, 40, def).?;
     const s = w.slotOfNetId(z).?;
@@ -1971,15 +1979,22 @@ test "MoveSpeedRand rolls the day chase per entity, deterministically" {
     try std.testing.expectEqual(rolled, w.class_id[s2].chase_speed_day);
     // No MoveSpeedRand prop: unrolled.
     const plain = w.spawnZombieDef(5, 70, 5, 40, .{
-        .name = "zombieBoe", .hash = 1, .kind = .zombie,
-        .chase_speed_day = 0.2, .chase_speed = 1.25,
+        .name = "zombieBoe",
+        .hash = 1,
+        .kind = .zombie,
+        .chase_speed_day = 0.2,
+        .chase_speed = 1.25,
     }).?;
     try std.testing.expectEqual(@as(f32, 0.2), w.class_id[w.slotOfNetId(plain).?].chase_speed_day);
     // An aggro >= 1 day value is not rolled (the stock `aggro < 1` gate).
     const dog = w.spawnZombieDef(7, 70, 7, 40, .{
-        .name = "dog", .hash = 2, .kind = .zombie,
-        .chase_speed_day = 1.2, .chase_speed = 1.3,
-        .move_speed_rand_min = -0.2, .move_speed_rand_max = 0.25,
+        .name = "dog",
+        .hash = 2,
+        .kind = .zombie,
+        .chase_speed_day = 1.2,
+        .chase_speed = 1.3,
+        .move_speed_rand_min = -0.2,
+        .move_speed_rand_max = 0.25,
     }).?;
     try std.testing.expectEqual(@as(f32, 1.2), w.class_id[w.slotOfNetId(dog).?].chase_speed_day);
 }

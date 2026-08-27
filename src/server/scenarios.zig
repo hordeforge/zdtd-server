@@ -1311,11 +1311,6 @@ test "scenario stealth meter broadcasts NetPackageEntityStealth to observers" {
     std.debug.print("PASS stealth-meter: NetPackageEntityStealth carries the noise fold\n", .{});
 }
 
-
-
-
-
-
 test "scenario demolish blast uses per-class ExplosionData and the earth DamageBonus" {
     // drainExplosions: the blast params come from the class's <property
     // class="Explosion"> block carried per entity (spawnZombie copies it from

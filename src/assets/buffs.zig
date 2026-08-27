@@ -1203,7 +1203,7 @@ test "hpLossPerSecond converts the ModifyStats Health row to a per-second rate" 
     const def = BuffDef{
         .name = "buffStatusHungry03",
         .update_rate_ticks = 44, // stock update_rate 2.2 s
-        .stat_mods = &.{ .{ .stat = "Health", .op = .base_subtract, .value = 0.25 } },
+        .stat_mods = &.{.{ .stat = "Health", .op = .base_subtract, .value = 0.25 }},
     };
     const per_s = hpLossPerSecond(&def);
     try std.testing.expectApproxEqAbs(@as(f32, 0.25 / 2.2), per_s, 0.0001);
@@ -1217,7 +1217,6 @@ test "stageBuffName maps stages to the stock conditional buff names" {
     try std.testing.expectEqualStrings("buffStatusThirsty03", stageBuffName(3, true).?);
     try std.testing.expect(stageBuffName(0, false) == null);
 }
-
 
 test "parseCurveValue fills per-level segments; curveAt clamps and levels" {
     var c: [max_curve_len]f32 = .{0} ** max_curve_len;

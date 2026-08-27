@@ -1192,7 +1192,6 @@ test "container group rolls are prob-weighted, not uniform" {
     try std.testing.expect(common + rare == 4000);
 }
 
-
 test "stock loot.xml container flags parse" {
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
     if (!io_fs.fileExists(path)) return error.SkipZigTest;

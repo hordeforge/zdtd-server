@@ -218,7 +218,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         // Stat-changed observer (ADR 0034): one bounded call per changed
         // player per tick - plugins react/announce; the sim stays authority.
         if (survival_changed or stamina_changed) {
-            self.statChangedObserver( c.entity_id, @intFromFloat(h.hp), @intFromFloat(h.food), @intFromFloat(h.water), @intFromFloat(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+            self.statChangedObserver(c.entity_id, @intFromFloat(h.hp), @intFromFloat(h.food), @intFromFloat(h.water), @intFromFloat(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
         }
         if (survival_changed or stamina_changed) {
             if (c.survival_sync_cd <= 0) {
@@ -339,7 +339,8 @@ pub fn actuatePoweredDoors(self: *Game) void {
     }
 }
 
-pub fn worldHour(self: *const Game) u64 {    const clk = self.sim.director.clock;
+pub fn worldHour(self: *const Game) u64 {
+    const clk = self.sim.director.clock;
     return @as(u64, clk.day) * 24 + @as(u64, @trunc(clk.hours));
 }
 
