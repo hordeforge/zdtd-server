@@ -438,7 +438,11 @@ pub const Server = struct {
     /// Parse and respond with `std.http.Server` over the buffered request bytes.
     fn serveHttp(self: *Server) !void {
         var in_r: std.Io.Reader = .fixed(self.recv_buf[0..self.recv_len]);
-        var out_buf: [49152]u8 = undefined;
+        // The out buffer must hold the largest response body (the rendered
+        // shell dashboard, up to max_shell_html) plus header headroom; 49 KiB
+        // was too small and the dashboard 500'd with WriteFailed for any page
+        // over it (shell.html alone is 63 KiB).
+        var out_buf: [max_shell_html + 4096]u8 = undefined;
         var out_w: std.Io.Writer = .fixed(&out_buf);
         var http_srv = http.Server.init(&in_r, &out_w);
         var req = http_srv.receiveHead() catch |err| {
