@@ -52,7 +52,7 @@ CATEGORY_PROSE = {
         "Per-trader stock (direct + group rolls), hours, live wallet, lazy full-reroll restock, "
         "stock persistence, turn-in on open and the WorldAreas compound package land; "
         "quest offers (NPCQuestList exchange complete); sell any item at EconomicValue x markdown "
-        "(quality lerp from the root quality_mod); POI placement open",
+        "(quality lerp from the root quality_mod); trader POI NPCs spawn at their IndexedBlockOffsets",
         "A: traders.xml, npc.xml, items.xml EconomicValue · R: npc-dialog.md · Z: TraderInfo roll, wallet, quest offers",
     ),
     "Blood moon": (
@@ -89,12 +89,14 @@ CATEGORY_PROSE = {
         "A: items.xml, recipes.xml, loot.xml · R: items.md, crafting-recipes.md, loot-economy.md",
     ),
     "Player progression": (
-        "Level, XP, survival stats and active buffs survive a restart (ZPV9, saved on reap); "
+        "Level, XP, survival stats and active buffs survive a restart (ZPV3 buffs + ZPV11 skill tail, saved on reap); "
         "eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; "
         "respawn targets the bedroll with a stock-order confirm; clean curve loader; "
         "biome + quest stage modifiers feed gameStageOf; "
-        "perk runtime, stats blob and XP pushes still open",
-        "A: progression.xml, buffs.xml · R: progression.md, entity-stats.md, save-persistence.md · Z: ZPV9 persist, survival knobs",
+        "server-validated perk spend (SetSkillLevelServer, parent/cost/max gates) with level-scaled "
+        "perk passives through the passive VM; the PlayerStats S2C blob and EntityAddExpClient pushes "
+        "ride the server ledger; the on_perk_spend verdict (ADR 0033) gates spending",
+        "A: progression.xml, buffs.xml · R: progression.md, entity-stats.md, save-persistence.md · Z: ZPV3/ZPV11 persist, survival knobs",
     ),
     "World systems": (
         "Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; "
@@ -143,6 +145,27 @@ def parse_gap():
             elif st == "MISSING":
                 missing += 1
         out.append((name, works, partial, missing, rows))
+    # The scorecard table is the count authority (the footer and the recount
+    # note both say "GAP_ANALYSIS scorecard wins on conflict"). The live-marker
+    # counts above are a cross-check; override each area's counts with the
+    # `## 2. Scorecard` rows so the dashboard can never drift from the doc.
+    in_score = False
+    score_rows = []
+    for line in lines:
+        if line.startswith("## 2. Scorecard"):
+            in_score = True
+            continue
+        if in_score and line.startswith("## "):
+            break
+        if not in_score:
+            continue
+        m = re.match(r"^\|\s*\[[^]]+\]\(#[0-9]+-[a-z-]+\)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|", line)
+        if m:
+            score_rows.append(tuple(int(x) for x in m.groups()))
+    if len(score_rows) == len(out):
+        for i, (w, p, m, _t) in enumerate(score_rows):
+            name, _w, _p, _m, rows = out[i]
+            out[i] = (name, w, p, m, rows)
     return out
 
 
