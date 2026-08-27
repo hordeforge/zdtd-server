@@ -20,11 +20,12 @@ pub const stock_wire_announce = "V 3.1.0";
 /// form (`V 3.1.0`, protocol.md VersionLongString packing).
 pub const stock_wire_gsi_version = "V.3.10.14";
 
-/// `VersionInformation.LongStringNoBuild` for the supported wire:
-/// `String.Format("{0} {1}.{2}", ReleaseType, Major, Minor)` with the **raw**
-/// Minor (0xA=10, not the display 3.1), asm.il VersionInformation IL_00BE
-/// `ldstr {0} {1}.{2}`. V3.1.0 b14 = "V 3.10". This is what the stock client
-/// sends as both `version` and `compVersion` (ConnectionManager IL_0095-00A4)
-/// and what `VersionAuthorizer` compares the client's compatibilityVersion
-/// against (ordinal-ignore-case, else EKickReason.VersionMismatch).
-pub const stock_wire_comp = "V 3.10";
+/// `VersionInformation.LongStringNoBuild` for the supported wire. The IL
+/// reading (`String.Format("{0} {1}.{2}", ReleaseType, Major, Minor)` with
+/// the raw Minor, asm.il IL_00BE) suggests "V 3.10", but the EMPIRICALLY
+/// VERIFIED stock behavior (network.md login-version-gate section, live
+/// V3.1.0 b14 captures 2026-08-22/23) is the display form: the real client
+/// sends "V 3.1.0" for both `version` and `compVersion` and the authorizer
+/// accepts it, kicking "V 3.10" with VersionMismatch=4. zdtd mirrors the
+/// observed gate; a loadgen join with "V 3.1.0" must PASS.
+pub const stock_wire_comp = "V 3.1.0";

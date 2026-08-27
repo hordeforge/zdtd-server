@@ -55,10 +55,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 c.puid_native = login.native;
                 // VersionAuthorizer (asm.il VersionAuthorizer): the client's
                 // compatibilityVersion must equal LongStringNoBuild
-                // (`version.stock_wire_comp` = "V 3.10" for V3.1.0 b14,
-                // `{0} {1}.{2}` with the raw Minor) ordinal-ignore-case, or
-                // stock kicks EKickReason.VersionMismatch(4). A different
-                // client build must not join and desync silently.
+                // (`version.stock_wire_comp` = "V 3.1.0" - the EMPIRICALLY
+                // verified value, network.md login-version-gate section; the
+                // IL reading "V 3.10" is wrong in practice) ordinal-ignore-
+                // case, or stock kicks EKickReason.VersionMismatch(4). A
+                // different client build must not join and desync silently.
                 if (!std.ascii.eqlIgnoreCase(login.compVersion(), version_mod.stock_wire_comp)) {
                     self.harness.counters.inc(.c2s_version_rejects);
                     if (c.peer) |p| {
