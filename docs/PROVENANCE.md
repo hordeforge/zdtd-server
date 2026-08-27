@@ -334,13 +334,13 @@ field-by-field provenance.
 
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
-| `EntityDef.max_hp` default | 40 | Z | **Diverges**: stock HP ships as `entityclasses.xml` `<passive_effect name="HealthMax" operation="base_set">` + `<replace_passive_effect>` variables (`healthSlim=125` … `healthSlimInfernal=1600`); not parsed yet (audit A34, P1). zombieBoe falls to 40 instead of 125±15% |
+| `EntityDef.max_hp` fallback | 40 | Z | **Fallback only** (audit A34 closed 2026-08-27): stock HP ships as `entityclasses.xml` `<passive_effect name="HealthMax" operation="base_set">` + `<replace_passive_effect>` variables (the healthSlim...healthBruteInfernal ladder, 125..3100) and IS parsed - property/passive rows share the class map, `^` vars resolve, bounds 1..1e6; 40 applies only to a class with no HP source. `perc_add` +-15% spawn rolls are deliberately pinned to base for deterministic sims |
 
 ### 3.4 Class table (`src/ecs/world.zig` 16-row `class_table`)
 
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
-| `class_table` rows | 16 | A | `entityclasses.xml` per-class defs + `entitygroups.xml` ZombiesAll (29 members); only ~6 classes reachable today, rest spawn with zombieBoe stats (audit A35, P2; GAP_ANALYSIS 1828-1838) |
+| `class_table` rows | 16 | A | `entityclasses.xml` per-class defs + `entitygroups.xml` ZombiesAll (29 members); the 16-row table holds only the per-kind defaults now - spawns carry the full resolved class stats on the entity (`spawnZombieDef`, audit A35 closed 2026-08-27), so every class reaches the AI with its own HP/speeds/damage |
 
 ### 3.5 Movement envelope (`src/server/movement.zig`)
 
