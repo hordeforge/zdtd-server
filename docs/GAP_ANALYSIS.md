@@ -1173,10 +1173,12 @@ parsed, and quest offering is unwired.
 
 - **Haggling / barter perks** `PARTIAL (waived)`
   `perkBetterBarter` / `perkDaringAdventurer` Bartering/TraderStage perks
-  (5..25%, +10..50) exist in `progression.xml` but require the progression/buff
-  runtime to apply; trading math is now stock-correct via `traders.xml` markups.
-  Waived as shop-overlay balance, not wire parity.
-  *Anchors:* `Data/Config/progression.xml:3064-3065`, `:3084`
+  (5..25%, +10..50) exist in `progression.xml`; trading math is stock-correct
+  via `traders.xml` markups. 2026-08-27: the progression runtime + passive VM
+  landed, but the barter passives are still not wired into `GetSellPrice` (the
+  sell path reads econ × EconomicSellScale × markup × qmod only). Still waived
+  as shop-overlay balance, not wire parity.
+  *Anchors:* `Data/Config/progression.xml:3064-3065`, `:3084`, `src/server/game/trader.zig:180-206`
 
 - **Trader tiers / TierItemGroups / traderstage_templates** `N/A (parity)`
   The engine tier machinery exists but stock V3.1.0 data never exercises it:
@@ -1576,8 +1578,9 @@ encoding is one day high.
 
 - **Blood-moon bonus loot bags** `PARTIAL (waived)`
   Stock `LootBonusScale` / `bonusLootEvery` bump on horde is not yet wired; horde
-  uses the ordinary `LootDropProb` path. Bonus loot needs true gamestage; waived
-  until progression/gamestage land.
+  uses the ordinary `LootDropProb` path. 2026-08-27: progression/gamestage
+  partially landed (quest ambushes + sleeper stage) but `LootBonusScale` is still
+  not wired into the horde bag roll. Still recorded, not a wire-parity gap.
   *Anchors:* `asm.il:413875`, `asm.il:414005`
 
 - **Blood-moon corpse decay / chunk pinning** `PARTIAL (waived)`
