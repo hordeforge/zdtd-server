@@ -394,6 +394,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
   clamp, so a knockback beyond the stock band no longer ships non-stock motion
   to peers.
+- Blood-moon spawn ceiling and wave-size casts clamp the config-scaled
+  products in f64 (an unranged [rules.bloodmoon] budget_scale/wave_frac could
+  trap the u32 cast).
 - Harvest drop rolls and the HarvestCount held-tool multiplier are clamped
   to 65535 before their casts (modded drop/HarvestCount rows could exceed the
   target type; the stack store is u16 anyway).

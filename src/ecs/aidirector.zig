@@ -438,7 +438,10 @@ pub const Director = struct {
         // (1.9f)` (asm.il:413528), a 1.9x ceiling over the world budget, so
         // the horde does not thin at the ordinary day/night cap.
         const cap: u32 = if (self.bloodmoon_active)
-            @intFromFloat(@as(f32, @floatFromInt(self.max_alive)) * w.rules.bloodmoon.budget_scale)
+            // Clamp in f64: [rules.bloodmoon] budget_scale has no declared
+            // range, so a large operator value must not trap the u32 cast
+            // (f32 cannot hold u32 max exactly; f64 can).
+            @intFromFloat(@min(@as(f64, @floatFromInt(self.max_alive)) * @as(f64, w.rules.bloodmoon.budget_scale), 4294967295.0))
         else
             self.max_alive;
         if (alive_z >= cap) {
@@ -460,7 +463,7 @@ pub const Director = struct {
             self.buildBloodMoonParties(w);
             self.recountAndTeleportHorde(w);
             const bm = self.stageGroup(bloodmoon_spawner);
-            var wave: u32 = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(self.bloodmoon_enemy_count)) * w.rules.bloodmoon.wave_frac)));
+            var wave: u32 = @max(1, @as(u32, @intFromFloat(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
             var bm_group: []const u8 = "";
             if (bm) |sg| {
                 wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
