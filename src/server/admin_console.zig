@@ -36,8 +36,15 @@ const apm = @import("../apm/root.zig");
 const world_store = @import("../world/store.zig");
 const chatMsgOk = c2s_text.chatMsgOk;
 const ecs = @import("../ecs/root.zig");
+const aidirector = @import("../ecs/aidirector.zig");
 const packages = @import("../wire/packages.zig");
 const assets_gamestages = @import("../assets/gamestages.zig");
+
+/// Ceiling for the operator `settime` day value. The sim's day arithmetic
+/// (blood-moon cycle math, gamestage) assumes day fits comfortably in u32; a
+/// giant operator value (e.g. the max u64) must not break it. 1e6 days is
+/// ~2700 real years of game time at the default DayNightLength.
+pub const max_admin_settime_day: u32 = 1_000_000;
 
 pub fn pollAdmin(self: *Game) void {
     const chunk = self.admin.pollLine(&self.admin_line) orelse return;
@@ -1524,8 +1531,12 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             const s = std.fmt.bufPrint(&tb2, "Day {d}, {d:0>2}:{d:0>2}\n", .{ clk.day, hh, mm }) catch return;
             self.adminReply(s);
         },
-        .settime => |world_time| {
+        .settime => |raw_time| {
             // Stock world time: 24000 ticks/day, 1000/hour (asm.il 1926175).
+            // Clamp: the sim's day arithmetic (blood-moon cycles, gamestage)
+            // assumes day fits comfortably in u32; a giant operator value must
+            // not overflow the day field or the cycle math.
+            const world_time = @min(raw_time, @as(u64, max_admin_settime_day - 1) * aidirector.ticks_per_day);
             const clk = &self.sim.director.clock;
             clk.day = @intCast(world_time / 24000 + 1);
             const in_day = world_time % 24000;
