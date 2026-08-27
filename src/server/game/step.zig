@@ -334,10 +334,11 @@ pub fn step(self: *Game) !void {
         self.wasm_plugins.onTick();
         // Temporal composability: a plugin that disabled itself this pass must
         // not leave queued (undrained) effects behind; withdraw before the
-        // next drain (paper: revertible effects).
+        // next drain, and despawn its applied spawns (the held inverse, paper
+        // 3.1) so a broken module's entities do not outlive it.
         var wsrc: [8]i16 = undefined;
         const wn = self.wasm_plugins.takeWithdrawn(&wsrc);
-        for (wsrc[0..wn]) |s| self.sim.commands.dropFrom(s);
+        for (wsrc[0..wn]) |s| withdrawPluginSrc(self, s);
     }
     {
         const cn = self.sim.completed_quests_n;
@@ -512,4 +513,16 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     // truncates out of i32 range.
     if (base >= 2147483648.0) return std.math.maxInt(i32);
     return @max(1, @as(i32, @floor(base)));
+}
+
+/// Withdraw one plugin src: drop its pending commands and despawn its applied
+/// spawns (paper 3.1 held inverse). Used on self-disable (trap/fuel, from the
+/// tick withdrawal pass) and before an admin reload, so a module's entities
+/// never outlive it.
+pub fn withdrawPluginSrc(self: *Game, src: i16) void {
+    var spawn_out: [ecs.command.max_commands]i32 = undefined;
+    const sn = self.sim.commands.dropFrom(src, &spawn_out);
+    for (spawn_out[0..sn]) |id| {
+        if (self.sim.slotOfNetId(id)) |es| self.sim.destroy(es);
+    }
 }

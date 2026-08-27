@@ -40,6 +40,11 @@ safe runtime components:
    disabled/trapped module's still-pending commands before the drain
    (`WasmHost.takeWithdrawn`, once per disable). No new queued effect verb may
    bypass attribution.
+   Amended 2026-08-28 (paper 3.1 held inverse): the buffer also records each
+   applied spawn per src, and withdrawal (self-disable and admin reload)
+   despawns those entities, so a module's spawned zombies do not outlive it.
+   The spawn ring is capped at `max_commands`, dropping the oldest attribution
+   when full (the most recent spawns stay revertible).
 3. **Declarative dependencies.** Modules export `_zdtd_requires` returning a
    comma-separated capability list (hook names + `log`/`tick`/`queue`/
    `sense`/`query`). Unknown or un-exported capabilities reject the module at

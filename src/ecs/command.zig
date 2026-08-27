@@ -37,6 +37,16 @@ pub const Buffer = struct {
     /// dropped by src before drain (paper).
     srcs: [max_commands]i16 = .{0} ** max_commands,
     n: usize = 0,
+    /// Applied spawns attributed per source (paper 3.1 held inverse): the
+    /// runtime records the spawned net id per plugin src so a withdrawn
+    /// module's entities are despawned on removal, not left behind. Ring
+    /// capped at max_commands; when full the oldest attribution is dropped
+    /// (documented truncation: the most recent spawns stay revertible).
+    spawn_srcs: [max_commands]i16 = .{0} ** max_commands,
+    spawn_ids: [max_commands]i32 = .{0} ** max_commands,
+    spawn_n: usize = 0,
+    /// Ring-truncation counter (not cleared on drain).
+    spawn_evicted: u32 = 0,
     /// Lifetime drop counter (not cleared on drain).
     dropped: u32 = 0,
     /// Once: soft warning when n crosses warn_at.
@@ -65,10 +75,13 @@ pub const Buffer = struct {
     }
 
     /// Withdraw (drop) every pending op attributed to `src`; later ops shift
-    /// down so drain order is preserved. Used when a plugin disables so its
-    /// queued effects never execute (temporal composability).
-    pub fn dropFrom(self: *Buffer, src: i16) void {
-        if (src == 0) return;
+    /// down so drain order is preserved. Also hands back the applied spawns
+    /// attributed to `src` (the held inverse, paper 3.1) so the caller can
+    /// despawn them; returns the count written to `out`. Used when a plugin
+    /// disables so its queued effects never execute and its spawned entities
+    /// do not outlive it (temporal composability).
+    pub fn dropFrom(self: *Buffer, src: i16, out: []i32) usize {
+        if (src == 0) return 0;
         var w: usize = 0;
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
@@ -80,10 +93,40 @@ pub const Buffer = struct {
             w += 1;
         }
         self.n = w;
+        var n: usize = 0;
+        w = 0;
+        for (self.spawn_ids[0..self.spawn_n], 0..) |id, si| {
+            if (self.spawn_srcs[si] != src) {
+                self.spawn_srcs[w] = self.spawn_srcs[si];
+                self.spawn_ids[w] = id;
+                w += 1;
+                continue;
+            }
+            if (n < out.len) out[n] = id;
+            n += 1;
+        }
+        self.spawn_n = w;
+        return n;
     }
 
     pub fn clear(self: *Buffer) void {
         self.n = 0;
+    }
+
+    /// Record an applied spawn for its source. Ring capped at max_commands:
+    /// when full the oldest attribution is dropped so the newest spawns stay
+    /// revertible (the guarantee degrades gracefully, never silently).
+    fn recordSpawn(self: *Buffer, src: i16, net_id: i32) void {
+        if (src == 0) return;
+        if (self.spawn_n >= max_commands) {
+            std.mem.copyForwards(i16, self.spawn_srcs[0 .. self.spawn_n - 1], self.spawn_srcs[1..self.spawn_n]);
+            std.mem.copyForwards(i32, self.spawn_ids[0 .. self.spawn_n - 1], self.spawn_ids[1..self.spawn_n]);
+            self.spawn_n -= 1;
+            self.spawn_evicted += 1;
+        }
+        self.spawn_srcs[self.spawn_n] = src;
+        self.spawn_ids[self.spawn_n] = net_id;
+        self.spawn_n += 1;
     }
 
     pub fn len(self: *const Buffer) usize {
@@ -104,7 +147,8 @@ pub const Buffer = struct {
         while (i < count) : (i += 1) {
             switch (self.ops[i]) {
                 .spawn_zombie => |z| {
-                    if (w.spawnZombie(z.x, z.y, z.z, z.hp) != null) {
+                    if (w.spawnZombie(z.x, z.y, z.z, z.hp)) |nid| {
+                        self.recordSpawn(self.srcs[i], nid);
                         r.spawned += 1;
                         r.applied += 1;
                     }
@@ -182,11 +226,12 @@ test "dropFrom withdraws a plugin's pending effects, preserving drain order" {
     // Temporal composability (paper): ops attributed to a disabled plugin are
     // dropped before drain; remaining ops shift down and keep their order.
     var buf: Buffer = .{};
+    var out: [max_commands]i32 = undefined;
     _ = buf.pushSrc(0, .{ .damage = .{ .net_id = 1, .amount = 1 } }); // native
     _ = buf.pushSrc(1, .{ .damage = .{ .net_id = 2, .amount = 2 } }); // plugin 1
     _ = buf.pushSrc(1, .{ .damage = .{ .net_id = 3, .amount = 3 } }); // plugin 1
     _ = buf.pushSrc(2, .{ .damage = .{ .net_id = 4, .amount = 4 } }); // plugin 2
-    buf.dropFrom(1);
+    try std.testing.expectEqual(@as(usize, 0), buf.dropFrom(1, &out));
     try std.testing.expectEqual(@as(usize, 2), buf.len());
     try std.testing.expectEqual(@as(i16, 0), buf.srcs[0]);
     try std.testing.expectEqual(@as(i16, 2), buf.srcs[1]);
@@ -194,8 +239,54 @@ test "dropFrom withdraws a plugin's pending effects, preserving drain order" {
     try std.testing.expectEqual(@as(i32, 1), buf.ops[0].damage.net_id);
     try std.testing.expectEqual(@as(i32, 4), buf.ops[1].damage.net_id);
     // src 0 (native) is never withdrawable.
-    buf.dropFrom(0);
+    try std.testing.expectEqual(@as(usize, 0), buf.dropFrom(0, &out));
     try std.testing.expectEqual(@as(usize, 2), buf.len());
+}
+
+test "dropFrom hands back a plugin's applied spawns (held inverse)" {
+    // Paper 3.1: the runtime holds the spawn inverse and replays it on
+    // withdrawal, so a disabled module's entities do not outlive it.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+
+    _ = w.commands.pushSrc(1, .{ .spawn_zombie = .{ .x = 1, .y = 70, .z = 2, .hp = 40 } });
+    _ = w.commands.pushSrc(2, .{ .spawn_zombie = .{ .x = 3, .y = 70, .z = 4, .hp = 40 } });
+    const dr = w.commands.drain(&w);
+    try std.testing.expectEqual(@as(u32, 2), dr.spawned);
+    try std.testing.expectEqual(@as(u32, 2), w.countKind(.zombie));
+
+    // Withdraw plugin 1: its spawned entity id is returned, plugin 2's is not.
+    // The caller (Game withdraw) despawns what dropFrom hands back.
+    var out: [max_commands]i32 = undefined;
+    const n = w.commands.dropFrom(1, &out);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    if (w.slotOfNetId(out[0])) |es| w.destroy(es);
+    try std.testing.expectEqual(@as(u32, 1), w.countKind(.zombie));
+    try std.testing.expect(w.slotOfNetId(out[0]) == null);
+
+    // Withdraw plugin 2: the last spawn is returned and despawned.
+    const n2 = w.commands.dropFrom(2, &out);
+    try std.testing.expectEqual(@as(usize, 1), n2);
+    if (w.slotOfNetId(out[0])) |es| w.destroy(es);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
+    try std.testing.expect(w.slotOfNetId(out[0]) == null);
+}
+
+test "spawn ring truncates oldest attribution at cap" {
+    var buf: Buffer = .{};
+    // Fill past the ring cap: the newest attribution survives withdrawal.
+    for (0..max_commands + 4) |i| {
+        buf.recordSpawn(1, @intCast(100 + i));
+    }
+    try std.testing.expectEqual(@as(u32, 4), buf.spawn_evicted);
+    try std.testing.expectEqual(max_commands, buf.spawn_n);
+    var out: [max_commands]i32 = undefined;
+    const n = buf.dropFrom(1, &out);
+    try std.testing.expectEqual(max_commands, n);
+    // The oldest 4 are gone; the newest max_commands survive.
+    try std.testing.expectEqual(@as(i32, 100 + 4), out[0]);
+    try std.testing.expectEqual(@as(i32, 100 + max_commands + 3), out[max_commands - 1]);
 }
 
 test "command buffer soft warn at warn_ratio" {

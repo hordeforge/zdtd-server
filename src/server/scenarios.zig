@@ -4200,6 +4200,40 @@ test "scenario join enter bundle arrives in full on the capture peer" {
     std.debug.print("PASS enter bundle: {d}/{d} critical packages arrived on capture\n", .{ checked, names.len });
 }
 
+test "scenario plugin withdrawal despawns applied spawns" {
+    // Paper 3.1 held inverse: a withdrawn plugin's applied queue spawns are
+    // despawned by the Game withdrawal path (self-disable and reload both
+    // route here), so a broken module's entities never outlive it.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_withdraw");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_withdraw", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // The flat world seeds a few zombies; assert relative to the baseline.
+    const base = g.sim.countKind(.zombie);
+    _ = g.sim.commands.pushSrc(1, .{ .spawn_zombie = .{ .x = 0, .y = 70, .z = 0, .hp = 40 } });
+    _ = g.sim.commands.pushSrc(2, .{ .spawn_zombie = .{ .x = 4, .y = 70, .z = 4, .hp = 40 } });
+    _ = g.sim.commands.drain(&g.sim);
+    try std.testing.expectEqual(base + 2, g.sim.countKind(.zombie));
+
+    // Withdraw plugin 1 only: its spawn is despawned, plugin 2's survives.
+    @import("game/step.zig").withdrawPluginSrc(g, 1);
+    try std.testing.expectEqual(base + 1, g.sim.countKind(.zombie));
+
+    // Withdraw plugin 2: back to the baseline.
+    @import("game/step.zig").withdrawPluginSrc(g, 2);
+    try std.testing.expectEqual(base, g.sim.countKind(.zombie));
+
+    std.debug.print("PASS plugin withdraw: applied spawns despawned per src\n", .{});
+}
+
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {
     var path_buf: [512]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name });

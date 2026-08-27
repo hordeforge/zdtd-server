@@ -8,6 +8,7 @@ const plugin_mod = @import("../../plugin/root.zig");
 const ecs = @import("../../ecs/root.zig");
 const c2s_text = @import("../c2s_text.zig");
 const nav = @import("../../world/nav.zig");
+const game_step = @import("step.zig");
 
 const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
 
@@ -379,6 +380,10 @@ pub fn adminPlugin(self: *Game, rest: []const u8) void {
             return;
         };
         const path = self.wasm_plugins.slots[idx].name;
+        // Paper HMR: disposing the old instance withdraws its pending commands
+        // and despawns its applied spawns before reinstantiation, so the
+        // reloaded module starts clean instead of inheriting the old queue.
+        game_step.withdrawPluginSrc(self, @intCast(idx + 1));
         const ok = self.wasm_plugins.reload(idx, path);
         self.adminReply(if (ok) "plugin reloaded\n" else "plugin reload failed; see server log\n");
         return;
