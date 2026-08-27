@@ -394,3 +394,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
   clamp, so a knockback beyond the stock band no longer ships non-stock motion
   to peers.
+- Disconnect cleanup: a dropped or transport-reaped player's sim entity is
+  now destroyed immediately (previously it lingered as a ghost until the slot
+  was reused - a phantom in listents/mem counts and a spawn-on-approach
+  candidate for late joiners), and the reap path shares the one drop path.

@@ -59,6 +59,15 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
             }
         }
     }
+    // The player entity is now gone from every client's view; destroy the sim
+    // entity so the slot frees and no ghost player lingers (a phantom in
+    // listents/mem counts and a spawn-on-approach candidate for late joiners).
+    // The next spawn on this peer slot reaps anyway (world.zig:1241), but
+    // dropping the ghost now keeps counts and replication honest between
+    // joins. Death observers have no subscribers, so no kill semantics leak.
+    if (self.sim.playerByPeer(slot)) |ps| {
+        self.sim.destroy(ps);
+    }
     self.clients[slot] = .{};
     self.refreshInfoPlayers();
 }

@@ -284,6 +284,10 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     var rr = binary.Reader{ .data = rmb };
     try std.testing.expectEqual(a_eid, try rr.readI32());
     try std.testing.expectEqual(@as(u8, @intFromEnum(packages.RemoveEntityReason.despawned)), try rr.readByte());
+    // The drop destroys the sim player entity: no ghost player lingers for
+    // this peer slot (listents/mem phantom, spawn-on-approach for late
+    // joiners) until the slot is reused.
+    try std.testing.expect(g.sim.playerByPeer(ca.slot) == null);
 
     std.debug.print(
         "PASS multiplayer-bodies: B saw A id={d}, A saw B id={d}, drop sent Remove(despawned)\n",

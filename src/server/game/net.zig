@@ -15,7 +15,6 @@ const ln_packet = @import("../../litenet/packet.zig");
 const packages = @import("../../wire/packages.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
-const systems = @import("../../ecs/systems.zig");
 
 const window_fast_attempts = game_mod.window_fast_attempts;
 const window_retry_sleep_ns = game_mod.window_retry_sleep_ns;
@@ -365,14 +364,15 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
                 self.harness.counters.inc(.stale_peers_reaped);
                 var ts: [19]u8 = undefined;
                 std.debug.print("zdtd: {s} peer reaped dead local_id={d} slot={d} entity={d}\n", .{ clock.wallStamp(&ts), p.local_id, c.slot, c.entity_id });
-                _ = systems.vehicleDetach(&self.sim, c.entity_id);
                 // Hard-disconnect reap: persist before the slot clears so the
                 // player's data is not lost until the next autosave (GAP
                 // "Save on disconnect / kick"). Pre-join peers have no entity.
                 if (c.entity_id > 0) self.savePlayers() catch |e| persist.logPersistErr(self, "save players on reap", e);
-                self.clearLocksForPeer(c.slot);
-                c.* = .{};
-                self.refreshInfoPlayers();
+                // One drop path owns the disconnect cleanup (party removal,
+                // claims, EntityRemove fan-out, sim destroy); the hand-rolled
+                // reset here was a partial subset that left the sim player
+                // entity alive (ghost) and skipped the remove broadcast.
+                self.dropClientSlot(c.slot, "reap");
             }
         }
     }
