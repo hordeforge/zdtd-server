@@ -36,7 +36,13 @@
   since the gate landed 2026-08-21. Fixed to 'V 3.1.0', verified with live
   joins. Harness note: single-bot loadgen joins pass; two concurrent bots can
   exhaust the 250ms critical pump budget on the 255KB block IdMapping under
-  localhost ACK pacing (by-design cap, not a join-path bug).
+  localhost ACK pacing (by-design cap, not a join-path bug). Root cause
+  pinned 2026-08-27: the loadgen's own stage machine stalls at LoginAnswered
+  on some runs, which stops its ACK processing entirely - the server's
+  reliable pump then cannot drain regardless of the budget (verified: a 1s
+  budget changed nothing; the real client and the passing loadgen runs
+  deliver the bundle fine at 250ms). Harness limitation, not a server
+  defect; the pump's bounded give-up is correct behavior.
 - **Stale-row corrections**: enemy animals, battery/solar, per-class AITask,
   PlayerQuestPositions, sounds row - all re-audited against the code/RE.
 
