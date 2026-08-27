@@ -114,6 +114,7 @@ never silently truncate a report.
 | `sleeper_scan` | Sleeper-volume player test pass (serial or job batch) |
 | `te_scan` | One-time storage-TE block scan of a streamed chunk |
 | `chunk_gen` | Resident-miss chunk materialization: disk load or procedural gen |
+| `survival` | Per-player passive-effects VM + survival stats pass (P4b; `survival_players` / `vm_recomputes`) |
 
 `save_encode`, `save_flush_wait`, `terrain_snap`, `sleeper_scan`, `te_scan` and
 `chunk_gen`
