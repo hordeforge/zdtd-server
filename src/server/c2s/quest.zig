@@ -294,7 +294,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // window to the declared maximum (accept + offer paths below).
         const req_tier: u8 = blk: {
             const mt = self.sim.catalog.max_tier;
-            const tl: u8 = @intCast(@max(head.tier_level, 0));
+            // Clamp: tier_level is a raw wire i32 and a hostile value above
+            // 255 would trap the u8 cast; any tier above the stock max is
+            // nonsense, so the max_tier comparison below picks mt anyway.
+            const tl: u8 = @intCast(@min(@max(head.tier_level, 0), 255));
             if (mt > 0 and tl > mt) break :blk mt;
             break :blk tl;
         };

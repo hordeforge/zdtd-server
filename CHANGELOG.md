@@ -398,6 +398,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   roll array (a large on_loot_roll verdict could read out of bounds) and the
   block-damage verdict products widen to u64 (u32 overflowed for a large
   verdict times a u16 damage).
+- The trader quest-list tier (raw wire i32) is clamped to 255 before its u8
+  cast; a hostile value above 255 trapped.
 - The inventory-ledger give delta is clamped to i16 (admin give with a
   count above 32767 previously trapped the cast; the other ledger callers
   already clamped).
