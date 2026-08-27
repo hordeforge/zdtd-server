@@ -6177,8 +6177,8 @@ test "scenario vending lock/password/allowed editing (owner-gated)" {
 }
 
 test "scenario storm_frequency knob reaches weather and the GameStats wire" {
-    // TODO open item: StormFrequency was a compile-time GameStats default with
-    // no knob. [sim] storm_frequency now feeds the weather scheduler divisor
+    // StormFrequency was a compile-time GameStats default with no knob;
+    // [sim] storm_frequency now feeds the weather scheduler divisor
     // and the GameStats wire value the client is told, so the two agree.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -6225,7 +6225,7 @@ test "scenario storm_frequency knob reaches weather and the GameStats wire" {
 }
 
 test "scenario weather storm state survives a restart" {
-    // Storm SM persistence (TODO residual): force biome 0 into an active storm,
+    // Storm SM persistence: force biome 0 into an active storm,
     // deinit saves weather.zwt, and a fresh Game in the same world resumes the
     // storm instead of re-rolling the opening groups.
     var tmp = std.testing.tmpDir(.{});
