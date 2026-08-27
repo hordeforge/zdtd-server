@@ -2947,12 +2947,17 @@ and server-to-client XP/level pushes do not exist.
 - **Client to server progression blob (NetPackagePlayerStats)** `PARTIAL (waived)`
   `EntityNetworkStats` blob is intentionally dropped (`accept, no sim`) — stock
   `ToEntity` level relay would trust client stats. Server persists level/XP
-  authority; peer stat display is polish, not wire parity.
-  *Anchors:* `src/server/game.zig:4785-4788`, `asm.il:833182`
+  authority. S2C snapshots ship 2026-08-27: the server-authored
+  `NetPackagePlayerStats` body goes to every peer on join/progression changes
+  (`join.zig sendPlayerStatsTo`), so peer level display is wire-backed, not
+  client-echoed.
+  *Anchors:* `src/server/game/join.zig:605-660`, `asm.il:833182`
 
 - **Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)** `PARTIAL (waived)`
   Builder exists but push is via authoritative `EntityStatChanged`/`PlayerStats`
   path that is pending full progression ledger sync. Dedicated push is polish.
+  SHIPS 2026-08-27: `NetPackageEntityAddExpClient` rides the server XP award
+  (`game/player.zig:143`) driven by the server ledger.
   *Anchors:* `src/wire/packages.zig:158-159`, `asm.il:813609`
 
 - **progression.xml attribute and perk catalog load** → **non-goal** (2026-08-25):
@@ -2965,12 +2970,19 @@ and server-to-client XP/level pushes do not exist.
   Skill level changes are intentionally not authoritative (no server-side perk
   table yet); the client owns spend and the server persists level/XP. Full
   perk table + `GameEventRequest` wiring is a progression follow-on.
-  *Anchors:* `src/server/game.zig:4794-4799`, `src/wire/packages.zig:2216-2235`
+  SHIPS 2026-08-27: server-authoritative spend via
+  `NetPackageEntitySetSkillLevelServer` (`c2s/misc.zig:331`), validated against
+  the catalog (parent/cost/max gates) with the `on_perk_spend` verdict
+  (ADR 0033) on top.
+  *Anchors:* `src/server/c2s/misc.zig:331`, `src/wire/packages.zig:2216-2235`
 
 - **Perk / attribute passive effects applied to gameplay** `PARTIAL (waived)`
   649 `passive_effect` rows not yet wired; armour mitigation is the only live sim
   effect. Needs full `effect_group` VM — waived until progression runtime exists.
-  *Anchors:* `src/ecs/inventory.zig:146-157`, `Data/Config/progression.xml`
+  SHIPS 2026-08-27 (bounded VM): level-scaled perk passives fold through the
+  passive-effects VM over the tracked stats (armour resist + HealthChangeOT
+  regen), revertibly like buffs.
+  *Anchors:* `src/ecs/inventory.zig:146-157`, `src/assets/progression.zig:547-588`
 
 - **Crafting skills / magazines / recipe unlock by progression** `PARTIAL (waived)`
   99 `unlock_entry` rows gating recipes behind crafting_skill not yet parsed;
@@ -2982,7 +2994,10 @@ and server-to-client XP/level pushes do not exist.
   Spawn uses `gsScale=1` (no scaling); `gamestages.xml` is now parsed in `§8`
   Gamestage PARTIAL and wiring full stage to every spawn needs the progression
   ledger. Waived until progression-driven difficulty lands.
-  *Anchors:* `src/server/game.zig:7044`, `src/assets/gamestages.zig`
+  PARTIAL 2026-08-27: `gamestages.xml` parsing + stage-0 spawn-group resolution
+  now drive quest ambushes (`QuestActionSpawnGSEnemy`) and sleeper stage
+  resolution; per-spawn `gsScale` level scaling is still recorded.
+  *Anchors:* `src/assets/gamestages.zig`, `src/server/game/hooks.zig` questSpawnGsEnemy
 
 - **buffs.xml catalog and passive_effect parse** → **non-goal** (2026-08-25):
   482 buff defs parse; the full passive_effect VM (comma lists, level
