@@ -220,6 +220,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageHoldingItem")) {
+        // Rate gate: unthrottled, a spam loop would fan the held-item echo
+        // out to every nearby peer for free (same rationale as SetBlock).
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         const h = packages.stock_inv.readHoldingItem(body) catch return true;
         if (h.entity_id != 0 and h.entity_id != c.entity_id) {
             self.harness.counters.inc(.ownership_rejects);
@@ -242,6 +248,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageItemDrop")) {
+        // Rate gate: each accepted drop spawns an item entity + broadcast to
+        // observers; without the token a spam loop amplifies C2S bandwidth.
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         const d = packages.stock_inv.readItemDrop(body) catch return true;
         const item_id = reverseItemType(self, d.stack.type_id);
         if (item_id == 0 or d.stack.count == 0) return true;
@@ -285,6 +297,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageBag")) {
+        // Rate gate: a bag write mutates inventory and echoes to every other
+        // peer; unthrottled it is the same broadcast-amplification hole as
+        // the SetBlock relay.
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         const entity_id = packages.stock_inv.peekBagEntityId(body) catch return true;
         if (entity_id == c.entity_id or entity_id == 0) {
             const ps = self.sim.playerByPeer(c.slot) orelse return true;
@@ -343,6 +362,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     }
     if (std.mem.eql(u8, name, "NetPackageTileEntity")) {
         if (self.quarantineDenies(c, .container)) return true;
+        // Rate gate: every TE write mutates a container/workstation/trigger
+        // and rebroadcasts to nearby peers (same amplification rationale as
+        // SetBlock; the SetBlock order is quarantine first, then token).
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         // Vending TE (type 7) first: its payload version i32 (3) cleanly
         // discriminates it from the storage size-marker and the
         // workstation version byte, so no other parse can misroute it.
@@ -736,6 +762,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageInventoryDataRequest")) {
+        // Rate gate: each request serves up to 54 container slots; unthrottled
+        // a spam loop turns a few bytes into a full response per packet.
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         // Stock: KeyHashPair (Guid+hash) + managerToken Guid.
         // Serve TE container slots when Guid matches our deterministic pos-key.
         if (packages.parseInvDataRequestStock(body)) |req| {
