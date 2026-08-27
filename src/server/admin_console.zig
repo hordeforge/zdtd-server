@@ -46,6 +46,18 @@ const assets_gamestages = @import("../assets/gamestages.zig");
 /// ~2700 real years of game time at the default DayNightLength.
 pub const max_admin_settime_day: u32 = 1_000_000;
 
+/// The player-visible (in-game console) command list. Must stay in sync with
+/// `c2s_text.isPlayerConsoleCommand`: the cross-check test in c2s_text.zig
+/// asserts every allowlisted verb appears here and every listed verb is
+/// allowlisted, so a drift fails CI instead of showing a help line for a
+/// command the gate rejects (or hiding one it accepts).
+pub const player_console_help = [_][]const u8{
+    "zdtd console commands:",
+    " gettime|gt  listplayers|lp  listplayerids|lpi  listents|le  version",
+    " say|s <msg>",
+    " dm|cm|settempunit|debugmenu (client-side)",
+};
+
 pub fn pollAdmin(self: *Game) void {
     const chunk = self.admin.pollLine(&self.admin_line) orelse return;
     // One read may carry several newline-separated commands (piped input).
@@ -330,11 +342,10 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
     }
 
     if (eqAny(verb, &.{ "help", "commands", "?" })) {
-        // Keep in sync with c2s_text.isPlayerConsoleCommand allowlist.
-        out.line("zdtd console commands:");
-        out.line(" gettime|gt  listplayers|lp  listplayerids|lpi  listents|le  version");
-        out.line(" say|s <msg>");
-        out.line(" dm|cm|settempunit|debugmenu (client-side)");
+        // Keep in sync with c2s_text.isPlayerConsoleCommand allowlist: the
+        // test "player console help matches the allowlist" cross-checks this
+        // const against c2s_text so neither side can drift silently.
+        for (player_console_help) |ln| out.line(ln);
     } else if (eqAny(verb, &.{ "gettime", "gt" })) {
         const clk = &self.sim.director.clock;
         const hh: u32 = @trunc(clk.hours);
@@ -1837,4 +1848,52 @@ test "auditVerb keeps an injected verb on one audit line" {
     try std.testing.expect(std.mem.startsWith(u8, buf[0..n], "help"));
     try std.testing.expect(std.mem.findScalar(u8, buf[0..n], '\n') == null);
     try std.testing.expect(std.mem.findScalar(u8, buf[0..n], '\r') == null);
+}
+
+test "player console help matches the c2s_text allowlist" {
+    // Bidirectional contract: every allowlisted verb a player may type is
+    // shown in the in-game help, and every verb the help shows is allowlisted.
+    // "help"/"commands"/"?" trigger the help itself, so they are exempt from
+    // the help-verb direction (they are still allowlisted).
+    const exempt = [_][]const u8{ "help", "commands", "?" };
+    const structural = [_][]const u8{ "<msg>", "(client-side)" };
+
+    // 1. Every allowlisted verb (except the help triggers) appears in the help.
+    for (c2s_text.isPlayerConsoleCommandAllowlist()) |v| {
+        var is_exempt = false;
+        for (exempt) |e| {
+            if (std.mem.eql(u8, v, e)) {
+                is_exempt = true;
+                break;
+            }
+        }
+        if (is_exempt) continue;
+        var found = false;
+        for (player_console_help[1..]) |ln| {
+            var it = std.mem.tokenizeAny(u8, ln, " |");
+            while (it.next()) |tok| {
+                if (std.mem.eql(u8, tok, v)) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        try std.testing.expect(found);
+    }
+
+    // 2. Every verb token in the help (structural tokens excepted) is allowlisted.
+    for (player_console_help[1..]) |ln| {
+        var it = std.mem.tokenizeAny(u8, ln, " |");
+        while (it.next()) |tok| {
+            var is_structural = false;
+            for (structural) |s| {
+                if (std.mem.eql(u8, tok, s)) {
+                    is_structural = true;
+                    break;
+                }
+            }
+            if (is_structural) continue;
+            try std.testing.expect(c2s_text.isPlayerConsoleCommand(tok));
+        }
+    }
 }

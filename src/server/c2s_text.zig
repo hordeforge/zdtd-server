@@ -82,13 +82,22 @@ pub fn chatMsgOk(msg: []const u8) bool {
 
 /// Commands accepted from an ordinary player's F1 console. Administrative and
 /// world-mutating commands are available only through the loopback admin TCP
-/// console, which is a separate trust boundary.
+/// console, which is a separate trust boundary. The list is the single source
+/// of truth: `isPlayerConsoleCommand` matches against it, and the admin
+/// console's cross-check test (player_console_help) asserts the in-game help
+/// shows exactly these verbs.
+pub const player_console_allowlist = [_][]const u8{
+    "help",        "commands",  "?",             "gettime", "gt",      "listplayers", "lp",
+    "listents",    "le",        "say",           "s",       "version", "dm",          "cm",
+    "settempunit", "debugmenu", "listplayerids", "lpi",
+};
+
+pub fn isPlayerConsoleCommandAllowlist() []const []const u8 {
+    return &player_console_allowlist;
+}
+
 pub fn isPlayerConsoleCommand(verb: []const u8) bool {
-    return eqAny(verb, &.{
-        "help",        "commands",  "?",             "gettime", "gt",      "listplayers", "lp",
-        "listents",    "le",        "say",           "s",       "version", "dm",          "cm",
-        "settempunit", "debugmenu", "listplayerids", "lpi",
-    });
+    return eqAny(verb, &player_console_allowlist);
 }
 
 test "player console policy rejects administrative mutations" {
