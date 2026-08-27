@@ -84,8 +84,10 @@ Explicit paths still load and are folded in after discovery as user mods
 Modules load once at startup; a missing or unloadable module is logged and
 skipped, it does not stop the server. `on_enable` runs right after load,
 `on_tick` runs late in every tick, `on_player_join` runs on a player's first
-join, `on_shutdown` runs at shutdown, and the four event hooks run at their
-game events (death, kill, block damage, quest completion).
+join, `on_shutdown` runs at shutdown, and the verdict/observer hooks run at
+their game events (death, kill, block damage, quest completion, perk spend,
+GameEvent, trade price, quest accept, stat changed, player leave, trader
+event).
 
 ### Disabling and blacklisting (`[mods]`)
 

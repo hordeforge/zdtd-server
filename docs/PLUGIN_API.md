@@ -28,10 +28,16 @@ A native ABI could promise neither.
 | Wasm runtime, module loading, fuel accounting | **implemented** (`src/plugin/wasm.zig`: `WasmHost`, `Plugin`, `Budget`) |
 | Host function table and capability gating | **implemented**, module `zdtd`, fields `log(level, ptr, len)`, `tick() -> i64`, `queue(ptr, len) -> i32` (bare field names; see [PLUGIN_DEV.md](PLUGIN_DEV.md#host-imports)) |
 | `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `PLUGIN_API_VERSION=1`: in-tree test scaffolding |
-| `src/plugin/host.zig` | Fixed table (8), register / enable / setTick / onTick / playerJoin / shutdown |
+| `src/plugin/host.zig` | Fixed table (21 hooks), register / enable / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
-| Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin`; `deinit` shutdown; kill verdict routed via `World.kill_verdict_fn`; block damage + quest payout consult the event hooks |
+| Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin` / `playerLeave`; `deinit` shutdown; kill verdict routed via `World.kill_verdict_fn`; block damage + quest payout consult the event hooks; perk spend / GameEvent / stat changed / trade / quest accept consult their verdicts and observers |
 | Event hooks (T15) | `on_player_death`, `on_entity_killed`, `on_block_damage`, `on_quest_complete` return a verdict: `<0` deny, `0` keep, `>0` adjust as percent; first non-zero across plugins wins; a trap/fuel-exhausted plugin reports keep |
+| Perk verdict (ADR 0033) | `on_perk_spend(player, skill, level, cost)`: `<0` deny the purchase, `0` keep, `>0` scales the skill-point cost by percent; first non-zero wins |
+| GameEvent verdict (ADR 0035) | `on_game_event(player, event, target, var_count)`: `<0` deny, `0` keep, `>0` keep (first non-keep wins); the stock IL=211 sender/party gate lands native before the verdict |
+| Stat observer (ADR 0034) | `on_stat_changed(player, hp, food, water, stamina, level, xp)`: pure observer fired when the survival pass or an XP award changed a tracked stat; void, no verdict |
+| Player lifecycle observers | `on_player_join(peer_slot, entity_id)` / `on_player_leave(peer_slot, entity_id)`: void observers at join and disconnect |
+| Trader observer | `on_trader_event(player, trader_entity, kind)`: void observer on trade open / sell / buy |
+| Quest accept verdict | `on_quest_accept(player, def_id)`: first non-zero wins (deny / keep / scale) |
 | Admin commands from plugins | Wasm `on_admin_command(ptr,len,out_ptr,out_cap)->i32` and static `on_admin_command(cmd,out)`; first handler that returns >0 bytes wins; falls through to core `unknown` if none handle it (admin TCP auth still gates `runAdminLine`) |
 | Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
 | Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny, magnitude = reason bytes in out; first deny wins (traps treated as allow) |
@@ -82,9 +88,10 @@ The contract is the module's exports plus the host's imports. Nothing else
 crosses.
 
 - **Guest exports** the hooks it wants: `on_enable`, `on_tick`,
-  `on_player_join`, `on_shutdown`, plus the four event hooks
-  (`on_player_death`, `on_entity_killed`, `on_block_damage`,
-  `on_quest_complete`). A missing export means that hook is not registered,
+  `on_player_join`, `on_shutdown`, plus the verdict/observer hooks
+  (see the state table above: death/kill/block-damage/quest-complete,
+  perk spend, GameEvent, trade price, quest accept, stat changed,
+  player leave, trader event). A missing export means that hook is not registered,
   which costs nothing at runtime.
 - **Host imports** are capability-gated. A module declares what it needs; the
   host supplies only those functions. There is no filesystem, no socket, and no
