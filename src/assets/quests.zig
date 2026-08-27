@@ -466,6 +466,9 @@ fn parseQuestDefBody(
     // means the stock quest grants no dukes, so credit 0, not an invented floor.
     const reward_coin: u32 = sumCoinReward(body);
 
+    // Fallback quest-marker position when the quest def binds no POI rect:
+    // a 50/70 center (ground-ish height) jittered deterministically per quest
+    // id (FNV of the quest name), so identical quests always place alike.
     var tx: f32 = 50;
     const ty: f32 = 70;
     var tz: f32 = 50;
