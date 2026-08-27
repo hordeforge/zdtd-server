@@ -41,3 +41,18 @@ for m in mcp; do
 done
 
 echo "done"
+
+# C fixtures (assets/fixtures/plugin_*.c): rebuild so the committed .wasm
+# always matches its source (a stale fixture fails the wasm host tests
+# loudly, but drift should never reach that point). clang is the fixture
+# compiler per the comment in plugin_hello.c.
+if command -v clang >/dev/null 2>&1; then
+  for c in assets/fixtures/plugin_*.c; do
+    w="${c%.c}.wasm"
+    if [ ! -f "$w" ] || [ "$w" -ot "$c" ]; then
+      clang --target=wasm32 -nostdlib -O2 -Wl,--no-entry -Wl,--export-all \
+        -o "$w" "$c"
+      echo "built $w"
+    fi
+  done
+fi
