@@ -65,3 +65,17 @@ safe runtime components:
 - Not adopted: the paper's full fiber/provision calculus and dependency
   typing/versioning (§6.6) — overkill for a fixed hook table; revisited only
   if plugins gain mutual provisioning.
+- Reactive coeffects (§3.2): adopted as load-time validation. The paper
+  classifies runtime context changes against the spec to drive activation;
+  zdtd's coeffect context is the host hook/import surface, which is fixed for
+  the process, so a module's declared capabilities cannot disappear at
+  runtime and fail-closed load validation is the complete story.
+- Effect introspection (§3.1.3): the command buffer's src attribution and
+  the spawn ring let the host enumerate a module's pending and applied
+  effects (`dropFrom`); no further iterator surface is needed.
+- Config reconciliation (§5.2.1): not adopted. The paper's loader reconciles
+  entry-field changes incrementally; zdtd reads `[plugin]` config once at
+  startup and `plugin reload` re-arms the stored budget rather than re-reading
+  the config chain (zdtd.toml + mode packs + CLI merge lives in main.zig), so
+  a budget edit takes effect on restart. Revisited if per-module config
+  entries land.
