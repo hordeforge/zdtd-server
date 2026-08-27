@@ -2,15 +2,15 @@
 
 **Date:** 2026-08-27 (gap-review sweep waves 56-86)
 **Branch:** `main`
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1411 tests, 1 skipped, all green), `zig build fuzz` green, `make release-check` ok.
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1413 tests, 1 skipped, all green), `zig build fuzz` green, `make release-check` ok.
 
 ## Current gates
 
 - `game.zig`: 3210 lines, delegating to 44 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig` (one import + one `test { _ = game_*; }` per shard). The old ≤2500 line convention was never an enforced gate; `lint-architecture.sh` enforces the import structure, not a size cap.
 - `lint-architecture: clean` enforced by `scripts/lint-architecture.sh`.
-- `zig build` + `zig build test` green (1411 tests across the suite).
-- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **291** features (**289 WORKS / 0 PARTIAL / 0 MISSING**, recounted 2026-08-22; the remaining PARTIAL labels are ad-hoc waived rows not counted).
-- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (205/205 files, 44 constants ledgered) + `make check-xml-audit`.
+- `zig build` + `zig build test` green (1413 tests across the suite).
+- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **291** features (**291 WORKS / 0 PARTIAL / 0 MISSING**, recounted 2026-08-22; the remaining PARTIAL labels are ad-hoc waived rows not counted).
+- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (205/205 files, 47 constants ledgered) + `make check-xml-audit`.
 - Live stock-client gate **23/23** on a fresh world (`FRESH=1`).
 
 ## Waves 56-86 (2026-08-27 gap-review sweep)
