@@ -54,7 +54,7 @@ property load. Dump must match the **connected client** version (STATUS pin).
 
 | Module | Stock file | Notes |
 |---|---|---|
-| `maxdamage.zig` | blocks.xml, materials.xml + AssignIds dump | HP, storage, power watts/Class, MaxFuel, OutputPerFuel/Charge/Stack, id↔name |
+| `maxdamage.zig` | blocks.xml, materials.xml + AssignIds dump | HP, storage, power watts/Class, MaxFuel, OutputPerFuel/Charge/Stack, turret combat stats (MaxDistance/EntityDamage/BurstFireRate/BurstRoundCount), id↔name |
 | `blocks.zig` | blocks.xml + AssignIds | solid flags; **ids from dump only** |
 | `block_textures.zig` | blocks.xml Texture | defaults; terrain >255 not on chunk channel |
 | `painting.zig` | painting.xml | paint id ↔ TextureId |
