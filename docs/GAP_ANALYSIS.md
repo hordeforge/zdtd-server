@@ -4581,8 +4581,8 @@ nobody re-opens a closed row from a stale one.
 |---|---|
 | `GAP_ANALYSIS.md:588-605` and `STATUS.md:143`: trader window shows real `traderAlways` stock | Not supported by the IL. `NetPackageTraderData` is ToServer-only and dropped by the client (asm.il:843057, :787291); no trader entity exists client-side either |
 | `GAP_ANALYSIS.md:535` and `:612`: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
-| `GAP_ANALYSIS.md:339`: "Player respawn rules | HAVE" | PARTIAL: fixed spawn point, zeroed food and water, no bedroll |
-| `GAP_ANALYSIS.md:340`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | Understates it: the bag content is a hardcoded single scrap and the real stock backpack request is refused |
+| `GAP_ANALYSIS.md:339`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` world.zig:764-782), a placed bedroll records the respawn point (c2s/inv.zig:714-721) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
+| `GAP_ANALYSIS.md:340`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | REFRESHED 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths (STATUS DropOnDeath rows; the single-scrap placeholder and refused backpack request are both gone), so the WORKS row is accurate |
 | `STATUS.md:32`: "Player death to respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path that is actually broken |
 | `GAP_ANALYSIS.md:889`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
 | `src/ecs/quest.zig:68` comment: `Quest::AdvancePhase` at 982816 | Stale; that line is inside `ObjectiveTreasureChest` in this dump. AdvancePhase now ends at 986686, `refreshQuestCompletion` is 987390-987648, `Quest::Write` is 988813-989038 |
