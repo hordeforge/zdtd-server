@@ -38,7 +38,9 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
     const sv = self.plugins.lootRoll(list_name, @intCast(n));
     const v = if (sv != 0) sv else self.wasm_plugins.lootRoll(list_name, @intCast(n));
     if (v < 0) return;
-    if (v > 0) n = n * @as(usize, @intCast(v)) / 100;
+    // Re-cap after the percent scale: a large plugin verdict must not push n
+    // past the stacks array (the loop below would read out of bounds).
+    if (v > 0) n = @min(n * @as(usize, @intCast(v)) / 100, stacks.len);
     if (n == 0) return;
     var i: usize = 0;
     while (i < n) : (i += 1) {

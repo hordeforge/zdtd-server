@@ -394,6 +394,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
   clamp, so a knockback beyond the stock band no longer ships non-stock motion
   to peers.
+- Plugin verdict scaling is bounded: the loot-roll count re-caps to the
+  roll array (a large on_loot_roll verdict could read out of bounds) and the
+  block-damage verdict products widen to u64 (u32 overflowed for a large
+  verdict times a u16 damage).
 - The inventory-ledger give delta is clamped to i16 (admin give with a
   count above 32767 previously trapped the cast; the other ledger callers
   already clamped).

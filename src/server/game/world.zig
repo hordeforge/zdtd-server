@@ -213,8 +213,10 @@ pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
     const v = blockDamageVerdict(self, x, y, z, @intCast(dmg));
     if (v < 0) return self.getBlockHp(x, y, z);
     if (v > 0) {
-        const scaled: u32 = @as(u32, dmg) * @as(u32, @intCast(v)) / 100;
-        applied = @intCast(@min(scaled, 65535));
+        // u64 product: a large verdict times the u16 damage must not overflow
+        // u32 (Debug trap / ReleaseFast wrap); clamped to the u16 ceiling.
+        const scaled: u32 = @intCast(@min(@as(u64, dmg) * @as(u64, @intCast(v)) / 100, 65535));
+        applied = @intCast(scaled);
     }
     const cur = self.getBlockHp(x, y, z);
     const sum: u32 = @as(u32, cur) + applied;

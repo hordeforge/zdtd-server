@@ -184,7 +184,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         if (v < 0) {
                             abs = cur_dmg;
                         } else if (v > 0) {
-                            const add = @as(u32, delta) * @as(u32, @intCast(v)) / 100;
+                            // u64 product: a large verdict times the delta must
+                            // not overflow u32 (Debug trap / ReleaseFast wrap);
+                            // the result is clamped to the u16 damage ceiling.
+                            const add: u32 = @intCast(@min(@as(u64, delta) * @as(u64, @intCast(v)) / 100, 65535));
                             abs = @intCast(@min(@as(u32, cur_dmg) + add, 65535));
                         }
                     }
