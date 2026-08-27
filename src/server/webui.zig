@@ -127,6 +127,13 @@ pub const Snapshot = struct {
     bounds_rejects: u64 = 0,
     movement_rejects: u64 = 0,
     decode_rejects: u64 = 0,
+    // Guard policy (quarantine rung / load shed), same counters as the admin
+    // `guardpolicy` command so an operator sees the guard firing on the dashboard.
+    guard_kicks: u64 = 0,
+    guard_would_kicks: u64 = 0,
+    guard_quarantines: u64 = 0,
+    quarantine_rejects: u64 = 0,
+    load_shed_drops: u64 = 0,
     // Latency
     tick_mean_ns: u64 = 0,
     tick_p50_ns: u64 = 0,
@@ -1800,6 +1807,29 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         alertNumClass(s.decode_rejects, false),
         s.decode_rejects,
     });
+    // Guard-policy counters in their own grid (the reject grid print is at the
+    // 32-arg format-call cap; split here like renderApmJson does).
+    try w.print(
+        \\<h3>Guard policy</h3>
+        \\<ul class="grid">
+        \\<li class="stat"><b class="{s}">{d}</b><span>guard kicks</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>guard would-kicks</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>guard quarantines</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>quarantine rejects</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>load-shed drops</span></li>
+        \\</ul>
+    , .{
+        alertNumClass(s.guard_kicks, true),
+        s.guard_kicks,
+        alertNumClass(s.guard_would_kicks, false),
+        s.guard_would_kicks,
+        alertNumClass(s.guard_quarantines, false),
+        s.guard_quarantines,
+        alertNumClass(s.quarantine_rejects, false),
+        s.quarantine_rejects,
+        alertNumClass(s.load_shed_drops, false),
+        s.load_shed_drops,
+    });
     return w.buffered();
 }
 
@@ -1924,13 +1954,18 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
     });
     // Same reject counters as HTML Errors panel / guardstats (tools use this JSON).
     try w.print(
-        \\,"phase_rejects":{d},"ownership_rejects":{d},"bounds_rejects":{d},"movement_rejects":{d},"decode_rejects":{d}
+        \\,"phase_rejects":{d},"ownership_rejects":{d},"bounds_rejects":{d},"movement_rejects":{d},"decode_rejects":{d},"guard_kicks":{d},"guard_would_kicks":{d},"guard_quarantines":{d},"quarantine_rejects":{d},"load_shed_drops":{d}
     , .{
         s.phase_rejects,
         s.ownership_rejects,
         s.bounds_rejects,
         s.movement_rejects,
         s.decode_rejects,
+        s.guard_kicks,
+        s.guard_would_kicks,
+        s.guard_quarantines,
+        s.quarantine_rejects,
+        s.load_shed_drops,
     });
     // Compact player roster so tools need not scrape HTML partials.
     try w.writeAll(",\"players\":[");
@@ -2256,6 +2291,9 @@ test "render status fits buffer" {
     try std.testing.expect(std.mem.find(u8, js, "\"bounds_rejects\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"movement_rejects\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"decode_rejects\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"guard_kicks\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"guard_quarantines\":") != null);
+    try std.testing.expect(std.mem.find(u8, js, "\"load_shed_drops\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"world\":\"test\"") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"wire_chunks\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"players\":[") != null);

@@ -162,6 +162,11 @@ pub fn fillWebuiSnap(self: *Game) void {
     s.bounds_rejects = self.harness.counters.get(.bounds_rejects);
     s.movement_rejects = self.harness.counters.get(.movement_rejects);
     s.decode_rejects = self.harness.counters.get(.decode_rejects);
+    s.guard_kicks = self.harness.counters.get(.guard_kicks);
+    s.guard_would_kicks = self.harness.counters.get(.guard_would_kicks);
+    s.guard_quarantines = self.harness.counters.get(.guard_quarantines);
+    s.quarantine_rejects = self.harness.counters.get(.quarantine_rejects);
+    s.load_shed_drops = self.harness.counters.get(.load_shed_drops);
     const th = self.harness.prof.histOf(.tick_total);
     s.tick_mean_ns = th.meanNs();
     s.tick_p50_ns = th.percentileNs(50);
