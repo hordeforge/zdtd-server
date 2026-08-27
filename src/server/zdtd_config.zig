@@ -38,6 +38,9 @@ pub const Authority = struct {
     max_edit_range_blocks: ?f32 = null,
     /// Movement anti-cheat envelope: max accepted horizontal speed in m/s.
     max_horizontal_speed_mps: ?f32 = null,
+    /// Movement anti-cheat envelope: max accepted vertical speed in m/s
+    /// (rejects Y-only teleports the horizontal clamp cannot see).
+    max_vertical_speed_mps: ?f32 = null,
     max_claimed_damage: ?i32 = null,
     peer_stale_ms: ?u64 = null,
     lock_stale_ms: ?u64 = null,
