@@ -4141,6 +4141,61 @@ test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele 
     );
 }
 
+test "scenario join enter bundle arrives in full on the capture peer" {
+    // net-send-review checklist: a join regression must fail a test, not wedge
+    // a client. Assert the enter-bundle critical sends that fit the capture
+    // landed on a capture peer: ConfigFile -> WorldInfo -> ChunkClusterInfo ->
+    // WorldSpawnPoints -> WorldAreas -> WorldTime -> GameStats (IdMapping is
+    // too large for a capture slot; its arrival is enforced by the critical
+    // send abort semantics, see the comment below). No ticking happens here,
+    // so the capture holds only the bundle (no chunk-stream overflow to drop
+    // the earliest critical sends).
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_enterbundle");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_enterbundle", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+
+    // NetPackageIdMapping is deliberately absent: the deflated blocks mapping
+    // is ~255 KiB and the capture slot cap is 8 KiB, so it truncates and the
+    // channel parser cannot see it. Its arrival is still enforced here: it is
+    // a critical send (sendBlockIdMapping -> sendFramedReliable critical), so
+    // a WindowFull or a misclassification to droppable aborts the bundle with
+    // error.WindowFull and attachJoinedClient above would have failed.
+    // NetPackageWorldAreas is also absent: sendWorldAreas skips the send when
+    // the world has no trader-area prefabs (join.zig:449), which is the flat
+    // test world.
+    const names = [_][]const u8{
+        "NetPackageConfigFile",
+        "NetPackageWorldInfo",
+        "NetPackageChunkClusterInfo",
+        "NetPackageWorldSpawnPoints",
+        "NetPackageWorldTime",
+        "NetPackageGameStats",
+    };
+    var checked: usize = 0;
+    for (names) |nm| {
+        const id = packages.idOf(nm) orelse continue;
+        if (cap.findPkgId(id) == null) {
+            std.debug.print("FAIL enter bundle: {s} (id {d}) not found in {d} capture slots\n", .{ nm, id, cap.n });
+            return error.MissingBundlePackage;
+        }
+        checked += 1;
+    }
+    try std.testing.expectEqual(@as(usize, names.len), checked);
+    std.debug.print("PASS enter bundle: {d}/{d} critical packages arrived on capture\n", .{ checked, names.len });
+}
+
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {
     var path_buf: [512]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name });
