@@ -262,6 +262,14 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseInvDataRequestStock(input) catch null;
     _ = packages.parseChunkRemoveBody(input) catch null;
     _ = packages.parseCollectBody(input) catch null;
+    // The standalone bag body (NetPackageBag) and the positional-audio relay
+    // parser are remote surfaces; assert the parsed bag count never exceeds
+    // the caller's slot array.
+    var bag_slots: [8]stock_inv.StockSlot = undefined;
+    if (stock_inv.parseBagBody(input, &bag_slots)) |b| {
+        try std.testing.expect(b.n <= bag_slots.len);
+    } else |_| {}
+    _ = packages.parseSoundAtPosition(input) catch null;
     _ = packages.parseEntityAttach(input) catch null;
     _ = packages.parseLandClaimRepair(input) catch null;
     _ = packages.parseTraderTrade(input) catch null;
