@@ -1,14 +1,16 @@
 //! Stock sky day/night model (RE entity-ai.md SkyManager): pure world-time →
 //! daylight-curve functions for the clone-side world-light model.
 //!
-//! Slice 1 of the light model: the day/night ambient leg only, feeding the
-//! stealth-meter light byte (PlayerStealth.TickServer S2C). Everything
-//! position-dependent in `LightManager.GetLightLevel` (chunk block light
-//! `BlockLight`, moving light entities `GetLightLevelFromMovingLights`, shade
-//! `CalcShadeLight` and the moon term `GetMoonBrightness`) is 0 and recorded
-//! as later slices; the ambient total collapses to the day curve (the real
-//! `AmbientTotal` folds sky-color luma × sky scale × day/night brightness ×
-//! moon scale, `WorldEnvironment.AmbientSpectrumFrameUpdate`).
+//! Slices 1-2 of the light model: the day/night ambient leg (slice 1) plus
+//! the moon-brightness fold (slice 2, weather-environment.md section 5 pin
+//! 2026-08-27) feed the stealth-meter light byte (PlayerStealth.TickServer
+//! S2C). Everything position-dependent in `LightManager.GetLightLevel`
+//! (chunk block light `BlockLight`, moving light entities
+//! `GetLightLevelFromMovingLights`, shade `CalcShadeLight`) stays 0 and
+//! recorded as later slices; the ambient total collapses to the day curve ×
+//! the moon scale (the real `AmbientTotal` folds sky-color luma × sky scale
+//! × day/night brightness × moon scale,
+//! `WorldEnvironment.AmbientSpectrumFrameUpdate`).
 
 const std = @import("std");
 
@@ -109,4 +111,50 @@ test "sky: ambientLuma applies the GetLightLevel ambient shaping" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), ambientLuma(1.0), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), ambientLuma(0.0), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.3299), ambientLuma(0.5), 0.0001);
+}
+
+/// Stock moon brightness term (RE weather-environment.md section 5 pin
+/// 2026-08-27; SkyManager cctor + Update IL): the night ambient folds the
+/// moon brightness from a 7-phase table. `SkyManager.Update` computes the
+/// phase index as `((int)(dayCount + 5.5)) % 7` (a blood-moon window forces
+/// index 0 = full moon, not modeled here), then `moonBright =
+/// sMoonBrights[index]`. Slice 2 of the light model: the previously zero
+/// moon term.
+pub const moon_phases = [_]f32{ 0.05, 0.35, 0.55, 0.70, 1.40, 1.63, 1.82 };
+pub const moon_brights = [_]f32{ 1.0, 0.65, 0.45, 0.25, 0.40, 0.60, 0.90 };
+
+pub fn moonBrightness(day: u64) f32 {
+    const index: usize = @intCast(@mod(@as(i64, @intCast(day)) + 5, 7));
+    return moon_brights[index];
+}
+
+/// Stock SkyManager.GetMoonAmbientScale(add=0, mpy=1) fold: `FastLerp(
+/// moonBright, 1, dayPercent * 3.030303)` - the night ambient is the moon
+/// brightness, transitioning to 1 (no moon dimming) by dayPercent >= 1/3.03.
+pub fn moonAmbientScale(moon_bright: f32, day_pct: f32) f32 {
+    const t = @min(day_pct * 3.030303, 1.0);
+    return moon_bright + (1.0 - moon_bright) * t;
+}
+
+test "sky: moon brightness follows the stock 7-phase table" {
+    // ((int)(dayCount + 5.5)) % 7 over the pinned sMoonBrights.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.60), moonBrightness(0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.90), moonBrightness(1), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.00), moonBrightness(2), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.65), moonBrightness(3), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.45), moonBrightness(4), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), moonBrightness(5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.40), moonBrightness(6), 0.0001);
+    // 7-day cycle.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.60), moonBrightness(7), 0.0001);
+}
+
+test "sky: moon ambient scale folds night to moon, day to 1" {
+    // Night (dayPercent ~0): ambient folds the moon brightness.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), moonAmbientScale(0.25, 0.0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.00), moonAmbientScale(0.25, 0.33), 0.0001);
+    // Day: no moon dimming.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.00), moonAmbientScale(0.9, 1.0), 0.0001);
+    // Mid-transition: lerp(moon, 1, 0.5) at dayPercent = 1/6.06.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.625), moonAmbientScale(0.25, 0.165), 0.001);
 }

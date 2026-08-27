@@ -100,11 +100,12 @@ pub fn step(self: *Game) !void {
         // stealth light legs (CanSleeperAttackDetect crouch range) and the
         // stealth-meter S2C byte.
         const clk = &self.sim.director.clock;
-        self.sim.ambient_light = sky.ambientLuma(sky.dayPercent(
-            clk.worldTimeBits(),
-            clk.dawn,
-            clk.dusk,
-        ));
+        const day_pct = sky.dayPercent(clk.worldTimeBits(), clk.dawn, clk.dusk);
+        // Slice 2 (moon term, RE weather-environment.md section 5 pin
+        // 2026-08-27): the night ambient folds the 7-phase moon brightness
+        // (GetMoonAmbientScale); day ambient is unchanged.
+        const moon = sky.moonBrightness(clk.worldTimeBits() / sky.day_ticks);
+        self.sim.ambient_light = sky.ambientLuma(day_pct) * sky.moonAmbientScale(moon, day_pct);
         // Wake sleeper volumes whose AABB contains this tick's combat noise
         // (stock World.CheckSleeperVolumeNoise; player-independent) - must run
         // before systems.tickAll consumes the noise ring.
