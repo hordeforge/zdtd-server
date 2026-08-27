@@ -42,7 +42,11 @@
   reliable pump then cannot drain regardless of the budget (verified: a 1s
   budget changed nothing; the real client and the passing loadgen runs
   deliver the bundle fine at 250ms). Harness limitation, not a server
-  defect; the pump's bounded give-up is correct behavior.
+  defect; the pump's bounded give-up is correct behavior. Note 2026-08-27
+  evening: the single-bot stall reproduced 3/3 consecutive runs (3 inbound
+  packets then silence, server `joined=1 entered=0`, `join_ok` increments,
+  `c2s_throttle=0`) - treat the harness as stalled by default now and rely
+  on the server-side counters + the real-client gate instead.
 - **Stale-row corrections**: enemy animals, battery/solar, per-class AITask,
   PlayerQuestPositions, sounds row - all re-audited against the code/RE.
 
