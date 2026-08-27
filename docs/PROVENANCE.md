@@ -347,6 +347,7 @@ field-by-field provenance.
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
 | `max_horizontal_speed_mps` | 20.0 | R | Soft cap above sprint (~6 m/s) + vehicle margin; no stock key (audit B29; `[authority]` tunable planned) |
+| `max_vertical_speed_mps` | 25.0 | R | Vertical envelope cap: rejects Y-only teleports (fly hacking) the horizontal clamp cannot see; above stock jump/fall (~7.5/9.8 m/s); `[authority]` tunable (2026-08-27) |
 
 ### 3.6 Guard policy (`src/server/guard_policy.zig`)
 

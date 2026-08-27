@@ -7,6 +7,12 @@ const std = @import("std");
 /// clamped. Policy, not stock data: the live value is the Game field fed from
 /// zdtd.toml [authority] max_horizontal_speed_mps; this is only its default.
 pub const max_horizontal_speed_mps: f32 = 20.0;
+/// Vertical envelope cap: stock jump apex ~7.5 m/s and fall ~9.8 m/s are far
+/// under this; the cap only rejects vertical teleports (fly hacking) that the
+/// horizontal clamp cannot see because the Y delta is separate. Policy, not
+/// stock data; the live value is the Game field fed from zdtd.toml
+/// [authority] max_vertical_speed_mps.
+pub const max_vertical_speed_mps: f32 = 25.0;
 /// Floor dt so a double-packet same tick does not divide by zero.
 pub const min_dt_s: f32 = 1.0 / 40.0;
 /// Cap dt after long stall so one packet cannot jump the whole map.
@@ -53,6 +59,27 @@ pub fn clampHorizontal(
         .z = last_z + dz * s,
         .clamped = true,
     };
+}
+
+/// Vertical movement cap: same shape as clampHorizontal but on the Y delta
+/// (jump/fall are legitimately fast, so the cap is generous; it rejects
+/// teleports, which the horizontal-only clamp would let through).
+pub fn clampVertical(
+    last_y: f32,
+    new_y: f32,
+    dt_s: f32,
+    max_vertical_speed: f32,
+) struct { y: f32, clamped: bool } {
+    const dt = clampDtSeconds(dt_s);
+    const max_dy = max_vertical_speed * dt;
+    const dy = new_y - last_y;
+    if (!std.math.isFinite(dy) or !std.math.isFinite(max_dy) or !(max_dy > 0)) {
+        return .{ .y = last_y, .clamped = true };
+    }
+    if (!(@abs(dy) > max_dy)) {
+        return .{ .y = new_y, .clamped = false };
+    }
+    return .{ .y = last_y + @as(f32, @floatFromInt(if (dy > 0) @as(i32, 1) else -1)) * max_dy, .clamped = true };
 }
 
 /// dt from server tick delta (20 TPS). Zero/underflow → min_dt.
@@ -119,4 +146,21 @@ test "horizontalSpeedMps" {
     const s_neg = horizontalSpeedMps(1, 0, -1);
     try std.testing.expect(@abs(s_neg - (1.0 / min_dt_s)) < 0.01);
     try std.testing.expect(std.math.isFinite(horizontalSpeedMps(1, 0, std.math.nan(f32))));
+}
+
+test "clampVertical accepts jump/fall and rejects teleports" {
+    const r1 = clampVertical(70, 71, 0.05, max_vertical_speed_mps);
+    try std.testing.expect(!r1.clamped);
+    try std.testing.expectApproxEqAbs(@as(f32, 71), r1.y, 0.001);
+    // A 100-block vertical teleport in one tick is clamped to the cap.
+    const r2 = clampVertical(70, 170, 0.05, max_vertical_speed_mps);
+    try std.testing.expect(r2.clamped);
+    try std.testing.expectApproxEqAbs(@as(f32, 70 + max_vertical_speed_mps * 0.05), r2.y, 0.001);
+    // Legit fall speed (~9.8 m/s = ~0.5 blocks/tick) passes; a 10-block/tick
+    // drop (200 m/s) is a teleport and is bounded the same way.
+    const r3 = clampVertical(70, 69.5, 0.05, max_vertical_speed_mps);
+    try std.testing.expect(!r3.clamped);
+    const r4 = clampVertical(70, -100, 0.05, max_vertical_speed_mps);
+    try std.testing.expect(r4.clamped);
+    try std.testing.expectApproxEqAbs(@as(f32, 70 - max_vertical_speed_mps * 0.05), r4.y, 0.001);
 }

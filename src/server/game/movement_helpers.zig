@@ -46,7 +46,10 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     const dt = movement.dtFromTicks(c.move_tick, self.tick_n, tick_s);
     const cap = self.max_horizontal_speed_mps;
     const clamp = movement.clampHorizontal(c.move_x, c.move_z, x, z, dt, cap);
-    if (!clamp.clamped) {
+    // Vertical cap: the horizontal clamp cannot see Y-only teleports (fly
+    // hacking), so the Y delta is bounded the same way with its own cap.
+    const vclamp = movement.clampVertical(c.move_y, y, dt, self.max_vertical_speed_mps);
+    if (!clamp.clamped and !vclamp.clamped) {
         return .{ .x = x, .y = y, .z = z, .applied = true };
     }
     self.harness.counters.inc(.movement_rejects);
@@ -58,8 +61,8 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     if (self.authority_mode != .correct) {
         return .{ .x = x, .y = y, .z = z, .applied = true };
     }
-    if (packages.buildPosAndRotBody(self.body_buf[0..64], entity_id, clamp.x, y, clamp.z, 0, 0, 0, true)) |sb| {
+    if (packages.buildPosAndRotBody(self.body_buf[0..64], entity_id, clamp.x, vclamp.y, clamp.z, 0, 0, 0, true)) |sb| {
         self.sendGame(peer, "NetPackageEntityPosAndRot", sb) catch {};
     } else |_| {}
-    return .{ .x = clamp.x, .y = y, .z = clamp.z, .applied = true };
+    return .{ .x = clamp.x, .y = vclamp.y, .z = clamp.z, .applied = true };
 }

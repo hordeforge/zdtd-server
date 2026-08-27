@@ -87,6 +87,9 @@ pub const default_interest_range: f32 = 160;
 /// zdtd policy, not stock data: no serverconfig property covers it, and the
 /// right cap depends on which vehicles/buffs a server runs.
 pub const default_max_horizontal_speed_mps: f32 = movement.max_horizontal_speed_mps;
+/// Vertical envelope cap (zdtd.toml [authority] max_vertical_speed_mps):
+/// rejects vertical teleports the horizontal-only clamp could not see.
+pub const default_max_vertical_speed_mps: f32 = movement.max_vertical_speed_mps;
 
 /// Max UTF-8 bytes in a player Global chat message. Canonical value lives with
 /// the text trust boundary that enforces it (c2s_text).
@@ -320,6 +323,8 @@ pub const InitOptions = struct {
     interest_range: f32 = default_interest_range,
     /// Movement envelope cap (zdtd.toml [authority] max_horizontal_speed_mps).
     max_horizontal_speed_mps: f32 = default_max_horizontal_speed_mps,
+    /// Vertical envelope cap (zdtd.toml [authority] max_vertical_speed_mps).
+    max_vertical_speed_mps: f32 = default_max_vertical_speed_mps,
     peer_stale_ms: u64 = default_peer_stale_ms,
     /// Container lock auto-release (zdtd.toml [authority] lock_stale_ms).
     lock_stale_ns: u64 = default_lock_stale_ns,
