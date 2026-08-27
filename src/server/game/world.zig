@@ -358,7 +358,11 @@ pub fn drainExplosions(self: *Game) void {
                     }
                     if (mult == 0) continue; // category immune to this blast
                     const falloff: f32 = 1.0 - @sqrt(d2f) / radius;
-                    const dmg: u16 = @intFromFloat(block_dmg * falloff * mult);
+                    // Clamp to u16 like the chew path and the ExplosionClient
+                    // broadcast below: the loader caps BlockDamage at 1e6, and
+                    // a modded blast times a DamageBonus multiplier can exceed
+                    // 65535, which would trap the @intFromFloat cast.
+                    const dmg: u16 = @intFromFloat(@min(block_dmg * falloff * mult, 65535.0));
                     if (dmg == 0) continue;
                     const max_hp = self.maxDamageForBlock(id);
                     const total = self.addBlockDamage(wx, wy, wz, dmg) catch continue;
