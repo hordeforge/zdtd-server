@@ -200,8 +200,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         self.sim.setPos(p.entity_id, env.x, env.y, env.z, yaw);
         self.noteAcceptedMove(c, env.x, env.y, env.z);
         // Clamped: the owner already got a correction; peers pick the true
-        // position up on the next motion pass rather than the raw claim.
-        if (env.x == p.x and env.z == p.z) {
+        // position up on the next motion pass rather than the raw claim. The
+        // gate checks all three axes: a Y-only clamp (fly attempt) must not
+        // relay the raw teleport Y to peers either.
+        if (env.x == p.x and env.y == p.y and env.z == p.z) {
             try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
         }
         return true;

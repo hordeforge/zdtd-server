@@ -4145,6 +4145,65 @@ test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele 
     );
 }
 
+test "scenario teleport Y-clamp suppresses the raw claim on peers" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_tpclamp");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_tpclamp", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_mover: ln_peer.Capture = .{};
+    var cap_obs: ln_peer.Capture = .{};
+    const m = try g.attachJoinedClient(&cap_mover);
+    _ = try g.attachJoinedClient(&cap_obs);
+    try std.testing.expect(m.entity_id > 0);
+    const idx = g.sim.slotOfNetId(m.entity_id) orelse return error.MissingEntity;
+    const sx = g.sim.transform[idx].x;
+    const sy = g.sim.transform[idx].y;
+    const sz = g.sim.transform[idx].z;
+
+    // Arm the envelope with a legitimate first move (move_valid=false would
+    // otherwise apply the teleport directly).
+    var pos_body: [64]u8 = undefined;
+    var frame_buf: [128]u8 = undefined;
+    const home = try packages.buildPosAndRotBody(&pos_body, m.entity_id, sx, sy, sz, 0, 0, 0, true);
+    try g.injectFramed(m, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", home));
+    try std.testing.expectEqual(sy, g.sim.transform[idx].y);
+
+    // A Y-only fly teleport (same x/z, +1000 y) is clamped by the vertical
+    // envelope; the sim must not reach the claim.
+    const fly = try packages.buildPosAndRotBody(&pos_body, m.entity_id, sx, sy + 1000, sz, 0, 0, 0, true);
+    try g.injectFramed(m, try packages.framed(&frame_buf, "NetPackageEntityTeleport", fly));
+    try std.testing.expect(g.sim.transform[idx].y < sy + 1.0);
+
+    // The observer must not have seen the raw claim: a clamped teleport is
+    // not relayed (peers pick the true position up on the next motion pass).
+    const did = packages.idOf("NetPackageEntityTeleport").?;
+    var found = false;
+    var i: usize = 0;
+    while (i < cap_obs.n and !found) : (i += 1) {
+        const msg = cap_obs.slots[i].data[0..cap_obs.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id == did and pkgs[j].body.len >= 4 and
+                std.mem.readInt(i32, pkgs[j].body[0..4], .little) == m.entity_id)
+            {
+                found = true;
+                break;
+            }
+        }
+    }
+    try std.testing.expect(!found);
+
+    std.debug.print("PASS scenario: Y-clamped C2S teleport suppressed on the observer peer\n", .{});
+}
+
 test "scenario join enter bundle arrives in full on the capture peer" {
     // net-send-review checklist: a join regression must fail a test, not wedge
     // a client. Assert the enter-bundle critical sends that fit the capture
