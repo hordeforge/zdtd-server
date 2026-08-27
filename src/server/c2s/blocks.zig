@@ -15,6 +15,12 @@ const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
 
+/// Cap on the C2S-claimed explosion radii (block + entity). RE: the largest
+/// stock ExplosionData.EntityRadius is 6 (entities.xml `explosion` on
+/// cop/feral: radius_blocks 5, radius_entities 6); a forged blob must not
+/// carve the whole map or damage every loaded entity.
+const max_claimed_explosion_radius: f32 = 6.0;
+
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageBlockTrigger")) {
         // Same rate gate as SetBlock: unthrottled would let a spam loop fan
@@ -436,7 +442,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        const rad: i32 = @trunc(@max(1, @min(ex.radius, 6)));
+        const rad: i32 = @intFromFloat(@max(1, @min(ex.radius, max_claimed_explosion_radius)));
         const cx = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bx else @as(i32, @floor(ex.wx));
         const cy = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.by else @as(i32, @floor(ex.wy));
         const cz = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bz else @as(i32, @floor(ex.wz));
@@ -488,7 +494,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // ExplosionData is supplied by the client. Keep its effect inside the
         // same bounded authority envelope as direct C2S damage; otherwise a
         // forged blob can use a 65535 m radius and damage every loaded entity.
-        const e_rad: f32 = @max(1, @min(ex.entity_radius, 6));
+        const e_rad: f32 = @max(1, @min(ex.entity_radius, max_claimed_explosion_radius));
         const claimed_damage: f32 = if (ex.entity_damage > 0) ex.entity_damage else @as(f32, @floatFromInt(ex.block_damage));
         const e_dmg: f32 = @min(claimed_damage, @as(f32, @floatFromInt(self.max_claimed_damage)));
         var es: ecs.Slot = 0;
