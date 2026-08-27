@@ -145,6 +145,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         if (self.sim.slotOfNetId(f.entity_id)) |idx| {
+            // Store the client-reported word verbatim (stock relay mirror).
+            // Server-side decisions never read these stored bits: crouch is
+            // derived from the package directly below, and the S2C flags word
+            // for AI entities is built from sim state in replicate.zig.
             self.sim.flags[idx].bits = f.flags;
             // Stealth (RE entity-ai.md PlayerStealth): the client reports its
             // crouch in this flags word (bit 512); the AI sense gates muffle

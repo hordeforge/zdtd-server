@@ -1532,13 +1532,12 @@ pub const Game = struct {
         self.bots.tick(self, dt);
     }
 
-    /// Allocate a globally-unique net id for a host-side bot. Drawn from the
-    /// same sim counter as ECS spawns (World.spawnBase increments next_net_id),
-    /// so bot ids never collide with player/zombie/... ids.
-    pub fn allocBotNetId(self: *Game) i32 {
-        const id = self.sim.next_net_id;
-        self.sim.next_net_id +%= 1;
-        return id;
+    /// Allocate a globally-unique net id for a host-side bot, or null when
+    /// the shared sim counter is exhausted. Drawn from the same guarded
+    /// counter as ECS spawns (World.allocNetId), so bot ids never collide
+    /// with player/zombie/... ids and the wrap policy is one place.
+    pub fn allocBotNetId(self: *Game) ?i32 {
+        return self.sim.allocNetId();
     }
 
     pub fn worldHour(self: *const Game) u64 {

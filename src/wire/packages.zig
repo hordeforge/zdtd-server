@@ -801,13 +801,15 @@ pub fn buildRelPosBody(buf: []u8, entity_id: i32, dx: i16, dy: i16, dz: i16, rx:
 }
 
 /// Stock NetPackageEntityAliveFlags bits actually set on the S2C path (V3).
-pub const cF_approaching_player: u16 = 0x0002;
-pub const cF_spawned: u16 = 0x0008;
-pub const cF_is_alert: u16 = 0x0040;
+/// Values are canonical in ecs/components.zig (single source of truth for the
+/// bit numbers); these aliases keep the stock wire naming.
+pub const cF_approaching_player: u16 = components.flag_approaching_player;
+pub const cF_spawned: u16 = components.flag_spawned;
+pub const cF_is_alert: u16 = components.flag_is_alert;
 /// Stock `IsCrouching` bit (protocol-packages.md 5.5.6): set by the client's
 /// EntityFlags/AliveFlags package; the sim reads it for the stealth sense
 /// gates (hear muffle + sleeper detect).
-pub const cF_crouching: u16 = 0x0200;
+pub const cF_crouching: u16 = components.flag_crouching;
 
 pub fn buildAliveFlagsBody(buf: []u8, entity_id: i32, flags: u16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };

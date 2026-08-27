@@ -1057,8 +1057,23 @@ pub const falling_hit_cap: usize = 3;
 /// Entities tracked per falling block (a collapse column crushes few victims).
 pub const falling_hits_tracked: usize = 8;
 
+/// Stock EntityAliveFlags bit values (protocol-packages.md 5.5.6 /
+/// protocol-frames.md 9, bit 0 = LSB). The sim flags word mirrors the stock
+/// wire word; ecs owns the canonical values and wire/packages.zig aliases its
+/// cF_* consts here, so there is one source of truth for the bit numbers.
+pub const flag_approaching_enemy: u16 = 0x0001;
+pub const flag_approaching_player: u16 = 0x0002;
+pub const flag_aiming_gun: u16 = 0x0004;
+pub const flag_spawned: u16 = 0x0008;
+pub const flag_jumping: u16 = 0x0010;
+pub const flag_breaking_blocks: u16 = 0x0020;
+pub const flag_is_alert: u16 = 0x0040;
+pub const flag_flashlight_on: u16 = 0x0080;
+pub const flag_god_mode: u16 = 0x0100;
+pub const flag_crouching: u16 = 0x0200;
+
 pub const Flags = struct {
-    bits: u16 = 8, // Spawned
+    bits: u16 = flag_spawned,
 };
 
 /// Replication dirty bits.

@@ -994,10 +994,26 @@ pub const World = struct {
         };
     }
 
+    /// Highest net id the monotonic counter may hand out before wrap.
+    /// Exhaustion needs 2^31 allocations and is unreachable under the
+    /// max_entities cap, but a wrapped id would silently collide with a live
+    /// entity's id (net_to_slot.put overwrites the old mapping), so allocation
+    /// fails closed instead.
+    const net_id_max = std.math.maxInt(i32);
+
+    /// Reserve the next globally-unique net id, or null when the counter is
+    /// exhausted (see net_id_max). Shared by ECS spawns and host-side bots so
+    /// the two id spaces never collide.
+    pub fn allocNetId(self: *World) ?i32 {
+        const id = self.next_net_id;
+        if (id >= net_id_max) return null;
+        self.next_net_id = id + 1;
+        return id;
+    }
+
     fn spawnBase(self: *World, kind: Kind, x: f32, y: f32, z: f32, hp: f32) ?Slot {
+        const nid = self.allocNetId() orelse return null;
         const s = self.allocSlot() orelse return null;
-        const nid = self.next_net_id;
-        self.next_net_id += 1;
         self.alive[s] = true;
         self.alive_bits.set(s);
         self.entity_count +%= 1;
@@ -1023,7 +1039,7 @@ pub const World = struct {
         self.slot_gen[s] +%= 1;
         self.network_id[s] = .{ .id = nid, .gen = self.slot_gen[s] };
         self.kind[s] = kind;
-        self.flags[s] = .{ .bits = 8 };
+        self.flags[s] = .{ .bits = c.flag_spawned };
         self.dirty[s] = .{ .spawn = true, .pos = true };
         self.dirty_bits.set(s);
         const cid: u16 = switch (kind) {

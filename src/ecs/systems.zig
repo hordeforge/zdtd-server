@@ -1957,9 +1957,9 @@ const AiCtx = struct {
             }
 
             if (ai.alert or ai.state == .chase or ai.state == .attack) {
-                ctx.w.flags[s].bits |= 64;
+                ctx.w.flags[s].bits |= c.flag_is_alert;
             } else {
-                ctx.w.flags[s].bits &= ~@as(u16, 64);
+                ctx.w.flags[s].bits &= ~c.flag_is_alert;
             }
 
             // Vertical settle once per tick (gravity + ground snap), so the
@@ -2363,7 +2363,7 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, 
             }
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
-            ctx.w.flags[s].bits |= 1;
+            ctx.w.flags[s].bits |= c.flag_approaching_enemy;
             // Combat noise (stock NotifyNoise): the landed hit alerts zombies
             // and wakes sleepers within radius (group-AI PARTIAL).
             ctx.w.pushNoise(ctx.w.transform[s].x, ctx.w.transform[s].y, ctx.w.transform[s].z, ctx.w.rules.ai.combat_noise_radius);

@@ -225,7 +225,7 @@ pub const BotManager = struct {
         var slot: usize = 0;
         while (slot < max_bots and self.bots[slot].alive) : (slot += 1) {}
         if (slot >= max_bots) return null;
-        const id = g.allocBotNetId();
+        const id = g.allocBotNetId() orelse return null;
         const gy = g.groundHeight(@floor(x), @floor(z));
         // Deterministic mixed-loadout pick from pool (clanker LoadoutPool parity)
         var prng: u32 = @as(u32, @bitCast(id)) *% 2654435761 +% @as(u32, @truncate(@as(u64, @bitCast(g.tick_n))));
