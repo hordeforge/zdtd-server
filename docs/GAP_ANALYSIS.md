@@ -5171,7 +5171,7 @@ not stock:
 | Battery charge / solar | PARTIAL (solar = generator node; no battery SoC) |
 | Turret placeable block + power | PARTIAL (entity + node) |
 | Ammo items / reload | PARTIAL (ammo counter) |
-| Blade / junk turret variants | PARTIAL (the turret system ships blade + junk variants with the stock wire + sim; per-variant data (damage, fire rate, ammo) is rules-driven rather than parsed from items.xml/block data) |
+| Blade / junk turret variants | PARTIAL (the turret system ships blade + junk variants with the stock wire + sim; the placed turret's range/damage/fire interval now parse from the autoTurret block data (blocks.xml MaxDistance/EntityDamage/BurstFireRate, rule 15, wired via the Game hook - 2026-08-27); per-variant data beyond the base block (blade/junk item stats from items.xml Action0, magazine/ammo semantics) stays rules-driven, recorded) |
 
 ---
 

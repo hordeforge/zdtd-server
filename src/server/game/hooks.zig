@@ -441,6 +441,15 @@ pub fn turretWatts(ctx: ?*anyopaque) f32 {
     return 15;
 }
 
+/// Placed-turret combat stats from the autoTurret block (blocks.xml
+/// MaxDistance/EntityDamage/BurstFireRate/BurstRoundCount). Wired to
+/// World.turret_stats_fn: rule 15 - the sim never hardcodes stock turret
+/// data; zero fields fall back to the component defaults.
+pub fn turretStats(ctx: ?*anyopaque) ?ecs.components.TurretBlockStats {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.maxdamage.turretStatsByName("autoTurret");
+}
+
 pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     if (g.items.byId(item_id)) |_| return g.items.stackFor(item_id);

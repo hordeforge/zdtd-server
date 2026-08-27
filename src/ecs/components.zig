@@ -377,6 +377,17 @@ pub fn applySkillFloor(d: *BotDef) void {
     d.dodge_chance = 0.2 + 0.11 * @as(f32, @floatFromInt(d.skill));
 }
 
+/// Placed-turret combat stats from the block (blocks.xml autoTurret family:
+/// MaxDistance, EntityDamage, BurstFireRate, BurstRoundCount). Zero fields
+/// stay unset - callers fall back to the component defaults. Pure shape
+/// shared by the assets loader (assets→ecs allowed) and the world hook.
+pub const TurretBlockStats = struct {
+    max_distance: f32 = 0,
+    entity_damage: f32 = 0,
+    burst_fire_rate: f32 = 0,
+    burst_rounds: u16 = 0,
+};
+
 pub const VehicleKind = enum(u8) {
     bicycle = 0,
     minibike = 1,
@@ -439,8 +450,9 @@ pub const Vehicle = struct {
 };
 
 /// zdtd sim defaults for the Turret component. Stock turret stats ship in
-/// items.xml (turret item PassiveEffects: range, damage, magazine); not parsed
-/// today - divergence potential, tracked with the A-bucket loader gaps.
+/// blocks.xml (autoTurret family: MaxDistance, EntityDamage, BurstFireRate,
+/// BurstRoundCount); the Game hook (World.turret_stats_fn) overlays them at
+/// spawn - these are the no-game-dir fallback only (rule 15).
 pub const Turret = struct {
     range: f32 = 24,
     damage: f32 = 12,

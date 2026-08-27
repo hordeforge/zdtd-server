@@ -435,6 +435,11 @@ pub const World = struct {
     /// Optional → autoTurret block RequiredPower (maxdamage; stock 15 W).
     turret_watts_ctx: ?*anyopaque = null,
     turret_watts_fn: ?*const fn (?*anyopaque) f32 = null,
+    /// Optional → placed-turret combat stats (blocks.xml autoTurret family:
+    /// MaxDistance/EntityDamage/BurstFireRate/BurstRoundCount). Null → the
+    /// component defaults (rule 15: stock data from the block table).
+    turret_stats_ctx: ?*anyopaque = null,
+    turret_stats_fn: ?*const fn (?*anyopaque) ?c.TurretBlockStats = null,
     /// Optional kind → vehicles.xml fuelTank capacity (0 = unset → the
     /// `[rules.vehicle] fuel_cap` floor). Game wires the vehicle table.
     vehicle_tank_ctx: ?*anyopaque = null,
@@ -1431,7 +1436,18 @@ pub const World = struct {
             self.power.nodes[ni].entity_id = self.network_id[s].id;
         }
         self.mask[s].turret = true;
-        self.turret[s] = .{ .power_node = nid };
+        var t: c.Turret = .{ .power_node = nid };
+        if (self.turret_stats_fn) |f| {
+            // Rule 15: the placed turret's range/damage/fire interval come
+            // from the autoTurret block data (blocks.xml), never hardcoded
+            // sim defaults; zero fields keep the component defaults.
+            if (f(self.turret_stats_ctx)) |ts| {
+                if (ts.max_distance > 0) t.range = ts.max_distance;
+                if (ts.entity_damage > 0) t.damage = ts.entity_damage;
+                if (ts.burst_fire_rate > 0) t.fire_interval = ts.burst_fire_rate;
+            }
+        }
+        self.turret[s] = t;
         self.power.resolve();
         self.notifySpawn(s);
         return self.network_id[s].id;
@@ -2141,4 +2157,32 @@ test "AtomicBits concurrent set loses no bits" {
     var i: usize = 0;
     while (i < max_entities) : (i += 1) try std.testing.expect(bits.isSet(i));
     try std.testing.expectEqual(@as(usize, max_entities), bits.count());
+}
+
+test "spawnTurret applies the block-data combat stats through the hook" {
+    // Rule 15: the placed turret's range/damage/fire interval come from the
+    // autoTurret block data via the Game hook; zero fields keep the
+    // component defaults.
+    var w: World = .{};
+    defer w.deinit();
+    var stats: c.TurretBlockStats = .{ .max_distance = 30, .entity_damage = 32, .burst_fire_rate = 0.15 };
+    w.turret_stats_fn = struct {
+        fn f(ctx: ?*anyopaque) ?c.TurretBlockStats {
+            const s: *c.TurretBlockStats = @ptrCast(@alignCast(ctx.?));
+            return s.*;
+        }
+    }.f;
+    w.turret_stats_ctx = &stats;
+    const id = w.spawnTurret(5, 70, 5).?;
+    const s = w.slotOfNetId(id).?;
+    try std.testing.expectEqual(@as(f32, 30), w.turret[s].range);
+    try std.testing.expectEqual(@as(f32, 32), w.turret[s].damage);
+    try std.testing.expectEqual(@as(f32, 0.15), w.turret[s].fire_interval);
+    // Without the hook the component defaults hold.
+    var w2: World = .{};
+    defer w2.deinit();
+    const id2 = w2.spawnTurret(5, 70, 5).?;
+    const s2 = w2.slotOfNetId(id2).?;
+    try std.testing.expectEqual(@as(f32, 24), w2.turret[s2].range);
+    try std.testing.expectEqual(@as(f32, 12), w2.turret[s2].damage);
 }

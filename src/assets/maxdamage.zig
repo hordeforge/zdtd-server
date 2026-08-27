@@ -7,6 +7,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const arena_util = @import("../util/arena.zig");
 const blocks_nim = @import("blocks_nim.zig");
+const components = @import("../ecs/components.zig");
 
 /// Bundled V3.1.4 full client AssignIds dump (ZDTD_DUMP_BLOCK_IDS Postfix).
 /// Pins verified: treeDeadTree02=24626, cntWoodenChestClosed=18671. No stale saves.
@@ -35,6 +36,9 @@ pub const Dim = struct {
     }
 };
 
+/// Turret combat stats live in `components.TurretBlockStats` (pure shape;
+/// assets→ecs allowed, ecs→assets forbidden - production wiring uses hooks).
+
 pub const Table = struct {
     /// name → MaxDamage
     by_name: std.StringHashMapUnmanaged(u16) = .{},
@@ -57,6 +61,11 @@ pub const Table = struct {
     /// block name → power watts (MaxPower for sources, else RequiredPower for
     /// consumers). From blocks.xml DynamicProperties, keyed by name like by_name.
     power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// block name → turret combat stats (blocks.xml autoTurret/shotgunTurret
+    /// MaxDistance/EntityDamage/BurstFireRate/BurstRoundCount). Rule 15: the
+    /// placed turret's range/damage/fire interval come from the block data,
+    /// never hardcoded sim defaults.
+    turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .{},
     /// block name → blocks.xml Class (Generator, BatteryBank, …). Arena keys.
     power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
     /// Block names whose Extends-resolved Class is "Sleeper" (BlockSleeper's
@@ -299,6 +308,12 @@ pub const Table = struct {
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
     pub fn wattsByName(self: *const Table, name: []const u8) ?f32 {
         return self.power_watts_by_name.get(name);
+    }
+
+    /// Turret combat stats for a stock block name (autoTurret/shotgunTurret),
+    /// else null. Rule 15: block data, never hardcoded sim defaults.
+    pub fn turretStatsByName(self: *const Table, name: []const u8) ?components.TurretBlockStats {
+        return self.turret_stats_by_name.get(name);
     }
 
     /// blocks.xml Class property for a block name, else null.
@@ -677,6 +692,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var storage_names: std.StringHashMapUnmanaged(void) = .{};
     var loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
     var power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .{};
     var power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
     var power_max_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var power_output_per_fuel_by_name: std.StringHashMapUnmanaged(f32) = .{};
@@ -742,6 +758,29 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         }
         if (xml.propertyValue(body, "MaxFuel")) |mf| {
             if (xml.parseF32(mf)) |v| try power_max_fuel_by_name.put(arena, kn, v);
+        }
+        // Turret family combat stats (autoTurret / shotgunTurret / blade
+        // turrets): range, damage, per-burst fire rate. Extends-resolved in
+        // the second pass like the other block facts.
+        if (xml.propertyValue(body, "MaxDistance")) |md| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(md)) |v| ts.max_distance = v;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
+        if (xml.propertyValue(body, "EntityDamage")) |ed| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(ed)) |v| ts.entity_damage = v;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
+        if (xml.propertyValue(body, "BurstFireRate")) |bfr| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseF32(bfr)) |v| ts.burst_fire_rate = v;
+            try turret_stats_by_name.put(arena, kn, ts);
+        }
+        if (xml.propertyValue(body, "BurstRoundCount")) |brc| {
+            var ts = turret_stats_by_name.get(kn) orelse components.TurretBlockStats{};
+            if (xml.parseU16(brc)) |v| ts.burst_rounds = v;
+            try turret_stats_by_name.put(arena, kn, ts);
         }
         if (xml.propertyValue(body, "OutputPerFuel")) |opf| {
             if (xml.parseF32(opf)) |v| try power_output_per_fuel_by_name.put(arena, kn, v);
@@ -823,6 +862,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .storage_names = storage_names,
         .loot_list_by_name = loot_list_by_name,
         .power_watts_by_name = power_watts_by_name,
+        .turret_stats_by_name = turret_stats_by_name,
         .power_class_by_name = power_class_by_name,
         .sleeper_class_names = sleeper_class_names,
         .power_max_fuel_by_name = power_max_fuel_by_name,
@@ -894,6 +934,12 @@ test "load blocks.xml MaxDamage when present" {
     try std.testing.expectEqual(@as(f32, 11250), t.outputPerFuelByName("generatorbank").?);
     try std.testing.expectEqual(@as(f32, 90), t.outputPerChargeByName("batterybank").?);
     try std.testing.expectEqual(@as(f32, 15), t.wattsByName("autoTurret").?);
+    // Rule 15: the placed-turret combat stats come from the block data.
+    const ts = t.turretStatsByName("autoTurret").?;
+    try std.testing.expectEqual(@as(f32, 30), ts.max_distance);
+    try std.testing.expectEqual(@as(f32, 32), ts.entity_damage);
+    try std.testing.expectEqual(@as(f32, 0.15), ts.burst_fire_rate);
+    try std.testing.expectEqual(@as(u16, 15), ts.burst_rounds);
     // Merge nim map
     const nim = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Prefabs/POIs/abandoned_house_01.blocks.nim";
     try t.mergeNim(std.testing.allocator, nim);
