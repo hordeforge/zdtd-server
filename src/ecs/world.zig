@@ -447,6 +447,10 @@ pub const World = struct {
     /// Optional item_id → max stack (items.xml Stacknumber). Null → builtin_defs.
     stack_ctx: ?*anyopaque = null,
     stack_fn: ?*const fn (?*anyopaque, u16) u16 = null,
+    /// Optional item_id → held-item light (items.xml LightValue, 0 = none).
+    /// Feeds the PlayerStealth selfLight blend (rule 15).
+    held_light_ctx: ?*anyopaque = null,
+    held_light_fn: ?*const fn (?*anyopaque, u16) f32 = null,
     /// Optional item_id → armor? (name prefix armor*). Null → offline pin.
     is_armor_ctx: ?*anyopaque = null,
     is_armor_fn: ?*const fn (?*anyopaque, u16) bool = null,
@@ -599,6 +603,18 @@ pub const World = struct {
     pub fn maxStack(self: *const World, item_id: u16) u16 {
         if (self.stack_fn) |f| return f(self.stack_ctx, item_id);
         return c.maxStackOffline(item_id);
+    }
+
+    /// Held-item light for the stealth selfLight blend (items.xml LightValue
+    /// via the Game hook; 0 when unhooked or the item carries none).
+    pub fn heldLightFor(self: *const World, player_slot: Slot) f32 {
+        if (!self.mask[player_slot].inventory) return 0;
+        const inv = &self.inventory[player_slot];
+        if (inv.holding >= c.inv_toolbelt) return 0;
+        const item_id = inv.slots[inv.holding].item_id;
+        if (item_id == 0) return 0;
+        if (self.held_light_fn) |f| return f(self.held_light_ctx, item_id);
+        return 0;
     }
 
     /// Deposit into an entity inventory slot respecting catalog stack caps.

@@ -38,6 +38,10 @@ const PlayerSnap = struct {
     /// stealthLightLevel): consumed by the CanSeeStealth sight gate. 0 =
     /// darkest night (the World ambient default).
     light_level: f32 = 0,
+    /// Held-item light (items.xml LightValue): the TickServer selfLight out
+    /// param. Drives the lightAttackPercent switch (selfLight < 0.1 -> the
+    /// passive-89 crouch reach; else 1) and the stealth light blend.
+    self_light: f32 = 0,
 };
 
 /// Player positions for AI targeting / despawn. When `skip_blood_moon_dead` is
@@ -61,7 +65,8 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
             .y = w.transform[j].y,
             .z = w.transform[j].z,
             .crouching = w.player[j].crouching,
-            .light_level = stealthLightLevel(w.ambient_light, w.player[j].crouching, w.rules.ai.stealth_light_passive),
+            .light_level = stealthLightLevel(w.ambient_light, w.heldLightFor(j), w.player[j].crouching, w.rules.ai.stealth_light_passive),
+            .self_light = w.heldLightFor(j),
         };
         n += 1;
     }
@@ -102,9 +107,9 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
 /// `lightAttackPercent` fed to `CanSleeperAttackDetect`'s `FastLerp(3, 15,
 /// t)` crouch range. The IL check is on the **selfLight** out param of
 /// GetStealthLightLevel (the held-item light, IL_010B: `selfLight < 0.1` →
-/// passive-89 else 1) - not the day/night ambient. The sim carries no item
-/// lights, so selfLight is 0 and the passive applies; `self_light` is the
-/// input for when item lights land (recorded).
+/// passive-89 else 1) - not the day/night ambient. Wired 2026-08-27: the
+/// held item's items.xml LightValue (torch .35, flashlight .55) raises the
+/// crouch reach to the full 15 when held.
 fn stealthLightAttackPercent(self_light: f32, passive: f32) f32 {
     return if (self_light < stealth_self_light_dark) passive else 1.0;
 }
@@ -112,13 +117,20 @@ fn stealthLightAttackPercent(self_light: f32, passive: f32) f32 {
 /// Stock `PlayerStealth.TickServer` lightLevel (IL=0131-014F): the stealth
 /// light byte consumed by both the NetPackageEntityStealth S2C (Setup IL=26
 /// conv.u1 of lightLevel) and the CanSeeStealth sight gate. Chain: light =
-/// GetStealthLightLevel (slice-1 ambient; the selfLight + movingLight terms
-/// are 0 until item lights land), crouch ×0.6 (IL_00A6), the speedAverage
-/// visibility scale (1 + speed×0.15, IL_00CD) is 0 for a standing player,
-/// then `lightLevel = clamp(light × (0.32 + 0.68 × passive89) × 100, 0,
-/// 200)`. passive89 = rules.ai.stealth_light_passive.
-pub fn stealthLightLevel(ambient_light: f32, crouching: bool, passive: f32) f32 {
-    const light = ambient_light * (if (crouching) stealth_crouch_light_scale else 1.0);
+/// GetStealthLightLevel (slice-1 ambient + the selfLight held-item blend,
+/// RE entity-ai.md: ratio = FastClamp(selfLight / (light + 0.05), 0.5, 3.2),
+/// light += selfLight x ratio; selfLight = the AlwaysActive held item's
+/// items.xml LightValue, Inventory.GetLightLevel IL=76), crouch ×0.6
+/// (IL_00A6), the speedAverage visibility scale (1 + speed×0.15, IL_00CD) is
+/// 0 for a standing player, then `lightLevel = clamp(light × (0.32 + 0.68 ×
+/// passive89) × 100, 0, 200)`. passive89 = rules.ai.stealth_light_passive.
+pub fn stealthLightLevel(ambient_light: f32, self_light: f32, crouching: bool, passive: f32) f32 {
+    var light = ambient_light;
+    if (self_light > 0) {
+        const ratio = std.math.clamp(self_light / (light + 0.05), 0.5, 3.2);
+        light += self_light * ratio;
+    }
+    light *= if (crouching) stealth_crouch_light_scale else 1.0;
     const folded = light * (stealth_light_passive_blend_a + stealth_light_passive_blend_b * passive) * 100.0;
     return @min(folded, stealth_light_level_max);
 }
@@ -1731,12 +1743,6 @@ const AiCtx = struct {
             if (ctx.w.mask[s].sleeper and !ctx.w.sleeper[s].awake) {
                 const sl = ctx.w.sleeper[s];
                 const ar = ctx.w.rules.ai;
-                // selfLight 0 (no held-item light in the sim; RE TickServer
-                // IL_010B checks selfLight < 0.1) → lightAttackPercent is the
-                // passive-89 always: crouch range FastLerp(3, 15, 0.89) = 13.68.
-                const lap = stealthLightAttackPercent(0, ar.stealth_light_passive);
-                const crouch_reach = ar.crouch_sleeper_detect_min +
-                    (ar.crouch_sleeper_detect_max - ar.crouch_sleeper_detect_min) * lap;
                 const sr = @sqrt(senseDistSq(ctx.w, s)); // sightRangeBase
                 var near = false;
                 for (ctx.players) |pl| {
@@ -1744,6 +1750,13 @@ const AiCtx = struct {
                     const dz = pl.z - sl.home_z;
                     const dist = @sqrt(dx * dx + dz * dz);
                     if (dist > sl.volume_r) continue; // out of the volume entirely
+                    // lightAttackPercent: selfLight < 0.1 → the passive-89
+                    // always, a held light (torch/flashlight) raises it to 1,
+                    // so the crouch range FastLerp(3, 15, t) stretches to the
+                    // full 15.
+                    const lap = stealthLightAttackPercent(pl.self_light, ar.stealth_light_passive);
+                    const crouch_reach = ar.crouch_sleeper_detect_min +
+                        (ar.crouch_sleeper_detect_max - ar.crouch_sleeper_detect_min) * lap;
                     const wake_reach = if (pl.crouching) @min(sl.volume_r, crouch_reach) else sl.volume_r;
                     if (dist <= wake_reach) {
                         if (sr > 0.001) {
@@ -5845,12 +5858,23 @@ test "stealth: CanSeeStealth light gate gates sight by the TickServer lightLevel
     w.class_table[0].sight_light_max = 150.0;
     const zyaw: f32 = 90.0; // faces +x; no walls (LOS clear).
     const hear: f32 = 0.1;
-    const noon = stealthLightLevel(0.5, false, 0.89);
+    const noon = stealthLightLevel(0.5, 0, false, 0.89);
     try std.testing.expectApproxEqAbs(@as(f32, 46.26), noon, 0.01);
     try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 8, 70, 0, hear, noon));
     try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0, hear, noon));
-    const crouched = stealthLightLevel(0.5, true, 0.89);
+    const crouched = stealthLightLevel(0.5, 0, true, 0.89);
     try std.testing.expectApproxEqAbs(@as(f32, 27.76), crouched, 0.01);
+    // Held-item light (selfLight blend, RE entity-ai.md TickServer step 2):
+    // a pistol light (.45) at night adds selfLight x clamp(selfLight /
+    // (light + 0.05), 0.5, 3.2).
+    const gunlight = stealthLightLevel(0.1, 0.45, false, 0.89);
+    try std.testing.expectApproxEqAbs(@as(f32, 134.15), gunlight, 0.05);
+    const torchlight = stealthLightLevel(0.05, 0.35, false, 0.89);
+    try std.testing.expectApproxEqAbs(@as(f32, 108.25), torchlight, 0.05);
+    // The lightAttackPercent switch: a held light (>= 0.1) lifts the crouch
+    // reach from the passive-89 value to 1 (full FastLerp(3, 15, t) range).
+    try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0, 0.89), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), stealthLightAttackPercent(0.45, 0.89), 0.0001);
     try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 8, 70, 0, hear, crouched));
     // Night: lightLevel 0 sees only inside the threshold's -2 floor (t <
     // 2/152 → < ~0.4 m); 5 m is hidden. Hearing is untouched by the light

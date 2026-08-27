@@ -92,6 +92,11 @@ pub const ItemDef = struct {
     /// feral 24; 0 = none/unset → the `[rules.progression] block_bite_damage`
     /// floor).
     damage_block: f32 = 0,
+    /// items.xml LightValue (held-item light: torch .35, flashlight02 .55,
+    /// weapon lights .45). Feeds the PlayerStealth selfLight term (Inventory.
+    /// GetLightLevel IL=76: an AlwaysActive held item's LightValue, clamped
+    /// 0..1). 0 = no held light.
+    light_value: f32 = 0,
     /// items.xml melee reach: `Range` property (zombie hand 1.6) or the
     /// passive `MaxRange` (club/axe 2.4). 0 = none/unset → the
     /// `[rules.combat] attack_range_sq` floor.
@@ -642,6 +647,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_place_names.deinit(allocator);
     var stock_dmg_blocks: std.ArrayList(f32) = .empty;
     defer stock_dmg_blocks.deinit(allocator);
+    var stock_light_values: std.ArrayList(f32) = .empty;
+    defer stock_light_values.deinit(allocator);
     var stock_melee_ranges: std.ArrayList(f32) = .empty;
     defer stock_melee_ranges.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
@@ -774,6 +781,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 dmg_block = xml.parseF32(v) orelse 0;
             }
             try stock_dmg_blocks.append(allocator, dmg_block);
+            // LightValue property (held-item light: torches, flashlights,
+            // weapon lights). The stealth selfLight term (rule 15).
+            var light_val: f32 = 0;
+            if (xml.propertyValue(clean[ii..item_end], "LightValue")) |v| {
+                light_val = std.math.clamp(xml.parseF32(v) orelse 0, 0, 1);
+            }
+            try stock_light_values.append(allocator, light_val);
             // Melee reach: `Range` property (zombie hand 1.6) or the passive
             // `MaxRange` (club/axe 2.4). Drives the AI attack-range gate.
             var mrange: f32 = 0;
@@ -1129,6 +1143,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.entity_damage = stock_edmgs.items[idx];
                 def.place_block_name = stock_place_names.items[idx];
                 def.damage_block = stock_dmg_blocks.items[idx];
+                def.light_value = stock_light_values.items[idx];
                 def.melee_range = stock_melee_ranges.items[idx];
                 def.phys_resist_curve = stock_pdr_curves.items[idx];
                 def.phys_resist_n = stock_pdr_n.items[idx];
@@ -1180,6 +1195,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .entity_damage = stock_edmgs.items[idx],
             .place_block_name = stock_place_names.items[idx],
             .damage_block = stock_dmg_blocks.items[idx],
+            .light_value = stock_light_values.items[idx],
             .melee_range = stock_melee_ranges.items[idx],
             .fuel_value = stock_fuels.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
@@ -1481,6 +1497,17 @@ test "load stock items.xml when present" {
     }
     if (t.byName("resourceWood")) |wood| {
         try std.testing.expectEqual(@as(u16, 50), wood.econ_bundle_size);
+    }
+    // Held-item lights (Inventory.GetLightLevel IL=76): torches and
+    // flashlights carry items.xml LightValue for the stealth selfLight term.
+    if (t.byName("meleeToolTorch")) |torch| {
+        try std.testing.expectApproxEqAbs(@as(f32, 0.35), torch.light_value, 0.001);
+    }
+    if (t.byName("meleeToolFlashlight02")) |fl| {
+        try std.testing.expectApproxEqAbs(@as(f32, 0.55), fl.light_value, 0.001);
+    }
+    if (t.byName("gunHandgunT0PipePistol")) |gun| {
+        try std.testing.expectApproxEqAbs(@as(f32, 0.45), gun.light_value, 0.001);
     }
     // Melee damage: club/axe declare it as the EntityDamage passive effect
     // (base_set) — property-less items must not resolve to 0.

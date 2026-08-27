@@ -214,7 +214,7 @@ pub fn tickStealthBroadcast(self: *Game) void {
         const noise8: u8 = @intFromFloat(@min(noise, 127.0));
         const crouch = self.sim.player[ps].crouching;
         const light8: u8 = @intFromFloat(@min(
-            systems.stealthLightLevel(self.sim.ambient_light, crouch, self.sim.rules.ai.stealth_light_passive),
+            systems.stealthLightLevel(self.sim.ambient_light, self.sim.heldLightFor(ps), crouch, self.sim.rules.ai.stealth_light_passive),
             255.0,
         ));
         var alert = false;

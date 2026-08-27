@@ -456,6 +456,14 @@ pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
     return invsys.maxStackBuiltin(item_id);
 }
 
+/// Held-item light for the PlayerStealth selfLight blend (items.xml
+/// LightValue: torches .35, flashlights .55, weapon lights .45; 0 = none).
+pub fn heldItemLight(ctx: ?*anyopaque, item_id: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.items.byId(item_id)) |d| return d.light_value;
+    return 0;
+}
+
 /// Block-solid probe for the AI sense LOS ray (stock CanSee's Voxel.Raycast).
 /// A missing/erroring chunk counts as clear (nothing to hide behind yet).
 /// Runs on parallel AI/turret workers (LOS, movement probes, gravity), so the
