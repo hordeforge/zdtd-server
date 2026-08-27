@@ -38,6 +38,11 @@ pub const stock_first_item_type: i32 = items_start_here + 1;
 /// ItemClass.Stacknumber default when no property declares one (asm.il:749089).
 pub const stock_default_stack: u16 = 0x1f4; // 500
 
+/// Item id 0 = none/air: never a real item (item ids start at 1 after
+/// ItemsStartHere). The empty-slot sentinel for offline pins and fail-closed
+/// lookups that resolve to nothing.
+pub const no_item_id: u16 = 0;
+
 fn typeFromBuiltinId(item_id: u16) i32 {
     if (item_id == 0) return 0;
     return items_start_here + @as(i32, item_id);

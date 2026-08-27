@@ -23,7 +23,11 @@ pkg_edges() {
   local dir="src/${pkg}"
   [[ -d "$dir" ]] || return 0
   local imports
+  # The one sanctioned ecs -> assets edge (rules.zig comptime sandbox_presets
+  # defaults, documented in scripts/lint-architecture.sh) is excluded so the
+  # documented exception does not look like a cycle.
   imports="$(rg -o '@import\("(\.\./)+[a-z0-9_]+' "$dir" --glob '*.zig' 2>/dev/null |
+    grep -v '^src/ecs/rules\.zig:@import("\.\./assets' |
     sed -E 's/.*@import\("(\.\.\/)+//' | sort -u || true)"
   for tgt in $imports; do
     tgt="${tgt%%/*}"

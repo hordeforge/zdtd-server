@@ -12,6 +12,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const apm = @import("../../apm/root.zig");
 const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
+const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
 const containers_mod = @import("../../world/containers.zig");
@@ -511,7 +512,7 @@ pub fn rollBlockDropEvent(
         // The IL "[recipe]" / "*" names appear on no V3.1.0 b14 drop row;
         // an unknown item fails closed to a skip (missing beats fake).
         const item = self.items.byName(d.item_name) orelse continue;
-        if (item.id == 0) continue;
+        if (item.id == assets_items.no_item_id) continue;
         total +|= count;
         if (sn < stacks.len) {
             stacks[sn] = .{ .id = item.id, .count = @intCast(@min(count, 65535)) };
