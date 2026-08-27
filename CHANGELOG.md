@@ -380,3 +380,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   stock join-phase config sync (`NetPackageConfigFile`, 42 S2C rows,
   Deflate-cached patched XML, `archetypes` name-only). DLL mods are never
   hosted; `Bundles/` is tolerated, never read.
+- Admin harden: `settime` clamps to a sane day ceiling (a max-u64 world time
+  previously overflowed the blood-moon math and crashed the server); admin
+  `tele`/`tp` and plugin spawn/move coordinates are bounded to
+  `max_player_coord` (±1e6 blocks) and out-of-range C2S movement is rejected,
+  so a huge-but-finite coordinate can no longer trap the tick-path casts.
+- Admin `wipeplayer` accepts the current ZPV12 player-save format (a wipe on a
+  v12 save previously failed to clear the record).
+- WebUI: the operator dashboard gains a Guard policy panel (kicks,
+  would-kicks, quarantines, quarantine rejects, load-shed drops) and the page
+  header wordmark is a level-1 heading (screen-reader landmark).
+- Knockback impulse (C2S hit shove) now goes through the single
+  NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
+  clamp, so a knockback beyond the stock band no longer ships non-stock motion
+  to peers.
