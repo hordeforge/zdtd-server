@@ -359,7 +359,7 @@ field-by-field provenance.
 
 | Location | Value | R | Stock source |
 |---|--:|:-:|---|
-| `ecs/electric.zig` power tick | ~6.25 Hz | R | RE: tile-entities-power.md (PowerManager ~6.25 Hz root forest tick) |
+| `ecs/electric.zig` power tick | 20 Hz (every step) | R | **Diverges**: zdtd resolves the grid every tick (step.zig `power.tick`) vs stock `PowerManager` ~6.25 Hz Unity Update (tile-entities-power.md); faster, deterministic switching, not wire-visible |
 | `world/weather.zig` storm/blood-moon | — | R | RE: weather-environment.md (server-authoritative storm state machine) |
 | `ecs/poi_lock.zig` `unlock_grace` | 2000 | R | QuestEventManager `PrefabInstance.lockInstance` (QuestLockInstance, asm.il 1001892+) |
 | `ecs/party.zig` | max 8, flat XP | R | Party max 8 per parties-factions.md §2; NOTE the stock shared-XP reduction `startingXP*(1-0.1*inRange)` is NOT yet implemented - zdtd grants flat XP with the XPMultiplier only (partial) |
