@@ -33,6 +33,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageSharedQuest")) {
+        // Rate gate (LandClaimRepair precedent): the fallback/else branches
+        // broadcast the body to every connected peer; unthrottled a spam
+        // loop fans C2S bandwidth out for free (bandwidth DoS).
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         const head = packages.stock_quest.parseSharedQuestHead(body) catch return true;
         // Stock GameManager.QuestShareServer: if sharedWith is local, handle; else
         // forward package to sharedWithEntityID. We forward the body unchanged and
@@ -146,6 +153,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageWaypoint")) {
+        // Rate gate (LandClaimRepair precedent): Everyone-mode relays the
+        // waypoint to every connected peer; unthrottled a spam loop fans
+        // C2S bandwidth out for free (bandwidth DoS).
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         // Stock NetPackageWaypoint.ProcessPackage (IL=29): ValidEntityIdForSender
         // gate, then GameManager.WaypointInviteServer (IL=164) relays to the
         // inviter's allies (EnumWaypointInviteMode Friends=0, AllyStore.IsAlly
@@ -192,6 +206,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
+        // Rate gate: an accepted add relays the buff to every peer
+        // (relayBuff broadcastExcept); unthrottled a spam loop fans the
+        // relay out for free while flipping the buff set (bandwidth DoS).
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         try self.handleAddRemoveBuff(c, body);
         return true;
     }
