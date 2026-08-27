@@ -936,6 +936,12 @@ pub const Stealth = struct {
     /// Ticks to hold before the sleeperNoiseVolume decay resumes (stock sets
     /// 20 when a loud noise (volume ≥ 11) lands).
     sleeper_noise_wait_ticks: i32 = 0,
+    /// RE PlayerStealth.TickServer speedAverage (step 1): lerps toward the
+    /// per-tick horizontal speed at 0.2 when moving, decays x0.5 when idle.
+    /// The stealth light fold `x (1 + speedAverage x 0.15)` (IL_00CD).
+    prev_x: f32 = 0,
+    prev_z: f32 = 0,
+    speed_average: f32 = 0,
 };
 
 /// One player-attributed stealth-noise event (movement noise, stock

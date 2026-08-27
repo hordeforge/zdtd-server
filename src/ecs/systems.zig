@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const protocol = @import("../protocol.zig");
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
 const max_entities = @import("world.zig").max_entities;
@@ -65,7 +66,7 @@ fn snapshotPlayers(w: *const World, out: *[64]PlayerSnap, skip_blood_moon_dead: 
             .y = w.transform[j].y,
             .z = w.transform[j].z,
             .crouching = w.player[j].crouching,
-            .light_level = stealthLightLevel(w.ambient_light, w.heldLightFor(j), w.player[j].crouching, w.rules.ai.stealth_light_passive),
+            .light_level = stealthLightLevel(w.ambient_light, w.heldLightFor(j), w.player[j].crouching, w.rules.ai.stealth_light_passive, w.stealth[j].speed_average),
             .self_light = w.heldLightFor(j),
         };
         n += 1;
@@ -124,13 +125,15 @@ fn stealthLightAttackPercent(self_light: f32, passive: f32) f32 {
 /// (IL_00A6), the speedAverage visibility scale (1 + speed×0.15, IL_00CD) is
 /// 0 for a standing player, then `lightLevel = clamp(light × (0.32 + 0.68 ×
 /// passive89) × 100, 0, 200)`. passive89 = rules.ai.stealth_light_passive.
-pub fn stealthLightLevel(ambient_light: f32, self_light: f32, crouching: bool, passive: f32) f32 {
+pub fn stealthLightLevel(ambient_light: f32, self_light: f32, crouching: bool, passive: f32, speed_average: f32) f32 {
     var light = ambient_light;
     if (self_light > 0) {
         const ratio = std.math.clamp(self_light / (light + 0.05), 0.5, 3.2);
         light += self_light * ratio;
     }
     light *= if (crouching) stealth_crouch_light_scale else 1.0;
+    // IL_00CD-00E0: movement visibility `x (1 + speedAverage x 0.15)`.
+    light *= 1.0 + speed_average * stealth_speed_visibility_scale;
     const folded = light * (stealth_light_passive_blend_a + stealth_light_passive_blend_b * passive) * 100.0;
     return @min(folded, stealth_light_level_max);
 }
@@ -140,6 +143,7 @@ pub fn stealthLightLevel(ambient_light: f32, self_light: f32, crouching: bool, p
 /// selfLight < 0.1 → passive89 lightAttackPercent threshold.
 const stealth_crouch_light_scale: f32 = 0.6;
 const stealth_light_passive_blend_a: f32 = 0.32;
+const stealth_speed_visibility_scale: f32 = 0.15; // IL_00CD speedAverage x 0.15
 const stealth_light_passive_blend_b: f32 = 0.68;
 const stealth_light_level_max: f32 = 200.0;
 const stealth_self_light_dark: f32 = 0.1;
@@ -2694,6 +2698,18 @@ fn stealthNotifyNoise(w: *World, s: Slot, ev: c.StealthNoiseEvent) void {
 fn stealthTick(w: *World, s: Slot) void {
     const r = w.rules.ai;
     const st = &w.stealth[s];
+    // RE PlayerStealth.TickServer speedAverage (step 1): lerp toward the
+    // per-tick horizontal speed (blocks/s) at 0.2 when moving, decay x0.5
+    // when idle. Feeds the light fold `x (1 + speedAverage x 0.15)`.
+    const sdx = w.transform[s].x - st.prev_x;
+    const sdz = w.transform[s].z - st.prev_z;
+    const speed = @sqrt(sdx * sdx + sdz * sdz) * @as(f32, @floatFromInt(protocol.ticks_per_second));
+    st.prev_x = w.transform[s].x;
+    st.prev_z = w.transform[s].z;
+    st.speed_average = if (speed > 0.01)
+        st.speed_average + (speed - st.speed_average) * 0.2
+    else
+        st.speed_average * 0.5;
     // NoiseCleanup: decrement ticks, drop expired entries.
     var i: u8 = 0;
     while (i < st.noise_n) {
@@ -5858,23 +5874,27 @@ test "stealth: CanSeeStealth light gate gates sight by the TickServer lightLevel
     w.class_table[0].sight_light_max = 150.0;
     const zyaw: f32 = 90.0; // faces +x; no walls (LOS clear).
     const hear: f32 = 0.1;
-    const noon = stealthLightLevel(0.5, 0, false, 0.89);
+    const noon = stealthLightLevel(0.5, 0, false, 0.89, 0);
     try std.testing.expectApproxEqAbs(@as(f32, 46.26), noon, 0.01);
     try std.testing.expect(canSensePlayer(&w, 0, 0, 70, 0, zyaw, 8, 70, 0, hear, noon));
     try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 20, 70, 0, hear, noon));
-    const crouched = stealthLightLevel(0.5, 0, true, 0.89);
+    const crouched = stealthLightLevel(0.5, 0, true, 0.89, 0);
     try std.testing.expectApproxEqAbs(@as(f32, 27.76), crouched, 0.01);
     // Held-item light (selfLight blend, RE entity-ai.md TickServer step 2):
     // a pistol light (.45) at night adds selfLight x clamp(selfLight /
     // (light + 0.05), 0.5, 3.2).
-    const gunlight = stealthLightLevel(0.1, 0.45, false, 0.89);
+    const gunlight = stealthLightLevel(0.1, 0.45, false, 0.89, 0);
     try std.testing.expectApproxEqAbs(@as(f32, 134.15), gunlight, 0.05);
-    const torchlight = stealthLightLevel(0.05, 0.35, false, 0.89);
+    const torchlight = stealthLightLevel(0.05, 0.35, false, 0.89, 0);
     try std.testing.expectApproxEqAbs(@as(f32, 108.25), torchlight, 0.05);
     // The lightAttackPercent switch: a held light (>= 0.1) lifts the crouch
     // reach from the passive-89 value to 1 (full FastLerp(3, 15, t) range).
     try std.testing.expectApproxEqAbs(@as(f32, 0.89), stealthLightAttackPercent(0, 0.89), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), stealthLightAttackPercent(0.45, 0.89), 0.0001);
+    // Movement visibility (IL_00CD): light x (1 + speedAverage x 0.15).
+    // Noon 46.26 x 1.3 = 60.14 at speedAverage 2 (a jog).
+    const moving = stealthLightLevel(0.5, 0, false, 0.89, 2.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 60.14), moving, 0.05);
     try std.testing.expect(!canSensePlayer(&w, 0, 0, 70, 0, zyaw, 8, 70, 0, hear, crouched));
     // Night: lightLevel 0 sees only inside the threshold's -2 floor (t <
     // 2/152 → < ~0.4 m); 5 m is hidden. Hearing is untouched by the light
