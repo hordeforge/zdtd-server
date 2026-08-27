@@ -30,6 +30,13 @@
 - **Stealth light model** (waves 84-86): moon phase fold, held-item selfLight
   (items.xml LightValue), speedAverage movement-visibility - the TickServer
   chain is now complete for every server-computable term.
+- **Login version gate P0 (wave 101)**: a loadgen join smoke exposed that the
+  gate expected the IL-reading 'V 3.10' while stock empirically accepts the
+  display form 'V 3.1.0' - real clients were kicked with VersionMismatch=4
+  since the gate landed 2026-08-21. Fixed to 'V 3.1.0', verified with live
+  joins. Harness note: single-bot loadgen joins pass; two concurrent bots can
+  exhaust the 250ms critical pump budget on the 255KB block IdMapping under
+  localhost ACK pacing (by-design cap, not a join-path bug).
 - **Stale-row corrections**: enemy animals, battery/solar, per-class AITask,
   PlayerQuestPositions, sounds row - all re-audited against the code/RE.
 
