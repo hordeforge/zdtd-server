@@ -1933,7 +1933,7 @@ test "scenario always-on radius effect: radiated barrel grants buffRadiation01" 
     // always-on no-fuel sources (wallTorchLight, candleWallLight,
     // burningBarrel, cntBarrelRadiatedSingle00, decoPumpkinJackOLantern)
     // grant their ActiveRadiusEffects buff to players within radius; the
-    // per-player local 5x5x5 scan applies them each tick. Real game-dir
+    // per-player local 7x7x7 scan applies them each tick. Real game-dir
     // blocks/buffs. Skipped without the game dir.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;

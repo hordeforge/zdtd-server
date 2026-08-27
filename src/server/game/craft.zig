@@ -410,10 +410,12 @@ pub fn tickBlockRadiusEffects(self: *Game) void {
 /// (buffCampfireAOE warmth, buffCandleAOE, buffRadiation01) to every player
 /// within radius, refreshing while in range (ecs.buff.add refresh; the S2C
 /// relay fires only on a fresh grant like the workstation pass). Stock runs
-/// the radius scan per player tick; zdtd scans the player's local 5x5x5
+/// the radius scan per player tick; zdtd scans the player's local 7x7x7
 /// block neighborhood for no-fuel radius blocks instead of a placed-block
-/// index (the source set is seven blocks, radius <= 3; the fuel-module
-/// workstations stay on tickBlockRadiusEffects, so no double application).
+/// index (the source set is seven blocks, radius <= 3; the barrelRadiated
+/// radius is 2.5, so the box must be at least 3 wide to cover its band; the
+/// fuel-module workstations stay on tickBlockRadiusEffects, so no double
+/// application).
 pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
     for (&self.clients) |*cl| {
         if (!cl.joined) continue;
@@ -423,12 +425,12 @@ pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
         const px: i32 = @intFromFloat(@floor(t.x));
         const py: i32 = @intFromFloat(@floor(t.y));
         const pz: i32 = @intFromFloat(@floor(t.z));
-        var dx: i32 = -2;
-        while (dx <= 2) : (dx += 1) {
-            var dy: i32 = -2;
-            while (dy <= 2) : (dy += 1) {
-                var dz: i32 = -2;
-                while (dz <= 2) : (dz += 1) {
+        var dx: i32 = -3;
+        while (dx <= 3) : (dx += 1) {
+            var dy: i32 = -3;
+            while (dy <= 3) : (dy += 1) {
+                var dz: i32 = -3;
+                while (dz <= 3) : (dz += 1) {
                     const bx = px + dx;
                     const by = py + dy;
                     const bz = pz + dz;
