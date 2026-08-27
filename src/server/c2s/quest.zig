@@ -19,6 +19,11 @@ const c2s_text = @import("../c2s_text.zig");
 const replicate_te = @import("../replicate_te.zig");
 const vending_mod = @import("../../world/vending.zig");
 
+/// Fallback quest-giver marker Y when the trader NPC is not yet in the sim
+/// (the marker snaps to the real transform once the entity loads). A
+/// plausible ground height, not stock data; the giver marker is client-side.
+const quest_giver_fallback_y: f32 = 70;
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageLandClaimRepair")) {
@@ -276,7 +281,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             .event_type = .fetch_list,
         };
         var tx: f32 = 0;
-        var ty: f32 = 70;
+        var ty: f32 = quest_giver_fallback_y;
         var tz: f32 = 0;
         if (self.sim.slotOfNetId(head.npc_entity_id)) |ni| {
             if (self.sim.mask[ni].transform) {
@@ -380,7 +385,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         try self.sendTraderSnapshot(peer, null);
         var offers: [8]packages.stock_quest.QuestPacketEntry = undefined;
         var tx: f32 = 0;
-        var ty: f32 = 70;
+        var ty: f32 = quest_giver_fallback_y;
         var tz: f32 = 0;
         if (self.sim.slotOfNetId(npc_id)) |ni| {
             if (self.sim.mask[ni].transform) {

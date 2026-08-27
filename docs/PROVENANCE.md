@@ -403,6 +403,7 @@ field-by-field provenance.
 | `ecs/components.zig falling_group_cap` | 32 | Z | **zdtd-owned** falling-block group cap (stock `GroupBounds.IsWithinSize` clamps groups but the bound is not IL-pinned); larger collapses keep the first 32 cells - the rest still air out |
 | `max_claimed_explosion_radius` | 6.0 | R | `server/c2s/blocks.zig` cap on C2S-claimed explosion radii (block + entity): largest stock ExplosionData.EntityRadius is 6 (entities.xml `explosion` on cop/feral: radius_blocks 5, radius_entities 6); a forged blob must not carve the whole map or damage every loaded entity (2026-08-27) |
 | `fatal_kill_amount` | 9999 | Z | `server/c2s/misc.zig` **zdtd-owned** honored-`fatal` kill amount vs NPC kinds: stock fatal damage is client-computed; the server honors the flag only against zombies/animals with an amount far above any sim NPC class HP (max class hp 1600; the 9999-HP trader class is excluded by the zombie/animal gate) (2026-08-27) |
+| `quest_giver_fallback_y` | 70 | Z | `server/c2s/quest.zig` **zdtd-owned** fallback quest-giver marker Y when the trader NPC is not yet in the sim (the marker snaps to the real transform once the entity loads); plausible ground height, not stock data - the giver marker is client-side (2026-08-27) |
 
 ### 3.9 Divergence register (provenance for the differences)
 
