@@ -46,7 +46,12 @@
   evening: the single-bot stall reproduced 3/3 consecutive runs (3 inbound
   packets then silence, server `joined=1 entered=0`, `join_ok` increments,
   `c2s_throttle=0`) - treat the harness as stalled by default now and rely
-  on the server-side counters + the real-client gate instead.
+  on the server-side counters + the real-client gate instead. Smoke scripts
+  (2026-08-28): `smoke-modlet.sh` tolerates the stall (server-side checks
+  are its gate; the IdMapping window-drop fallback mirrors the old
+  version-drift one); `smoke-navezgane.sh` stays RED while the harness
+  stalls because its join IS the assertion - use the real-client gate for
+  joins until the sibling harness is fixed.
 - **Stale-row corrections**: enemy animals, battery/solar, per-class AITask,
   PlayerQuestPositions, sounds row - all re-audited against the code/RE.
 
