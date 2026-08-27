@@ -19,7 +19,7 @@
 //   log(level, ptr, len)        write a log line
 //   tick() -> i64               current server tick
 //   queue(ptr, len) -> i32      queue a text SimCommand
-//   sense(ptr, len, token)      fill a read-only world snapshot (BOTS_SPEC §3)
+//   sense(ptr, len, token)      fill a read-only world snapshot (RFC 0001 §3)
 //   query(req_ptr, req_len, out_ptr, out_cap) -> i32   point query
 //   json_parse(ptr, len) -> i32        std.json parse of the frame; 0 ok, <0 err
 //   json_str(path_ptr, path_len, out_ptr, out_cap) -> i32  decoded string at a
@@ -214,7 +214,7 @@ fn hostJsonObj(path: [:0]const u8) i32 {
 }
 
 // ---------------------------------------------------------------------------
-// Sense snapshot reads (BOTS_SPEC §3). LE reads; wasm32 is little-endian but
+// Sense snapshot reads (RFC 0001 §3). LE reads; wasm32 is little-endian but
 // readInt keeps it explicit.
 
 // text result for a tool that reads the snapshot; returns false on overflow.
@@ -223,7 +223,7 @@ fn toolTextSnapshot(w: *Wbuf, snap: []const u8, snap_len: usize, tool: usize) bo
     const count = std.mem.readInt(u32, snap[4..8], .little);
     const tick = std.mem.readInt(u32, snap[8..12], .little);
     // Records follow at a fixed stride; the snapshot may also carry a 16-byte
-    // event trailer (BOTS_SPEC §3), so iterate only over full records up to
+    // event trailer (RFC 0001 §3), so iterate only over full records up to
     // count, never past the buffer.
     var players: usize = 0;
     var zombies: usize = 0;
