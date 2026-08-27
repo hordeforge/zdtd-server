@@ -2152,6 +2152,57 @@ test "vehicles and turrets persist across restart (entities.zen)" {
     }
 }
 
+test "vehicle basket C2S applies and echoes to peers" {
+    // RE NetPackageBag (research dedicated-misc-systems.md vehicle storage
+    // pin v2): wire = entityId i32 + blobLen u16 + Bag.Write blob (version 1
+    // + u16 count + ItemStacks). The client's OnBagModified sends the bag;
+    // zdtd applies it to the vehicle's basket and echoes the body to the
+    // other clients (the stock S2C sender is unpinned).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    const v = g.sim.spawnVehicleEx(.minibike, 256, 70, 260, 500, 12, 1).?;
+    const vs = g.sim.slotOfNetId(v).?;
+    try g.seatRider(ca.entity_id, vs, systems.seat_any); // driver seat 0
+
+    // Build the Bag blob: version 1 + 1 slot (wood x5, absolute stock type).
+    var blob: [256]u8 = undefined;
+    var bw = wire_binary.Writer{ .buf = &blob };
+    try bw.writeByte(1);
+    try bw.writeU16(1);
+    try packages.stock_inv.writeItemStack(&bw, .{ .type_id = 65536 + 7, .count = 5 });
+    var body: [300]u8 = undefined;
+    var w = wire_binary.Writer{ .buf = &body };
+    try w.writeI32(v);
+    try w.writeU16(@intCast(bw.pos));
+    @memcpy(body[w.pos..][0..bw.pos], blob[0..bw.pos]);
+    const body_len = w.pos + bw.pos;
+
+    cap_a.clear();
+    cap_b.clear();
+    var fb: [512]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageBag", body[0..body_len]));
+    const bag_id = packages.idOf("NetPackageBag").?;
+    try std.testing.expectEqual(@as(u8, 1), g.sim.vehicle[vs].basket_n);
+    try std.testing.expectEqual(@as(u16, 7), g.sim.vehicle[vs].basket[0].item_id); // wood
+    try std.testing.expectEqual(@as(u16, 5), g.sim.vehicle[vs].basket[0].count);
+    try std.testing.expect(cap_a.findPkgId(bag_id) == null); // sender excluded
+    try std.testing.expect(cap_b.findPkgId(bag_id) != null); // peer hears the echo
+    std.debug.print("PASS vehicle basket: C2S apply + peer echo, sender excluded\n", .{});
+}
+
 test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

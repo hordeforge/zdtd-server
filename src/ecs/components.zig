@@ -389,6 +389,11 @@ pub const VehicleKind = enum(u8) {
 /// seat block any stock vehicle has (Vehicle::SetSeats, asm.il:1344168).
 pub const max_seats: usize = 6;
 
+/// Vehicle basket slot cap. Stock VehicleInventory is PUBLIC_SLOTS + 1
+/// (10 + 1 = 11); the storage window cap in stock is 8 rows. Fixed array so
+/// the C2S Bag blob parse has a hard bound (rule 20).
+pub const max_basket_slots: usize = 8;
+
 /// Seat 0 is the driver: EntityVehicle::AttachEntityToSelf sets hasDriver only
 /// when the resolved slot is 0 (asm.il:542176 IL_008a).
 pub const driver_seat: u8 = 0;
@@ -409,6 +414,11 @@ pub const Vehicle = struct {
     /// Last drive input (held until exit or new op=2). Applied each sim tick.
     throttle: f32 = 0,
     steer: f32 = 0,
+    /// Basket contents (RE NetPackageBag, research dedicated-misc-systems.md
+    /// vehicle storage pin v2): the basket is Entity.bag, synced as a Bag blob.
+    /// A packed fixed array, like the player inventory; empty slots hold id 0.
+    basket: [max_basket_slots]InvSlot = [_]InvSlot{.{}} ** max_basket_slots,
+    basket_n: u8 = 0,
 
     pub fn driverNetId(self: *const Vehicle) i32 {
         return self.seats[driver_seat];

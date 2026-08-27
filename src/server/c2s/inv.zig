@@ -309,6 +309,28 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (self.sim.mask[si].inventory) {
                 _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return true;
                 self.clampInventoryStacks(&self.sim.inventory[si]);
+            } else if (self.sim.mask[si].vehicle) {
+                // Vehicle basket (RE NetPackageBag write IL=19 / read IL=16,
+                // research dedicated-misc-systems.md vehicle storage pin v2):
+                // the basket is Entity.bag, synced as a Bag.Write blob. Apply
+                // to the vehicle's fixed basket array (item ids validated by
+                // the reverse resolver) and echo the raw body to the other
+                // clients, since the stock S2C broadcast sender is unpinned.
+                var wire_slots: [ecs.components.max_basket_slots]packages.stock_inv.StockSlot = undefined;
+                const parsed = packages.stock_inv.parseBagBody(body, wire_slots[0..]) catch {
+                    self.harness.counters.inc(.c2s_malformed);
+                    return true;
+                };
+                const v = &self.sim.vehicle[si];
+                var bi: usize = 0;
+                while (bi < ecs.components.max_basket_slots) : (bi += 1) {
+                    v.basket[bi] = if (bi < parsed.n)
+                        packages.stock_inv.toEcs(wire_slots[bi], reverseItemType, self)
+                    else
+                        .{};
+                }
+                v.basket_n = @intCast(parsed.n);
+                try self.broadcastExcept("NetPackageBag", body, c.slot);
             }
         } else return true;
         try self.sendHoldingEcho(peer, c);

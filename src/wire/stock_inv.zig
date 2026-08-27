@@ -628,6 +628,49 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
     return out2;
 }
 
+/// Parse the NetPackageBag Bag blob (Bag.Write IL=71, research
+/// dedicated-misc-systems.md vehicle storage pin v2): version byte 1 |
+/// u16 slot count | N x ItemStack (u16 count + ItemValue) | hasLocked bool +
+/// PackedBoolArray | Touched bool | hasPreferences bool + PreferenceTracker.
+/// Only version/count/slots are applied server-side (locked slots and
+/// preferences are client cosmetics); the tail is not validated. Bounded: the
+/// slot count is capped at the caller's `out` length (rule 20) and every
+/// ItemValue parse is bounds-checked by the reader.
+pub fn parseBagSlots(body: []const u8, out: []StockSlot) (binary.ReadError || error{Overflow})!usize {
+    var r: binary.Reader = .{ .data = body };
+    const version = try r.readByte();
+    if (version == 0) return 0; // empty bag
+    if (version != 1) return error.Overflow; // unknown Bag version, fail closed
+    const count = try r.readU16();
+    if (count > out.len) return error.Overflow;
+    var n: usize = 0;
+    while (n < count) : (n += 1) {
+        const stack_count = try r.readU16();
+        if (stack_count == 0) {
+            // Empty ItemStack: count 0 carries no ItemValue bytes.
+            out[n] = .{};
+            continue;
+        }
+        var slot = try readItemValue(&r);
+        slot.count = stack_count;
+        out[n] = slot;
+    }
+    return n;
+}
+
+/// Parse a full NetPackageBag body (write IL=19): entityId i32 | blobLen u16 |
+/// Bag.Write blob. Returns the bag entity id and the parsed slots. Bounded:
+/// the blob length is clamped to the body, the slot count to `out` (rule 20).
+pub fn parseBagBody(body: []const u8, out: []StockSlot) (binary.ReadError || error{Overflow})!struct { entity_id: i32, n: usize } {
+    if (body.len < 6) return error.EndOfStream;
+    const entity_id = std.mem.readInt(i32, body[0..4], .little);
+    const blob_len = std.mem.readInt(u16, body[4..6], .little);
+    const blob_end = 6 + @as(usize, blob_len);
+    if (blob_end > body.len) return error.EndOfStream; // truncated blob, fail closed
+    const n = try parseBagSlots(body[6..blob_end], out);
+    return .{ .entity_id = entity_id, .n = n };
+}
+
 fn skipTypedMetadata(r: *binary.Reader) binary.ReadError!void {
     // TypedMetadataValue.Read: i32 typeTag, then payload
     const tag = try r.readI32();
@@ -1536,4 +1579,34 @@ test "applyEquipmentBody parses the standalone equipment body" {
     try std.testing.expectEqual(@as(u16, 5), inv.slots[components.inv_equip_start + 2].item_id);
     try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 0].item_id);
     try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 11].item_id);
+}
+
+test "bag blob parses the stock Bag.Write layout" {
+    // Bag.Write IL=71: version 1 | u16 count | N x ItemStack | client
+    // cosmetics tail (locked/touched/preferences, not validated).
+    var body: [256]u8 = undefined;
+    var w = binary.Writer{ .buf = &body };
+    try w.writeByte(1); // version
+    try w.writeU16(2); // slot count
+    try writeItemStack(&w, .{ .type_id = items_start_here + 5, .count = 3 });
+    try writeItemStack(&w, .{ .type_id = 0, .count = 0 }); // empty slot
+    var out: [8]StockSlot = undefined;
+    const n = try parseBagSlots(w.written(), out[0..]);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqual(@as(i32, items_start_here + 5), out[0].type_id);
+    try std.testing.expectEqual(@as(u16, 3), out[0].count);
+    try std.testing.expectEqual(@as(i32, 0), out[1].type_id);
+
+    // Bounds: an over-long count is rejected, not truncated.
+    var b2: [16]u8 = undefined;
+    var w2 = binary.Writer{ .buf = &b2 };
+    try w2.writeByte(1);
+    try w2.writeU16(99);
+    try std.testing.expectError(error.Overflow, parseBagSlots(w2.written(), out[0..]));
+    // Unknown Bag version fails closed.
+    var b3: [8]u8 = undefined;
+    var w3 = binary.Writer{ .buf = &b3 };
+    try w3.writeByte(7);
+    try w3.writeU16(0);
+    try std.testing.expectError(error.Overflow, parseBagSlots(w3.written(), out[0..]));
 }
