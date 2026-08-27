@@ -112,6 +112,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const dy = std.mem.readInt(i16, body[13..15], .little);
         const dz = std.mem.readInt(i16, body[15..17], .little);
         if (self.sim.slotOfNetId(eid)) |idx| {
+            // RelPos delta scale (RE protocol-packages.md 5.5.4): dPos is the
+            // client's movement delta encoded in 1/32-block i16 units.
             const scale: f32 = 0.03125;
             const nx = self.sim.transform[idx].x + @as(f32, @floatFromInt(dx)) * scale;
             const ny = self.sim.transform[idx].y + @as(f32, @floatFromInt(dy)) * scale;

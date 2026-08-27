@@ -29,6 +29,12 @@ const reverseItemType = game_mod.Game.reverseItemType;
 const max_chat_msg_len = c2s_text.max_chat_msg_len;
 const chatMsgOk = c2s_text.chatMsgOk;
 
+/// Honored-`fatal` kill amount vs NPC kinds (zombies/animals). Stock fatal
+/// damage is client-computed; the server honors the flag only against NPCs
+/// and sends a kill amount far above any sim NPC class HP (max class hp
+/// 1600; the 9999-HP trader class is excluded by the zombie/animal gate).
+const fatal_kill_amount: f32 = 9999;
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageChat") or std.mem.eql(u8, name, "NetPackageSimpleChat")) {
@@ -526,7 +532,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Client strength is a claim: cap it, and honor `fatal` only against
         // NPC kinds (a spoofed fatal must not one-shot another player).
         var amount: f32 = @floatFromInt(@min(d.strength, self.max_claimed_damage));
-        if (d.fatal and was_zombie) amount = 9999;
+        if (d.fatal and was_zombie) amount = fatal_kill_amount;
         // PvP gate + armor mitigation when damaging a player.
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
             if (self.sim.mask[ei].player and self.sim.player[ei].peer_slot >= 0) {
