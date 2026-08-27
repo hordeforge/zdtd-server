@@ -5168,7 +5168,7 @@ not stock:
 | Placeable electrical blocks in world | HAVE (SetBlock → PowerGrid node, real watts) |
 | Stock `NetPackageWireActions` SetParent/RemoveParent | HAVE |
 | Wire tool stock UX packages | PARTIAL (WireToolActions = peer visual rebroadcast) |
-| Battery charge / solar | PARTIAL (solar = generator node; no battery SoC) |
+| Battery charge / solar | WORKS (2026-08-27 re-audit: the battery SoC ships - electric.zig ticks charge on surplus and discharge on shortfall (test "battery charges on surplus and discharges on shortfall"), and solar nodes are daylight-gated (only contribute when the day/night clock says day, schedule.zig turrets read solar as powered only in daylight); residuals recorded: battery capacity/coulomb profile rides the block OutputPerCharge/OutputPerStack parses, no separate SoC wire) |
 | Turret placeable block + power | PARTIAL (entity + node) |
 | Ammo items / reload | PARTIAL (ammo counter) |
 | Blade / junk turret variants | PARTIAL (the turret system ships blade + junk variants with the stock wire + sim; the placed turret's range/damage/fire interval now parse from the autoTurret block data (blocks.xml MaxDistance/EntityDamage/BurstFireRate, rule 15, wired via the Game hook - 2026-08-27); per-variant data beyond the base block (blade/junk item stats from items.xml Action0, magazine/ammo semantics) stays rules-driven, recorded) |
