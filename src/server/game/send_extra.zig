@@ -47,6 +47,9 @@ pub fn sendFramedReliable(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8
     }
     self.sendReliablePumped(peer, pkg_name, framed, retry_budget, 960, false) catch |err| switch (err) {
         error.WindowFull => {
+            // 960 = the net.zig sendReliablePumped attempt ladder's non-chunk,
+            // non-droppable default (Chunk 4000 / droppable 64 / else 960);
+            // the budget_ns deadline is the real cap, attempts are the ceiling.
             self.harness.counters.inc(.reliable_window_drops);
             const n = self.harness.counters.get(.reliable_window_drops);
             if (n == 1 or n % 100 == 0) {
