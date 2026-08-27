@@ -11,6 +11,9 @@ pub fn rescueDeepVoid(self: *Game, peer: *ln_peer.Peer, entity_id: i32, x: f32, 
     const gz: i32 = std.math.lossyCast(i32, @floor(z));
     const h_u16: u16 = self.world.heightWorld(gx, gz) catch @intCast(@max(1, self.world.primarySpawn().y));
     const surface: f32 = @floatFromInt(h_u16);
+    // Void threshold -1.0 (below the world's lowest cell) and the +0.9
+    // above-surface snap: the movement paths drop a player who fell out of
+    // the mesh back onto the terrain just above the ground.
     const min_y = surface + 0.9;
     if (!(y < -1.0)) return null;
     var yaw: f32 = 0;
