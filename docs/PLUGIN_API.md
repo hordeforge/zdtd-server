@@ -28,7 +28,7 @@ A native ABI could promise neither.
 | Wasm runtime, module loading, fuel accounting | **implemented** (`src/plugin/wasm.zig`: `WasmHost`, `Plugin`, `Budget`) |
 | Host function table and capability gating | **implemented**, module `zdtd`, fields `log(level, ptr, len)`, `tick() -> i64`, `queue(ptr, len) -> i32` (bare field names; see [PLUGIN_DEV.md](PLUGIN_DEV.md#host-imports)) |
 | `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `PLUGIN_API_VERSION=1`: in-tree test scaffolding |
-| `src/plugin/host.zig` | Fixed table (21 hooks), register / enable / setTick / onTick / playerJoin / shutdown |
+| `src/plugin/host.zig` | Fixed table (22 hooks), register / enable / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
 | Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin` / `playerLeave`; `deinit` shutdown; kill verdict routed via `World.kill_verdict_fn`; block damage + quest payout consult the event hooks; perk spend / GameEvent / stat changed / trade / quest accept consult their verdicts and observers |
 | Event hooks (T15) | `on_player_death`, `on_entity_killed`, `on_block_damage`, `on_quest_complete` return a verdict: `<0` deny, `0` keep, `>0` adjust as percent; first non-zero across plugins wins; a trap/fuel-exhausted plugin reports keep |
@@ -38,6 +38,7 @@ A native ABI could promise neither.
 | Player lifecycle observers | `on_player_join(peer_slot, entity_id)` / `on_player_leave(peer_slot, entity_id)`: void observers at join and disconnect |
 | Trader observer | `on_trader_event(player, trader_entity, kind)`: void observer on trade open / sell / buy |
 | Quest accept verdict | `on_quest_accept(player, def_id)`: first non-zero wins (deny / keep / scale) |
+| MCP frame handler (ADR 0031) | Wasm `on_mcp_frame(frame_ptr, frame_len, out_ptr, out_cap) -> i32`: the host routes one MCP JSON-RPC frame to the first module exporting it (mcpFrameThunk); protocol logic lives in the guest, the transport owns HTTP; guest scratch + fuel budgets apply (docs/rfc/0002-mcp-server-design.md) |
 | Admin commands from plugins | Wasm `on_admin_command(ptr,len,out_ptr,out_cap)->i32` and static `on_admin_command(cmd,out)`; first handler that returns >0 bytes wins; falls through to core `unknown` if none handle it (admin TCP auth still gates `runAdminLine`) |
 | Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
 | Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny, magnitude = reason bytes in out; first deny wins (traps treated as allow) |
