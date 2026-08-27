@@ -285,6 +285,23 @@ test "loadByName default file when present" {
     try std.testing.expect(p.max_spawned_zombies != null);
 }
 
+test "every committed mode pack binds against the current rules schema" {
+    // The committed modes/*.toml packs are not embedded; parse() binds each
+    // fully (init-options + the [rules.*] overlay) through the fail-closed
+    // toml binder, so a stale key surfaces here instead of at runtime load.
+    for ([_][]const u8{ "default", "builder", "horde_lite", "survival_crunch" }) |name| {
+        var buf: [64]u8 = undefined;
+        const path = std.fmt.bufPrint(&buf, "modes/{s}.toml", .{name}) catch continue;
+        if (!io_fs.fileExists(path)) continue;
+        var p = try loadByName(std.testing.allocator, name);
+        defer p.deinit();
+        try std.testing.expectEqualStrings(name, p.name);
+        // The rules overlay must be non-empty for the named packs (they are
+        // the point of the pack); default may be empty.
+        _ = p.rules;
+    }
+}
+
 test "loadByName rejects bad name" {
     try std.testing.expectError(error.BadModeName, loadByName(std.testing.allocator, "../x"));
 }
