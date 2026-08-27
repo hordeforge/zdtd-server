@@ -2322,11 +2322,9 @@ gamestage, no wandering hordes, and no screamers.
   `src/server/game/init_assets.zig:377-384` (callback wiring),
   `src/assets/entities.zig:74-80`
 
-- **Enemy animals (wolf, bear, dire wolf, mountain lion, snake, coyote)** `PARTIAL (waived)`
-  `spawning.xml` `EnemyAnimals*` rules are parsed but director consumes only the
-  first `animal` rule into slot 7 (stag). Hostile wildlife needs multi-slot animal
-  variety + `spawning.xml` kind routing — waived as entity-variety, not parity gate.
-  *Anchors:* `src/server/game.zig:882`, `src/ecs/aidirector.zig:188-209`,
+- **Enemy animals (wolf, bear, dire wolf, mountain lion, snake, coyote)** `WORKS` (2026-08-27 re-audit: the `EnemyAnimals*` night rules ARE consumed - `biomeGroupName` collects every matching animal rule for the spawn biome (day Any WildGameForest + Night wildlife + Night enemy groups), gated by time-of-day and the POI-tag gate, and rotates across them deterministically by the spawn counter, so wolves/bears/snakes appear at night with their full class stats (A35 class_resolve_fn, bear 2500 HP). Documented approximation: the stock random-start scan over up to min(5, count) groups is a deterministic first-matching-rule walk)
+  *Anchors:* `src/server/game.zig:2803-2845` biomeGroupName,
+  `src/ecs/aidirector.zig:505-575` tickAnimals/spawnAnimalsNearPlayers,
   `Data/Config/spawning.xml:31-33`
 
 - **Vultures / flying entities** `PARTIAL (waived)`
