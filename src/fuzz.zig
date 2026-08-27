@@ -583,6 +583,8 @@ const admin_corpus = [_][]const u8{
     "settime night",
     "settime 8000",
     "settime 1 12 30",
+    "settime 18446744073709551615",
+    "settime 999999999 0 0",
     "version",
     // adversarial lengths / whitespace
     "kick ",

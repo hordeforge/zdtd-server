@@ -185,6 +185,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Same speed envelope as PosAndRot: without it a client teleports
         // anywhere and noteAcceptedMove rebaselines the gate to that spot.
         const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
+        if (!env.applied) return true;
         if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, false)) |ny| {
             // Snapped; do not fan-out void coords.
             self.noteAcceptedMove(c, env.x, ny, env.z);

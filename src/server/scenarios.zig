@@ -4065,6 +4065,82 @@ test "scenario malicious C2S: speedhack PosAndRot increments movement_rejects" {
     );
 }
 
+test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele clamps" {
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_coordbound");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_coordbound", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+    const idx = g.sim.slotOfNetId(c.entity_id) orelse return error.MissingEntity;
+    const spawn_x = g.sim.transform[idx].x;
+    const spawn_y = g.sim.transform[idx].y;
+    const spawn_z = g.sim.transform[idx].z;
+
+    // A coordinate beyond the sim's ceiling but inside the wire reader's
+    // stock range (1<<24, wire/packages.zig world_coord_limit) must be
+    // rejected at the envelope - even on the first packet after spawn, where
+    // move_valid=false would otherwise apply it directly and the tick path's
+    // @intFromFloat casts could still trap further out.
+    var pos_body: [64]u8 = undefined;
+    var frame_buf: [128]u8 = undefined;
+    const before = g.harness.counters.get(.bounds_rejects);
+    const huge = try packages.buildPosAndRotBody(&pos_body, c.entity_id, 2e6, 2e6, 2e6, 0, 0, 0, true);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", huge));
+    const after = g.harness.counters.get(.bounds_rejects);
+    try std.testing.expect(after > before);
+    try std.testing.expectEqual(spawn_x, g.sim.transform[idx].x);
+    try std.testing.expectEqual(spawn_y, g.sim.transform[idx].y);
+    try std.testing.expectEqual(spawn_z, g.sim.transform[idx].z);
+
+    // Same for a C2S hard teleport: rejected, transform untouched.
+    const before2 = g.harness.counters.get(.bounds_rejects);
+    const huge_tp = try packages.buildPosAndRotBody(&pos_body, c.entity_id, -2e6, -2e6, -2e6, 0, 0, 0, true);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityTeleport", huge_tp));
+    try std.testing.expect(g.harness.counters.get(.bounds_rejects) > before2);
+    try std.testing.expectEqual(spawn_x, g.sim.transform[idx].x);
+    try std.testing.expectEqual(spawn_z, g.sim.transform[idx].z);
+
+    // Admin `tele` clamps to the same ceiling instead of rejecting: the
+    // operator's intent is honored up to the safety bound.
+    var sink: [4096]u8 = undefined;
+    var line_buf: [64]u8 = undefined;
+    const line = try std.fmt.bufPrint(&line_buf, "tele {d} 3e38 3e38 3e38", .{c.slot});
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = sink[0..];
+    g.runAdminLine(line, "test");
+    g.admin_reply_sink = null;
+    const max_c = game_mod.max_player_coord;
+    try std.testing.expectEqual(max_c, g.sim.transform[idx].x);
+    try std.testing.expectEqual(max_c, g.sim.transform[idx].y);
+    try std.testing.expectEqual(max_c, g.sim.transform[idx].z);
+
+    // Plugin bot verbs: an out-of-range `bot spawn` is dropped (no bot), and a
+    // `bot move` with a huge dest never sets a dest the tick step would cast.
+    _ = g.bots.handleCommand(g, "bot spawn 3e38 3e38");
+    try std.testing.expectEqual(@as(usize, 0), g.bots.n);
+    const bot_id = g.bots.spawn(g, 0, g.bots.cfg.spawn_y, 0, 100) orelse return error.NoBot;
+    const bs = g.bots.find(bot_id) orelse return error.NoBot;
+    var move_cmd: [64]u8 = undefined;
+    const move_line = try std.fmt.bufPrint(&move_cmd, "bot move {d} 3e38 3e38 3e38 5", .{bot_id});
+    _ = g.bots.handleCommand(g, move_line);
+    try std.testing.expect(!g.bots.bots[bs].move_active);
+
+    std.debug.print(
+        "PASS coord bound: C2S 2e6 rejected (bounds_rejects {d}->{d}), admin tele clamped to {d:.0}\n",
+        .{ before, after, max_c },
+    );
+}
+
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {
     var path_buf: [512]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name });

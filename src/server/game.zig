@@ -131,6 +131,8 @@ pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 
 pub const max_land_claims = game_types.max_land_claims;
 pub const max_quest_position_data = @import("game/constants.zig").max_quest_position_data;
+pub const max_player_coord = @import("game/constants.zig").max_player_coord;
+pub const coordInRange = @import("game/constants.zig").coordInRange;
 pub const admin_help_index = @import("game/constants.zig").admin_help_index;
 pub const logPersistErr = @import("game/constants.zig").logPersistErr;
 pub const Zpv2Drop = @import("game/constants.zig").Zpv2Drop;

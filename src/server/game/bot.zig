@@ -504,6 +504,9 @@ pub const BotManager = struct {
             if (tn < 2) return true;
             const x = std.fmt.parseFloat(f32, tokbuf[tn - 2]) catch return true;
             const z = std.fmt.parseFloat(f32, tokbuf[tn - 1]) catch return true;
+            // Same ceiling as movement: the tick path grounds the bot via
+            // @floor -> i32 casts, so a huge coordinate must be dropped.
+            if (!game_mod.coordInRange(x) or !game_mod.coordInRange(z)) return true;
             const name: []const u8 = if (tn == 3) tokbuf[0] else default_bot_name;
             _ = self.spawnNamed(g, x, self.cfg.spawn_y, z, bot_max_hp, name);
             return true;
@@ -515,13 +518,16 @@ pub const BotManager = struct {
             const z = it.next() orelse return true;
             const speed = it.next() orelse return true;
             if (it.next() != null) return true;
-            self.move(
-                std.fmt.parseInt(i32, id, 10) catch return true,
-                std.fmt.parseFloat(f32, x) catch return true,
-                std.fmt.parseFloat(f32, y) catch return true,
-                std.fmt.parseFloat(f32, z) catch return true,
-                std.fmt.parseFloat(f32, speed) catch return true,
-            );
+            const fx = std.fmt.parseFloat(f32, x) catch return true;
+            const fy = std.fmt.parseFloat(f32, y) catch return true;
+            const fz = std.fmt.parseFloat(f32, z) catch return true;
+            const fs = std.fmt.parseFloat(f32, speed) catch return true;
+            // Destination and speed must be finite and in range: the
+            // integration step casts the position and a NaN speed would poison
+            // the position arithmetic (both trap the tick-path casts).
+            if (!game_mod.coordInRange(fx) or !game_mod.coordInRange(fy) or !game_mod.coordInRange(fz)) return true;
+            if (!std.math.isFinite(fs) or fs < 0) return true;
+            self.move(std.fmt.parseInt(i32, id, 10) catch return true, fx, fy, fz, fs);
             return true;
         }
         if (std.mem.eql(u8, sub, "look")) {

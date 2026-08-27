@@ -11,6 +11,14 @@ const nav = @import("../../world/nav.zig");
 
 const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
 
+/// Fail closed on out-of-range query coordinates. parseFloat can yield a
+/// finite value far beyond the i32 range the nav/ground probes cast into, or
+/// NaN/Inf; any of those returns no answer, never a cast (the @intFromFloat
+/// traps on the same values the C2S movement envelope rejects).
+fn queryCoordLegal(v: f32) bool {
+    return game_mod.coordInRange(v);
+}
+
 /// Bytes of guest text kept per `zdtd_log` call. Plugin hooks receive player
 /// names and chat bodies, so an unbounded guest string could dump payloads of
 /// player data into the operator log; the cap bounds one line's exposure.
@@ -91,11 +99,20 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
         const z = it.next() orelse return null;
         const hp = it.next() orelse return null;
         if (it.next() != null) return null;
+        const fx = std.fmt.parseFloat(f32, x) catch return null;
+        const fy = std.fmt.parseFloat(f32, y) catch return null;
+        const fz = std.fmt.parseFloat(f32, z) catch return null;
+        const fhp = std.fmt.parseFloat(f32, hp) catch return null;
+        // Same ceiling as C2S movement: a spawn coordinate beyond it lands the
+        // transform outside the i32 range the tick path casts into. Fail closed
+        // like a parse error (command dropped, never applied).
+        if (!queryCoordLegal(fx) or !queryCoordLegal(fy) or !queryCoordLegal(fz)) return null;
+        if (!std.math.isFinite(fhp) or fhp < 0) return null;
         return .{ .spawn_zombie = .{
-            .x = std.fmt.parseFloat(f32, x) catch return null,
-            .y = std.fmt.parseFloat(f32, y) catch return null,
-            .z = std.fmt.parseFloat(f32, z) catch return null,
-            .hp = std.fmt.parseFloat(f32, hp) catch return null,
+            .x = fx,
+            .y = fy,
+            .z = fz,
+            .hp = fhp,
         } };
     }
     if (std.mem.eql(u8, verb, "despawn")) {
@@ -280,6 +297,7 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
     const fz = std.fmt.parseFloat(f32, sz) catch return 0;
     const thx = std.fmt.parseFloat(f32, tx) catch return 0;
     const thz = std.fmt.parseFloat(f32, tz) catch return 0;
+    if (!queryCoordLegal(fx) or !queryCoordLegal(fz) or !queryCoordLegal(thx) or !queryCoordLegal(thz)) return 0;
     const from: [3]f32 = .{ fx, g.groundHeight(@floor(fx), @floor(fz)), fz };
     const threat: [3]f32 = .{ thx, g.groundHeight(@floor(thx), @floor(thz)), thz };
     const cv = g.findCover(from, threat, 10.0) orelse return 0;
@@ -301,6 +319,7 @@ fn wasmQueryPath(g: *Game, it: *std.mem.TokenIterator(u8, .scalar), out: []u8) u
     const fz = std.fmt.parseFloat(f32, sz) catch return 0;
     const thx = std.fmt.parseFloat(f32, tx) catch return 0;
     const thz = std.fmt.parseFloat(f32, tz) catch return 0;
+    if (!queryCoordLegal(fx) or !queryCoordLegal(fz) or !queryCoordLegal(thx) or !queryCoordLegal(thz)) return 0;
     const scx = @divFloor(@as(i32, @intFromFloat(fx)), nav.cell_size);
     const scz = @divFloor(@as(i32, @intFromFloat(fz)), nav.cell_size);
     const tcx = @divFloor(@as(i32, @intFromFloat(thx)), nav.cell_size);
@@ -365,4 +384,30 @@ pub fn adminPlugin(self: *Game, rest: []const u8) void {
         return;
     }
     self.adminReply("usage: plugin <list|reload <name>>\n");
+}
+
+test "plugin queue verbs fail closed on out-of-range coordinates" {
+    // ECS spawn: absurd-but-finite coords, NaN and negative hp are dropped
+    // like parse errors, never queued into the sim.
+    try std.testing.expect(parsePluginCommand("spawn 3e38 3e38 3e38 100") == null);
+    try std.testing.expect(parsePluginCommand("spawn nan 70 0 100") == null);
+    try std.testing.expect(parsePluginCommand("spawn 0 70 0 nan") == null);
+    try std.testing.expect(parsePluginCommand("spawn 0 70 0 -5") == null);
+    const ok = parsePluginCommand("spawn 0 70 0 100") orelse return error.MissingOp;
+    switch (ok) {
+        .spawn_zombie => |z| {
+            try std.testing.expectEqual(@as(f32, 70), z.y);
+            try std.testing.expectEqual(@as(f32, 100), z.hp);
+        },
+        else => return error.WrongOp,
+    }
+
+    // The query guard rejects the same value classes the movement envelope
+    // does: huge finite, NaN and Inf.
+    try std.testing.expect(!queryCoordLegal(3e38));
+    try std.testing.expect(!queryCoordLegal(std.math.nan(f32)));
+    try std.testing.expect(!queryCoordLegal(std.math.inf(f32)));
+    try std.testing.expect(queryCoordLegal(0));
+    try std.testing.expect(queryCoordLegal(game_mod.max_player_coord));
+    try std.testing.expect(!queryCoordLegal(-game_mod.max_player_coord - 1));
 }

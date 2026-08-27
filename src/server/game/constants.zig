@@ -7,6 +7,22 @@ const persist = @import("../persist.zig");
 
 pub const max_quest_position_data: usize = 4; // QuestGiver + Location + POIPosition + POISize
 
+/// Absolute ceiling for any player coordinate axis, in blocks. Stock maps are
+/// at most ~10 km across; this is a hard safety ceiling, not world-size
+/// policy. The tick path casts player transforms to block indices via
+/// @intFromFloat (radius-effect scans, trigger activation), so a
+/// finite-but-huge coordinate from C2S or an admin teleport would leave the
+/// i32 range and trap. C2S movement beyond the ceiling is rejected; admin
+/// teleports are clamped to it.
+pub const max_player_coord: f32 = 1_000_000;
+
+/// True when a coordinate is finite and within the safety ceiling. NaN/Inf
+/// and out-of-range values are rejected here, so no caller needs a second
+/// finite check (a NaN comparison is always false).
+pub fn coordInRange(v: f32) bool {
+    return @abs(v) <= max_player_coord;
+}
+
 pub const admin_help_index = [_]admin_cmds.HelpEntry{
     .{ .names = "admin", .description = "Manage user permission levels" },
     .{ .names = "apm, metrics", .description = "zdtd: server APM counters and section latency" },

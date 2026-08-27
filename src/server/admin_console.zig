@@ -415,14 +415,20 @@ pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterato
         out.line("coordinates must be finite");
         return;
     }
-    self.sim.transform[ps] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
+    // Same ceiling as the admin tele: clamp so a huge-but-finite coordinate
+    // cannot leave the i32 range the tick path casts into.
+    const max_c = game_mod.max_player_coord;
+    const cx = std.math.clamp(x, -max_c, max_c);
+    const cy = std.math.clamp(y, -max_c, max_c);
+    const cz = std.math.clamp(z, -max_c, max_c);
+    self.sim.transform[ps] = .{ .x = cx, .y = cy, .z = cz, .yaw = 0 };
     if (self.sim.mask[ps].player) {
-        self.resetMoveEnvelopePeer(@intCast(self.sim.player[ps].peer_slot), x, y, z);
+        self.resetMoveEnvelopePeer(@intCast(self.sim.player[ps].peer_slot), cx, cy, cz);
     }
     const entity_id = self.sim.netId(ps);
-    const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, x, y, z, 0, 0, 0, true) catch return;
+    const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, cx, cy, cz, 0, 0, 0, true) catch return;
     self.broadcast("NetPackageEntityTeleport", body) catch {};
-    out.linef("teleported to {d:.0} {d:.0} {d:.0}", .{ x, y, z });
+    out.linef("teleported to {d:.0} {d:.0} {d:.0}", .{ cx, cy, cz });
 }
 
 pub fn consoleSpawnEntity(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterator(u8, .any), out: *ConsoleOut) void {
@@ -1504,10 +1510,17 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         },
         .tele => |t| {
             if (self.sim.playerByPeer(t.peer)) |ps| {
-                self.sim.transform[ps] = .{ .x = t.x, .y = t.y, .z = t.z, .yaw = 0 };
-                self.resetMoveEnvelopePeer(t.peer, t.x, t.y, t.z);
+                // Clamp, not reject: the operator asked to move the player and
+                // the ceiling (max_player_coord) still far exceeds any stock
+                // map, so a clamped coordinate is never a silent mis-apply.
+                const max_c = game_mod.max_player_coord;
+                const cx = std.math.clamp(t.x, -max_c, max_c);
+                const cy = std.math.clamp(t.y, -max_c, max_c);
+                const cz = std.math.clamp(t.z, -max_c, max_c);
+                self.sim.transform[ps] = .{ .x = cx, .y = cy, .z = cz, .yaw = 0 };
+                self.resetMoveEnvelopePeer(t.peer, cx, cy, cz);
                 const entity_id = self.sim.netId(ps);
-                const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, t.x, t.y, t.z, 0, 0, 0, true) catch {
+                const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, cx, cy, cz, 0, 0, 0, true) catch {
                     self.adminReply("teleport encode failed\n");
                     return;
                 };

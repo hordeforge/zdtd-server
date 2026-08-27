@@ -1620,6 +1620,29 @@ encoding is one day high.
   *Anchors:* `src/server/admin.zig:764-792`, `asm.il:251877`,
   `src/server/game/tests.zig:1183-1190`
 
+- **Player-coordinate ceiling (C2S / admin / plugin spawns)** `WORKS` `(2026-08-27 re-audit)`
+  Every path that moves a player or spawns an entity from untrusted input now
+  bounds coordinates to `max_player_coord` (±1e6 blocks; any stock map is a
+  few km). C2S absolute-coordinate packages are already wire-gated at the
+  stock reader range (`readWorldF32`, 1<<24, wire/packages.zig
+  world_coord_limit); the movement envelope now adds the tighter
+  sim-authority bound (rule 20 range-check) for the first packet after spawn,
+  which applies directly, and for `RelPos` baselines, and the C2S `Teleport`
+  arm now honors `applied=false` like the other two. Admin `tele` / `tp`
+  clamps to the ceiling instead of rejecting, and plugin inputs fail closed:
+  `zdtd.queue` `spawn` (coords + hp), `bot spawn`, `bot move` (dest + speed),
+  and the `cover` / `path` queries. Without the bound a finite-but-huge
+  coordinate (e.g. `3e38`, which no wire reader filters on the admin/plugin
+  paths) lands in the sim transform and traps the tick-path `@intFromFloat`
+  casts (radius-effect scans, trigger activation, bot grounding) - same crash
+  class as the settime day ceiling.
+  *Anchors:* `src/server/game/constants.zig:17-23`,
+  `src/server/game/movement_helpers.zig:41-54`,
+  `src/server/c2s/move.zig:34-35,125-126,176-190`,
+  `src/server/admin_console.zig:390-425,1511-1525`,
+  `src/server/game/wasm_host.zig:97-115,282-323`,
+  `src/server/game/bot.zig:494-530`
+
 - **Where the blood-moon options come from** `WORKS` `(2026-08-23 re-audit)`
   The V3.1.0 SandboxCode path is implemented end to end (the row's
   "writes empty SandboxCode" claim was stale): the operator's
