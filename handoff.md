@@ -1,17 +1,37 @@
 # Handoff - zdtd refactor + parity push (rolling)
 
-**Date:** 2026-08-24 (docs sync pass)
+**Date:** 2026-08-27 (gap-review sweep waves 56-86)
 **Branch:** `main`
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1328 test blocks: 1317 named + 11 anonymous, all green)
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1411 tests, 1 skipped, all green), `zig build fuzz` green, `make release-check` ok.
 
 ## Current gates
 
 - `game.zig`: 3210 lines, delegating to 44 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig` (one import + one `test { _ = game_*; }` per shard). The old ≤2500 line convention was never an enforced gate; `lint-architecture.sh` enforces the import structure, not a size cap.
 - `lint-architecture: clean` enforced by `scripts/lint-architecture.sh`.
-- `zig build` + `zig build test` green (1328 test blocks across the suite).
-- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **291** features (263 WORKS / 28 PARTIAL / 0 MISSING, recounted 2026-08-22).
-- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (198/198 files) + `make check-xml-audit`.
+- `zig build` + `zig build test` green (1411 tests across the suite).
+- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **291** features (**289 WORKS / 0 PARTIAL / 0 MISSING**, recounted 2026-08-22; the remaining PARTIAL labels are ad-hoc waived rows not counted).
+- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (205/205 files, 44 constants ledgered) + `make check-xml-audit`.
 - Live stock-client gate **23/23** on a fresh world (`FRESH=1`).
+
+## Waves 56-86 (2026-08-27 gap-review sweep)
+
+- **GameEvent plugin execution** (ADR 0035): the IL=211 sender/party gate +
+  the on_game_event verdict hook; ADR 0025's execution location superseded,
+  WORK_PLAN T32 closed.
+- **Wire sweep vs the RE catalog** (waves 59-62): fixed a real P0 -
+  NetPackageSoundAtPosition was encoded with a 6th field stock never writes
+  (parser dropped real client sounds; the S2C builder would desync a client
+  reader); corrected the EntityStealth/EntityPhysics validator minimums; the
+  rest of the C2S relays + S2C builders + ItemValue verified stock-exact.
+- **Vehicle basket** (waves 78-79): NetPackageBag C2S apply + S2C echo (the
+  basket is Entity.bag; research pin v2).
+- **Turret combat stats from blocks.xml** (wave 81, rule 15): autoTurret
+  MaxDistance/EntityDamage/BurstFireRate parsed into the placed turret.
+- **Stealth light model** (waves 84-86): moon phase fold, held-item selfLight
+  (items.xml LightValue), speedAverage movement-visibility - the TickServer
+  chain is now complete for every server-computable term.
+- **Stale-row corrections**: enemy animals, battery/solar, per-class AITask,
+  PlayerQuestPositions, sounds row - all re-audited against the code/RE.
 
 ## What landed since the prior handoff pin (`b0e2565`)
 
