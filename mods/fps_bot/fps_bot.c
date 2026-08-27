@@ -1,4 +1,4 @@
-// bot — FPS bot addon (ADR 0026, RFC 0001 / PRD 0001).
+// bot - FPS bot addon (ADR 0026, RFC 0001 / PRD 0001).
 //
 // A WebAssembly plugin that commands player-mesh FPS bots through the host's
 // sense/act boundary. The servant (host) owns spawn/tick/replicate/kill/LOS
@@ -1387,7 +1387,7 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
         rn += st(reply_buf + rn, 599 - rn, "\n");
       }
     } else if (slen == 3 && sub[0]=='c' && sub[1]=='f' && sub[2]=='g') {
-      // bot cfg <id> <key> <val> — per-bot overrides (RFC 0001 `bot cfg`).
+      // bot cfg <id> <key> <val> - per-bot overrides (RFC 0001 `bot cfg`).
       // keys: vision | reaction | agg | selfpres | venge | camp | alert.
       // vision/reaction: 0 resets to the skill-derived default. Personality
       // keys (agg/selfpres/venge/camp/alert, 0..1): a negative value resets
