@@ -175,8 +175,12 @@ spatial POI index on the deco sampler; design [RFC 0007](rfc/0007-deco-suppressi
 re-entry guard (no challenge sim), the combine station TE (the server-side
 craft behavior of §4.2; `ItemValue.WasCombined` is parsed but no combine
 craft exists), and the bundled AssignIds dump refresh
-(needs a 3.2.0 client `NameIdMapping` capture; 2 blocks pinned in the
-maxdamage stale-dump allowance).
+(regenerator shipped in 7dtd-engine-research tools/assignids_dump.py
+2026-08-28: shape expansion + fixedBlockIds + the terrain/non-terrain
+leftover pipeline, fixed pins reproduce; replacing the bundled 3.1.0
+dump still needs a live 3.2.0 client capture to prove byte-exactness,
+so the 2 new 3.2.0 blocks stay pinned in the maxdamage stale-dump
+allowance).
 
 ## 2. Scorecard
 
