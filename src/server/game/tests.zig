@@ -33,7 +33,7 @@ const assets_progression = @import("../../assets/progression.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
-const jobs = @import("../../ecs/jobs.zig");
+const parallel = @import("../../util/parallel.zig");
 const zpv2DropName = game.zpv2DropName;
 
 test "peerIpKey covers ipv4 mapped ipv6 and pure ipv6" {
@@ -1512,7 +1512,7 @@ test "sleeper scan job batch matches the serial pass" {
     var par = base;
     par.hit = batched[0..];
     // 64 >= parallel.min_parallel_items, so this really fans out.
-    jobs.forSlotRange(vols.len, par, Game.SleeperScanCtx.work);
+    parallel.forRanges(vols.len, par, Game.SleeperScanCtx.work);
 
     try std.testing.expectEqualSlices(u8, serial[0..], batched[0..]);
     try std.testing.expectEqual(@as(u8, 1), serial[0]);
@@ -1565,7 +1565,6 @@ test "path step hook sees walls and terrain, and the snapshot agrees" {
 
 test "parallel solid/water probes share one world without corruption" {
     if (@import("builtin").single_threaded) return error.SkipZigTest;
-    const parallel = @import("../../util/parallel.zig");
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/terrain_hooks_par", 0, .{
         .enable_sample_plugin = false,
     });

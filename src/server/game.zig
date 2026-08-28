@@ -82,7 +82,6 @@ const biomes_mod = @import("../world/biomes.zig");
 const world_weather = @import("../world/weather.zig");
 const stability_mod = @import("../world/stability.zig");
 const terrain_snapshot = @import("../world/terrain_snapshot.zig");
-const jobs = @import("../ecs/jobs.zig");
 const interest = @import("../ecs/interest.zig");
 const invsys = @import("../ecs/inventory.zig");
 const party = @import("../ecs/party.zig");
@@ -2083,6 +2082,22 @@ pub const Game = struct {
     }
     pub fn withinEditReach(self: *const Game, px: f32, py: f32, pz: f32, bx: f32, by: f32, bz: f32) bool {
         return game_rescue.withinEditReach(self, px, py, pz, bx, by, bz);
+    }
+
+    pub fn rejectIfBeyondEditRange(
+        self: *Game,
+        c: *Client,
+        peer_local: i32,
+        entity_id: i32,
+        surf: evidence_mod.Surface,
+        px: f32,
+        py: f32,
+        pz: f32,
+        bx: f32,
+        by: f32,
+        bz: f32,
+    ) bool {
+        return game_guard.rejectIfBeyondEditRange(self, c, peer_local, entity_id, surf, px, py, pz, bx, by, bz);
     }
 
     pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {

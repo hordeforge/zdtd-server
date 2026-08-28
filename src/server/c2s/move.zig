@@ -61,10 +61,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (self.sim.playerByPeer(c.slot)) |ps| {
                     const pp = self.sim.transform[ps];
                     const bp = self.sim.transform[bs];
-                    const dx = bp.x - pp.x;
-                    const dy = bp.y - pp.y;
-                    const dz = bp.z - pp.z;
-                    if (dx * dx + dy * dy + dz * dz > self.max_edit_range * self.max_edit_range) {
+                    if (!self.withinEditReach(pp.x, pp.y, pp.z, bp.x, bp.y, bp.z)) {
                         self.harness.counters.inc(.bounds_rejects);
                         return true;
                     }

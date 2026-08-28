@@ -41,7 +41,8 @@ def src_files():
             capture_output=True, text=True, check=True,
         ).stdout.split()
         if listed:
-            return sorted(set(listed))
+            # Working-tree deletions are gone even while git still lists them.
+            return sorted({p for p in listed if os.path.isfile(os.path.join(ROOT, p))})
     except Exception:
         pass
     out = set()

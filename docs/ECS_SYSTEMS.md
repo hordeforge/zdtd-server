@@ -10,17 +10,13 @@ zdtd's game sim is a single **SoA entity-component-system**.
 src/ecs/
   entity.zig       Slot / max_entities / NetId
   components.zig   plain data types + Mask
-  world.zig        SoA columns + resources + spawn + locals + observers
+  world.zig        SoA columns + resources + spawn + locals
   systems.zig      mutations; tickAll → schedule.run; quest phase-advance systems (questAccept*, questOn*)
   schedule.zig     Phase enum + ordered run (buffs…commands)
   locals.zig       TickLocals scratch (cleared beginTick)
-  jobs.zig         thin forSlotRange over util/parallel
-  query.zig        forEach* / each packed / forEachParallelKind / group face
+  query.zig        groupSlice / copyKindInto (View scans are file-private tests)
   group.zig        cached per-Kind dense alive lists (ascending, no heap)
   command.zig      fixed tick command buffer (cap 64; drain in schedule)
-  observers.zig    on_spawn / on_death listeners (cap 4)
-  sim_view.zig     narrow inv/transform mut surface
-  snapshot.zig     deterministic sim census/director bytes for tests
   interest.zig     spatial range + dirty/serialize-once helpers
   inventory.zig    armor mitigation + inventory helpers
   inv_ledger.zig   P4 inv cause ledger (fixed ring, no heap)
@@ -101,14 +97,17 @@ Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,
 
 ### Queries (`query.zig`)
 
+Production walks cached kind lists. The open `0..max_entities` View scans
+(`forEachKind` / `forEachAlive` / …) stay file-private as the test oracle that
+`groupSlice` must match.
+
 ```zig
-ecs.forEachKind(w, .zombie, ctx, f);           // kind filter
-ecs.forEachWith(w, .{ .player = true, .inventory = true }, ctx, f);
-ecs.forEachAlive(w, ctx, f);
-// f: fn (@TypeOf(ctx), *World, Slot) void
+for (ecs.groupSlice(w, .zombie)) |s| { ... }   // O(live), ascending
+var buf: [ecs.max_entities]ecs.Slot = undefined;
+const n = ecs.copyKindInto(w, .zombie, &buf);  // snapshot; for loops that destroy
 ```
 
-No heap; dense `0..max_entities` scan with mask/kind predicates.
+No heap. `copyKindInto` when the loop body spawns or destroys.
 
 #### Groups (cached kind lists, `group.zig`)
 
@@ -123,21 +122,14 @@ trackers) added in `World::SpawnEntityInWorld` and removed in
 `World::unloadEntity` (asm.il:1225261-1225262, :1234230/:1234384,
 :1233956/:1234090); `GetPlayers()` just returns the cached list.
 
-```zig
-for (ecs.groupSlice(w, .zombie)) |s| { ... }   // O(live), ascending
-ecs.forEachKindGroup(w, .zombie, ctx, f);      // safe under removal, order unspecified then
-var buf: [ecs.max_entities]ecs.Slot = undefined;
-const n = ecs.copyKindInto(w, .zombie, &buf);  // snapshot; for loops that destroy
-```
-
 Keeping the list ascending means group iteration visits the same slots in the
 same order as the open View scan, so wiring a group into a system is a pure
 speedup with byte-identical results (nearest-player tie-breaks, capped despawn
 id lists and turret target selection all depend on slot order).
 
-**View is the default.** A group slice is invalidated by the next spawn/destroy;
-loops that mutate the world use `copyKindInto` or stay on the View. `countKind`
-reads the group length (one mechanism, no parallel counter).
+A group slice is invalidated by the next spawn/destroy; loops that mutate the
+world use `copyKindInto`. `countKind` reads the group length (one mechanism, no
+parallel counter).
 
 Wired today: `systems.snapshotPlayers` (twice per tick), the `systemTurrets`
 zombie-list build, `systemDespawnFar` (via `copyKindInto`, it destroys),

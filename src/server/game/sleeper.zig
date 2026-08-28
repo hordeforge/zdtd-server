@@ -6,7 +6,6 @@ const Game = game_mod.Game;
 const apm = @import("../../apm/root.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const parallel_util = @import("../../util/parallel.zig");
-const jobs = @import("../../ecs/jobs.zig");
 const comps = @import("../../ecs/components.zig");
 const rng_util = @import("../../util/rng.zig");
 
@@ -73,7 +72,7 @@ pub fn tickSleeperVolumes(self: *Game) void {
             .hit = hit[0..vn],
         };
         if (self.job_batches and vn >= parallel_util.min_parallel_items) {
-            jobs.forSlotRange(vn, ctx, SleeperScanCtx.work);
+            parallel_util.forRanges(vn, ctx, SleeperScanCtx.work);
         } else {
             SleeperScanCtx.work(ctx, 0, vn);
         }

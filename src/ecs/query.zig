@@ -1,4 +1,5 @@
-//! Dense SoA iteration helpers. No allocation; O(capacity) scans.
+//! Kind-group iteration over World. Production uses groupSlice / copyKindInto.
+//! Open View scans stay file-private as the group oracle. No allocation.
 
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
@@ -6,17 +7,17 @@ const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const Kind = c.Kind;
 const Mask = c.Mask;
-const jobs = @import("jobs.zig");
+const parallel = @import("../util/parallel.zig");
 
 /// True when every bit set in `require` is also set in `have`.
-pub fn maskMatches(have: Mask, require: Mask) bool {
+fn maskMatches(have: Mask, require: Mask) bool {
     const h: u32 = @bitCast(have);
     const r: u32 = @bitCast(require);
     return (h & r) == r;
 }
 
 /// Call `f(ctx, w, slot)` for every alive entity.
-pub fn forEachAlive(
+fn forEachAlive(
     w: *World,
     ctx: anytype,
     comptime f: fn (@TypeOf(ctx), *World, Slot) void,
@@ -29,7 +30,7 @@ pub fn forEachAlive(
 }
 
 /// Alive entities whose mask contains all bits set in `require`.
-pub fn forEachWith(
+fn forEachWith(
     w: *World,
     require: Mask,
     ctx: anytype,
@@ -44,7 +45,7 @@ pub fn forEachWith(
 }
 
 /// Alive entities of a given Kind (requires mask.kind).
-pub fn forEachKind(
+fn forEachKind(
     w: *World,
     kind: Kind,
     ctx: anytype,
@@ -62,7 +63,7 @@ pub fn forEachKind(
 /// Packed-args each: `fn(ctx, w, slot, packed)` where packed is a struct of
 /// column pointers (e.g. `struct { t: *Transform, ai: *ZombieAi }`).
 /// Caller fills packed from `w` columns for the slot; this only filters mask.
-pub fn each(
+fn each(
     w: *World,
     require: Mask,
     ctx: anytype,
@@ -78,9 +79,9 @@ pub fn each(
     }
 }
 
-/// Chunk-style parallel over kind: range-split slots via jobs/parallel when
+/// Chunk-style parallel over kind: range-split slots via util/parallel when
 /// pool available; else serial. `work` must be thread-safe for disjoint slots.
-pub fn forEachParallelKind(
+fn forEachParallelKind(
     w: *World,
     kind: Kind,
     ctx: anytype,
@@ -101,17 +102,16 @@ pub fn forEachParallelKind(
             }
         }
     };
-    jobs.forSlotRange(max_entities, Ctx{ .outer = ctx, .world = w, .k = kind }, Ctx.range);
+    parallel.forRanges(max_entities, Ctx{ .outer = ctx, .world = w, .k = kind }, Ctx.range);
 }
 
 // ---------------------------------------------------------------------------
 // Group face (cached dense per-Kind lists, see group.zig).
 //
-// View (everything above) is the default: an open `0..max_entities` scan that
-// is always correct, including while the loop body spawns or destroys.
-// Group is the cached alternative: same slots, same ascending order, but O(live)
+// Production walks the cached group: same slots, same ascending order, O(live)
 // instead of O(capacity). It is only valid while nothing spawns or destroys.
-// A loop that mutates the world must use `copyKindInto` or stay on the View.
+// A loop that mutates the world must use `copyKindInto`. The open View scans
+// above stay as the test oracle that groupSlice must match.
 // ---------------------------------------------------------------------------
 
 /// Ascending alive slots of `kind`. Invalidated by the next spawn/destroy.
@@ -122,7 +122,7 @@ pub fn groupSlice(w: *const World, kind: Kind) []const Slot {
 /// Group walk that re-reads the length and re-checks `alive` each step, so a
 /// body that destroys stays memory-safe. Visit order/completeness under such
 /// mutation is unspecified: use `copyKindInto` when the body mutates.
-pub fn forEachKindGroup(
+fn forEachKindGroup(
     w: *World,
     kind: Kind,
     ctx: anytype,

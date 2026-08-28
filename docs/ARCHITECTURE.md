@@ -392,7 +392,7 @@ flowchart TB
         CMD -. deferred .-> SLOTS
     end
 
-    QUERY["query.zig<br/>forEachKind / forEachWith / forEachAlive<br/>forEachParallelKind via util/parallel"]
+    QUERY["query.zig<br/>groupSlice / copyKindInto"]
     QUERY --> world
 ```
 

@@ -139,9 +139,9 @@ pub const Buffer = struct {
     /// drain via apm sections; `applied` / Buffer.dropped counters suffice.
     pub fn drain(self: *Buffer, w: *World) DrainResult {
         var r: DrainResult = .{ .dropped_before = self.dropped };
-        // Snapshot the count: ops applied below can push (spawn observers →
-        // pushCommand). Those stay deferred to the next tick instead of
-        // running in this pass or being wiped by the clear.
+        // Snapshot the count: ops applied below can push more commands.
+        // Those stay deferred to the next tick instead of running in this
+        // pass or being wiped by the clear.
         const count = self.n;
         var i: usize = 0;
         while (i < count) : (i += 1) {

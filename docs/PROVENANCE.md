@@ -118,20 +118,16 @@ Coverage targets, all enforced by the scan:
 | `src/ecs/interest.zig` | Z | Spatial interest: grid cells → nearby players for replication. M11: dirty gating helpers for serialize-once fan-out (encode once, memcpy per peer) |
 | `src/ecs/inv_ledger.zig` | Z | P4 inv cause ledger: fixed ring of recent inventory mutations (no heap) |
 | `src/ecs/inventory.zig` | R | Inventory systems: move/drop/hold/use/open-container transactions (RE: items.md inventory + protocol-packages.md InventoryTransaction wire; c2s/inv.zig handler) |
-| `src/ecs/jobs.zig` | Z | Thin jobs helper: run work over a slot range and wait. Wraps util/parallel (persistent pool). No heap; serial when pool unavailable |
 | `src/ecs/locals.zig` | Z | Named tick scratch on World. No file-static mutables for sim. Cleared once per tick via World.beginTick / schedule.run |
-| `src/ecs/observers.zig` | Z | Fixed on_spawn / on_death listener table. Cap 4. No heap. World fires via fireSpawn / fireDeath; listeners must not spawn/destroy |
 | `src/ecs/party.zig` | R | Party engine (RE ../7dtd-engine-research/docs/parties-factions.md §2). |
 | `src/ecs/path.zig` | R | Lightweight grid path helpers for zombie chase (greedy, BFS, A*). |
 | `src/ecs/poi_lock.zig` | R | Quest POI lockout table: the server half of QuestEventManager's PrefabInstance.lockInstance (QuestLockInstance, asm.il 1001892-1002045) |
 | `src/ecs/powerblocks.zig` | R | Stock electrical block registry from blocks.xml Class + AssignIds. NodeKind mapping is RE (PowerItemTypes); names/ids/watts/fuel come from game data |
-| `src/ecs/query.zig` | Z | Dense SoA iteration helpers. No allocation; O(capacity) scans |
+| `src/ecs/query.zig` | Z | Kind-group iteration: groupSlice / copyKindInto. No allocation; View scans are file-private tests |
 | `src/ecs/quest.zig` | R | Quest catalog (shared resource) + definition types. Runtime journal/wallet live as SoA components; mutations are in systems.zig. Carries `builtin_objective_kinds` (stock objective-type mapping, §3.7), `QuestPolicy` (zdtd-owned kill/radius defaults, §3.7) and `FlatObjective` (per-objective phase completion — stock refreshQuestCompletion requires all non-optional objectives of a phase; arrival objectives carry required 1 since their `value` is a distance) |
 | `src/ecs/root.zig` | Z | ECS package root: SoA world, components, systems, resources. |
 | `src/ecs/rules.zig` | R | Sim rule parameters (ADR 0021 decision 2): a game mode is mostly these numbers. Carried on `World.rules` (read as `w.rules.<group>.<field>`), set |
 | `src/ecs/schedule.zig` | Z | Explicit sim pipeline phases. Ordered only; parallel stays inside a phase (systemZombieAi / systemTurrets via util/parallel). No access-set scheduler |
-| `src/ecs/sim_view.zig` | Z | Narrow mut surface over World for inv/transform (plugin / handler boundary). No heap. Prefer this over raw *World when only these mutators are needed |
-| `src/ecs/snapshot.zig` | Z | Deterministic sim snapshot bytes for tests/debug (not a full save format). Fixed buffer, no heap. Covers live entity census + director clock |
 | `src/ecs/systems.zig` | R | ECS systems: pure functions over World SoA columns + resources. Hot loops (zombie AI, turrets) run multi-threaded over disjoint slots |
 | `src/ecs/world.zig` | R | ECS world: dense SoA columns, resources, O(1) net id map, spawn helpers |
 | `src/fuzz.zig` | Z | Coverage-guided fuzz targets for remote wire parsing boundaries and other untrusted-input surfaces (admin lines, map XML, COG headers, |

@@ -11,7 +11,6 @@ const rules_mod = @import("rules.zig");
 const command = @import("command.zig");
 const inv_ledger = @import("inv_ledger.zig");
 const locals_mod = @import("locals.zig");
-const observers_mod = @import("observers.zig");
 const group = @import("group.zig");
 const poi_lock = @import("poi_lock.zig");
 const path_mod = @import("path.zig");
@@ -40,7 +39,6 @@ pub const BotSnap = struct {
 pub const CommandBuffer = command.Buffer;
 pub const CommandOp = command.Op;
 pub const TickLocals = locals_mod.TickLocals;
-pub const ObserverRegistry = observers_mod.Registry;
 
 /// Word-packed slot set whose `set`/`unset` are safe to call from pool worker
 /// threads (parallel AI marks dirty bits for knockback displacement).
@@ -357,8 +355,6 @@ pub const World = struct {
     commands: CommandBuffer = .{},
     /// Named tick scratch (interest ids, despawn lists). Cleared in beginTick.
     locals: TickLocals = .{},
-    /// on_spawn / on_death listeners (cap 4). No heap.
-    observers: ObserverRegistry = .{},
     /// P4 inv cause ring (last N mutations). Hot path: fixed, no heap.
     inv_ledger: InvLedger = .{},
     /// Zombie chase/wander speed multiplier from ZombieMove* serverconfig, set by
@@ -699,12 +695,11 @@ pub const World = struct {
 
     pub fn destroy(self: *World, slot: Slot) void {
         if (slot >= max_entities or !self.alive[slot]) return;
-        const death_id: NetId = if (self.mask[slot].network_id) self.network_id[slot].id else 0;
         // Capture kind before mask clear for the kind group.
         const had_kind = self.mask[slot].kind;
         const kind_val = self.kind[slot];
-        // Mark dead before notifying: a listener that cascades into destroy()
-        // on this same slot would otherwise recurse without bound.
+        // Mark dead before group removal so a concurrent kind-group walk
+        // sees the same truth as alive[]: this slot is gone.
         self.alive[slot] = false;
         self.alive_bits.unset(slot);
         self.freed_this_tick[slot] = true;
@@ -714,10 +709,7 @@ pub const World = struct {
         if (self.mask[slot].zombie_ai and self.zombie_ai[slot].spawn_rule != 0xffff) {
             self.director.releaseRule(self.zombie_ai[slot].spawn_rule);
         }
-        // Drop from the group here too, so a death listener iterating a group
-        // sees exactly what alive[] already tells it: this slot is gone.
         if (had_kind) self.kind_groups.remove(kind_val, slot);
-        self.observers.fireDeath(self, slot, death_id);
         if (self.mask[slot].player) {
             const peer_slot = self.player[slot].peer_slot;
             if (peer_slot >= 0 and peer_slot < @as(i32, @intCast(self.peer_to_player.len)) and
@@ -814,11 +806,6 @@ pub const World = struct {
         // any_freed_this_tick stays set until replicate reconciles known_entities:
         // net poll / admin may destroy before beginTick, sim after it.
         self.locals.clear();
-    }
-
-    fn notifySpawn(self: *World, slot: Slot) void {
-        if (!self.alive[slot] or !self.mask[slot].network_id) return;
-        self.observers.fireSpawn(self, slot, self.network_id[slot].id);
     }
 
     /// Push a combat-noise event (stock NotifyNoise). Called from parallel AI
@@ -1178,7 +1165,7 @@ pub const World = struct {
         };
         self.class_id[s].hash = class_hash;
         self.class_id[s].loot_list = loot_list;
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1294,7 +1281,7 @@ pub const World = struct {
             if (id == 0) continue;
             _ = self.depositItem(s, id, it[2]);
         }
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1309,7 +1296,7 @@ pub const World = struct {
             .home_z = z,
             .has_home = true,
         };
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1333,7 +1320,7 @@ pub const World = struct {
         self.loot_bag[s] = .{};
         self.inventory[s] = .{};
         _ = self.depositItem(s, item_id, count);
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1357,7 +1344,7 @@ pub const World = struct {
             out += 1;
         }
         self.inventory[s] = inv;
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1382,7 +1369,7 @@ pub const World = struct {
         self.mask[s].falling = true;
         self.falling[s] = .{ .n = @intCast(n) };
         @memcpy(self.falling[s].cells[0..n], cells[0..n]);
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1417,7 +1404,7 @@ pub const World = struct {
             .mass_kg = mass_kg,
         };
         self.falling[s].cells[0] = cell;
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1426,7 +1413,7 @@ pub const World = struct {
         self.mask[s].trader = true;
         self.mask[s].trader_stock = true;
         self.trader_stock[s] = .{ .name = name, .trader_info_id = trader_info_id, .wallet = wallet, .wallet_default = wallet };
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1456,7 +1443,7 @@ pub const World = struct {
             .max_speed = max_speed,
             .seat_count = @max(1, @min(seat_count, @as(u8, c.max_seats))),
         };
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 
@@ -1490,7 +1477,7 @@ pub const World = struct {
         }
         self.turret[s] = t;
         self.power.resolve();
-        self.notifySpawn(s);
+
         return self.network_id[s].id;
     }
 

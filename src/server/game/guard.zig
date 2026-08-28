@@ -8,6 +8,31 @@ const evidence_mod = @import("../evidence.zig");
 const guard_policy = @import("../guard_policy.zig");
 const packages = @import("../../wire/packages.zig");
 
+/// One edit-range policy: reach check, bounds counter, and evidence record.
+/// True means the action is out of range and the caller must drop it.
+pub fn rejectIfBeyondEditRange(
+    self: *Game,
+    c: *Client,
+    peer_local: i32,
+    entity_id: i32,
+    surf: evidence_mod.Surface,
+    px: f32,
+    py: f32,
+    pz: f32,
+    bx: f32,
+    by: f32,
+    bz: f32,
+) bool {
+    const dx = px - bx;
+    const dy = py - by;
+    const dz = pz - bz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 <= self.max_edit_range * self.max_edit_range) return false;
+    self.harness.counters.inc(.bounds_rejects);
+    noteEvidence(self, c, peer_local, entity_id, .bounds, .strong, surf, @sqrt(d2), self.max_edit_range);
+    return true;
+}
+
 pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
     if (self.loadShedding() and (sev == .info or sev == .soft)) {
         self.harness.counters.inc(.load_shed_drops);

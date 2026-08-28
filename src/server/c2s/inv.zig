@@ -418,15 +418,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // overwrite + container-store fill guard).
             const owner = self.sim.playerByPeer(c.slot) orelse return true;
             const op = self.sim.transform[owner];
-            const tdx = @as(f32, @floatFromInt(parsed.world_x)) - op.x;
-            const tdy = @as(f32, @floatFromInt(parsed.world_y)) - op.y;
-            const tdz = @as(f32, @floatFromInt(parsed.world_z)) - op.z;
-            const te_d2 = tdx * tdx + tdy * tdy + tdz * tdz;
-            if (te_d2 > self.max_edit_range * self.max_edit_range) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(te_d2), self.max_edit_range);
-                return true;
-            }
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                op.x,
+                op.y,
+                op.z,
+                @floatFromInt(parsed.world_x),
+                @floatFromInt(parsed.world_y),
+                @floatFromInt(parsed.world_z),
+            )) return true;
             const pos: containers_mod.PosKey = .{ .x = parsed.world_x, .y = parsed.world_y, .z = parsed.world_z };
             const sc: u16 = if (parsed.size_x > 0 and parsed.size_y > 0)
                 @intCast(@min(@as(usize, parsed.size_x) * @as(usize, parsed.size_y), containers_mod.max_container_slots))
@@ -461,15 +464,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (stock_te.parseWorkstationTeBody(body)) |ws| {
             const wsp = self.sim.playerByPeer(c.slot) orelse return true;
             const wp = self.sim.transform[wsp];
-            const wdx = @as(f32, @floatFromInt(ws.world_x)) - wp.x;
-            const wdy = @as(f32, @floatFromInt(ws.world_y)) - wp.y;
-            const wdz = @as(f32, @floatFromInt(ws.world_z)) - wp.z;
-            const ws_d2 = wdx * wdx + wdy * wdy + wdz * wdz;
-            if (ws_d2 > self.max_edit_range * self.max_edit_range) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(ws_d2), self.max_edit_range);
-                return true;
-            }
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                wp.x,
+                wp.y,
+                wp.z,
+                @floatFromInt(ws.world_x),
+                @floatFromInt(ws.world_y),
+                @floatFromInt(ws.world_z),
+            )) return true;
             if (self.workstations.getOrCreate(ws.world_x, ws.world_y, ws.world_z)) |st| {
                 replicate_te.applyWsGroup(self, st.fuel[0..], ws.fuel[0..ws.fuel_n]);
                 replicate_te.applyWsGroup(self, st.input[0..], ws.input[0..ws.input_n]);
@@ -587,15 +593,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (trig.trigger_type > stock_te.trigger_type_trip_wire) return true;
             const tp = self.sim.playerByPeer(c.slot) orelse return true;
             const tpos = self.sim.transform[tp];
-            const gdx = @as(f32, @floatFromInt(trig.world_x)) - tpos.x;
-            const gdy = @as(f32, @floatFromInt(trig.world_y)) - tpos.y;
-            const gdz = @as(f32, @floatFromInt(trig.world_z)) - tpos.z;
-            const g_d2 = gdx * gdx + gdy * gdy + gdz * gdz;
-            if (g_d2 > self.max_edit_range * self.max_edit_range) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, c.entity_id, .bounds, .strong, .container, @sqrt(g_d2), self.max_edit_range);
-                return true;
-            }
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                tpos.x,
+                tpos.y,
+                tpos.z,
+                @floatFromInt(trig.world_x),
+                @floatFromInt(trig.world_y),
+                @floatFromInt(trig.world_z),
+            )) return true;
             // A Switch carries no delay/duration on the wire; its state is the
             // block meta, which arrives on the SetBlock path instead.
             if (trig.trigger_type != stock_te.trigger_type_switch and

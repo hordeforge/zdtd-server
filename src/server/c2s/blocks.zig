@@ -459,15 +459,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // above), not the possibly-unrelated thrown/explosion position:
             // otherwise a client can claim to be next to the blast but dig
             // anywhere on the map via the block-position override.
-            const dx = @as(f32, @floatFromInt(cx)) - bp.x;
-            const dy = @as(f32, @floatFromInt(cy)) - bp.y;
-            const dz = @as(f32, @floatFromInt(cz)) - bp.z;
-            const ex_d2 = dx * dx + dy * dy + dz * dz;
-            if (ex_d2 > self.max_edit_range * self.max_edit_range) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, ex.entity_id, .bounds, .strong, .block, @sqrt(ex_d2), self.max_edit_range);
-                return true;
-            }
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                ex.entity_id,
+                .block,
+                bp.x,
+                bp.y,
+                bp.z,
+                @floatFromInt(cx),
+                @floatFromInt(cy),
+                @floatFromInt(cz),
+            )) return true;
         } else return true;
         var dy: i32 = -rad;
         while (dy <= rad) : (dy += 1) {

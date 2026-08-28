@@ -64,7 +64,7 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     // listents/mem counts and a spawn-on-approach candidate for late joiners).
     // The next spawn on this peer slot reaps anyway (world.zig:1241), but
     // dropping the ghost now keeps counts and replication honest between
-    // joins. Death observers have no subscribers, so no kill semantics leak.
+    // joins. Plugin leave already ran above; destroy itself has no side hooks.
     if (self.sim.playerByPeer(slot)) |ps| {
         self.sim.destroy(ps);
     }

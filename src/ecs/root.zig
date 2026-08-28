@@ -35,12 +35,8 @@ pub const inv_ledger = @import("inv_ledger.zig");
 pub const query = @import("query.zig");
 pub const group = @import("group.zig");
 pub const command = @import("command.zig");
-pub const snapshot = @import("snapshot.zig");
 pub const locals = @import("locals.zig");
 pub const schedule = @import("schedule.zig");
-pub const jobs = @import("jobs.zig");
-pub const observers = @import("observers.zig");
-pub const sim_view = @import("sim_view.zig");
 
 pub const World = world.World;
 pub const Slot = world.Slot;
@@ -72,8 +68,4 @@ test {
     _ = command;
     _ = locals;
     _ = schedule;
-    _ = jobs;
-    _ = observers;
-    _ = sim_view;
-    _ = snapshot;
 }
