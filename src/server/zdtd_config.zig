@@ -210,6 +210,10 @@ pub const Mods = struct {
     /// a blacklisted name is a load failure. Naming a core component here is
     /// a config error.
     blacklist: ?[]const u8 = null,
+    /// Force-load these discovered mods despite their `enabled = false`
+    /// manifest flag (config-only mods ship off by default so a fresh boot
+    /// stays stock; the operator opts in here).
+    enabled: ?[]const u8 = null,
 };
 
 /// Authority.mode is a constrained string: observe | permissive | correct.

@@ -9330,7 +9330,7 @@ test "scenario mods AC1: resolver keeps official tiers in discovery order" {
         mkManifest("mcp", "mcp.wasm", "official", null, null, null),
         mkManifest("my_user_mod", "u.wasm", "user", null, null, null),
     };
-    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{});
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{}, &.{});
     defer plan.deinit(gpa);
 
     try std.testing.expectEqual(@as(usize, 3), plan.modules.len);
@@ -9351,7 +9351,7 @@ test "scenario mods AC2: disabled skips, blacklist vetoes refs" {
         mkManifest("core_killfeed", "k.wasm", "official", null, null, null),
     };
     // disabled = ["core_killfeed"] drops it.
-    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{"core_killfeed"}, &.{});
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{"core_killfeed"}, &.{}, &.{});
     defer plan.deinit(gpa);
     try std.testing.expectEqual(@as(usize, 1), plan.modules.len);
     try std.testing.expectEqualStrings("fps_bot", plan.modules[0].manifest.name.?);
@@ -9359,7 +9359,7 @@ test "scenario mods AC2: disabled skips, blacklist vetoes refs" {
     // blacklist = ["fps_bot"] refuses the mod itself.
     try std.testing.expectError(
         error.BlacklistedTarget,
-        plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{"fps_bot"}),
+        plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{"fps_bot"}, &.{}),
     );
 
     // A mod whose override names a blacklisted target cannot load.
@@ -9369,7 +9369,7 @@ test "scenario mods AC2: disabled skips, blacklist vetoes refs" {
     };
     try std.testing.expectError(
         error.BlacklistedTarget,
-        plugin_mod.resolver.resolve(gpa, &replacers, &.{}, &.{}, &.{"fps_bot"}),
+        plugin_mod.resolver.resolve(gpa, &replacers, &.{}, &.{}, &.{"fps_bot"}, &.{}),
     );
     std.debug.print("PASS mods AC2: disabled drops, blacklist vetoes refs\n", .{});
 }
@@ -9381,7 +9381,7 @@ test "scenario mods AC3: disabling a core component fails config" {
     // `[mods] disabled = ["loot"]` (a native core component) is a config error.
     try std.testing.expectError(
         error.DisabledCore,
-        plugin_mod.resolver.resolve(gpa, &.{}, &.{}, &.{"loot"}, &.{}),
+        plugin_mod.resolver.resolve(gpa, &.{}, &.{}, &.{"loot"}, &.{}, &.{}),
     );
     std.debug.print("PASS mods AC3: core component protected from disable\n", .{});
 }
@@ -9397,7 +9397,7 @@ test "scenario mods AC4/AC5: exclusive core override point routes only to the cl
     const mods = [_]plugin_mod.manifest.Manifest{
         mkManifest("gate", "assets/fixtures/plugin_override.wasm", "user", null, "craft.request,loot.roll", null),
     };
-    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{});
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{}, &.{});
     defer plan.deinit(gpa);
     // The single claiming module occupies slot 0; both points map to it.
     try std.testing.expectEqual(@as(usize, 0), plan.point_claims.get("craft.request").?);
@@ -9441,7 +9441,7 @@ test "scenario mods AC6: override = name replaces the official mod" {
         mkManifest("fps_bot", "mods/fps_bot/fps_bot.wasm", "official", null, null, null),
         mkManifest("my_bot", "assets/fixtures/plugin_hello.wasm", "user", "fps_bot", null, null),
     };
-    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{});
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{}, &.{});
     defer plan.deinit(gpa);
     // The target is dropped; only the replacer loads.
     try std.testing.expectEqual(@as(usize, 1), plan.modules.len);
@@ -9475,7 +9475,7 @@ test "scenario mods AC7: duplicate point claim / duplicate replacer is a boot er
     };
     try std.testing.expectError(
         error.DuplicateClaim,
-        plugin_mod.resolver.resolve(gpa, &dup_points, &.{}, &.{}, &.{}),
+        plugin_mod.resolver.resolve(gpa, &dup_points, &.{}, &.{}, &.{}, &.{}),
     );
 
     // Two mods replacing bot.
@@ -9486,7 +9486,7 @@ test "scenario mods AC7: duplicate point claim / duplicate replacer is a boot er
     };
     try std.testing.expectError(
         error.DuplicateClaim,
-        plugin_mod.resolver.resolve(gpa, &dup_replacer, &.{}, &.{}, &.{}),
+        plugin_mod.resolver.resolve(gpa, &dup_replacer, &.{}, &.{}, &.{}, &.{}),
     );
     std.debug.print("PASS mods AC7: duplicate claims fail loudly\n", .{});
 }
@@ -9502,7 +9502,7 @@ test "scenario mods AC8: discovered mods run under the standard budget and attri
         mkManifest("looper", "assets/fixtures/plugin_looper.wasm", "user", null, null, null),
         mkManifest("hello", "assets/fixtures/plugin_hello.wasm", "user", null, null, null),
     };
-    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{});
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{}, &.{});
     defer plan.deinit(gpa);
 
     freshScenarioDir("worlds/zdtd_sc_mods_budget");

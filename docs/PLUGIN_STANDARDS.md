@@ -71,9 +71,10 @@ TOML, bound by `src/plugin/manifest.zig` through the comptime binder
 ```toml
 name = "core_announce"            # required; MUST equal the directory name
 version = "0.1.0"                 # semver string; informational
-wasm = "core_announce.wasm"       # required; relative to this directory
+wasm = "core_announce.wasm"       # required (or `mode`, see below); relative to this directory
+mode = "infinite"                 # config-only mod: activates modes/<name>.toml (no wasm); exclusive with wasm
 description = "..."               # one line, says what + which hook(s)
-enabled = true                    # optional; false = skip auto-discovery (demo gates ship off); explicit [plugin] modules paths still load
+enabled = true                    # optional; false = skip auto-discovery (demo gates ship off); explicit [plugin] modules paths still load; [mods] enabled forces on
 tier = "official"                 # optional; "official" | "user" ("core" is an error)
 override = "<other-mod-name>"     # optional; full replacement of that module (PRD 0005 R7)
 points = "damage.player_scale"    # optional; comma-separated core override points (PRD 0005 R5)
@@ -97,6 +98,13 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
    otherwise).
 6. `[mods] disabled = "a,b"` skips mods by name; entries naming a native core
    component are config errors.
+7. **Config-only mods** (PRD 0005 style, no wasm): `mode = "<name>"` activates
+   `modes/<name>.toml` — its gameplay keys and `[rules.*]` override the
+   built-in defaults exactly like `--mode <name>` (explicit `--mode` /
+   `[mode] name` still wins). `wasm` and `mode` are mutually exclusive. Such
+   mods ship `enabled = false` so a fresh boot stays stock; the operator opts
+   in via `[mods] enabled = "a,b"` (or flips `enabled`). At most one loaded
+   mod may carry a `mode` (`DuplicateMode` otherwise).
 
 ### Example (minimal)
 

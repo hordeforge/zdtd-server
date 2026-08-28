@@ -1,0 +1,14 @@
+# infinite_world: procedural world generation while players are in the game.
+# Config-only mod (no wasm): activating it loads modes/infinite.toml, whose
+# gameplay keys and [rules.*] override the built-in defaults exactly like
+# --mode infinite. Ships enabled = false so a fresh boot stays stock; enable
+# via zdtd.toml [mods] enabled = ["infinite_world"] (or flip enabled = true).
+# Removing it later restores the default terrain (a clean session writes no
+# world files; see docs/WORLDGEN.md).
+
+name = "infinite_world"
+version = "0.1.0"
+tier = "user"
+mode = "infinite"
+enabled = false
+description = "Procedural infinite world: chunks generate on first touch as players explore (activates modes/infinite.toml: seed + [rules.worldgen]). Opt-in: [mods] enabled = [\"infinite_world\"]."

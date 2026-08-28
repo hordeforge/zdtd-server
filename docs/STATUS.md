@@ -62,6 +62,11 @@ stream trees instead of staying bald; bare proc worlds fail closed).
 And save growth: clean proc chunks are no longer persisted on eviction (they
 regenerate deterministically from the seed; edits carry `dirty` and persist),
 so an infinite world's save dir grows with edits, not visits.
+And delivery as a mod: the infinite world ships as `mods/infinite_world/`
+(a config-only mod — new `mode` manifest key activating modes/infinite.toml,
+mutually exclusive with `wasm`; off by default, opted in via `[mods]
+enabled = "infinite_world"`). Mods stay reversible: nothing persists until
+the player edits, so removing the mod restores the default terrain.
 Counts unchanged.
 
 ## Wave 2026-08-20 (surface-parity reconciliation)

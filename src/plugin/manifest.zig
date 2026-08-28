@@ -86,9 +86,14 @@ pub const Manifest = struct {
     /// Mod names this module requires to be loaded (binder scalar list).
     requires: ?[]const u8 = null,
     description: ?[]const u8 = null,
-    /// False = do not auto-load via discovery (default true). Explicit
-    /// `[plugin] modules` paths still load regardless of this flag. Demo
-    /// gates/feeds ship with `enabled = false` so a fresh boot stays stock.
+    /// Config-only mods carry a mode pack name (modes/<name>.toml) instead of
+    /// a wasm module: enabling the mod activates the pack (its gameplay keys
+    /// and [rules.*] override the built-in defaults, like --mode). The
+    /// explicit --mode / [mode] name still wins over this.
+    mode: ?[]const u8 = null,
+    /// False = do not auto-load via discovery (default true). Demo gates
+    /// ship with `enabled = false` so a fresh boot stays stock. `[mods]
+    /// enabled` forces a mod on despite this flag.
     enabled: ?bool = null,
 
     /// Directory the manifest was found in (set by discovery; not a toml key).
@@ -98,7 +103,25 @@ pub const Manifest = struct {
     /// Returns a loud message on failure (fail-closed at load).
     pub fn validate(self: *const Manifest) ?[]const u8 {
         if (self.name == null) return "missing required key 'name'";
-        if (self.wasm == null) return "missing required key 'wasm'";
+        if (self.wasm == null and self.mode == null) {
+            return "missing required key 'wasm' (or 'mode' for a config-only mod)";
+        }
+        if (self.wasm != null and self.mode != null) {
+            return "'wasm' and 'mode' are mutually exclusive (a mod is either a plugin or a config carrier)";
+        }
+        if (self.mode) |mo| {
+            // Same rule as server/mode.zig isValidModeName (plugin must not
+            // import server; kept in sync by the resolver test).
+            var ok = mo.len > 0 and mo.len <= 64;
+            for (mo) |c| {
+                const c_ok = (c >= 'a' and c <= 'z') or
+                    (c >= 'A' and c <= 'Z') or
+                    (c >= '0' and c <= '9') or
+                    c == '_';
+                if (!c_ok) ok = false;
+            }
+            if (!ok) return "invalid 'mode' name (use [A-Za-z0-9_] only)";
+        }
         if (self.tier) |t| {
             if (!std.mem.eql(u8, t, "official") and !std.mem.eql(u8, t, "user")) {
                 return "tier must be 'official' or 'user' (core components are native and registered host-side)";
@@ -146,7 +169,8 @@ pub fn free(a: std.mem.Allocator, m: *const Manifest) void {
     a.free(m.dir);
     a.free(m.name.?);
     if (m.version) |v| a.free(v);
-    a.free(m.wasm.?);
+    if (m.wasm) |w| a.free(w);
+    if (m.mode) |mo| a.free(mo);
     if (m.tier) |t| a.free(t);
     if (m.override) |o| a.free(o);
     if (m.points) |p| a.free(p);

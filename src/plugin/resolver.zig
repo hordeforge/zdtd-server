@@ -29,6 +29,10 @@ pub const ResolvedResult = struct {
     point_claims: std.StringHashMapUnmanaged(usize),
     /// Mod name -> slot (for admin/ops).
     name_to_slot: std.StringHashMapUnmanaged(usize),
+    /// Config-only mod: the mode pack (modes/<name>.toml) an enabled loaded
+    /// mod activates (null when none). First in load order wins; a second is
+    /// error.DuplicateMode. The explicit --mode / [mode] name still wins.
+    mode_pack: ?[]const u8 = null,
     /// Synthetic manifests created for legacy [plugin] modules: none of their
     /// fields are owned here (strings point into caller-owned paths), so only
     /// the slice itself is freed.
@@ -52,6 +56,7 @@ pub fn resolve(
     explicit_paths: []const []const u8,
     disabled: []const []const u8,
     blacklist: []const []const u8,
+    enabled: []const []const u8,
 ) ResolverError!ResolvedResult {
     var disabled_set: std.StringHashMapUnmanaged(void) = .empty;
     defer disabled_set.deinit(a);
@@ -59,6 +64,12 @@ pub fn resolve(
     var blacklist_set: std.StringHashMapUnmanaged(void) = .empty;
     defer blacklist_set.deinit(a);
     for (blacklist) |n| try blacklist_set.put(a, n, {});
+    // `[mods] enabled`: force-load these discovered mods despite their
+    // `enabled = false` manifest flag (config-only mods ship off by default
+    // so a fresh boot stays stock; the operator opts in here).
+    var enabled_set: std.StringHashMapUnmanaged(void) = .empty;
+    defer enabled_set.deinit(a);
+    for (enabled) |n| try enabled_set.put(a, n, {});
 
     // Core-component protection (R4/AC3): a disabled/blacklisted entry naming
     // a core component is a config error, fail-closed.
@@ -116,9 +127,10 @@ pub fn resolve(
     for (discovered) |m| {
         if (m.override != null) continue; // replacers appended below
         // `enabled = false` in mod.toml: not auto-loaded (demo gates ship
-        // off); explicit [plugin] modules paths still load.
+        // off); explicit [plugin] modules paths still load, and `[mods]
+        // enabled` forces the mod on.
         if (m.enabled) |en| {
-            if (!en) continue;
+            if (!en and !enabled_set.contains(m.name.?)) continue;
         }
         if (disabled_set.contains(m.name.?)) continue; // skip with info log (caller logs)
         if (blacklist_set.contains(m.name.?)) return error.BlacklistedTarget;
@@ -134,7 +146,7 @@ pub fn resolve(
     for (discovered) |m| {
         if (m.override == null) continue;
         if (m.enabled) |en| {
-            if (!en) continue;
+            if (!en and !enabled_set.contains(m.name.?)) continue;
         }
         if (disabled_set.contains(m.name.?)) continue;
         if (blacklist_set.contains(m.name.?)) return error.BlacklistedTarget;
@@ -164,6 +176,15 @@ pub fn resolve(
     var name_to_slot: std.StringHashMapUnmanaged(usize) = .empty;
     errdefer name_to_slot.deinit(a);
     for (load.items) |rm| try name_to_slot.put(a, rm.manifest.name.?, rm.slot);
+
+    // Config-only mod: at most one loaded mod may activate a mode pack
+    // (modes/<name>.toml). First in load order wins; a second is ambiguous.
+    var mode_pack: ?[]const u8 = null;
+    for (load.items) |rm| {
+        const mo = rm.manifest.mode orelse continue;
+        if (mode_pack != null) return error.DuplicateMode;
+        mode_pack = mo;
+    }
 
     // Legacy [plugin] modules: synthesized user mods, appended after discovery.
     var synthetic = std.ArrayList(manifest.Manifest).empty;
@@ -203,6 +224,7 @@ pub fn resolve(
         .modules = try load.toOwnedSlice(a),
         .point_claims = claims,
         .name_to_slot = name_to_slot,
+        .mode_pack = mode_pack,
         .synthetic = try synthetic.toOwnedSlice(a),
     };
 }
@@ -238,7 +260,7 @@ test "resolve keeps official mods in dir order" {
         mk("fps_bot", "fps_bot.wasm", "official", null, null),
         mk("mcp", "mcp.wasm", "official", null, null),
     };
-    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{});
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 2), r.modules.len);
     try testing.expectEqualStrings("fps_bot", r.modules[0].manifest.name.?);
@@ -248,7 +270,7 @@ test "resolve keeps official mods in dir order" {
 
 test "resolve disabled skips mod" {
     const mods = [_]manifest.Manifest{ mk("a", "a.wasm", null, null, null), mk("b", "b.wasm", null, null, null) };
-    var r = try resolve(testing.allocator, &mods, &.{}, &.{"a"}, &.{});
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{"a"}, &.{}, &.{});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 1), r.modules.len);
     try testing.expectEqualStrings("b", r.modules[0].manifest.name.?);
@@ -258,11 +280,11 @@ test "resolve rejects disabling a core component" {
     const mods = [_]manifest.Manifest{};
     try testing.expectError(
         error.DisabledCore,
-        resolve(testing.allocator, &mods, &.{}, &.{"loot"}, &.{}),
+        resolve(testing.allocator, &mods, &.{}, &.{"loot"}, &.{}, &.{}),
     );
     try testing.expectError(
         error.DisabledCore,
-        resolve(testing.allocator, &mods, &.{}, &.{}, &.{"quests"}),
+        resolve(testing.allocator, &mods, &.{}, &.{}, &.{"quests"}, &.{}),
     );
 }
 
@@ -270,7 +292,7 @@ test "resolve blacklist rejects mod and vetoes replacers" {
     const mods = [_]manifest.Manifest{mk("bad", "bad.wasm", null, null, null)};
     try testing.expectError(
         error.BlacklistedTarget,
-        resolve(testing.allocator, &mods, &.{}, &.{}, &.{"bad"}),
+        resolve(testing.allocator, &mods, &.{}, &.{}, &.{"bad"}, &.{}),
     );
 }
 
@@ -280,10 +302,10 @@ test "resolve blacklist vetoes requires dependencies" {
     const mods = [_]manifest.Manifest{ mk("dep", "dep.wasm", null, null, null), needy };
     try testing.expectError(
         error.BlacklistedTarget,
-        resolve(testing.allocator, &mods, &.{}, &.{}, &.{"dep"}),
+        resolve(testing.allocator, &mods, &.{}, &.{}, &.{"dep"}, &.{}),
     );
     // Without the blacklist entry the same set resolves.
-    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{});
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 2), r.modules.len);
 }
@@ -293,7 +315,7 @@ test "resolve override drops target, keeps replacer" {
         mk("fps_bot", "fps_bot.wasm", "official", null, null),
         mk("mybot", "mybot.wasm", "user", "fps_bot", null),
     };
-    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{});
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 1), r.modules.len);
     try testing.expectEqualStrings("mybot", r.modules[0].manifest.name.?);
@@ -306,7 +328,7 @@ test "resolve two replacers for one target fails" {
         mk("a", "a.wasm", "user", "fps_bot", null),
         mk("b", "b.wasm", "user", "fps_bot", null),
     };
-    try testing.expectError(error.DuplicateClaim, resolve(testing.allocator, &mods, &.{}, &.{}, &.{}));
+    try testing.expectError(error.DuplicateClaim, resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{}));
 }
 
 test "resolve duplicate point claim fails" {
@@ -314,14 +336,14 @@ test "resolve duplicate point claim fails" {
         mk("a", "a.wasm", null, null, "loot.roll"),
         mk("b", "b.wasm", null, null, "loot.roll"),
     };
-    try testing.expectError(error.DuplicateClaim, resolve(testing.allocator, &mods, &.{}, &.{}, &.{}));
+    try testing.expectError(error.DuplicateClaim, resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{}));
 }
 
 test "resolve exclusive point claim maps slot" {
     const mods = [_]manifest.Manifest{
         mk("gate", "gate.wasm", null, null, "loot.roll,quest.payout"),
     };
-    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{});
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 0), r.point_claims.get("loot.roll").?);
     try testing.expectEqual(@as(usize, 0), r.point_claims.get("quest.payout").?);
@@ -330,9 +352,34 @@ test "resolve exclusive point claim maps slot" {
 
 test "resolve explicit [plugin] modules appended as user mods" {
     const mods = [_]manifest.Manifest{};
-    var r = try resolve(testing.allocator, &mods, &.{"mods/foo.wasm"}, &.{}, &.{});
+    var r = try resolve(testing.allocator, &mods, &.{"mods/foo.wasm"}, &.{}, &.{}, &.{});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 1), r.modules.len);
     try testing.expectEqualStrings("mods/foo.wasm", r.modules[0].manifest.name.?);
     try testing.expectEqual(.user, r.modules[0].tier);
+}
+
+test "resolve activates a mode pack from an enabled config-only mod" {
+    // Config-only mods (mode = "pack", no wasm) ship enabled=false so a fresh
+    // boot stays stock; `[mods] enabled` forces them on and activates the
+    // pack, which overrides the built-in defaults like --mode.
+    var cfg = mk("infinite_world", "", "user", null, null);
+    cfg.mode = "infinite";
+    cfg.enabled = false;
+    const mods = [_]manifest.Manifest{cfg};
+    // Off by default: not auto-loaded, no mode pack.
+    var r0 = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
+    defer r0.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), r0.modules.len);
+    try testing.expect(r0.mode_pack == null);
+    // [mods] enabled forces it on; the mode pack activates.
+    var r1 = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{"infinite_world"});
+    defer r1.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), r1.modules.len);
+    try testing.expectEqualStrings("infinite", r1.mode_pack.?);
+    // Two enabled config mods each with a mode: ambiguous, fail closed.
+    var c2 = mk("other", "", "user", null, null);
+    c2.mode = "other";
+    const mods2 = [_]manifest.Manifest{ cfg, c2 };
+    try testing.expectError(error.DuplicateMode, resolve(testing.allocator, &mods2, &.{}, &.{}, &.{}, &.{ "infinite_world", "other" }));
 }

@@ -735,28 +735,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
     };
     var mode_owned: ?mode_mod.Pack = null;
     defer if (mode_owned) |*mp| mp.deinit();
-    if (mode_name) |mn| {
-        if (!mode_mod.isValidModeName(mn)) {
-            if (mode_name_cli != null) {
-                usageError("invalid --mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
-            }
-            fatal("invalid [mode] name '{s}' in zdtd.toml (use [A-Za-z0-9_] only)", .{mn});
-        }
-        mode_owned = mode_mod.loadByName(gpa, mn) catch |err| switch (err) {
-            // Missing pack is the common operator mistake (typo, or running from
-            // the wrong CWD): name the path and what is actually there instead
-            // of leaking "FileNotFound".
-            error.FileNotFound => fatalUnknownMode(gpa, mn),
-            else => fatal("cannot load mode '{s}' (modes/{s}.toml): {s}", .{ mn, mn, @errorName(err) }),
-        };
-        if (mode_owned) |*mp| {
-            if (!std.mem.eql(u8, mp.name, mn)) {
-                fatal("mode file modes/{s}.toml declares name '{s}'", .{ mn, mp.name });
-            }
-            mode_mod.applyToInitOptions(mp, &init_opts);
-            log.info("zdtd: mode={s}\n", .{mp.name});
-        }
-    }
+    // The mode pack loads after mod resolution: --mode / [mode] name wins,
+    // else a config-only mod's `mode` (mods/<name> activating a pack).
 
     if (toml_owned) |*tf| {
         zdtd_config.applyToInitOptions(tf, &init_opts);
@@ -773,20 +753,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
-    // Effective worldgen seed precedence: CLI --worldgen-seed > zdtd.toml
-    // [worldgen] seed > mode pack `worldgen_seed` (pack < toml < CLI, like
-    // rules). applyToInitOptions already applied CLI/toml (both null-guarded);
-    // the pack tier lands here so it can never clobber either. `--map` still
-    // wins over any seed at Game init (loadStockMap branch).
-    if (init_opts.worldgen_seed == null) {
-        if (mode_owned) |*mp| {
-            if (mp.worldgen_seed) |s| init_opts.worldgen_seed = s;
-        }
-    }
-
     // PRD 0005: discover mods/ (addons) + plugins/ (first-party core)
     // manifests, resolve tiers + overrides + claims, then load through the
-    // plan. `[mods] disabled`/`blacklist` gate discovery.
+    // plan. `[mods] disabled`/`blacklist` gate discovery; `[mods] enabled`
+    // forces off-by-default config mods on.
     const discovered = blk: {
         const mods_list = plugin_mod.manifest.discover(gpa, "mods") catch |err| {
             fatal("cannot scan mods/: {s}", .{@errorName(err)});
@@ -817,6 +787,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         break :blk splitPluginModules(gpa, s);
     } else &.{};
     defer if (blacklist_list.len > 0) gpa.free(blacklist_list);
+    const enabled_list = if (toml_owned) |*tf| blk: {
+        const s = tf.mods.enabled orelse "";
+        break :blk splitPluginModules(gpa, s);
+    } else &.{};
+    defer if (enabled_list.len > 0) gpa.free(enabled_list);
 
     var mod_plan = plugin_mod.resolver.resolve(
         gpa,
@@ -824,12 +799,58 @@ pub fn main(init: std.process.Init.Minimal) !void {
         init_opts.plugin_modules,
         disabled_list,
         blacklist_list,
+        enabled_list,
     ) catch |err| {
         fatal("mod resolution failed: {s}", .{@errorName(err)});
     };
     // Owned by main until after Game.createWithOptions (init_world loads it).
     defer mod_plan.deinit(gpa);
     init_opts.plugin_plan = &mod_plan;
+
+    // Mode pack: --mode / [mode] name wins, else a config-only mod's `mode`
+    // (an enabled mod activating a pack that overrides the built-in
+    // defaults). Optional.
+    const mode_name_eff: ?[]const u8 = blk: {
+        if (mode_name) |mn| break :blk mn;
+        if (mod_plan.mode_pack) |mo| {
+            log.info("zdtd: mode={s} (via mod)\n", .{mo});
+            break :blk mo;
+        }
+        break :blk null;
+    };
+    if (mode_name_eff) |mn| {
+        if (!mode_mod.isValidModeName(mn)) {
+            if (mode_name_cli != null) {
+                usageError("invalid --mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
+            }
+            fatal("invalid mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
+        }
+        mode_owned = mode_mod.loadByName(gpa, mn) catch |err| switch (err) {
+            // Missing pack is the common operator mistake (typo, or running from
+            // the wrong CWD): name the path and what is actually there instead
+            // of leaking "FileNotFound".
+            error.FileNotFound => fatalUnknownMode(gpa, mn),
+            else => fatal("cannot load mode '{s}' (modes/{s}.toml): {s}", .{ mn, mn, @errorName(err) }),
+        };
+        if (mode_owned) |*mp| {
+            if (!std.mem.eql(u8, mp.name, mn)) {
+                fatal("mode file modes/{s}.toml declares name '{s}'", .{ mn, mp.name });
+            }
+            mode_mod.applyToInitOptions(mp, &init_opts);
+            log.info("zdtd: mode={s}\n", .{mp.name});
+        }
+    }
+
+    // Effective worldgen seed precedence: CLI --worldgen-seed > zdtd.toml
+    // [worldgen] seed > mode pack `worldgen_seed` (pack < toml < CLI, like
+    // rules). applyToInitOptions already applied CLI/toml (both null-guarded);
+    // the pack tier lands here so it can never clobber either. `--map` still
+    // wins over any seed at Game init (loadStockMap branch).
+    if (init_opts.worldgen_seed == null) {
+        if (mode_owned) |*mp| {
+            if (mp.worldgen_seed) |s| init_opts.worldgen_seed = s;
+        }
+    }
     // Log which discovered mods were skipped (disabled / blacklisted /
     // enabled=false) so the operator sees why something did not load. The
     // loaded set with tiers and replacements is logged by loadResolved.
