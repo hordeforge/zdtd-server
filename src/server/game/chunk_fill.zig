@@ -223,6 +223,14 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
 
 pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
     if (ch.te_scanned) return;
+    // Proc worlds carry no prefab storage: a clean proc chunk (never edited)
+    // holds only terrain + deco-mirror blocks, so the 65536-cell walk below
+    // would scan for nothing - 19.7 M cells for the 17x17 join view, the
+    // bulk of the join tick overrun (GAP "Join-burst tick budget under
+    // concurrent load"). The seed chest and player-placed containers mark
+    // the chunk dirty, so they still scan; a later edit re-scans (the skip
+    // does not set te_scanned).
+    if (!ch.dirty and self.world.terrain_source == .proc) return;
     const blocks = ch.blocks orelse return;
     // Always-on evidence for the "TE loot as a job batch" gap: the loot roll
     // is microseconds, this up-to-65536-cell walk is where the time goes.
