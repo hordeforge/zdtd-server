@@ -40,6 +40,21 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   GSI browser fields (`ServerDescription`/`ServerWebsiteURL`/`Region`/
   `Language`/`ServerMatchmakingGroup`); all documented in GAME_OPTIONS.md and
   shipped in serverconfig.example.xml.
+- Pure XML/assetbundle modlet support (docs/prd/0003-modlets.md,
+  docs/rfc/0003-modlets-plan.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
+  `XmlPatcher` op catalog (append/prepend/insert/remove/set/csv/include,
+  `@modfolder:` tokens; `conditional` fails closed until RE pins the grammar),
+  patched catalogs feeding every XML loader (`--mods-dir` override), and the
+  stock join-phase config sync (`NetPackageConfigFile`, 42 S2C rows,
+  Deflate-cached patched XML, `archetypes` name-only). DLL mods are never
+  hosted; `Bundles/` is tolerated, never read.
+- WebUI: the operator dashboard gains a Guard policy panel (kicks,
+  would-kicks, quarantines, quarantine rejects, load-shed drops) and the page
+  header wordmark is a level-1 heading (screen-reader landmark).
+- Dependency bump: zwasm 2.4.1 → 2.5.0 (build.zig.zon URL + hash,
+  THIRD_PARTY.md). Picks up the upstream pre-tag cleanliness sweep (file org,
+  build flags, audit fixes) and full WASI 0.3 coverage; no zdtd-facing API
+  change.
 
 ### Fixed
 
@@ -53,6 +68,42 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Join cost: the storage-TE scan on clean proc chunks dropped 19.7 M → 262 K
   cells; a fresh boot's starter chest is no longer clobbered by a reboot
   with no saved entities; placed deco no longer marks chunks dirty.
+- Admin harden: `settime` clamps to a sane day ceiling (a max-u64 world time
+  previously overflowed the blood-moon math and crashed the server); admin
+  `tele`/`tp` and plugin spawn/move coordinates are bounded to
+  `max_player_coord` (±1e6 blocks) and out-of-range C2S movement is rejected,
+  so a huge-but-finite coordinate can no longer trap the tick-path casts.
+- Admin `wipeplayer` accepts the current ZPV12 player-save format (a wipe on a
+  v12 save previously failed to clear the record).
+- Knockback impulse (C2S hit shove) now goes through the single
+  NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
+  clamp, so a knockback beyond the stock band no longer ships non-stock motion
+  to peers.
+- Plugin verdict scaling is bounded: the loot-roll count re-caps to the
+  roll array (a large on_loot_roll verdict could read out of bounds) and the
+  block-damage verdict products widen to u64 (u32 overflowed for a large
+  verdict times a u16 damage).
+- Plugin spawn reversion: a module's applied `zdtd.queue` spawns are recorded
+  per source and despawned when the module disables (trap/fuel) or reloads,
+  so its entities never outlive it (ADR 0030 amended).
+- The trader quest-list tier (raw wire i32) is clamped to 255 before its u8
+  cast; a hostile value above 255 trapped.
+- The inventory-ledger give delta is clamped to i16 (admin give with a
+  count above 32767 previously trapped the cast; the other ledger callers
+  already clamped).
+- Blood-moon spawn ceiling and wave-size casts clamp the config-scaled
+  products in f64 (an unranged [rules.bloodmoon] budget_scale/wave_frac could
+  trap the u32 cast).
+- Harvest drop rolls and the HarvestCount held-tool multiplier are clamped
+  to 65535 before their casts (modded drop/HarvestCount rows could exceed the
+  target type; the stack store is u16 anyway).
+- Explosion block damage is clamped to u16 per block (the loader allows
+  BlockDamage up to 1e6; a modded blast times a DamageBonus multiplier could
+  exceed 65535 and trap the cast - the chew path already clamped).
+- Disconnect cleanup: a dropped or transport-reaped player's sim entity is
+  now destroyed immediately (previously it lingered as a ghost until the slot
+  was reused - a phantom in listents/mem counts and a spawn-on-approach
+  candidate for late joiners), and the reap path shares the one drop path.
 
 ## [0.2.0] - 2026-08-22
 
@@ -418,55 +469,3 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   unmetered bandwidth-amplification path where one client packet fanned out
   to every nearby or connected peer.
 
-## [Unreleased]
-
-- Dependency bump: zwasm 2.4.1 → 2.5.0 (build.zig.zon URL + hash, THIRD_PARTY.md).
-  Picks up the upstream pre-tag cleanliness sweep (file org, build flags, audit
-  fixes) and full WASI 0.3 coverage; no zdtd-facing API change.
-- Pure XML/assetbundle modlet support (docs/prd/0003-modlets.md,
-  docs/rfc/0003-modlets-plan.md): stock `Mods/` scan with `ModInfo.xml` V2, the full
-  `XmlPatcher` op catalog (append/prepend/insert/remove/set/csv/include,
-  `@modfolder:` tokens; `conditional` fails closed until RE pins the grammar),
-  patched catalogs feeding every XML loader (`--mods-dir` override), and the
-  stock join-phase config sync (`NetPackageConfigFile`, 42 S2C rows,
-  Deflate-cached patched XML, `archetypes` name-only). DLL mods are never
-  hosted; `Bundles/` is tolerated, never read.
-- Admin harden: `settime` clamps to a sane day ceiling (a max-u64 world time
-  previously overflowed the blood-moon math and crashed the server); admin
-  `tele`/`tp` and plugin spawn/move coordinates are bounded to
-  `max_player_coord` (±1e6 blocks) and out-of-range C2S movement is rejected,
-  so a huge-but-finite coordinate can no longer trap the tick-path casts.
-- Admin `wipeplayer` accepts the current ZPV12 player-save format (a wipe on a
-  v12 save previously failed to clear the record).
-- WebUI: the operator dashboard gains a Guard policy panel (kicks,
-  would-kicks, quarantines, quarantine rejects, load-shed drops) and the page
-  header wordmark is a level-1 heading (screen-reader landmark).
-- Knockback impulse (C2S hit shove) now goes through the single
-  NetPackageEntityVelocity builder and inherits the stock [-8, 8] per-axis
-  clamp, so a knockback beyond the stock band no longer ships non-stock motion
-  to peers.
-- Plugin verdict scaling is bounded: the loot-roll count re-caps to the
-  roll array (a large on_loot_roll verdict could read out of bounds) and the
-  block-damage verdict products widen to u64 (u32 overflowed for a large
-  verdict times a u16 damage).
-- Plugin spawn reversion: a module's applied `zdtd.queue` spawns are recorded
-  per source and despawned when the module disables (trap/fuel) or reloads,
-  so its entities never outlive it (ADR 0030 amended).
-- The trader quest-list tier (raw wire i32) is clamped to 255 before its u8
-  cast; a hostile value above 255 trapped.
-- The inventory-ledger give delta is clamped to i16 (admin give with a
-  count above 32767 previously trapped the cast; the other ledger callers
-  already clamped).
-- Blood-moon spawn ceiling and wave-size casts clamp the config-scaled
-  products in f64 (an unranged [rules.bloodmoon] budget_scale/wave_frac could
-  trap the u32 cast).
-- Harvest drop rolls and the HarvestCount held-tool multiplier are clamped
-  to 65535 before their casts (modded drop/HarvestCount rows could exceed the
-  target type; the stack store is u16 anyway).
-- Explosion block damage is clamped to u16 per block (the loader allows
-  BlockDamage up to 1e6; a modded blast times a DamageBonus multiplier could
-  exceed 65535 and trap the cast - the chew path already clamped).
-- Disconnect cleanup: a dropped or transport-reaped player's sim entity is
-  now destroyed immediately (previously it lingered as a ghost until the slot
-  was reused - a phantom in listents/mem counts and a spawn-on-approach
-  candidate for late joiners), and the reap path shares the one drop path.
