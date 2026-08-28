@@ -3366,6 +3366,25 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/zdtd_config.zig` max_streamed_chunks_cap,
   `src/server/game/chunk_stream.zig` (bitset + radius), `src/server/game/types.zig`
 
+- **Join-burst tick budget under concurrent load** `PARTIAL` `(2026-08-29)`
+  Measured with a live 7dtd-loadgen double join against `--mode infinite`
+  (APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
+  net_poll 1.9 s. The join burst is fully synchronous: `sendSpawnArea`
+  queues the whole 17x17 view (289 chunks), each proc chunk costs
+  generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and
+  the deco burst mirrors up to `deco_objects_per_join` (8192) trees. One
+  poll drains it all, so a second concurrent client's critical packages
+  (PackageIds retransmit) starve behind the reliable-window flood and its
+  join times out at ChallengeReplied (`join_ok=14, join_fail=0` server-side
+  - the server accepted everything; the client starved). Fix directions
+  (each a slice of its own): pace the join spawn-area through the
+  `chunk_adds_per_stream_tick` stream budget instead of one synchronous
+  flood; a per-poll send byte budget in the net drain so critical packages
+  never queue behind a chunk burst; W2b async chunk gen (already planned)
+  moves proc gen + te_scan off the join tick.
+  *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns),
+  loadgen `ChallengeReplied timeout` under concurrent count=2.
+
 - **Resident chunk cap and deterministic eviction** `WORKS`
   4096 resident chunks, min-key victim (not HashMap walk order) so DST replay is
   stable, save-before-free so nothing is discarded unsaved.
