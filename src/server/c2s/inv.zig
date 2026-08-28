@@ -722,7 +722,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             try self.world.setBlockWorld(r.place_x, r.place_y, r.place_z, r.place_block);
             // A placed bedroll becomes the player's respawn point (stock
             // bedroll blocks set EntityPlayer.spawnPoint on placement).
-            if (self.isBedrollId(@truncate(r.place_block))) {
+            if (self.isBedrollId(r.place_block)) {
                 c.bed_x = r.place_x;
                 c.bed_y = r.place_y;
                 c.bed_z = r.place_z;

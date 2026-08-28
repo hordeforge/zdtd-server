@@ -1158,7 +1158,7 @@ pub const Game = struct {
         for (slots) |*s| {
             if (s.count == 0 or s.item_id == 0) continue;
             const max = itemStackFor(self, s.item_id);
-            if (max > 0 and s.count > max) s.count = max;
+            if (max > 0) s.count = @min(s.count, max);
         }
     }
 

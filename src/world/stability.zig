@@ -150,7 +150,7 @@ fn spreadCell(w: *store.World, c: *store.Chunk, lx: i32, y: i32, lz: i32, v: u8,
     const f = facts(fctx, id);
     if (f.ignore) return;
     var vv = v;
-    if (vv > 1 and !f.support) vv = 1;
+    if (!f.support) vv = @min(vv, 1);
     if (vv <= c.stabilityAt(lx, y, lz)) return;
     c.setStabilityByte(lx, y, lz, vv);
     if (!f.support) return;
@@ -169,7 +169,7 @@ fn spreadVertical(w: *store.World, c: *store.Chunk, lx: i32, y: i32, lz: i32, st
         const f = facts(fctx, id);
         if (f.ignore) break;
         var v = stab;
-        if (v > 1 and !f.support) v = 1;
+        if (!f.support) v = @min(v, 1);
         if (v <= c.stabilityAt(lx, uy, lz)) break;
         c.setStabilityByte(lx, uy, lz, v);
         if (!f.support) break;
@@ -185,7 +185,7 @@ fn spreadVertical(w: *store.World, c: *store.Chunk, lx: i32, y: i32, lz: i32, st
         const f = facts(fctx, id);
         if (f.ignore) break;
         var v = vv;
-        if (v > 1 and !f.support) v = 1;
+        if (!f.support) v = @min(v, 1);
         if (v <= c.stabilityAt(lx, dy, lz)) break;
         c.setStabilityByte(lx, dy, lz, v);
         if (!f.support) break;
@@ -219,7 +219,7 @@ fn maxStabilityAround(w: *store.World, x: i32, y: i32, z: i32, fctx: ?*anyopaque
         if (!f.support) continue;
         const s = stabAtWorld(w, nx, ny, nz);
         if (d[1] == -1) down = s;
-        if (s > max) max = s;
+        max = @max(max, s);
     }
     return .{ .max = max, .down = down, .from_down = max == down };
 }
@@ -229,9 +229,9 @@ fn maxStabilityAround(w: *store.World, x: i32, y: i32, z: i32, fctx: ?*anyopaque
 fn recomputeStability(w: *store.World, x: i32, y: i32, z: i32, id: u16, fctx: ?*anyopaque, facts: FactsFn) u8 {
     const m = maxStabilityAround(w, x, y, z, fctx, facts);
     var v: i32 = if (m.from_down) m.max else m.max - 1;
-    if (v < 0) v = 0;
+    v = @max(v, 0);
     const f = facts(fctx, id);
-    if (v > 1 and !f.support) v = 1;
+    if (!f.support) v = @min(v, 1);
     return @intCast(v);
 }
 

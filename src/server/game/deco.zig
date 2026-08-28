@@ -8,6 +8,7 @@ const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
 const subbiome_noise = @import("../../world/subbiome_noise.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
+const world_store = @import("../../world/store.zig");
 
 pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
     const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
@@ -62,7 +63,7 @@ pub fn decoOffsetsFor(self: *const Game, id: u16) deco_mirror.Offsets {
 /// Write one placed decoration into the block store so collision, harvest and
 /// the streamed chunk payload agree with what the client renders.
 pub fn mirrorDeco(self: *Game, cache: *DecoDimCache, o: packages.stock_deco.DecoObj) bool {
-    const offsets = cache.offsetsFor(self, @truncate(o.block_raw));
+    const offsets = cache.offsetsFor(self, world_store.typeId(o.block_raw));
     if (offsets.n == 0) return false;
     const written = deco_mirror.apply(&self.world, .{
         .x = o.x,

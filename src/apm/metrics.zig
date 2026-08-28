@@ -150,7 +150,7 @@ pub const LatencyHist = struct {
     pub fn observe(self: *LatencyHist, ns: u64) void {
         self.count = std.math.add(u64, self.count, 1) catch std.math.maxInt(u64);
         self.sum_ns = std.math.add(u64, self.sum_ns, ns) catch std.math.maxInt(u64);
-        if (ns > self.max_ns) self.max_ns = ns;
+        self.max_ns = @max(self.max_ns, ns);
         const b: u6 = if (ns == 0) 0 else @intCast(@min(63, 63 - @clz(ns)));
         self.buckets[b] = std.math.add(u64, self.buckets[b], 1) catch std.math.maxInt(u64);
     }

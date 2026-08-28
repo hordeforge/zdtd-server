@@ -1398,6 +1398,9 @@ const block_change_flags_known: u8 =
     block_change_flag_value | block_change_flag_damage | block_change_flag_density |
     block_change_flag_force_density | block_change_flag_update_light | block_change_flag_texture;
 
+/// BlockValue.type: low 16 of rawData (asm.il BlockValue.get_type).
+const block_type_mask: u32 = 0xffff;
+
 /// BlockValue.meta lives in rawData bits 22..25 (asm.il:140570 get_meta).
 /// Powered blocks carry their visual state there: bit 0x1 = isPowered,
 /// bit 0x2 = isOn (Block::ActivateBlock, asm.il:127088 / 137044).
@@ -1405,7 +1408,7 @@ pub const block_meta_powered: u8 = 1;
 pub const block_meta_on: u8 = 2;
 
 pub fn blockMeta(raw: u32) u8 {
-    return @truncate((raw >> 22) & 15);
+    return @intCast((raw >> 22) & 15);
 }
 
 /// BlockValue::set_meta: clear bits 22..25 then splice the low nibble back in.
@@ -1538,7 +1541,7 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     if ((flags & block_change_flag_value) != 0) {
         const raw = try r.readU32();
         ch.raw = raw;
-        ch.block_id = @truncate(raw & 0xffff);
+        ch.block_id = @intCast(raw & block_type_mask);
         ch.damage = try r.readU16();
         ch.has_value = true;
     }

@@ -582,10 +582,10 @@ fn applyGravity(w: *World, s: Slot, dt: f32) void {
         // World.Gravity then the 0.98 y-drag, so acceleration is ~1.6
         // blocks/s² and the speed self-caps around -3.9 blocks/s. Swimming
         // uses gravity*0.025 and the 0.91 drag (a slow float).
-        const g_eff: f32 = if (swimming) w.rules.ai.gravity * w.rules.ai.swim_gravity_per else w.rules.ai.gravity;
+        const applied_gravity: f32 = if (swimming) w.rules.ai.gravity * w.rules.ai.swim_gravity_per else w.rules.ai.gravity;
         const drag: f32 = if (swimming) w.rules.ai.swim_drag_y else 0.98;
-        ai.vy = (ai.vy + g_eff * dt) * drag;
-        if (ai.vy < w.rules.ai.fall_max_vy) ai.vy = w.rules.ai.fall_max_vy;
+        ai.vy = (ai.vy + applied_gravity * dt) * drag;
+        ai.vy = @max(ai.vy, w.rules.ai.fall_max_vy);
         t.y += ai.vy * dt;
     }
 }
@@ -834,7 +834,7 @@ fn bumpPhase(w: *World, ps: Slot, s: *c.QuestProgress, d: quest.QuestDef, kind: 
         var max_p: u16 = 0;
         for (d.objectives, 0..) |o, i| {
             if (o.kind != kind or (o.phase != s.phase and o.phase != 0)) continue;
-            if (i < s.obj_progress.len and s.obj_progress[i] > max_p) max_p = s.obj_progress[i];
+            if (i < s.obj_progress.len) max_p = @max(max_p, s.obj_progress[i]);
         }
         if (max_p > 0) s.progress = max_p;
         const phase_done = phaseObjectivesComplete(w, d, s);
@@ -1519,7 +1519,7 @@ pub fn traderRestock(w: *World) void {
             stock.entries[e].markup = 0;
         }
         // The money pool regenerates toward its spawn default each restock.
-        if (stock.wallet < stock.wallet_default) stock.wallet = stock.wallet_default;
+        stock.wallet = @max(stock.wallet, stock.wallet_default);
     }
 }
 
@@ -2751,7 +2751,7 @@ fn stealthTick(w: *World, s: Slot) void {
         st.sleeper_noise_wait_ticks -= 1;
     } else if (st.sleeper_noise_volume > 0) {
         st.sleeper_noise_volume -= r.stealth_sleeper_volume_decay;
-        if (st.sleeper_noise_volume < 0) st.sleeper_noise_volume = 0;
+        st.sleeper_noise_volume = @max(st.sleeper_noise_volume, 0);
     }
     // Attraction (stock TickServer IL_01BF+): while the raw sum is non-zero,
     // scan the attraction radius around the player for hearing zombies.
@@ -2976,7 +2976,7 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
             continue;
         }
         f.vy = (f.vy + g * dt) * 0.98;
-        if (f.vy < w.rules.ai.fall_max_vy) f.vy = w.rules.ai.fall_max_vy;
+        f.vy = @max(f.vy, w.rules.ai.fall_max_vy);
         const t = &w.transform[s];
         const dy: f32 = f.vy * dt;
         t.y += dy;
@@ -3054,7 +3054,7 @@ pub fn systemVehicles(w: *World, dt: f32) void {
                 }
             } else { // no-sink: snap up to surface, kill downward velocity
                 t.y = gy;
-                if (v.vy < 0) v.vy = 0;
+                v.vy = @max(v.vy, 0);
             }
         }
 
@@ -3115,7 +3115,7 @@ pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32)
             return;
         }
         v.fuel -= @abs(v.speed) * vr.fuel_per_m * dt;
-        if (v.fuel < 0) v.fuel = 0;
+        v.fuel = @max(v.fuel, 0);
     }
 }
 

@@ -251,7 +251,7 @@ pub fn aStarToward(
     var nx_arr: [max_nodes]i32 = undefined;
     var nz_arr: [max_nodes]i32 = undefined;
     var ny_arr: [max_nodes]i32 = undefined;
-    var g_cost: [max_nodes]u32 = .{std.math.maxInt(u32)} ** max_nodes;
+    var cost_so_far: [max_nodes]u32 = .{std.math.maxInt(u32)} ** max_nodes;
     var parent: [max_nodes]i32 = .{-1} ** max_nodes;
     var closed: [max_nodes]bool = .{false} ** max_nodes;
     var n_nodes: usize = 0;
@@ -264,7 +264,7 @@ pub fn aStarToward(
     nx_arr[0] = sx;
     nz_arr[0] = sz;
     ny_arr[0] = sy;
-    g_cost[0] = 0;
+    cost_so_far[0] = 0;
     n_nodes = 1;
     node_map.put(sx, sz, 0);
     openPush(heap[0..], &heap_n, .{ .f = manhattan(sx, sz, gx, gz), .ni = 0 });
@@ -279,7 +279,7 @@ pub fn aStarToward(
         const ci: usize = popped.ni;
         if (closed[ci]) continue;
         // Lazy heap: skip stale entries whose f no longer matches current g.
-        const cur_f = g_cost[ci] + manhattan(nx_arr[ci], nz_arr[ci], gx, gz);
+        const cur_f = cost_so_far[ci] + manhattan(nx_arr[ci], nz_arr[ci], gx, gz);
         if (popped.f != cur_f) continue;
         closed[ci] = true;
 
@@ -296,11 +296,11 @@ pub fn aStarToward(
             const nz = cz + d[1];
             if (manhattan(sx, sz, nx, nz) > span) continue;
 
-            const tent_g = g_cost[ci] + 1;
+            const tent_g = cost_so_far[ci] + 1;
             const existing = node_map.get(nx_arr[0..n_nodes], nz_arr[0..n_nodes], nx, nz);
             if (existing) |e| {
                 if (closed[e]) continue;
-                if (tent_g >= g_cost[e]) continue;
+                if (tent_g >= cost_so_far[e]) continue;
             } else if (n_nodes >= max_nodes) continue;
             // Probe last: it is the expensive call (terrain lock / column scan)
             // and the cheap rejects above already dropped most neighbours.
@@ -314,7 +314,7 @@ pub fn aStarToward(
                 break :blk e;
             };
             ny_arr[ni] = ny;
-            g_cost[ni] = tent_g;
+            cost_so_far[ni] = tent_g;
             parent[ni] = @intCast(ci);
             const f = tent_g + manhattan(nx, nz, gx, gz);
             openPush(heap[0..], &heap_n, .{ .f = f, .ni = @intCast(ni) });

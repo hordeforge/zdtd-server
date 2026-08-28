@@ -1737,7 +1737,7 @@ test "power visuals rewrite block meta once per state change" {
 
     replicate_te.broadcastPowerVisuals(g);
     const raw = g.blockRawAt(8, 70, 8);
-    try std.testing.expectEqual(world_store.block_stone, @as(u16, @truncate(raw & 0xffff)));
+    try std.testing.expectEqual(world_store.block_stone, world_store.typeId(raw));
     try std.testing.expectEqual(
         packages.block_meta_on | packages.block_meta_powered,
         packages.blockMeta(raw),

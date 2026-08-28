@@ -2077,7 +2077,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             const count: u32 = if (hide_player)
                 1
             else
-                (if (show_zombie) @as(u32, 3) else @as(u32, 2)) + (if (show_flanker) @as(u32, 1) else 0);
+                (if (show_zombie) @as(u32, 3) else @as(u32, 2)) + @as(u32, @intFromBool(show_flanker));
             std.mem.writeInt(u32, out[4..8], count, .little);
             std.mem.writeInt(u32, out[8..12], 1, .little);
             std.mem.writeInt(i32, out[12..16], 0, .little);

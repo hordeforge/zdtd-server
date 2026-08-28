@@ -124,7 +124,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (wire_abs > cur_dmg) {
                     if (self.block_damage_player != 100) {
                         const delta: u32 = @as(u32, wire_abs - cur_dmg) * self.block_damage_player / 100;
-                        abs = @intCast(@min(@as(u32, cur_dmg) + delta, 65535));
+                        abs = @intCast(@min(@as(u32, cur_dmg) + delta, std.math.maxInt(u16)));
                     } else {
                         abs = wire_abs;
                     }
@@ -135,7 +135,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (self.claimCovering(b.x, b.z)) |claim| {
                     if (claim.owner_entity == editor_ent) {
                         const dur = if (claim.owner_online) self.land_claim_online_dur else self.land_claim_offline_dur;
-                        if (dur > 0) max_hp = @intCast(@min(@as(u32, max_hp) * dur, 65535));
+                        if (dur > 0) max_hp = @intCast(@min(@as(u32, max_hp) * dur, std.math.maxInt(u16)));
                     }
                 }
                 if (abs >= max_hp) {
@@ -145,7 +145,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // the swap (the block did not break).
                     const down_raw = self.downgradeBreakRaw(b.x, b.y, b.z, base_cur);
                     if (down_raw != 0) {
-                        place_id = @truncate(down_raw & 0xffff);
+                        place_id = world_store.typeId(down_raw);
                         out_dmg = 0;
                         self.clearBlockHp(b.x, b.y, b.z);
                         self.clearBlockRaw(b.x, b.y, b.z);
@@ -332,7 +332,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // (IL=77 IL_0031-0048; a mismatch silently drops, so a stale or
         // spoofed pickup never removes a different block).
         const cur_id = self.world.blockWorld(pk.x, pk.y, pk.z) catch return true;
-        if (cur_id != @as(u16, @truncate(pk.raw))) return true;
+        if (cur_id != world_store.typeId(pk.raw)) return true;
         // zdtd trust bounds (stock checks CanPickup client-side; the server
         // still enforces reach and claims so a spoofed pickup cannot delete
         // distant or claimed blocks).

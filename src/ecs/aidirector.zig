@@ -975,7 +975,7 @@ pub const Director = struct {
             const r = &self.heat[i];
             if (r.cooldown > 0) r.cooldown -= dt;
             r.activity -= r.decay * dt;
-            if (r.activity < 0) r.activity = 0;
+            r.activity = @max(r.activity, 0);
             // A spent region stays while on cooldown (it must keep blocking new
             // heat in the same area); once cooled and empty it is dropped.
             if (r.activity <= 0.01 and r.cooldown <= 0) {
@@ -1028,7 +1028,7 @@ pub const Director = struct {
             const dz = nrz - rz;
             if (dx == 0 and dz == 0) continue;
             if (@abs(dx) > 1 or @abs(dz) > 1) continue;
-            if (r.cooldown < neighbor_cd) r.cooldown = neighbor_cd;
+            r.cooldown = @max(r.cooldown, neighbor_cd);
         }
     }
 

@@ -28,6 +28,8 @@ const te_types = packages.te_types;
 /// All-broken topsoil bitfield (the pre-topsoil look; `topsoil_all_broken`
 /// rule for worlds without splat maps).
 const topsoil_broken = [_]u8{0xFF} ** 32;
+/// Harvest/destroy XML counts parse as unbounded u32; the stack store is u16.
+const max_drop_count: u32 = std.math.maxInt(u16);
 
 pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool {
     // Resident miss = disk load or procedural gen (worldgen W2 runs here,
@@ -192,7 +194,7 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
-                const id: u16 = @truncate(blocks[@intCast(lx + lz * 16 + y * 256)]);
+                const id: u16 = world_store.typeId(blocks[@intCast(lx + lz * 16 + y * 256)]);
                 if (id != last_id) {
                     last_id = id;
                     last_power = self.power_registry.lookup(id);
@@ -239,7 +241,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
             while (lx < 16) : (lx += 1) {
                 cells += 1;
                 const idx = @as(usize, @intCast(lx + lz * 16 + y * 256));
-                const id: u16 = @truncate(blocks[idx]);
+                const id: u16 = world_store.typeId(blocks[idx]);
                 if (id == 0) continue;
                 if (id != last_id) {
                     last_id = id;
@@ -485,13 +487,13 @@ pub fn rollBlockDropEvent(
         // Clamp at the roll: the final stack store is u16 and the XML count
         // values parse as unbounded u32, so a modded row must not trap the
         // @trunc cast (same class as the explosion block-AoE clamp).
-        var count: u32 = @min(d.count_min, 65535);
+        var count: u32 = @min(d.count_min, max_drop_count);
         if (d.count_max > d.count_min) {
             const span: f64 = @as(f64, @floatFromInt(d.count_max)) + 1.0 -
                 @as(f64, @floatFromInt(d.count_min));
-            count += @as(u32, @trunc(@min(span * @as(f64, @floatCast(prng.nextFloat())), 65535.0)));
+            count += @as(u32, @trunc(@min(span * @as(f64, @floatCast(prng.nextFloat())), @as(f64, @floatFromInt(max_drop_count)))));
         }
-        if (count > 65535) count = 65535;
+        count = @min(count, max_drop_count);
         if (count == 0) continue; // IL: skip if 0 (the count="0" rows).
         // Stick path (IL_0078-0093): only rows with stick_chance >= 0.001
         // participate; the placement roll happens BEFORE the prob gate.
@@ -597,7 +599,7 @@ fn tryPlaceStuckDrop(
 pub fn fallBlocksLanded(ctx: ?*anyopaque, cells: []const ecs.components.FallingCell) void {
     const g: *Game = @ptrCast(@alignCast(ctx orelse return));
     for (cells) |cell| {
-        const tid: u16 = @truncate(cell.raw & 0xffff);
+        const tid: u16 = world_store.typeId(cell.raw);
         if (tid == 0) continue;
         _ = rollBlockDropEvent(g, 0, cell.x, cell.y, cell.z, tid, .fall, 1.0);
     }

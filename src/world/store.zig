@@ -16,6 +16,8 @@ const biome_layers = @import("../assets/biome_layers.zig");
 const weather_mod = @import("weather.zig");
 const io_fs = @import("../util/io_fs.zig");
 const chunk_flush = @import("chunk_flush.zig");
+const tts = @import("tts.zig");
+pub const typeId = tts.typeId;
 
 /// How missing chunks are filled on first touch (on-the-fly, not full-map bake).
 pub const TerrainSource = enum {
@@ -372,7 +374,7 @@ pub const Chunk = struct {
 
     /// Block type id (low 16 of rawData).
     pub fn blockAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u16 {
-        return @truncate(self.rawAt(lx, y, lz));
+        return tts.typeId(self.rawAt(lx, y, lz));
     }
 
     /// Full BlockValue.rawData for wire packing. The no-blocks fallback
@@ -902,7 +904,7 @@ pub const World = struct {
         const c = try self.getOrCreate(t.pos);
         try c.setBlockRaw(self.allocator, t.lx, y, t.lz, raw);
         self.markTopSoilBroken(c, t.lx, y, t.lz);
-        self.levelerPushIfWaterEdit(x, y, z, @truncate(raw));
+        self.levelerPushIfWaterEdit(x, y, z, tts.typeId(raw));
     }
 
     /// Stock SetTopSoilBroken trigger (blocks.md position path): a block
@@ -973,7 +975,7 @@ pub const World = struct {
 
     pub fn isSolidWorld(self: *World, x: i32, y: i32, z: i32) !bool {
         const raw = try self.rawWorld(x, y, z);
-        const id: u16 = @truncate(raw);
+        const id: u16 = tts.typeId(raw);
         if (id == self.terrain_ids.air or id == self.terrain_ids.water) return false;
         // An open door is passable (RE TEFeatureDoor.SetOpen): the AI solid
         // probes use this predicate, so a zombie walks through the door it
@@ -981,7 +983,7 @@ pub const World = struct {
         // `block_meta_on`; duplicated here because world must not import wire).
         if (self.door_id_fn) |f| {
             if (f(self.door_id_ctx, id)) {
-                return (@as(u8, @truncate((raw >> 22) & 15)) & 2) == 0;
+                return (@as(u8, @intCast((raw >> 22) & 15)) & 2) == 0;
             }
         }
         return true;

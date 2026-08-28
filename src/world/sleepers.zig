@@ -518,7 +518,7 @@ pub fn loadFromPrefabs(
             const cnt: i32 = @intCast(tb.blockCount());
             var bi: i32 = 0;
             while (bi < cnt) : (bi += 1) {
-                const tid: u16 = @truncate(tb.types[@intCast(bi)] & 0xffff);
+                const tid: u16 = tts_rot.typeId(tb.types[@intCast(bi)]);
                 const name = nm.nameOf(tid) orelse continue;
                 // Stock Block.IsSleeperBlock = resolved Class "Sleeper"; the
                 // prefix fallback (offline/no table) misses infestedSleeper*.

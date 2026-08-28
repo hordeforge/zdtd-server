@@ -128,7 +128,7 @@ fn findNodeIdx(sorted: []const u32, id: u16) u16 {
         const mid = lo + (hi - lo) / 2;
         if (sorted[mid] < key) lo = mid + 1 else hi = mid;
     }
-    if (lo < sorted.len and (sorted[lo] >> 16) == id) return @truncate(sorted[lo]);
+    if (lo < sorted.len and (sorted[lo] >> 16) == id) return @intCast(sorted[lo] & 0xffff);
     return std.math.maxInt(u16);
 }
 

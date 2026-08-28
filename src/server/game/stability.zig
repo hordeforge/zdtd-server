@@ -5,6 +5,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
 const stability_mod = @import("../../world/stability.zig");
+const world_store = @import("../../world/store.zig");
 const ecs_components = @import("../../ecs/components.zig");
 
 pub fn stabilityFacts(ctx: ?*anyopaque, id: u16) stability_mod.Facts {
@@ -70,7 +71,7 @@ pub fn stabilityAfterSetBlock(self: *Game, x: i32, y: i32, z: i32, old_id: u16, 
         var k: usize = 0;
         while (k < cn) : (k += 1) {
             const cell = cells[k];
-            const tid: u16 = @truncate(cell.raw & 0xffff);
+            const tid: u16 = world_store.typeId(cell.raw);
             const def = self.blocks.byId(tid) orelse continue;
             if (!self.maxdamage.showModelOnFall(def.name)) continue;
             _ = self.sim.spawnFallingBlock(cell, self.maxdamage.fallingMassKg(def.name));

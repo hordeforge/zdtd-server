@@ -25,6 +25,11 @@ pub const child_bit: u32 = 0x4000_0000;
 pub const decal_bit: u32 = 0x8000_0000;
 /// TTS block-paint blockId bitfield: type mask (RE: tts.zig header).
 pub const type_mask: u32 = 0xFFFF;
+
+/// BlockValue.type: low 16 of rawData (asm.il BlockValue.get_type).
+pub fn typeId(raw: u32) u16 {
+    return @intCast(raw & type_mask);
+}
 /// First file version written with the current `BlockValue` bit layout; older
 /// files carry `BlockValueV3` and go through `convertOldRawData` first.
 pub const blockvalue_version: u32 = 18;
@@ -365,7 +370,7 @@ const rot_y_step = [24]u8{
 pub fn rotateRawY(raw: u32, steps: u8) u32 {
     const n: u8 = steps & 3;
     if (n == 0) return raw;
-    const rot: u8 = @truncate((raw >> rotation_shift) & rotation_mask);
+    const rot: u8 = @intCast((raw >> rotation_shift) & rotation_mask);
     var out: u8 = rot;
     if (rot < 24) {
         var i: u8 = 0;
@@ -426,7 +431,7 @@ pub fn paintDecoration(
         }
         const raw = tts.types[@intCast(i)];
         if (raw == 0) continue;
-        const typ: u16 = @truncate(raw & type_mask);
+        const typ: u16 = typeId(raw);
         if (typ == filler_id or typ == filler_adaptive_id) {
             // Stock resolves fillers through InitTerrainFillers / CopyIntoLocal:
             // the cell takes the surrounding terrain instead of staying a
@@ -467,7 +472,7 @@ test "rotateRawY cube orientations form a bijection of order four" {
     var rot: u8 = 0;
     while (rot < 24) : (rot += 1) {
         const raw = @as(u32, rot) << rotation_shift;
-        const once: u8 = @truncate((rotateRawY(raw, 1) >> rotation_shift) & rotation_mask);
+        const once: u8 = @intCast((rotateRawY(raw, 1) >> rotation_shift) & rotation_mask);
         try std.testing.expect(once < 24);
         try std.testing.expect(!seen[once]);
         seen[once] = true;

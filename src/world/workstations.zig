@@ -381,7 +381,7 @@ pub const Workstation = struct {
             var j: usize = last;
             while (j > 0) : (j -= 1) {
                 var src = self.queue[j - 1];
-                if (src.multiplier < 0) src.multiplier = 0;
+                src.multiplier = @max(src.multiplier, 0);
                 self.queue[j] = src;
                 self.queue[j - 1].clear();
             }

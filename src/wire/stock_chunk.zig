@@ -172,8 +172,11 @@ fn rawAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u32 {
     return blockAt(opts, lx, y, lz);
 }
 
+/// BlockValue.type: low 16 of rawData.
+const block_type_mask: u32 = 0xffff;
+
 fn blockType(raw: u32) u16 {
-    return @truncate(raw);
+    return @intCast(raw & block_type_mask);
 }
 
 /// Layer cell index matching stock: x + z*16 + (y&3)*256 within a 4-high band.
@@ -264,7 +267,7 @@ pub fn layerAnyNonAirU32(raws: []const u32) bool {
         if (@reduce(.Or, types != zero)) return true;
     }
     while (i < raws.len) : (i += 1) {
-        if (@as(u16, @truncate(raws[i])) != stock_air) return true;
+        if (blockType(raws[i]) != stock_air) return true;
     }
     return false;
 }
@@ -358,7 +361,7 @@ pub fn packTexturePlane(vals: []const u64, plane: u3, out: []u8) void {
 }
 
 /// Density bytes from dense rawData: densityForBlock per low-16 type.
-/// Scalar equivalent: dens[i] = densityForBlock(@truncate(raws[i])).
+/// Scalar equivalent: dens[i] = densityForBlock(blockType(raws[i])).
 /// Hot stream path when dens_at is null and a raw plane is memoized.
 pub fn packDensityFromRaws(raws: []const u32, dens: []u8) void {
     std.debug.assert(dens.len >= raws.len);
@@ -380,7 +383,7 @@ pub fn packDensityFromRaws(raws: []const u32, dens: []u8) void {
         dens[i..][0..simd_u32_w].* = @select(u8, is_air, air_d, mid);
     }
     while (i < raws.len) : (i += 1) {
-        dens[i] = densityForBlock(@truncate(raws[i]));
+        dens[i] = densityForBlock(blockType(raws[i]));
     }
 }
 
@@ -421,7 +424,7 @@ pub fn fillWaterMassFromRaws(raws: []const u32, water_id: u16, vals: []u16) bool
         vals[i..][0..simd_u32_w].* = @select(u16, hit, mass, zero);
     }
     while (i < raws.len) : (i += 1) {
-        if (@as(u16, @truncate(raws[i])) == water_id) {
+        if (blockType(raws[i]) == water_id) {
             vals[i] = water_mass_full;
             has_water = true;
         } else {
@@ -760,7 +763,7 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
                         var lx: i32 = 0;
                         while (lx < 16) : (lx += 1) {
                             const raw = rawAt(opts, lx, y0 + ly, lz);
-                            if (@as(u16, @truncate(raw)) == opts.water_block_id) {
+                            if (blockType(raw) == opts.water_block_id) {
                                 vals[layerCell(lx, ly, lz)] = water_mass_full;
                                 has_water = true;
                             }
@@ -1310,7 +1313,7 @@ test "simd packDensityFromRaws matches densityForBlock" {
     packDensityFromRaws(&raws, &dens);
     i = 0;
     while (i < 1024) : (i += 1) {
-        try std.testing.expectEqual(densityForBlock(@truncate(raws[i])), dens[i]);
+        try std.testing.expectEqual(densityForBlock(blockType(raws[i])), dens[i]);
     }
     // Tail length not a multiple of vector width.
     var short_raws: [11]u32 = .{ 0, 1, 100, 239, 240, 259, 1000, 0, 5, 300, 42 };
@@ -1318,7 +1321,7 @@ test "simd packDensityFromRaws matches densityForBlock" {
     packDensityFromRaws(&short_raws, &short_dens);
     i = 0;
     while (i < 11) : (i += 1) {
-        try std.testing.expectEqual(densityForBlock(@truncate(short_raws[i])), short_dens[i]);
+        try std.testing.expectEqual(densityForBlock(blockType(short_raws[i])), short_dens[i]);
     }
 }
 

@@ -355,7 +355,7 @@ pub const Index = struct {
         };
         defer self.allocator.free(local_types);
         for (tb.types, 0..) |*raw, i| {
-            const typ: u16 = @truncate(raw.* & tts.type_mask);
+            const typ: u16 = tts.typeId(raw.*);
             local_types[i] = typ;
             if (typ == 0) continue;
             const mapped: i32 = if (typ < table.len) table[typ] else -1;
@@ -1027,13 +1027,13 @@ test "prefab type ids remap through blocks.nim into runtime ids" {
         var checked: usize = 0;
         var changed: usize = 0;
         for (raw.types, remapped.types) |r, m| {
-            const local: u16 = @truncate(r & tts.type_mask);
+            const local: u16 = tts.typeId(r);
             if (local == 0) continue;
             // Every authored id must name a block this install still has, or
             // the prefab would be stamped with something else entirely.
             const bname = map.nameOf(local) orelse return error.PrefabIdMissingFromNameMap;
             const runtime = table.idByName(bname) orelse return error.BlockNameMissingFromAssignIds;
-            try std.testing.expectEqual(runtime, @as(u16, @truncate(m & tts.type_mask)));
+            try std.testing.expectEqual(runtime, tts.typeId(m));
             // BlockValue::set_type replaces the low 16 bits only.
             try std.testing.expectEqual(r & ~tts.type_mask, m & ~tts.type_mask);
             checked += 1;
