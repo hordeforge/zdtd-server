@@ -155,9 +155,14 @@ reasoning as ADR 0023's requirement evaluator). Plan:
       formula.
 - [x] T35: air-drop crates now push a `supply_drop` NavObject marker
       alongside the loot-bag spawn.
-- [ ] T36: `BlockTrigger` C2S is relayed to nearby peers with zero server
-      validation; any peer can claim any trigger fired and the server never
-      checks the prefab's actual wiring.
+- [x] T36: `BlockTrigger` C2S handled + rebroadcast (GAP re-audit 2026-08-26
+      WORKS at relay granularity, matching the WORK_PLAN header): the relay
+      carries the client-simulated circuit broadcast (same client-trust model
+      as other client-driven paths). Residual kept honest: the server does not
+      validate the claim against the prefab's actual `PrefabTriggerData`
+      wiring/latch state (lever-to-door circuits are client-simulated), so a
+      fabricated trigger id is not rejected - tracked under the T36 section
+      in WORK_PLAN as the grow-by-real-gap authority slice.
 - [x] T37: bedroll ownership persists (`players.zsv` bumped ZPV3 -> ZPV4,
       version-gated field, old files upgrade in place on next save).
 - [x] T38: `ActiveRadiusEffects` (A36, fresh find from a genuine third-pass

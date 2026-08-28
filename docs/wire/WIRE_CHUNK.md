@@ -1,8 +1,8 @@
 # Chunk wire formats (zdtd)
 
-> Purpose: stock `NetPackageChunk` / `ChunkRemove` wire plus the ZCH3 disk overlay — what the client `Read`s, what `src/wire/stock_chunk.zig` encodes, and how it differs from test helpers.
+> Purpose: stock `NetPackageChunk` / `ChunkRemove` wire plus the ZCH3 disk overlay — what the client `Read`s, what `src/wire/stock_chunk.zig` encodes, and how it differs from test helpers. (ZCH4 is the non-stock `[wire] profile` variant that carries the column height in the header; see STATUS Batch O / ADR 0036.)
 
-Related: [PACKAGES.md](PACKAGES.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) · [AUTHORITY.md](../AUTHORITY.md) · [PARITY_TOOLING.md](../PARITY_TOOLING.md) · `src/wire/stock_chunk.zig` · `src/world/chunks.zig`
+Related: [PACKAGES.md](PACKAGES.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) · [AUTHORITY.md](../AUTHORITY.md) · [PARITY_TOOLING.md](../PARITY_TOOLING.md) · `src/wire/stock_chunk.zig` · `src/world/store.zig` (the chunk store the wire reads)
 
 **Production S→C** for the stock client is the network-mode encoder in
 `src/wire/stock_chunk.zig` (`buildNetPackageChunkNew`), not the height-plane
