@@ -212,7 +212,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 h.stamina = @max(0, h.stamina - prog.stamina_drain_per_second * dt);
             }
         } else {
-            h.stamina = @min(h.stamina_max, h.stamina + (prog.stamina_regen_per_second + stamina_ot_bonus) * dt);
+            // Clamp both ways like the sprint branch: a draining
+            // StaminaChangeOT buff (stage-3 starvation, modded data) must not
+            // drive stamina negative while idle.
+            h.stamina = @max(0, @min(h.stamina_max, h.stamina + (prog.stamina_regen_per_second + stamina_ot_bonus) * dt));
         }
         const stamina_changed = h.stamina != stamina_was;
         // Stat-changed observer (ADR 0034): one bounded call per changed
