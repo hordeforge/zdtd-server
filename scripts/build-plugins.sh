@@ -42,12 +42,14 @@ done
 
 echo "done"
 
-# C fixtures (assets/fixtures/plugin_*.c): rebuild so the committed .wasm
-# always matches its source (a stale fixture fails the wasm host tests
-# loudly, but drift should never reach that point). clang is the fixture
-# compiler per the comment in plugin_hello.c.
+# C fixtures (assets/fixtures/plugin_*.c) and C addons (mods/*.c): rebuild so
+# the committed .wasm always matches its source (a stale fixture fails the
+# wasm host tests loudly, but drift should never reach that point). clang is
+# the fixture compiler per the comment in plugin_hello.c; the C addons
+# (fps_bot, example_chat_filter) use the same recipe.
 if command -v clang >/dev/null 2>&1; then
-  for c in assets/fixtures/plugin_*.c; do
+  for c in assets/fixtures/plugin_*.c mods/fps_bot/fps_bot.c mods/example_chat_filter/example_chat_filter.c; do
+    [ -f "$c" ] || continue
     w="${c%.c}.wasm"
     if [ ! -f "$w" ] || [ "$w" -ot "$c" ]; then
       clang --target=wasm32 -nostdlib -O2 -Wl,--no-entry -Wl,--export-all \
