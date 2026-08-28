@@ -55,10 +55,11 @@ alive, mask
 transform, health, network_id, kind, flags
 player, journal, wallet          // players
 buffs                            // any EntityAlive (lazily attached)
-zombie_ai                        // zombies
+zombie_ai                        // zombies and animals
 vehicle                          // vehicles
 turret                           // turrets
 trader_stock                     // traders (inventory on the entity)
+falling                          // stability-collapse groups
 ```
 
 ### Tick order (`schedule.run` / `systems.tickAll`)
@@ -71,13 +72,14 @@ flowchart LR
     BUFFS[buffs — systemBuffs] --> DIR
     DIR[director — clock + spawns] --> AI
     AI[ai — systemZombieAi<br/>parallel] --> VEH
-    VEH[vehicles] --> TUR
+    VEH[vehicles] --> FALL
+    FALL[falling — gravity + landing] --> TUR
     TUR[turrets — parallel] --> DESP
     DESP[despawn] --> CMDS
     CMDS[commands — drainCommands cap 64]
 
     classDef phase fill:#1a3a5c,stroke:#5b8def,color:#dbe6ff
-    class BUFFS,DIR,AI,VEH,TUR,DESP,CMDS phase
+    class BUFFS,DIR,AI,VEH,FALL,TUR,DESP,CMDS phase
 ```
 
 Detail: `src/ecs/schedule.zig:run` and [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule). Power resolves once per tick in `Game.step` with real daylight, not inside `schedule.run`.
@@ -85,12 +87,13 @@ Detail: `src/ecs/schedule.zig:run` and [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-
 0. `World.beginTick`: clear `TickLocals`
 1. `systemBuffs`: 20 Hz buff duration/stack tick; reports expiries to the net layer
 2. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)
-3. `systemZombieAi`: multi-threaded over slots; deferred player damage
+3. `systemZombieAi`: multi-threaded over the merged zombie+animal group; deferred player damage
 4. `systemVehicles`: driver transform stick
-5. Power: resolve stays in `Game.step` (daylight); not doubled here
-6. `systemTurrets`: multi-threaded targeting; deferred zombie damage
-7. `systemDespawnFar`: cull far zombies
-8. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
+5. `systemFallingBlocks`: gravity + landing + crush (snapshot then destroy)
+6. Power: resolve stays in `Game.step` (daylight); not doubled here
+7. `systemTurrets`: multi-threaded targeting over the turret group; deferred zombie damage
+8. `systemDespawnFar`: cull far zombies/animals (merged slot-ascending snapshot)
+9. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
 
 Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,
 `vehicleAttach` / `vehicleControl` / `vehicleDetach`.
@@ -112,7 +115,7 @@ No heap. `copyKindInto` when the loop body spawns or destroys.
 #### Groups (cached kind lists, `group.zig`)
 
 `World.kind_groups` keeps one **slot-ascending** dense array of alive slots per
-`Kind` (7 x 512 x u16 = 7 KB, no heap), maintained at the only two points that
+`Kind` (8 x 512 x u16 = 8 KB, no heap), maintained at the only two points that
 write `alive[]`/`kind[]`: `spawnBase` inserts, `destroy` removes (plus the
 idempotent `World.reviveSlot`, the single sanctioned un-kill). Because `kind[s]`
 is written exactly once per entity lifetime, a slot never migrates between
@@ -121,6 +124,14 @@ plus maintained per-type lists (`Players`, EntityAlive, vehicle/drone/turret
 trackers) added in `World::SpawnEntityInWorld` and removed in
 `World::unloadEntity` (asm.il:1225261-1225262, :1234230/:1234384,
 :1233956/:1234090); `GetPlayers()` just returns the cached list.
+
+```zig
+for (ecs.groupSlice(w, .zombie)) |s| { ... }   // O(live), ascending
+ecs.forEachKindGroup(w, .zombie, ctx, f);      // safe under removal, order unspecified then
+var buf: [ecs.max_entities]ecs.Slot = undefined;
+const n = ecs.query.copyKindInto(w, .zombie, &buf);  // snapshot; for loops that destroy
+const an = ecs.query.copyKindsInto(w, &.{ .zombie, .animal }, &buf);  // merged slot-ascending
+```
 
 Keeping the list ascending means group iteration visits the same slots in the
 same order as the open View scan, so wiring a group into a system is a pure
@@ -131,16 +142,18 @@ A group slice is invalidated by the next spawn/destroy; loops that mutate the
 world use `copyKindInto`. `countKind` reads the group length (one mechanism, no
 parallel counter).
 
-Wired today: `systems.snapshotPlayers` (twice per tick), the `systemTurrets`
-zombie-list build, `systemDespawnFar` (via `copyKindInto`, it destroys),
+Wired today: `systems.snapshotPlayers` (twice per tick), `systemZombieAi` and
+`systemDespawnFar` (merged zombie+animal via `copyKindsInto`), the
+`systemTurrets` zombie-list and turret-list builds, `systemFallingBlocks`
+(snapshot then destroy), `systemBuffs` (`alive_bits`),
 `Game.tickZombieBlockDamage`, `Game.broadcastVehiclePositions`. The replicate
 entity pass, motion dirty-clear and `clearDeadKnownEntities` do not use groups
-either (iterating 7 kind groups would be kind-major, not slot-ascending); they
-walk `World.alive_bits` / `World.dirty_bits`, word-packed sets maintained by
+(iterating kind groups would be kind-major, not slot-ascending); they walk
+`World.alive_bits` / `World.dirty_bits`, word-packed sets maintained by
 `spawnBase` / `destroy` / `reviveSlot` and the `markDirty` funnel, which keeps
-slot order and costs O(live) or O(changed). Still an open scan: `systemZombieAi`
-(its predicate is `mask.zombie_ai`, a bit mutated after spawn, so it would need
-maintenance points that do not exist).
+slot order and costs O(live) or O(changed). `mask.zombie_ai` is set at spawn for
+zombie and animal and is not cleared while alive, so the merged kind groups
+are the live AI set.
 
 ### Tick command buffer (`command.zig`)
 

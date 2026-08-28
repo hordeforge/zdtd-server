@@ -39,6 +39,10 @@ pub const Systems = struct {
     /// Zombie AI task selection and movement.
     ai: bool = true,
     vehicles: bool = true,
+    /// Stability-collapse falling-block entities (gravity + landing + crush).
+    /// Off freezes already-spawned fallers in the air; pair with no SetBlock
+    /// collapses or they accumulate.
+    falling: bool = true,
     turrets: bool = true,
     /// Far-entity despawn. Off means director spawns accumulate; pair it with
     /// `director = false` or a lower spawn cap.
@@ -847,6 +851,7 @@ pub const SystemsOverlay = struct {
     stealth: ?bool = null,
     ai: ?bool = null,
     vehicles: ?bool = null,
+    falling: ?bool = null,
     turrets: ?bool = null,
     despawn: ?bool = null,
     commands: ?bool = null,

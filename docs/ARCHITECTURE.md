@@ -219,14 +219,14 @@ flowchart TB
 
     subgraph sim["sim_entities — schedule.run + Game extras"]
         DIR[systemDirector — clock + blood moon + restocks]
-        DIR --> AI[systemZombieAi + systemDigUpdate<br/>parallel over slots]
+        DIR --> AI[systemZombieAi + systemDigUpdate<br/>parallel over zombie+animal groups]
         AI --> VEH[systemVehicles]
-        VEH --> TUR[systemTurrets — parallel]
+        VEH --> FALL[systemFallingBlocks — gravity + landing]
+        FALL --> TUR[systemTurrets — parallel]
         TUR --> DESP[systemDespawnFar]
         DESP --> CMD[drainCommands — spawn/despawn/damage  cap 64]
         CMD --> WATER[world.levelWaterTick — budgeted fills]
-        WATER --> FALL[systemFallingBlocks — gravity + landing]
-        FALL --> EXPL[drainExplosions — EntityZombieCop AoE]
+        WATER --> EXPL[drainExplosions — EntityZombieCop AoE]
         EXPL --> DIG[drainDigRequests — MoveHelper]
         DIG --> WAKE[drainSleeperWakeups + tickEntityLookAt]
         WAKE --> MAPS[tickMapChunks + tickPlayerPositions + tickClientInfo]
@@ -406,19 +406,20 @@ flowchart LR
     BUFFS[buffs<br/>systemBuffs — 20 Hz<br/>stack + duration + expiry] --> DIR
     DIR[director<br/>systemDirector — clock<br/>blood moon + horde spawns] --> AI
     AI[ai<br/>systemZombieAi — parallel<br/>+ systemDigUpdate] --> VEH
-    VEH[vehicles<br/>systemVehicles — driver stick] --> TUR
+    VEH[vehicles<br/>systemVehicles — driver stick] --> FALL
+    FALL[falling<br/>systemFallingBlocks — gravity + landing] --> TUR
     TUR[turrets<br/>systemTurrets — parallel<br/>target + fire] --> DESP
     DESP[despawn<br/>systemDespawnFar — cull far zombies] --> CMDS
     CMDS[commands<br/>drainCommands — apply deferred ops<br/>from systems + plugins]
 
     classDef phase fill:#1a3a5c,stroke:#5b8def,color:#dbe6ff
-    class BUFFS,DIR,AI,VEH,TUR,DESP,CMDS phase
+    class BUFFS,DIR,AI,VEH,FALL,TUR,DESP,CMDS phase
 ```
 
 Pinned in `src/ecs/schedule.zig:order`:
 
 ```
-buffs → director → animals → ai → vehicles → turrets → despawn → commands
+buffs → director → animals → stealth → ai → vehicles → falling → turrets → despawn → commands
 ```
 
 Power (`ecs/electric.zig:PowerGrid`) resolves once per tick in `Game.step` with real daylight, not inside `schedule.run` — a second resolve doubled the BFS and forced daylight at night. Turrets read last tick's resolve. Command-style systems (`questAccept*`, `questOn*`, `trade`, `vehicleAttach`) run on demand, not every tick.

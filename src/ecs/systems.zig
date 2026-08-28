@@ -1123,8 +1123,7 @@ pub fn questCheckPoiLockout(w: *World, entity_id: i32, x: f32, z: f32) PoiLockou
     const rect = w.poiAt(x, z) orelse return .{};
     // Stock exempts party members (CheckForPOILockouts, asm.il 998957): a
     // party member inside the POI does not block the rally.
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
+    for (query.groupSlice(w, .player)) |i| {
         if (!w.alive[i] or !w.mask[i].player or !w.mask[i].transform) continue;
         if (w.mask[i].network_id and w.network_id[i].id == entity_id) continue;
         if (rect.containsXZ(w.transform[i].x, w.transform[i].z)) {
@@ -1316,8 +1315,9 @@ pub fn collectLootNear(w: *World, peer_slot: usize, radius: f32) u32 {
     const pz = w.transform[ps].z;
     const r2 = radius * radius;
     var n: u32 = 0;
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
+    var bags: [max_entities]Slot = undefined;
+    const bn = query.copyKindInto(w, .loot_bag, &bags);
+    for (bags[0..bn]) |i| {
         if (!w.alive[i] or !w.mask[i].loot_bag or !w.mask[i].transform) continue;
         const dx = w.transform[i].x - px;
         const dz = w.transform[i].z - pz;
@@ -1493,8 +1493,7 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
 /// N > 0 restocks when day >= last_restock_day + N.
 pub fn traderRestock(w: *World) void {
     const day = w.director.clock.day;
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
+    for (query.groupSlice(w, .trader)) |i| {
         if (!w.alive[i] or !w.mask[i].trader_stock) continue;
         var stock = &w.trader_stock[i];
         if (stock.reset_interval < 0) continue;
@@ -1705,10 +1704,13 @@ const AiCtx = struct {
     w: *World,
     dt: f32,
     players: []const PlayerSnap,
-    /// Tick-start copy of `w.transform`. A worker owns only its own slot range,
-    /// so every cross-slot position read (fear scan, revenge target) must come
-    /// from here: reading `w.transform[other]` races the worker writing it.
+    /// Tick-start copy of `w.transform`. A worker owns only its own entries in
+    /// `slots`, so every cross-slot position read (fear scan, revenge target)
+    /// must come from here: reading `w.transform[other]` races the worker writing it.
     pos: *const [max_entities]c.Transform,
+    /// Live zombie+animal slots, slot-ascending snapshot. Workers index this
+    /// rather than the 512-slot table so idle capacity is not scanned.
+    slots: []const Slot,
     /// Fixed-point damage accumulators, one per entity slot (atomic adds).
     dmg_fp: []u32,
     hits: *std.atomic.Value(u32),
@@ -1719,7 +1721,7 @@ const AiCtx = struct {
     fn work(ctx: AiCtx, begin: usize, end: usize) void {
         var i: usize = begin;
         while (i < end) : (i += 1) {
-            const s: Slot = @intCast(i);
+            const s = ctx.slots[i];
             if (!ctx.w.alive[s] or !ctx.w.mask[s].zombie_ai or !ctx.w.mask[s].transform) continue;
             var ai = &ctx.w.zombie_ai[s];
             // Knockback shove: displace before the AI step so the push wins
@@ -2596,36 +2598,38 @@ fn tickItemDistractions(w: *World) void {
         const bx = w.transform[i].x;
         const bz = w.transform[i].z;
         const r2 = bag.distraction_radius_sq;
-        var j: Slot = 0;
-        while (j < max_entities) : (j += 1) {
-            if (!w.alive[j] or !w.mask[j].zombie_ai or !w.mask[j].transform) continue;
-            if (w.mask[j].sleeper and !w.sleeper[j].awake) continue;
-            // EntityAlive.distraction != null → already eating one (IL_00C0).
-            if (w.zombie_ai[j].distraction >= 0) continue;
-            // DistractionTags filter: tag 4 ("zombie") requires the target's
-            // EntityClass tags to overlap (IL_00E5-010E).
-            if ((tags & 4) != 0 and w.kind[j] != .zombie) continue;
-            const dx = w.transform[j].x - bx;
-            const dz = w.transform[j].z - bz;
-            const d2 = dx * dx + dz * dz;
-            if (d2 > r2) continue;
-            // A closer pending item wins (IL_0124-013D).
-            const ai = &w.zombie_ai[j];
-            if (ai.pending_distraction >= 0) {
-                if (w.slotOfNetId(ai.pending_distraction)) |_| {
-                    if (d2 >= ai.pending_distraction_dsq) continue;
-                } else {
-                    // Stale latch (item collected/destroyed): drop it.
-                    ai.pending_distraction = -1;
-                    ai.pending_distraction_dsq = 0;
+        const ai_kinds = [_]c.Kind{ .zombie, .animal };
+        for (ai_kinds) |kind| {
+            for (query.groupSlice(w, kind)) |j| {
+                if (!w.alive[j] or !w.mask[j].zombie_ai or !w.mask[j].transform) continue;
+                if (w.mask[j].sleeper and !w.sleeper[j].awake) continue;
+                // EntityAlive.distraction != null → already eating one (IL_00C0).
+                if (w.zombie_ai[j].distraction >= 0) continue;
+                // DistractionTags filter: tag 4 ("zombie") requires the target's
+                // EntityClass tags to overlap (IL_00E5-010E).
+                if ((tags & 4) != 0 and w.kind[j] != .zombie) continue;
+                const dx = w.transform[j].x - bx;
+                const dz = w.transform[j].z - bz;
+                const d2 = dx * dx + dz * dz;
+                if (d2 > r2) continue;
+                // A closer pending item wins (IL_0124-013D).
+                const ai = &w.zombie_ai[j];
+                if (ai.pending_distraction >= 0) {
+                    if (w.slotOfNetId(ai.pending_distraction)) |_| {
+                        if (d2 >= ai.pending_distraction_dsq) continue;
+                    } else {
+                        // Stale latch (item collected/destroyed): drop it.
+                        ai.pending_distraction = -1;
+                        ai.pending_distraction_dsq = 0;
+                    }
                 }
+                // distractionResistance - strength gate (IL_013E-016B): zdtd has
+                // no per-entity resistance state, so a non-positive strength (no
+                // DistractionStrength effect) never registers. Decoy ships 100.
+                if (bag.distraction_strength <= 0) continue;
+                ai.pending_distraction = w.network_id[i].id;
+                ai.pending_distraction_dsq = d2;
             }
-            // distractionResistance - strength gate (IL_013E-016B): zdtd has
-            // no per-entity resistance state, so a non-positive strength (no
-            // DistractionStrength effect) never registers. Decoy ships 100.
-            if (bag.distraction_strength <= 0) continue;
-            ai.pending_distraction = w.network_id[i].id;
-            ai.pending_distraction_dsq = d2;
         }
         bag.distraction_lifetime -= 1;
     }
@@ -2790,7 +2794,11 @@ fn stealthTick(w: *World, s: Slot) void {
 
 pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // Zombie AI also drives animal wander (kind.animal reuses zombie_ai mask).
-    if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
+    // mask.zombie_ai is set at spawn for both kinds and never cleared while
+    // alive, so the merged kind groups are the live AI set.
+    var ai_slots: [max_entities]Slot = undefined;
+    const ai_n = query.copyKindsInto(w, &.{ .zombie, .animal }, &ai_slots);
+    if (ai_n == 0) return 0;
     // Dropped-item distraction broadcast runs before task selection so a
     // zombie can react to a fresh decoy on the same tick it lands.
     tickItemDistractions(w);
@@ -2806,14 +2814,14 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
         .dt = dt,
         .players = snaps[0..pn],
         .pos = &pos_snap,
+        .slots = ai_slots[0..ai_n],
         .dmg_fp = dmg_fp[0..],
         .hits = &hits_a,
         .zombie_speed_scale = w.zombie_speed_scale,
     };
-    // Slot count is the constant 512, so forRanges always pays the pool
-    // broadcast/wait round-trip; skip it while the live population is small
-    // enough that one worker's share would finish before the wakeup does.
-    if (w.entity_count < 64) AiCtx.work(ctx, 0, max_entities) else parallel.forRanges(max_entities, ctx, AiCtx.work);
+    // Split the live AI list, not the 512-slot table: idle capacity is not
+    // scanned, and the pool wakeup is skipped while the population is small.
+    if (ai_n < 64) AiCtx.work(ctx, 0, ai_n) else parallel.forRanges(ai_n, ctx, AiCtx.work);
     consumeCombatNoise(w);
     _ = applyDeferredDamage(w, dmg_fp[0..]);
     return hits_a.load(.monotonic);
@@ -2885,7 +2893,11 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
     // the skip gate is "faller center below the target's head").
     const head_y = [_]f32{ 1.7, 1.8, 1.0 };
     const kinds = [_]c.Kind{ .player, .zombie, .animal };
-    for (query.groupSlice(w, .falling_block)) |s| {
+    // Landing destroy() shifts the live group; snapshot so every faller this
+    // tick still gets a gravity/land pass (same pattern as systemDespawnFar).
+    var fall_slots: [max_entities]Slot = undefined;
+    const fall_n = query.copyKindInto(w, .falling_block, &fall_slots);
+    for (fall_slots[0..fall_n]) |s| {
         if (!w.alive[s] or !w.mask[s].falling or !w.mask[s].transform) continue;
         const f = &w.falling[s];
         f.tick +%= 1;
@@ -3105,8 +3117,7 @@ pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32)
 
 /// Apply held throttle/steer every sim tick (stock client may send sparse drive pkgs).
 pub fn vehicleTickHeld(w: *World, dt: f32) void {
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
+    for (query.groupSlice(w, .vehicle)) |i| {
         if (!w.alive[i] or !w.mask[i].vehicle) continue;
         if (w.vehicle[i].driverNetId() < 0) continue;
         const v = w.vehicle[i];
@@ -3133,8 +3144,7 @@ pub fn vehicleFindSeat(w: *const World, vslot: Slot, player_net: i32) ?u8 {
 /// Vehicle slot this rider occupies, whichever vehicle that is.
 pub fn vehicleOfRider(w: *const World, player_net: i32) ?Slot {
     if (player_net < 0) return null;
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
+    for (query.groupSlice(w, .vehicle)) |i| {
         if (!w.alive[i] or !w.mask[i].vehicle) continue;
         for (w.vehicle[i].seats) |rider| {
             if (rider == player_net) return i;
@@ -3216,6 +3226,9 @@ const TurretCtx = struct {
     /// Alive zombie slots with transform, snapshotted once per tick so each
     /// turret does not rescan all entity slots.
     zombies: []const Slot,
+    /// Live turret slots, slot-ascending snapshot. Workers index this rather
+    /// than the 512-slot table.
+    turrets: []const Slot,
     /// Per-slot powered flags, resolved once per tick from the power grid so
     /// each turret skips the O(node_n) isEntityPowered scan.
     powered: *const [max_entities]bool,
@@ -3226,7 +3239,7 @@ const TurretCtx = struct {
     fn work(ctx: TurretCtx, begin: usize, end: usize) void {
         var i: usize = begin;
         while (i < end) : (i += 1) {
-            const s: Slot = @intCast(i);
+            const s = ctx.turrets[i];
             if (!ctx.w.alive[s] or !ctx.w.mask[s].turret or !ctx.w.mask[s].transform) continue;
             var t = &ctx.w.turret[s];
             if (t.fire_cd > 0) t.fire_cd -= ctx.dt;
@@ -3315,10 +3328,11 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         if (w.slotOfNetId(node.entity_id)) |ps| powered[ps] = true;
     }
     var owner_hit: [max_entities]u32 = .{0} ** max_entities;
-    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .powered = &powered, .owner_hit = owner_hit[0..] };
-    // Same small-population gate as systemZombieAi: pool sync costs more than
-    // a serial sweep of 512 slots when few entities are alive.
-    if (w.entity_count < 64) TurretCtx.work(ctx, 0, max_entities) else parallel.forRanges(max_entities, ctx, TurretCtx.work);
+    var turret_slots: [max_entities]Slot = undefined;
+    const tn = query.copyKindInto(w, .turret, &turret_slots);
+    const ctx = TurretCtx{ .w = w, .dt = dt, .dmg_fp = dmg_fp[0..], .zombies = zombie_slots[0..zn], .turrets = turret_slots[0..tn], .powered = &powered, .owner_hit = owner_hit[0..] };
+    // Split the live turret list, not the 512-slot table.
+    if (tn < 64) TurretCtx.work(ctx, 0, tn) else parallel.forRanges(tn, ctx, TurretCtx.work);
     var out: TurretTick = .{};
     var i: Slot = 0;
     while (i < max_entities) : (i += 1) {
@@ -3383,37 +3397,32 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps, false);
     var n: u8 = 0;
-    // This loop destroys, so it walks snapshots of the mob kind groups rather
-    // than the live groups (same ascending order, so the capped out_ids picks
-    // the same ids as the old open scan). Animals despawn like zombies: stock
-    // despawns far entities regardless of kind, otherwise wildlife accumulates
-    // to MaxSpawnedAnimals and holds slots + known_entities bits forever.
+    // This loop destroys, so it walks a slot-ascending snapshot of both mob
+    // kinds rather than the live groups. Concatenating groups would be
+    // kind-major and would change which ids fill the capped out_ids list.
     var slots: [max_entities]Slot = undefined;
-    const mob_kinds = [_]c.Kind{ .zombie, .animal };
-    for (mob_kinds) |k| {
-        const kn = query.copyKindInto(w, k, &slots);
-        for (slots[0..kn]) |i| {
-            if (n >= out_ids.len) break;
-            if (!w.alive[i] or !w.mask[i].transform) continue;
-            // Sleepers stay (POI volumes re-trigger on approach otherwise).
-            if (w.mask[i].sleeper) continue;
-            if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
-            var near = false;
-            for (snaps[0..pn]) |p| {
-                const dx = p.x - w.transform[i].x;
-                const dz = p.z - w.transform[i].z;
-                if (dx * dx + dz * dz < despawn_dist_sq) {
-                    near = true;
-                    break;
-                }
+    const kn = query.copyKindsInto(w, &.{ .zombie, .animal }, &slots);
+    for (slots[0..kn]) |i| {
+        if (n >= out_ids.len) break;
+        if (!w.alive[i] or !w.mask[i].transform) continue;
+        // Sleepers stay (POI volumes re-trigger on approach otherwise).
+        if (w.mask[i].sleeper) continue;
+        if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
+        var near = false;
+        for (snaps[0..pn]) |p| {
+            const dx = p.x - w.transform[i].x;
+            const dz = p.z - w.transform[i].z;
+            if (dx * dx + dz * dz < despawn_dist_sq) {
+                near = true;
+                break;
             }
-            if (near) continue;
-            if (w.mask[i].network_id) {
-                out_ids[n] = w.network_id[i].id;
-                n += 1;
-            }
-            w.destroy(i);
         }
+        if (near) continue;
+        if (w.mask[i].network_id) {
+            out_ids[n] = w.network_id[i].id;
+            n += 1;
+        }
+        w.destroy(i);
     }
     return n;
 }
@@ -3425,9 +3434,10 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
 pub fn systemBuffs(w: *World, out: []buff.Expiry) u8 {
     var n: u8 = 0;
     var removed: [c.max_buffs_per_entity]buff.Removed = undefined;
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
-        if (!w.alive[i] or !w.mask[i].buffs) continue;
+    var it = w.alive_bits.iterator(.{});
+    while (it.next()) |idx| {
+        const i: Slot = @intCast(idx);
+        if (!w.mask[i].buffs) continue;
         // Entity::bDead skips the started/duration half of the tick (asm.il 735832).
         const dead = w.mask[i].health and w.health[i].hp <= 0;
         const rn = buff.tick(&w.buffs[i], dead, &removed);
@@ -6270,6 +6280,25 @@ test "falling blocks: group falls under gravity and dies on landing (no re-place
     }
     try std.testing.expect(landed);
     try std.testing.expect(!w.alive[s]);
+}
+
+test "falling blocks: two groups landing the same tick both destroy" {
+    // destroy() shifts the live kind group; iterating the slice would skip
+    // the second faller. copyKindInto keeps both in this tick's pass.
+    var w: World = .{ .rules = .{ .ai = .{ .gravity = -1.6 } } };
+    defer w.deinit();
+    const Ground = struct {
+        fn solid(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            return y <= 70;
+        }
+    };
+    w.solid_fn = &Ground.solid;
+    const a = w.spawnFallingBlocks(&.{.{ .x = 5, .y = 71, .z = 5, .raw = 700 }}).?;
+    const b = w.spawnFallingBlocks(&.{.{ .x = 8, .y = 71, .z = 8, .raw = 701 }}).?;
+    systemFallingBlocks(&w, 0.05);
+    try std.testing.expect(w.slotOfNetId(a) == null);
+    try std.testing.expect(w.slotOfNetId(b) == null);
+    try std.testing.expectEqual(@as(u32, 0), w.countKind(.falling_block));
 }
 
 test "falling blocks: spawn is capped at the group size and centered" {

@@ -145,6 +145,36 @@ pub fn copyKindInto(w: *const World, kind: Kind, out: []Slot) usize {
     return n;
 }
 
+/// Snapshot several kind groups into `out`, merged slot-ascending. Concatenating
+/// groups would be kind-major and would change capped-list tie-breaks (despawn
+/// id lists, AI admission) versus the open View scan. `kinds.len` is small
+/// (zombie+animal on the AI/despawn path).
+pub fn copyKindsInto(w: *const World, kinds: []const Kind, out: []Slot) usize {
+    var idx: [16]usize = .{0} ** 16;
+    std.debug.assert(kinds.len <= idx.len);
+    var n: usize = 0;
+    while (n < out.len) {
+        var best: ?Slot = null;
+        var best_k: usize = 0;
+        for (kinds, 0..) |kind, ki| {
+            const src = w.kind_groups.slice(kind);
+            const i = idx[ki];
+            if (i >= src.len) continue;
+            if (best == null or src[i] < best.?) {
+                best = src[i];
+                best_k = ki;
+            }
+        }
+        const s = best orelse break;
+        if (n == 0 or out[n - 1] != s) {
+            out[n] = s;
+            n += 1;
+        }
+        idx[best_k] += 1;
+    }
+    return n;
+}
+
 const std = @import("std");
 
 /// Open View scan collecting alive slots of `kind`; the reference order the
@@ -248,6 +278,21 @@ test "forEachKindGroup visits the same slots as forEachKind" {
     forEachKind(&w, .zombie, &view, Acc.add);
     forEachKindGroup(&w, .zombie, &grp, Acc.add);
     try std.testing.expectEqualSlices(Slot, view.buf[0..view.n], grp.buf[0..grp.n]);
+}
+
+test "copyKindsInto merges kind groups slot-ascending" {
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnZombie(0, 70, 0, 40);
+    _ = w.spawnAnimal(1, 70, 0, 30, 0, "");
+    _ = w.spawnZombie(2, 70, 0, 40);
+    _ = w.spawnPlayer(3, 70, 0, 0);
+    var out: [max_entities]Slot = undefined;
+    const n = copyKindsInto(&w, &.{ .zombie, .animal }, &out);
+    try std.testing.expectEqual(@as(usize, 3), n);
+    try std.testing.expectEqualSlices(Slot, &.{ 0, 1, 2 }, out[0..n]);
+    // Concatenating groups would be kind-major (0,2,1); merge must not.
+    try std.testing.expect(out[0] < out[1] and out[1] < out[2]);
 }
 
 test "copyKindInto snapshots ascending and caps at out.len" {

@@ -146,6 +146,7 @@ test, so a retune cannot land silently).
 | `animals` | true | Off stops daytime wildlife (stock SpawnManagerBiomes is a system separate from the AIDirector, spawning.md §2); independent of `director` so a no-zombie mode can keep animals |
 | `ai` | true | Off means zombies never select or run a task |
 | `vehicles` | true | |
+| `falling` | true | Off freezes already-spawned falling-block entities in the air (stability-collapse gravity/landing/crush). Pair with no SetBlock collapses or they accumulate |
 | `turrets` | true | |
 | `despawn` | true | Off means spawns accumulate; pair with `director = false` or a lower cap |
 | `stealth` | true | Player stealth-noise model (RE entity-ai.md PlayerStealth): consumes the movement-noise ring, accumulates per-player noise volume, wakes sleepers at the volume cap, feeds the heat map. Off means relayed/server sounds never alert AI |

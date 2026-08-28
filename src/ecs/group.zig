@@ -18,7 +18,7 @@
 //! `World.spawnBase` inserts, `World.destroy` removes (plus `World.reviveSlot`,
 //! which is idempotent).
 //!
-//! No heap and no `World` import (avoids a dependency cycle): 7 x 512 x u16 = 7 KB.
+//! No heap and no `World` import (avoids a dependency cycle): 8 kinds x 512 x u16 = 8 KB.
 
 const std = @import("std");
 const ent = @import("entity.zig");

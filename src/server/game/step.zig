@@ -131,10 +131,8 @@ pub fn step(self: *Game) !void {
             self.sim.rules.water.spread_cap,
             self.sim.rules.water.puddle_cap,
         );
-        // Stability-collapse falling blocks (EntityFallingBlock groups): fall
-        // under gravity, die on landing (RE entity-ai.md landing: no
-        // re-placement).
-        systems.systemFallingBlocks(&self.sim, dt);
+        // Falling-block gravity/landing runs inside systems.tickAll (schedule
+        // falling phase) so ECS owns the entity tick.
         // Demolition explosions (RE entity-ai.md EntityZombieCop): the sim
         // countdowns pushed requests; apply the entity + block AoE here.
         self.drainExplosions();

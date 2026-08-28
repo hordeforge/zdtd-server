@@ -17,6 +17,10 @@ pub const Phase = enum(u8) {
     stealth,
     ai,
     vehicles,
+    /// EntityFallingBlock gravity/landing. After vehicles (same gravity family)
+    /// and before turrets; crush damage is serial and must not race the
+    /// parallel turret pass.
+    falling,
     turrets,
     despawn,
     commands,
@@ -53,11 +57,11 @@ pub const TickResult = struct {
 /// real dependency (buffs before ai so movement and damage read this tick's
 /// buff state), so reordering would break determinism rather than customise it.
 pub const order = [_][]const u8{
-    "buffs", "director", "animals", "stealth", "ai", "vehicles", "turrets", "despawn", "commands",
+    "buffs", "director", "animals", "stealth", "ai", "vehicles", "falling", "turrets", "despawn", "commands",
 };
 
-/// Run full sim tick: beginTick → buffs → director → ai → vehicles → turrets →
-/// despawn → drain commands. Power resolve stays in Game.step (daylight).
+/// Run full sim tick: beginTick → buffs → director → ai → vehicles → falling →
+/// turrets → despawn → drain commands. Power resolve stays in Game.step (daylight).
 ///
 /// Each system is gated on `w.rules.systems`, which defaults to all-on, so the
 /// default pipeline is exactly the stock one. A disabled system is skipped, not
@@ -77,6 +81,10 @@ pub fn run(w: *World, dt: f32) TickResult {
     const hits = if (on.ai) systems.systemZombieAi(w, dt) else 0;
     if (on.ai) systems.systemDigUpdate(w);
     if (on.vehicles) systems.systemVehicles(w, dt);
+    // Falling-block entities are ECS (Kind.falling_block); Game.step used to
+    // tick them after drainCommands, which skipped same-tick command ops from
+    // landing and walked a live group while destroy() shifted it.
+    if (on.falling) systems.systemFallingBlocks(w, dt);
     // Power resolves once per tick in Game.step (power.tick with real daylight);
     // an extra resolve here doubled the grid BFS and forced daylight=true, so
     // turrets read solar as powered at night. Turrets use last tick's resolve.
@@ -129,8 +137,8 @@ test "schedule.run drains commands and clears locals" {
 test "default pipeline order is pinned" {
     // The order encodes a dependency (buffs before ai). A reorder is a
     // behaviour change and must fail here rather than pass silently.
-    try std.testing.expectEqual(@as(usize, 9), order.len);
-    const want = [_][]const u8{ "buffs", "director", "animals", "stealth", "ai", "vehicles", "turrets", "despawn", "commands" };
+    try std.testing.expectEqual(@as(usize, 10), order.len);
+    const want = [_][]const u8{ "buffs", "director", "animals", "stealth", "ai", "vehicles", "falling", "turrets", "despawn", "commands" };
     for (order, want) |got, exp| try std.testing.expectEqualStrings(exp, got);
     // Every entry has a toggle, and every toggle defaults on.
     const Systems = @import("rules.zig").Systems;
