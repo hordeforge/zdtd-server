@@ -42,7 +42,8 @@ stateDiagram-v2
     Connecting --> Challenged: challenge sent (ServerChallenge)
     Challenged --> Joined: challenge echo + PackageIds, PlayerLogin accepted
     Joined --> Entering: RequestToEnterGame (configs, WorldInfo, areas, stats)
-    Entering --> Spawning: RequestToSpawnPlayer
+    Entering --> Entering: AuthConfirmation echo; SignDataRequest -> SignDataResponse (config sync); POIMetadataRequest -> POIMetadataResponse (3.2.0 POI metadata, replaces POIAround)
+    Entering --> Spawning: RequestToSpawnPlayer / DynamicClientArrive fallback
     Spawning --> Playing: PlayerId bundle (id map, chunks, Spawned, time, stats)
     Playing --> Playing: net poll + tick (movement, C2S apply, replicate)
     Playing --> [*]: PlayerDisconnect / stale peer reap
@@ -59,9 +60,18 @@ the one send site). The chunk streamer starts earlier, at WorldInitInfoRequest
 before the bundle while
 the client still waits on its spawn request. Death respawn re-enters Spawning
 while `entered` stays true; the re-bundle then sends Spawned(died) + teleport
-instead of a second PlayerId.
+instead of a second PlayerId. The 3.2.0 join additions: the
+`POIMetadataRequest -> POIMetadataResponse` exchange (replaces the removed
+`NetPackagePOIAround`, changelog-3.2.0 §3.2). The `ConfirmSpawnEntity` +
+`EntityCreationData.requestedBy/requestKey` tail is **not emitted**: it only
+matters for client-requested entity spawns, which zdtd refuses
+(`RequestToSpawnEntity` C2S), and the ECD stays FileVersion 36 so a 3.2.0
+client's `read` skips the tail (`stock_entity.zig`, parse-compatible).
 
-Owners: `src/server/c2s/join.zig` (7-package join SM), `src/server/c2s/dispatch.zig`
+Owners: `src/server/c2s/join.zig` (8-package join SM: PlayerLogin,
+RequestToEnterGame, AuthConfirmation, SignDataRequest, POIMetadataRequest,
+WorldInitInfoRequest, DynamicClientArrive, RequestToSpawnPlayer),
+`src/server/c2s/dispatch.zig`
 (phase gate dispatch), `src/server/game.zig` (sendJoinBundle, sets
 `Client.entered`), `src/server/phase_gate.zig` (`phaseOf` / `allowed` table).
 
