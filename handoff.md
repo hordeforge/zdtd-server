@@ -6,7 +6,7 @@
 
 ## Current gates
 
-- `game.zig`: 3210 lines, delegating to 44 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig` (one import + one `test { _ = game_*; }` per shard). The old ≤2500 line convention was never an enforced gate; `lint-architecture.sh` enforces the import structure, not a size cap.
+- `game.zig`: 3437 lines, delegating to 44 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig` (one import + one `test { _ = game_*; }` per shard). The old ≤2500 line convention was never an enforced gate; `lint-architecture.sh` enforces the import structure, not a size cap.
 - `lint-architecture: clean` enforced by `scripts/lint-architecture.sh`.
 - `zig build` + `zig build test` green (1470 passed / 1 skipped, measured 2026-08-29).
 - `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **291** features (**291 WORKS / 0 PARTIAL / 0 MISSING**, recounted 2026-08-22; the remaining PARTIAL labels are ad-hoc waived rows not counted).
