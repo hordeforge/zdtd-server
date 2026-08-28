@@ -1,16 +1,16 @@
 # Handoff - zdtd refactor + parity push (rolling)
 
-**Date:** 2026-08-29 (waves 56-86: 2026-08-27; waves 87-93: 2026-08-28/29 malleable geometry + 3.2.0 + real-client audit)
+**Date:** 2026-08-29 (waves 56-86: 2026-08-27; waves 87-93: 2026-08-28/29 malleable geometry + 3.2.0 + real-client audit; wave 94: 2026-08-29 review sweep + soak evidence)
 **Branch:** `main`
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (~1460 tests, 1 skipped, all green), `zig build fuzz` green, `make release-check` ok.
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1470 passed / 1 skipped, measured 2026-08-29), `zig build fuzz` green, `make release-check` ok.
 
 ## Current gates
 
 - `game.zig`: 3210 lines, delegating to 44 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig` (one import + one `test { _ = game_*; }` per shard). The old ≤2500 line convention was never an enforced gate; `lint-architecture.sh` enforces the import structure, not a size cap.
 - `lint-architecture: clean` enforced by `scripts/lint-architecture.sh`.
-- `zig build` + `zig build test` green (1413 tests across the suite).
+- `zig build` + `zig build test` green (1470 passed / 1 skipped, measured 2026-08-29).
 - `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **291** features (**291 WORKS / 0 PARTIAL / 0 MISSING**, recounted 2026-08-22; the remaining PARTIAL labels are ad-hoc waived rows not counted).
-- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (205/205 files, 47 constants ledgered) + `make check-xml-audit`.
+- Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (201/201 files, 58 constants ledgered) + `make check-xml-audit`.
 - Live stock-client gate **23/23** on a fresh world (`FRESH=1`).
 
 ## Waves 56-86 (2026-08-27 gap-review sweep)
@@ -86,6 +86,29 @@
   4-client concurrency, persistence restart, admin console, webui and GSI
   validated live.
 
+## Wave 94 (2026-08-29: review sweep + soak evidence)
+
+- **Soak**: baked Navezgane 3-client mixed-action soak PASS (35 joins,
+  0 net/persist/encode/phase/decode errors). Proc-world 4-way rejoin-churn
+  soak exposed the join-burst gap now FAILING a concurrent join (see Still
+  open) - recorded in GAP entry 26; fix stays gated on stock-client
+  validation.
+- **Provenance**: 6 more constants ledgered (max_seat_scan R pin,
+  max_quest_vars parse cap, map_batch/map_walk_above minimap bounds,
+  litenet resend_ns/ack_yield_ns transport timings). Plugin host caps
+  (max_wasm_plugins/max_wasm_module_bytes) + frame deflate bounds recorded
+  as kept-with-reason in PLUGIN_CONFIG_DISPOSITION.
+- **Stale-record sweep**: GAP "No progression system exists" bullet
+  rewritten to the live residual (perk spend is server-authoritative with
+  the on_perk_spend verdict; 649 passive rows parse; game stage drives
+  spawn tiers - only the A21+ magazine crafting-skill leg stays recorded).
+  TODO: T24-T28 all shipped (ZPV11 skill tail, parent prereq at spend, VM
+  tracked deltas, S2C echo, armor resist curves); core temperature closed
+  per RE (dedi stubs felt-temp; client computes); --worldgen-seed
+  documented in GAME_OPTIONS; Gates line refreshed (291/0/0, 1470/1471
+  tests measured). All 22 plugin hooks verified to have live sim call
+  sites; no plugin/config-eligible behavior remains native.
+
 ## Docs
 
 - `handoff.md` is a rolling handoff (same file, overwritten each pass): see this file + `git log --oneline -30` for recent commits.
@@ -103,9 +126,9 @@
 
 ```bash
 zig build                           # compiles clean (0 warnings)
-zig build test                       # exit 0; 1328 test blocks run
+zig build test                       # exit 0; 1470 passed / 1 skipped (2026-08-29)
 bash scripts/lint-architecture.sh   # expect "lint-architecture: clean"
-python3 tools/provenance_scan.py    # expect 198/198
+python3 tools/provenance_scan.py    # expect 201/201
 ```
 
 Architecture rule: every new `src/server/game/*.zig` shard must be imported via `src/server/root.zig` and referenced in its `test { _ = game_*; }` block, otherwise `lint-architecture.sh` fails on forbidden `@import`.
@@ -114,6 +137,6 @@ Architecture rule: every new `src/server/game/*.zig` shard must be imported via 
 
 - Formal parity/demo polish (optional): any remaining worldgen `water_info.xml` sim, full deco density tuning, EAI task extras, party gamestage/loot max — all already represented as honest `PARTIAL (waived)` and not required for the 0-MISSING gate.
 - Hardcode audit residuals: the remaining P2/P3 findings are recorded in `docs/PROVENANCE.md` §3.9 (divergence register) — future `Rules`/loader slices when the feature ships.
-- **Join tick overrun** (GAP "Join-burst tick budget under concurrent load", PARTIAL): the synchronous join gen+encode still peaks ~2 s (budget 50 ms) despite the ACK yield / te_scan skip / config-budget mitigations. Fix directions recorded: pace the join spawn-area through `chunk_adds_per_stream_tick`, a per-poll send byte budget, W2b async chunk gen (moves proc gen + te_scan off the join tick).
+- **Join tick overrun** (GAP "Join-burst tick budget under concurrent load", PARTIAL): the synchronous join gen+encode still peaks ~2 s (budget 50 ms) despite the ACK yield / te_scan skip / config-budget mitigations. 2026-08-29 soak evidence: under 4-way bot rejoin churn on the proc world one of four clients FAILED to complete a join (entity=-1, ~3105 packages without everJoined, server max tick 7.1 s; Debug build amplifies it - proc gen ~1.7 ms/chunk Debug vs ~126 µs ReleaseFast). Fix directions recorded: pace the join spawn-area through `chunk_adds_per_stream_tick` (inner 5x5 mesh core immediate, tail paces) and W2b async chunk gen (moves proc gen + te_scan off the join tick); both are join-timing changes gated on stock-client validation (no client installed; the mesh-core race is documented in c2s/join.zig DynamicClientArrive).
 - **W2b async chunk gen** (docs/WORLDGEN.md): the planned worker-pool generation; the join-tick slice above is its first consumer.
 - **RE-gated difficulty legs**: `EntityIncomingDamageModifier` per-tier values await the SetupOptions Cecil extraction in `../7dtd-engine-research`.
