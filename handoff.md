@@ -95,7 +95,9 @@
   passes the same churn 4/4 (56 joins, 0 fails, max tick 262ms) - the
   failure is Debug proc-gen amplification; the Release gap is a tick
   overrun, not a join failure (GAP entry 26; fix stays gated on
-  stock-client validation).
+  stock-client validation). Steady-state 3-bot 120s wander on the proc
+  world: 3/3 PASS, zero net/send/persist/encode/decode errors, no
+  disconnects; overruns cluster at the join burst only.
 - **Provenance**: 6 more constants ledgered (max_seat_scan R pin,
   max_quest_vars parse cap, map_batch/map_walk_above minimap bounds,
   litenet resend_ns/ack_yield_ns transport timings). Plugin host caps
