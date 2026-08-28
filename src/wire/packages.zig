@@ -283,8 +283,13 @@ pub fn idOf(name: []const u8) ?u16 {
 pub const VersionInfo = struct {
     release_type: u8 = 1,
     major: i32 = 3,
-    minor: i32 = 10,
-    build: i32 = 14,
+    /// Raw Minor for the 3.2.0 wire (changelog-3.2.0 §1: minor 10->20,
+    /// build 14->9; version.zig `stock_wire_gsi_version` = "V.3.20.9"). The
+    /// client derives the display form ("V 3.2.0") from these numbers and
+    /// echoes it back in the login package, so the PackageIds numeric
+    /// version must match the login gate (`stock_wire_comp`) exactly.
+    minor: i32 = 20,
+    build: i32 = 9,
 
     pub fn write(self: VersionInfo, w: *binary.Writer) !void {
         try w.writeByte(self.release_type);
@@ -1702,8 +1707,10 @@ test "package ids body" {
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(@as(u8, 1), try r.readByte());
     try std.testing.expectEqual(@as(i32, 3), try r.readI32());
-    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
-    try std.testing.expectEqual(@as(i32, 14), try r.readI32());
+    // 3.2.0 raw numbers (changelog-3.2.0 §1: minor 10->20, build 14->9);
+    // a client derives "V 3.2.0" from these and echoes it in the login.
+    try std.testing.expectEqual(@as(i32, 20), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 9), try r.readI32());
     try std.testing.expectEqual(@as(i32, @intCast(default_mappings.len)), try r.readI32());
 }
 

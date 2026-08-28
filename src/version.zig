@@ -28,7 +28,7 @@ pub const stock_wire_gsi_version = "V.3.20.9";
 /// client sends "V 3.1.0" for both `version` and `compVersion` and the
 /// authorizer accepts it, kicking "V 3.10" with VersionMismatch=4. The
 /// 3.2.0 pin follows the same display form ("V 3.2.0", changelog-3.2.0 §1);
-/// a live 3.2.0 capture has not re-probed the gate, so this is inferred,
-/// not yet live-verified. zdtd mirrors the observed gate; a loadgen join
-/// with "V 3.2.0" must PASS.
+/// LIVE-VERIFIED 2026-08-29: a 7dtd-loadgen join against zdtd (PackageIds
+/// numeric Minor=20 -> the client echoes "V 3.2.0") passes the gate, while
+/// the previous Minor=10 advertising was rejected with VersionMismatch=4.
 pub const stock_wire_comp = "V 3.2.0";
