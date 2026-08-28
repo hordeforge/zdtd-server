@@ -82,7 +82,9 @@ fields, then the scenario.
 - Does the stock honk arrive as a C2S package or is the honk purely
   client-local with the server raising the event on proximity? The
   changelog says `UseHorn` fires the honk game event; the C2S trigger is
-  not pinned.
+  not pinned. (Resolved 2026-08-28: `EntityVehicle.SetupDevices` no longer
+  parses `PropOnHonkEvent`; the string props were removed in V3.2.0, so the
+  honk-open configuration lives on the door TE, not the vehicle.)
 - The 3.2.0 interior trader doors use the `oldWoodDoorNoHonk` variant;
   does the door's block identity (name prefix) gate honk-open, or only the
   TE property?
