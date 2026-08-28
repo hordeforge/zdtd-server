@@ -809,9 +809,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     // Mode pack: --mode / [mode] name wins, else a config-only mod's `mode`
     // (an enabled mod activating a pack that overrides the built-in
-    // defaults). Optional.
+    // defaults). Optional. When an explicit mode overrides a mod's mode, say
+    // so: the operator enabled the mod expecting its pack, and a silent
+    // override is exactly the "mods override built-ins" surprise to avoid.
     const mode_name_eff: ?[]const u8 = blk: {
-        if (mode_name) |mn| break :blk mn;
+        if (mode_name) |mn| {
+            if (mod_plan.mode_pack) |mo| {
+                if (!std.mem.eql(u8, mn, mo)) {
+                    log.info("zdtd: mode={s} (explicit) overrides config mod's mode={s}\n", .{ mn, mo });
+                }
+            }
+            break :blk mn;
+        }
         if (mod_plan.mode_pack) |mo| {
             log.info("zdtd: mode={s} (via mod)\n", .{mo});
             break :blk mo;
