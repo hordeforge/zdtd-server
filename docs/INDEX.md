@@ -98,6 +98,8 @@ Where the world and its data come from.
 | [MODLETS_PRD.md](MODLETS_PRD.md) | Superseded pre-numbering modlets draft (pointer to PRD 0003) |
 | [MODLETS_PLAN.md](MODLETS_PLAN.md) | Superseded pre-numbering modlets plan (pointer to RFC 0003) |
 | [PRD 0005](prd/0005-mod-tiers-and-override.md) | Module tiers and mod override requirements (with [RFC 0005](rfc/0005-mod-tiers-and-override.md); ADR 0032) |
+| [PRD 0006](prd/0006-honk-doors.md) | Vehicle horn opens trader doors requirements (with [RFC 0006](rfc/0006-honk-doors.md)) |
+| [PRD 0007](prd/0007-deco-suppression.md) | Decoration suppression requirements (with [RFC 0007](rfc/0007-deco-suppression.md)) |
 | [STD_ABSTRACTIONS.md](STD_ABSTRACTIONS.md) | Zig 0.16 stdlib map: Io/net/http plus posix residuals |
 | [IMPLEMENTATION_PLAN_BOTS.md](IMPLEMENTATION_PLAN_BOTS.md) | FPS bot execution plan (ADR 0026) |
 | [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) | Plugin/config boundary review (ADR 0020/0026) |

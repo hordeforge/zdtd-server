@@ -168,8 +168,10 @@ skipped per stock (`[rules.progression] trap_xp_party_share`), timid-animal
 detection/flee split (`[rules.ai] timid_danger_distance` /
 `timid_safe_distance`), `AllowDecorations` parsed into prefab quest data.
 Tracked as gaps here: horn-opens-trader-doors (needs a door TE subsystem,
-rules surface deferred until it exists), the deco-suppression gate (needs a
-spatial POI index on the deco sampler), the challenge `forceComplete`
+rules surface deferred until it exists; design [RFC 0006](rfc/0006-honk-doors.md) /
+[PRD 0006](prd/0006-honk-doors.md)), the deco-suppression gate (needs a
+spatial POI index on the deco sampler; design [RFC 0007](rfc/0007-deco-suppression.md) /
+[PRD 0007](prd/0007-deco-suppression.md)), the challenge `forceComplete`
 re-entry guard (no challenge sim), and the bundled AssignIds dump refresh
 (needs a 3.2.0 client `NameIdMapping` capture; 2 blocks pinned in the
 maxdamage stale-dump allowance).

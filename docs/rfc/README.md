@@ -21,6 +21,8 @@ Status is one of: **draft**, **in review**, **decided**, **withdrawn**,
 | [0002](0002-mcp-server-design.md) | MCP server addon design | decided (implements PRD 0002) |
 | [0003](0003-modlets-plan.md) | Modlet compatibility implementation plan | decided (shipped, localization phase descoped; implements PRD 0003) |
 | [0005](0005-mod-tiers-and-override.md) | Module tiers and mod override: manifest model, discovery, override claims | decided (implements PRD 0005; ADR 0032) |
+| [0006](0006-honk-doors.md) | Vehicle horn opens trader doors: door TE + honk signal design | draft (answers PRD 0006) |
+| [0007](0007-deco-suppression.md) | Decoration suppression: chunk-keyed footprint gate | draft (answers PRD 0007) |
 
 Numbering: 4-digit, zero-padded, never reused — next is **RFC 0006**. RFC NNNN
 is the design counterpart of [PRD NNNN](../prd/README.md) for the same addon.
