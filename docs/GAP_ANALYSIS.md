@@ -3377,13 +3377,17 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   (PackageIds retransmit) starve behind the reliable-window flood and its
   join times out at ChallengeReplied (`join_ok=14, join_fail=0` server-side
   - the server accepted everything; the client starved).
-  `(2026-08-29)` mitigation landed: `sendSpawnArea` yields ~500 us per
+  `(2026-08-29)` mitigations landed: `sendSpawnArea` yields ~500 us per
   chunk (loopback RTT ~100 us) so the reliable window drains continuously -
   a live double join now PASSES repeatedly on BOTH clients (26 passes in
-  one window; the pre-fix run had client 1 never passing). The join tick
-  itself still overruns (max ~2 s - the synchronous gen+scan+encode is
-  inherent without async work); the deeper fixes stay tracked: pace the
-  join spawn-area through the `chunk_adds_per_stream_tick` stream budget,
+  one window; the pre-fix run had client 1 never passing); the storage-TE
+  scan is skipped for clean proc chunks (te_scan_cells 19.7 M -> 262 K at
+  join, 75x); and the full-stock config bundle (deflated blocks.xml ~0.5-1
+  MB) got a 1 s critical retry budget after 250 ms exhausted it under a
+  concurrent join. The join tick itself still overruns (max ~2 s - the
+  synchronous gen+encode is inherent without async work); the deeper fixes
+  stay tracked: pace the join spawn-area through the
+  `chunk_adds_per_stream_tick` stream budget,
   a per-poll send byte budget, W2b async chunk gen (moves proc gen +
   te_scan off the join tick). Also (2026-08-29): the full-stock config
   bundle (deflated blocks.xml ~0.5-1 MB = ~274 fragments vs the 64-slot
