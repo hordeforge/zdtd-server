@@ -1,8 +1,8 @@
 # Handoff - zdtd refactor + parity push (rolling)
 
-**Date:** 2026-08-27 (gap-review sweep waves 56-86)
+**Date:** 2026-08-29 (waves 56-86: 2026-08-27; waves 87-93: 2026-08-28/29 malleable geometry + 3.2.0 + real-client audit)
 **Branch:** `main`
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1413 tests, 1 skipped, all green), `zig build fuzz` green, `make release-check` ok.
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (~1460 tests, 1 skipped, all green), `zig build fuzz` green, `make release-check` ok.
 
 ## Current gates
 
@@ -61,6 +61,31 @@
 - **Stock-data wiring:** block damage channel (`stock_chunk.dmg_at` + `chunk_fill.DmgCtx`) and respawn preserve of food/water/stamina.
 - **GAP rescore wave:** ~31 honest waivers with RE cites across loot/water/survival/claims/anim/quests/traders/gamestage/bedroll/blood-moon/Stage2/deco/progression/trader-S2C/haggling/forge/etc., so the inventory is honest PARTIALs rather than faked MISSINGs. Plus loot/water/survival/claims fixes that moved MISSING→WORKS.
 
+## Waves 87-93 (2026-08-28/29: malleable geometry, 3.2.0, real-client audit)
+
+- **Malleable world geometry (ADR 0036)**: `[rules.geometry]` elevation
+  projection (sea_level/height_scale/height_offset/height_ceiling; identity
+  at stock defaults) + `[wire] profile` column-height dialects
+  (protocol.WireProfile; chunk store / wire builder / ZCH4 save follow it;
+  tall-512 synthetic seam proof; non-stock needs a paired client mod).
+  Proc shaping params lifted to `[rules.worldgen]` (`WorldGen.applyParams`,
+  byte-identical defaults; fail-closed validate on both groups).
+- **Infinite procedural world**: `modes/infinite.toml` (`--mode infinite`)
+  + `mods/infinite_world/` config-only mod (`mode` manifest key + `[mods]
+  enabled`; carriers never enter the wasm load list). Proc deco resolves
+  from the W3 biome field (game-dir proc worlds stream trees); clean proc
+  chunks never persist (save dir grows with edits, not visits); spawn
+  derived from the surface; starter chest seeds once per fresh world.
+- **Real-client audit (7td-loadgen)**: fixed the 3.2.0 P0 (PackageIds
+  advertised Minor=10 while the login gate wants the 3.2.0 display form -
+  every real client was kicked; now live-verified end to end), concurrent
+  double-join starvation (ACK yield in sendSpawnArea), the full-stock
+  config-bundle WindowFull (critical retry budget 250ms -> 1s), the
+  storage-TE scan on clean proc chunks (19.7M -> 262K cells at join),
+  and the deco-mirror persistence leak. All boot paths, both joins under
+  4-client concurrency, persistence restart, admin console, webui and GSI
+  validated live.
+
 ## Docs
 
 - `handoff.md` is a rolling handoff (same file, overwritten each pass): see this file + `git log --oneline -30` for recent commits.
@@ -89,3 +114,6 @@ Architecture rule: every new `src/server/game/*.zig` shard must be imported via 
 
 - Formal parity/demo polish (optional): any remaining worldgen `water_info.xml` sim, full deco density tuning, EAI task extras, party gamestage/loot max — all already represented as honest `PARTIAL (waived)` and not required for the 0-MISSING gate.
 - Hardcode audit residuals: the remaining P2/P3 findings are recorded in `docs/PROVENANCE.md` §3.9 (divergence register) — future `Rules`/loader slices when the feature ships.
+- **Join tick overrun** (GAP "Join-burst tick budget under concurrent load", PARTIAL): the synchronous join gen+encode still peaks ~2 s (budget 50 ms) despite the ACK yield / te_scan skip / config-budget mitigations. Fix directions recorded: pace the join spawn-area through `chunk_adds_per_stream_tick`, a per-poll send byte budget, W2b async chunk gen (moves proc gen + te_scan off the join tick).
+- **W2b async chunk gen** (docs/WORLDGEN.md): the planned worker-pool generation; the join-tick slice above is its first consumer.
+- **RE-gated difficulty legs**: `EntityIncomingDamageModifier` per-tier values await the SetupOptions Cecil extraction in `../7dtd-engine-research`.
