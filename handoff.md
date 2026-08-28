@@ -90,9 +90,12 @@
 
 - **Soak**: baked Navezgane 3-client mixed-action soak PASS (35 joins,
   0 net/persist/encode/phase/decode errors). Proc-world 4-way rejoin-churn
-  soak exposed the join-burst gap now FAILING a concurrent join (see Still
-  open) - recorded in GAP entry 26; fix stays gated on stock-client
-  validation.
+  soak: Debug build can fail a concurrent join (1 of 4 bots wedged,
+  entity=-1, 3105 pkgs without everJoined, max tick 7.1s) but ReleaseFast
+  passes the same churn 4/4 (56 joins, 0 fails, max tick 262ms) - the
+  failure is Debug proc-gen amplification; the Release gap is a tick
+  overrun, not a join failure (GAP entry 26; fix stays gated on
+  stock-client validation).
 - **Provenance**: 6 more constants ledgered (max_seat_scan R pin,
   max_quest_vars parse cap, map_batch/map_walk_above minimap bounds,
   litenet resend_ns/ack_yield_ns transport timings). Plugin host caps
@@ -137,6 +140,6 @@ Architecture rule: every new `src/server/game/*.zig` shard must be imported via 
 
 - Formal parity/demo polish (optional): any remaining worldgen `water_info.xml` sim, full deco density tuning, EAI task extras, party gamestage/loot max — all already represented as honest `PARTIAL (waived)` and not required for the 0-MISSING gate.
 - Hardcode audit residuals: the remaining P2/P3 findings are recorded in `docs/PROVENANCE.md` §3.9 (divergence register) — future `Rules`/loader slices when the feature ships.
-- **Join tick overrun** (GAP "Join-burst tick budget under concurrent load", PARTIAL): the synchronous join gen+encode still peaks ~2 s (budget 50 ms) despite the ACK yield / te_scan skip / config-budget mitigations. 2026-08-29 soak evidence: under 4-way bot rejoin churn on the proc world one of four clients FAILED to complete a join (entity=-1, ~3105 packages without everJoined, server max tick 7.1 s; Debug build amplifies it - proc gen ~1.7 ms/chunk Debug vs ~126 µs ReleaseFast). Fix directions recorded: pace the join spawn-area through `chunk_adds_per_stream_tick` (inner 5x5 mesh core immediate, tail paces) and W2b async chunk gen (moves proc gen + te_scan off the join tick); both are join-timing changes gated on stock-client validation (no client installed; the mesh-core race is documented in c2s/join.zig DynamicClientArrive).
+- **Join tick overrun** (GAP "Join-burst tick budget under concurrent load", PARTIAL): the synchronous join gen+encode still peaks ~2 s (budget 50 ms) despite the ACK yield / te_scan skip / config-budget mitigations. 2026-08-29 soak evidence: under 4-way bot rejoin churn on the proc world the Debug build can fail a concurrent join (1 of 4 clients wedged, entity=-1; max tick 7.1 s; proc gen ~1.7 ms/chunk Debug vs ~126 µs ReleaseFast); the ReleaseFast binary passes the same churn 4/4 (56 joins, 0 fails, max tick 262 ms, 83 overruns) - so Release keeps a tick-budget overrun, not a join failure. Fix directions recorded: pace the join spawn-area through `chunk_adds_per_stream_tick` (inner 5x5 mesh core immediate, tail paces) and W2b async chunk gen (moves proc gen + te_scan off the join tick); both are join-timing changes gated on stock-client validation (no client installed; the mesh-core race is documented in c2s/join.zig DynamicClientArrive).
 - **W2b async chunk gen** (docs/WORLDGEN.md): the planned worker-pool generation; the join-tick slice above is its first consumer.
 - **RE-gated difficulty legs**: `EntityIncomingDamageModifier` per-tier values await the SetupOptions Cecil extraction in `../7dtd-engine-research`.

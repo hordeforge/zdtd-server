@@ -571,22 +571,24 @@ area and the concrete work.
     `PARTIAL` (2026-08-29): the synchronous join burst (289 chunks × proc
     gen + encode) still peaks ~2 s (budget 50 ms) after the ACK-yield,
     clean-proc te_scan skip (19.7 M → 262 K cells) and config-budget fixes.
-    New evidence (2026-08-29 4-way rejoin-churn soak, Debug build): the burst
-    can now FAIL a concurrent join, not just spike ticks — under continuous
-    bot rejoin cycling on the proc world, one of four clients wedged
-    (entity=-1, ~3105 packages received but `everJoined` never set; server
+    Soak evidence (2026-08-29, 4-way bot rejoin churn on the proc world):
+    the **Debug** build can FAIL a concurrent join — one of four clients
+    wedged (entity=-1, ~3105 packages received but `everJoined` never set;
     max tick 7.1 s, 531 reliable-window drops, 3 non-critical XP send
-    drops) and was disconnected after ~63 s. The wedge is the synchronous
-    burst holding the main thread for seconds while the other peers' enter
-    bundle waits behind it; the Debug build amplifies it (proc gen ~1.7 ms/
-    chunk Debug vs ~126 µs ReleaseFast). Remaining directions: deliver the
-    spawn-area through the `chunk_adds_per_stream_tick` stream budget
-    instead of one synchronous flood (the inner 5×5 mesh core stays
-    immediate; the tail paces), and W2b async chunk gen (moves gen + te_scan
-    off the join tick) — both are join-timing changes gated on stock-client
-    validation (no client installed; the mesh-core race is documented in
-    c2s/join.zig DynamicClientArrive). The per-poll send byte budget
-    direction is subsumed by the ACK-yield fix
+    drops) and was disconnected after ~63 s. The same churn on a
+    **ReleaseFast** build passes 4/4 (56 joins, 0 fails, max tick 262 ms,
+    83 overruns, 7 window drops, 1 send drop): the Debug failure is the
+    proc-gen amplification (~1.7 ms/chunk Debug vs ~126 µs ReleaseFast)
+    holding the main thread while other peers' enter bundle waits. The
+    Release binary keeps a tick-budget overrun (max ~260 ms vs 50 ms), not
+    a join failure. Remaining directions: deliver the spawn-area through
+    the `chunk_adds_per_stream_tick` stream budget instead of one
+    synchronous flood (the inner 5×5 mesh core stays immediate; the tail
+    paces), and W2b async chunk gen (moves gen + te_scan off the join
+    tick) — both are join-timing changes gated on stock-client validation
+    (no client installed; the mesh-core race is documented in c2s/join.zig
+    DynamicClientArrive). The per-poll send byte budget direction is
+    subsumed by the ACK-yield fix
     (the reliable window drains between spawn-area chunks, so the fragment
     pump no longer spins; a separate budget would be redundant). Details +
     evidence in "Join-burst tick budget under concurrent load" (§ the
