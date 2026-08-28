@@ -3376,12 +3376,16 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   poll drains it all, so a second concurrent client's critical packages
   (PackageIds retransmit) starve behind the reliable-window flood and its
   join times out at ChallengeReplied (`join_ok=14, join_fail=0` server-side
-  - the server accepted everything; the client starved). Fix directions
-  (each a slice of its own): pace the join spawn-area through the
-  `chunk_adds_per_stream_tick` stream budget instead of one synchronous
-  flood; a per-poll send byte budget in the net drain so critical packages
-  never queue behind a chunk burst; W2b async chunk gen (already planned)
-  moves proc gen + te_scan off the join tick.
+  - the server accepted everything; the client starved).
+  `(2026-08-29)` mitigation landed: `sendSpawnArea` yields ~500 us per
+  chunk (loopback RTT ~100 us) so the reliable window drains continuously -
+  a live double join now PASSES repeatedly on BOTH clients (26 passes in
+  one window; the pre-fix run had client 1 never passing). The join tick
+  itself still overruns (max ~2 s - the synchronous gen+scan+encode is
+  inherent without async work); the deeper fixes stay tracked: pace the
+  join spawn-area through the `chunk_adds_per_stream_tick` stream budget,
+  a per-poll send byte budget, W2b async chunk gen (moves proc gen +
+  te_scan off the join tick).
   *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns),
   loadgen `ChallengeReplied timeout` under concurrent count=2.
 

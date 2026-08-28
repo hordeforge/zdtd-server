@@ -16,6 +16,18 @@ const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const world_store = @import("../../world/store.zig");
 const replicate_te = @import("../replicate_te.zig");
+const clock = @import("../../util/clock.zig");
+
+/// Yield between join burst chunk sends so the peer's ACKs land. Loopback RTT
+/// is ~100 µs, so 500 µs comfortably drains the reliable window (the LiteNet
+/// fragment pump's own `ack_yield_ns` is 2 ms for the retry path); polling
+/// alone races the RTT, the window stays full, and every 40 KB chunk
+/// fragments against it - the join burst stalled the tick for ~2 s and a
+/// second concurrent client's critical packages starved behind the flood
+/// (GAP "Join-burst tick budget under concurrent load"). One-time join cost
+/// only, never the per-tick stream. The deeper fix (pacing the join through
+/// the stream budget / W2b async gen) is tracked in that GAP.
+const join_ack_yield_ns: u64 = 500_000;
 const game_join = @import("join.zig");
 
 const max_streamed_chunks_cap = game_mod.max_streamed_chunks_cap;
@@ -114,8 +126,11 @@ pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius:
             if (delivered) {
                 if (client_ptr) |cl| clientAddStreamed(self, cl, packages.makeChunkKey(cx, cz));
             }
-            // Let ACKs land between multi-chunk sends.
+            // Let ACKs land between multi-chunk sends: polling alone races the
+            // loopback RTT, so yield briefly (join-only) to keep the reliable
+            // window draining and other peers' critical packets interleaved.
             self.pollNetOnce();
+            clock.sleepNs(join_ack_yield_ns);
         }
     }
 }
