@@ -80,19 +80,18 @@ pub fn writeFile(rel_path: []const u8, data: []const u8) !void {
     var threaded = ioThreaded();
     defer threaded.deinit();
     const io = threaded.io();
-    if (std.mem.findScalarLast(u8, rel_path, '/')) |sl| {
-        if (sl > 0) try std.Io.Dir.cwd().createDirPath(io, rel_path[0..sl]);
-    }
-    // Write temp then rename: a crash or full disk mid-write must not corrupt
+    // Atomic materialize: a crash or full disk mid-write must not corrupt
     // the previous contents (players/chunks/containers all come through here).
-    var tmp_buf: [512 + 4]u8 = undefined;
-    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{rel_path}) catch return error.NameTooLong;
-    errdefer std.Io.Dir.cwd().deleteFile(io, tmp_path) catch |err| switch (err) {
-        error.FileNotFound => {},
-        else => util_log.err("zdtd: cleanup temp '{s}' failed: {s}\n", .{ tmp_path, @errorName(err) }),
-    };
-    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp_path, .data = data });
-    try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), rel_path, io);
+    var atomic_file = try std.Io.Dir.cwd().createFileAtomic(io, rel_path, .{
+        .make_path = true,
+        .replace = true,
+    });
+    defer atomic_file.deinit(io);
+    var wbuf: [4096]u8 = undefined;
+    var file_writer = atomic_file.file.writer(io, &wbuf);
+    file_writer.interface.writeAll(data) catch return file_writer.err.?;
+    try file_writer.flush();
+    try atomic_file.replace(io);
 }
 
 /// List file basenames in `dir_path`, sorted lexicographically.

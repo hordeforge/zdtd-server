@@ -82,6 +82,7 @@ is non-blocking. Listen stays blocking; `poll(0)` gates `accept4(..., NONBLOCK|C
 | `posix.read` / `system.write` / `system.close` | tcp_listen client I/O |
 | `posix.poll` POLLOUT | tcp_listen `writeAll` EAGAIN gate (no std write-with-cap exists) |
 | `system.clock_gettime` / `nanosleep` | clock hot path |
+| `system.getrusage` | sys_metrics process CPU/RSS (no Io equivalent) |
 
 ## Checklist for new code
 

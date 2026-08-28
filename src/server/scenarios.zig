@@ -6864,8 +6864,8 @@ test "scenario quest POI selection matches stock tags/tier/bands and feeds offer
         .allocator = gpa,
         .items = items,
         .name_storage = name_storage,
-        .tts_cache = std.StringHashMap(world_tts.TtsBlocks).init(gpa),
-        .quest_cache = std.StringHashMap(world_store.prefabs.QuestData).init(gpa),
+        .tts_cache = .empty,
+        .quest_cache = .empty,
     };
     // Tags must be allocator-owned (Index.deinit frees each entry's tags),
     // and distinct per entry — a shared pointer would be freed N times.
@@ -6873,10 +6873,10 @@ test "scenario quest POI selection matches stock tags/tier/bands and feeds offer
     const tags_fetch_b = try gpa.dupe(u8, "fetch");
     const tags_fetch_c = try gpa.dupe(u8, "fetch");
     const tags_fetch_p = try gpa.dupe(u8, "fetch");
-    try idx.quest_cache.put("poi_clear_a", .{ .tags = tags_clear, .tier = 1, .has_sleepers = true });
-    try idx.quest_cache.put("poi_fetch_b", .{ .tags = tags_fetch_b, .tier = 1, .has_sleepers = true });
-    try idx.quest_cache.put("poi_fetch_c", .{ .tags = tags_fetch_c, .tier = 2, .has_sleepers = true });
-    try idx.quest_cache.put("part_road", .{ .tags = tags_fetch_p, .tier = 1, .has_sleepers = true });
+    try idx.quest_cache.put(gpa, "poi_clear_a", .{ .tags = tags_clear, .tier = 1, .has_sleepers = true });
+    try idx.quest_cache.put(gpa, "poi_fetch_b", .{ .tags = tags_fetch_b, .tier = 1, .has_sleepers = true });
+    try idx.quest_cache.put(gpa, "poi_fetch_c", .{ .tags = tags_fetch_c, .tier = 2, .has_sleepers = true });
+    try idx.quest_cache.put(gpa, "part_road", .{ .tags = tags_fetch_p, .tier = 1, .has_sleepers = true });
     g.world.prefabs = idx;
 
     const clear_mask = @intFromEnum(quest_mod.QuestTag.clear);

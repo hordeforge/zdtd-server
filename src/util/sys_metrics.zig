@@ -55,11 +55,16 @@ pub fn sample() Metrics {
     m.mem_total_mb = miB(info.totalram);
     m.mem_avail_mb = miB(info.freeram +% info.bufferram);
     m.procs = @intCast(info.procs);
-    const ru = std.posix.getrusage(std.os.linux.rusage.SELF);
-    m.proc_rss_mb = @intCast(@max(ru.maxrss, 0) / 1024);
-    if (m.uptime_s > 0) {
-        const cpu_us = cpuMicros(ru.utime) + cpuMicros(ru.stime);
-        m.proc_cpu_pct = @floatCast((cpu_us / 1.0e6) / @as(f64, @floatFromInt(m.uptime_s)) * 100.0);
+    // posix.system: no Io getrusage; the medium posix wrapper is the 0.16
+    // layer the changelog removed. Fail closed like sysinfo (leave CPU/RSS 0).
+    var ru: std.posix.rusage = undefined;
+    const ru_rc = std.posix.system.getrusage(std.posix.rusage.SELF, &ru);
+    if (std.posix.errno(ru_rc) == .SUCCESS) {
+        m.proc_rss_mb = @intCast(@max(ru.maxrss, 0) / 1024);
+        if (m.uptime_s > 0) {
+            const cpu_us = cpuMicros(ru.utime) + cpuMicros(ru.stime);
+            m.proc_cpu_pct = @floatCast((cpu_us / 1.0e6) / @as(f64, @floatFromInt(m.uptime_s)) * 100.0);
+        }
     }
     return m;
 }

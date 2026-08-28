@@ -342,7 +342,8 @@ pub const World = struct {
     /// bits in O(changed) rather than O(max_entities).
     dirty_bits: AtomicBits = AtomicBits.initEmpty(),
     /// O(1) NetId → Slot (0xFFFF = empty).
-    net_to_slot: std.AutoHashMap(i32, Slot) = undefined,
+    net_to_slot: std.AutoHashMapUnmanaged(i32, Slot) = .empty,
+    net_map_allocator: std.mem.Allocator = undefined,
     net_map_init: bool = false,
     /// Set when a net_to_slot insert failed (OOM): the map may be missing
     /// entries, so slotOfNetId must fall back to the SoA scan on miss.
@@ -625,15 +626,16 @@ pub const World = struct {
 
     pub fn ensureNetMap(self: *World, allocator: std.mem.Allocator) !void {
         if (self.net_map_init) return;
-        self.net_to_slot = std.AutoHashMap(i32, Slot).init(allocator);
-        try self.net_to_slot.ensureTotalCapacity(max_entities);
+        self.net_map_allocator = allocator;
+        self.net_to_slot = .empty;
+        try self.net_to_slot.ensureTotalCapacity(allocator, max_entities);
         self.net_map_init = true;
     }
 
     pub fn deinit(self: *World) void {
         self.catalog.deinit();
         if (self.net_map_init) {
-            self.net_to_slot.deinit();
+            self.net_to_slot.deinit(self.net_map_allocator);
             self.net_map_init = false;
         }
     }
@@ -976,7 +978,7 @@ pub const World = struct {
         if (!self.net_map_init) return;
         // Pre-sized at init; insert failure only if map allocator is exhausted.
         // Fall back: slotOfNetId still walks SoA when map misses.
-        self.net_to_slot.put(id, slot) catch {
+        self.net_to_slot.put(self.net_map_allocator, id, slot) catch {
             self.net_map_degraded = true;
             std.debug.print(
                 "zdtd: net_to_slot put failed id={d} slot={d} (OOM? using linear lookup)\n",

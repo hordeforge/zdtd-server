@@ -184,10 +184,10 @@ pub const Index = struct {
     /// Prefab content root (Data/Prefabs) for size lookup; may be empty.
     prefabs_root: []const u8 = "",
     /// Lazy .tts block cache keyed by decoration name (stable name_storage slices).
-    tts_cache: std.StringHashMap(tts.TtsBlocks),
+    tts_cache: std.StringHashMapUnmanaged(tts.TtsBlocks),
     /// Lazy QuestTags/DifficultyTier cache keyed by decoration name (tags owned
     /// by self.allocator; absent prefabs are cached with empty tags).
-    quest_cache: std.StringHashMap(QuestData),
+    quest_cache: std.StringHashMapUnmanaged(QuestData),
     /// Runtime AssignIds resolver for the `.blocks.nim` remap; without it the
     /// prefab-local ids are stamped raw (offline / no id table).
     id_lookup: ?IdLookup = null,
@@ -195,14 +195,14 @@ pub const Index = struct {
     pub fn deinit(self: *Index) void {
         var it = self.tts_cache.iterator();
         while (it.next()) |e| e.value_ptr.deinit();
-        self.tts_cache.deinit();
+        self.tts_cache.deinit(self.allocator);
         var qit = self.quest_cache.iterator();
         while (qit.next()) |e| {
             if (e.value_ptr.tags.len != 0) self.allocator.free(e.value_ptr.tags);
             if (e.value_ptr.poi_tags.len != 0) self.allocator.free(e.value_ptr.poi_tags);
             if (e.value_ptr.trader_tag.len != 0) self.allocator.free(e.value_ptr.trader_tag);
         }
-        self.quest_cache.deinit();
+        self.quest_cache.deinit(self.allocator);
         self.allocator.free(self.items);
         self.allocator.free(self.name_storage);
         if (self.prefabs_root.len != 0) self.allocator.free(self.prefabs_root);
@@ -425,7 +425,7 @@ pub const Index = struct {
             return null;
         };
         self.remapToRuntimeIds(name, &loaded);
-        self.tts_cache.put(name, loaded) catch {
+        self.tts_cache.put(self.allocator, name, loaded) catch {
             var tmp = loaded;
             tmp.deinit();
             std.debug.print("zdtd: tts cache put failed for {s}\n", .{name});
@@ -514,7 +514,7 @@ pub const Index = struct {
                 &qd.teleport_n,
             );
         }
-        self.quest_cache.put(name, qd) catch {
+        self.quest_cache.put(self.allocator, name, qd) catch {
             if (qd.tags.len != 0) self.allocator.free(qd.tags);
             if (qd.poi_tags.len != 0) self.allocator.free(qd.poi_tags);
             if (qd.trader_tag.len != 0) self.allocator.free(qd.trader_tag);
@@ -613,8 +613,8 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8, prefabs_data_dir:
             .allocator = allocator,
             .items = try allocator.alloc(Decoration, 0),
             .name_storage = try allocator.alloc(u8, 0),
-            .tts_cache = std.StringHashMap(tts.TtsBlocks).init(allocator),
-            .quest_cache = std.StringHashMap(QuestData).init(allocator),
+            .tts_cache = .empty,
+            .quest_cache = .empty,
         };
     }
 
@@ -678,8 +678,8 @@ pub fn parseXml(allocator: std.mem.Allocator, xml: []const u8, prefabs_data_dir:
         .allocator = allocator,
         .items = items,
         .name_storage = names,
-        .tts_cache = std.StringHashMap(tts.TtsBlocks).init(allocator),
-        .quest_cache = std.StringHashMap(QuestData).init(allocator),
+        .tts_cache = .empty,
+        .quest_cache = .empty,
     };
     if (prefabs_data_dir) |root| {
         idx.prefabs_root = try allocator.dupe(u8, root);
@@ -743,8 +743,8 @@ fn readPrefabYOffset(allocator: std.mem.Allocator, tts_path: []const u8) i32 {
 fn fillSizesFromTts(idx: *Index) !void {
     var path_buf: [2048]u8 = undefined;
     // Cache by name (keys are d.name slices into stable name_storage).
-    var cache = std.StringHashMap(struct { x: i32, y: i32, z: i32, yoff: i32 }).init(idx.allocator);
-    defer cache.deinit();
+    var cache: std.StringHashMapUnmanaged(struct { x: i32, y: i32, z: i32, yoff: i32 }) = .empty;
+    defer cache.deinit(idx.allocator);
 
     const subdirs = [_][]const u8{ "POIs", "Parts", "RWGTiles" };
     const root = idx.prefabs_root;
@@ -783,7 +783,7 @@ fn fillSizesFromTts(idx: *Index) !void {
             sy = 8;
             sz = 16;
         }
-        try cache.put(d.name, .{ .x = sx, .y = sy, .z = sz, .yoff = yoff });
+        try cache.put(idx.allocator, d.name, .{ .x = sx, .y = sy, .z = sz, .yoff = yoff });
         d.size_x = sx;
         d.size_y = sy;
         d.size_z = sz;

@@ -26,9 +26,9 @@ pub const ResolvedResult = struct {
     /// modules. Replaced targets are dropped; replacers take their place.
     modules: []ResolvedModule,
     /// Override-point id -> module slot that exclusively claims it.
-    point_claims: std.StringHashMap(usize),
+    point_claims: std.StringHashMapUnmanaged(usize),
     /// Mod name -> slot (for admin/ops).
-    name_to_slot: std.StringHashMap(usize),
+    name_to_slot: std.StringHashMapUnmanaged(usize),
     /// Synthetic manifests created for legacy [plugin] modules: none of their
     /// fields are owned here (strings point into caller-owned paths), so only
     /// the slice itself is freed.
@@ -37,8 +37,8 @@ pub const ResolvedResult = struct {
     pub fn deinit(self: *ResolvedResult, a: std.mem.Allocator) void {
         if (self.synthetic.len > 0) a.free(self.synthetic);
         a.free(self.modules);
-        self.point_claims.deinit();
-        self.name_to_slot.deinit();
+        self.point_claims.deinit(a);
+        self.name_to_slot.deinit(a);
     }
 };
 
@@ -53,12 +53,12 @@ pub fn resolve(
     disabled: []const []const u8,
     blacklist: []const []const u8,
 ) ResolverError!ResolvedResult {
-    var disabled_set = std.StringHashMap(void).init(a);
-    defer disabled_set.deinit();
-    for (disabled) |n| try disabled_set.put(n, {});
-    var blacklist_set = std.StringHashMap(void).init(a);
-    defer blacklist_set.deinit();
-    for (blacklist) |n| try blacklist_set.put(n, {});
+    var disabled_set: std.StringHashMapUnmanaged(void) = .empty;
+    defer disabled_set.deinit(a);
+    for (disabled) |n| try disabled_set.put(a, n, {});
+    var blacklist_set: std.StringHashMapUnmanaged(void) = .empty;
+    defer blacklist_set.deinit(a);
+    for (blacklist) |n| try blacklist_set.put(a, n, {});
 
     // Core-component protection (R4/AC3): a disabled/blacklisted entry naming
     // a core component is a config error, fail-closed.
@@ -75,16 +75,16 @@ pub fn resolve(
 
     // Pass 0: name -> discovered index; core-component protection (R4) is
     // validated by the caller (config binder) against the core registry.
-    var name_index = std.StringHashMap(usize).init(a);
-    defer name_index.deinit();
-    for (discovered, 0..) |dm, i| try name_index.put(dm.name.?, i);
+    var name_index: std.StringHashMapUnmanaged(usize) = .empty;
+    defer name_index.deinit(a);
+    for (discovered, 0..) |dm, i| try name_index.put(a, dm.name.?, i);
 
     // Collect mods that actually load: skip disabled, reject blacklisted,
     // resolve override edges (target dropped, replacer kept).
     var load = std.ArrayList(ResolvedModule).empty;
     defer load.deinit(a);
-    var replaced = std.StringHashMap(void).init(a);
-    defer replaced.deinit();
+    var replaced: std.StringHashMapUnmanaged(void) = .empty;
+    defer replaced.deinit(a);
 
     // First mark every override target as replaced (a target replaced twice is
     // a DuplicateClaim: two mods override the same mod).
@@ -92,7 +92,7 @@ pub fn resolve(
         const t = m.override orelse continue;
         if (blacklist_set.contains(t)) return error.BlacklistedTarget;
         if (replaced.contains(t)) return error.DuplicateClaim;
-        try replaced.put(t, {});
+        try replaced.put(a, t, {});
     }
     // Override target must exist among discovered or explicit paths; else the
     // replacer cannot load.
@@ -148,8 +148,8 @@ pub fn resolve(
 
     // Exclusive point claims: first claimant wins the point; a second is a
     // boot error naming both (R8). Slots are the final load order.
-    var claims = std.StringHashMap(usize).init(a);
-    errdefer claims.deinit();
+    var claims: std.StringHashMapUnmanaged(usize) = .empty;
+    errdefer claims.deinit(a);
     for (load.items) |rm| {
         const pts = rm.manifest.points orelse continue;
         var it = std.mem.splitScalar(u8, pts, ',');
@@ -157,13 +157,13 @@ pub fn resolve(
             const p = std.mem.trim(u8, p_raw, " \t");
             if (p.len == 0) continue;
             if (claims.contains(p)) return error.DuplicateClaim;
-            try claims.put(p, rm.slot);
+            try claims.put(a, p, rm.slot);
         }
     }
 
-    var name_to_slot = std.StringHashMap(usize).init(a);
-    errdefer name_to_slot.deinit();
-    for (load.items) |rm| try name_to_slot.put(rm.manifest.name.?, rm.slot);
+    var name_to_slot: std.StringHashMapUnmanaged(usize) = .empty;
+    errdefer name_to_slot.deinit(a);
+    for (load.items) |rm| try name_to_slot.put(a, rm.manifest.name.?, rm.slot);
 
     // Legacy [plugin] modules: synthesized user mods, appended after discovery.
     var synthetic = std.ArrayList(manifest.Manifest).empty;
@@ -196,7 +196,7 @@ pub fn resolve(
             .tier = .user,
             .slot = load.items.len,
         });
-        try name_to_slot.put(path, load.items.len - 1);
+        try name_to_slot.put(a, path, load.items.len - 1);
     }
 
     return ResolvedResult{

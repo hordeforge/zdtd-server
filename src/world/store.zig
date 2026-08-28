@@ -484,7 +484,7 @@ pub const max_step_up: i32 = 1;
 pub const max_drop: i32 = 3;
 
 pub const World = struct {
-    chunks: std.AutoHashMap(u64, Chunk),
+    chunks: std.AutoHashMapUnmanaged(u64, Chunk),
     world_dir: []u8,
     allocator: std.mem.Allocator,
     heightmap: ?dtm.Heightmap = null,
@@ -528,7 +528,7 @@ pub const World = struct {
     pub fn init(allocator: std.mem.Allocator, world_dir: []const u8) !World {
         io_fs.mkdirPath(world_dir);
         return .{
-            .chunks = std.AutoHashMap(u64, Chunk).init(allocator),
+            .chunks = .empty,
             .world_dir = try allocator.dupe(u8, world_dir),
             .allocator = allocator,
         };
@@ -694,7 +694,7 @@ pub const World = struct {
         if (self.biomes) |*b| b.deinit();
         self.biome_layers_table.deinit();
         if (self.map_dir) |d| self.allocator.free(d);
-        self.chunks.deinit();
+        self.chunks.deinit(self.allocator);
         self.allocator.free(self.world_dir);
     }
 
@@ -744,7 +744,7 @@ pub const World = struct {
         if (self.chunks.count() >= max_resident_chunks and !self.chunks.contains(k)) {
             try self.evictOneChunk(k);
         }
-        const gop = try self.chunks.getOrPut(k);
+        const gop = try self.chunks.getOrPut(self.allocator, k);
         self.touch_seq += 1;
         if (!gop.found_existing) {
             gop.value_ptr.* = Chunk.generateFlat(pos);
@@ -1255,8 +1255,8 @@ pub const World = struct {
             };
             self.flush.submit(key, owned_path, payload) catch {
                 // Queue full or shut down: write inline rather than drop. An
-                // older snapshot for this key may still own the same `.tmp`
-                // path, so let it finish before publishing the newer image.
+                // older snapshot for this key may still be in flight, so let
+                // it finish before publishing the newer image.
                 self.flush.waitKey(key);
                 defer io_a.free(owned_path);
                 defer io_a.free(payload);
