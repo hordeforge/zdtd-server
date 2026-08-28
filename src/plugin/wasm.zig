@@ -5,7 +5,7 @@
 //! Data crosses as flat bytes in the guest's linear memory; no host pointer
 //! reaches a guest and WASI is deliberately not provided.
 //!
-//! Non-goals: WASI, hot reload, JIT, any hook the host table does not expose.
+//! Non-goals: WASI, JIT, any hook the host table does not expose.
 
 const std = @import("std");
 const zwasm = @import("zwasm");
@@ -48,6 +48,14 @@ pub const Hook = enum(u8) {
         "on_trader_event",  "on_mcp_frame",     "on_trade_price",   "on_perk_spend",
         "on_stat_changed",  "on_game_event",
     };
+};
+
+/// Host import field names under the `zdtd` module (`defineImports`). Keep in
+/// sync with the `linker.defineFuncCtx` list: a new import that is missing
+/// here is an undeclarable capability (`_zdtd_requires` would reject it).
+pub const host_verbs = [_][]const u8{
+    "log",        "tick",     "queue",    "sense",    "query",
+    "json_parse", "json_str", "json_raw", "json_obj",
 };
 
 /// Verdict convention for the event hooks (T15 / PLUGIN_DEV.md): a return
@@ -218,6 +226,13 @@ pub const Plugin = struct {
         }
     }
 
+    fn isHostVerb(cap: []const u8) bool {
+        for (host_verbs) |v| {
+            if (std.mem.eql(u8, cap, v)) return true;
+        }
+        return false;
+    }
+
     /// Declarative capability check (`_zdtd_requires` -> "name,name,..." in
     /// guest memory). Every name must be a hook the module exports or a host
     /// verb it imports; anything else fails the load with the offending name.
@@ -248,11 +263,7 @@ pub const Plugin = struct {
         while (it.next()) |raw| {
             const cap = std.mem.trim(u8, raw, " \t\r\n");
             if (cap.len == 0) continue;
-            if (std.mem.eql(u8, cap, "log") or std.mem.eql(u8, cap, "tick") or
-                std.mem.eql(u8, cap, "queue") or std.mem.eql(u8, cap, "sense") or
-                std.mem.eql(u8, cap, "query") or std.mem.eql(u8, cap, "json_parse") or
-                std.mem.eql(u8, cap, "json_str") or std.mem.eql(u8, cap, "json_raw") or
-                std.mem.eql(u8, cap, "json_obj")) continue;
+            if (isHostVerb(cap)) continue;
             var found = false;
             for (Hook.names, 0..) |hname, i| {
                 if (std.mem.eql(u8, cap, hname)) {
@@ -878,7 +889,11 @@ pub const WasmHost = struct {
             );
             return error.RequiresUnmet;
         }
-        if (p2.instance.handle.runtime) |rt| ctx.rt_slot[idx] = @ptrCast(rt);
+        const rt = p2.instance.handle.runtime orelse {
+            std.debug.print("zdtd: wasm plugin '{s}' rejected: no runtime (cannot attribute queue src)\n", .{path});
+            return error.NoRuntime;
+        };
+        ctx.rt_slot[idx] = @ptrCast(rt);
         ctx.plugin_slot[idx] = @ptrCast(&self.slots[idx]);
         self.slots[idx] = p2;
         self.withdrawn[idx] = false;
@@ -960,10 +975,22 @@ pub const WasmHost = struct {
         self.n -= 1;
     }
 
-    /// First slot whose module path ends with `name` (basename or suffix).
+    /// First slot matching `name`: exact display name (`plugin list` prints
+    /// it), then a path suffix, then a path stem suffix (so `plugin reload bot`
+    /// matches `fps_bot.wasm`). Empty names never match.
     pub fn findByName(self: *const WasmHost, name: []const u8) ?usize {
+        if (name.len == 0) return null;
         for (0..self.n) |i| {
-            if (std.mem.endsWith(u8, self.slots[i].name, name)) return i;
+            const disp = self.slots[i].display;
+            if (disp.len > 0 and std.mem.eql(u8, disp, name)) return i;
+        }
+        for (0..self.n) |i| {
+            const path = self.slots[i].name;
+            if (std.mem.endsWith(u8, path, name)) return i;
+            if (std.mem.endsWith(u8, path, ".wasm")) {
+                const stem = path[0 .. path.len - ".wasm".len];
+                if (std.mem.endsWith(u8, stem, name)) return i;
+            }
         }
         return null;
     }
@@ -1161,6 +1188,12 @@ pub const WasmHost = struct {
             self.slots[i].deinit();
         }
         self.n = 0;
+        self.withdrawn = .{false} ** max_wasm_plugins;
+        self.claims = .{no_claim} ** manifest.OverridePoint.count;
+        if (self.ctx) |ctx| {
+            ctx.rt_slot = .{null} ** max_wasm_plugins;
+            ctx.plugin_slot = .{null} ** max_wasm_plugins;
+        }
     }
 
     pub fn count(self: *const WasmHost) usize {
@@ -1222,6 +1255,9 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
                     break;
                 }
             }
+            // Fail closed: an unattributed queue would run as native (src 0)
+            // and could not be withdrawn. Drop it rather than leak the effect.
+            if (src == 0) return 1;
             hc.queue_fn(hc, src, cmd);
             return 0;
         }
@@ -1912,6 +1948,46 @@ test "plugin reload failure frees the display copy and reports false" {
     // The survivor's claim followed it down; the dropped module's released.
     try std.testing.expectEqual(@as(u8, 0), host.claims[@intFromEnum(manifest.OverridePoint.craft_request)]);
     try std.testing.expectEqual(no_claim, host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)]);
+}
+
+test "findByName matches display name and wasm stem suffix" {
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(
+        std.testing.allocator,
+        &[_][]const u8{ "plugins/core_tradefeed/core_tradefeed.wasm", "assets/fixtures/plugin_hello.wasm" },
+        &ctx,
+        .{},
+    );
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 2), host.n);
+    host.slots[0].display = try std.testing.allocator.dupe(u8, "core_tradefeed");
+    // Display name is what `plugin list` prints.
+    try std.testing.expectEqual(@as(?usize, 0), host.findByName("core_tradefeed"));
+    // Stem suffix: `plugin reload hello` matches plugin_hello.wasm.
+    try std.testing.expectEqual(@as(?usize, 1), host.findByName("hello"));
+    try std.testing.expectEqual(@as(?usize, 1), host.findByName("plugin_hello.wasm"));
+    try std.testing.expectEqual(@as(?usize, null), host.findByName(""));
+    try std.testing.expectEqual(@as(?usize, null), host.findByName("no_such_mod"));
+    host.shutdown();
+    try std.testing.expectEqual(@as(usize, 0), host.n);
+    try std.testing.expect(ctx.rt_slot[0] == null and ctx.plugin_slot[0] == null);
+    try std.testing.expect(ctx.rt_slot[1] == null and ctx.plugin_slot[1] == null);
+}
+
+test "host_verbs is the _zdtd_requires vocabulary for host imports" {
+    try std.testing.expectEqual(@as(usize, 9), host_verbs.len);
+    try std.testing.expect(Plugin.isHostVerb("log"));
+    try std.testing.expect(Plugin.isHostVerb("json_obj"));
+    try std.testing.expect(!Plugin.isHostVerb("on_tick"));
+    try std.testing.expect(!Plugin.isHostVerb("bot"));
 }
 
 test "queue import attributes commands to the calling plugin slot" {

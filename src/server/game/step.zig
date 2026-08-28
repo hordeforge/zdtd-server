@@ -19,6 +19,7 @@ const game_stability = @import("stability.zig");
 const game_net = @import("net.zig");
 const util_sim = @import("../../util/sim.zig");
 const sky = @import("../../world/sky.zig");
+const plugin_mod = @import("../../plugin/root.zig");
 
 pub fn step(self: *Game) !void {
     const sc = apm.profiler.scope(&self.harness.prof, .tick_total);
@@ -336,7 +337,7 @@ pub fn step(self: *Game) !void {
         // not leave queued (undrained) effects behind; withdraw before the
         // next drain, and despawn its applied spawns (the held inverse, paper
         // 3.1) so a broken module's entities do not outlive it.
-        var wsrc: [8]i16 = undefined;
+        var wsrc: [plugin_mod.wasm.max_wasm_plugins]i16 = undefined;
         const wn = self.wasm_plugins.takeWithdrawn(&wsrc);
         for (wsrc[0..wn]) |s| withdrawPluginSrc(self, s);
     }
@@ -525,4 +526,5 @@ pub fn withdrawPluginSrc(self: *Game, src: i16) void {
     for (spawn_out[0..sn]) |id| {
         if (self.sim.slotOfNetId(id)) |es| self.sim.destroy(es);
     }
+    self.bots.dropFrom(src);
 }

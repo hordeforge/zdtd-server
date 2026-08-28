@@ -4130,13 +4130,13 @@ test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele 
 
     // Plugin bot verbs: an out-of-range `bot spawn` is dropped (no bot), and a
     // `bot move` with a huge dest never sets a dest the tick step would cast.
-    _ = g.bots.handleCommand(g, "bot spawn 3e38 3e38");
+    _ = g.bots.handleCommand(g, "bot spawn 3e38 3e38", 0);
     try std.testing.expectEqual(@as(usize, 0), g.bots.n);
     const bot_id = g.bots.spawn(g, 0, g.bots.cfg.spawn_y, 0, 100) orelse return error.NoBot;
     const bs = g.bots.find(bot_id) orelse return error.NoBot;
     var move_cmd: [64]u8 = undefined;
     const move_line = try std.fmt.bufPrint(&move_cmd, "bot move {d} 3e38 3e38 3e38 5", .{bot_id});
-    _ = g.bots.handleCommand(g, move_line);
+    _ = g.bots.handleCommand(g, move_line, 0);
     try std.testing.expect(!g.bots.bots[bs].move_active);
 
     std.debug.print(
@@ -4286,9 +4286,18 @@ test "scenario plugin withdrawal despawns applied spawns" {
     @import("game/step.zig").withdrawPluginSrc(g, 1);
     try std.testing.expectEqual(base + 1, g.sim.countKind(.zombie));
 
-    // Withdraw plugin 2: back to the baseline.
+    // Bots queued through zdtd.queue are attributed too: a withdrawn plugin's
+    // bots and count floor must not outlive it.
+    g.bots.bots[0] = .{ .net_id = 9001, .alive = true, .src = 2 };
+    g.bots.n = 1;
+    g.bots.floor = 4;
+    g.bots.floor_src = 2;
+
+    // Withdraw plugin 2: back to the baseline, and plugin 2's bots/floor go.
     @import("game/step.zig").withdrawPluginSrc(g, 2);
     try std.testing.expectEqual(base, g.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(usize, 0), g.bots.n);
+    try std.testing.expectEqual(@as(u32, 0), g.bots.floor);
 
     std.debug.print("PASS plugin withdraw: applied spawns despawned per src\n", .{});
 }
@@ -8790,7 +8799,7 @@ test "scenario bot count floor spawns bots and fillSense emits them" {
     }
 
     // `bot count 2` (as the wasm guest re-queues it) spawns a 2-bot floor.
-    try std.testing.expect(g.bots.handleCommand(g, "bot count 2"));
+    try std.testing.expect(g.bots.handleCommand(g, "bot count 2", 0));
     try std.testing.expectEqual(@as(usize, 2), g.bots.n);
 
     // The sense snapshot then carries both bots as kind==2 records.
@@ -8817,21 +8826,21 @@ test "scenario applyCountFloor tops up across repeated calls" {
         g.deinit();
         gpa.destroy(g);
     }
-    _ = g.bots.handleCommand(g, "bot count 3");
+    _ = g.bots.handleCommand(g, "bot count 3", 0);
     try std.testing.expectEqual(@as(usize, 3), g.bots.n);
-    _ = g.bots.handleCommand(g, "bot count 5");
+    _ = g.bots.handleCommand(g, "bot count 5", 0);
     try std.testing.expectEqual(@as(usize, 5), g.bots.n);
 
     // Two-way floor: reducing the target removes extras (`bot count 2`).
-    _ = g.bots.handleCommand(g, "bot count 2");
+    _ = g.bots.handleCommand(g, "bot count 2", 0);
     try std.testing.expectEqual(@as(usize, 2), g.bots.n);
     // `bot count 0` clears the floor entirely.
-    _ = g.bots.handleCommand(g, "bot count 0");
+    _ = g.bots.handleCommand(g, "bot count 0", 0);
     try std.testing.expectEqual(@as(usize, 0), g.bots.n);
 
     // Self-healing floor: set a floor, kill a bot, and the next tick respawns
     // it so the population returns to the remembered floor.
-    _ = g.bots.handleCommand(g, "bot count 2");
+    _ = g.bots.handleCommand(g, "bot count 2", 0);
     try std.testing.expectEqual(@as(usize, 2), g.bots.n);
     const doomed = g.bots.bots[0].net_id;
     try std.testing.expect(g.bots.damageBot(doomed, 1000)); // lethal

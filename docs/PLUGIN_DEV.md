@@ -140,8 +140,8 @@ long long _zdtd_requires(void) {
 Admin console (or webui console):
 
 ```text
-plugin list              # slot, module path, enabled/disabled
-plugin reload bot   # suffix match on the module path
+plugin list              # slot, display name, tier, enabled/disabled
+plugin reload bot        # display name, or path / .wasm-stem suffix
 ```
 
 `plugin reload` disposes the old instance (`on_shutdown`, fuel/memory
@@ -155,8 +155,10 @@ bounded by the host boundary, reloading it recovers everything it installed.
 
 Queued commands (`zdtd.queue`) are attributed to the plugin that issued them.
 When a module disables itself (hook trap / fuel exhaustion), its still-queued,
-not-yet-applied commands are **withdrawn** before the next drain, so a broken
-module cannot leave side effects behind. Re-enabling requires a reload.
+not-yet-applied commands are **withdrawn** before the next drain, and its
+applied ECS spawns and attributed bots (including a `bot count` floor) are
+despawned, so a broken module cannot leave side effects behind. Re-enabling
+requires a reload.
 
 ## Host imports
 

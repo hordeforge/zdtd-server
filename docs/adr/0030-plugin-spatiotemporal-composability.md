@@ -45,11 +45,17 @@ safe runtime components:
    despawns those entities, so a module's spawned zombies do not outlive it.
    The spawn ring is capped at `max_commands`, dropping the oldest attribution
    when full (the most recent spawns stay revertible).
+   Amended 2026-08-28 (bot verbs): `zdtd.queue bot ...` is attributed the same
+   way; `BotManager` records spawn/floor src and `withdrawPluginSrc` despawns
+   that src's bots and clears its count floor. Unattributed queue imports
+   fail closed (drop) instead of running as native src 0. A failed reload that
+   drops a slot remaps remaining command and bot srcs so compacted slots keep
+   their attribution.
 3. **Declarative dependencies.** Modules export `_zdtd_requires` returning a
-   comma-separated capability list (hook names + `log`/`tick`/`queue`/
-   `sense`/`query`). Unknown or un-exported capabilities reject the module at
-   load with a loud error (fail-closed); the vocabulary stays in sync with
-   `Hook.names` and the host import table.
+   comma-separated capability list (hook names + `host_verbs`: `log`/`tick`/
+   `queue`/`sense`/`query`/`json_*`). Unknown or un-exported capabilities
+   reject the module at load with a loud error (fail-closed); the vocabulary
+   stays in sync with `Hook.names` and the host import table.
 4. **Boundary stays the boundary.** Plugins still mutate the sim only through
    the verbs the server understands; composability is host-side plumbing, not
    a widening of plugin authority. `plugin` remains a leaf package (no ecs

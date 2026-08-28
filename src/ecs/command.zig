@@ -109,6 +109,20 @@ pub const Buffer = struct {
         return n;
     }
 
+    /// After a plugin slot is dropped and later slots compact, decrement every
+    /// remaining src above `dropped` so surviving plugins keep their
+    /// attribution (pending ops and the applied-spawn ring). `dropped` is the
+    /// 1-based src that just left; src 0 (native) is never shifted.
+    pub fn shiftSrcsAfter(self: *Buffer, dropped: i16) void {
+        if (dropped <= 0) return;
+        for (self.srcs[0..self.n]) |*s| {
+            if (s.* > dropped) s.* -= 1;
+        }
+        for (self.spawn_srcs[0..self.spawn_n]) |*s| {
+            if (s.* > dropped) s.* -= 1;
+        }
+    }
+
     pub fn clear(self: *Buffer) void {
         self.n = 0;
     }
@@ -287,6 +301,25 @@ test "spawn ring truncates oldest attribution at cap" {
     // The oldest 4 are gone; the newest max_commands survive.
     try std.testing.expectEqual(@as(i32, 100 + 4), out[0]);
     try std.testing.expectEqual(@as(i32, 100 + max_commands + 3), out[max_commands - 1]);
+}
+
+test "shiftSrcsAfter remaps remaining plugin srcs after a slot drop" {
+    // Failed middle-plugin reload compact the slot table; pending ops and
+    // the spawn ring must follow so later withdrawal still matches.
+    var buf: Buffer = .{};
+    _ = buf.pushSrc(1, .{ .damage = .{ .net_id = 1, .amount = 1 } });
+    _ = buf.pushSrc(3, .{ .damage = .{ .net_id = 3, .amount = 3 } });
+    buf.recordSpawn(3, 30);
+    buf.recordSpawn(1, 10);
+    buf.shiftSrcsAfter(2);
+    try std.testing.expectEqual(@as(i16, 1), buf.srcs[0]);
+    try std.testing.expectEqual(@as(i16, 2), buf.srcs[1]);
+    try std.testing.expectEqual(@as(i16, 2), buf.spawn_srcs[0]);
+    try std.testing.expectEqual(@as(i16, 1), buf.spawn_srcs[1]);
+    // Native src 0 is untouched; a non-positive dropped is a no-op.
+    _ = buf.pushSrc(0, .{ .damage = .{ .net_id = 9, .amount = 1 } });
+    buf.shiftSrcsAfter(0);
+    try std.testing.expectEqual(@as(i16, 0), buf.srcs[2]);
 }
 
 test "command buffer soft warn at warn_ratio" {

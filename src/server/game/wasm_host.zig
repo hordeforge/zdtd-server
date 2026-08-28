@@ -73,7 +73,7 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void 
     // ops: the BotManager owns spawn/move/look/shoot/remove/count and returns
     // true for any command starting with `bot `. Everything else falls through
     // to the ECS plugin verbs (spawn/despawn/damage).
-    if (g.bots.handleCommand(g, cmd)) return;
+    if (g.bots.handleCommand(g, cmd, src)) return;
     const op = parsePluginCommand(cmd) orelse {
         const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
         // Guest-controlled bytes: same one-line rule as wasmLog above.
@@ -390,8 +390,16 @@ pub fn adminPlugin(self: *Game, rest: []const u8) void {
         // Paper HMR: disposing the old instance withdraws its pending commands
         // and despawns its applied spawns before reinstantiation, so the
         // reloaded module starts clean instead of inheriting the old queue.
-        game_step.withdrawPluginSrc(self, @intCast(idx + 1));
+        const src: i16 = @intCast(idx + 1);
+        game_step.withdrawPluginSrc(self, src);
+        const n_before = self.wasm_plugins.n;
         const ok = self.wasm_plugins.reload(idx, path);
+        // A failed reload drops the slot and later modules compact: remap
+        // remaining command/bot srcs so later withdrawal still matches.
+        if (!ok and self.wasm_plugins.n < n_before) {
+            self.sim.commands.shiftSrcsAfter(src);
+            self.bots.shiftSrcsAfter(src);
+        }
         self.adminReply(if (ok) "plugin reloaded\n" else "plugin reload failed; see server log\n");
         return;
     }

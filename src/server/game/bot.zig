@@ -144,6 +144,10 @@ pub const Bot = struct {
     /// Index into `bot_loadout_pool` (sent to the guest as a kind-4 bot-info
     /// sense record so the brain can adapt range/burst/lead to the weapon).
     weapon_id: u8 = 0,
+    /// 1-based wasm plugin slot that spawned this bot (0 = native/admin).
+    /// Temporal composability: a withdrawn plugin's bots are despawned so
+    /// they do not outlive it (paper 3.1 held inverse, same as ECS spawns).
+    src: i16 = 0,
 
     /// Set the display name, copying at most name.len-1 bytes (NUL-terminated).
     /// An empty name falls back to the default "Bot".
@@ -180,6 +184,9 @@ pub const BotManager = struct {
     /// Remembered population floor (set by `bot count <n>`); tick tops up when
     /// bots die so the floor is self-healing (RFC 0001: keep n alive).
     floor: u32 = 0,
+    /// Plugin src that last set `floor` (0 = native/admin). Cleared with the
+    /// floor on withdrawal so a disabled module cannot keep respawning bots.
+    floor_src: i16 = 0,
     /// Damage events pending in the sense trailer (RFC 0001 §3). Recorded on
     /// attributed damage to a live bot; drained (and cleared) by
     /// `drainSenseEvents` each sense pass, so they are one-tick flavor.
@@ -452,6 +459,33 @@ pub const BotManager = struct {
         self.n = 0;
     }
 
+    /// Withdraw (despawn) every live bot attributed to `src` and clear the
+    /// population floor when this src set it. Native src 0 is never withdrawn.
+    pub fn dropFrom(self: *BotManager, src: i16) void {
+        if (src == 0) return;
+        for (&self.bots) |*b| {
+            if (!b.alive or b.src != src) continue;
+            b.* = .{};
+            self.n -|= 1;
+        }
+        if (self.floor_src == src) {
+            self.floor = 0;
+            self.floor_src = 0;
+        }
+    }
+
+    /// After a plugin slot is dropped and later slots compact, decrement
+    /// remaining bot/floor srcs above `dropped` so attribution still matches
+    /// the compacted 1-based slot index.
+    pub fn shiftSrcsAfter(self: *BotManager, dropped: i16) void {
+        if (dropped <= 0) return;
+        for (&self.bots) |*b| {
+            if (!b.alive) continue;
+            if (b.src > dropped) b.src -= 1;
+        }
+        if (self.floor_src > dropped) self.floor_src -= 1;
+    }
+
     /// Population floor: spawn at a small spread until the live count is >= n.
     /// Spawn-only (matches the pre-refactor `bot count` behaviour); a target of
     /// 0 is a no-op. Clamped to max_bots; stops early when the table fills.
@@ -479,14 +513,16 @@ pub const BotManager = struct {
         while (self.n < self.floor) : (spread += 1) {
             const ix: f32 = @as(f32, @floatFromInt(spread)) * self.cfg.spawn_spread;
             const iz: f32 = @as(f32, @floatFromInt(spread % 3)) * self.cfg.spawn_spread;
-            if (self.spawn(g, ix, self.cfg.spawn_y, iz, bot_max_hp) == null) break;
+            const id = self.spawn(g, ix, self.cfg.spawn_y, iz, bot_max_hp) orelse break;
+            if (self.find(id)) |s| self.bots[s].src = self.floor_src;
         }
     }
 
     /// Parse a `bot <verb>` command and dispatch. Returns true when the command
     /// was any `bot ...` (consumed even when malformed); false otherwise, so
     /// game/wasm_host.zig can fall through to the ECS plugin verbs.
-    pub fn handleCommand(self: *BotManager, g: *Game, cmd: []const u8) bool {
+    /// `src` is the 1-based wasm slot that queued the command (0 = native).
+    pub fn handleCommand(self: *BotManager, g: *Game, cmd: []const u8, src: i16) bool {
         var it = std.mem.tokenizeScalar(u8, cmd, ' ');
         const verb = it.next() orelse return false;
         if (!std.mem.eql(u8, verb, "bot")) return false;
@@ -508,7 +544,9 @@ pub const BotManager = struct {
             // @floor -> i32 casts, so a huge coordinate must be dropped.
             if (!game_mod.coordInRange(x) or !game_mod.coordInRange(z)) return true;
             const name: []const u8 = if (tn == 3) tokbuf[0] else default_bot_name;
-            _ = self.spawnNamed(g, x, self.cfg.spawn_y, z, bot_max_hp, name);
+            if (self.spawnNamed(g, x, self.cfg.spawn_y, z, bot_max_hp, name)) |id| {
+                if (self.find(id)) |s| self.bots[s].src = src;
+            }
             return true;
         }
         if (std.mem.eql(u8, sub, "move")) {
@@ -567,6 +605,7 @@ pub const BotManager = struct {
         if (std.mem.eql(u8, sub, "count")) {
             const n = it.next() orelse return true;
             if (it.next() != null) return true;
+            self.floor_src = src;
             self.applyCountFloor(g, std.fmt.parseInt(u32, n, 10) catch return true);
             return true;
         }
@@ -979,4 +1018,40 @@ test "BotManager fillSense appends after existing ECS actor records" {
     try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, out[80..84], .little));
     // The gap record (offset 48+4, the pre-existing actor slot) is untouched.
     try std.testing.expectEqual(@as(u8, 0xAA), out[48 + 4]);
+}
+
+test "dropFrom withdraws a plugin's bots and its count floor" {
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 10, .alive = true, .src = 1 };
+    m.bots[1] = .{ .net_id = 11, .alive = true, .src = 2 };
+    m.n = 2;
+    m.floor = 4;
+    m.floor_src = 1;
+    m.dropFrom(1);
+    try std.testing.expectEqual(@as(usize, 1), m.n);
+    try std.testing.expect(!m.bots[0].alive);
+    try std.testing.expect(m.bots[1].alive);
+    try std.testing.expectEqual(@as(u32, 0), m.floor);
+    try std.testing.expectEqual(@as(i16, 0), m.floor_src);
+    // Native src 0 is never withdrawn.
+    m.bots[0] = .{ .net_id = 12, .alive = true, .src = 0 };
+    m.n = 2;
+    m.dropFrom(0);
+    try std.testing.expectEqual(@as(usize, 2), m.n);
+    m.dropFrom(2);
+    try std.testing.expectEqual(@as(usize, 1), m.n);
+    try std.testing.expect(m.bots[0].alive);
+}
+
+test "shiftSrcsAfter remaps remaining bot srcs after a slot drop" {
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 10, .alive = true, .src = 1 };
+    m.bots[1] = .{ .net_id = 11, .alive = true, .src = 3 };
+    m.n = 2;
+    m.floor = 2;
+    m.floor_src = 3;
+    m.shiftSrcsAfter(2);
+    try std.testing.expectEqual(@as(i16, 1), m.bots[0].src);
+    try std.testing.expectEqual(@as(i16, 2), m.bots[1].src);
+    try std.testing.expectEqual(@as(i16, 2), m.floor_src);
 }
