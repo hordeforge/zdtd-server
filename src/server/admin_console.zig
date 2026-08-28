@@ -1414,6 +1414,25 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 const ps = self.sim.playerByPeer(i);
                 const t = if (ps) |p| self.sim.transform[p] else ecs.components.Transform{};
                 const hp: i32 = if (ps) |p| @trunc(self.sim.health[p].hp) else 0;
+                // Stock listplayers prints the platform identity (pltfmid=Local_..)
+                // and the source ip; the loadgen's spawn flow parses exactly this
+                // shape, so surfacing the puid/peer here unblocks telnet zombie
+                // spawning (was always "<unknown>"/"" - 2026-08-29 soak find).
+                var plat_buf: [128]u8 = undefined;
+                var ip_buf: [64]u8 = undefined;
+                const plat_id: []const u8 = if (cl.puid_primary.get()) |pid|
+                    std.fmt.bufPrint(&plat_buf, "{s}_{s}", .{ pid.platform, pid.id }) catch "<unknown>"
+                else
+                    "<unknown>";
+                const ip_str: []const u8 = if (cl.peer) |peer| switch (peer.addr) {
+                    .ip4 => |a| std.fmt.bufPrint(&ip_buf, "{d}.{d}.{d}.{d}", .{ a.bytes[0], a.bytes[1], a.bytes[2], a.bytes[3] }) catch "<unknown>",
+                    // Dual-stack socket: v4 peers arrive as v4-mapped ip6
+                    // (::ffff:127.0.0.1); surface the v4 form like peerIpKey.
+                    .ip6 => |a| if (std.mem.eql(u8, a.bytes[0..12], &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff }))
+                        std.fmt.bufPrint(&ip_buf, "{d}.{d}.{d}.{d}", .{ a.bytes[12], a.bytes[13], a.bytes[14], a.bytes[15] }) catch "<unknown>"
+                    else
+                        "<unknown>",
+                } else "<unknown>";
                 self.adminWrite(admin_cmds.writePlayerRow, .{ n, admin_cmds.PlayerRow{
                     .entity_id = cl.entity_id,
                     .name = cl.name[0..cl.name_len],
@@ -1422,6 +1441,8 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                     .z = t.z,
                     .rot_y = t.yaw,
                     .health = hp,
+                    .platform_id = plat_id,
+                    .ip = ip_str,
                 } });
                 n += 1;
             }
