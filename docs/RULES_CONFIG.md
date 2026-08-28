@@ -66,7 +66,6 @@ Wiring changes that accompany the moves (non-field fixes, same behavior):
 
 | Candidate | Reason |
 |---|---|
-| `aidirector` difficulty/move tier tables (hp 0.5–2.0, speed 0.5–1.7) | `toml_bind` is scalar-only; surfacing needs per-tier scalar expansion (11 fields). Tracked; documented in `aidirector.zig` as zdtd-tuned R9. |
 | `store.zig` sea_level 64 | Used in comptime default literals (`.{sea_level} ** 256`); runtime config would be a structural refactor. (The projection surface around it — `[rules.geometry]` sea_level/height_scale/height_offset/height_ceiling, ADR 0036 — IS config.) |
 | `store.zig`/`water.zig` water-source radius 12 | Worldgen-only carve; low value. |
 | `dem.zig` elevation mapping, `prefabs.zig` paint cap, trader gate scan margins, `sleeper.zig` scatter cap 8, `join.zig` mob burst cap 16, `bot.zig` weapon profiles | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
@@ -84,6 +83,10 @@ Moved since this table was written:
 - **`[rules.geometry]`** (2026-08-28, ADR 0036): elevation projection
   (sea_level 64, height_scale 1.0, height_offset 0.0, height_ceiling 0) on
   the block store; identity at stock defaults; fail-closed validate.
+- **`[rules.director]` tier ladders** (was line 69 above): the per-tier
+  scalars exist — `difficulty_hp_0..5` (0.5–2.0) and `move_scale_0..4`
+  (0.5–1.7) — read by `aidirector.zig` from the rules (the 11-field scalar
+  expansion the old row said was needed already happened).
 
 ## Verification
 
