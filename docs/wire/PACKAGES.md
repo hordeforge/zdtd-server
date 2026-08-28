@@ -17,6 +17,21 @@ NetPackageAllyRequest shows `ReadBoolean;` but actually reads two identities and
 then the bool (asm.il 886226). Same for NetPackageAllyResponse, NetPackageSetBlock
 and NetPackagePlayerLogin. See `src/wire/platform_user.zig` for the real fields.
 
+## V3.2.0 wire delta (not in the V3.1.0 b14 parity table)
+
+The table below is pinned to the V3.1.0 b14 parity snapshot (regenerate via
+`7dtd-engine-research/tools/parity` against the 3.2.0 DLL to fold these rows
+in). The 3.2.0 changes are implemented in `src/wire/packages.zig` and
+grounded in `7dtd-engine-research/docs/changelog-3.2.0.md`:
+
+| Package | Change |
+|---|---|
+| `NetPackageDamageEntity` | **Breaking**: the ten 3.1.0 booleans folded into one packed u32 flag word (`packages.zig dmg_*`), bit 10 `TrapKillXP` new; body gains `KillXPScale` (f32, `packages.zig` DamageEntity builder) and `damageMultiplier` |
+| `NetPackagePOIMetadataRequest` / `NetPackagePOIMetadataResponse` | New; replace `NetPackagePOIAround` (removed). Response = count i32 + `PrefabInstance.POIMetadata` records (pos/size/rot/tier/trader/tags, `packages.zig` POIMetadata) |
+| `NetPackageConfirmSpawnEntity` | New (spawn ack, `packages.zig` name map) |
+| `NetPackageEntityCreationData` | Tail gains `requestedBy`/`requestKey` |
+| `ItemValue.Activated` | Bool → `Flags` bitfield (wire-compatible; `stock_inv.zig`) |
+
 | Package | Dir | Handled(C2S) | Sent(S2C) | read wire (head) |
 |---|---|---|---|---|
 | NetPackageAddRemoveBuff | ? | handled |  | `ReadInt32;ReadString;ReadSingle;ReadBoolean;ReadInt32;SU.Rea` |
