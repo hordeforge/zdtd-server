@@ -302,7 +302,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 };
                 n += 1;
             }
-            const body_out = try packages.buildPoiMetadataResponse(self.body_buf[0..65536], records[0..n]);
+            // Build into a 256 KiB slice, not the old 64 KiB: 512 records of
+            // name/tags/quest_tags can exceed 64 KiB on dense maps (Pregen's
+            // 3469 prefabs overflowed it deterministically, so the response
+            // silently never shipped - 2026-08-29 soak find). body_buf is
+            // 512 KiB and idle here (the request arrives after the configs).
+            const body_out = try packages.buildPoiMetadataResponse(self.body_buf[0..262144], records[0..n]);
             try game_net.sendGameBudget(self, peer, "NetPackagePOIMetadataResponse", body_out, game_mod.window_retry_budget_ns, false);
         }
         return true;

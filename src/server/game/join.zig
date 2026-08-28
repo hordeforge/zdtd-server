@@ -417,7 +417,11 @@ pub fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void {
         pts[0] = .{ .x = @floatFromInt(sp.x), .y = @floatFromInt(sp.y), .z = @floatFromInt(sp.z) };
         n = 1;
     }
-    const body = try packages.buildWorldSpawnPoints(self.body_buf[0..512], pts[0..n]);
+    // 26 bytes per entry + 5 header; 32 entries need 837. The old 512-byte
+    // slice overflowed on maps with >= 20 spawn points (Pregen has many;
+    // Navezgane has 1) - every enter failed with Overflow and the client
+    // silently got no WorldSpawnPoints (2026-08-29 Pregen soak find).
+    const body = try packages.buildWorldSpawnPoints(self.body_buf[0..1024], pts[0..n]);
     try self.sendGameCritical(peer, "NetPackageWorldSpawnPoints", body);
 }
 

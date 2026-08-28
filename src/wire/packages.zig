@@ -1260,6 +1260,34 @@ pub fn buildPoiMetadataResponse(buf: []u8, records: []const PoiMetadata) ![]u8 {
     return w.written();
 }
 
+test "POI metadata response: 512 dense records fit the response buffer" {
+    // Regression (2026-08-29 Pregen soak): the handler built into a 64 KiB
+    // slice, and 512 records with real prefab names/tags exceed it, so the
+    // response silently never shipped on dense maps. The handler now uses a
+    // 256 KiB slice; this pins that the worst-case record count fits.
+    var records: [max_poi_metadata]PoiMetadata = undefined;
+    for (&records, 0..) |*r, i| {
+        r.* = .{
+            .x = @intCast(i),
+            .y = 0,
+            .z = 0,
+            .size_x = 10,
+            .size_y = 8,
+            .size_z = 10,
+            .rotation = 0,
+            .tier = 3,
+            .trader_area = false,
+            .prefab_name = "house_old_brick_02_police_station_red_wasteland_abandoned",
+            .tags = "wasteland,house,red,day,residential,abandoned,police",
+            .quest_tags = "town,residential,abandoned,police,crime,disturbance",
+        };
+    }
+    var buf: [262144]u8 = undefined;
+    const body = try buildPoiMetadataResponse(&buf, &records);
+    try std.testing.expect(body.len > 65536); // the old slice could not hold it
+    try std.testing.expect(body.len < buf.len);
+}
+
 /// NetPackageConfirmSpawnEntity body (V3.2.0, changelog-3.2.0 §3.3):
 /// createdEntityId:i64 (an Int32 field widened on write) + requestKey
 /// Guid.ToByteArray bytes[16]. Sent only for client-requested entity spawns
@@ -2971,6 +2999,19 @@ test "world spawn points stock wire" {
     try std.testing.expectEqual(@as(f32, 51), @as(f32, @bitCast(std.mem.readInt(u32, body[19..23], .little))));
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[23..27], .little));
     try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, body[27..31], .little));
+}
+
+test "world spawn points: 32 entries exceed the old 512-byte join buffer" {
+    // Regression (2026-08-29 Pregen soak): sendWorldSpawnPoints built into a
+    // 512-byte slice, but 32 entries need 837 bytes (26/entry + 5 header), so
+    // maps with >= 20 spawn points overflowed on every enter. The join
+    // handler now uses a 1024-byte slice; pin that the full cap fits.
+    var pts: [32]stock_entity.SpawnPointEntry = undefined;
+    for (&pts, 0..) |*p, i| p.* = .{ .x = @floatFromInt(i), .y = 60, .z = @floatFromInt(i) };
+    var buf: [1024]u8 = undefined;
+    const body = try buildWorldSpawnPoints(&buf, &pts);
+    try std.testing.expect(body.len > 512); // the old slice could not hold it
+    try std.testing.expect(body.len < buf.len);
 }
 
 /// One trader compound for NetPackageWorldAreas: position/size/protect

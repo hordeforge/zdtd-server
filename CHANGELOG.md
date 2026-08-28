@@ -68,6 +68,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Join cost: the storage-TE scan on clean proc chunks dropped 19.7 M → 262 K
   cells; a fresh boot's starter chest is no longer clobbered by a reboot
   with no saved entities; placed deco no longer marks chunks dirty.
+- WorldSpawnPoints buffer: the join-time builder used a 512-byte slice but
+  32 spawn points need 837 bytes, so maps with many spawn points (Pregen06k01
+  has >= 20; Navezgane has 1) overflowed on every enter and the client
+  silently got no spawn points (2026-08-29 Pregen soak find; buffer now
+  1024 with a regression test).
+- POI metadata response buffer: the 3.2.0 `POIMetadataResponse` built into a
+  64 KiB slice, which 512 dense records can exceed - latent overflow on maps
+  with long prefab names; hardened to 256 KiB with a regression test.
 - Admin harden: `settime` clamps to a sane day ceiling (a max-u64 world time
   previously overflowed the blood-moon math and crashed the server); admin
   `tele`/`tp` and plugin spawn/move coordinates are bounded to
