@@ -14,7 +14,7 @@ const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
 
 /// Fail closed on out-of-range query coordinates. parseFloat can yield a
 /// finite value far beyond the i32 range the nav/ground probes cast into, or
-/// NaN/Inf; any of those returns no answer, never a cast (the @intFromFloat
+/// NaN/Inf; any of those returns no answer, never a cast (the @trunc
 /// traps on the same values the C2S movement envelope rejects).
 fn queryCoordLegal(v: f32) bool {
     return game_mod.coordInRange(v);
@@ -253,7 +253,7 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
         var src = g.mcp_allowlist;
         var n: usize = 0;
         while (src.len > 0) {
-            const comma = std.mem.indexOfScalar(u8, src, ',') orelse src.len;
+            const comma = std.mem.findScalar(u8, src, ',') orelse src.len;
             const piece = std.mem.trim(u8, src[0..comma], " \t");
             if (piece.len > 0) {
                 if (n > 0 and n < out.len) {
@@ -328,10 +328,10 @@ fn wasmQueryPath(g: *Game, it: *std.mem.TokenIterator(u8, .scalar), out: []u8) u
     const thx = std.fmt.parseFloat(f32, tx) catch return 0;
     const thz = std.fmt.parseFloat(f32, tz) catch return 0;
     if (!queryCoordLegal(fx) or !queryCoordLegal(fz) or !queryCoordLegal(thx) or !queryCoordLegal(thz)) return 0;
-    const scx = @divFloor(@as(i32, @intFromFloat(fx)), nav.cell_size);
-    const scz = @divFloor(@as(i32, @intFromFloat(fz)), nav.cell_size);
-    const tcx = @divFloor(@as(i32, @intFromFloat(thx)), nav.cell_size);
-    const tcz = @divFloor(@as(i32, @intFromFloat(thz)), nav.cell_size);
+    const scx = @divFloor(@as(i32, @trunc(fx)), nav.cell_size);
+    const scz = @divFloor(@as(i32, @trunc(fz)), nav.cell_size);
+    const tcx = @divFloor(@as(i32, @trunc(thx)), nav.cell_size);
+    const tcz = @divFloor(@as(i32, @trunc(thz)), nav.cell_size);
     var cells: [nav.max_waypoints]nav.Cell = undefined;
     const n = nav.findPath(&g.world, scx, scz, tcx, tcz, &cells);
     if (n == 0) return 0;

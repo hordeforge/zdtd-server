@@ -436,7 +436,7 @@ pub const LootTable = struct {
         if (e.force_prob) return 1;
         const ep = self.entryProb(e, loot_stage);
         if (!(ep > 0)) return 0;
-        return @intFromFloat(@min(ep, 10.0) * 1000.0);
+        return @trunc(@min(ep, 10.0) * 1000.0);
     }
 
     /// Milliprobs for the ischosen reward weighted pick. Non-finite or
@@ -446,7 +446,7 @@ pub const LootTable = struct {
     fn pickWeight(prob: f32) u32 {
         if (!std.math.isFinite(prob) or prob <= 0) return 1;
         const milli: f32 = @min(prob, 4_000_000.0) * 1000.0;
-        return @max(@as(u32, @intFromFloat(milli)), 1);
+        return @max(@as(u32, @trunc(milli)), 1);
     }
 };
 

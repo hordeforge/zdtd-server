@@ -118,7 +118,7 @@ fn triggerVolume(self: *Game, vi: usize) void {
     // (EnemyCount < MaxSpawnedZombies * 2.1, spawning.md) BEFORE waking the
     // volume, so an over-cap world leaves it armed for a later restore.
     if (self.sleeper_cap_gate_enabled) {
-        const cap: u32 = @intFromFloat(@as(f32, @floatFromInt(self.sim.director.max_alive)) * 2.1);
+        const cap: u32 = @trunc(@as(f32, @floatFromInt(self.sim.director.max_alive)) * 2.1);
         if (self.sim.countKind(.zombie) >= cap) return;
     }
     vol.triggered = true;

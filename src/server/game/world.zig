@@ -166,7 +166,7 @@ pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
 /// or material without Experience).
 pub fn harvestXpForBlock(self: *const Game, block_id: u16) u32 {
     if (block_id == 0) return 0;
-    return @intFromFloat(@max(0, self.maxdamage.harvestExpFor(block_id)));
+    return @trunc(@max(0, self.maxdamage.harvestExpFor(block_id)));
 }
 
 /// Wire damage for a block: Stage2Health caps the displayed value (RE
@@ -363,8 +363,8 @@ pub fn drainExplosions(self: *Game) void {
                     // Clamp to u16 like the chew path and the ExplosionClient
                     // broadcast below: the loader caps BlockDamage at 1e6, and
                     // a modded blast times a DamageBonus multiplier can exceed
-                    // 65535, which would trap the @intFromFloat cast.
-                    const dmg: u16 = @intFromFloat(@min(block_dmg * falloff * mult, 65535.0));
+                    // 65535, which would trap the @trunc cast.
+                    const dmg: u16 = @trunc(@min(block_dmg * falloff * mult, 65535.0));
                     if (dmg == 0) continue;
                     const max_hp = self.maxDamageForBlock(id);
                     const total = self.addBlockDamage(wx, wy, wz, dmg) catch continue;
@@ -406,9 +406,9 @@ pub fn drainExplosions(self: *Game) void {
             ex.y,
             ex.z,
             0,
-            @intFromFloat(@min(block_dmg, 65535.0)),
-            @intCast(@max(1, @as(u32, @intFromFloat(radius)))),
-            @intFromFloat(@min(block_dmg, 65535.0)),
+            @trunc(@min(block_dmg, 65535.0)),
+            @intCast(@max(1, @as(u32, @trunc(radius)))),
+            @trunc(@min(block_dmg, 65535.0)),
             nid,
         )) |fxb| {
             self.broadcastNear("NetPackageExplosionClient", fxb, ex.x, ex.z, self.interest_range) catch {};

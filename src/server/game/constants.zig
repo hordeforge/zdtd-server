@@ -10,7 +10,7 @@ pub const max_quest_position_data: usize = 4; // QuestGiver + Location + POIPosi
 /// Absolute ceiling for any player coordinate axis, in blocks. Stock maps are
 /// at most ~10 km across; this is a hard safety ceiling, not world-size
 /// policy. The tick path casts player transforms to block indices via
-/// @intFromFloat (radius-effect scans, trigger activation), so a
+/// @trunc (radius-effect scans, trigger activation), so a
 /// finite-but-huge coordinate from C2S or an admin teleport would leave the
 /// i32 range and trap. C2S movement beyond the ceiling is rejected; admin
 /// teleports are clamped to it.

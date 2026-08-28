@@ -264,8 +264,8 @@ fn selectQuestPoi(
     //    biome name, type 2 requires membership in the comma list, type 3
     //    requires the anchor's biome.
     if (p.biome_type != ecs.quest.biome_filter_none) {
-        const probe_x: i32 = @intFromFloat(if (biome_at_center) @floor(cx) else @floor(bbox_x));
-        const probe_z: i32 = @intFromFloat(if (biome_at_center) @floor(cz) else @floor(bbox_z));
+        const probe_x: i32 = if (biome_at_center) @floor(cx) else @floor(bbox_x);
+        const probe_z: i32 = if (biome_at_center) @floor(cz) else @floor(bbox_z);
         const name = biomeNameAt(g, probe_x, probe_z);
         if (p.biome_type == ecs.quest.biome_filter_exclude) {
             if (name != null and std.mem.eql(u8, name.?, p.biome_filter)) return null;
@@ -670,5 +670,5 @@ fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
     const q: f32 = @floatFromInt(@max(1, @min(quality, 6)));
     const t: f32 = (q - 1.0) / 5.0;
     const v: f64 = @as(f64, d.degradation_min) + (@as(f64, d.degradation_max) - @as(f64, d.degradation_min)) * @as(f64, t);
-    return @intFromFloat(v);
+    return @trunc(v);
 }

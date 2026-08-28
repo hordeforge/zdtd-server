@@ -275,7 +275,7 @@ pub const ItemTable = struct {
         const idx = @min(q, @as(usize, d.mod_slots_n)) - 1;
         const v = d.mod_slots_curve[idx];
         if (v <= 0) return 0;
-        return @intFromFloat(@min(v, 255.0));
+        return @trunc(@min(v, 255.0));
     }
 
     /// Stock ItemValue.type → item name (reverse of stockTypeFor). Walks the

@@ -2067,7 +2067,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
     var out: [4096]u8 = undefined;
     const rep = host.adminCommand("bot help", &out);
     try std.testing.expect(rep != null);
-    try std.testing.expect(std.mem.indexOf(u8, rep.?, "bot help") != null);
+    try std.testing.expect(std.mem.find(u8, rep.?, "bot help") != null);
 
     // Tick 1 (player visible): the brain aims and moves on the player.
     Cap.queued_n = 0;
@@ -2088,30 +2088,30 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
     var skill_out: [256]u8 = undefined;
     const srep = host.adminCommand("bot skill 4 1000", &skill_out);
     try std.testing.expect(srep != null);
-    try std.testing.expect(std.mem.indexOf(u8, srep.?, "id=1000") != null);
+    try std.testing.expect(std.mem.find(u8, srep.?, "id=1000") != null);
 
     // Roster integrity: the brain locked the player (2000) as its target, so
     // `bot list` must show a valid, non-garbage target for bot 1000.
     var list_out: [512]u8 = undefined;
     const lrep = host.adminCommand("bot list", &list_out);
     try std.testing.expect(lrep != null);
-    try std.testing.expect(std.mem.indexOf(u8, lrep.?, "id=1000") != null);
-    try std.testing.expect(std.mem.indexOf(u8, lrep.?, "target=2000") != null);
+    try std.testing.expect(std.mem.find(u8, lrep.?, "id=1000") != null);
+    try std.testing.expect(std.mem.find(u8, lrep.?, "target=2000") != null);
 
     // Per-bot `bot cfg` overrides parse and reply; unknown keys are rejected.
     // vision/reaction are reset to the skill default (0) right after so the
     // later phases still engage the player at range 14.
     var cfg_out: [256]u8 = undefined;
     const c1 = host.adminCommand("bot cfg 1000 vision 5", &cfg_out);
-    try std.testing.expect(c1 != null and std.mem.indexOf(u8, c1.?, "cfg set") != null);
+    try std.testing.expect(c1 != null and std.mem.find(u8, c1.?, "cfg set") != null);
     const c2 = host.adminCommand("bot cfg 1000 reaction 1", &cfg_out);
-    try std.testing.expect(c2 != null and std.mem.indexOf(u8, c2.?, "cfg set") != null);
+    try std.testing.expect(c2 != null and std.mem.find(u8, c2.?, "cfg set") != null);
     const c3 = host.adminCommand("bot cfg 1000 bogus 1", &cfg_out);
-    try std.testing.expect(c3 != null and std.mem.indexOf(u8, c3.?, "unknown key") != null);
+    try std.testing.expect(c3 != null and std.mem.find(u8, c3.?, "unknown key") != null);
     const c4 = host.adminCommand("bot cfg 1000 vision 0", &cfg_out);
-    try std.testing.expect(c4 != null and std.mem.indexOf(u8, c4.?, "cfg set") != null);
+    try std.testing.expect(c4 != null and std.mem.find(u8, c4.?, "cfg set") != null);
     const c5 = host.adminCommand("bot cfg 1000 reaction 0", &cfg_out);
-    try std.testing.expect(c5 != null and std.mem.indexOf(u8, c5.?, "cfg set") != null);
+    try std.testing.expect(c5 != null and std.mem.find(u8, c5.?, "cfg set") != null);
 
     // Tick 2 (identical scene): command gating suppresses redundant move/look.
     Cap.queued_n = 0;
@@ -2125,7 +2125,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
     try std.testing.expect(Cap.queued_n >= 1);
     var found_pursue = false;
     for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
-        if (std.mem.indexOf(u8, c[0..Cap.queued_len[qi]], "10.00 0.00 10.00") != null) found_pursue = true;
+        if (std.mem.find(u8, c[0..Cap.queued_len[qi]], "10.00 0.00 10.00") != null) found_pursue = true;
     }
     try std.testing.expect(found_pursue);
 
@@ -2203,7 +2203,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
         host.onTick();
         for (Cap.queued[0..Cap.queued_n], 0..) |*c, qi| {
             const s = c[0..Cap.queued_len[qi]];
-            if (std.mem.startsWith(u8, s, "bot move ") and std.mem.indexOf(u8, s, "10.00 0.00 10.00") == null) juked = true;
+            if (std.mem.startsWith(u8, s, "bot move ") and std.mem.find(u8, s, "10.00 0.00 10.00") == null) juked = true;
         }
     }
     try std.testing.expect(juked);
@@ -2228,7 +2228,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
     var list2_out: [512]u8 = undefined;
     const l2 = host.adminCommand("bot list", &list2_out);
     try std.testing.expect(l2 != null);
-    try std.testing.expect(std.mem.indexOf(u8, l2.?, "target=2000") != null); // grudge holds the player
+    try std.testing.expect(std.mem.find(u8, l2.?, "target=2000") != null); // grudge holds the player
 
     // Ammo/reload phase: the trailer gives bot 1000 a SNIPER (weapon_id 3,
     // mag 5, burst 1, ~0.6 s between shots). Firing must run the mag dry and
@@ -2348,19 +2348,19 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
     {
         const rep = p.callMcpFrame("{nope", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32700") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "-32700") != null);
     }
     // Batches are refused with Invalid Request.
     {
         const rep = p.callMcpFrame("[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}]", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32600") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "-32600") != null);
     }
     // tools/list before initialize is not allowed (spec -32002).
     {
         const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32002") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "-32002") != null);
     }
     // ping is allowed pre-initialize and echoes the id.
     {
@@ -2376,15 +2376,15 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
             &out,
         );
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"id\":7") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"protocolVersion\":\"2025-06-18\"") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"serverInfo\"") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "\"id\":7") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "\"protocolVersion\":\"2025-06-18\"") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "\"serverInfo\"") != null);
     }
     // Re-initialize is refused.
     {
         const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"initialize\"}", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32600") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "-32600") != null);
     }
     // The initialized notification gets no response and unlocks the tools.
     {
@@ -2395,37 +2395,37 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
     {
         const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"tools\":[") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"name\":\"server_status\"") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"name\":\"admin_command\"") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "\"tools\":[") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "\"name\":\"server_status\"") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "\"name\":\"admin_command\"") != null);
     }
     // Unknown tool and missing name are Invalid Params.
     {
         const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"nope\"}}", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32602") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "-32602") != null);
     }
     // Read tool without a sense surface fails closed (isError, not fake data).
     {
         const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"server_status\"}}", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "no world data available") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "no world data available") != null);
     }
     // With a snapshot the same tool reports real host data.
     Cap.sense_enabled = true;
     {
         const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"server_status\"}}", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "ticks=42") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "players=1") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "zombies=1") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "ticks=42") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "players=1") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "zombies=1") != null);
     }
     {
         const rep = p.callMcpFrame("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"player_list\"}}", &out);
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "id=2000") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "x=10.0") != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "hp=100.0") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "id=2000") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "x=10.0") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "hp=100.0") != null);
     }
     // admin_command: allowlisted verb queues through the plugin boundary...
     Cap.queued_n = 0;
@@ -2435,7 +2435,7 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
             &out,
         );
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "\"result\"") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "\"result\"") != null);
         try std.testing.expectEqual(@as(usize, 1), Cap.queued_n);
         try std.testing.expect(std.mem.eql(u8, Cap.queued[0][0..Cap.queued_len[0]], "bot count 6"));
     }
@@ -2446,7 +2446,7 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
             &out,
         );
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "verb not in allowlist") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "verb not in allowlist") != null);
     }
     // admin_command without a verb is Invalid Params.
     {
@@ -2455,7 +2455,7 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
             &out,
         );
         try std.testing.expect(rep != null);
-        try std.testing.expect(std.mem.indexOf(u8, rep.?, "-32602") != null);
+        try std.testing.expect(std.mem.find(u8, rep.?, "-32602") != null);
     }
     // No module trapped or exhausted fuel through the whole sequence.
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());

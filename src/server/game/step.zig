@@ -265,7 +265,7 @@ pub fn step(self: *Game) !void {
                 const trap_xp_scaled: u64 = if (!std.math.isFinite(trap_scaled_f))
                     0
                 else
-                    @min(@as(u64, @intFromFloat(trap_scaled_f)), std.math.maxInt(i32));
+                    @min(@as(u64, @trunc(trap_scaled_f)), std.math.maxInt(i32));
                 self.killXpAward(osz, trap_xp_scaled, 100, true); // trap kills carry no verdict scale, no party share (V3.2.0 §4.3)
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
@@ -507,7 +507,7 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     const level: f32 = @floatFromInt(self.clients[peer].level);
     const base = level * (1.0 + mods[idx]);
     // Clamp before the cast: a modded quest_tier_mod can push base past the
-    // i32 range (finite), which traps @intFromFloat.
+    // i32 range (finite), which traps @trunc.
     if (!std.math.isFinite(base) or base < 1.0) return 1;
     // 2^31 is exactly representable in f32; anything at or above it
     // truncates out of i32 range.

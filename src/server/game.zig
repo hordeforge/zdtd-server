@@ -214,8 +214,8 @@ const wasmQuery = game_wasm_host.wasmQuery;
 /// attacker unknown (-1). <0 deny, 0 keep, >0 scale by percent.
 pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
-    const sv = g.plugins.playerDamage(-1, victim, @intFromFloat(amount));
-    return if (sv != 0) sv else g.wasm_plugins.playerDamage(-1, victim, @intFromFloat(amount));
+    const sv = g.plugins.playerDamage(-1, victim, @trunc(amount));
+    return if (sv != 0) sv else g.wasm_plugins.playerDamage(-1, victim, @trunc(amount));
 }
 
 /// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
@@ -226,8 +226,8 @@ pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
 /// radiation, starvation, attacker -1) and explosion damage (attacker = the
 /// blaster), so a module shapes ALL damage directed at players.
 pub fn playerDamageVerdictAmount(g: *Game, attacker: i32, victim: i32, amount: f32) f32 {
-    const sv = g.plugins.playerDamage(attacker, victim, @intFromFloat(amount));
-    const v = if (sv != 0) sv else g.wasm_plugins.playerDamage(attacker, victim, @intFromFloat(amount));
+    const sv = g.plugins.playerDamage(attacker, victim, @trunc(amount));
+    const v = if (sv != 0) sv else g.wasm_plugins.playerDamage(attacker, victim, @trunc(amount));
     if (v < 0) return 0;
     if (v > 0) return amount * @as(f32, @floatFromInt(v)) / 100.0;
     return amount;

@@ -1308,7 +1308,7 @@ test "scenario stealth meter broadcasts NetPackageEntityStealth to observers" {
             }
         }
     }
-    const expect: u8 = @intFromFloat(@min(g.sim.stealth[pa].noise_volume, 127.0));
+    const expect: u8 = @trunc(@min(g.sim.stealth[pa].noise_volume, 127.0));
     const got_v = got orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(expect, got_v);
     try std.testing.expect(got_v > 0); // a real meter value, not a zero ping
@@ -1357,9 +1357,9 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
     // blocks up; an airborne cop falls and dies before the drain) and offset
     // the whole blast a bit from the player so the entity AoE spares them.
     const px = g.sim.transform[c.slot];
-    const gx: i32 = @as(i32, @intFromFloat(px.x)) + 10;
-    const gz: i32 = @as(i32, @intFromFloat(px.z)) + 10;
-    const gy: i32 = @intFromFloat(g.groundHeight(gx, gz));
+    const gx: i32 = @as(i32, @trunc(px.x)) + 10;
+    const gz: i32 = @as(i32, @trunc(px.z)) + 10;
+    const gy: i32 = @trunc(g.groundHeight(gx, gz));
     // Cop A: radius 5, block damage 5000 (overrides the 1000 floor), entity
     // damage 800, DamageBonus earth -> 0.
     g.sim.setClassDef(1, .{
@@ -1958,9 +1958,9 @@ test "scenario always-on radius effect: radiated barrel grants buffRadiation01" 
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
     const ap = g.sim.transform[ps];
-    const bx: i32 = @intFromFloat(ap.x + 1);
-    const by: i32 = @intFromFloat(ap.y);
-    const bz: i32 = @intFromFloat(ap.z);
+    const bx: i32 = @trunc(ap.x + 1);
+    const by: i32 = @trunc(ap.y);
+    const bz: i32 = @trunc(ap.z);
     try g.world.setBlockWorld(bx, by, bz, barrel_id);
 
     var t: u64 = 0;
@@ -2611,23 +2611,23 @@ test "scenario in-game player console: allowlist, deny, and admin routing" {
     // the friendly help text.
     var hbuf: [512]u8 = undefined;
     const help = try sendCmd(g, c, &cap, "help", &hbuf);
-    try std.testing.expect(std.mem.indexOf(u8, help, "zdtd console commands") != null);
+    try std.testing.expect(std.mem.find(u8, help, "zdtd console commands") != null);
     // gettime carries the jittered CalcNextDay blood-moon countdown (the
     // plain frequency modulus ignored BloodMoonRange).
     g.sim.director.clock.bloodmoon_frequency = 7;
     var gbuf: [512]u8 = undefined;
     const gt = try sendCmd(g, c, &cap, "gettime", &gbuf);
-    try std.testing.expect(std.mem.indexOf(u8, gt, "bloodmoon in") != null);
+    try std.testing.expect(std.mem.find(u8, gt, "bloodmoon in") != null);
     // A non-allowlisted verb is denied for a plain player.
     var dbuf: [512]u8 = undefined;
     const deny = try sendCmd(g, c, &cap, "kick nobody", &dbuf);
-    try std.testing.expect(std.mem.indexOf(u8, deny, "permission denied") != null);
+    try std.testing.expect(std.mem.find(u8, deny, "permission denied") != null);
     // Admin (permission list entry): the same verb routes through the full
     // admin surface; the reply is captured (kick's target error), not denied.
     try std.testing.expect(g.admin_list.add("Bot", 0));
     var abuf: [512]u8 = undefined;
     const adm = try sendCmd(g, c, &cap, "kick nobody", &abuf);
-    try std.testing.expect(std.mem.indexOf(u8, adm, "permission denied") == null);
+    try std.testing.expect(std.mem.find(u8, adm, "permission denied") == null);
     try std.testing.expect(adm.len > 0);
     std.debug.print("PASS player-console: allowlist + deny + admin routing with captured reply\n", .{});
 }
@@ -4094,7 +4094,7 @@ test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele 
     // stock range (1<<24, wire/packages.zig world_coord_limit) must be
     // rejected at the envelope - even on the first packet after spawn, where
     // move_valid=false would otherwise apply it directly and the tick path's
-    // @intFromFloat casts could still trap further out.
+    // @trunc casts could still trap further out.
     var pos_body: [64]u8 = undefined;
     var frame_buf: [128]u8 = undefined;
     const before = g.harness.counters.get(.bounds_rejects);
@@ -7803,7 +7803,7 @@ test "scenario on_player_damage verdict denies PvP via the real core_pvp module"
     // non-PvP damage untouched). Spawn it beside player A so the interest
     // range gate passes.
     const ap = g.sim.transform[pa];
-    const zy = g.groundHeight(@intFromFloat(ap.x + 2), @intFromFloat(ap.z));
+    const zy = g.groundHeight(@trunc(ap.x + 2), @trunc(ap.z));
     const zid = g.sim.spawnZombie(ap.x + 2, zy, ap.z, 100).?;
     const zs = g.sim.slotOfNetId(zid).?;
     const zhp0 = g.sim.health[zs].hp;
@@ -8061,9 +8061,9 @@ test "scenario player dig routes the on_block_damage verdict (plugin_rules doubl
     const c = try g.attachJoinedClient(&cap);
     const pa = g.sim.playerByPeer(c.slot).?;
     const ap = g.sim.transform[pa];
-    const bx: i32 = @intFromFloat(ap.x + 1);
-    const bz: i32 = @intFromFloat(ap.z);
-    const by: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    const bx: i32 = @trunc(ap.x + 1);
+    const bz: i32 = @trunc(ap.z);
+    const by: i32 = @trunc(g.groundHeight(bx, bz));
     try g.world.setBlockWorld(bx, by, bz, world_store.block_stone);
 
     // Control: a dig claiming 10 damage on a fresh block applies exactly 10.
@@ -8118,9 +8118,9 @@ test "scenario harvest drops roll into the breaker (terrStone → resourceRockSm
     const c = try g.attachJoinedClient(&cap);
     const pa = g.sim.playerByPeer(c.slot).?;
     const ap = g.sim.transform[pa];
-    const bx: i32 = @intFromFloat(ap.x + 1);
-    const bz: i32 = @intFromFloat(ap.z);
-    const by: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    const bx: i32 = @trunc(ap.x + 1);
+    const bz: i32 = @trunc(ap.z);
+    const by: i32 = @trunc(g.groundHeight(bx, bz));
     try g.world.setBlockWorld(bx, by, bz, stone_id);
 
     // A dig claiming far beyond MaxDamage breaks the block in one swing.
@@ -8195,9 +8195,9 @@ test "scenario harvest count scales by the held tool's HarvestCount passive" {
 
     // Wooden club in hand: 0.25x on the oreWoodHarvest drop -> 13 rocks.
     g.sim.inventory[ps].slots[g.sim.inventory[ps].holding] = .{ .item_id = club_id, .count = 1, .quality = 1 };
-    const bx: i32 = @intFromFloat(ap.x + 1);
-    const bz: i32 = @intFromFloat(ap.z);
-    const by: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    const bx: i32 = @trunc(ap.x + 1);
+    const bz: i32 = @trunc(ap.z);
+    const by: i32 = @trunc(g.groundHeight(bx, bz));
     try g.world.setBlockWorld(bx, by, bz, stone_id);
     try breakAt(g, c, bx, by, bz, stone_id);
     try std.testing.expectEqual(@as(u32, 13), countRocks(g, c.slot, rock_id));
@@ -8238,7 +8238,7 @@ test "scenario fall-event drops re-place debris at landing (terrDirt)" {
 
     const bx: i32 = 250;
     const bz: i32 = 250;
-    const base_y: i32 = @intFromFloat(g.groundHeight(bx, bz));
+    const base_y: i32 = @trunc(g.groundHeight(bx, bz));
     try g.setBlock(bx, base_y, bz, dirt_id);
     try g.setBlock(bx, base_y + 1, bz, dirt_id);
     try g.setBlock(bx, base_y + 2, bz, dirt_id);
@@ -8666,14 +8666,14 @@ test "scenario wasmQuery cover: none on open ground, found behind a wall" {
     // candidate (-7.07,-7.07) blocks that line: the query must now return a
     // point, and it must be the hidden direction, not the open one.
     const h = g.groundHeight(1, 1);
-    const hh: i32 = @intFromFloat(h);
+    const hh: i32 = @trunc(h);
     try g.world.setBlockWorld(1, hh, 1, world_store.block_stone);
     try g.world.setBlockWorld(1, hh + 1, 1, world_store.block_stone);
     try g.world.setBlockWorld(1, hh + 2, 1, world_store.block_stone);
     const n = game_wasm_host.wasmQuery(&g.wasm_ctx, "cover 0 0 10 10", &out);
     try std.testing.expect(n >= 3);
     // Response is "<cx> <cz>" — a two-float answer with a space separator.
-    const sep = std.mem.indexOfScalar(u8, out[0..n], ' ');
+    const sep = std.mem.findScalar(u8, out[0..n], ' ');
     try std.testing.expect(sep != null);
     const cx = std.fmt.parseFloat(f32, out[0..sep.?]) catch 0;
     const cz = std.fmt.parseFloat(f32, out[sep.? + 1 .. n]) catch 0;
@@ -8698,7 +8698,7 @@ test "scenario wasmQuery path: nav path across loaded chunks" {
 
     // Ensure chunks (0..1, 0..1) exist with a walkable floor at ground height.
     const h = g.groundHeight(0, 0);
-    const hh: i32 = @intFromFloat(h);
+    const hh: i32 = @trunc(h);
     var x: i32 = 0;
     while (x < 32) : (x += 1) {
         var z: i32 = 0;

@@ -380,7 +380,7 @@ fn sandboxPct(v: f32) u16 {
     const p = @round(v * 100.0);
     if (p < 0.0) return 0;
     if (p > 65535.0) return 65535;
-    return @intFromFloat(p);
+    return @trunc(p);
 }
 
 fn sandboxIntU8(v: i32) u8 {

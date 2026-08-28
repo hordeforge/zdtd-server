@@ -127,8 +127,8 @@ const Wbuf = struct {
         }
         const neg = v_in < 0;
         const v = if (neg) -v_in else v_in;
-        var whole: i64 = @intFromFloat(v);
-        var frac: i64 = @intFromFloat((v - @as(f32, @floatFromInt(whole))) * 10.0 + 0.5);
+        var whole: i64 = @trunc(v);
+        var frac: i64 = @trunc((v - @as(f32, @floatFromInt(whole))) * 10.0 + 0.5);
         if (frac >= 10) {
             whole += 1;
             frac = 0;

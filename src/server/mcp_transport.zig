@@ -306,7 +306,7 @@ pub const Transport = struct {
 // Small HTTP helpers (mirror webui.zig idioms; private to this file).
 
 fn pathOnly(target: []const u8) []const u8 {
-    return target[0 .. std.mem.indexOfScalar(u8, target, '?') orelse target.len];
+    return target[0 .. std.mem.findScalar(u8, target, '?') orelse target.len];
 }
 
 fn httpReasonPhrase(status: u16) []const u8 {
@@ -332,7 +332,7 @@ fn peekContentLength(buf: []const u8) !usize {
     _ = it.next(); // request line
     while (it.next()) |line| {
         if (line.len == 0) break;
-        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        const colon = std.mem.findScalar(u8, line, ':') orelse continue;
         const name = std.mem.trim(u8, line[0..colon], " \t");
         const value = std.mem.trim(u8, line[colon + 1 ..], " \t");
         if (std.ascii.eqlIgnoreCase(name, "content-length")) {

@@ -51,7 +51,7 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
     // Stat-changed observer (ADR 0034): the XP/level leg, one call per award.
     if (c.xp != before_xp) {
         const h = &self.sim.health[self.sim.playerByPeer(slot) orelse return];
-        self.statChangedObserver(c.entity_id, @intFromFloat(h.hp), @intFromFloat(h.food), @intFromFloat(h.water), @intFromFloat(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+        self.statChangedObserver(c.entity_id, @trunc(h.hp), @trunc(h.food), @trunc(h.water), @trunc(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
     }
 }
 
@@ -91,12 +91,12 @@ pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
         if (g > 0) {
             // Clamp before the cast: a modded ExperienceGain past u64 range
             // (finite) traps the float->int conversion. 2^31 is exact in f32.
-            return @intFromFloat(@min(@trunc(g), 2147483648.0));
+            return @trunc(@min(@trunc(g), 2147483648.0));
         }
     }
     // Rules floor (progression.kill_xp_fallback) when the class resolved no
     // ExperienceGain (offline/builtin catalog or recycled slot).
-    return @intFromFloat(@max(0, self.sim.rules.progression.kill_xp_fallback));
+    return @trunc(@max(0, self.sim.rules.progression.kill_xp_fallback));
 }
 
 /// Party.GetPartyXP + GameManager.SharedKillServer (parties-factions.md
@@ -217,9 +217,9 @@ pub fn tickStealthBroadcast(self: *Game) void {
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
         if (!self.sim.mask[ps].transform) continue;
         const noise = self.sim.stealth[ps].noise_volume;
-        const noise8: u8 = @intFromFloat(@min(noise, 127.0));
+        const noise8: u8 = @trunc(@min(noise, 127.0));
         const crouch = self.sim.player[ps].crouching;
-        const light8: u8 = @intFromFloat(@min(
+        const light8: u8 = @trunc(@min(
             systems.stealthLightLevel(self.sim.ambient_light, self.sim.heldLightFor(ps), crouch, self.sim.rules.ai.stealth_light_passive, self.sim.stealth[ps].speed_average),
             255.0,
         ));

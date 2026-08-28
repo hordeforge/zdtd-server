@@ -92,7 +92,7 @@ fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f3
     const dz = pz - zz;
     const dist = @sqrt(dx * dx + dy * dy + dz * dz);
     if (dist < 0.001) return true;
-    const steps: usize = @intCast(@min(@as(u32, @intFromFloat(dist / 0.8)), 64));
+    const steps: usize = @intCast(@min(@as(u32, @trunc(dist / 0.8)), 64));
     var i: usize = 1;
     while (i < steps) : (i += 1) {
         const t = @as(f32, @floatFromInt(i)) * 0.8 / dist;
@@ -1442,12 +1442,12 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             scaled *= @as(f64, p(w.percent_uses_left_ctx, item, sold_quality, sold_use_times));
         }
         // Clamp before the cast: a hostile sell hook or modded quality_mod can
-        // exceed u32 range (or go non-finite), which traps in @intFromFloat;
+        // exceed u32 range (or go non-finite), which traps in @trunc;
         // fail closed at 1 instead of crashing the tick.
         if (!std.math.isFinite(scaled) or scaled <= 1.0) {
             unit = 1;
         } else {
-            unit = @intFromFloat(@min(scaled, @as(f64, std.math.maxInt(u32))));
+            unit = @trunc(@min(scaled, @as(f64, std.math.maxInt(u32))));
         }
         if (unit == 0) return false;
         // Same widening as the buy cost above.
@@ -1819,7 +1819,7 @@ const AiCtx = struct {
                     if (ai.prime_ticks > 0) {
                         ai.prime_ticks -= 1;
                         if (ai.prime_ticks == 0) {
-                            ai.explode_ticks = @intFromFloat(delay / 5.0 * 1.5 * 20.0);
+                            ai.explode_ticks = @trunc(delay / 5.0 * 1.5 * 20.0);
                         }
                     }
                     if (ai.explode_ticks > 0) {
@@ -1833,7 +1833,7 @@ const AiCtx = struct {
                     !ctx.w.mask[s].sleeper)
                 {
                     ai.primed = true;
-                    ai.prime_ticks = @intFromFloat(delay * 20.0);
+                    ai.prime_ticks = @trunc(delay * 20.0);
                 }
             }
 
@@ -2928,7 +2928,7 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
                     // the stock conv.i4; players reduce it by armor
                     // mitigation (passive 164 is the armor reduction path).
                     const raw: f32 = @min(f.mass_kg * -f.vy * 0.05, 40.0);
-                    var dmg: f32 = @floatFromInt(@as(i32, @intFromFloat(raw)));
+                    var dmg: f32 = @floatFromInt(@as(i32, @trunc(raw)));
                     if (kind == .player) {
                         const mit = inventory.armorMitigation(w, @intCast(w.player[t].peer_slot));
                         dmg *= 1.0 - mit;

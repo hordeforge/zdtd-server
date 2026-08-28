@@ -574,8 +574,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
             if (self.sim.mask[ei].player) {
                 const atk = self.sim.network_id[actor_slot].id;
-                const sv = self.plugins.playerDamage(atk, d.entity_id, @intFromFloat(amount));
-                const v = if (sv != 0) sv else self.wasm_plugins.playerDamage(atk, d.entity_id, @intFromFloat(amount));
+                const sv = self.plugins.playerDamage(atk, d.entity_id, @trunc(amount));
+                const v = if (sv != 0) sv else self.wasm_plugins.playerDamage(atk, d.entity_id, @trunc(amount));
                 if (v < 0) return true;
                 if (v > 0) amount = amount * @as(f32, @floatFromInt(v)) / 100.0;
             }

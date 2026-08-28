@@ -445,7 +445,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        const rad: i32 = @intFromFloat(@max(1, @min(ex.radius, max_claimed_explosion_radius)));
+        const rad: i32 = @trunc(@max(1, @min(ex.radius, max_claimed_explosion_radius)));
         const cx = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bx else @as(i32, @floor(ex.wx));
         const cy = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.by else @as(i32, @floor(ex.wy));
         const cz = if (ex.bx != 0 or ex.by != 0 or ex.bz != 0) ex.bz else @as(i32, @floor(ex.wz));

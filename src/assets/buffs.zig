@@ -726,7 +726,7 @@ fn addTo(out: *TrackedDeltas, field: TrackedField, v: f32) void {
 /// Sanity ceiling for a tracked delta (f32). Stock stat values and passive
 /// deltas are < 1e4; the ceiling keeps a pathological modded curve value
 /// (1e38, inf, or nan from a passive/effect attribute) from reaching the
-/// tick's @intFromFloat casts on the max stats, while leaving every real
+/// tick's @trunc casts on the max stats, while leaving every real
 /// curve 10000x of headroom. NaN folds to 0 (fail closed); the sign is
 /// kept for finite values.
 pub const tracked_delta_max: f32 = 1_000_000;
@@ -1194,7 +1194,7 @@ test "effectTotals sums active buffs and reverts exactly on removal" {
 
 test "addDeltas clamps pathological curve values to the sanity ceiling" {
     // A modded passive value of 1e38 (or inf/nan) must not reach the tick's
-    // @intFromFloat casts; the fold saturates instead.
+    // @trunc casts; the fold saturates instead.
     const def = BuffDef{
         .name = "hugeBuff",
         .passives = &.{

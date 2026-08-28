@@ -53,14 +53,14 @@ fn damageFor(code: []const u8, option: []const u8) f32 {
 /// quote. Comptime-safe (pure slice ops over the embedded XML).
 fn attrValue(s: []const u8, key: []const u8) ?[]const u8 {
     var i: usize = 0;
-    while (std.mem.indexOfPos(u8, s, i, key)) |k| {
+    while (std.mem.findPos(u8, s, i, key)) |k| {
         const vstart = k + key.len;
         if (vstart >= s.len) return null;
         if (s[vstart] != '"') {
             i = k + 1;
             continue;
         }
-        const vend = std.mem.indexOfScalarPos(u8, s, vstart + 1, '"') orelse return null;
+        const vend = std.mem.findScalarPos(u8, s, vstart + 1, '"') orelse return null;
         return s[vstart + 1 .. vend];
     }
     return null;
@@ -74,8 +74,8 @@ pub const difficulty: [6]DifficultyPreset = blk: {
     var n: usize = 0;
     var i: usize = 0;
     while (n < out.len) {
-        const pi = std.mem.indexOfPos(u8, src, i, "<preset ") orelse break;
-        const pe = std.mem.indexOfPos(u8, src, pi, "/>") orelse break;
+        const pi = std.mem.findPos(u8, src, i, "<preset ") orelse break;
+        const pe = std.mem.findPos(u8, src, pi, "/>") orelse break;
         const tag = src[pi .. pe + 2];
         if (attrValue(tag, "category=")) |cat| {
             if (std.mem.eql(u8, cat, "Difficulty")) {

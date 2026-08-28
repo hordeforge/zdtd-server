@@ -41,7 +41,7 @@ pub const ApplyResult = struct { x: f32, y: f32, z: f32, applied: bool };
 pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entity_id: i32, x: f32, y: f32, z: f32) ApplyResult {
     // Rule 20: range-check untrusted movement. NaN/Inf and any coordinate
     // beyond the ceiling are rejected (never clamped): the sim transform must
-    // not hold a value that traps the tick-path @intFromFloat casts (radius
+    // not hold a value that traps the tick-path @trunc casts (radius
     // scans, trigger activation), and clamping an attacker's coordinate would
     // still "teleport" them to the ceiling. The first packet after spawn
     // applies directly (move_valid=false), so this must run before that arm.

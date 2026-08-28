@@ -740,9 +740,9 @@ fn parseObjectiveKinds(arena: std.mem.Allocator, spec: ?[]const u8) ![]const que
     while (i < s.len) {
         while (i < s.len and (s[i] == ' ' or s[i] == '\t' or s[i] == ',')) i += 1;
         if (i >= s.len) break;
-        const eq = std.mem.indexOfScalarPos(u8, s, i, '=') orelse break;
+        const eq = std.mem.findScalarPos(u8, s, i, '=') orelse break;
         const typ = std.mem.trim(u8, s[i..eq], " \t");
-        const end = std.mem.indexOfScalarPos(u8, s, eq + 1, ',') orelse s.len;
+        const end = std.mem.findScalarPos(u8, s, eq + 1, ',') orelse s.len;
         const kind_str = std.mem.trim(u8, s[eq + 1 .. end], " \t");
         if (phaseKindFromName(kind_str)) |k| {
             if (typ.len > 0) try tmp.append(arena, .{ .obj_type = try dupe(arena, typ), .kind = k });

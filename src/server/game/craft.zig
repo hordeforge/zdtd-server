@@ -422,9 +422,9 @@ pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
         const ps = self.sim.playerByPeer(cl.slot) orelse continue;
         if (!self.sim.mask[ps].transform) continue;
         const t = self.sim.transform[ps];
-        const px: i32 = @intFromFloat(@floor(t.x));
-        const py: i32 = @intFromFloat(@floor(t.y));
-        const pz: i32 = @intFromFloat(@floor(t.z));
+        const px: i32 = @floor(t.x);
+        const py: i32 = @floor(t.y);
+        const pz: i32 = @floor(t.z);
         var dx: i32 = -3;
         while (dx <= 3) : (dx += 1) {
             var dy: i32 = -3;

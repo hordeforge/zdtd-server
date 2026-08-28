@@ -484,12 +484,12 @@ pub fn rollBlockDropEvent(
         // RandomRange(minCount, maxCount+1): uniform count in [min, max].
         // Clamp at the roll: the final stack store is u16 and the XML count
         // values parse as unbounded u32, so a modded row must not trap the
-        // @intFromFloat cast (same class as the explosion block-AoE clamp).
+        // @trunc cast (same class as the explosion block-AoE clamp).
         var count: u32 = @min(d.count_min, 65535);
         if (d.count_max > d.count_min) {
             const span: f64 = @as(f64, @floatFromInt(d.count_max)) + 1.0 -
                 @as(f64, @floatFromInt(d.count_min));
-            count += @as(u32, @intFromFloat(@min(span * @as(f64, @floatCast(prng.nextFloat())), 65535.0)));
+            count += @as(u32, @trunc(@min(span * @as(f64, @floatCast(prng.nextFloat())), 65535.0)));
         }
         if (count > 65535) count = 65535;
         if (count == 0) continue; // IL: skip if 0 (the count="0" rows).
@@ -517,7 +517,7 @@ pub fn rollBlockDropEvent(
                         if (mult <= 0) continue;
                         // Clamp before the cast (modded HarvestCount rows can
                         // multiply far past u32); the stack store is u16 anyway.
-                        count = @intFromFloat(@min(@as(f64, @floatFromInt(count)) * @as(f64, mult), 65535.0));
+                        count = @trunc(@min(@as(f64, @floatFromInt(count)) * @as(f64, mult), 65535.0));
                         if (count == 0) continue;
                     }
                 }

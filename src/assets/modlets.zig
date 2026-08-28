@@ -159,7 +159,7 @@ fn parseModInfo(folder: []const u8, info: []const u8) ?struct {
     };
     // nameValidationRegex is not pinned from IL (G2): enforce the observable
     // stock contract (non-empty, no path separators) plus a sane cap.
-    if (name.len == 0 or name.len > 64 or std.mem.indexOfAny(u8, name, "/\\") != null) {
+    if (name.len == 0 or name.len > 64 or std.mem.findAny(u8, name, "/\\") != null) {
         util_log.warn("zdtd: [MODS]{s}/ModInfo.xml Name '{s}' invalid; mod skipped\n", .{ folder, name });
         return null;
     }
