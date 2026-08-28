@@ -146,6 +146,33 @@ block_id_mapping = true
 # [mods]
 # disabled = "zdtd_killfeed"   # skip loading, one info log per mod
 # blacklist = "evil_mod"       # refuse; also vetoes overrides/requires of it
+# enabled = ["infinite_world"] # config-only mods: activates its `mode` pack
+#                              # (mods/infinite_world/mod.toml -> modes/infinite.toml)
+
+# Gamemode pack (CLI --mode wins; modes/<name>.toml).
+# [mode]
+# name = "infinite"
+
+# Procedural terrain seed (zdtd-invented worldgen, not stock RWG; CLI
+# --worldgen-seed wins; ignored with --map).
+# [worldgen]
+# seed = 7
+
+# Malleable world geometry (ADR 0036): elevation projection + [rules.worldgen]
+# shaping. Identity at the stock defaults; see docs/GAME_OPTIONS.md.
+# [rules.geometry]
+# height_scale = 1.0
+# height_offset = 0.0
+# height_ceiling = 0
+# [rules.worldgen]
+# base_height = 68
+# height_amp = 24
+# min_surface = 12
+# max_surface = 200
+# squash = 28
+# noise_weight = 0.85
+# y_scale = 2.0
+# bedrock_h = 3
 
 # Sim rule overlay (ADR 0021, docs/GAME_OPTIONS.md "[rules] sim rules"). Both
 # this file and a mode pack can set [rules.*]; the operator's zdtd.toml wins
