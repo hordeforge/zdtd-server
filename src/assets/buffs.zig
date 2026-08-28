@@ -723,9 +723,22 @@ fn addTo(out: *TrackedDeltas, field: TrackedField, v: f32) void {
     }
 }
 
+/// Sanity ceiling for a tracked delta (f32). Stock stat values and passive
+/// deltas are < 1e4; the ceiling keeps a pathological modded curve value
+/// (1e38, inf, or nan from a passive/effect attribute) from reaching the
+/// tick's @intFromFloat casts on the max stats, while leaving every real
+/// curve 10000x of headroom. NaN folds to 0 (fail closed); the sign is
+/// kept for finite values.
+pub const tracked_delta_max: f32 = 1_000_000;
+
+fn clampDelta(v: f32) f32 {
+    if (std.math.isNan(v)) return 0;
+    return std.math.clamp(v, -tracked_delta_max, tracked_delta_max);
+}
+
 fn addDeltas(a: *TrackedDeltas, b: TrackedDeltas) void {
     inline for (@typeInfo(TrackedDeltas).@"struct".fields) |f| {
-        @field(a, f.name) += @field(b, f.name);
+        @field(a, f.name) = clampDelta(@field(a, f.name) + @field(b, f.name));
     }
 }
 
@@ -1177,6 +1190,36 @@ test "effectTotals sums active buffs and reverts exactly on removal" {
     try std.testing.expectEqual(@as(f32, 10), back.stamina_max);
     set.slots[0].active = false;
     try std.testing.expect(!effectTotals(&t, &set).any());
+}
+
+test "addDeltas clamps pathological curve values to the sanity ceiling" {
+    // A modded passive value of 1e38 (or inf/nan) must not reach the tick's
+    // @intFromFloat casts; the fold saturates instead.
+    const def = BuffDef{
+        .name = "hugeBuff",
+        .passives = &.{
+            .{ .name = "HealthMax", .op = .base_add, .value = 1e38 },
+            .{ .name = "HealthChangeOT", .op = .base_add, .value = std.math.inf(f32) },
+        },
+    };
+    const defs = [_]BuffDef{def};
+    const t = Table{ .defs = defs[0..] };
+    var set: components.BuffSet = .{};
+    set.slots[0] = .{ .active = true, .def_id = 0 };
+    const totals = effectTotals(&t, &set);
+    try std.testing.expectEqual(tracked_delta_max, totals.hp_max);
+    try std.testing.expectEqual(tracked_delta_max, totals.hp_ot);
+    // NaN folds to 0 (fail closed), and a second huge buff still saturates.
+    const def2 = BuffDef{
+        .name = "nanBuff",
+        .passives = &.{.{ .name = "StaminaMax", .op = .base_add, .value = std.math.nan(f32) }},
+    };
+    const defs2 = [_]BuffDef{ def, def2 };
+    const t2 = Table{ .defs = defs2[0..] };
+    set.slots[1] = .{ .active = true, .def_id = 1 };
+    const t2totals = effectTotals(&t2, &set);
+    try std.testing.expectEqual(@as(f32, 0), t2totals.stamina_max);
+    try std.testing.expectEqual(tracked_delta_max, t2totals.hp_max);
 }
 
 test "survivalStages selects the stock stage thresholds (0.5 / 0.25 / 0.02)" {
