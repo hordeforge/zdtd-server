@@ -412,6 +412,7 @@ field-by-field provenance.
 | `server/game/map.zig map_batch` | 8 | Z | **zdtd-owned** minimap pieces per send (8 = 4128 bytes raw); the stock producer sends the whole window at once, zdtd batches to bound the per-frame cost (2026-08-29 sweep) |
 | `server/game/map.zig map_walk_above` | 64 | Z | **zdtd-owned** perf floor for the top-block minimap walk (stock walks the whole 256 column; a cell above a 64+-block structure stays invisible) (2026-08-29 sweep) |
 | `litenet/peer.zig` resend_ns / ack_yield_ns | 80 ms / 2 ms | Z | **zdtd-owned** LiteNet-compatible transport timings: resend gate in the same ballpark as LiteNet, and the WindowFull pump sleep (far below the resend gate, above loopback RTT) so the reliable window drains between join-burst sends; same class as `join_ack_yield_ns` (2026-08-29 sweep) |
+| `server/game/types.zig` window_retry_budget_ns / window_fast_attempts / window_retry_sleep_ns | 16 ms / 16 / 1 ms | Z | **zdtd-owned** per-package reliable-send retry pump: 16 ms budget (critical 1 s), 16 fast attempts before the 1 ms sleep cadence (every 4th); the pump bounds a wedged window per package instead of spinning (2026-08-29 transport review) |
 
 ### 3.9 Divergence register (provenance for the differences)
 
