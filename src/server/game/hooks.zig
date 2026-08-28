@@ -393,6 +393,13 @@ pub fn questAcceptAt(ctx: ?*anyopaque, peer_slot: i32, def_id: u16) i32 {
     return if (sv != 0) sv else g.wasm_plugins.questAccept(player, def_id);
 }
 
+/// Stock item name → ECS id. Wired to World.item_id_fn so spawnPlayer's
+/// starter kit resolves through the loaded items table (fail closed → 0).
+pub fn itemIdByName(ctx: ?*anyopaque, name: []const u8) u16 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.items.ecsIdByName(name);
+}
+
 pub fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const IdCtx = struct {

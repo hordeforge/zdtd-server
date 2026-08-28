@@ -429,6 +429,10 @@ pub const World = struct {
     /// Optional item_id → placeable block id (AssignIds). Null → inventory offline map.
     place_ctx: ?*anyopaque = null,
     place_fn: ?*const fn (?*anyopaque, u16) u16 = null,
+    /// Optional stock item name → ECS id (ItemTable.ecsIdByName). Null → the
+    /// spawnPlayer starter kit uses the offline builtin ids (8/2/7/6).
+    item_id_ctx: ?*anyopaque = null,
+    item_id_fn: ?*const fn (?*anyopaque, []const u8) u16 = null,
     /// Optional item_id → items.xml FuelValue (0 = not fuel). Game wires ItemTable.
     fuel_value_ctx: ?*anyopaque = null,
     fuel_value_fn: ?*const fn (?*anyopaque, u16) f32 = null,
@@ -1276,15 +1280,20 @@ pub const World = struct {
         self.health[s].food_max = 100;
         self.health[s].water = 100;
         self.health[s].water_max = 100;
-        // Starter kit by stock item name → ECS id (items.builtinStockName reverse).
-        // Production may refill via Game after items.xml load.
-        const starter = [_]struct { u16, u16 }{
-            .{ 8, 1 }, // meleeToolRepairT0StoneAxe
-            .{ 2, 5 }, // foodCanBeef
-            .{ 7, 20 }, // resourceWood
-            .{ 6, 50 }, // casinoCoin
+        // Starter kit by stock item name. Production resolves via item_id_fn
+        // (items.xml / AssignIds); missing names fail closed. Offline tests
+        // without the hook keep the builtin ECS ids.
+        const starter = [_]struct { []const u8, u16, u16 }{
+            .{ "meleeToolRepairT0StoneAxe", 8, 1 },
+            .{ "foodCanBeef", 2, 5 },
+            .{ "resourceWood", 7, 20 },
+            .{ "casinoCoin", 6, 50 },
         };
-        for (starter) |it| _ = self.depositItem(s, it[0], it[1]);
+        for (starter) |it| {
+            const id: u16 = if (self.item_id_fn) |f| f(self.item_id_ctx, it[0]) else it[1];
+            if (id == 0) continue;
+            _ = self.depositItem(s, id, it[2]);
+        }
         self.notifySpawn(s);
         return self.network_id[s].id;
     }
@@ -1713,6 +1722,25 @@ pub const World = struct {
         }
     }
 };
+
+test "spawnPlayer starter kit fails closed when name resolve returns 0" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const Ctx = struct {
+        fn lookup(_: ?*anyopaque, name: []const u8) u16 {
+            if (std.mem.eql(u8, name, "foodCanBeef")) return 2;
+            return 0;
+        }
+    };
+    w.item_id_fn = &Ctx.lookup;
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    try std.testing.expect(w.inventory[ps].countItem(2) >= 1);
+    try std.testing.expectEqual(@as(u32, 0), w.inventory[ps].countItem(8));
+    try std.testing.expectEqual(@as(u32, 0), w.inventory[ps].countItem(7));
+    try std.testing.expectEqual(@as(u32, 0), w.inventory[ps].countItem(6));
+}
 
 test "ecs spawn player zombie damage" {
     var w: World = .{};

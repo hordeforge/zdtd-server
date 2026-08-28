@@ -869,6 +869,8 @@ pub const Game = struct {
         self.sim.bot_damage_fn = &botDamageAt;
         self.sim.place_ctx = self;
         self.sim.place_fn = &placeBlockId;
+        self.sim.item_id_ctx = self;
+        self.sim.item_id_fn = &itemIdByName;
         self.sim.fuel_value_ctx = self;
         self.sim.fuel_value_fn = &itemFuelValue;
         self.sim.vehicle_tank_ctx = self;
@@ -1116,6 +1118,10 @@ pub const Game = struct {
     /// Zombie melee on a host-side bot (ADR 0026); attributed via BotManager.
     pub fn botDamageAt(ctx: ?*anyopaque, bot_net: i32, attacker_net: i32, amount: f32) bool {
         return game_hooks.botDamageAt(ctx, bot_net, attacker_net, amount);
+    }
+
+    fn itemIdByName(ctx: ?*anyopaque, name: []const u8) u16 {
+        return game_hooks.itemIdByName(ctx, name);
     }
 
     fn placeBlockId(ctx: ?*anyopaque, item_id: u16) u16 {

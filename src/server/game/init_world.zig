@@ -279,8 +279,10 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         const chest_block: u16 = replicate_te.seedChestBlockId(self);
         if (self.world.setBlockWorld(cx, cy, cz, chest_block)) |_| {
             if (self.containers.getOrCreate(.{ .x = cx, .y = cy, .z = cz }, 8, chest_block)) |cont| {
-                cont.setSlot(0, .{ .item_id = 7, .count = 10, .quality = 1 }); // wood
-                cont.setSlot(1, .{ .item_id = 2, .count = 3, .quality = 1 }); // food
+                const wood = self.items.ecsIdByName("resourceWood");
+                const food = self.items.ecsIdByName("foodCanBeef");
+                if (wood != 0) cont.setSlot(0, .{ .item_id = wood, .count = 10, .quality = 1 });
+                if (food != 0) cont.setSlot(1, .{ .item_id = food, .count = 3, .quality = 1 });
             }
         } else |err| {
             var ts: [19]u8 = undefined;

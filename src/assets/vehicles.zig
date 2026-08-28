@@ -12,10 +12,11 @@ pub const max_vehicles: usize = 32;
 pub const Def = struct {
     name: []const u8 = "",
     kind: components.VehicleKind = .minibike,
-    /// Forward velocity max (m/s-ish stock units).
-    velocity_max: f32 = 7,
-    /// Motor torque forward (stock units).
-    motor_torque: f32 = 400,
+    /// Forward velocity max (vehicles.xml velocityMax / velocityMax_turbo).
+    /// 0 = unset (sim uses vehicleKindDefaultSpeed only when XML is absent).
+    velocity_max: f32 = 0,
+    /// Motor torque forward (vehicles.xml motorTorque_turbo). 0 = unset.
+    motor_torque: f32 = 0,
     /// Max HP when used as entity (EntityVehicle C# constant: gyro 250,
     /// 4x4 300, rest 200; stock entityclasses carry no vehicle HealthMax).
     max_hp: f32 = 200,
@@ -134,8 +135,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         const close = std.mem.findPos(u8, clean, gt, "</vehicle>") orelse break;
         const body = clean[gt + 1 .. close];
 
-        var vel: f32 = 7;
-        var torque: f32 = 400;
+        var vel: f32 = 0;
+        var torque: f32 = 0;
         var tank_cap: f32 = 0;
         if (xml.propertyValue(body, "velocityMax_turbo")) |v| {
             const f = firstF32(v);
@@ -179,6 +180,28 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
     return paths.tryLoadConfig("vehicles.xml", Table, loadFromPath, allocator, game_dir, config_dir);
+}
+
+test "missing velocityMax fails closed to 0" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/vehicles.xml", .{dir});
+    const src =
+        \\<vehicles>
+        \\  <vehicle name="vehicleMinibike">
+        \\    <property name="motorTorque_turbo" value="200"/>
+        \\  </vehicle>
+        \\</vehicles>
+    ;
+    try io_fs.writeFile(path, src);
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const mb = t.byName("vehicleMinibike").?;
+    try std.testing.expectEqual(@as(f32, 0), mb.velocity_max);
+    try std.testing.expectEqual(@as(f32, 200), mb.motor_torque);
 }
 
 test "load vehicles.xml when present" {

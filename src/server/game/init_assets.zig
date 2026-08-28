@@ -633,6 +633,14 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             util_log.warn("zdtd: vehicles table empty despite game-dir\n", .{});
         if (self.storage_pairs.pairs.len == 0)
             util_log.warn("zdtd: storage pairs table empty despite game-dir\n", .{});
+        if (!self.world.biome_layers_table.loaded)
+            util_log.warn("zdtd: biomes.xml layers empty despite game-dir\n", .{});
+        if (self.block_textures.by_id.count() == 0)
+            util_log.warn("zdtd: block textures empty despite game-dir\n", .{});
+        if (self.item_mods.defs.len == 0)
+            util_log.warn("zdtd: item_modifiers table empty despite game-dir\n", .{});
+        if (self.noise_table.map.count() == 0)
+            util_log.warn("zdtd: sounds.xml noise table empty despite game-dir\n", .{});
     }
     if (self.maxdamage.idByName("generatorbank")) |gid| {
         if (self.power_registry.lookup(gid)) |pr| {

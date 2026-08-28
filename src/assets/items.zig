@@ -251,7 +251,9 @@ pub const ItemTable = struct {
         for (self.defs) |d| {
             if (std.mem.eql(u8, d.name, name)) return d;
         }
-        // Stock items.xml name → builtin ECS row (e.g. casinoCoin → id 6).
+        // Offline only: stock items.xml name → builtin ECS row (casinoCoin → 6).
+        // After items.xml load, missing names fail closed (wrong id is worse).
+        if (self.source != .builtin) return null;
         var id: u16 = 1;
         while (id < 64) : (id += 1) {
             const sn = builtinStockName(id) orelse continue;
@@ -373,8 +375,8 @@ pub const ItemTable = struct {
             if (d.name.len >= 4 and (std.mem.startsWith(u8, d.name, "food") or std.mem.startsWith(u8, d.name, "drink")))
                 return true;
         }
-        // Builtin offline ids.
-        return item_id == 2 or item_id == 4;
+        // Builtin offline ids (food / medicine). XML catalogs fail closed.
+        return self.source == .builtin and (item_id == 2 or item_id == 4);
     }
 
     pub fn foodAmountFor(self: *const ItemTable, item_id: u16) f32 {
@@ -434,8 +436,10 @@ pub const ItemTable = struct {
             if (d.name.len > 0) {
                 if (self.byStockName(d.name)) |t| return t;
             }
-        } else if (builtinStockName(item_id)) |sn| {
-            if (self.byStockName(sn)) |t| return t;
+        } else if (self.source == .builtin) {
+            if (builtinStockName(item_id)) |sn| {
+                if (self.byStockName(sn)) |t| return t;
+            }
         }
         // The relative-id pin exists only for the no-game-dir fixture catalog.
         // In XML mode an unresolved type would name the wrong stock item.
@@ -463,10 +467,12 @@ pub const ItemTable = struct {
             }
             break;
         }
-        // Alias builtins via computed stockTypeFor
-        var id: u16 = 1;
-        while (id <= 12) : (id += 1) {
-            if (self.stockTypeFor(id) == stock_type) return id;
+        // Alias builtins via computed stockTypeFor (offline catalog only).
+        if (self.source == .builtin) {
+            var id: u16 = 1;
+            while (id <= 12) : (id += 1) {
+                if (self.stockTypeFor(id) == stock_type) return id;
+            }
         }
         // Relative ids are an offline fixture convention, never XML truth.
         if (self.source == .builtin and stock_type > items_start_here) {
@@ -1300,10 +1306,17 @@ test "XML item table fails closed instead of using builtin balance or ids" {
     try std.testing.expectEqual(@as(f32, 0), t.waterAmountFor(101));
     try std.testing.expectEqual(@as(i32, 0), t.stockTypeFor(99));
     try std.testing.expectEqual(@as(u16, 0), t.ecsIdFromStockType(items_start_here + 99));
+    try std.testing.expect(t.byName("casinoCoin") == null);
+    try std.testing.expectEqual(@as(u16, 0), t.ecsIdByName("resourceWood"));
+    try std.testing.expect(!t.isEat(2));
+    try std.testing.expect(!t.isEat(4));
+    try std.testing.expectEqual(@as(i32, 0), t.stockTypeFor(6));
 
     const builtin = ItemTable.builtin();
     try std.testing.expectEqual(@as(i32, items_start_here + 7), builtin.stockTypeFor(7));
     try std.testing.expectEqual(@as(f32, 15), builtin.foodAmountFor(2));
+    try std.testing.expectEqual(@as(u16, 6), builtin.ecsIdByName("casinoCoin"));
+    try std.testing.expect(builtin.isEat(2));
 }
 
 test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {
