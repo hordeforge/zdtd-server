@@ -48,6 +48,23 @@ pub fn readActions(body: []const u8, voice_buf: []u8) binary.ReadError!ActionPar
     };
 }
 
+/// Encode NetPackagePartyActions.write (parties-factions.md §3).
+pub const ActionsArgs = struct {
+    action: u8,
+    invited_by_entity: i32,
+    invited_entity: i32,
+    voice_lobby: []const u8 = "",
+};
+
+pub fn buildActionsBody(buf: []u8, args: ActionsArgs) ![]u8 {
+    var w = binary.Writer{ .buf = buf };
+    try w.writeByte(args.action);
+    try w.writeI32(args.invited_by_entity);
+    try w.writeI32(args.invited_entity);
+    try w.writeString(args.voice_lobby);
+    return w.written();
+}
+
 /// Members snapshot for NetPackagePartyData.write.
 pub const PartyDataArgs = struct {
     party_id: i32,
@@ -112,6 +129,22 @@ pub fn readSharedKillBody(body: []const u8) binary.ReadError!SharedKillParsed {
         .entity_id = try r.readI32(),
         .killer_id = try r.readI32(),
     };
+}
+
+test "party actions body round-trips write then read" {
+    var buf: [32]u8 = undefined;
+    const body = try buildActionsBody(&buf, .{
+        .action = 1,
+        .invited_by_entity = 106,
+        .invited_entity = 107,
+        .voice_lobby = "",
+    });
+    var voice_buf: [8]u8 = undefined;
+    const p = try readActions(body, &voice_buf);
+    try std.testing.expectEqual(@as(u8, 1), p.action);
+    try std.testing.expectEqual(@as(i32, 106), p.invited_by_entity);
+    try std.testing.expectEqual(@as(i32, 107), p.invited_entity);
+    try std.testing.expectEqualStrings("", p.voice_lobby);
 }
 
 test "shared kill body round-trips the four stock fields" {

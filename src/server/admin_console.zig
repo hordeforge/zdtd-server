@@ -1722,7 +1722,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             };
             if (is_player) {
                 // Push hp=0 stat so the client death flow triggers.
-                if (packages.buildEntityStatBody(self.body_buf[512..640], eid, 0, 100)) |hb| {
+                if (packages.buildEntityStatChangedBody(self.body_buf[512..640], eid, -1, .health, 0, 100, 0)) |hb| {
                     self.broadcast("NetPackageEntityStatChanged", hb) catch {};
                 } else |_| {}
                 std.debug.print("zdtd: admin kill player entity={d} hp=0 sent\n", .{eid});

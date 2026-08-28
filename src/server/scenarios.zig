@@ -7020,12 +7020,11 @@ test "scenario block_activated objective event advances the phase" {
 /// Encode a NetPackagePartyActions body (currentOperation, invitedBy, invited,
 /// voiceLobbyId — RE parties-factions.md §3).
 fn buildPartyActionBody(buf: []u8, action: u8, invited_by: i32, invited: i32) ![]u8 {
-    var w = binary.Writer{ .buf = buf };
-    try w.writeByte(action);
-    try w.writeI32(invited_by);
-    try w.writeI32(invited);
-    try w.writeString("");
-    return w.written();
+    return packages.stock_party.buildActionsBody(buf, .{
+        .action = action,
+        .invited_by_entity = invited_by,
+        .invited_entity = invited,
+    });
 }
 
 test "scenario party: accept invite fans a snapshot, leave disbands, disconnect removes" {

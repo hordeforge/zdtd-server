@@ -1869,11 +1869,6 @@ pub fn buildEntityStatChangedBody(
     return w.written();
 }
 
-/// Legacy simplified hp pair (bots). Prefer buildEntityStatChangedBody for stock clients.
-pub fn buildEntityStatBody(buf: []u8, entity_id: i32, hp: f32, max_hp: f32) ![]u8 {
-    return buildEntityStatChangedBody(buf, entity_id, -1, .health, hp, max_hp, 0);
-}
-
 /// Stock NetPackageEntityStealth body (write IL=12): id:i32 | data:u16.
 /// The data packing matches the three Setup overloads + the client-branch
 /// read (ProcessPackage IL=92): bit 0 = crouching, bit 2 = eating, bit 3 =
@@ -2286,15 +2281,6 @@ pub const GameStatsValues = struct {
 /// Write emits only bPersistent PropertyDecls in engine propertyList order with
 /// no name/id prefix (RE sandbox-options §6.1, GameStats.il Write IL=60).
 /// Empty payload (len=0) remains valid. Full blob uses stock defaults + overrides.
-pub fn buildGameStatsBody(buf: []u8, players: u16, zombies: u16, day: u32, hours: f32) ![]u8 {
-    _ = players;
-    _ = zombies;
-    _ = day;
-    _ = hours;
-    return buildGameStatsBodyValues(buf, .{});
-}
-
-/// Full persistent GameStats.Write matching the propertyList order (V3.1.0 b14).
 pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // Reserve i16 length; fill after payload.
@@ -2395,9 +2381,8 @@ test "GameStats body is i16 len + full persistent blob" {
     try std.testing.expectEqual(@as(usize, @intCast(plen)), body.len - 2);
     // Empty string defaults + 69 typed fields: payload is non-trivial (not empty blob).
     try std.testing.expect(plen > 100);
-    // Compatibility wrapper still builds.
-    const emptyish = try buildGameStatsBody(buf[256..], 0, 0, 1, 8);
-    try std.testing.expect(emptyish.len > 100);
+    const defaults = try buildGameStatsBodyValues(buf[256..], .{});
+    try std.testing.expect(defaults.len > 100);
 }
 
 /// One biome weather snapshot (WeatherPackage on wire).
@@ -2951,41 +2936,17 @@ pub fn attachTypeIsDetach(t: AttachType) bool {
     return t == .detach_server or t == .detach_client;
 }
 
-pub const SpawnPointXYZ = struct {
-    x: i32,
-    y: i32,
-    z: i32,
-    /// Degrees yaw (SpawnPosition.heading). 0 if unknown.
-    heading: f32 = 0,
-    team: i32 = 0,
-    /// -1 = all game modes (stock default for world spawns).
-    active_in_game_mode: i32 = -1,
-};
+pub const SpawnPointEntry = stock_entity.SpawnPointEntry;
 
-/// NetPackageWorldSpawnPoints body = SpawnPointList.Write:
-///   u8 CurrentSaveVersion(=2) + i32 count + SpawnPoint.Write * n
-/// SpawnPoint.Write = SpawnPosition.Write + i32 team + i32 activeInGameMode
-/// SpawnPosition.Write = u16 0 + f32 x,y,z + f32 heading
+/// NetPackageWorldSpawnPoints body = SpawnPointList.Write (one stock shape).
 /// Per-point payload = 26 bytes (stock GetLength lies with count*20).
-pub fn buildWorldSpawnPoints(buf: []u8, points: []const SpawnPointXYZ) ![]u8 {
-    var w: binary.Writer = .{ .buf = buf };
-    try w.writeByte(2); // SpawnPointList.CurrentSaveVersion
-    try w.writeI32(@intCast(points.len));
-    for (points) |p| {
-        try w.writeU16(0); // SpawnPosition always writes a discarded u16
-        try w.writeF32(@floatFromInt(p.x));
-        try w.writeF32(@floatFromInt(p.y));
-        try w.writeF32(@floatFromInt(p.z));
-        try w.writeF32(p.heading);
-        try w.writeI32(p.team);
-        try w.writeI32(p.active_in_game_mode);
-    }
-    return w.written();
+pub fn buildWorldSpawnPoints(buf: []u8, points: []const stock_entity.SpawnPointEntry) ![]u8 {
+    return stock_entity.buildWorldSpawnPointsBody(buf, points);
 }
 
 test "world spawn points stock wire" {
     var buf: [128]u8 = undefined;
-    const body = try buildWorldSpawnPoints(&buf, &[_]SpawnPointXYZ{
+    const body = try buildWorldSpawnPoints(&buf, &[_]stock_entity.SpawnPointEntry{
         .{ .x = -273, .y = 61, .z = 449, .heading = 51 },
         .{ .x = 0, .y = 70, .z = 0 },
     });

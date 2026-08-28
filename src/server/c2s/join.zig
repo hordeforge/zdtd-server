@@ -414,7 +414,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(bed_surf.x)), @as(f32, @floatFromInt(bed_surf.y)) + 0.08, @as(f32, @floatFromInt(bed_surf.z)), 0, 0, 0, true)) |tb| {
                     try self.sendGame(peer, "NetPackageEntityTeleport", tb);
                 } else |_| {}
-                if (packages.buildEntityStatBody(self.body_buf[512..640], c.entity_id, 100, 100)) |hb| {
+                if (packages.buildEntityStatChangedBody(self.body_buf[512..640], c.entity_id, -1, .health, 100, 100, 0)) |hb| {
                     try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
                 } else |_| {}
                 std.debug.print("zdtd: respawn heal entity={d}\n", .{c.entity_id});

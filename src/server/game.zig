@@ -3280,10 +3280,6 @@ pub const Game = struct {
         return @import("game/step.zig").step(self);
     }
 
-    fn anyEnteredClient(self: *const Game) bool {
-        return game_weather.anyEnteredClient(self);
-    }
-
     /// Build NetPackageWeather from the live weather state machine (omit if none).
     pub fn buildWeatherBodyFromBiomes(self: *Game) ?[]const u8 {
         return game_weather.buildWeatherBodyFromBiomes(self);

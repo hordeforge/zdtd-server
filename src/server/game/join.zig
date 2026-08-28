@@ -387,19 +387,19 @@ test "chunk cluster bounds match ChunkProviderDisc formula" {
 }
 
 pub fn sendWorldSpawnPoints(self: *Game, peer: *ln_peer.Peer) !void {
-    var pts: [32]packages.SpawnPointXYZ = undefined;
+    var pts: [32]packages.SpawnPointEntry = undefined;
     var n: usize = 0;
     if (self.world.spawn_count > 0) {
         while (n < self.world.spawn_count and n < pts.len) : (n += 1) {
             pts[n] = .{
-                .x = self.world.spawns[n].x,
-                .y = self.world.spawns[n].y,
-                .z = self.world.spawns[n].z,
+                .x = @floatFromInt(self.world.spawns[n].x),
+                .y = @floatFromInt(self.world.spawns[n].y),
+                .z = @floatFromInt(self.world.spawns[n].z),
             };
         }
     } else {
         const sp = self.world.primarySpawn();
-        pts[0] = .{ .x = sp.x, .y = sp.y, .z = sp.z };
+        pts[0] = .{ .x = @floatFromInt(sp.x), .y = @floatFromInt(sp.y), .z = @floatFromInt(sp.z) };
         n = 1;
     }
     const body = try packages.buildWorldSpawnPoints(self.body_buf[0..512], pts[0..n]);

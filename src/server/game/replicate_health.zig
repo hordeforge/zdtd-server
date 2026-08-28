@@ -30,7 +30,7 @@ pub fn replicatePlayerHealth(self: *Game) void {
                 if (!oc.has_backpack) self.spawnDeathBag(i);
                 if (oc.peer) |op| {
                     const wsp = self.world.primarySpawn();
-                    var entries: [2]packages.stock_entity.SpawnPointEntry = undefined;
+                    var entries: [2]packages.SpawnPointEntry = undefined;
                     var en: usize = 0;
                     entries[en] = .{ .x = @floatFromInt(wsp.x), .y = @floatFromInt(wsp.y), .z = @floatFromInt(wsp.z) };
                     en += 1;
@@ -38,7 +38,7 @@ pub fn replicatePlayerHealth(self: *Game) void {
                         entries[en] = .{ .x = @floatFromInt(oc.bed_x), .y = @floatFromInt(oc.bed_y), .z = @floatFromInt(oc.bed_z) };
                         en += 1;
                     }
-                    if (packages.stock_entity.buildWorldSpawnPointsBody(self.body_buf[96..200], entries[0..en])) |spb| {
+                    if (packages.buildWorldSpawnPoints(self.body_buf[96..200], entries[0..en])) |spb| {
                         self.sendGame(op, "NetPackageWorldSpawnPoints", spb) catch {
                             self.harness.counters.inc(.net_send_errors);
                         };

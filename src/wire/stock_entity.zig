@@ -707,7 +707,8 @@ pub const SpawnPointEntry = struct {
     z: f32 = 0,
     heading: f32 = 0,
     team: i32 = 0,
-    active_in_game_mode: i32 = 0,
+    /// -1 = all game modes (stock default for world spawns).
+    active_in_game_mode: i32 = -1,
 };
 
 pub fn buildWorldSpawnPointsBody(buf: []u8, points: []const SpawnPointEntry) ![]u8 {
@@ -741,5 +742,5 @@ test "world spawn points body is the stock SpawnPointList shape" {
     try std.testing.expectEqual(@as(f32, 20), try r.readF32());
     try std.testing.expectEqual(@as(f32, 90), try r.readF32()); // heading
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // team
-    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // activeInGameMode
+    try std.testing.expectEqual(@as(i32, -1), try r.readI32()); // activeInGameMode
 }
