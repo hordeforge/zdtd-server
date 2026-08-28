@@ -462,11 +462,16 @@ pub const Chunk = struct {
     ///
     /// Density and paint are left as they are, mirroring the stock path's
     /// `SetDensityRaw(previous density)`.
+    /// Mirror-write for the deco mirror (derived decoration, re-applied on
+    /// every stream/reload — stock ChunkCluster.addDistantDecorationBlocks).
+    /// Deliberately does NOT mark the chunk dirty: mirrored trees are not the
+    /// player's data, so a clean session leaves no files (the deco mirror
+    /// re-derives them). Real edits to a deco cell (harvest/place) go through
+    /// `setBlockRaw` and persist normally.
     pub fn setBlockDecoRaw(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, raw: u32) !void {
         if (y < 0 or y >= self.y_dim) return;
         try self.ensureBlocks(allocator);
         self.blocks.?[self.blockIndex(lx, y, lz)] = raw;
-        self.dirty = true;
     }
 
     pub fn isSolid(self: *const Chunk, lx: i32, y: i32, lz: i32) bool {
@@ -1702,6 +1707,13 @@ test "a clean proc session writes no world files (mods leave no trace)" {
     try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = 0, .z = 0 }, &path_buf)));
     try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = 1, .z = 0 }, &path_buf)));
     try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = -2, .z = 3 }, &path_buf)));
+    // Derived decoration (the deco mirror) is re-derived on every stream and
+    // reload, so it must not dirty the chunk or write files either — a clean
+    // session truly leaves no trace (real edits still persist).
+    try w.setBlockDecoWorld(3, 10, 3, block_stone);
+    try std.testing.expect(!w.chunks.getPtr(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);
+    try w.saveAll();
+    try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = 0, .z = 0 }, &path_buf)));
     // An edit is the one thing that persists.
     try w.setBlockWorld(5, 10, 5, block_stone);
     try w.saveAll();
