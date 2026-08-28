@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 const protocol = @import("../protocol.zig");
 const World = @import("world.zig").World;
 const Slot = @import("world.zig").Slot;
+const EntityClass = @import("world.zig").EntityClass;
 const max_entities = @import("world.zig").max_entities;
 const c = @import("components.zig");
 const quest = @import("quest.zig");
@@ -1989,7 +1990,7 @@ fn senseDistSq(w: *const World, s: Slot) f32 {
 }
 
 /// Dispatch to a task's CanExecute gate (selection pass, step 2).
-fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
+fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: TargetSnap) bool {
     const sense_d2 = senseDistSq(w, s);
     return switch (id) {
         .break_block => breakBlockCanExecute(w, s, ai, np.id, np.d2, sense_d2),
@@ -2009,7 +2010,7 @@ fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np:
 /// defaults to CanExecute (asm.il:424569); Wander and Look are the two tasks
 /// with real overrides, and they are exactly the two whose start state must be
 /// allowed to run down instead of being re-tested against the start condition.
-fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: anytype) bool {
+fn canContinue(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: TargetSnap) bool {
     return switch (id) {
         .wander => wanderContinue(w, s, ai, np.id, np.d2, senseDistSq(w, s)),
         .look => lookContinue(ai),
@@ -2080,7 +2081,7 @@ fn breakBlockCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id: 
 
 /// Hold chase projection so Game.tickZombieBlockDamage keeps chewing the cover
 /// block. Throttled A* replan clears path_blocked when a detour opens.
-fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) void {
+fn breakBlockUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) void {
     ai.alert = true;
     if (np.id >= 0) {
         ai.target_id = np.id;
@@ -2118,7 +2119,7 @@ fn destroyAreaCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi, np_id:
 }
 
 /// Same hold as BreakBlock: keep path_blocked and chase state so block damage runs.
-fn destroyAreaUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: anytype, dt: f32) void {
+fn destroyAreaUpdate(w: *World, s: Slot, ai: *c.ZombieAi, np: TargetSnap, dt: f32) void {
     // Arm chew once; breakBlockUpdate owns path_blocked after replan (do not re-force).
     if (!ai.path_blocked) ai.path_blocked = true;
     breakBlockUpdate(w, s, ai, np, dt);
@@ -2336,7 +2337,7 @@ fn lookUpdate(w: *World, s: Slot, ai: *c.ZombieAi, dt: f32) void {
 /// EAIApproachAndAttackTarget::Update: grid A* toward the sensed player when a
 /// solid hook is set (else straight-line), melee on contact. Projects .attack
 /// in range else .chase. Aggro persists with no fresh target (np.id<0).
-fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: anytype, cspd: f32, ct: anytype) void {
+fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f32, ct: *const EntityClass) void {
     ai.alert = true;
     if (np.id < 0) {
         // Director-seeded aggro / target briefly out of sense range: hold the

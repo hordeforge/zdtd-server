@@ -640,8 +640,9 @@ pub fn maybeDestroyContainerOnClose(self: *Game, x: i32, y: i32, z: i32) void {
     }
     self.containers.remove(pos);
     // Block takes MaxDamage (stock DamageBlock(..., MaxDamage, ...)): air +
-    // broadcast, exactly like the block-break paths (tick.zig).
-    _ = self.world.setBlockWorld(x, y, z, 0) catch {};
+    // broadcast, exactly like the block-break paths (tick.zig). Fail closed
+    // if the world mutation misses: do not advertise air the sim still holds.
+    self.world.setBlockWorld(x, y, z, 0) catch return;
     self.clearBlockHp(x, y, z);
     self.clearBlockRaw(x, y, z);
     if (packages.buildSetBlockBody(&self.body_buf, x, y, z, 0)) |sb| {

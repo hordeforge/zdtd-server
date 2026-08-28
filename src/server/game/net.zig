@@ -393,8 +393,9 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
             // Pre-auth challenge: stock derives the 16 bytes from
             // Guid.NewGuid() (asm.il 852999, 853010-853025); a monotonic
             // counter would make the echo predictable, so use the Io CSPRNG
-            // (same idiom as the webui session nonce). Per-connection init is
-            // allowed (accept path, not the tick).
+            // (Zig 0.16 `Io.random`). Per-connection init is allowed (accept
+            // path, not the tick). Nested Threaded is paired init/deinit so
+            // it can sit inside a bound UDP socket Threaded.
             var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
             defer threaded.deinit();
             threaded.io().random(&c.challenge);

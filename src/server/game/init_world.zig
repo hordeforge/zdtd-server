@@ -152,7 +152,11 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     // zdtd's own list files; see admin_xml.zig for the format and the
     // hot-reload poll in tickServerAdminReload.
     if (opts.serveradmin_path) |sa_path| {
-        self.serveradmin_path = self.allocator.dupe(u8, sa_path) catch null;
+        self.serveradmin_path = self.allocator.dupe(u8, sa_path) catch |err| blk: {
+            var ts: [19]u8 = undefined;
+            std.debug.print("zdtd: {s} warning: serveradmin.xml path alloc failed: {s}\n", .{ clock.wallStamp(&ts), @errorName(err) });
+            break :blk null;
+        };
         if (self.serveradmin_path != null) {
             self.serveradmin_mtime = io_fs.fileMtimeNanos(sa_path) orelse 0;
             admin_xml.load(self.allocator, sa_path, &self.admin_list, &self.whitelist, &self.ban_list) catch |err| {

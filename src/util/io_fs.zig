@@ -2,6 +2,9 @@
 //! Ordinary file/dir work goes through here or `std.Io` directly, never
 //! `std.os.linux` / raw posix in application code.
 //!
+//! Each helper constructs a short-lived `std.Io.Threaded` so it can nest
+//! inside a bound UDP/TCP Threaded (those save/restore SIGIO/SIGPIPE).
+//!
 //! DST: `injectWriteFailures` / `injectReadFailures` force the next N write or
 //! read calls to fail so crash/full-disk/torn-read paths can be replayed from
 //! a seed without real I/O faults. `util.sim.disable` clears both counters.
@@ -54,7 +57,8 @@ fn consumeFault(counter: *std.atomic.Value(u32)) bool {
 /// `std.Io.Threaded` bookkeeping only. Always page_allocator so concurrent
 /// callers (parallel chunk save, overlapping FS helpers) never share a
 /// DebugAllocator/GPA with Threaded.init. Payload/list buffers still use the
-/// caller allocator where the API returns owned memory.
+/// caller allocator where the API returns owned memory. Paired init/deinit
+/// so this can nest inside a bound socket Threaded.
 fn ioThreaded() std.Io.Threaded {
     return std.Io.Threaded.init(std.heap.page_allocator, .{});
 }
