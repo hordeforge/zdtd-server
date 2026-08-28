@@ -641,6 +641,14 @@ pub const World = struct {
         wg.applyParams(self.worldgen_params);
         self.worldgen = wg;
         self.syncWorldgenBiomes();
+        // Proc worlds have no DTM spawn points: derive one from the generated
+        // surface near the origin (deterministic per seed), so the player
+        // never spawns buried or mid-air at the hardcoded (256,70,256).
+        const sx: i32 = 256;
+        const sz: i32 = 256;
+        const h = self.heightWorld(sx, sz) catch 0;
+        self.spawns[0] = .{ .x = sx, .y = @as(i32, @intCast(h)) + 2, .z = sz };
+        self.spawn_count = 1;
     }
 
     /// Point the procedural generator at the loaded biome table (W3): more than
@@ -1645,6 +1653,57 @@ test "proc worlds persist only edited chunks" {
     try std.testing.expect(c.dirty);
     try w.saveChunk(c);
     try std.testing.expect(io_fs.fileExists(path));
+}
+
+test "proc worlds derive a spawn from the generated surface" {
+    // No DTM spawn points on proc worlds: the spawn must sit above the
+    // deterministic surface near the origin, not the hardcoded (256,70,256)
+    // which can bury the player or leave them mid-air for a random seed.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.enableProc(7);
+    const sp = w.primarySpawn();
+    try std.testing.expectEqual(@as(i32, 256), sp.x);
+    try std.testing.expectEqual(@as(i32, 256), sp.z);
+    const h = try w.heightWorld(sp.x, sp.z);
+    try std.testing.expectEqual(@as(i32, @intCast(h)) + 2, sp.y);
+    try std.testing.expect(sp.y > 3);
+    // A different seed derives its own surface-relative spawn.
+    w.enableProc(999);
+    const sp2 = w.primarySpawn();
+    const h2 = try w.heightWorld(sp2.x, sp2.z);
+    try std.testing.expectEqual(@as(i32, @intCast(h2)) + 2, sp2.y);
+}
+
+test "a clean proc session writes no world files (mods leave no trace)" {
+    // --mode infinite is an opt-in overlay: exploring materializes chunks but
+    // nothing persists until the player edits, so removing the mod later
+    // leaves the world dir exactly as it was (default behavior unchanged;
+    // edits are the player's data).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.enableProc(1);
+    // Explore a few chunks as the stream would, then save-all like shutdown.
+    _ = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    _ = try w.getOrCreate(.{ .x = 1, .z = 0 });
+    _ = try w.getOrCreate(.{ .x = -2, .z = 3 });
+    try w.saveAll();
+    var path_buf: [512]u8 = undefined;
+    try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = 0, .z = 0 }, &path_buf)));
+    try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = 1, .z = 0 }, &path_buf)));
+    try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = -2, .z = 3 }, &path_buf)));
+    // An edit is the one thing that persists.
+    try w.setBlockWorld(5, 10, 5, block_stone);
+    try w.saveAll();
+    try std.testing.expect(io_fs.fileExists(try w.chunkPath(.{ .x = 0, .z = 0 }, &path_buf)));
 }
 
 test "flat world set dig persist" {

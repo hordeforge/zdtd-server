@@ -52,6 +52,14 @@ persist. An infinite world's save dir grows with the player's edits, not with
 every visited chunk. Baked worlds keep persisting clean chunks (disk reload
 beats DTM+prefab regen; the map is finite).
 
+**Reversibility** (2026-08-29): a mod must not permanently change default
+behavior. `--mode infinite` is an opt-in per-launch overlay — exploring a
+proc world writes nothing until the player edits (pinned by a test), so
+dropping the mode later returns the server to its default terrain with the
+world dir untouched. Persistent state is only the player's data (edited
+chunks, entities) and the operator's own zdtd.toml. Use a dedicated world
+dir per terrain source so stale saves from another source cannot load.
+
 ## Design goals
 
 - **On-the-fly, not prebaked.** No "generate world then host" step for the
