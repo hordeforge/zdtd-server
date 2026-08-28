@@ -20,6 +20,12 @@ vehicle storage) and the recorded RE-gated rows; the last RE-blocked wire
 pin (NetPackageSoundAtPosition) closed 2026-08-27.
 The difficulty-presets ladder and the item stamina-loss legs are wired
 (sandbox_presets.zig comptime parse, 2026-08-26; StaminaLoss choke).
+Live real-client validation (2026-08-28/29, 7dtd-loadgen): the 3.2.0 login
+gate is re-probed and confirmed (PackageIds Minor=20 -> the display form
+"V 3.2.0" passes; the Minor=10 advertising bug that kicked every client
+was fixed), and concurrent joins (2-4 clients) PASS on both the infinite
+proc world and baked Navezgane across all gates (make check, fuzz,
+check-xml-audit, check-release, make release) plus the release binary.
 **Policy:** proper stock wire/sim only; missing preferred over fakes (see residual gaps)
 **Conflict rule:** this document wins where it disagrees with GAP_ANALYSIS or IMPLEMENTATION_PLAN on whether a gate shipped.
 
