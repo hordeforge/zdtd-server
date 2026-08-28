@@ -276,9 +276,12 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             _ = self.sim.spawnVehicle(vk, sx + 6, sy, sz - 4);
         }
     }
-    // Near-spawn storage TE (stock TileEntity on chunk stream).
-    // Prefer runtime AssignIds id for cntWoodenChestClosed when known; else placeholder.
-    {
+    // Near-spawn storage TE (stock TileEntity on chunk stream). Seeded once on
+    // a fresh world, like the persistable kinds above: the block + containers
+    // survive restart via the chunk save + containers.zct, so re-placing on
+    // every boot would both dirty the spawn chunk needlessly and clobber
+    // whatever the player built at the seed-chest spot.
+    if (!had_saved_entities) {
         const cx: i32 = sp.x + 2;
         const cy: i32 = sp.y;
         const cz: i32 = sp.z + 2;

@@ -5645,6 +5645,36 @@ test "scenario tall wire profile: 512-tall columns, 128-layer wire body, ZCH4 sa
     std.debug.print("PASS tall-wire-profile: y_dim=512 planes={d} wire={d}B vs {d}B ZCH4\n", .{ ch2.planeCells(), body.len, stock_body.len });
 }
 
+test "scenario restart does not re-seed the starter chest" {
+    // The near-spawn seed chest is placed once on a fresh world; a restart
+    // loads it from the chunk save and must not re-place it over whatever
+    // the player built at that spot (it previously re-seeded every boot,
+    // dirtying the spawn chunk and clobbering player builds).
+    freshScenarioDir("worlds/zdtd_sc_seedchest");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g1 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_seedchest", 0);
+    const sp = g1.world.primarySpawn();
+    const cx = sp.x + 2;
+    const cy = sp.y;
+    const cz = sp.z + 2;
+    const chest = try g1.world.blockWorld(cx, cy, cz);
+    try std.testing.expect(chest != 0 and chest != g1.world.terrain_ids.air);
+    // The player builds over the seed-chest spot.
+    try g1.world.setBlockWorld(cx, cy, cz, world_store.block_stone);
+    g1.deinit();
+    gpa.destroy(g1);
+    // Restart: the player's block survives (no fresh chest re-seeded).
+    const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_seedchest", 0);
+    defer {
+        g2.deinit();
+        gpa.destroy(g2);
+    }
+    try std.testing.expectEqual(world_store.block_stone, try g2.world.blockWorld(cx, cy, cz));
+    std.debug.print("PASS seed-chest: restart keeps the player's block over the seed spot\n", .{});
+}
+
 test "scenario proc world streams deco from the W3 biome field" {
     // An infinite proc world (the `infinite` mode pack / --worldgen-seed)
     // must not be bald: proc worlds carry no biomemap, so deco resolves from
