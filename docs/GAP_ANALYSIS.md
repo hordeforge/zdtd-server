@@ -569,10 +569,12 @@ area and the concrete work.
     clean-proc te_scan skip (19.7 M → 262 K cells) and config-budget fixes.
     Remaining directions: deliver the spawn-area through the
     `chunk_adds_per_stream_tick` stream budget instead of one synchronous
-    flood, add a per-poll send byte budget so critical packages never queue
-    behind a chunk burst, and W2b async chunk gen (moves gen + te_scan off
-    the join tick). Details + evidence in "Join-burst tick budget under
-    concurrent load" (§ the world-and-chunks inventory).
+    flood, and W2b async chunk gen (moves gen + te_scan off the join tick) —
+    the per-poll send byte budget direction is subsumed by the ACK-yield fix
+    (the reliable window drains between spawn-area chunks, so the fragment
+    pump no longer spins; a separate budget would be redundant). Details +
+    evidence in "Join-burst tick budget under concurrent load" (§ the
+    world-and-chunks inventory).
 
 ---
 
@@ -3398,15 +3400,10 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   concurrent join. The join tick itself still overruns (max ~2 s - the
   synchronous gen+encode is inherent without async work); the deeper fixes
   stay tracked: pace the join spawn-area through the
-  `chunk_adds_per_stream_tick` stream budget,
-  a per-poll send byte budget, W2b async chunk gen (moves proc gen +
-  te_scan off the join tick). Also (2026-08-29): the full-stock config
-  bundle (deflated blocks.xml ~0.5-1 MB = ~274 fragments vs the 64-slot
-  window, 42 rows sharing one deadline) exhausted the 250 ms critical
-  retry budget under a concurrent loadgen join ('config file items send
-  failed: WindowFull', join died at LoginAnswered) - raised to 1 s (4x the
-  room, worst-case freeze bounded to 20 ticks); the baked Navezgane join
-  now PASSES on both clients.
+  `chunk_adds_per_stream_tick` stream budget, and W2b async chunk gen
+  (moves proc gen + te_scan off the join tick; the per-poll send byte
+  budget direction is subsumed by the ACK-yield - the window drains between
+  spawn-area chunks, so a separate budget would be redundant).
   *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns),
   loadgen `ChallengeReplied timeout` under concurrent count=2.
 
