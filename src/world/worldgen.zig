@@ -336,7 +336,53 @@ pub const WorldGen = struct {
     /// Fill 16×16 height plane for chunk (cx, cz) via one coarse sample grid.
     /// Cheap path: 825 fBm samples for the whole chunk, then a per-column
     /// top-down scan of the interpolated field.
+    ///
+    /// Vectorized over `cell_w` X columns sharing one trilerp (the same lane
+    /// shape as `generateChunkBlocks`). Scalar equivalent: `fillHeightsScalar`.
     pub fn fillHeights(self: *const WorldGen, cx: i32, cz: i32, out: *[256]u8) void {
+        const s = Sampler.init(self, cx, cz);
+        const top = s.airAbove();
+        const floor_h: u8 = @intCast(bedrock_h - 1);
+        @memset(out, floor_h);
+
+        const cells_xz = @divExact(chunk_size, cell_w);
+        var ck: i32 = 0;
+        while (ck < cells_xz) : (ck += 1) {
+            var ci: i32 = 0;
+            while (ci < cells_xz) : (ci += 1) {
+                var dz: i32 = 0;
+                while (dz < cell_w) : (dz += 1) {
+                    const lz = ck * cell_w + dz;
+                    const tz = @as(f32, @floatFromInt(dz)) / @as(f32, @floatFromInt(cell_w));
+                    const col: usize = @intCast(ci * cell_w + lz * chunk_size);
+                    var h_run: @Vector(cell_w, u8) = @splat(floor_h);
+                    var found: @Vector(cell_w, bool) = @splat(false);
+                    var y: i32 = top;
+                    y_scan: while (y >= bedrock_h) {
+                        const cj = @divFloor(y, cell_h);
+                        const c = s.corners(ci, cj, ck);
+                        const y_lo = @max(cj * cell_h, bedrock_h);
+                        while (y >= y_lo) : (y -= 1) {
+                            const dy = y - cj * cell_h;
+                            const ty = @as(f32, @floatFromInt(dy)) / @as(f32, @floatFromInt(cell_h));
+                            const d = trilerp(cell_w, c, tx_lanes, ty, tz);
+                            const solid = d > @as(@Vector(cell_w, f32), @splat(0));
+                            const take = solid & (found == @as(@Vector(cell_w, bool), @splat(false)));
+                            const hy: @Vector(cell_w, u8) = @splat(@intCast(y));
+                            h_run = @select(u8, take, hy, h_run);
+                            found = found | solid;
+                            if (@reduce(.And, found)) break :y_scan;
+                        }
+                    }
+                    out[col..][0..cell_w].* = h_run;
+                }
+            }
+        }
+    }
+
+    /// Scalar reference for `fillHeights`. Tests only: per-column downward
+    /// `densityAt` scan, the pre-vector form.
+    fn fillHeightsScalar(self: *const WorldGen, cx: i32, cz: i32, out: *[256]u8) void {
         const s = Sampler.init(self, cx, cz);
         const top = s.airAbove();
         var lz: i32 = 0;
@@ -455,6 +501,32 @@ pub const WorldGen = struct {
     /// The surface cell is world-constant, so adjacent chunks agree by
     /// construction and the fill cannot seam.
     pub fn fillWaterTable(heights: *const [256]u8, blocks: []u32, water_id: u16) void {
+        std.debug.assert(blocks.len >= @as(usize, @intCast(chunk_size * y_dim * chunk_size)));
+        const lanes = 16;
+        const Vh = @Vector(lanes, u8);
+        const Vb = @Vector(lanes, u32);
+        const water_v: Vb = @splat(@as(u32, water_id));
+        const air_v: Vb = @splat(@as(u32, assignids.air));
+        const surface: Vh = @splat(water_surface_cell);
+        var row: usize = 0;
+        while (row < 256) : (row += lanes) {
+            const h: Vh = heights[row..][0..lanes].*;
+            if (@reduce(.And, h >= surface)) continue;
+            var y: u8 = 1;
+            while (y <= water_surface_cell) : (y += 1) {
+                const yv: Vh = @splat(y);
+                const in_band = (yv > h) & (yv <= surface);
+                if (!@reduce(.Or, in_band)) continue;
+                const bi = row + @as(usize, y) * 256;
+                const cur: Vb = blocks[bi..][0..lanes].*;
+                const hit = in_band & (cur == air_v);
+                blocks[bi..][0..lanes].* = @select(u32, hit, water_v, cur);
+            }
+        }
+    }
+
+    /// Scalar reference for `fillWaterTable`. Tests only.
+    fn fillWaterTableScalar(heights: *const [256]u8, blocks: []u32, water_id: u16) void {
         var col: usize = 0;
         while (col < 256) : (col += 1) {
             const h = heights[col];
@@ -675,6 +747,21 @@ test "worldgen heightAt agrees with fillHeights" {
     }
 }
 
+test "fillHeights SIMD matches scalar scan" {
+    const seeds = [_]u64{ 1, 42, 12345, 31337 };
+    const chunks = [_][2]i32{ .{ 0, 0 }, .{ -2, 5 }, .{ 3, -2 } };
+    for (seeds) |seed| {
+        const g = WorldGen.init(seed);
+        for (chunks) |ch| {
+            var vectorized: [256]u8 = undefined;
+            var scalar: [256]u8 = undefined;
+            g.fillHeights(ch[0], ch[1], &vectorized);
+            g.fillHeightsScalar(ch[0], ch[1], &scalar);
+            try std.testing.expectEqualSlices(u8, &scalar, &vectorized);
+        }
+    }
+}
+
 test "biome field is deterministic, in range and region-contiguous" {
     var g = WorldGen.init(42);
     g.biome_n = 7;
@@ -866,5 +953,35 @@ test "RWG water table surface is world-constant across adjacent chunks" {
         if (bb[col + 62 * 256] == assignids.water) {
             try std.testing.expectEqual(assignids.air, bb[col + 63 * 256]);
         }
+    }
+}
+
+test "fillWaterTable SIMD matches scalar" {
+    var prng = std.Random.DefaultPrng.init(0x5744);
+    const rnd = prng.random();
+    var trial: usize = 0;
+    while (trial < 64) : (trial += 1) {
+        var heights: [256]u8 = undefined;
+        for (&heights, 0..) |*h, i| {
+            h.* = switch (i % 8) {
+                0 => 0,
+                1 => 50,
+                2 => 61,
+                3 => 62,
+                4 => 63,
+                5 => 70,
+                6 => 255,
+                else => rnd.int(u8),
+            };
+        }
+        var vectorized: [16 * 256 * 16]u32 = undefined;
+        for (&vectorized, 0..) |*cell, i| {
+            const y = i / 256;
+            cell.* = if (rnd.boolean() and y > 40 and y < 70) assignids.terr_stone else assignids.air;
+        }
+        var scalar = vectorized;
+        WorldGen.fillWaterTable(&heights, &vectorized, assignids.water);
+        WorldGen.fillWaterTableScalar(&heights, &scalar, assignids.water);
+        try std.testing.expectEqualSlices(u32, &scalar, &vectorized);
     }
 }

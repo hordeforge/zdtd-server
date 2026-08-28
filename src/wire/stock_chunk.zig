@@ -87,11 +87,13 @@ pub const EncodeOpts = struct {
     /// textures). Null → all-clear (fresh-world state, stock default).
     topsoil: ?*const [32]u8 = null,
     /// Dense precomputed raw plane (65536 BlockValue cells, x + z*16 + y*256).
-    /// encodeNetworkChunk fills it once and shares it with the block-layer loop
-    /// and the density/water channels so blockAt is not re-invoked per channel.
+    /// When set, the block-layer loop and density/water SIMD packs read it
+    /// directly. When null, `raws_scratch` is filled once (height-band SIMD or
+    /// block_at) and then used the same way.
     raws: ?*const [65536]u32 = null,
-    /// Caller-owned scratch for `raws` (pre-allocated; no hot-path heap). Null
-    /// disables the memoization: channels fall back to the block_at callback.
+    /// Caller-owned scratch for `raws` (pre-allocated; no hot-path heap). Used
+    /// only when `raws` is null. Null disables the memoization: channels fall
+    /// back to the block_at callback.
     raws_scratch: ?*[65536]u32 = null,
 };
 
@@ -122,6 +124,39 @@ fn defaultBlockAt(heights: *const [256]u8, lx: i32, y: i32, lz: i32) u32 {
     if (y == h) return stock_terr_topsoil;
     if (y + 1 == h) return stock_terr_dirt;
     return stock_terr_dirt;
+}
+
+/// Fill a dense 16×256×16 raw plane from the height map (`defaultBlockAt`).
+/// Vectorized over 16-wide XZ runs per Y. Scalar equivalent: `out[i] =
+/// defaultBlockAt(heights, i%16, i/256, (i/16)%16)`.
+pub fn fillDefaultRawsFromHeights(heights: *const [256]u8, out: *[65536]u32) void {
+    const lanes = 16;
+    const V = @Vector(lanes, u32);
+    const Vu = @Vector(lanes, u16);
+    const Vb = @Vector(lanes, u8);
+    const air_v: V = @splat(@as(u32, stock_air));
+    const bedrock_v: V = @splat(@as(u32, stock_terr_bedrock));
+    const stone_v: V = @splat(@as(u32, stock_terr_stone));
+    const topsoil_v: V = @splat(@as(u32, stock_terr_topsoil));
+    const dirt_v: V = @splat(@as(u32, stock_terr_dirt));
+    const zero_u8: Vb = @splat(0);
+    var y: u16 = 0;
+    while (y < 256) : (y += 1) {
+        const yb: Vb = @splat(@truncate(y));
+        const yu: Vu = @splat(y);
+        const y_plus_3 = yu + @as(Vu, @splat(3));
+        var col: usize = 0;
+        while (col < 256) : (col += lanes) {
+            const h: Vb = heights[col..][0..lanes].*;
+            const hu: Vu = h;
+            var raw: V = dirt_v;
+            raw = @select(u32, yb == h, topsoil_v, raw);
+            raw = @select(u32, y_plus_3 < hu, stone_v, raw);
+            raw = @select(u32, yb == zero_u8, bedrock_v, raw);
+            raw = @select(u32, yb > h, air_v, raw);
+            out[col + @as(usize, y) * 256 ..][0..lanes].* = raw;
+        }
+    }
 }
 
 fn blockAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u32 {
@@ -439,15 +474,21 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     // channel triples the lookup cost on the stream path. Without scratch the
     // channels fall back to the callback (tests and cold paths).
     var opts_memo = opts;
-    if (opts.raws_scratch) |scratch| {
-        var i: usize = 0;
-        while (i < scratch.len) : (i += 1) {
-            const lx: i32 = @intCast(i % 16);
-            const lz: i32 = @intCast((i / 16) % 16);
-            const y: i32 = @intCast(i / 256);
-            scratch[i] = blockAt(opts, lx, y, lz);
+    if (opts.raws == null) {
+        if (opts.raws_scratch) |scratch| {
+            if (opts.block_at == null) {
+                fillDefaultRawsFromHeights(opts.heights, scratch);
+            } else {
+                var i: usize = 0;
+                while (i < scratch.len) : (i += 1) {
+                    const lx: i32 = @intCast(i % 16);
+                    const lz: i32 = @intCast((i / 16) % 16);
+                    const y: i32 = @intCast(i / 256);
+                    scratch[i] = blockAt(opts, lx, y, lz);
+                }
+            }
+            opts_memo.raws = scratch;
         }
-        opts_memo.raws = scratch;
     }
 
     // 64 block layers
@@ -1111,6 +1152,34 @@ test "simd layerIsUniform and anyNonAir" {
     try std.testing.expect(!layerNeedsUpperU32(&raws));
     raws[17] = 1000;
     try std.testing.expect(layerNeedsUpperU32(&raws));
+}
+
+test "fillDefaultRawsFromHeights SIMD matches defaultBlockAt" {
+    var prng = std.Random.DefaultPrng.init(0xD3F4);
+    const rnd = prng.random();
+    var trial: usize = 0;
+    while (trial < 32) : (trial += 1) {
+        var heights: [256]u8 = undefined;
+        for (&heights, 0..) |*h, i| {
+            h.* = switch (i % 7) {
+                0 => 0,
+                1 => 1,
+                2 => 3,
+                3 => 60,
+                4 => 255,
+                else => rnd.int(u8),
+            };
+        }
+        var plane: [65536]u32 = undefined;
+        fillDefaultRawsFromHeights(&heights, &plane);
+        var i: usize = 0;
+        while (i < plane.len) : (i += 1) {
+            const lx: i32 = @intCast(i % 16);
+            const lz: i32 = @intCast((i / 16) % 16);
+            const y: i32 = @intCast(i / 256);
+            try std.testing.expectEqual(defaultBlockAt(&heights, lx, y, lz), plane[i]);
+        }
+    }
 }
 
 test "simd packLower and packTexturePlane match scalar" {

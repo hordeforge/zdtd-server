@@ -138,6 +138,14 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .water_block_id = self.world.terrain_ids.water,
         .dmg_at = DmgCtx.at,
         .dmg_ctx = &dmg_ctx,
+        // Dense plane already lives on the chunk after getOrCreate; pass it so
+        // encode skips the 65536-cell scratch fill and the density/water SIMD
+        // packs read it directly. Scratch remains the fallback when blocks are
+        // still lazy (height-only / unmaterialized).
+        .raws = if (ch.blocks) |b| blk: {
+            std.debug.assert(b.len >= 65536);
+            break :blk @as(*const [65536]u32, @ptrCast(b.ptr));
+        } else null,
         .raws_scratch = &self.chunk_raws,
         // Per-cell biome (GAP per-chunk-biome row): the biome map under each
         // column, so transitions follow biomes.png / the proc field instead of
