@@ -73,16 +73,30 @@ Ground: `src/server/config.zig` (XML parse + `applySandboxCode` + clamps), `src/
 | `BlockDamageAIBM` | 100 | 0..1000 | as above during a blood moon |
 | `AirDropFrequency` | 72 | 0..8760 | game-hours between supply-crate drops; 0 off (`tickAirDrop`) |
 | `DropOnDeath` | 1 | 0..4 | 0 nothing / 1 all / 2 toolbelt / 3 backpack / 4 delete → loot bag on death |
+| `DeathPenalty` | 1 | 0..3 | 0 nothing / 1 XP-only / 2 backpack / 3 delete; rides GameStat.DeathPenalty (wire GameStats blob) and the client-side death flow switches on it |
 | `LandClaimSize` | 41 | 1..255 (odd) | keystone protection area; even values forced odd |
 | `LandClaimOnlineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner online |
 | `LandClaimOfflineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner offline |
 | `LandClaimExpiryDays` | 3 | 0..365 | offline days without owner online before claim is released (0 = never; `Game.land_claim_expiry_days`) |
+| `LandClaimCount` | 3 | 0..64 | max land claims per player (GameStats blob) |
+| `LandClaimDeadZone` | 60 | 0..4096 | minimum blocks between a player's claims (GameStats blob) |
+| `LandClaimOfflineDelay` | 3 | 0..365 | offline grace days before claim decay starts (GameStats blob) |
+| `LandClaimDecayMode` | 0 | 0..2 | claim decay mode: 0 none / 1 linear / 2 exponential (GameStats blob) |
 | `ServerPort` | 26902 | 0..65533 | TCP GameServerInfo; LiteNet = port+2 (CLI `--port` wins); values above 65533 abort startup |
 
 | `ServerMaxPlayerCount` | 8 | 1..64 | GSI max + soft join cap |
 | `ServerPassword` | empty | string | LiteNet Connect key; empty = open |
 | `ViewRadius` | 7 | 1..16 | stream / interest seed radius |
+| `ServerReservedSlots` | 0 | 0..64 | slots at the cap reserved for players with permission ≤ `ServerReservedSlotsPermission` (PlayerSlotsAuthorizer IL=174); 0 = disabled |
+| `ServerReservedSlotsPermission` | 0 | 0..255 | permission level qualifying for a reserved slot |
+| `ServerAdminSlots` | 0 | 0..64 | extra headroom for players with permission ≤ `ServerAdminSlotsPermission`; 0 = disabled |
+| `ServerAdminSlotsPermission` | 0 | 0..255 | permission level qualifying for admin headroom |
 | `GameName` / `GameWorld` | zdtd / empty | string | world identity / stock map folder under `--game-dir` |
+| `ServerDescription` | empty | string | GSI server-browser description (GameInfoString 3); empty = client default |
+| `ServerWebsiteURL` | empty | string | GSI server-browser website (GameInfoString 4); empty = client default |
+| `Region` | empty | string | GSI server-browser region; empty = client default |
+| `Language` | empty | string | GSI server-browser language; empty = client default |
+| `ServerMatchmakingGroup` | empty | string | GSI play group (GameInfoString 17); empty = client default |
 | `AdminPort` | 0 | u16 | zdtd alias for the console port; 0 = off |
 | `TelnetEnabled` | false | bool | enable the stock telnet console (`TelnetPort` then wins over `AdminPort`) |
 | `TelnetPort` | 0 | u16 | stock telnet port; 0 = off |
