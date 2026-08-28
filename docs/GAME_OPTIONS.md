@@ -288,7 +288,7 @@ test, so a retune cannot land silently).
 | `incoming_damage_0`, `incoming_damage_1`, `incoming_damage_2`, `incoming_damage_3`, `incoming_damage_4`, `incoming_damage_5` | 1.0 / 1.0 / 0.75 / 1.0 / 1.0 / 1.0 | GameDifficulty 0..5 → damage multiplier when a server (AI) attacker hits a client entity (stock `IncomingDamageModifier`; difficulty 2 = Adventurer pins the shipped serverconfig code `AAAJABJACJADJARFBNC` decode 0.75; the rest of the ladder waits on a SetupOptions Cecil extraction) |
 | `entity_incoming_damage_0`, `entity_incoming_damage_1`, `entity_incoming_damage_2`, `entity_incoming_damage_3`, `entity_incoming_damage_4`, `entity_incoming_damage_5` | 1.0 (all) | GameDifficulty 0..5 → multiplier for a client hitting a server entity (stock `EntityIncomingDamageModifier`). Stock applies it client-side; the server trusts the claimed strength, so this ladder is config/operator policy and the RE-pin reference, not a server-side re-scale |
 
-`[rules.world]` / `[rules.vehicle]` / `[rules.geometry]` (ADR 0021 / ADR 0036):
+`[rules.world]` / `[rules.vehicle]` / `[rules.geometry]` / `[rules.worldgen]` (ADR 0021 / ADR 0036):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -298,6 +298,13 @@ test, so a retune cannot land silently).
 | `height_scale` | 1.0 | Elevation projection: `surface_y = clamp(height_offset + height_scale * elev_m, 0, ceiling)`. 1.0 = identity; < 1 compresses mountains into the column; > 1 needs a taller wire profile for headroom (ADR 0036) |
 | `height_offset` | 0.0 | Vertical shift applied after scaling (lift/lower the whole world) |
 | `height_ceiling` | 0 | Hard ceiling for the projected surface Y; 0 = active wire-profile max (stock 255) |
+| `base_height` | 68 | `[rules.worldgen]` procedural shaping: sea/base height band of the 2D stack (zdtd-owned no-map generator; defaults = the pre-lift constants, byte-identical proc output) |
+| `height_amp` | 24 | Procedural shaping: continental + ridged amplitude blend base |
+| `min_surface` / `max_surface` | 12 / 200 | Procedural shaping: surface band the stack clamps into (columnTarget + interpolation margin) |
+| `squash` | 28 | Procedural shaping: vertical blocks over which the Y-gradient runs solid→air |
+| `noise_weight` | 0.85 | Procedural shaping: noise blend weight; must stay < 1 (hard solid-below / air-above guarantee) |
+| `y_scale` | 2.0 | Procedural shaping: vertical stretch of the density noise |
+| `bedrock_h` | 3 | Procedural shaping: blocks below this are forced solid (bedrock always lands) |
 | `accel_mps2` | 14.0 | Vehicle throttle acceleration (blocks/s^2 per throttle unit; zdtd sim, GAP 4816) |
 | `reverse_frac` | 0.3 | Vehicle reverse speed cap as a fraction of max speed |
 | `coast_decay` | 0.8 | Vehicle coast decay per second with no throttle |

@@ -541,6 +541,10 @@ pub const World = struct {
     /// elevation maps onto the column. Set by the Game from `rules.geometry`
     /// (toml_bind); stock defaults are the identity fast path.
     geometry: rules_mod.Geometry = .{},
+    /// Procedural terrain shaping params ([rules.worldgen], ADR 0021). Applied
+    /// to the WorldGen at `enableProc`; defaults are byte-identical to the
+    /// pre-lift generator constants.
+    worldgen_params: rules_mod.WorldgenGroup = .{},
     worldgen: ?worldgen_mod.WorldGen = null,
     /// Door-id oracle (Game wires the blocks table): true when the id is a
     /// door block, so `isSolidWorld` treats an open door as passable.
@@ -633,7 +637,9 @@ pub const World = struct {
         self.map_dir = null;
         self.spawn_count = 0;
         self.terrain_source = .proc;
-        self.worldgen = worldgen_mod.WorldGen.init(seed);
+        var wg = worldgen_mod.WorldGen.init(seed);
+        wg.applyParams(self.worldgen_params);
+        self.worldgen = wg;
         self.syncWorldgenBiomes();
     }
 

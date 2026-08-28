@@ -3345,6 +3345,10 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   stock RWG maps load as DTM (rwgmixer.xml is `-`), so aquifers, caves,
   multi-biome and per-column surfacing are zdtd-owned demo polish, moved to
   the explicit non-goals list with this reason.
+  (2026-08-29) the shaping params are config: `[rules.worldgen]`
+  (base_height/height_amp/surface band/squash/noise_weight/y_scale/bedrock_h
+  via `WorldGen.applyParams`; defaults byte-identical; grid cells + noise
+  recipe stay code).
 
 - **Chunk streaming to the stock client** `WORKS` `(2026-08-22)`
   Hole-free centred square, add/remove deltas, paced 8 adds per 5-tick period.

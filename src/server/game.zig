@@ -821,6 +821,9 @@ pub const Game = struct {
         // [rules.geometry] elevation projection onto the block store (Layer A
         // of the malleable-geometry work; stock defaults are the identity).
         self.world.geometry = opts.rules.geometry;
+        // [rules.worldgen] procedural terrain shaping (ADR 0021; defaults are
+        // the pre-lift generator constants, so proc output is unchanged).
+        self.world.worldgen_params = opts.rules.worldgen;
         // [wire] profile onto the block store (Layer B): column height + plane
         // sizing for chunks, save format and the chunk wire dialect.
         self.world.profile = opts.wire_profile;

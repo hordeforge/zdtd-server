@@ -563,6 +563,30 @@ pub const Vehicle = struct {
     gravity: f32 = -9.81,
 };
 
+/// Procedural terrain shaping params (zdtd-owned W1/W2 no-map generator; the
+/// stock DTM-backed maps override them). Defaults are the pre-lift module
+/// constants, so a default `[rules.worldgen]` is byte-identical to the old
+/// generator. Only the tuning surface moved to config (ADR 0021); the grid
+/// cells (`cell_w`/`cell_h`), the noise recipe and the RWG water table stay
+/// code (structural / RE-derived). Provenance: PROVENANCE.md §3.8.
+pub const WorldgenGroup = struct {
+    /// Sea / base height band for the 2D shaping stack.
+    base_height: f32 = 68,
+    /// Continental + ridged amplitude blend base.
+    height_amp: f32 = 24,
+    /// Surface band the shaping stack clamps into (columnTarget + margin).
+    min_surface: u8 = 12,
+    max_surface: u8 = 200,
+    /// Vertical blocks over which the Y-gradient runs solid→air.
+    squash: f32 = 28,
+    /// Noise blend weight; must stay < 1 (hard solid-below / air-above).
+    noise_weight: f32 = 0.85,
+    /// Vertical stretch of the density noise.
+    y_scale: f32 = 2.0,
+    /// Blocks below this are forced solid (bedrock always lands).
+    bedrock_h: i32 = 3,
+};
+
 /// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
 /// horde schedule (start tick + min/max gap in world ticks) and spawn
 /// distance/size, plus the chunk-heat spawner constants (heat threshold,
@@ -678,6 +702,7 @@ pub const Rules = struct {
     progression: Progression = .{},
     world: WorldGroup = .{},
     geometry: Geometry = .{},
+    worldgen: WorldgenGroup = .{},
     vehicle: Vehicle = .{},
     director: Director = .{},
     difficulty: Difficulty = .{},
@@ -842,6 +867,17 @@ pub const GeometryOverlay = struct {
     height_ceiling: ?u32 = null,
 };
 
+pub const WorldgenOverlay = struct {
+    base_height: ?f32 = null,
+    height_amp: ?f32 = null,
+    min_surface: ?u8 = null,
+    max_surface: ?u8 = null,
+    squash: ?f32 = null,
+    noise_weight: ?f32 = null,
+    y_scale: ?f32 = null,
+    bedrock_h: ?i32 = null,
+};
+
 pub const VehicleOverlay = struct {
     accel_mps2: ?f32 = null,
     reverse_frac: ?f32 = null,
@@ -932,6 +968,7 @@ pub const RulesOverlay = struct {
     progression: ProgressionOverlay = .{},
     world: WorldGroupOverlay = .{},
     geometry: GeometryOverlay = .{},
+    worldgen: WorldgenOverlay = .{},
     vehicle: VehicleOverlay = .{},
     director: DirectorOverlay = .{},
     difficulty: DifficultyOverlay = .{},

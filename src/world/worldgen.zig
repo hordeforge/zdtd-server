@@ -31,6 +31,7 @@ const std = @import("std");
 const noise_mod = @import("noise.zig");
 const assignids = @import("../assets/assignids_comptime.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
+const rules_mod = @import("../ecs/rules.zig");
 
 /// Stock chunk X/Z span, 16 blocks (WorldConstants; stock_facts block_x/z_dim).
 pub const chunk_size: i32 = 16;
@@ -114,10 +115,10 @@ const tx_lanes: @Vector(cell_w, f32) = blk: {
 /// `y_clamped_gradient` + weighted 3D fBm. Both terms are clamped to [-1,1]:
 /// fBm is not analytically bounded by 1, and the clamps are what make
 /// `noise_weight < 1` a hard solid-below / air-above guarantee.
-fn cellDensity(n: *const noise_mod.Noise, target: f32, wx: f32, wy: f32, wz: f32) f32 {
-    const grad = std.math.clamp((target - wy) / squash, -1, 1);
-    const n3 = std.math.clamp(noise_mod.fbm3(n, wx, wy * y_scale, wz, density_p), -1, 1);
-    return grad + noise_weight * n3;
+fn cellDensity(self: *const WorldGen, target: f32, wx: f32, wy: f32, wz: f32) f32 {
+    const grad = std.math.clamp((target - wy) / self.squash, -1, 1);
+    const n3 = std.math.clamp(noise_mod.fbm3(&self.noise, wx, wy * self.y_scale, wz, density_p), -1, 1);
+    return grad + self.noise_weight * n3;
 }
 
 /// Per-chunk coarse sample grid: `cache_2d` column targets plus the 3D density
@@ -126,9 +127,13 @@ fn cellDensity(n: *const noise_mod.Noise, target: f32, wx: f32, wy: f32, wz: f32
 const Sampler = struct {
     cache2d: [samples_x * samples_x]f32,
     samples: [samples_x * samples_x * samples_y]f32,
+    /// Interpolation margin ([rules.worldgen] squash + cell_h); the air-above
+    /// bound is exact only with the generator's own margin.
+    margin: f32,
 
     fn init(wg: *const WorldGen, cx: i32, cz: i32) Sampler {
         var s: Sampler = undefined;
+        s.margin = wg.margin;
         const base_x = cx * chunk_size;
         const base_z = cz * chunk_size;
         var k: usize = 0;
@@ -143,7 +148,7 @@ const Sampler = struct {
                 while (j < samples_y) : (j += 1) {
                     const wy: f32 = @floatFromInt(@as(i32, @intCast(j)) * cell_h);
                     s.samples[i + k * samples_x + j * samples_x * samples_x] =
-                        cellDensity(&wg.noise, target, wx, wy, wz);
+                        cellDensity(wg, target, wx, wy, wz);
                 }
             }
         }
@@ -188,7 +193,7 @@ const Sampler = struct {
     fn airAbove(self: *const Sampler) i32 {
         var m: f32 = self.cache2d[0];
         for (self.cache2d[1..]) |t| m = @max(m, t);
-        const y: i32 = @ceil(m + margin);
+        const y: i32 = @ceil(m + self.margin);
         return @min(y, y_dim - 1);
     }
 };
@@ -196,6 +201,19 @@ const Sampler = struct {
 pub const WorldGen = struct {
     seed: u64,
     noise: noise_mod.Noise,
+    /// Terrain shaping params ([rules.worldgen], ADR 0021). The module consts
+    /// are the pre-lift defaults; the store applies `worldgen_params` via
+    /// `applyParams`, so a default config is byte-identical to the old
+    /// generator. `margin` derives from `squash` + cell_h at apply time.
+    base_height: f32,
+    height_amp: f32,
+    min_surface: u8,
+    max_surface: u8,
+    squash: f32,
+    noise_weight: f32,
+    y_scale: f32,
+    bedrock_h: i32,
+    margin: f32,
     /// Loaded biome count for the W3 biome field; < 2 keeps single-biome fill
     /// (the W2 behaviour). Set by the store from biome_layers_table.
     biome_n: u8 = 0,
@@ -217,7 +235,32 @@ pub const WorldGen = struct {
         return .{
             .seed = seed,
             .noise = noise_mod.Noise.init(seed),
+            // [rules.worldgen] defaults: the pre-lift module constants, so a
+            // default config is byte-identical to the old generator.
+            .base_height = base_height,
+            .height_amp = height_amp,
+            .min_surface = min_surface,
+            .max_surface = max_surface,
+            .squash = squash,
+            .noise_weight = noise_weight,
+            .y_scale = y_scale,
+            .bedrock_h = bedrock_h,
+            .margin = margin,
         };
+    }
+
+    /// Overlay the `[rules.worldgen]` shaping params (ADR 0021; the store
+    /// calls this from the effective rules). Recomputes the derived margin.
+    pub fn applyParams(self: *WorldGen, p: rules_mod.WorldgenGroup) void {
+        self.base_height = p.base_height;
+        self.height_amp = p.height_amp;
+        self.min_surface = p.min_surface;
+        self.max_surface = p.max_surface;
+        self.squash = p.squash;
+        self.noise_weight = p.noise_weight;
+        self.y_scale = p.y_scale;
+        self.bedrock_h = p.bedrock_h;
+        self.margin = p.squash + @as(f32, @floatFromInt(cell_h));
     }
 
     /// Continuous biome field (W3): a low-frequency fBm mapped onto the loaded
@@ -263,11 +306,11 @@ pub const WorldGen = struct {
         const ridge_amp = 4.0 + m * 22.0;
 
         // cont ~[-1,1], ridge ~[0,2], detail ~[-1,1]
-        const h = base_height + cont * cont_amp + ridge * ridge_amp + detail * 6.0;
+        const h = self.base_height + cont * cont_amp + ridge * ridge_amp + detail * 6.0;
         return std.math.clamp(
             h,
-            @as(f32, @floatFromInt(min_surface)) + margin,
-            @as(f32, @floatFromInt(max_surface)) - margin,
+            @as(f32, @floatFromInt(self.min_surface)) + self.margin,
+            @as(f32, @floatFromInt(self.max_surface)) - self.margin,
         );
     }
 
@@ -301,7 +344,7 @@ pub const WorldGen = struct {
                 while (dy < 2) : (dy += 1) {
                     const cwy: f32 = @floatFromInt((iy + dy) * cell_h);
                     c[@intCast(dx + dz * 2 + dy * 4)] =
-                        cellDensity(&self.noise, target, cwx, cwy, cwz);
+                        cellDensity(self, target, cwx, cwy, cwz);
                 }
             }
         }
@@ -335,11 +378,11 @@ pub const WorldGen = struct {
                 ));
             }
         }
-        var y: i32 = @min(@as(i32, @ceil(top + margin)), y_dim - 1);
-        while (y >= bedrock_h) : (y -= 1) {
+        var y: i32 = @min(@as(i32, @ceil(top + self.margin)), y_dim - 1);
+        while (y >= self.bedrock_h) : (y -= 1) {
             if (self.density(wx, y, wz) > 0) return @intCast(y);
         }
-        return @intCast(bedrock_h - 1);
+        return @intCast(self.bedrock_h - 1);
     }
 
     /// Fill 16×16 height plane for chunk (cx, cz) via one coarse sample grid.
@@ -351,7 +394,7 @@ pub const WorldGen = struct {
     pub fn fillHeights(self: *const WorldGen, cx: i32, cz: i32, out: *[256]u8) void {
         const s = Sampler.init(self, cx, cz);
         const top = s.airAbove();
-        const floor_h: u8 = @intCast(bedrock_h - 1);
+        const floor_h: u8 = @intCast(self.bedrock_h - 1);
         @memset(out, floor_h);
 
         const cells_xz = @divExact(chunk_size, cell_w);
@@ -367,10 +410,10 @@ pub const WorldGen = struct {
                     var h_run: @Vector(cell_w, u8) = @splat(floor_h);
                     var found: @Vector(cell_w, bool) = @splat(false);
                     var y: i32 = top;
-                    y_scan: while (y >= bedrock_h) {
+                    y_scan: while (y >= self.bedrock_h) {
                         const cj = @divFloor(y, cell_h);
                         const c = s.corners(ci, cj, ck);
-                        const y_lo = @max(cj * cell_h, bedrock_h);
+                        const y_lo = @max(cj * cell_h, self.bedrock_h);
                         while (y >= y_lo) : (y -= 1) {
                             const dy = y - cj * cell_h;
                             const ty = @as(f32, @floatFromInt(dy)) / @as(f32, @floatFromInt(cell_h));
@@ -398,9 +441,9 @@ pub const WorldGen = struct {
         while (lz < chunk_size) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < chunk_size) : (lx += 1) {
-                var h: i32 = bedrock_h - 1;
+                var h: i32 = self.bedrock_h - 1;
                 var y: i32 = top;
-                while (y >= bedrock_h) : (y -= 1) {
+                while (y >= self.bedrock_h) : (y -= 1) {
                     if (s.densityAt(lx, y, lz) > 0) {
                         h = y;
                         break;
@@ -449,7 +492,7 @@ pub const WorldGen = struct {
                             // is lx + lz*16 + y*256), so one vector trilerp fills
                             // cell_w blocks with a single store.
                             const d = trilerp(cell_w, c, tx_lanes, ty, tz);
-                            const solid: @Vector(cell_w, bool) = if (y < bedrock_h)
+                            const solid: @Vector(cell_w, bool) = if (y < self.bedrock_h)
                                 @splat(true)
                             else
                                 d > @as(@Vector(cell_w, f32), @splat(0));
@@ -1025,4 +1068,29 @@ test "worldgen first pass uses live air id, not AssignIds pin" {
     var blocks: [16 * 256 * 16]u32 = undefined;
     g.generateChunkBlocks(0, 0, &heights, &blocks);
     try std.testing.expectEqual(@as(u32, 80), blocks[255 * 256]);
+}
+
+test "worldgen [rules.worldgen] params change heights deterministically" {
+    // Non-default shaping params must flow through applyParams and change the
+    // surface while staying deterministic: same params + seed -> same fill.
+    const g1 = WorldGen.init(7);
+    var g2 = WorldGen.init(7);
+    g2.applyParams(.{ .base_height = 30, .height_amp = 40 });
+    var a: [256]u8 = undefined;
+    var b: [256]u8 = undefined;
+    g1.fillHeights(0, 0, &a);
+    g2.fillHeights(0, 0, &b);
+    var changed = false;
+    for (a, b) |x, y| {
+        if (x != y) changed = true;
+    }
+    try std.testing.expect(changed);
+    // Defaults remain the pre-lift constants (byte-identical generator).
+    try std.testing.expectEqual(@as(f32, 68), g1.base_height);
+    try std.testing.expectEqual(@as(f32, 24), g1.height_amp);
+    try std.testing.expectEqual(@as(f32, 0.85), g1.noise_weight);
+    // Determinism: the same params applied twice produce the same plane.
+    var b2: [256]u8 = undefined;
+    g2.fillHeights(0, 0, &b2);
+    try std.testing.expectEqualSlices(u8, &b, &b2);
 }
