@@ -50,6 +50,30 @@ flowchart LR
 
 Ground: `src/server/config.zig` (XML parse + `applySandboxCode` + clamps), `src/ecs/rules.zig` (`Rules` floors), `src/server/zdtd_config.zig` + `src/util/toml_bind.zig` (toml overlay).
 
+### CLI flags (world, config paths, run control)
+
+The precedence table's `…` covers the full CLI surface; the non-serverconfig
+flags are (full text in `zdtd --help`):
+
+| Flag | Effect |
+|---|---|
+| `--world DIR` | zdtd save/overlay dir (default `worlds/zdtd_default`) |
+| `--map DIR` | stock `Data/Worlds/<Name>` (dtm + prefabs); conflicts with `--worldgen-seed` |
+| `--game-dir DIR` | install root (`Data/Worlds` + `Data/Config`) |
+| `--world-name NAME` | Navezgane / Pregen06k01 / … (needs `--game-dir` unless `--map`) |
+| `--serverconfig PATH` | stock-like ServerSettings XML (see `serverconfig.example.xml`) |
+| `--mode NAME` | gamemode pack `modes/<NAME>.toml` |
+| `--admin-port N` | stock telnet console (0 = off; loopback unless `TelnetPassword`) |
+| `--quests PATH` | explicit `quests.xml` (file must exist) |
+| `--config-dir DIR` | stock `Data/Config` dir for XML assets (dir must exist) |
+| `--config-overrides DIR` | dir of xpath patch XMLs (repeatable; filename order; dir must exist) |
+| `--mods-dir DIR` | stock `Mods` root for XML/assetbundle modlets (default `GAME_DIR/Mods`) |
+| `--worldgen-seed U64` | procedural terrain seed (decimal or 0x hex); conflicts with `--map` |
+| `--ticks N` / `--once` | run N ticks (or one) then save and exit |
+
+Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
+(`--mcp-port/bind/token/allowlist`) in RFC 0002.
+
 ## Applied to the sim
 
 | Property | Default | Range | Effect + where |
