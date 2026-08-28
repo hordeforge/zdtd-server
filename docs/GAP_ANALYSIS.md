@@ -121,7 +121,7 @@ recorded.
 an entire 13x13-chunk window. Terrain is hard voxel stairs because the DTM's
 sub-block byte is discarded. Nothing ever collapses.
 
-**Progression is nearly complete.** The 57 perks, 16 attributes and 23 crafting
+**Progression is nearly complete.** The 57 perks, 8 attributes and 23 crafting
 skills parse from `progression.xml` with their 649 `passive_effect` rows (the
 passive-effects VM applies the tracked deltas); spending is server-authoritative
 (`NetPackageEntitySetSkillLevelServer` C2S + the `on_perk_spend` Wasm verdict),
