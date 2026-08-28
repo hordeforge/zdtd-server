@@ -220,3 +220,15 @@ fallbacks (maxDamageForBlock id bands, rent term 30, POI bbox 50/20/50) are
 documented stock-data defaults that XML overrides when present. Every Rules
 group/field and every zdtd.toml key has a consumer (the old dead-field class
 is gone; the parity + pin tests hold).
+
+## 2026-08-29 sweep (plugin host caps)
+
+Re-audit of the plugin host: the runtime knobs that are behavior are already
+config (`[plugin] modules/fuel/max_memory_pages`). The remaining fixed
+host bounds are load-time safety ceilings, kept in code with reason:
+`wasm.zig max_wasm_plugins` (8-slot fixed table, the ADR 0020 host shape) and
+`max_wasm_module_bytes` (16 MiB per-module ceiling at load; real plugins are
+KBs, and an oversized operator-supplied `.wasm` fails closed instead of
+loading). Both are the "FAIL safety guards" class from RULES_CONFIG, not
+tunables. The frame-level C2S deflate bounds (`wire/frame.zig` inflate_cap
+512 KiB, max_inflate_ratio 64) are the same class on the transport side.
