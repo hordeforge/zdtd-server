@@ -11,7 +11,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-23):** `make check` exit 0 · **1294/1294** tests · `lint-architecture: clean` · live stock-client gate **23/23**. GAP **0 MISSING** (291 features: 263 WORKS, 28 PARTIAL). Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
+**Gates (2026-08-29):** `make check` exit 0 · **1470/1471** tests (1 skipped; 2026-08-29 fresh run) · `lint-architecture: clean` · live stock-client gate **23/23**. GAP **0 MISSING** (291 features: **291 WORKS, 0 PARTIAL**). Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
 
 ### Freeze (core playable)
 
@@ -104,32 +104,33 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ### Perk and attribute progression (ADR 0023)
 
-`progression.xml`'s catalog loads (attributes, perks, costs) but nothing
-tracks a player's level in any of them: no per-player state, no requirement
-evaluator, no passive-effect resolver. Found because A34 (turret kill XP)
-needed the last of those three and could only get a flat floor instead.
-Decision: [ADR 0023](docs/adr/0023-perk-attribute-system.md). Plan:
-[docs/WORK_PLAN.md](docs/WORK_PLAN.md) T24-T27, strictly ordered.
+**SHIPPED 2026-08-26/29** (all of T24-T28 below). `progression.xml`'s catalog
+loads (attributes, perks, costs, passives); per-player levels + skill-point
+balance persist through `players.zsv` (ZPV11 skill tail); spending is
+server-authoritative (`NetPackageEntitySetSkillLevelServer` C2S, validated
+against the catalog: known skill, one level per request, max level, SP cost
+scaled by the `on_perk_spend` Wasm verdict, parent-attribute prereq — the only
+`<level_requirements>` shape the shipped file carries), echoed S2C via
+`NetPackageEntitySetSkillLevelClient` + `NetPackagePlayerStats` snapshots to
+every peer; the passive-effects VM folds the tracked perk/buff deltas
+(armor `PhysicalDamageResist`/`ElementalDamageResist` quality curves included);
+`ElectricalTrapXP` reads `PassiveEffects` from buffs.xml instead of a floor.
 
-- [ ] T24: persist per-player attribute and perk levels plus a skill-point
-      balance through the existing player save (ZPV3). Everything below needs
-      this first.
-- [ ] T25: a `ProgressionLevel`/`PlayerLevel` requirement evaluator for
-      `<level_requirements>` (measured against the shipped file: no other
-      requirement type appears there); any other requirement type in a block
-      fails the level-up closed rather than approving it by ignoring what it
-      can't check.
-- [ ] T26: `resolveEffect`'s progression and buffs layers (see
-      [ADR 0024](docs/adr/0024-passive-effect-stack-layers.md): stock computes
-      this class of number from an item/equipment/progression/buffs layer
-      stack, not a perk-only read), so A34's `ElectricalTrapXP` floor upgrades
-      to the real per-player value and the next perk-gated number is a call
-      site, not a new `Rules` field.
-- [ ] T27: C2S perk/attribute spend, landed only after the S2C push
-      (`buildPlayerStatsBody`) can echo the result correctly.
-- [ ] T28: armor mitigation (`PhysicalDamageResist`/`ElementalDamageResist`,
-      A35) fills T26's item/equipment layer stubs instead of a parallel
-      resolver; independent of T24-T27, no per-player state needed.
+- [x] T24: per-player attribute and perk levels plus a skill-point balance
+      persist through the player save (ZPV11 skill tail).
+- [x] T25: requirement evaluator: the stock file's only requirement shape is
+      the perk `parent` attribute, enforced at spend; any other shape fails
+      the purchase closed.
+- [x] T26: the passive-effects VM covers the progression + buffs layers
+      (`trackedDeltasFrom` over the parsed 649 rows); `ElectricalTrapXP` reads
+      the buffs.xml passive, no floor.
+- [x] T27: C2S perk/attribute spend lands on the sim and echoes correctly
+      (`buildPlayerStatsBody` S2C + skill-level echo, both shipped).
+- [x] T28: armor mitigation: `items.xml` armor
+      `PhysicalDamageResist`/`ElementalDamageResist` quality curves
+      (`value="8,12.3"`) parse and fold through the VM.
+      Residual: the A21+ magazine-driven crafting-skill advancement (book
+      unlocks stay recorded, not driven).
 
 ### GameEvent engine, challenges, and other research-vs-plan gaps
 
@@ -265,7 +266,10 @@ Shipped: SetBlock damage S2C, materials MaxDamage, ItemDrop class_item + Collect
   regens when well-fed, and syncs via `NetPackageEntityStatChanged`; rates are
   `[rules.progression]` tunables (stock passive-effect defaults not in the
   V3.1.0 IL corpus). **Stamina SHIPPED** (sprint drain via MovementState 3,
-  idle regen, EntityStatChanged kind 1 sync). Open: core temperature,
+  idle regen, EntityStatChanged kind 1 sync). Core temperature: closed per RE
+  (the stock dedi stubs the felt-temperature getters; the server ships the
+  per-biome slot-0 value and the client computes felt temp + cold/hot buffs
+  from its own weathersurvival.xml; STATUS.md core-temperature row). Open:
   wellness.
 - [x] **Storm gameplay effects (gates)** SHIPPED 2026-08-07: storm SM + `[sim] storm_frequency` (feeds the weather scheduler AND the GameStats wire), and the operator's `SandboxCode`/`SandboxPreset` now parse from serverconfig and ride the GameStats blob (EnumGameStats 71/70), so a joining client decodes the server's sandbox gates (TemperatureSurvival, StormFreq, blood-moon settings) instead of its own defaults. Per RE (weather-environment.md §4) the stock *dedicated* server stubs felt-temperature helpers and does NOT compute wet/cold buffs - the local client computes felt temperature from the shipped per-biome params + weathersurvival.xml MinEvents - so server-side buff application would double-apply and is intentionally NOT implemented. **GSI advertising SHIPPED 2026-08-07**: the TCP GameServerInfo text (and the PlayerLoginAnswer copy) now carries `SandboxPreset`/`SandboxCode` (GameInfoString 18/19) when the operator set them; unset keys are omitted (empty = client default, same as GameStats).
 - [x] Vending machines: TileEntityVendingMachine (type 7) wire emitted - blocks.xml Class/TraderID with Extends resolution, per-block TraderData store seeded from trader_info, TE pushed on chunk stream + LockRequest open (`VendingMachineLockContext`). Disk persistence ships (ZVNM). **Rent SM ships 2026-08-07** (server-authoritative rent/clear/extend/expire via `NetPackagePlayerVendingMachine`; scenario `vending-rent`). **Real-client trade CopyFrom ships 2026-08-07**: the stock NetPackageTraderData ToServer body is parsed and mirrored onto trader/vending stock (scenario `traderdata-copyfrom`). **Owner lock/password/allowed editing ships 2026-08-07** (vending TE composite C2S, owner-gated; scenario `vending-edit`). The vending row is closed.
@@ -345,7 +349,7 @@ PR); unpark the rest after core demo depth + M11 unless prioritized.
 - [ ] **W5b** WFC / edge-matched **tile** layout for districts/roads (not per-block terrain); collapse when settlement cell demanded; see WORLDGEN §6.1 (multi-milestone)
 - [ ] **W6** DEM + procedural blend (detail on GLO-30 base; feather edges; still per-chunk stream) (multi-milestone)
 - [ ] **W7** Far-terrain LOD sampling (ties [SCALE.md](docs/SCALE.md); after M11 planet track) (multi-milestone)
-- [x] Operator: `--worldgen-seed U64` (implies proc); world dir = overlay+cache only; GAME_OPTIONS still open
+- [x] Operator: `--worldgen-seed U64` (implies proc); world dir = overlay+cache only; GAME_OPTIONS row + `[worldgen] seed` documented
 - [x] Persist: player edits win over regen (ZCH3 load before regen; heights-only re-load after gen; blockmeta/containers)
 - [ ] Stock RWG XML RE (rwgmixer/tiles) in `../7dtd-engine-research` only; zdtd tables, no DLL
 

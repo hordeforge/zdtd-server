@@ -121,9 +121,13 @@ recorded.
 an entire 13x13-chunk window. Terrain is hard voxel stairs because the DTM's
 sub-block byte is discarded. Nothing ever collapses.
 
-**No progression system exists.** 57 perks, 16 skills and 23 crafting skills load
-as names only, 649 `passive_effect` rows are never parsed, and gamestage does not
-exist, so day 1 and day 70 spawn identical enemies at identical counts.
+**Progression is nearly complete.** The 57 perks, 16 attributes and 23 crafting
+skills parse from `progression.xml` with their 649 `passive_effect` rows (the
+passive-effects VM applies the tracked deltas); spending is server-authoritative
+(`NetPackageEntitySetSkillLevelServer` C2S + the `on_perk_spend` Wasm verdict),
+and game stage drives spawn tiers and trader stage. The only open leg is the
+A21+ magazine-driven crafting-skill advancement (book unlocks stay recorded,
+not driven).
 
 ---
 
