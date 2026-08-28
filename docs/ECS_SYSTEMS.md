@@ -64,36 +64,38 @@ falling                          // stability-collapse groups
 
 ### Tick order (`schedule.run` / `systems.tickAll`)
 
-Pinned order `src/ecs/schedule.zig:order` — document order is run order; mode packs may disable a phase but never reorder it.
+Pinned order `src/ecs/schedule.zig:order` is run order; mode packs may disable a phase but never reorder it.
 
 ```mermaid
 flowchart LR
     BEGIN([beginTick<br/>clear TickLocals]) --> BUFFS
-    BUFFS[buffs — systemBuffs] --> DIR
-    DIR[director — clock + spawns] --> AI
-    AI[ai — systemZombieAi<br/>parallel] --> VEH
+    BUFFS[buffs: systemBuffs] --> DIR
+    DIR[director: clock + zombie spawns + animals] --> STEALTH
+    STEALTH[stealth] --> AI
+    AI[ai: systemZombieAi<br/>parallel] --> VEH
     VEH[vehicles] --> FALL
-    FALL[falling — gravity + landing] --> TUR
-    TUR[turrets — parallel] --> DESP
+    FALL[falling: gravity + landing] --> TUR
+    TUR[turrets: parallel] --> DESP
     DESP[despawn] --> CMDS
-    CMDS[commands — drainCommands cap 64]
+    CMDS[commands: drainCommands cap 64]
 
     classDef phase fill:#1a3a5c,stroke:#5b8def,color:#dbe6ff
-    class BUFFS,DIR,AI,VEH,FALL,TUR,DESP,CMDS phase
+    class BUFFS,DIR,STEALTH,AI,VEH,FALL,TUR,DESP,CMDS phase
 ```
 
 Detail: `src/ecs/schedule.zig:run` and [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule). Power resolves once per tick in `Game.step` with real daylight, not inside `schedule.run`.
 
 0. `World.beginTick`: clear `TickLocals`
 1. `systemBuffs`: 20 Hz buff duration/stack tick; reports expiries to the net layer
-2. `systemDirector`: clock, horde/blood-moon spawns (serial; spawns entities)
-3. `systemZombieAi`: multi-threaded over the merged zombie+animal group; deferred player damage
-4. `systemVehicles`: driver transform stick
-5. `systemFallingBlocks`: gravity + landing + crush (snapshot then destroy)
-6. Power: resolve stays in `Game.step` (daylight); not doubled here
-7. `systemTurrets`: multi-threaded targeting over the turret group; deferred zombie damage
-8. `systemDespawnFar`: cull far zombies/animals (merged slot-ascending snapshot)
-9. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
+2. `systemDirector`: clock, horde/blood-moon/scout spawns, heat decay, wildlife (`[systems] animals` independently of the zombie cap)
+3. `systemStealth`: player noise/light; before AI so this tick's noise is heard
+4. `systemZombieAi`: multi-threaded over the merged zombie+animal group; deferred player damage
+5. `systemVehicles`: driver transform stick
+6. `systemFallingBlocks`: gravity + landing + crush (snapshot then destroy)
+7. Power: resolve stays in `Game.step` (daylight); not doubled here
+8. `systemTurrets`: multi-threaded targeting over the turret group; deferred zombie damage
+9. `systemDespawnFar`: cull far zombies/animals (merged slot-ascending snapshot)
+10. `World.drainCommands`: apply deferred spawn/despawn/damage (cap 64)
 
 Command-style systems (not every tick): `questAccept*`, `questOn*`, `trade`,
 `vehicleAttach` / `vehicleControl` / `vehicleDetach`.
@@ -144,9 +146,11 @@ parallel counter).
 
 Wired today: `systems.snapshotPlayers` (twice per tick), `systemZombieAi` and
 `systemDespawnFar` (merged zombie+animal via `copyKindsInto`), the
-`systemTurrets` zombie-list and turret-list builds, `systemFallingBlocks`
-(snapshot then destroy), `systemBuffs` (`alive_bits`),
-`Game.tickZombieBlockDamage`, `Game.broadcastVehiclePositions`. The replicate
+`systemTurrets` zombie-list and turret-list builds plus the deferred-damage
+apply, `systemFallingBlocks` (snapshot then destroy), `systemBuffs` and
+`applyDeferredDamage` (`alive_bits`), `Director` player/zombie walks
+(`kind_groups.slice`), `Game.tickZombieBlockDamage`,
+`Game.broadcastVehiclePositions`. The replicate
 entity pass, motion dirty-clear and `clearDeadKnownEntities` do not use groups
 (iterating kind groups would be kind-major, not slot-ascending); they walk
 `World.alive_bits` / `World.dirty_bits`, word-packed sets maintained by

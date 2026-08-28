@@ -425,14 +425,11 @@ pub const Director = struct {
         // day and night for the mode that disabled it. Wildlife keeps wandering
         // under its own `[systems] animals` flag (stock SpawnManagerBiomes is a
         // system separate from the AIDirector, spawning.md section 2).
-        if (!w.rules.systems.director) {
-            spawned += self.tickAnimals(w);
-            if (self.clock.day != day_before) {
-                @import("systems.zig").traderRestock(w);
-            }
-            return .{ .spawned = spawned, .world_time = self.clock.worldTimeBits() };
-        }
-
+        //
+        // The alive-zombie cap is a spawn gate, not a return: heat decay,
+        // blood-moon party teleports, EndBloodMoon, animals, and trader
+        // restock still run. Returning here used to freeze all of those for
+        // as long as the cap was full.
         const alive_z = w.countKind(.zombie);
         // Blood-moon budget: stock's party spawner calls `AIDirector::CanSpawn
         // (1.9f)` (asm.il:413528), a 1.9x ceiling over the world budget, so
@@ -444,63 +441,64 @@ pub const Director = struct {
             @trunc(@min(@as(f64, @floatFromInt(self.max_alive)) * @as(f64, w.rules.bloodmoon.budget_scale), 4294967295.0))
         else
             self.max_alive;
-        if (alive_z >= cap) {
-            // Daily trader restock still runs below; skip spawn branches.
-            if (self.clock.day != day_before) {
-                @import("systems.zig").traderRestock(w);
+        const spawn_z = w.rules.systems.director and alive_z < cap;
+
+        if (w.rules.systems.director) {
+            if (spawn_z and self.clock.isNight() and self.horde_cd <= 0) {
+                spawned += self.spawnNearPlayers(w, 2, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, "");
+                self.horde_cd = if (self.bloodmoon_active) w.rules.director.bloodmoon_horde_drip_cd else w.rules.director.horde_drip_cd;
             }
-            return .{ .spawned = 0, .world_time = self.clock.worldTimeBits() };
+            if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
+                // Freeze the party gamestage at dusk (InitParty): the ladder and
+                // the horde size stay fixed for the whole night.
+                if (self.bm_stage_frozen == 0) self.bm_stage_frozen = self.party_stage;
+                self.buildBloodMoonParties(w);
+                self.recountAndTeleportHorde(w);
+                if (spawn_z) {
+                    const bm = self.stageGroup(bloodmoon_spawner);
+                    var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
+                    var bm_group: []const u8 = "";
+                    if (bm) |sg| {
+                        wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
+                        bm_group = sg.group;
+                    }
+                    spawned += self.spawnBloodMoonParties(w, wave, bm_group);
+                    self.bloodmoon_cd = w.rules.director.bloodmoon_wave_cd;
+                }
+            } else if (!self.bloodmoon_active and self.bm_stage_frozen != 0) {
+                // EndBloodMoon (412618): clear horde marks and the frozen stage at
+                // dawn; nothing is despawned.
+                self.bm_stage_frozen = 0;
+                clearHordeMarks(w);
+            }
+            // Horde zombies keep to their party focus every tick (teleport back
+            // past cTeleportDist) so a 2+ player horde cannot split.
+            if (self.bloodmoon_active) {
+                self.buildBloodMoonParties(w);
+                self.recountAndTeleportHorde(w);
+            }
+            // Wandering horde schedule (AIDirectorWanderingHordeComponent): a group
+            // of 6 at ~92 m every 12-24 in-game hours, player-gated. Stay due
+            // when the zombie cap is full so the wave fires as soon as there
+            // is budget instead of being dropped.
+            const wt = self.clock.worldTimeBits();
+            if (self.wandering_next == 0) {
+                if (wt > w.rules.director.wander_start_after) self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
+            } else if (wt >= self.wandering_next) {
+                if (spawn_z) {
+                    if (anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
+                    self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
+                }
+            }
+            // Heat map: decay always; the 5 s scout spawn is cap-gated.
+            self.tickHeat(w, dt, spawn_z);
+            if (spawn_z and !self.clock.isNight() and self.scouts_cd <= 0) {
+                spawned += self.spawnNearPlayers(w, 1, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
+                self.scouts_cd = w.rules.director.scout_drip_cd;
+            }
         }
 
-        if (self.clock.isNight() and self.horde_cd <= 0) {
-            spawned += self.spawnNearPlayers(w, 2, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, "");
-            self.horde_cd = if (self.bloodmoon_active) w.rules.director.bloodmoon_horde_drip_cd else w.rules.director.horde_drip_cd;
-        }
-        if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
-            // Freeze the party gamestage at dusk (InitParty): the ladder and
-            // the horde size stay fixed for the whole night.
-            if (self.bm_stage_frozen == 0) self.bm_stage_frozen = self.party_stage;
-            self.buildBloodMoonParties(w);
-            self.recountAndTeleportHorde(w);
-            const bm = self.stageGroup(bloodmoon_spawner);
-            var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
-            var bm_group: []const u8 = "";
-            if (bm) |sg| {
-                wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
-                bm_group = sg.group;
-            }
-            spawned += self.spawnBloodMoonParties(w, wave, bm_group);
-            self.bloodmoon_cd = w.rules.director.bloodmoon_wave_cd;
-        } else if (!self.bloodmoon_active and self.bm_stage_frozen != 0) {
-            // EndBloodMoon (412618): clear horde marks and the frozen stage at
-            // dawn; nothing is despawned.
-            self.bm_stage_frozen = 0;
-            clearHordeMarks(w);
-        }
-        // Horde zombies keep to their party focus every tick (teleport back
-        // past cTeleportDist) so a 2+ player horde cannot split.
-        if (self.bloodmoon_active) {
-            self.buildBloodMoonParties(w);
-            self.recountAndTeleportHorde(w);
-        }
-        // Wandering horde schedule (AIDirectorWanderingHordeComponent): a group
-        // of 6 at ~92 m every 12-24 in-game hours, player-gated.
-        const wt = self.clock.worldTimeBits();
-        if (self.wandering_next == 0) {
-            if (wt > w.rules.director.wander_start_after) self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
-        } else if (wt >= self.wandering_next) {
-            if (anyPlayer(w)) spawned += self.spawnWanderingHorde(w);
-            self.wandering_next = self.nextWanderingTime(w.rules.director.wander_min_gap, w.rules.director.wander_max_gap);
-        }
-        // Heat map: decay + the 5 s scout check (AIDirectorChunkEventComponent).
-        self.tickHeat(w, dt);
-        if (!self.clock.isNight() and self.scouts_cd <= 0) {
-            spawned += self.spawnNearPlayers(w, 1, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
-            self.scouts_cd = w.rules.director.scout_drip_cd;
-        }
-        // Daytime wildlife up to MaxSpawnedAnimals (wander, not chase).
         spawned += self.tickAnimals(w);
-        // Daily trader restock when day rolls.
         if (self.clock.day != day_before) {
             @import("systems.zig").traderRestock(w);
         }
@@ -528,8 +526,8 @@ pub const Director = struct {
 
     fn spawnAnimalsNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32) u32 {
         var n: u32 = 0;
-        var p: ecs_world.Slot = 0;
-        while (p < ecs_world.max_entities and n < count) : (p += 1) {
+        for (w.kind_groups.slice(.player)) |p| {
+            if (n >= count) break;
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
             const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.3;
             const r = min_r + (max_r - min_r) * @mod(ang, 1.0);
@@ -617,8 +615,8 @@ pub const Director = struct {
     /// decrements the alive count (kill attrition).
     fn spawnNearPlayers(self: *Director, w: *ecs_world.World, count: u32, min_r: f32, max_r: f32, group_override: []const u8) u32 {
         var n: u32 = 0;
-        var p: ecs_world.Slot = 0;
-        while (p < ecs_world.max_entities and n < count) : (p += 1) {
+        for (w.kind_groups.slice(.player)) |p| {
+            if (n >= count) break;
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
             var k: u32 = 0;
             while (k < count and n < count) : (k += 1) {
@@ -721,8 +719,7 @@ pub const Director = struct {
         const join2 = rules.party_join_dist * rules.party_join_dist;
         self.bm_parties = [_]BmParty{.{}} ** bm_parties_cap;
         self.bm_party_n = 0;
-        var p: ecs_world.Slot = 0;
-        while (p < ecs_world.max_entities) : (p += 1) {
+        for (w.kind_groups.slice(.player)) |p| {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
             const x = w.transform[p].x;
             const z = w.transform[p].z;
@@ -754,16 +751,19 @@ pub const Director = struct {
         if (self.bm_party_n == 0) {
             // All parties wiped: stock KillPartyZombies (party Tick, aidirector.md)
             // kills the horde when its party empties, so a dead party does not
-            // leave horde zombies roaming until dawn.
-            var s: ecs_world.Slot = 0;
-            while (s < ecs_world.max_entities) : (s += 1) {
+            // leave horde zombies roaming until dawn. Snapshot: destroy()
+            // shifts the live kind group.
+            var buf: [ecs_world.max_entities]ecs_world.Slot = undefined;
+            const src = w.kind_groups.slice(.zombie);
+            const n = src.len;
+            @memcpy(buf[0..n], src);
+            for (buf[0..n]) |s| {
                 if (w.alive[s] and w.zombie_ai[s].is_horde) w.destroy(s);
             }
             return;
         }
         const tel2 = rules.party_teleport_dist * rules.party_teleport_dist;
-        var s: ecs_world.Slot = 0;
-        while (s < ecs_world.max_entities) : (s += 1) {
+        for (w.kind_groups.slice(.zombie)) |s| {
             if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
             const x = w.transform[s].x;
             const z = w.transform[s].z;
@@ -790,8 +790,7 @@ pub const Director = struct {
 
     /// EndBloodMoon: clear IsHordeZombie on every living zombie (412618).
     fn clearHordeMarks(w: *ecs_world.World) void {
-        var s: ecs_world.Slot = 0;
-        while (s < ecs_world.max_entities) : (s += 1) {
+        for (w.kind_groups.slice(.zombie)) |s| {
             if (w.alive[s]) w.zombie_ai[s].is_horde = false;
         }
     }
@@ -890,11 +889,7 @@ pub const Director = struct {
 
     /// True when at least one online player exists (wandering horde gate).
     fn anyPlayer(w: *ecs_world.World) bool {
-        var p: ecs_world.Slot = 0;
-        while (p < ecs_world.max_entities) : (p += 1) {
-            if (w.alive[p] and w.mask[p].player) return true;
-        }
-        return false;
+        return w.countKind(.player) > 0;
     }
 
     /// ChooseNextTime: now + RandomRange(12000, 24000). The roll is a
@@ -915,12 +910,12 @@ pub const Director = struct {
     /// visible behaviour (a scheduled pack arriving from outside) without the
     /// path-command AI, which stays a residual (GAP wandering hordes row).
     fn spawnWanderingHorde(self: *Director, w: *ecs_world.World) u32 {
-        var p: ecs_world.Slot = 0;
-        while (p < ecs_world.max_entities) : (p += 1) {
+        for (w.kind_groups.slice(.player)) |p| {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
             var n: u32 = 0;
-            while (n < w.rules.director.wandering_horde_size) : (n += 1) {
-                const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 1.7 + @as(f32, @floatFromInt(n)) * 1.0472;
+            var i: u32 = 0;
+            while (i < w.rules.director.wandering_horde_size) : (i += 1) {
+                const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 1.7 + @as(f32, @floatFromInt(i)) * 1.0472;
                 const x = w.transform[p].x + @cos(ang) * w.rules.director.wandering_spawn_dist;
                 const z = w.transform[p].z + @sin(ang) * w.rules.director.wandering_spawn_dist;
                 const y = w.groundY(x, z) orelse w.transform[p].y;
@@ -974,7 +969,7 @@ pub const Director = struct {
     /// AIDirectorChunkEventComponent::Tick: decay region activity (events
     /// expire), then every 5 s run CheckToSpawn: a region at/above 25 spawns a
     /// scout party toward its center and cooldowns itself and its neighbors.
-    fn tickHeat(self: *Director, w: *ecs_world.World, dt: f32) void {
+    fn tickHeat(self: *Director, w: *ecs_world.World, dt: f32, spawn_z: bool) void {
         var i: usize = 0;
         while (i < self.heat_n) {
             const r = &self.heat[i];
@@ -993,7 +988,10 @@ pub const Director = struct {
         self.heat_check_cd -= dt;
         if (self.heat_check_cd > 0) return;
         self.heat_check_cd = w.rules.director.heat_check_seconds;
-        if (self.bloodmoon_active) return;
+        // Hold the heat event when the zombie cap is full so CheckToSpawn
+        // retries once there is budget, instead of burning activity for a
+        // scout that cannot spawn.
+        if (self.bloodmoon_active or !spawn_z) return;
         var ci: usize = 0;
         while (ci < self.heat_n) : (ci += 1) {
             const r = &self.heat[ci];
@@ -1041,7 +1039,8 @@ pub const Director = struct {
         const center = heatRegionCenter(key);
         const group = self.scoutGroup();
         var n: u32 = 0;
-        while (n < w.rules.director.heat_scout_count) : (n += 1) {
+        var i: u32 = 0;
+        while (i < w.rules.director.heat_scout_count) : (i += 1) {
             const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
             const x = center.x + @cos(ang) * w.rules.director.heat_scout_dist;
             const z = center.z + @sin(ang) * w.rules.director.heat_scout_dist;
@@ -1059,8 +1058,7 @@ pub const Director = struct {
     fn nearestPlayerSlot(w: *ecs_world.World, x: f32, z: f32) ?ecs_world.Slot {
         var best: ?ecs_world.Slot = null;
         var best_d2: f32 = std.math.floatMax(f32);
-        var p: ecs_world.Slot = 0;
-        while (p < ecs_world.max_entities) : (p += 1) {
+        for (w.kind_groups.slice(.player)) |p| {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
             const dx = w.transform[p].x - x;
             const dz = w.transform[p].z - z;
@@ -1179,6 +1177,29 @@ test "director=false stops zombies but wildlife follows its own flag" {
         _ = dir.tick(&w, 0.1);
     }
     try std.testing.expectEqual(before, w.countKind(.animal));
+}
+test "animals and heat keep ticking when the zombie cap is full" {
+    var w: ecs_world.World = .{};
+    var dir: Director = .{
+        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .max_alive = 2,
+        .max_alive_animals = 3,
+        .scouts_cd = 999,
+    };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    _ = w.spawnZombie(10, 70, 0, 40);
+    _ = w.spawnZombie(12, 70, 0, 40);
+    try std.testing.expectEqual(@as(u32, 2), w.countKind(.zombie));
+    dir.notifyActivity(0, 0, 10, 720);
+    const heat_before = dir.heat[0].activity;
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        dir.animals_cd = 0;
+        _ = dir.tick(&w, 0.1);
+    }
+    try std.testing.expect(dir.heat[0].activity < heat_before);
+    try std.testing.expect(w.countKind(.animal) >= 1);
+    try std.testing.expectEqual(@as(u32, 2), w.countKind(.zombie));
 }
 test "spawned classes carry full entityclasses stats via the resolver (A35)" {
     const Hooks = struct {
@@ -1411,7 +1432,7 @@ test "wandering horde arms after day 1 and spawns a 6-pack at 92 m" {
         horde += 1;
         horde_slot = s;
     }
-    try std.testing.expect(horde >= 1 and horde <= wandering_horde_size);
+    try std.testing.expectEqual(@as(u32, wandering_horde_size), horde);
     try std.testing.expect(d.wandering_next > d.clock.worldTimeBits());
     const hs = horde_slot orelse return error.TestUnexpectedResult;
     const dx = w.transform[hs].x - 0.0;
@@ -1438,7 +1459,7 @@ test "wandering horde size and distance follow [rules.director]" {
         horde += 1;
         horde_slot = s;
     }
-    try std.testing.expect(horde >= 1 and horde <= 3); // config size, not 6
+    try std.testing.expectEqual(@as(u32, 3), horde); // config size, not 6
     const hs = horde_slot orelse return error.TestUnexpectedResult;
     const dist = @sqrt(w.transform[hs].x * w.transform[hs].x + w.transform[hs].z * w.transform[hs].z);
     try std.testing.expect(dist > 30.0 and dist < 50.0); // config 40 m, not 92
@@ -1478,7 +1499,7 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
         if (!w.alive[s] or !w.zombie_ai[s].is_horde) continue;
         scouts += 1;
     }
-    try std.testing.expect(scouts >= 1 and scouts <= 2); // rules.director.heat_scout_count default
+    try std.testing.expectEqual(@as(u32, 2), scouts); // rules.director.heat_scout_count default
     // Region was reset (activity 0) and is on cooldown. Region key of (0,0):
     // floor(0/80)=0 on both axes, packed = 0.
     var found = false;

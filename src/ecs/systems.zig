@@ -597,8 +597,12 @@ fn fpDamage(fp: u32) f32 {
 
 fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
     var applied: u32 = 0;
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
+    // O(live) via the packed alive set. The accumulator is slot-indexed, but
+    // only living entities can have been written; scanning the 512-slot table
+    // paid for idle capacity every AI tick.
+    var it = w.alive_bits.iterator(.{});
+    while (it.next()) |idx| {
+        const i: Slot = @intCast(idx);
         const fp = dmg_fp[i];
         if (fp == 0) continue;
         if (!w.alive[i] or !w.mask[i].health) continue;
@@ -3334,8 +3338,10 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
     // Split the live turret list, not the 512-slot table.
     if (tn < 64) TurretCtx.work(ctx, 0, tn) else parallel.forRanges(tn, ctx, TurretCtx.work);
     var out: TurretTick = .{};
-    var i: Slot = 0;
-    while (i < max_entities) : (i += 1) {
+    // Workers only wrote zombie slots (ascending), so apply in that order
+    // instead of probing the full slot table. Same kill-list tie-break as the
+    // open scan: first 16 deaths in slot order fill the report.
+    for (zombie_slots[0..zn]) |i| {
         const fp = dmg_fp[i];
         if (fp == 0) continue;
         if (!w.alive[i] or !w.mask[i].health) continue;

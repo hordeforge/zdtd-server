@@ -56,6 +56,11 @@ pub const TickResult = struct {
 /// entry (`w.rules.systems.<name>`) but never reorder one: the order encodes a
 /// real dependency (buffs before ai so movement and damage read this tick's
 /// buff state), so reordering would break determinism rather than customise it.
+///
+/// `animals` is a Systems toggle with a named slot here so the field count
+/// matches. Wildlife spawning runs inside `systemDirector` (Director.tickAnimals),
+/// independently gated from zombie spawning; a second call in `run` would
+/// double-spawn.
 pub const order = [_][]const u8{
     "buffs", "director", "animals", "stealth", "ai", "vehicles", "falling", "turrets", "despawn", "commands",
 };
@@ -76,6 +81,8 @@ pub fn run(w: *World, dt: f32) TickResult {
 
     // Always run: the director owns the world clock and the daily restock, so
     // the `director` toggle is applied inside it (spawning only), not here.
+    // Wildlife (`[systems] animals`) is the SpawnManagerBiomes pass inside
+    // Director.tick, independently gated from zombie spawning.
     const dr = systems.systemDirector(w, dt);
     if (on.stealth) systems.systemStealth(w);
     const hits = if (on.ai) systems.systemZombieAi(w, dt) else 0;

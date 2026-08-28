@@ -670,9 +670,9 @@ pub const World = struct {
             return null;
         }
         // Preserve the standalone ECS API for callers using an out-of-range
-        // synthetic peer id.
-        var i: Slot = 0;
-        while (i < max_entities) : (i += 1) {
+        // synthetic peer id. The player group is slot-ascending, so the first
+        // match is the same one the open scan returned.
+        for (self.kind_groups.slice(.player)) |i| {
             if (self.alive[i] and self.mask[i].player and self.player[i].peer_slot == @as(i32, @intCast(peer_slot))) {
                 return i;
             }
@@ -1650,9 +1650,13 @@ pub const World = struct {
     /// the count written to `out`, which the caller broadcasts as EntityRemove.
     pub fn sweepCorpses(self: *World, dt: f32, out: []NetId) usize {
         var n: usize = 0;
-        var s: Slot = 0;
-        while (s < max_entities) : (s += 1) {
-            if (!self.alive[s] or self.health[s].corpse_seconds <= 0) continue;
+        // O(live): only living slots can hold a corpse timer. destroy() of the
+        // current slot is safe for the bitset iterator (the bit is already
+        // consumed); later corpses stay set and still tick this pass.
+        var it = self.alive_bits.iterator(.{});
+        while (it.next()) |idx| {
+            const s: Slot = @intCast(idx);
+            if (self.health[s].corpse_seconds <= 0) continue;
             // Report list full: stop before a removal nobody would be told
             // about (destroy without EntityRemove leaves a permanent client
             // ghost). The remaining corpses keep their dwell and expire on a
