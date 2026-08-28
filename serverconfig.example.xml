@@ -15,9 +15,30 @@
   <property name="ServerPort" value="26902"/>
   <property name="ServerMaxPlayerCount" value="8"/>
   <property name="ServerPassword" value=""/>
+  <!-- GSI server-browser fields (empty = client default). -->
+  <property name="ServerDescription" value=""/>
+  <property name="ServerWebsiteURL" value=""/>
+  <property name="Region" value=""/>
+  <property name="Language" value=""/>
+  <property name="ServerMatchmakingGroup" value=""/>
+  <!-- PlayerSlotsAuthorizer (IL=174): reserved slots at the cap for players
+       with permission <= ServerReservedSlotsPermission; admin slots add
+       headroom for permission <= ServerAdminSlotsPermission. 0 = disabled. -->
+  <property name="ServerReservedSlots" value="0"/>
+  <property name="ServerReservedSlotsPermission" value="0"/>
+  <property name="ServerAdminSlots" value="0"/>
+  <property name="ServerAdminSlotsPermission" value="0"/>
   <property name="GameName" value="zdtd"/>
   <!-- Stock world folder name under --game-dir/Data/Worlds/ (e.g. Navezgane) -->
   <property name="GameWorld" value=""/>
+  <!-- Stock sandbox code: one string encoding all 165 sandbox options; echoed
+       into GameStats(71) so a joining client decodes the server's gates, and
+       decoded server-side to overlay tuning (XP, block damage, day length).
+       Empty = client defaults (see docs/GAME_OPTIONS.md §2.1). -->
+  <property name="SandboxCode" value=""/>
+  <!-- Sandbox preset NAME for the server-browser display; not used to load
+       values. Advertised in the GSI GameInfoString when set. -->
+  <property name="SandboxPreset" value=""/>
   <!-- zdtd alias for the console port; 0 = disabled -->
   <property name="AdminPort" value="0"/>
   <!-- Stock telnet console. TelnetPort wins over AdminPort when enabled.
@@ -56,6 +77,10 @@
   <property name="LandClaimOnlineDurabilityModifier" value="4"/>
   <property name="LandClaimOfflineDurabilityModifier" value="4"/>
   <property name="LandClaimExpiryDays" value="3"/>
+  <property name="LandClaimCount" value="3"/>
+  <property name="LandClaimDeadZone" value="60"/>
+  <property name="LandClaimOfflineDelay" value="3"/>
+  <property name="LandClaimDecayMode" value="0"/>
   <property name="LootRespawnDays" value="7"/>
 
   <!-- observe | permissive (alias of observe) | correct (default) -->
