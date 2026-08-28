@@ -59,6 +59,9 @@ pack `worldgen_seed` tier — precedence CLI > zdtd.toml `[worldgen] seed` >
 pack, like rules) plus proc deco (species resolve from the W3 biome field +
 biomes.xml lists since proc worlds carry no biomemap; game-dir proc worlds
 stream trees instead of staying bald; bare proc worlds fail closed).
+And save growth: clean proc chunks are no longer persisted on eviction (they
+regenerate deterministically from the seed; edits carry `dirty` and persist),
+so an infinite world's save dir grows with edits, not visits.
 Counts unchanged.
 
 ## Wave 2026-08-20 (surface-parity reconciliation)

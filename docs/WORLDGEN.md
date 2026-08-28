@@ -46,6 +46,12 @@ lists (the same table the baked path uses) — with a game-dir present an
 infinite proc world is not bald. A bare proc world without game-dir biomes.xml
 stays bald (fail closed: no fabricated block ids the client cannot resolve).
 
+**Save growth** (2026-08-29): an untouched proc chunk regenerates from the
+seed, so `saveChunk` skips clean proc chunks — only edited (dirty) chunks
+persist. An infinite world's save dir grows with the player's edits, not with
+every visited chunk. Baked worlds keep persisting clean chunks (disk reload
+beats DTM+prefab regen; the map is finite).
+
 ## Design goals
 
 - **On-the-fly, not prebaked.** No "generate world then host" step for the

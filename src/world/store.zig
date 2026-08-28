@@ -1348,6 +1348,14 @@ pub const World = struct {
     }
 
     pub fn saveChunk(self: *World, c: *const Chunk) !void {
+        // Proc worlds regenerate untouched chunks deterministically from the
+        // seed, so a clean chunk needs no file: an infinite world would
+        // otherwise grow the save dir with every visited chunk for no
+        // benefit. Edited chunks carry `dirty` (setBlockRaw / dmg / topsoil /
+        // height) and still persist; `saveAll` already skips clean chunks.
+        // Baked worlds keep persisting clean chunks (disk reload beats
+        // DTM+prefab regen, and the map is finite).
+        if (!c.dirty and self.terrain_source == .proc) return;
         var path_buf: [512]u8 = undefined;
         const path = try self.chunkPath(c.pos, &path_buf);
         const key = c.pos.hash();
@@ -1611,6 +1619,32 @@ test "proc worldgen getOrCreate heights from seed" {
     try std.testing.expectEqual(h0, c2.heightAt(5, 7));
     try std.testing.expectEqualSlices(u8, &heights_before, &c2.heights);
     try std.testing.expectEqualSlices(u32, plane, c2.blocks.?);
+}
+
+test "proc worlds persist only edited chunks" {
+    // Infinite-world save growth: an untouched proc chunk regenerates from
+    // the seed, so evicting/saving it must leave no file; an edit marks
+    // dirty and persists.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.enableProc(1);
+    const pos = ChunkPos{ .x = 0, .z = 0 };
+    const c = try w.getOrCreate(pos);
+    try std.testing.expect(!c.dirty);
+    var path_buf: [512]u8 = undefined;
+    const path = try w.chunkPath(pos, &path_buf);
+    try w.saveChunk(c);
+    try std.testing.expect(!io_fs.fileExists(path));
+    // An edit marks dirty and persists.
+    try w.setBlockWorld(1, 10, 1, block_stone);
+    try std.testing.expect(c.dirty);
+    try w.saveChunk(c);
+    try std.testing.expect(io_fs.fileExists(path));
 }
 
 test "flat world set dig persist" {
