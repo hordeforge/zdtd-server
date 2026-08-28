@@ -361,7 +361,8 @@ No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
 | `land_claim_size` / `land_claim_online_durability_modifier` / `land_claim_offline_durability_modifier` / `land_claim_expiry_days` | claim geometry and decay |
 | `loot_respawn_days` | container re-roll interval (0..365) |
 | `enable_sample_plugin` | Register in-tree `sample_hello` static plugin (host already exists) |
-| `[rules.*]` sections | Any `Rules` field via `[rules.combat]`, `[rules.ai]`, `[rules.bloodmoon]`, `[rules.director]` (see above) |
+| `worldgen_seed` | Enables the on-the-fly procedural terrain (infinite world). Precedence: CLI `--worldgen-seed` > zdtd.toml `[worldgen] seed` > this key |
+| `[rules.*]` sections | Any `Rules` field via `[rules.combat]`, `[rules.ai]`, `[rules.bloodmoon]`, `[rules.director]`, `[rules.worldgen]` (see above) |
 
 Only the keys you set override; everything else falls through to
 `serverconfig.xml`, `zdtd.toml` and code defaults. A mode is a complete
@@ -370,7 +371,13 @@ behavior pack - `hardcore.toml` = `player_killing_mode = 0`,
 `attack_damage = 14`, and so on - no code involved.
 
 Shipped examples that exercise the rules surface: [`modes/horde_lite.toml`](../modes/horde_lite.toml)
-(softer) and [`modes/survival_crunch.toml`](../modes/survival_crunch.toml) (harsher).
+(softer), [`modes/survival_crunch.toml`](../modes/survival_crunch.toml) (harsher),
+and [`modes/infinite.toml`](../modes/infinite.toml) (procedural infinite world,
+[WORLDGEN.md](WORLDGEN.md)). The infinite world also ships as a **config-only
+mod**: `[mods] enabled = "infinite_world"` in zdtd.toml activates
+`mods/infinite_world/mod.toml`, whose `mode = "infinite"` loads the same pack
+(explicit `--mode` / `[mode] name` still wins). Mods ship off by default and
+leave no persistent change until the player edits.
 
 Select with `--mode default` or `zdtd.toml` `[mode] name = "default"`. Name must
 be `[A-Za-z0-9_]` only (no path segments). Missing file is fatal when selected.

@@ -293,7 +293,7 @@ test "every committed mode pack binds against the current rules schema" {
     // The committed modes/*.toml packs are not embedded; parse() binds each
     // fully (init-options + the [rules.*] overlay) through the fail-closed
     // toml binder, so a stale key surfaces here instead of at runtime load.
-    for ([_][]const u8{ "default", "builder", "horde_lite", "survival_crunch" }) |name| {
+    for ([_][]const u8{ "default", "builder", "horde_lite", "survival_crunch", "infinite" }) |name| {
         var buf: [64]u8 = undefined;
         const path = std.fmt.bufPrint(&buf, "modes/{s}.toml", .{name}) catch continue;
         if (!io_fs.fileExists(path)) continue;
@@ -304,6 +304,24 @@ test "every committed mode pack binds against the current rules schema" {
         // the point of the pack); default may be empty.
         _ = p.rules;
     }
+}
+
+test "infinite pack pins the mod contract (seed + shaping defaults)" {
+    // mods/infinite_world activates this pack; changing these values silently
+    // changes the mod's world, so pin them here (the resolver test pins the
+    // mode_pack activation itself).
+    var p = try loadByName(std.testing.allocator, "infinite");
+    defer p.deinit();
+    try std.testing.expectEqualStrings("infinite", p.name);
+    try std.testing.expectEqual(@as(?u64, 7), p.worldgen_seed);
+    try std.testing.expectEqual(@as(?f32, 68), p.rules.worldgen.base_height);
+    try std.testing.expectEqual(@as(?f32, 24), p.rules.worldgen.height_amp);
+    try std.testing.expectEqual(@as(?u8, 12), p.rules.worldgen.min_surface);
+    try std.testing.expectEqual(@as(?u8, 200), p.rules.worldgen.max_surface);
+    try std.testing.expectEqual(@as(?f32, 28), p.rules.worldgen.squash);
+    try std.testing.expectEqual(@as(?f32, 0.85), p.rules.worldgen.noise_weight);
+    try std.testing.expectEqual(@as(?f32, 2.0), p.rules.worldgen.y_scale);
+    try std.testing.expectEqual(@as(?i32, 3), p.rules.worldgen.bedrock_h);
 }
 
 test "loadByName rejects bad name" {
