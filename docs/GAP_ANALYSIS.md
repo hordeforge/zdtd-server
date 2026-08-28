@@ -441,9 +441,12 @@ area and the concrete work.
     too** (`trySendCompressed` in `sendGame`, the stock asm.il:808641
     compress set) so the join/stream cost drops; any overflow falls through
     to the uncompressed frame. The join drop `reliable_window_drops=1` is
-    gone. Still open: the remaining stock compressed set (ConfigFile has no
-    payload in zdtd's LoadLocal path; DynamicMesh/MapChunks/POIAround are not
-    sent), bulk world data on channel 1, and multi-package envelopes
+    gone. 3.2.0 update (2026-08-29): `NetPackagePOIMetadataResponse` (the
+    POIAround replacement) also ships deflated (net.zig compress set);
+    POIAround itself is removed in 3.2.0, so the old "not sent" note is
+    moot. Still open: the remaining stock compressed set (ConfigFile has no
+    payload in zdtd's LoadLocal path; DynamicMesh/MapChunks are not sent),
+    bulk world data on channel 1, and multi-package envelopes
     (`src/server/game.zig` send path).
 
 21. **Progression: build a buff runtime + the passive-effects VM.** `WORKS`

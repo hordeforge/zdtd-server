@@ -72,7 +72,7 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     // and friends): Chunk, ConfigFile, DynamicClientArrive, DynamicMesh,
     // IdMapping, MapChunks, POIMetadataResponse, SignDataResponse (the
     // 3.2.0 set swaps POIAround for POIMetadataResponse, changelog-3.2.0
-    // §3.5). The four zdtd emits today are deflated here (the rest are not
+    // §3.5). The five zdtd emits today are deflated here (the rest are not
     // yet sent - S2C coverage row).
     // IdMapping/ConfigFile deflating cuts the join cost (one flat-world join
     // was 6.4 MB out) and relieves the reliable window.
