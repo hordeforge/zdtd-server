@@ -1463,11 +1463,11 @@ pub const World = struct {
     pub fn spawnTurret(self: *World, x: f32, y: f32, z: f32) ?NetId {
         const s = self.spawnBase(.turret, x, y, z, 150) orelse return null;
         // Turret draw: autoTurret block RequiredPower via the Game hook (stock
-        // 15 W); 15 is also the builtin/offline table value (never 25).
+        // 15 W). 15 is the no-hook offline floor; a wired hook that returns 0
+        // fails closed instead of inventing 15 W after a game-dir load miss.
         var watts: f32 = 15;
         if (self.turret_watts_fn) |f| {
-            const w = f(self.turret_watts_ctx);
-            if (w > 0) watts = w;
+            watts = f(self.turret_watts_ctx);
         }
         const nid = self.power.addNode(.consumer, @floor(x), @floor(y), @floor(z), watts) orelse {
             self.destroy(s);
@@ -2260,4 +2260,18 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     const s2 = w2.slotOfNetId(id2).?;
     try std.testing.expectEqual(@as(f32, 24), w2.turret[s2].range);
     try std.testing.expectEqual(@as(f32, 12), w2.turret[s2].damage);
+}
+
+test "spawnTurret honors a fail-closed turret_watts hook" {
+    var w: World = .{};
+    defer w.deinit();
+    w.turret_watts_fn = struct {
+        fn f(_: ?*anyopaque) f32 {
+            return 0;
+        }
+    }.f;
+    const id = w.spawnTurret(5, 70, 5).?;
+    const s = w.slotOfNetId(id).?;
+    const ni = w.power.indexOfId(w.turret[s].power_node).?;
+    try std.testing.expectEqual(@as(f32, 0), w.power.nodes[ni].watts);
 }

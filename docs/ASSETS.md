@@ -59,7 +59,7 @@ property load. Dump must match the **connected client** version (STATUS pin).
 | `block_textures.zig` | blocks.xml Texture | defaults; terrain >255 not on chunk channel |
 | `painting.zig` | painting.xml | paint id ↔ TextureId |
 | `noise.zig` | sounds.xml | `<Noise>` rows keyed by SoundDataNode name: AI noise volume/time/muffle/heat per sound group (movement-noise model, RE entity-ai.md PlayerStealth) |
-| `biome_layers.zig` | biomes.xml layers + weather groups | column fill; ordered `<weather>` groups per biome (name/prob/duration/delay/ranges) drive `world/weather.zig`; wire params keep the raw 0..100 XML scale (the client divides) |
+| `biome_layers.zig` | biomes.xml layers + weather groups | column fill (leftover cells reuse the stack's own ids, never AssignIds pins); ordered `<weather>` groups per biome (name/prob/duration/delay/ranges) drive `world/weather.zig`; wire params keep the raw 0..100 XML scale (the client divides) |
 | biomap colors | biomes.xml biomemapcolor | `world/biomes.zig` ColorTable |
 | `items.zig` | items.xml | stacks, prices, stock type, placeable block |
 | `entities.zig` | entityclasses.xml | hash, HP, loot |

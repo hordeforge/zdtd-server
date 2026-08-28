@@ -199,7 +199,9 @@ pub const WorldGen = struct {
     /// (the W2 behaviour). Set by the store from biome_layers_table.
     biome_n: u8 = 0,
     /// Resolved surface stacks by biomemap id; null keeps `fillColumn`'s
-    /// default stack (single biome).
+    /// pin defaultStack (offline, no biomes.xml). Set whenever at least one
+    /// biome resolved, including a single-biome table: materials still come
+    /// from XML, only the W3 field stays off (`biome_n <= 1`).
     biome_table: ?*const biome_layers.Table = null,
 
     pub fn init(seed: u64) WorldGen {
@@ -782,6 +784,33 @@ test "generateChunkBlocks fills each biome's surface stack" {
         // region, so one chunk usually sits in a single biome (checked above).
         try std.testing.expect(top == 700 or top == 800);
     }
+}
+
+test "single loaded biome still uses XML stacks, not pin defaultStack" {
+    var g = WorldGen.init(3);
+    var bl: biome_layers.Table = .{};
+    bl.names[3] = "pine_forest";
+    bl.stacks[3] = .{
+        .n = 1,
+        .layers = .{
+            .{ .depth = 0, .block_id = 4242 },
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+        },
+    };
+    bl.default_stack = bl.stacks[3];
+    g.biome_n = 1;
+    g.biome_table = &bl;
+    var heights: [256]u8 = undefined;
+    var blocks: [16 * 256 * 16]u32 = undefined;
+    g.generateChunkBlocks(0, 0, &heights, &blocks);
+    const h = heights[0];
+    try std.testing.expectEqual(@as(u32, 4242), blocks[@as(usize, h) * 256]);
 }
 
 test "RWG water table fills basins to the stock surface cell, not shores" {

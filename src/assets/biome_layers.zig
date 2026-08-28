@@ -86,21 +86,32 @@ pub const SubBiome = struct {
 /// Stock pine_forest has 8 subbiomes; other biomes top out at 2-3.
 pub const max_subs_per_biome: usize = 12;
 
-/// Pine-forest-like fallback when biomes.xml is not loaded.
-pub fn defaultStack() Stack {
+/// Pine-forest-like column from resolved terrain ids (live AssignIds after
+/// merge, or the comptime pins when no dump is loaded).
+pub fn stackFromIds(forest: u16, dirt: u16, stone: u16, bedrock: u16) Stack {
     return .{
         .n = 4,
         .layers = .{
-            .{ .depth = 1, .block_id = assignids.terr_forest_ground },
-            .{ .depth = 3, .block_id = assignids.terr_dirt },
-            .{ .depth = 0, .block_id = assignids.terr_stone },
-            .{ .depth = 3, .block_id = assignids.terr_bedrock },
+            .{ .depth = 1, .block_id = forest },
+            .{ .depth = 3, .block_id = dirt },
+            .{ .depth = 0, .block_id = stone },
+            .{ .depth = 3, .block_id = bedrock },
             .{},
             .{},
             .{},
             .{},
         },
     };
+}
+
+/// Pine-forest-like fallback when biomes.xml is not loaded (AssignIds pins).
+pub fn defaultStack() Stack {
+    return stackFromIds(
+        assignids.terr_forest_ground,
+        assignids.terr_dirt,
+        assignids.terr_stone,
+        assignids.terr_bedrock,
+    );
 }
 
 pub const max_weather_biomes: usize = 16;
@@ -306,10 +317,19 @@ pub const Table = struct {
                 y -= n;
             }
         }
-        // Any gap below (malformed XML): stone, y=0 bedrock if empty.
-        if (y >= 1) @memset(out[1..@intCast(y + 1)], assignids.terr_stone);
-        if (y >= 0) out[0] = assignids.terr_bedrock;
-        if (out[0] == 0) out[0] = assignids.terr_bedrock;
+        // Leftover cells (malformed XML that did not reach y=0): reuse the
+        // stack's own fill layer and bottom layer. Pin stone/bedrock would
+        // paint the wrong id after a live AssignIds merge.
+        var fill_id: u16 = 0;
+        var bed_id: u16 = 0;
+        for (layers) |layer| {
+            if (layer.depth == 0 and fill_id == 0) fill_id = layer.block_id;
+            bed_id = layer.block_id;
+        }
+        if (fill_id == 0) fill_id = bed_id;
+        if (y >= 1 and fill_id != 0) @memset(out[1..@intCast(y + 1)], fill_id);
+        if (y >= 0 and bed_id != 0) out[0] = bed_id;
+        if (out[0] == 0 and bed_id != 0) out[0] = bed_id;
     }
 
     fn fillFallback(h: u8, out: *[256]u16) void {
@@ -850,6 +870,29 @@ test "fillColumn burnt_forest surface" {
     try std.testing.expectEqual(assignids.terr_bedrock, col[2]);
     try std.testing.expectEqual(assignids.terr_bedrock, col[0]);
     try std.testing.expectEqual(@as(u16, 0), col[61]);
+}
+
+test "fillColumn leftover cells reuse the stack ids, not AssignIds pins" {
+    const st: Stack = .{
+        .n = 1,
+        .layers = .{
+            .{ .depth = 1, .block_id = 9001 },
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+            .{},
+        },
+    };
+    var col: [256]u16 = undefined;
+    Table.fillColumn(st, 10, &col);
+    try std.testing.expectEqual(@as(u16, 9001), col[10]);
+    try std.testing.expectEqual(@as(u16, 9001), col[5]);
+    try std.testing.expectEqual(@as(u16, 9001), col[0]);
+    try std.testing.expect(col[0] != assignids.terr_stone);
+    try std.testing.expect(col[0] != assignids.terr_bedrock);
 }
 
 /// Stand-in for maxdamage's resolved `IsDistantDecoration`: trees yes, the

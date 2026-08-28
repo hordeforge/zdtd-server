@@ -296,8 +296,19 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     // Demo power grid off the spawn pad (do not auto-wire a live turret onto seed zombies).
     // The turret is persistable and only seeds fresh; the generator is a
     // virtual node (no block) and re-seeds every boot so a restored turret
-    // still finds a source after a restart.
-    const gen = self.sim.power.addNode(.generator, @trunc(sx + 50), @trunc(sy), @trunc(sz + 50), 100);
+    // still finds a source after a restart. Watts come from blocks.xml
+    // MaxPower on generatorbank when loaded; the 100 W floor is the
+    // no-game-dir demo only (never invent MaxPower after a catalog miss).
+    const gen_watts: f32 = if (self.maxdamage.wattsByName("generatorbank")) |w|
+        w
+    else if (!self.stock_catalogs_requested)
+        100
+    else
+        0;
+    const gen = if (gen_watts > 0)
+        self.sim.power.addNode(.generator, @trunc(sx + 50), @trunc(sy), @trunc(sz + 50), gen_watts)
+    else
+        null;
     if (!had_saved_entities) {
         if (self.sim.spawnTurret(sx + 52, sy, sz + 52)) |tid| {
             if (gen) |gid| {

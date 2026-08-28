@@ -322,7 +322,11 @@ pub const Chunk = struct {
     }
 
     fn ensureBlocks(self: *Chunk, allocator: std.mem.Allocator) !void {
-        try self.ensureBlocksWithStack(allocator, biome_layers.defaultStack());
+        const t = self.terrain orelse &terrain_pins;
+        try self.ensureBlocksWithStack(
+            allocator,
+            biome_layers.stackFromIds(t.forest_ground, t.dirt, t.stone, t.bedrock),
+        );
     }
 
     /// Materialize full block plane with a biome stack (called from World.getOrCreate).
@@ -580,13 +584,14 @@ pub const World = struct {
     }
 
     /// Point the procedural generator at the loaded biome table (W3): more than
-    /// one resolved biome turns on the biome field, so columns fill with their
-    /// biome's surface stack instead of the single-biome default.
+    /// one resolved biome turns on the biome field. A loaded table with even
+    /// one biome still supplies XML surface stacks; pin defaultStack is only
+    /// the no-table offline path.
     pub fn syncWorldgenBiomes(self: *World) void {
         if (self.worldgen) |*wg| {
             const n = self.biome_layers_table.biomeCount();
             wg.biome_n = n;
-            wg.biome_table = if (n > 1) &self.biome_layers_table else null;
+            wg.biome_table = if (n >= 1) &self.biome_layers_table else null;
         }
     }
 
@@ -2011,6 +2016,20 @@ test "procBiomeAt follows the surface fill field deterministically" {
         w.biome_layers_table.biomeIdAt(w.worldgen.?.biomeAt(8, 8)),
         w.procBiomeAt(0, 0),
     );
+}
+
+test "syncWorldgenBiomes keeps XML stacks for a single biome" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.enableProc(1);
+    w.biome_layers_table.names[3] = "pine_forest";
+    w.syncWorldgenBiomes();
+    try std.testing.expectEqual(@as(u8, 1), w.worldgen.?.biome_n);
+    try std.testing.expect(w.worldgen.?.biome_table != null);
 }
 
 /// Carve one column (world x, z=0) to air from `lo`..`hi` and return the chunk

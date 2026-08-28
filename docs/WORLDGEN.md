@@ -328,9 +328,10 @@ pub const WorldGen = struct {
 
 - Wire into `world/store.zig` `getOrCreate` as a terrain source alongside DEM and
   flat: on cache miss in procedural mode, call `worldgen` for that chunk only
-  (sync stub first; then async job + stream wait). `heights` filled via
-  `wg.fillHeights`; blocks via `ensureBlocksWithStack(biome_layers.defaultStack())`
-  in `store.zig`. Block ids via biomes.xml names + AssignIds. Stock
+  (sync stub first; then async job + stream wait). `generateProc` fills
+  heights and blocks via `generateChunkBlocks`; loaded biomes.xml stacks
+  apply even for a single biome (pin `defaultStack` only when no table is
+  loaded). Block ids via biomes.xml names + AssignIds. Stock
   chunk wire (`stock_chunk.zig`) unchanged.
 - Stream path (`game.zig` chunk interest) unchanged at the package layer: it
   already demand-loads via `getOrCreate`. Proc mode only changes what miss

@@ -439,13 +439,15 @@ pub fn vehicleTankCapacity(ctx: ?*anyopaque, kind: ecs.components.VehicleKind) f
     return 0;
 }
 
-/// autoTurret block RequiredPower (maxdamage; stock 15 W, builtin 15).
+/// autoTurret block RequiredPower (maxdamage; stock 15 W).
 /// Wired to World.turret_watts_fn so placed/restored turrets draw the stock
-/// load instead of the old flat 25.
+/// load. Game-dir without the row fails closed (0); the 15 W floor is the
+/// no-game-dir builtin only.
 pub fn turretWatts(ctx: ?*anyopaque) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     if (g.maxdamage.wattsByName("autoTurret")) |w| return w;
-    return 15;
+    if (!g.stock_catalogs_requested) return 15;
+    return 0;
 }
 
 /// Placed-turret combat stats from the autoTurret block (blocks.xml

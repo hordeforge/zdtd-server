@@ -355,7 +355,9 @@ pub const ItemTable = struct {
         if (stock_type == 0) return false;
         const eid = self.ecsIdFromStockType(stock_type);
         if (eid != 0 and self.isEat(eid)) return true;
-        // Name from parallel stock arrays when reverse id is 0.
+        // Name from parallel stock arrays when reverse id is 0. XML catalogs
+        // fail closed: a stock type with no ECS row is not eatable.
+        if (self.source != .builtin) return false;
         for (self.stock_types, 0..) |st, i| {
             if (st != stock_type) continue;
             if (i >= self.stock_names.len) break;
@@ -371,8 +373,11 @@ pub const ItemTable = struct {
         if (self.byId(item_id)) |d| {
             if (d.is_eat) return true;
             if (d.food_amount > 0 or d.water_amount > 0) return true;
-            // Name heuristic for stock food*/drink* without parsed Action0.
-            if (d.name.len >= 4 and (std.mem.startsWith(u8, d.name, "food") or std.mem.startsWith(u8, d.name, "drink")))
+            // Offline name heuristic for food*/drink* without parsed Action0.
+            // After items.xml load, missing Action0 fails closed (wrong eat
+            // is worse than missing).
+            if (self.source == .builtin and d.name.len >= 4 and
+                (std.mem.startsWith(u8, d.name, "food") or std.mem.startsWith(u8, d.name, "drink")))
                 return true;
         }
         // Builtin offline ids (food / medicine). XML catalogs fail closed.
@@ -429,9 +434,13 @@ pub const ItemTable = struct {
         if (item_id == 0) return 0;
         if (self.byId(item_id)) |d| {
             if (d.stock_type != 0) return d.stock_type;
-            // alias builtin short name → stock name
-            if (builtinStockName(item_id)) |sn| {
-                if (self.byStockName(sn)) |t| return t;
+            // Offline alias: builtin short name → stock name. XML catalogs
+            // already copy stock_type onto overlay rows; leftover aliases
+            // would map the wrong item.
+            if (self.source == .builtin) {
+                if (builtinStockName(item_id)) |sn| {
+                    if (self.byStockName(sn)) |t| return t;
+                }
             }
             if (d.name.len > 0) {
                 if (self.byStockName(d.name)) |t| return t;
@@ -1311,6 +1320,16 @@ test "XML item table fails closed instead of using builtin balance or ids" {
     try std.testing.expect(!t.isEat(2));
     try std.testing.expect(!t.isEat(4));
     try std.testing.expectEqual(@as(i32, 0), t.stockTypeFor(6));
+
+    const unparsed = [_]ItemDef{
+        .{ .id = 102, .name = "foodUnparsed" },
+        .{ .id = 103, .name = "drinkUnparsed" },
+    };
+    const xml_names: ItemTable = .{ .defs = &unparsed, .source = .xml };
+    try std.testing.expect(!xml_names.isEat(102));
+    try std.testing.expect(!xml_names.isEat(103));
+    try std.testing.expectEqual(@as(f32, 0), xml_names.foodAmountFor(102));
+    try std.testing.expectEqual(@as(f32, 0), xml_names.waterAmountFor(103));
 
     const builtin = ItemTable.builtin();
     try std.testing.expectEqual(@as(i32, items_start_here + 7), builtin.stockTypeFor(7));
