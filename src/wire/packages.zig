@@ -148,6 +148,7 @@ pub const default_mappings = [_][]const u8{
     "NetPackageChat",
     "NetPackageChunkClusterInfo",
     "NetPackageChunkRemoveAll",
+    "NetPackageConfirmSpawnEntity",
     "NetPackageConsoleCmdClient",
     "NetPackageConsoleCmdServer",
     "NetPackageDebug",
@@ -212,7 +213,8 @@ pub const default_mappings = [_][]const u8{
     "NetPackageNavObject",
     "NetPackageNetMetrics",
     "NetPackageOwnedEntitySync",
-    "NetPackagePOIAround",
+    "NetPackagePOIMetadataRequest",
+    "NetPackagePOIMetadataResponse",
     "NetPackagePOIWaypoint",
     "NetPackageParticleEffect",
     "NetPackagePartyActions",
@@ -1129,19 +1131,34 @@ test "HordeEvent body is event byte + pos + maxDist (17 bytes)" {
     try std.testing.expectEqual(@as(f32, 4096.0), fd);
 }
 
-/// Minimal DamageEntity body: enough for entityId + source + type + strength + fatal path fields zeros.
+/// NetPackageDamageEntity flags (V3.2.0 packed u32 bitfield; the 3.1.0 wire
+/// wrote ten separate booleans, changelog-3.2.0 §3.1 / protocol.md §6.5).
+pub const dmg_can_hit_special: u32 = 0x001;
+pub const dmg_cripple_legs: u32 = 0x002;
+pub const dmg_critical: u32 = 0x004;
+pub const dmg_dismember: u32 = 0x008;
+pub const dmg_fatal: u32 = 0x010;
+pub const dmg_from_buff: u32 = 0x020;
+pub const dmg_ignore_consecutive: u32 = 0x040;
+pub const dmg_ignore_party_share: u32 = 0x080;
+pub const dmg_pain_hit: u32 = 0x100;
+pub const dmg_turn_into_crawler: u32 = 0x200;
+pub const dmg_trap_kill_xp: u32 = 0x400;
+
+/// Minimal DamageEntity body (V3.2.0 layout): enough for entityId + flags +
+/// source + type + strength + fatal path, with the tail fields zeroed.
 pub fn buildDamageBody(buf: []u8, entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, attacker: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
+    var flags: u32 = dmg_pain_hit;
+    if (fatal) flags |= dmg_fatal;
+    try w.writeU32(flags);
     try w.writeByte(source);
     try w.writeByte(dtype);
     try w.writeU16(strength);
     try w.writeByte(0); // hitDirection
     try w.writeI16(0); // bodyPart
-    try w.writeByte(0); // movement
-    try w.writeBool(true); // pain
-    try w.writeBool(fatal);
-    try w.writeBool(false); // crit
+    try w.writeByte(0); // movementState
     try w.writeI32(attacker);
     try w.writeF32(0);
     try w.writeF32(-1);
@@ -1149,43 +1166,106 @@ pub fn buildDamageBody(buf: []u8, entity_id: i32, source: u8, dtype: u8, strengt
     try w.writeI32(0);
     try w.writeI32(0);
     try w.writeI32(0); // blockPos
-    try w.writeString(""); // hitTransform
+    try w.writeString(""); // hitTransformName
     try w.writeF32(0);
     try w.writeF32(0);
+    try w.writeF32(0); // hitTransformPosition
     try w.writeF32(0);
-    try w.writeF32(0);
-    try w.writeF32(0); // uv
-    try w.writeF32(1);
-    try w.writeF32(0);
-    try w.writeBool(true);
-    try w.writeBool(false);
-    try w.writeBool(false);
-    try w.writeBool(false);
-    try w.writeBool(false);
-    try w.writeByte(0);
-    try w.writeByte(0);
-    try w.writeF32(0);
-    try w.writeBool(false);
-    try w.writeByte(0);
-    try w.writeByte(0);
-    try w.writeU16(0);
-    try w.writeBool(false); // no item
+    try w.writeF32(0); // uvHit
+    try w.writeF32(1); // KillXPScale
+    try w.writeF32(1); // damageMultiplier
+    try w.writeF32(0); // random
+    try w.writeByte(0); // bonusDamageType
+    try w.writeByte(0); // StunType
+    try w.writeF32(0); // StunDuration
+    try w.writeByte(0); // ArmorSlot
+    try w.writeByte(0); // ArmorSlotGroup
+    try w.writeU16(0); // ArmorDamage
+    try w.writeBool(false); // attackingItem present
     return w.written();
 }
 
-pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool } {
-    if (body.len < 15) return error.EndOfStream;
+/// Parse the V3.2.0 DamageEntity head (the C2S damage path consumes the
+/// packed flags + strength; the tail beyond the head is not validated here).
+pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, trap_kill_xp: bool } {
+    if (body.len < 4 + 4 + 1 + 1 + 2 + 1 + 2 + 1) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
+    const flags = try r.readU32();
     const source = try r.readByte();
     const dtype = try r.readByte();
     const strength = try r.readU16();
-    _ = try r.readByte();
-    _ = try r.readI16();
-    _ = try r.readByte();
-    _ = try r.readBool();
-    const fatal = try r.readBool();
-    return .{ .entity_id = entity_id, .source = source, .dtype = dtype, .strength = strength, .fatal = fatal };
+    _ = try r.readByte(); // hitDirection
+    _ = try r.readI16(); // hitBodyPart
+    _ = try r.readByte(); // movementState
+    return .{
+        .entity_id = entity_id,
+        .source = source,
+        .dtype = dtype,
+        .strength = strength,
+        .fatal = (flags & dmg_fatal) != 0,
+        .trap_kill_xp = (flags & dmg_trap_kill_xp) != 0,
+    };
+}
+
+/// Stock `PrefabInstance.POIMetadata` record (read ctor IL=35, changelog-3.2.0
+/// §3.2): the minimal per-POI metadata the client's DynamicPrefabDecorator
+/// consumes for LOD/trader rendering.
+pub const PoiMetadata = struct {
+    x: i32,
+    y: i32,
+    z: i32,
+    size_x: i32,
+    size_y: i32,
+    size_z: i32,
+    rotation: u8,
+    tier: u8,
+    trader_area: bool,
+    prefab_name: []const u8,
+    tags: []const u8,
+    quest_tags: []const u8,
+};
+
+/// Cap on POI metadata records per response (a stock map ships a few hundred
+/// POIs; the frame stays well inside the compressed budget).
+pub const max_poi_metadata: usize = 512;
+
+/// NetPackagePOIMetadataResponse body: count:i32 + POIMetadata records
+/// (compressed on the wire, channel 1).
+pub fn buildPoiMetadataResponse(buf: []u8, records: []const PoiMetadata) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(@intCast(@min(records.len, max_poi_metadata)));
+    const n = @min(records.len, max_poi_metadata);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const r = records[i];
+        try w.writeI32(r.x);
+        try w.writeI32(r.y);
+        try w.writeI32(r.z);
+        try w.writeI32(r.size_x);
+        try w.writeI32(r.size_y);
+        try w.writeI32(r.size_z);
+        try w.writeByte(r.rotation);
+        try w.writeByte(r.tier);
+        try w.writeBool(r.trader_area);
+        try w.writeString(r.prefab_name);
+        try w.writeString(r.tags);
+        try w.writeString(r.quest_tags);
+    }
+    return w.written();
+}
+
+/// NetPackageConfirmSpawnEntity body (V3.2.0, changelog-3.2.0 §3.3):
+/// createdEntityId:i64 (an Int32 field widened on write) + requestKey
+/// Guid.ToByteArray bytes[16]. Sent only for client-requested entity spawns
+/// (EntityCreationData.requestedBy/requestKey). zdtd drops generic spawn
+/// requests (c2s/misc.zig RequestToSpawnEntity), so no live flow emits this;
+/// the builder pins the shape for that path and for goldens.
+pub fn buildConfirmSpawnEntityBody(buf: []u8, created_entity_id: i64, key: *const [16]u8) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI64(created_entity_id);
+    try w.writeBytes(key);
+    return w.written();
 }
 
 /// NetPackageChunk body (zdtd intermediate payload + optional stock envelope).
@@ -1479,7 +1559,7 @@ pub fn channelFor(name: []const u8) u8 {
         std.mem.eql(u8, name, "NetPackageChunkRemove") or
         std.mem.eql(u8, name, "NetPackageDynamicMesh") or
         std.mem.eql(u8, name, "NetPackageMapChunks") or
-        std.mem.eql(u8, name, "NetPackagePOIAround")) return 1;
+        std.mem.eql(u8, name, "NetPackagePOIMetadataResponse")) return 1;
     return 0;
 }
 

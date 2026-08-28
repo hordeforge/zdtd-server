@@ -14,6 +14,8 @@ const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const wire_binary = @import("../../wire/binary.zig");
 const c2s_text = @import("../c2s_text.zig");
+const prefabs_mod = @import("../../world/prefabs.zig");
+const game_net = @import("../game/net.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const ecs = @import("../../ecs/root.zig");
 const phase_gate = @import("../phase_gate.zig");
@@ -266,6 +268,40 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     // SignDataResponse(isLastBatch=true). Send prefab library shells (guid+name, 0 layers).
     if (std.mem.eql(u8, name, "NetPackageSignDataRequest")) {
         try self.sendSignDataBatches(peer);
+        return true;
+    }
+    // V3.2.0 POI metadata (changelog-3.2.0 §3.2): the client's
+    // DynamicPrefabDecorator.RequestWorldPOIMetadataFromServer asks for the
+    // minimal per-POI metadata (position/size/rot/tier/trader/tags) it needs
+    // for custom-POI LOD and trader-area rendering. Replaces the removed
+    // NetPackagePOIAround. Empty C2S body; the response is compressed
+    // (channel 1, get_Compress).
+    if (std.mem.eql(u8, name, "NetPackagePOIMetadataRequest")) {
+        if (self.world.prefabs) |*pf| {
+            var records: [packages.max_poi_metadata]packages.PoiMetadata = undefined;
+            var n: usize = 0;
+            for (pf.items) |d| {
+                if (n >= records.len) break;
+                const qd = pf.questData(d.name) orelse prefabs_mod.QuestData{};
+                records[n] = .{
+                    .x = d.x,
+                    .y = d.stampY(),
+                    .z = d.z,
+                    .size_x = d.size_x,
+                    .size_y = d.size_y,
+                    .size_z = d.size_z,
+                    .rotation = d.rot,
+                    .tier = qd.tier,
+                    .trader_area = qd.is_trader_area,
+                    .prefab_name = d.name,
+                    .tags = qd.poi_tags,
+                    .quest_tags = qd.tags,
+                };
+                n += 1;
+            }
+            const body_out = try packages.buildPoiMetadataResponse(self.body_buf[0..8192], records[0..n]);
+            try game_net.sendGameBudget(self, peer, "NetPackagePOIMetadataResponse", body_out, game_mod.window_retry_budget_ns, false);
+        }
         return true;
     }
     // worldInfoCo: after createWorld, client sends WorldInitInfoRequest and waits for

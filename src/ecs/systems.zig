@@ -2148,7 +2148,9 @@ fn refreshFearSource(w: *World, pos: *const [max_entities]c.Transform, s: Slot, 
     const x = w.transform[s].x;
     const z = w.transform[s].z;
     var best: i32 = -1;
-    const flee = w.rules.ai.flee_distance;
+    // V3.2.0 danger radius (changelog-3.2.0 §4.4): a threat within this
+    // distance becomes the fear source.
+    const flee = w.rules.ai.timid_danger_distance;
     var best_d2: f32 = flee * flee;
     const kinds = [_]c.Kind{ .player, .zombie, .animal };
     for (kinds) |kind| {
@@ -2206,7 +2208,9 @@ fn runawayUpdate(w: *World, pos: *const [max_entities]c.Transform, s: Slot, ai: 
     const dx = w.transform[s].x - pos[ts].x;
     const dz = w.transform[s].z - pos[ts].z;
     const d2 = dx * dx + dz * dz;
-    const flee = w.rules.ai.flee_distance;
+    // V3.2.0 safe radius (changelog-3.2.0 §4.4): the fright ends once the
+    // source is beyond it.
+    const flee = w.rules.ai.timid_safe_distance;
     if (d2 >= flee * flee) {
         // Out of range: the fright is over, release the mutex.
         ai.revenge_time = 0;

@@ -24,6 +24,10 @@ pub const QuestData = struct {
     poi_tags: []const u8 = "",
     /// Stock DifficultyTier (1..6), 0 when absent.
     tier: u8 = 0,
+    /// V3.2.0 `AllowDecorations` property (changelog-3.2.0 §4.5): true opts
+    /// the POI into world (biome) decorations inside its footprint. Parsed;
+    /// the deco sampler suppression gate is GAP-tracked.
+    allow_decorations: bool = false,
     /// True when the prefab XML defines at least one sleeper volume (the
     /// stock `SleeperVolumeList.AnyUsedEntry` gate for quest POI selection).
     has_sleepers: bool = false,
@@ -450,6 +454,14 @@ pub const Index = struct {
             }
             if (xml_util.propertyValue(raw, "DifficultyTier")) |v| {
                 qd.tier = std.fmt.parseInt(u8, v, 10) catch 0;
+            }
+            // V3.2.0 AllowDecorations (changelog-3.2.0 §4.5): separates the
+            // world-deco-inside-POI opt-in from the TraderArea setting. The
+            // suppression gate (skip biome deco inside a POI footprint unless
+            // this is true) needs a spatial POI index on the deco sampler;
+            // the property is parsed here so the gate has its data.
+            if (xml_util.propertyValue(raw, "AllowDecorations")) |v| {
+                qd.allow_decorations = std.ascii.eqlIgnoreCase(v, "true");
             }
             // PoiTags: the prefab `Tags` property (stock FastTags<Poi> for the
             // biome spawner's POITags/noPOITags test, spawning.md §2).

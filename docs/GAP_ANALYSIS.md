@@ -156,6 +156,24 @@ not counted; the former `reviews/DOC_CONSISTENCY_AUDIT.md` snapshot was removed
 with the `reviews/` directory.
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
+### V3.2.0 (2026-08-28)
+
+Wire pinned to **V3.2.0 b9** (research `docs/changelog-3.2.0.md`): the packed
+`DamageEntity` flags + `KillXPScale` parse (breaking), the POI metadata
+Request/Response packages replacing `POIAround`, the `ConfirmSpawnEntity`
+builder + the `EntityCreationData` requestedBy/requestKey tail note,
+`ItemValue.Activated` -> Flags bitfield, and the compress-set swap
+(POIAround -> POIMetadataResponse). Sim deltas: trap-kill XP party share
+skipped per stock (`[rules.progression] trap_xp_party_share`), timid-animal
+detection/flee split (`[rules.ai] timid_danger_distance` /
+`timid_safe_distance`), `AllowDecorations` parsed into prefab quest data.
+Tracked as gaps here: horn-opens-trader-doors (needs a door TE subsystem,
+rules surface deferred until it exists), the deco-suppression gate (needs a
+spatial POI index on the deco sampler), the challenge `forceComplete`
+re-entry guard (no challenge sim), and the bundled AssignIds dump refresh
+(needs a 3.2.0 client `NameIdMapping` capture; 2 blocks pinned in the
+maxdamage stale-dump allowance).
+
 ## 2. Scorecard
 
 291 features scored across nine areas (recounted 2026-08-22 from the

@@ -70,14 +70,17 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     };
     // Stock get_Compress()=true for exactly these eight (asm.il 808641-808647
     // and friends): Chunk, ConfigFile, DynamicClientArrive, DynamicMesh,
-    // IdMapping, MapChunks, POIAround, SignDataResponse. The four zdtd emits
-    // today are deflated here (the rest are not yet sent - S2C coverage row).
+    // IdMapping, MapChunks, POIMetadataResponse, SignDataResponse (the
+    // 3.2.0 set swaps POIAround for POIMetadataResponse, changelog-3.2.0
+    // §3.5). The four zdtd emits today are deflated here (the rest are not
+    // yet sent - S2C coverage row).
     // IdMapping/ConfigFile deflating cuts the join cost (one flat-world join
     // was 6.4 MB out) and relieves the reliable window.
     if (std.mem.eql(u8, pkg_name, "NetPackageChunk") or
         std.mem.eql(u8, pkg_name, "NetPackageSignDataResponse") or
         std.mem.eql(u8, pkg_name, "NetPackageIdMapping") or
-        std.mem.eql(u8, pkg_name, "NetPackageConfigFile"))
+        std.mem.eql(u8, pkg_name, "NetPackageConfigFile") or
+        std.mem.eql(u8, pkg_name, "NetPackagePOIMetadataResponse"))
     {
         if (try @import("send_extra.zig").sendCompressed(self, peer, pkg_name, body, budget_ns, critical)) return;
     }

@@ -254,7 +254,12 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // NetPackageEntityTargeted
     try w.writeI32(opts.entity_id);
-    // EntityCreationData.write FileVersion 36 (V3.1.0; ends with stressAmount)
+    // EntityCreationData.write FileVersion 36. V3.2.0 appends a
+    // requestedBy/requestKey tail that `read` consumes only at
+    // readFileVersion >= 37 (changelog-3.2.0 §3.3): a 3.2.0 client reading
+    // our v36 body skips the tail, so keeping v36 stays parse-compatible.
+    // The tail is only meaningful for client-requested spawns, which zdtd
+    // drops (c2s/misc.zig RequestToSpawnEntity), so it is not emitted.
     try w.writeByte(36);
     try w.writeI32(opts.entity_class);
     try w.writeI32(opts.entity_id);

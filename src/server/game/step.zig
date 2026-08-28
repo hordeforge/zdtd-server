@@ -266,7 +266,7 @@ pub fn step(self: *Game) !void {
                     0
                 else
                     @min(@as(u64, @intFromFloat(trap_scaled_f)), std.math.maxInt(i32));
-                self.killXpAward(osz, trap_xp_scaled, 100); // trap kills carry no verdict scale
+                self.killXpAward(osz, trap_xp_scaled, 100, true); // trap kills carry no verdict scale, no party share (V3.2.0 §4.3)
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{

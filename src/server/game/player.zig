@@ -105,27 +105,33 @@ pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
 /// (party_shared_kill_range, stock default 100); every other in-range
 /// member gets the same split XP through NetPackageSharedPartyKill so the
 /// client shows the shared-kill tooltip. Out of party the award is full.
-pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32) void {
+pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool) void {
     // on_entity_killed verdict >0 scales the kill XP (100 = keep). base is
     // xpGainFor-clamped to i32 range, so the u64 product cannot overflow.
     const base_scaled: u64 = base * scale_pct / 100;
     const killer = &self.clients[killer_slot];
     const party = self.parties.partyByMember(killer.entity_id);
+    // V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
+    // skips the party share when `bTrapKillXP` is set; the
+    // [rules.progression] trap_xp_party_share override re-enables it.
+    const share_party = !trap_kill or self.sim.rules.progression.trap_xp_party_share;
     var in_range: u8 = 0;
-    if (party) |p| {
-        if (self.sim.playerByPeer(killer_slot)) |ks| {
-            const kt = self.sim.transform[ks];
-            for (p.members[0..p.n]) |m| {
-                if (m == killer.entity_id) continue;
-                const ms = self.sim.slotOfNetId(m) orelse continue;
-                if (!self.sim.mask[ms].transform) continue;
-                const dx = self.sim.transform[ms].x - kt.x;
-                const dz = self.sim.transform[ms].z - kt.z;
-                if (dx * dx + dz * dz <= self.party_shared_kill_range * self.party_shared_kill_range) in_range += 1;
+    if (share_party) {
+        if (party) |p| {
+            if (self.sim.playerByPeer(killer_slot)) |ks| {
+                const kt = self.sim.transform[ks];
+                for (p.members[0..p.n]) |m| {
+                    if (m == killer.entity_id) continue;
+                    const ms = self.sim.slotOfNetId(m) orelse continue;
+                    if (!self.sim.mask[ms].transform) continue;
+                    const dx = self.sim.transform[ms].x - kt.x;
+                    const dz = self.sim.transform[ms].z - kt.z;
+                    if (dx * dx + dz * dz <= self.party_shared_kill_range * self.party_shared_kill_range) in_range += 1;
+                }
             }
         }
     }
-    const split: u64 = if (party != null)
+    const split: u64 = if (party != null and share_party)
         base_scaled * (100 - 10 * @as(u64, in_range)) / 100
     else
         base_scaled;
@@ -560,10 +566,10 @@ test "killXpAward scales by the on_entity_killed verdict percent" {
         g.deinit();
         gpa.destroy(g);
     }
-    // killXpAward(slot, base, scale): 200 base x 150% = 300 (xp_multiplier
+    // killXpAward(slot, base, scale, trap): 200 base x 150% = 300 (xp_multiplier
     // default 100 keeps 1.0x).
     const before = g.clients[0].xp;
-    g.killXpAward(0, 200, 150);
+    g.killXpAward(0, 200, 150, false);
     try std.testing.expectEqual(before + 300, g.clients[0].xp);
     std.debug.print("PASS kill-xp-scale: 200 x 150% = {d}\n", .{g.clients[0].xp - before});
 }

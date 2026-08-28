@@ -287,6 +287,13 @@ pub const Ai = struct {
     /// EAIRunawayWhenHurt / EAIApproachDistraction approach distance (m)
     /// and EAIApproachDistraction cFarDist (approach spiral radius).
     flee_distance: f32 = 20.0,
+    /// V3.2.0 EAIRunawayFromEntity rework (changelog-3.2.0 §4.4) split the
+    /// single radius into a detection radius and a flee-until radius: the
+    /// animal picks a fear source within `timid_danger_distance` and keeps
+    /// fleeing until the source is beyond `timid_safe_distance`. Defaults
+    /// equal the legacy single-radius behavior.
+    timid_danger_distance: f32 = 20.0,
+    timid_safe_distance: f32 = 20.0,
     /// Vehicle mount range squared (8 m).
     mount_range_sq: f32 = 64.0,
     /// DestroyArea random gate modulus (wander_rng % N == 1).
@@ -464,6 +471,10 @@ pub const Progression = struct {
     /// docs/adr/0023-perk-attribute-system.md), so this is a flat floor rather
     /// than a per-player perk lookup; 0.0 matches the stock no-perk default.
     trap_kill_xp_frac: f32 = 0.0,
+    /// V3.2.0 (changelog-3.2.0 §4.3): `EntityAlive.PartyShareKillServer`
+    /// skips the party XP share when `bTrapKillXP` is set. True = depart from
+    /// stock and let trap kills party-share like normal kills.
+    trap_xp_party_share: bool = false,
 };
 
 /// Placeholder group: added as constants move; no fields invented.
@@ -709,6 +720,8 @@ pub const AiOverlay = struct {
     wander_time_max_s: ?f32 = null,
     wander_arrive: ?f32 = null,
     flee_distance: ?f32 = null,
+    timid_danger_distance: ?f32 = null,
+    timid_safe_distance: ?f32 = null,
     mount_range_sq: ?f32 = null,
     destroy_area_rng_mod: ?u32 = null,
     revenge_window_s: ?f32 = null,
@@ -767,6 +780,7 @@ pub const ProgressionOverlay = struct {
     block_damage_range: ?f32 = null,
     kill_xp_fallback: ?f32 = null,
     trap_kill_xp_frac: ?f32 = null,
+    trap_xp_party_share: ?bool = null,
 };
 
 pub const WorldGroupOverlay = struct {

@@ -218,6 +218,8 @@ test, so a retune cannot land silently).
 | `wander_time_max_s` | 30.0 | Policy (EAIWander 30 s cap) |
 | `wander_arrive` | 0.2 | Policy (wander no-op radius) |
 | `flee_distance` | 20.0 | Policy (EAIRunAway flee distance, m) |
+| `timid_danger_distance` | 20.0 | V3.2.0 EAIRunawayFromEntity detection radius (m): a threat within it becomes the fear source |
+| `timid_safe_distance` | 20.0 | V3.2.0 EAIRunawayFromEntity flee-until radius (m): the fright ends once the source is beyond it |
 | `mount_range_sq` | 64.0 | Policy (vehicle mount 8 m squared) |
 | `destroy_area_rng_mod` | 16 | Policy (DestroyArea gate) |
 | `revenge_window_s` | 20.0 | Policy (EAISetAsTargetIfHurt 400 ticks) |
@@ -254,6 +256,7 @@ test, so a retune cannot land silently).
 | `radiation_damage_per_second` | 8.0 | HP lost per real second inside a radiated biome (biomes.xml `<biomemap name="radiated"/>`; stock BiomeType.Radiated is deadly) |
 | `kill_xp_fallback` | 100 | **Floor**: kill XP when entityclasses.xml ExperienceGain did not resolve (offline/builtin catalog or recycled slot); stock classes resolve their own XP when a game-dir is present |
 | `trap_kill_xp_frac` | 0.0 | **Floor**: fraction of a turret/trap kill's XP the owner is credited. Stock reads `PassiveEffects.ElectricalTrapXP` (default 0, unlocked by `perkAdvancedEngineering` levels 1-5 at .15/.3/.45/.6/.75); zdtd has no per-player perk level yet (planned: ADR 0023/0024), so this is a flat floor rather than a per-player lookup. 0.0 matches stock's unperked default |
+| `trap_xp_party_share` | false | V3.2.0: stock `PartyShareKillServer` skips the party XP share for `bTrapKillXP` kills; true departs from stock and lets trap kills party-share like normal kills |
 | `[rules.world]` | | |
 | `poi_unlock_grace_ticks` | 2000 | POI quest-lock release grace after unlock (ticks; 100 s at 20 TPS; RE QuestLockInstance.SetUnlocked 0x7d0) |
 | `[rules.director]` | | AIDirector policy (RE: aidirector.md; provenance PROVENANCE.md §3.7) |

@@ -50,12 +50,22 @@ pub const StockSlot = struct {
     meta: u16 = 0,
     use_times: f32 = 0,
     seed: u16 = 0,
-    activated: u8 = 0,
+    /// ItemValue.Flags byte (V3.2.0, changelog-3.2.0 §3.4): bit 0 =
+    /// Activated (the old byte field), bit 1 = WasCombined. Same wire
+    /// position/width, so the byte plumbing is unchanged.
+    flags: u8 = 0,
     ammo_index: u8 = 0,
     /// Attached mod item ids (stock ItemValue.Modifications; 4 slots).
     mods: [4]u16 = .{0} ** 4,
     mod_n: u8 = 0,
 };
+
+/// ItemValue.Flags bit 0: Activated (get_Activated = Flags & 1; the old
+/// `Activated` byte field, V3.2.0 changelog-3.2.0 §3.4).
+pub const cFlagsActivated: u8 = 1;
+/// ItemValue.Flags bit 1: WasCombined (get_WasCombined = Flags & 2; the
+/// Combine Station rework marks combined items).
+pub const cFlagsWasCombined: u8 = 2;
 
 /// Map relative item index (0..) to absolute type with ItemsStartHere offset.
 pub fn itemTypeFromIndex(item_index: u16) i32 {
@@ -106,7 +116,7 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
         if (has) try writeItemValueNested(w, mod_id);
     }
     try w.writeByte(0); // CosmeticMods.Length
-    try w.writeByte(s.activated);
+    try w.writeByte(s.flags);
     try w.writeByte(s.ammo_index);
     try w.writeU16(s.seed);
     try w.writeBool(false); // TextureFullArray default
@@ -600,10 +610,10 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         }
     }
 
-    var activated: u8 = 0;
+    var item_flags: u8 = 0;
     var ammo: u8 = 0;
     var seed: u16 = 0;
-    if (version > 1) activated = try r.readByte();
+    if (version > 1) item_flags = try r.readByte();
     if (version > 2) ammo = try r.readByte();
     if (version > 3) seed = try r.readU16();
     if (version > 8) {
@@ -618,7 +628,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         .meta = meta,
         .use_times = use_times,
         .seed = seed,
-        .activated = activated,
+        .flags = item_flags,
         .ammo_index = ammo,
     };
     if (!is_modifier) {

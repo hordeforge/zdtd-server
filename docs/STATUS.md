@@ -1,11 +1,12 @@
 # Status: stock-client join and play path
 
-> **What this is:** the living hub for what actually works today on the V3.1.0 b14 stock-client join and play path, with gate evidence and residual gaps.
+> **What this is:** the living hub for what actually works today on the V3.2.0 b9 stock-client join and play path, with gate evidence and residual gaps.
 
 > **Related:** gaps [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md)
 
-**Date pin:** 2026-08-23  
-**Game line:** V 3.x Mono (connected client **V3.1.0 b14**; bundled AssignIds dump byte-matches this client's runtime block ids), EAC off  
+**Date pin:** 2026-08-28  
+**Game line:** V 3.x Mono (connected client **V3.2.0 b9**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
+**Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`

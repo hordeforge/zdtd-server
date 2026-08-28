@@ -541,7 +541,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // Victim position for ClearSleepers POI gating (es is the
                 // victim's sim slot).
                 systems.questOnZombieKilled(&self.sim, c.slot, self.sim.transform[es].x, self.sim.transform[es].z);
-                self.killXpAward(c.slot, self.xpGainFor(nid), dmg.kill_scale_pct);
+                self.killXpAward(c.slot, self.xpGainFor(nid), dmg.kill_scale_pct, false);
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
                 if (c.peer) |kpeer| {
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[64..80], .{ .entity_id = c.entity_id, .zombie_kills = c.zombie_kills })) |ab| {

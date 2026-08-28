@@ -15,7 +15,7 @@ Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordefor
 | Doc index | [`docs/INDEX.md`](docs/INDEX.md) |
 | Metrics | [`docs/APM.md`](docs/APM.md) · `src/apm/` |
 
-Target: **V3.1.0 b14** (Mono) wire, Zig **0.16+**, **20 TPS** (50 ms) tick. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
+Target: **V3.2.0 b9** (Mono) wire, Zig **0.16+**, **20 TPS** (50 ms) tick. Validate via loadgen + stock client (EAC off) + **zdtd** apm dumps.
 
 ## Principles
 
