@@ -4064,16 +4064,18 @@ persists so little that a restart visibly damages a built base.
   does not sit in the same queue as control traffic); every other package is
   channel 0. `packages.framed` and the deflate path now pick the channel by
   package name (`packages.channelFor`), so Chunk/ChunkRemove envelopes leave on
-  channel 1 exactly like stock.
+  channel 1 exactly like stock; 3.2.0 swaps POIAround for POIMetadataResponse
+  in the same channel-1 slot (`channelFor`, `packages.zig:1570`).
   *Anchors:* `src/wire/packages.zig` `channelFor`/`framed`,
   `src/server/game/send_extra.zig` `sendCompressed`, `asm.il:808632-808638`,
   `asm.il:826004`, `asm.il:833771`
 
 - **S2C compression** `WORKS` `(2026-08-21)`
   Every emitted package from stock's `get_Compress()=true` set is deflated:
-  Chunk, ConfigFile, IdMapping, SignDataResponse (DynamicClientArrive,
-  DynamicMesh, MapChunks, POIAround are not yet emitted - see the S2C
-  coverage row). IdMapping + ConfigFile now ride the DeflateFramer (raw
+  Chunk, ConfigFile, IdMapping, SignDataResponse, and (3.2.0)
+  POIMetadataResponse - the POIAround replacement, itself removed in 3.2.0
+  (DynamicClientArrive, DynamicMesh, MapChunks are not yet emitted - see the
+  S2C coverage row). IdMapping + ConfigFile now ride the DeflateFramer (raw
   DEFLATE, compressed envelope flag) like Chunk, cutting the join cost (one
   flat-world join was 6.4 MB out with an uncompressed 250 KiB mapping through
   a shared reliable window) and relieving the window saturation the
