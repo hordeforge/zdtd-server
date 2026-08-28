@@ -258,7 +258,10 @@ pub fn announceChat(ctx: ?*anyopaque, msg: []const u8) void {
 /// percent. `item` is the ECS item id.
 pub fn tradePriceVerdict(ctx: ?*anyopaque, player: i32, item: u16, unit_price: u32) i32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
-    const p: i32 = @intCast(unit_price);
+    // Clamp before the i32 cast (the verdict host takes i32): stock prices
+    // are u16, but a future caller or modded data must not trap the tick on
+    // a >i32max price. Same shape as the perk-spend cost clamp in misc.zig.
+    const p: i32 = @intCast(@min(unit_price, std.math.maxInt(i32)));
     const sv = g.plugins.tradePrice(player, item, p);
     return if (sv != 0) sv else g.wasm_plugins.tradePrice(player, item, p);
 }
