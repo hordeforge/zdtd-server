@@ -143,9 +143,14 @@ pub const window_retry_sleep_ns: u64 = 1_000_000;
 pub const window_retry_budget_ns: u64 = 16_000_000;
 /// Bounded well under ADR 0012's 50ms tick budget headroom: sendGameCritical
 /// runs on the single tick thread (join SM), so this is a worst-case
-/// server-wide freeze, not just a slow join. Previously 3s (60 ticks) — a
-/// stuck peer's join could stall every other player for seconds.
-pub const critical_retry_budget_ns: u64 = 250_000_000;
+/// server-wide freeze, not just a slow join. Was 3s (60 ticks) - a stuck
+/// peer's join could stall every other player - then 250ms, which a live
+/// concurrent loadgen join against the full-stock catalogs (deflated
+/// blocks.xml ~0.5-1 MB = ~274 fragments vs the 64-slot window, 42 config
+/// rows sharing one deadline) exhausted: 'config file items send failed:
+/// WindowFull' and the join died at LoginAnswered. 1s is the middle: 4x the
+/// room for the full-stock bundle, worst-case freeze bounded to 20 ticks.
+pub const critical_retry_budget_ns: u64 = 1_000_000_000;
 pub const default_view_radius: i32 = 7;
 pub const default_max_players: u16 = 8;
 

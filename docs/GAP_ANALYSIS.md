@@ -3385,7 +3385,13 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   inherent without async work); the deeper fixes stay tracked: pace the
   join spawn-area through the `chunk_adds_per_stream_tick` stream budget,
   a per-poll send byte budget, W2b async chunk gen (moves proc gen +
-  te_scan off the join tick).
+  te_scan off the join tick). Also (2026-08-29): the full-stock config
+  bundle (deflated blocks.xml ~0.5-1 MB = ~274 fragments vs the 64-slot
+  window, 42 rows sharing one deadline) exhausted the 250 ms critical
+  retry budget under a concurrent loadgen join ('config file items send
+  failed: WindowFull', join died at LoginAnswered) - raised to 1 s (4x the
+  room, worst-case freeze bounded to 20 ticks); the baked Navezgane join
+  now PASSES on both clients.
   *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns),
   loadgen `ChallengeReplied timeout` under concurrent count=2.
 
