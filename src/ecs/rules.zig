@@ -585,6 +585,24 @@ pub const WorldgenGroup = struct {
     y_scale: f32 = 2.0,
     /// Blocks below this are forced solid (bedrock always lands).
     bedrock_h: i32 = 3,
+
+    /// Fail-closed sanity: the shaping surface must be a non-empty band with
+    /// room for the interpolation margin, and `noise_weight < 1` is load
+    /// bearing (the hard solid-below / air-above guarantee depends on it).
+    /// Returns a message on invalid config (validated in main.zig after the
+    /// rules merge, like the wire profile).
+    pub fn validate(self: WorldgenGroup) ?[]const u8 {
+        if (self.min_surface >= self.max_surface) {
+            return "[rules.worldgen] min_surface must be < max_surface";
+        }
+        if (self.squash <= 0) return "[rules.worldgen] squash must be > 0";
+        if (self.noise_weight >= 1.0) {
+            return "[rules.worldgen] noise_weight must be < 1 (the solid-below / air-above guarantee needs it)";
+        }
+        if (self.height_amp < 0) return "[rules.worldgen] height_amp must be >= 0";
+        if (self.bedrock_h < 0) return "[rules.worldgen] bedrock_h must be >= 0";
+        return null;
+    }
 };
 
 /// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
@@ -1128,4 +1146,23 @@ test "Geometry projection: identity at stock defaults, clamp at extremes" {
     // 0 ceiling = profile max.
     try std.testing.expectEqual(@as(u32, 255), g.ceiling(255));
     try std.testing.expectEqual(@as(u32, 16383), g.ceiling(16383));
+}
+
+test "WorldgenGroup validate rejects degenerate shaping" {
+    try std.testing.expect((WorldgenGroup{}).validate() == null);
+    // Reversed band, guarantee-breaking noise weight, non-positive squash.
+    const reversed: WorldgenGroup = .{ .min_surface = 200, .max_surface = 12 };
+    try std.testing.expect(reversed.validate() != null);
+    const heavy: WorldgenGroup = .{ .noise_weight = 1.0 };
+    try std.testing.expect(heavy.validate() != null);
+    const heavy2: WorldgenGroup = .{ .noise_weight = 1.5 };
+    try std.testing.expect(heavy2.validate() != null);
+    const flat: WorldgenGroup = .{ .squash = 0 };
+    try std.testing.expect(flat.validate() != null);
+    const above: WorldgenGroup = .{ .bedrock_h = -1 };
+    try std.testing.expect(above.validate() != null);
+    // Adjacent band (12..13) is valid; the interpolation margin keeps heights
+    // inside it by construction.
+    const thin: WorldgenGroup = .{ .min_surface = 12, .max_surface = 13 };
+    try std.testing.expect(thin.validate() == null);
 }

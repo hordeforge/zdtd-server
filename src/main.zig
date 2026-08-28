@@ -872,6 +872,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (mode_owned) |*mp| ecs_mod.rules.mergeOverlay(&rules_eff, &mp.rules);
     if (toml_owned) |*tf| ecs_mod.rules.mergeOverlay(&rules_eff, &tf.rules);
     init_opts.rules = rules_eff;
+    // Fail-closed sanity on the effective [rules.worldgen] shaping: a broken
+    // surface band or noise_weight >= 1 silently degenerates the generator
+    // (clamp collapse / the solid-below-air-above guarantee).
+    if (rules_eff.worldgen.validate()) |msg| fatal("{s}", .{msg});
     // Effective wire geometry profile (ADR geometry/wire-profiles): `[wire]
     // profile` from zdtd.toml; unknown names fail closed. A non-stock profile
     // changes the chunk wire dialect (needs a paired client mod) and the save
