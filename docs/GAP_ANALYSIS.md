@@ -563,6 +563,17 @@ area and the concrete work.
     QuestGotoPoint, PlayerDisconnect) is now handled: each is either decoded +
     applied or explicitly dropped with a comment.
 
+26. **Join tick budget: pace the spawn-area burst / W2b async chunk gen.**
+    `PARTIAL` (2026-08-29): the synchronous join burst (289 chunks × proc
+    gen + encode) still peaks ~2 s (budget 50 ms) after the ACK-yield,
+    clean-proc te_scan skip (19.7 M → 262 K cells) and config-budget fixes.
+    Remaining directions: deliver the spawn-area through the
+    `chunk_adds_per_stream_tick` stream budget instead of one synchronous
+    flood, add a per-poll send byte budget so critical packages never queue
+    behind a chunk burst, and W2b async chunk gen (moves gen + te_scan off
+    the join tick). Details + evidence in "Join-burst tick budget under
+    concurrent load" (§ the world-and-chunks inventory).
+
 ---
 
 ## 4. Quests
