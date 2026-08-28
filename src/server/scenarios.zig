@@ -4369,9 +4369,9 @@ test "scenario guard policy: quarantine denies only the abused surface" {
     try tripTwoStrongSignals(g, c);
 
     // The tripping event was attributed to `.damage`, so only that bit is set.
-    try std.testing.expectEqual(true, c.guard.quarantine.no_damage);
-    try std.testing.expectEqual(false, c.guard.quarantine.no_setblock);
-    try std.testing.expectEqual(false, c.guard.quarantine.no_container);
+    try std.testing.expectEqual(true, c.guard.quarantine.damage);
+    try std.testing.expectEqual(false, c.guard.quarantine.setblock);
+    try std.testing.expectEqual(false, c.guard.quarantine.container);
     try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.guard_quarantines));
     try std.testing.expectEqual(@as(u64, 0), g.harness.counters.get(.guard_kicks));
     try std.testing.expect(c.peer != null);
@@ -4396,7 +4396,7 @@ test "scenario guard policy: quarantine denies only the abused surface" {
     // Operator escape hatch (admin `guardclear <slot>`) resets the bits.
     c.guard.quarantine = .{};
     try std.testing.expectEqual(false, c.guard.quarantine.any());
-    std.debug.print("PASS guard policy quarantine: no_damage only, damage C2S denied\n", .{});
+    std.debug.print("PASS guard policy quarantine: damage bit only, damage C2S denied\n", .{});
 }
 
 test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock geometry" {

@@ -25,6 +25,9 @@ const version_mod = @import("../../version.zig");
 
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
 
+/// Upper bound on C2S RequestToSpawnPlayer.chunkViewDim (viewDist 8 mesh core).
+const max_spawn_chunk_view_dim: i32 = 8;
+
 /// True when handled (join SM package). False lets caller fall through to c2s/*.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     const sp = self.world.primarySpawn();
@@ -362,7 +365,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // chunkViewDim is in chunks; clamp for reliable window (join uses ≤2).
             var dim: i32 = req.chunk_view_dim;
             if (dim < 1) dim = self.view_radius;
-            if (dim > 8) dim = 8;
+            dim = @min(dim, max_spawn_chunk_view_dim);
             c.view_radius = dim;
         } else |_| {
             c.view_radius = self.view_radius;

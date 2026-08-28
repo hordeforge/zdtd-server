@@ -6,7 +6,7 @@ const std = @import("std");
 const util_log = @import("../util/log.zig");
 
 /// zdtd plugin API version (ADR 0020; engineering).
-pub const PLUGIN_API_VERSION: u32 = 1;
+pub const plugin_api_version: u32 = 1;
 
 pub const LogLevel = enum(u8) {
     debug,
@@ -17,7 +17,7 @@ pub const LogLevel = enum(u8) {
 
 /// Narrow host view passed into hooks. No raw `*Game`.
 pub const Host = struct {
-    version: u32 = PLUGIN_API_VERSION,
+    version: u32 = plugin_api_version,
     tick: u64 = 0,
     log_fn: *const fn (LogLevel, []const u8) void = defaultLog,
 
@@ -106,7 +106,7 @@ test "host log dispatches level and message to log_fn" {
     Cap.level = null;
     Cap.msg = null;
     var h: Host = .{ .log_fn = Cap.capture };
-    try std.testing.expectEqual(@as(u32, PLUGIN_API_VERSION), h.version);
+    try std.testing.expectEqual(@as(u32, plugin_api_version), h.version);
     h.log(.warn, "ping");
     try std.testing.expectEqual(LogLevel.warn, Cap.level.?);
     try std.testing.expectEqualStrings("ping", Cap.msg.?);

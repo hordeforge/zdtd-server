@@ -647,7 +647,7 @@ pub fn loadFromPath(
             ext = base_p.extends;
         }
         pb.class = own_class;
-        pb.trader_id = if (own_trader < 0) 0 else own_trader;
+        pb.trader_id = @max(own_trader, 0);
         pb.mesh = own_mesh;
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;

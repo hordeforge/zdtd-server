@@ -11,7 +11,7 @@ pub const Noise = struct {
     pub fn init(seed: u64) Noise {
         var n: Noise = .{ .perm = undefined, .seed = seed };
         var i: usize = 0;
-        while (i < 256) : (i += 1) n.perm[i] = @truncate(i);
+        while (i < 256) : (i += 1) n.perm[i] = @intCast(i);
         // Fisher-Yates with splitmix stream (deterministic).
         var s = seed;
         i = 255;

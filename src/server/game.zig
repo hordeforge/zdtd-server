@@ -1228,9 +1228,7 @@ pub const Game = struct {
     /// `streamChunksForClient` so we only touch chunks the join streams anyway
     /// (heightWorld getOrCreate must not become an unbounded world-gen burst).
     pub fn decoRadiusFor(self: *const Game, c: *const Client) i32 {
-        var r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else c.view_radius;
-        if (r < self.chunk_stream_radius_min) r = self.chunk_stream_radius_min;
-        if (r > self.chunk_stream_radius_max) r = self.chunk_stream_radius_max;
+        var r: i32 = @min(@max(c.view_radius, self.chunk_stream_radius_min), self.chunk_stream_radius_max);
         while (r > 1 and @as(usize, @intCast((2 * r + 1) * (2 * r + 1))) > self.max_streamed_chunks) r -= 1;
         return r;
     }
@@ -2140,9 +2138,9 @@ pub const Game = struct {
         const q = c.guard.quarantine;
         const denied = switch (surf) {
             .none => false,
-            .damage => q.no_damage,
-            .container => q.no_container,
-            .block => q.no_setblock,
+            .damage => q.damage,
+            .container => q.container,
+            .block => q.setblock,
         };
         if (!denied) return false;
         self.harness.counters.inc(.quarantine_rejects);

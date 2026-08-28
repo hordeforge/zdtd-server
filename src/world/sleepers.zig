@@ -474,14 +474,14 @@ pub fn loadFromPrefabs(
         //   tokens == vol_count*3    → triple (name, min, max) per volume
         //   otherwise                → groupName "???", 5,5
         const vol_count = segCount(start_s);
-        var g_toks: std.ArrayList([]const u8) = .empty;
-        defer g_toks.deinit(allocator);
+        var group_toks: std.ArrayList([]const u8) = .empty;
+        defer group_toks.deinit(allocator);
         {
             var it = std.mem.splitScalar(u8, group_s, ',');
-            while (it.next()) |t| try g_toks.append(allocator, std.mem.trim(u8, t, " \t"));
+            while (it.next()) |t| try group_toks.append(allocator, std.mem.trim(u8, t, " \t"));
         }
-        const name_only = g_toks.items.len == vol_count;
-        const triple = g_toks.items.len == vol_count * 3;
+        const name_only = group_toks.items.len == vol_count;
+        const triple = group_toks.items.len == vol_count * 3;
 
         // Authored spawn points come from Class=Sleeper marker blocks in the
         // voxel data, not XML (asm.il Prefab block-scan ~919380: Block.IsSleeperBlock
@@ -567,15 +567,15 @@ pub fn loadFromPrefabs(
                 .origin_z = d.z,
             };
             // Resolve this volume's group by form (one group per volume).
-            vol.groups[0] = if (name_only and cur_vol < g_toks.items.len) VolumeGroup{
-                .class_name = g_toks.items[cur_vol],
+            vol.groups[0] = if (name_only and cur_vol < group_toks.items.len) VolumeGroup{
+                .class_name = group_toks.items[cur_vol],
                 .min_count = 5,
                 .max_count = 5,
-            } else if (triple and cur_vol * 3 + 2 < g_toks.items.len) blk: {
-                const mn = parseCount(g_toks.items[cur_vol * 3 + 1]);
-                const mx = parseCount(g_toks.items[cur_vol * 3 + 2]);
+            } else if (triple and cur_vol * 3 + 2 < group_toks.items.len) blk: {
+                const mn = parseCount(group_toks.items[cur_vol * 3 + 1]);
+                const mx = parseCount(group_toks.items[cur_vol * 3 + 2]);
                 break :blk VolumeGroup{
-                    .class_name = g_toks.items[cur_vol * 3],
+                    .class_name = group_toks.items[cur_vol * 3],
                     .min_count = mn,
                     .max_count = @max(mn, mx),
                 };

@@ -1056,7 +1056,7 @@ for evidence (buffer → flush in admin/tick tail or dedicated writer later).
 
 **P4.4 - Enforce (only after dry-run)**
 
-- [x] Quarantine flags: `guard_policy.Quarantine{no_damage,no_container,no_setblock}`
+- [x] Quarantine flags: `guard_policy.Quarantine{damage,container,setblock}`
   attributed via the new `evidence.Surface`; enforced at DamageEntity, SetBlock,
   ExplosionInitiate, TileEntity (storage + workstation) and locking LockRequest;
   `quarantine_rejects` apm + admin `guardclear <slot>`. Session-scoped (a slot

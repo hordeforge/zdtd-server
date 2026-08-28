@@ -147,9 +147,8 @@ fn writeItemValueNested(w: *binary.Writer, mod_id: u16) !void {
 
 /// ItemStack.Write: count u16; if count != 0 then ItemValue.Write.
 pub fn writeItemStack(w: *binary.Writer, s: StockSlot) !void {
-    const c: u16 = if (s.count > 65535) 65535 else s.count;
-    try w.writeU16(c);
-    if (c != 0) try writeItemValue(w, s);
+    try w.writeU16(s.count);
+    if (s.count != 0) try writeItemValue(w, s);
 }
 
 /// GameUtils.WriteItemStack: count u16 + ItemStack.Write * n (including empties).

@@ -143,7 +143,7 @@ test "openAndBind dual-stack round-trips a loopback datagram" {
     defer s.close();
     var rx: [64]u8 = undefined;
     var from: IpAddress = undefined;
-    const v6 = std.meta.activeTag(s.local) == .ip6;
+    const v6 = s.local == .ip6;
     const dst: IpAddress = if (v6)
         .{ .ip6 = .loopback(port) }
     else

@@ -25,6 +25,12 @@ fn queryCoordLegal(v: f32) bool {
 /// player data into the operator log; the cap bounds one line's exposure.
 pub const max_wasm_log_len: usize = 200;
 
+/// Plugin callbacks receive the `*Game` installed at WasmHost.init as
+/// `HostCtx.data` or the kill-verdict `anyopaque` ctx.
+fn gameFromPtr(ptr: *anyopaque) *Game {
+    return @ptrCast(@alignCast(ptr));
+}
+
 pub fn wasmLog(ctx: *plugin_mod.wasm.HostCtx, level: u8, msg: []const u8) void {
     _ = ctx;
     const tag = wasm_log_level_tags[@min(@as(usize, level), wasm_log_level_tags.len - 1)];
@@ -37,12 +43,12 @@ pub fn wasmLog(ctx: *plugin_mod.wasm.HostCtx, level: u8, msg: []const u8) void {
 }
 
 pub fn wasmTick(ctx: *plugin_mod.wasm.HostCtx) u64 {
-    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
+    const g = gameFromPtr(ctx.data orelse return 0);
     return g.tick_n;
 }
 
 pub fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32) i32 {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
+    const g = gameFromPtr(ctx orelse return 0);
     return switch (kind) {
         .player => blk: {
             const sv = g.plugins.playerDeath(victim);
@@ -58,7 +64,7 @@ pub fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32)
 pub const max_plugin_cmd_len: usize = 128;
 
 pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void {
-    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return));
+    const g = gameFromPtr(ctx.data orelse return);
     if (cmd.len > max_plugin_cmd_len) {
         std.debug.print("zdtd wasm: queued command too long ({d} bytes); dropped\n", .{cmd.len});
         return;
@@ -142,7 +148,7 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
 pub const sense_header_len: usize = 24;
 
 pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
-    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
+    const g = gameFromPtr(ctx.data orelse return 0);
     if (out.len < sense_header_len) return 0;
     // Reserve room for the event trailer up front so a full record set still
     // leaves space for it (the guest parses the trailer after the records; a
@@ -152,12 +158,13 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     const max_records = if (out.len >= sense_header_len + trailer_cap) (out.len - sense_header_len - trailer_cap) / 32 else (out.len - sense_header_len) / 32;
     std.mem.writeInt(u32, out[0..4], 0x3353425a, .little); // 'ZBS3' (v3: world_time + blood_moon in the header)
     std.mem.writeInt(u32, out[4..8], 0, .little); // count, filled below
+    // Header ABI is u32; tick and world-time wrap at 2^32 by design.
     std.mem.writeInt(u32, out[8..12], @truncate(g.tick_n), .little);
     std.mem.writeInt(i32, out[12..16], 0, .little); // self_net_id
     // v3: world ticks (low 32) + blood-moon flag, so announcement/clock
     // modules can schedule from the header without a separate query.
     std.mem.writeInt(u32, out[16..20], @truncate(g.sim.director.clock.worldTimeBits()), .little);
-    std.mem.writeInt(u32, out[20..24], if (g.sim.director.bloodmoon_active) 1 else 0, .little);
+    std.mem.writeInt(u32, out[20..24], @as(u32, @intFromBool(g.sim.director.bloodmoon_active)), .little);
     var n: usize = 0;
     var s: ecs.Slot = 0;
     while (s < ecs.max_entities and n < max_records) : (s += 1) {
@@ -174,7 +181,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
         std.mem.writeInt(i32, r[0..4], g.sim.network_id[s].id, .little);
         r[4] = k;
         r[5] = 0; // self
-        r[6] = if (g.sim.health[s].hp > 0) 1 else 0; // alive
+        r[6] = @intFromBool(g.sim.health[s].hp > 0); // alive
         r[7] = 0; // pad
         const t = &g.sim.transform[s];
         std.mem.writeInt(u32, r[8..12], @bitCast(t.x), .little);
@@ -225,7 +232,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
 /// response bytes (0 = no MCP module / nothing to send). The transport owns
 /// the HTTP; this is the boundary crossing (ADR 0031 D3).
 pub fn mcpFrameThunk(ctx: *anyopaque, frame: []const u8, out: []u8) usize {
-    const g: *Game = @ptrCast(@alignCast(ctx));
+    const g = gameFromPtr(ctx);
     for (g.wasm_plugins.slots[0..g.wasm_plugins.n]) |*p| {
         if (p.hook_present[@intFromEnum(plugin_mod.wasm.Hook.on_mcp_frame)]) {
             const rep = p.callMcpFrame(frame, out) orelse return 0;
@@ -236,7 +243,7 @@ pub fn mcpFrameThunk(ctx: *anyopaque, frame: []const u8, out: []u8) usize {
 }
 
 pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usize {
-    const g: *Game = @ptrCast(@alignCast(ctx.data orelse return 0));
+    const g = gameFromPtr(ctx.data orelse return 0);
     var it = std.mem.tokenizeScalar(u8, req, ' ');
     const verb = it.next() orelse return 0;
     if (std.mem.eql(u8, verb, "mcp.allowlist")) {

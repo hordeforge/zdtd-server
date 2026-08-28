@@ -33,12 +33,12 @@ fn surfaceIndex(surf: evidence.Surface) u8 {
 /// Per-surface denial bits. Independent because `evidence.Surface` attributes
 /// each signal to the C2S surface it was observed on.
 pub const Quarantine = struct {
-    no_damage: bool = false,
-    no_container: bool = false,
-    no_setblock: bool = false,
+    damage: bool = false,
+    container: bool = false,
+    setblock: bool = false,
 
     pub fn any(self: Quarantine) bool {
-        return self.no_damage or self.no_container or self.no_setblock;
+        return self.damage or self.container or self.setblock;
     }
 };
 
@@ -46,10 +46,10 @@ pub const Quarantine = struct {
 /// phase, reconnect flood) and therefore quarantines every surface.
 pub fn bitsFor(surf: evidence.Surface) Quarantine {
     return switch (surf) {
-        .none => .{ .no_damage = true, .no_container = true, .no_setblock = true },
-        .damage => .{ .no_damage = true },
-        .container => .{ .no_container = true },
-        .block => .{ .no_setblock = true },
+        .none => .{ .damage = true, .container = true, .setblock = true },
+        .damage => .{ .damage = true },
+        .container => .{ .container = true },
+        .block => .{ .setblock = true },
     };
 }
 
@@ -290,16 +290,16 @@ test "kick rung requires enforce, no dry_run, and correct mode" {
     // Quarantine rung without enforce.
     const q = trip(.{ .quarantine = true }, true);
     try testing.expectEqual(Action.quarantine, q.action);
-    try testing.expectEqual(true, q.bits.no_damage);
-    try testing.expectEqual(false, q.bits.no_setblock);
+    try testing.expectEqual(true, q.bits.damage);
+    try testing.expectEqual(false, q.bits.setblock);
 }
 
 test "surface maps to independent bits and none sets all" {
-    try testing.expectEqual(Quarantine{ .no_damage = true }, bitsFor(.damage));
-    try testing.expectEqual(Quarantine{ .no_container = true }, bitsFor(.container));
-    try testing.expectEqual(Quarantine{ .no_setblock = true }, bitsFor(.block));
+    try testing.expectEqual(Quarantine{ .damage = true }, bitsFor(.damage));
+    try testing.expectEqual(Quarantine{ .container = true }, bitsFor(.container));
+    try testing.expectEqual(Quarantine{ .setblock = true }, bitsFor(.block));
     try testing.expectEqual(
-        Quarantine{ .no_damage = true, .no_container = true, .no_setblock = true },
+        Quarantine{ .damage = true, .container = true, .setblock = true },
         bitsFor(.none),
     );
     try testing.expectEqual(false, (Quarantine{}).any());

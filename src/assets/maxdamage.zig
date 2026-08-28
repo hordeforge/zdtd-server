@@ -36,6 +36,10 @@ pub const Dim = struct {
     }
 };
 
+/// FastMin(Hardness * Mass, 10) then * 8 (RE EntityFallingBlock IL=232-250).
+const falling_mass_hmm_cap: f32 = 10.0;
+const falling_mass_scale: f32 = 8.0;
+
 /// Turret combat stats live in `components.TurretBlockStats` (pure shape;
 /// assets→ecs allowed, ecs→assets forbidden - production wiring uses hooks).
 pub const Table = struct {
@@ -290,8 +294,8 @@ pub const Table = struct {
         const h = self.material_hardness.get(mat) orelse return 0;
         const m = self.material_mass.get(mat) orelse return 0;
         const hmm = h * m;
-        const clamped: f32 = if (hmm > 10.0) 10.0 else hmm;
-        return clamped * 8.0;
+        const clamped: f32 = @min(hmm, falling_mass_hmm_cap);
+        return clamped * falling_mass_scale;
     }
 
     /// materials.xml damage_category for a block id (block → Material →

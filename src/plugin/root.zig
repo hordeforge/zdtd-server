@@ -14,7 +14,7 @@ pub const sample_hello = @import("sample_hello.zig");
 pub const manifest = @import("manifest.zig");
 pub const resolver = @import("resolver.zig");
 
-pub const PLUGIN_API_VERSION = api.PLUGIN_API_VERSION;
+pub const plugin_api_version = api.plugin_api_version;
 pub const Host = api.Host;
 pub const PluginVTable = api.PluginVTable;
 pub const PluginHost = host.PluginHost;

@@ -59,9 +59,9 @@ pub fn quarantineDenies(self: *Game, c: *Client, surf: evidence_mod.Surface) boo
     const q = c.guard.quarantine;
     const denied = switch (surf) {
         .none => false,
-        .damage => q.no_damage,
-        .container => q.no_container,
-        .block => q.no_setblock,
+        .damage => q.damage,
+        .container => q.container,
+        .block => q.setblock,
     };
     if (!denied) return false;
     self.harness.counters.inc(.quarantine_rejects);
@@ -74,21 +74,21 @@ pub fn quarantineDenies(self: *Game, c: *Client, surf: evidence_mod.Surface) boo
 
 fn applyQuarantine(self: *Game, c: *Client, bits: guard_policy.Quarantine, det: evidence_mod.Detector) void {
     var changed = false;
-    if (bits.no_damage and !c.guard.quarantine.no_damage) {
-        c.guard.quarantine.no_damage = true;
+    if (bits.damage and !c.guard.quarantine.damage) {
+        c.guard.quarantine.damage = true;
         changed = true;
     }
-    if (bits.no_container and !c.guard.quarantine.no_container) {
-        c.guard.quarantine.no_container = true;
+    if (bits.container and !c.guard.quarantine.container) {
+        c.guard.quarantine.container = true;
         changed = true;
     }
-    if (bits.no_setblock and !c.guard.quarantine.no_setblock) {
-        c.guard.quarantine.no_setblock = true;
+    if (bits.setblock and !c.guard.quarantine.setblock) {
+        c.guard.quarantine.setblock = true;
         changed = true;
     }
     if (!changed) return;
     self.harness.counters.inc(.guard_quarantines);
-    std.debug.print("zdtd: guard quarantine slot={d} det={s} damage={} container={} setblock={}\n", .{ c.slot, @tagName(det), c.guard.quarantine.no_damage, c.guard.quarantine.no_container, c.guard.quarantine.no_setblock });
+    std.debug.print("zdtd: guard quarantine slot={d} det={s} damage={} container={} setblock={}\n", .{ c.slot, @tagName(det), c.guard.quarantine.damage, c.guard.quarantine.container, c.guard.quarantine.setblock });
 }
 
 pub fn loadShedding(self: *const Game) bool {

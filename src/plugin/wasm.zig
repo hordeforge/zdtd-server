@@ -228,8 +228,10 @@ pub const Plugin = struct {
             self.requiresFailed("_zdtd_requires trapped");
             return;
         };
-        const ptr: u32 = @truncate(@as(u64, @bitCast(ret64)));
-        const len: u32 = @truncate(@as(u64, @bitCast(ret64)) >> 32);
+        // Packed i64 ABI: low 32 bits pointer, high 32 bits length.
+        const packed_ret: u64 = @bitCast(ret64);
+        const ptr: u32 = @truncate(packed_ret);
+        const len: u32 = @truncate(packed_ret >> 32);
         if (len == 0 or len > 4096) {
             self.requiresFailed("_zdtd_requires returned an invalid range");
             return;

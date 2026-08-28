@@ -27,7 +27,7 @@ A native ABI could promise neither.
 |---|---|
 | Wasm runtime, module loading, fuel accounting | **implemented** (`src/plugin/wasm.zig`: `WasmHost`, `Plugin`, `Budget`) |
 | Host function table and capability gating | **implemented**, module `zdtd`, fields `log(level, ptr, len)`, `tick() -> i64`, `queue(ptr, len) -> i32` (bare field names; see [PLUGIN_DEV.md](PLUGIN_DEV.md#host-imports)) |
-| `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `PLUGIN_API_VERSION=1`: in-tree test scaffolding |
+| `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `plugin_api_version=1`: in-tree test scaffolding |
 | `src/plugin/host.zig` | Fixed table (22 hooks), register / enable / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
 | Game wire-up | `[plugin] modules` → `WasmHost.loadAll` at init; `step` onTick; join bundle `playerJoin` / `playerLeave`; `deinit` shutdown; kill verdict routed via `World.kill_verdict_fn`; block damage + quest payout consult the event hooks; perk spend / GameEvent / stat changed / trade / quest accept consult their verdicts and observers |
@@ -184,7 +184,7 @@ build too, not a defect in zwasm.
 | Deny > invent | Plugins can veto/adjust validated requests; they cannot invent world blobs |
 | Ordered, explicit | Fixed hook order; no access-set auto-scheduler |
 | Fail isolate | Hook error → disable that registration; process stays up when practical |
-| Versioned | `PLUGIN_API_VERSION` names the guest contract: exported hook names plus the host import table |
+| Versioned | `plugin_api_version` names the guest contract: exported hook names plus the host import table |
 
 ## Lifecycle
 

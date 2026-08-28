@@ -3083,8 +3083,8 @@ pub fn vehicleControl(w: *World, slot: Slot, throttle: f32, steer: f32, dt: f32)
     const vr = &w.rules.vehicle;
     // Stronger accel so a short C2S drive pulse still moves (playtest >=0.4 m).
     v.speed += throttle * vr.accel_mps2 * dt;
-    if (v.speed > max_spd) v.speed = max_spd;
-    if (v.speed < -max_spd * vr.reverse_frac) v.speed = -max_spd * vr.reverse_frac;
+    v.speed = @min(v.speed, max_spd);
+    v.speed = @max(v.speed, -max_spd * vr.reverse_frac);
     // Coast decay only when no throttle input.
     if (@abs(throttle) < 0.05) v.speed *= 1.0 - vr.coast_decay * dt;
     const spd_frac = if (max_spd > 0.01) @abs(v.speed) / max_spd else 0;

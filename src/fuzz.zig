@@ -129,7 +129,7 @@ fn fuzzChannelEnvelope(_: void, smith: *std.testing.Smith) !void {
 
 /// Outer TE header (handle | world xyz | block_id | pay_len) shared by the
 /// vending TE corpus seeds below; matches stock_te.zig's readOuterTeHeader.
-fn vend_te_header(pay_len: u32) [21]u8 {
+fn vendTeHeader(pay_len: u32) [21]u8 {
     var buf: [21]u8 = undefined;
     buf[0] = 1; // handle
     std.mem.writeInt(i32, buf[1..5], 0, .little); // world_x
@@ -176,17 +176,17 @@ const package_corpus = [_][]const u8{
     // vending TE (type 7): outer header (handle | pos | block | pay_len) +
     // chunkPos + ver=3 + unlocked + no owner + empty password +
     // allowed_count=0 + rental_end_day=0
-    &(vend_te_header(27) ++ vend_te_chunk_and_ver ++
+    &(vendTeHeader(27) ++ vend_te_chunk_and_ver ++
         [_]u8{ 0, 0, 0 } ++ // is_locked | owner-null | empty password
         [_]u8{ 0, 0, 0, 0 } ++ // allowed_count = 0
         [_]u8{ 0, 0, 0, 0 }), // rental_end_day = 0
     // vending TE: allowed_count claims 64 users but stream is truncated
     // right after the count (pay_len covers up to the count, no further body).
-    &(vend_te_header(23) ++ vend_te_chunk_and_ver ++
+    &(vendTeHeader(23) ++ vend_te_chunk_and_ver ++
         [_]u8{ 0, 0, 0 } ++
         [_]u8{ 64, 0, 0, 0 }),
     // vending TE: bad version (must reject before touching owner/allowed).
-    &(vend_te_header(16) ++ [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++
+    &(vendTeHeader(16) ++ [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } ++
         [_]u8{ 9, 0, 0, 0 }),
     // console cmd: 7bit-len oversize
     &.{ 0x80, 0x80, 0x01, 'x' },

@@ -90,8 +90,7 @@ pub fn clientRemoveStreamed(c: *Client, key: i64) void {
 pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
     const t = world_store.World.worldToChunk(wx, wz);
     // Honor radius 0 (single spawn chunk). Cap 17×17 for viewDist 8 mesh core.
-    var r: i32 = if (radius < 0) 0 else radius;
-    if (r > self.spawn_area_radius_max) r = self.spawn_area_radius_max;
+    const r: i32 = @min(@max(radius, 0), self.spawn_area_radius_max);
     var client_ptr: ?*Client = null;
     for (&self.clients) |*cl| {
         if (cl.peer == peer) {
@@ -134,9 +133,7 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
         // Client mesh needs ~2-chunk halo: with r=4 only the inner 5×5 (25)
         // become CGO; spawn overlay needs viewDist^2-10 (viewDist 7 → 39).
         // Stream up to view_radius (max self.chunk_stream_radius_max) so the meshable core clears the bar.
-        var r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else c.view_radius;
-        if (r < self.chunk_stream_radius_min) r = self.chunk_stream_radius_min;
-        if (r > self.chunk_stream_radius_max) r = self.chunk_stream_radius_max;
+        var r: i32 = @min(@max(c.view_radius, self.chunk_stream_radius_min), self.chunk_stream_radius_max);
         // Shrink to a square that fits the budget: truncating the raster scan
         // instead would leave a southern band, not the centered hole-free disk
         // the comment above requires (radius 7 wants 225 vs a 169 cap).

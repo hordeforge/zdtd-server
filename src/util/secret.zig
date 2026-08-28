@@ -12,7 +12,7 @@ const std = @import("std");
 /// Always walks max(a.len, b.len) so remote timing primarily reflects payload
 /// size, not an early length branch. Neither slice is retained.
 pub fn constantTimeEql(a: []const u8, b: []const u8) bool {
-    var diff: u8 = if (a.len == b.len) 0 else 1;
+    var diff: u8 = @intFromBool(a.len != b.len);
     const n = @max(a.len, b.len);
     var i: usize = 0;
     while (i < n) : (i += 1) {

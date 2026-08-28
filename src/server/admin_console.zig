@@ -1833,11 +1833,11 @@ pub fn adminReplyGuardPolicy(self: *Game) void {
     for (&self.clients, 0..) |*cl, i| {
         const q = cl.guard.quarantine;
         if (!q.any() and cl.guard.kick_at_tick == 0) continue;
-        const line = std.fmt.bufPrint(qb[pos..], "  slot={d} no_damage={d} no_container={d} no_setblock={d} kick_at={d}\n", .{
+        const line = std.fmt.bufPrint(qb[pos..], "  slot={d} damage={d} container={d} setblock={d} kick_at={d}\n", .{
             i,
-            @intFromBool(q.no_damage),
-            @intFromBool(q.no_container),
-            @intFromBool(q.no_setblock),
+            @intFromBool(q.damage),
+            @intFromBool(q.container),
+            @intFromBool(q.setblock),
             cl.guard.kick_at_tick,
         }) catch break;
         pos += line.len;
