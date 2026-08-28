@@ -172,7 +172,9 @@ rules surface deferred until it exists; design [RFC 0006](rfc/0006-honk-doors.md
 [PRD 0006](prd/0006-honk-doors.md)), the deco-suppression gate (needs a
 spatial POI index on the deco sampler; design [RFC 0007](rfc/0007-deco-suppression.md) /
 [PRD 0007](prd/0007-deco-suppression.md)), the challenge `forceComplete`
-re-entry guard (no challenge sim), and the bundled AssignIds dump refresh
+re-entry guard (no challenge sim), the combine station TE (the server-side
+craft behavior of §4.2; `ItemValue.WasCombined` is parsed but no combine
+craft exists), and the bundled AssignIds dump refresh
 (needs a 3.2.0 client `NameIdMapping` capture; 2 blocks pinned in the
 maxdamage stale-dump allowance).
 

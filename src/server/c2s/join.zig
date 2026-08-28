@@ -299,7 +299,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 };
                 n += 1;
             }
-            const body_out = try packages.buildPoiMetadataResponse(self.body_buf[0..8192], records[0..n]);
+            const body_out = try packages.buildPoiMetadataResponse(self.body_buf[0..65536], records[0..n]);
             try game_net.sendGameBudget(self, peer, "NetPackagePOIMetadataResponse", body_out, game_mod.window_retry_budget_ns, false);
         }
         return true;

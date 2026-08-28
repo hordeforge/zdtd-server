@@ -37,6 +37,7 @@ const joined_allow: []const []const u8 = &.{
     "NetPackageSignDataRequest",
     "NetPackageWorldInitInfoRequest",
     "NetPackageDynamicClientArrive",
+    "NetPackagePOIMetadataRequest", // V3.2.0: the client asks during world creation (DynamicPrefabDecorator)
     "NetPackagePlayerDisconnect",
 };
 
