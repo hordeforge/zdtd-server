@@ -2109,7 +2109,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
 | Entity spawn-on-approach | **PASS** | per-client known_entities bitset; ECD spawn on first range entry (director hordes, sleeper wakes, roaming); pw27 soak green |
-| Player persist v3 | **PASS** | players.zsv **ZPV3** (quality/meta + journal + level/XP/food/water/buffs; ZPV2 still read and upgraded on merge); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
+| Player persist v3+ | **PASS** | players.zsv **ZPV12** (quality/meta + journal + level/XP/food/water/buffs + skill points + game stage + hp; ZPV2-ZPV11 still read and upgraded in place); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
 | Player save merge | **PASS** | savePlayers keeps offline records (was TRUNC joined-only) |
 | Trader XML stock | **PASS** | per-trader traders.xml `<trader_info>` lists via npc.xml class→id (traderAlways fallback) + items.xml EconomicValue prices (group pick rolls deferred) |
@@ -2137,7 +2137,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS 33/33** | parity tool: 0 unhandled dir=1 (72 handled across `c2s/*`; `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10); 190-pkg catalog docs/wire/PACKAGES.md |
-| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco trees blocked on DecoManager.Read NRE. Not full-stock parity. |
+| Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco streams (A22 id-negotiation residual only). Not full-stock parity. |
 
 Scratch one_shot logs (implementer): `STATUS-*.md` under session scratch; canonical
 product notes stay in this file + linked docs.
@@ -2311,24 +2311,26 @@ Open work only. See [TODO.md](../TODO.md) for the actionable list.
 
 | Priority | Gap | Proper approach |
 |---|---|---|
-| P1 | Deco trees | Blocked on DecoManager.Read NRE RE; empty firstPackage only until object wire matches V3.1.0 |
-| P2 | GameStats live sandbox sync | Full bPersistent blob on join (RE); HUD day from WorldTime; optional mid-session refresh |
+| P2 | Deco id negotiation (A22) | Deco streams ship (join burst + per-chunk deco since 2026-08-05; the DecoManager.Read NRE is resolved). Residual: no client deco name-id negotiation, so a modded/other-version client could skew deco ids; one-shot join window (client nulls `loadedDecos` after world load) |
+| P2 | GameStats mid-session refresh | Full bPersistent blob ships on join (RE initPropertyDecl order) + HUD day from WorldTime; optional mid-session sandbox re-push not implemented (clients keep the join-time values, matching stock's join-only blob) |
 | P1 | M11 multiplayer CPU | Serialize-once + named caps + pool shipped; chunk workers parked until apm need; 32-bot loadgen = operator validation |
 | P2 | Quest / EAI / power depth | See GAP_ANALYSIS honest-gap sections (more EAI tasks) |
 | P2 | Workstation recipe validation | Queue rides the TE body (no NetPackageRecipe*); the server still trusts the client's Recipe blob instead of checking recipes.xml |
 | P2 | Workstation RecipeQueue C2S depth | Queue rides TE composite (no NetPackageRecipe*); InvTx craft works; deeper C2S optional |
-| P3 | Party membership + ally persistence | Both SHIPPED: allies.zal round-trip; real `Party` state machine + `PartyData` snapshots (entity-id keyed, no PUID). Shared party scope SHIPPED: kill-XP split, shared quests, party loot stage + highest game stage feed the director |
 | Parked | Full telnet / Steam browser | Admin TCP + WebUI cover research ops |
 | Non-goal | Encryption* RSA+AES | Platform AntiCheat only; ServerPassword LiteNet key shipped; EAC-off scope |
 | Parked | Planet-scale M2–M4 | DEM M1 proven; gateway/shards after M11 (SCALE.md) |
 | Multi-ms | Worldgen W3–W7 | W0/W1/W2 shipped (3D density field); climate/caves/POI/WFC track open |
 
 **HAVE (do not re-list as gaps):** AssignIds table (`assignids_v314.txt` 24808 rows +
-maxdamage merge), stock Chunk.write + upper24, players.zsv **ZPV3** (ZPV2 still
-read; progression tail + inv/journal), TE/blockmeta persist, claims.zlc,
+maxdamage merge), stock Chunk.write + upper24, players.zsv **ZPV12** (ZPV2 still
+read; progression tail incl. skill points + inv/journal; ZPV3-ZPV11 upgrade in
+place), TE/blockmeta persist, claims.zlc,
 clock.zcl, weather.zwt, workstation TE sim + workstations.zws persistence, trader TraderData v2, electrical
 place+WireActions, sleeper volumes, quest multi-phase graphs, EAI task table
-(9 tasks), land claim options.
+(9 tasks), land claim options, party membership + ally persistence (allies.zal
+round-trip; real Party state machine + shared kill-XP split), full GameStats
+bPersistent blob on join + HUD day from WorldTime.
 
 ---
 
@@ -2347,7 +2349,7 @@ place+WireActions, sleeper volumes, quest multi-phase graphs, EAI task table
 | `src/server/game.zig` | Orchestration + Game struct (thin façade over `src/server/game/*`) |
 | `src/server/game/*` | Per-domain game logic (join, tick, world, player, quest, social, trader, stability, replicate, net, loot, deco, weather, vehicle, sleeper, hooks, types) |
 | `src/server/c2s/*` | All 5 C2S domains (join, move, inv, quest, misc) |
-| `src/server/persist.zig` | zdtd-owned saves (players.zsv ZPV3, entities.zen, claims.zlc) |
+| `src/server/persist.zig` | zdtd-owned saves (players.zsv ZPV12, entities.zen, claims.zlc) |
 
 ---
 
