@@ -497,6 +497,47 @@ pub const WorldGroup = struct {
     poi_unlock_grace_ticks: u32 = 2000,
 };
 
+/// World elevation/geometry policy: how a terrain source's natural elevation
+/// (absolute game-Y meters, 1 block = 1 m) projects onto the chunk column.
+/// Data, not code: a world can ship compressed mountains (`height_scale < 1`),
+/// a sea-level model, or a custom ceiling without touching the generator.
+/// Stock defaults are the identity (scale 1, offset 0, ceiling = profile max),
+/// so the projection is a no-op for vanilla worlds (fast path, no plane
+/// rewrite). Semantics mirror RealEarth's elevation mapping
+/// (`gameY = sea + elev_m`); the sea addition lives in the source.
+pub const Geometry = struct {
+    /// Sea level in blocks (absolute game Y): the flat-world surface and the
+    /// baked-DTM out-of-bounds fallback. zdtd default 64 (stock 62.88 tracked
+    /// in the divergence register; RealEarth-style worlds set ~100).
+    sea_level: f32 = 64,
+    /// surface_y = clamp(height_offset + height_scale * elev_m, 0, ceiling).
+    /// 1.0 = identity; < 1 compresses mountains into the column; > 1 needs a
+    /// taller wire profile (ADR geometry/wire-profiles) for headroom.
+    height_scale: f32 = 1.0,
+    /// Vertical shift applied after scaling (lift/lower the whole world).
+    height_offset: f32 = 0.0,
+    /// Hard ceiling for the projected surface Y; 0 = active wire-profile max
+    /// (stock 255). A world with real-Everest data sets this to the column cap.
+    height_ceiling: u32 = 0,
+
+    /// Effective ceiling for the active profile max.
+    pub fn ceiling(self: Geometry, profile_max: u32) u32 {
+        return if (self.height_ceiling == 0) profile_max else self.height_ceiling;
+    }
+
+    /// Project an absolute elevation (game-Y meters) onto the column.
+    pub fn project(self: Geometry, elev_m: f32, profile_max: u32) u32 {
+        const v = self.height_offset + self.height_scale * elev_m;
+        const c = @max(0.0, @min(v, @as(f32, @floatFromInt(self.ceiling(profile_max)))));
+        return @intFromFloat(c);
+    }
+
+    /// Identity projection: skip the plane rewrite entirely.
+    pub fn isStock(self: Geometry) bool {
+        return self.height_scale == 1.0 and self.height_offset == 0.0 and self.height_ceiling == 0;
+    }
+};
+
 /// Vehicle sim tuning (zdtd-owned: the stock dedicated server has no vehicle
 /// physics sim, GAP 4816; these shape the server-side drive model). All
 /// operator-policy, so they live on the rules surface (ADR 0021).
@@ -636,6 +677,7 @@ pub const Rules = struct {
     bloodmoon: Bloodmoon = .{},
     progression: Progression = .{},
     world: WorldGroup = .{},
+    geometry: Geometry = .{},
     vehicle: Vehicle = .{},
     director: Director = .{},
     difficulty: Difficulty = .{},
@@ -793,6 +835,13 @@ pub const WorldGroupOverlay = struct {
     poi_unlock_grace_ticks: ?u32 = null,
 };
 
+pub const GeometryOverlay = struct {
+    sea_level: ?f32 = null,
+    height_scale: ?f32 = null,
+    height_offset: ?f32 = null,
+    height_ceiling: ?u32 = null,
+};
+
 pub const VehicleOverlay = struct {
     accel_mps2: ?f32 = null,
     reverse_frac: ?f32 = null,
@@ -882,6 +931,7 @@ pub const RulesOverlay = struct {
     bloodmoon: BloodmoonOverlay = .{},
     progression: ProgressionOverlay = .{},
     world: WorldGroupOverlay = .{},
+    geometry: GeometryOverlay = .{},
     vehicle: VehicleOverlay = .{},
     director: DirectorOverlay = .{},
     difficulty: DifficultyOverlay = .{},
@@ -1010,4 +1060,35 @@ test "Rules defaults pin pre-move constants" {
     // literals: FindBestEventAndReset 240 s, StartNeighborCooldown 180 s).
     try std.testing.expectEqual(@as(f32, 240.0), r.director.heat_cooldown_seconds);
     try std.testing.expectEqual(@as(f32, 180.0), r.director.heat_neighbor_cooldown_seconds);
+}
+
+test "Geometry projection: identity at stock defaults, clamp at extremes" {
+    const g: Geometry = .{};
+    try std.testing.expect(g.isStock());
+    // Identity: elev passes through, ceiling = profile max.
+    try std.testing.expectEqual(@as(u32, 0), g.project(0, 255));
+    try std.testing.expectEqual(@as(u32, 64), g.project(64, 255));
+    try std.testing.expectEqual(@as(u32, 255), g.project(255, 255));
+    // Clamps above profile max and below 0.
+    try std.testing.expectEqual(@as(u32, 255), g.project(300, 255));
+    try std.testing.expectEqual(@as(u32, 0), g.project(-5, 255));
+
+    // Compressed mountains: scale 0.5 halves elevation.
+    const half: Geometry = .{ .height_scale = 0.5 };
+    try std.testing.expect(!half.isStock());
+    try std.testing.expectEqual(@as(u32, 50), half.project(100, 255));
+    try std.testing.expectEqual(@as(u32, 127), half.project(255, 255));
+
+    // Sea-level model: offset lifts a relative-elevation source (RealEarth
+    // `gameY = sea + elev_m` is source-side; offset here shifts the whole map).
+    const lifted: Geometry = .{ .height_offset = 20.0 };
+    try std.testing.expectEqual(@as(u32, 120), lifted.project(100, 255));
+
+    // Explicit ceiling beats profile max; sea_level only shapes flat fill.
+    const capped: Geometry = .{ .height_ceiling = 100 };
+    try std.testing.expectEqual(@as(u32, 100), capped.ceiling(255));
+    try std.testing.expectEqual(@as(u32, 100), capped.project(200, 255));
+    // 0 ceiling = profile max.
+    try std.testing.expectEqual(@as(u32, 255), g.ceiling(255));
+    try std.testing.expectEqual(@as(u32, 16383), g.ceiling(16383));
 }

@@ -5542,6 +5542,109 @@ test "scenario mode pack rules overlay changes sim behaviour" {
     );
 }
 
+test "scenario tall wire profile: 512-tall columns, 128-layer wire body, ZCH4 saves" {
+    // Layer B seam proof (ADR geometry/wire-profiles): a non-stock wire profile
+    // flows from Game options into the block store (column height + plane
+    // sizing), the chunk wire body (layer band count + plane stride) and the
+    // save format (ZCH4 carrying the column height). Flat world + y_dim=512.
+    // No stock client can read this dialect (a paired client mod is required);
+    // the seam is proven with our own chunk + wire + save round-trips plus the
+    // production join stream (chunk_fill uses the same profile-aware builder).
+    freshScenarioDir("worlds/zdtd_sc_tall");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_tall", 0, .{
+        .wire_profile = .{ .y_dim = 512 },
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // Profile on the block store; chunks adopt the column height + plane size.
+    try std.testing.expectEqual(@as(u32, 512), g.world.profile.y_dim);
+    try std.testing.expect(g.world.profile.validate());
+    try std.testing.expectEqual(@as(u32, 128), g.world.profile.layers());
+    try std.testing.expectEqual(@as(u32, 256 * 512), g.world.profile.plane_cells());
+    const pos: world_store.ChunkPos = .{ .x = 0, .z = 0 };
+    const ch = try g.world.getOrCreate(pos);
+    try std.testing.expectEqual(@as(u32, 512), ch.y_dim);
+    try std.testing.expectEqual(@as(usize, 16 * 512 * 16), ch.planeCells());
+    try std.testing.expect(ch.blocks != null);
+    try std.testing.expectEqual(@as(u16, 64), ch.heightAt(0, 0)); // flat sea surface
+
+    // Wire: the chunk body encodes y_dim/4 = 128 layers, not 64. The same flat
+    // chunk encoded with the stock layer count is smaller (every extra air
+    // band still costs its presence byte + channel slots).
+    const TallCtx = struct {
+        ch: *world_store.Chunk,
+        fn at(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u32 {
+            const s: *const @This() = @ptrCast(@alignCast(ctx.?));
+            return s.ch.rawAt(lx, y, lz);
+        }
+        fn tex(ctx: ?*anyopaque, lx: i32, y: i32, lz: i32) u64 {
+            const s: *const @This() = @ptrCast(@alignCast(ctx.?));
+            return s.ch.texAt(lx, y, lz);
+        }
+    };
+    var tctx: TallCtx = .{ .ch = ch };
+    var wire_buf: [1024 * 1024]u8 = undefined;
+    const body = try packages.stock_chunk.buildNetPackageChunkNew(&wire_buf, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &ch.heights,
+        .layers = 128,
+        .y_dim = 512,
+        .block_at = TallCtx.at,
+        .block_ctx = &tctx,
+        .tex_at = TallCtx.tex,
+    });
+    var stock_buf: [1024 * 1024]u8 = undefined;
+    const stock_body = try packages.stock_chunk.buildNetPackageChunkNew(&stock_buf, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &ch.heights,
+        .layers = 64,
+        .y_dim = 512,
+        .block_at = TallCtx.at,
+        .block_ctx = &tctx,
+        .tex_at = TallCtx.tex,
+    });
+    try std.testing.expect(body.len > stock_body.len);
+
+    // Production join stream: the real chunk_fill builder (profile-aware)
+    // sends a NetPackageChunk for the tall world without overflowing. The
+    // test Capture truncates full chunk bodies at 8 KiB, so the proof is the
+    // streamed-chunk tracking (clientAddStreamed only runs after chunk_fill's
+    // sendGame delivered) plus the direct 128-vs-64-layer body check above.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try g.streamChunksForClient(c);
+    try std.testing.expect(c.streamed_n > 0);
+    // The stream inserted many chunks; the store's HashMap may have rehashed,
+    // invalidating the earlier `ch` pointer. Re-fetch before the save tests.
+    const ch2 = try g.world.getOrCreate(pos);
+
+    // Save: ZCH4 with the column height in the header; validate + reload into
+    // a same-profile chunk round-trips; a stock chunk rejects the record.
+    const img = try world_store.World.encodeChunk(ch2, gpa);
+    defer gpa.free(img);
+    try std.testing.expectEqual(@as(u8, '4'), img[3]);
+    const saved_y = std.mem.readInt(u32, img[16..20], .little);
+    try std.testing.expectEqual(@as(u32, 512), saved_y);
+    try world_store.World.validateChunkBytes(img, pos);
+    try g.world.saveChunk(ch2);
+    var other = world_store.Chunk.generateFlat(pos);
+    other.y_dim = 512;
+    try g.world.loadChunk(&other);
+    try std.testing.expectEqual(@as(u16, 64), other.heightAt(0, 0));
+    var stock_chunk = world_store.Chunk.generateFlat(pos);
+    try std.testing.expectError(error.ReadFailed, g.world.loadChunk(&stock_chunk));
+
+    std.debug.print("PASS tall-wire-profile: y_dim=512 planes={d} wire={d}B vs {d}B ZCH4\n", .{ ch2.planeCells(), body.len, stock_body.len });
+}
+
 test "scenario wasm T15 hooks: deny death, double block damage and quest reward, trap isolates" {
     // T15 proof (WORK_PLAN): a .wasm module implements a visible mode rule end
     // to end through the event hooks. plugin_rules denies every player death

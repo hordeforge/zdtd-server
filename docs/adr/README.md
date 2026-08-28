@@ -37,6 +37,7 @@ Status is one of: **accepted**, **superseded**, **deprecated** — a decision st
 | [0033](0033-perk-spend-verdict.md) | on_perk_spend verdict hook: plugins gate/scale perk spending; the VM stat deltas stay native | accepted |
 | [0034](0034-stat-changed-observer.md) | on_stat_changed observer: plugins observe player stats (survival pass + XP); the sim stays the single authority | accepted |
 | [0035](0035-game-event-verdict.md) | on_game_event verdict hook: plugins gate/customize GameEvents; the IL=211 sender/party gate lands native (supersedes ADR 0025's execution location) | accepted |
+| [0036](0036-malleable-world-geometry.md) | Malleable world geometry: `[rules.geometry]` elevation projection (meters → column, identity at stock) + `[wire] profile` column-height dialects (chunk store/wire/save follow it; non-stock needs a paired client mod) | accepted |
 
 Numbers 0027–0029 were never assigned. Next free number is **0036**.
 

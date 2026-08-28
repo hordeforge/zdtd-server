@@ -33,7 +33,7 @@ pub fn densityForBlock(id: u16) u8 {
     return 1;
 }
 
-const layers_n: usize = 64;
+const stock_layers: usize = 64;
 
 /// Full static water mass. WaterUtils.GetWaterLevel gates visible water at
 /// mass > 195 and GetStableMassBelow clamps at 19500, so static lake cells
@@ -86,10 +86,21 @@ pub const EncodeOpts = struct {
     /// clear = intact topsoil (client splat-renders), set = disturbed (block
     /// textures). Null → all-clear (fresh-world state, stock default).
     topsoil: ?*const [32]u8 = null,
+    /// Wire geometry profile (ADR geometry/wire-profiles): the block-layer
+    /// band count (64 stock, y_dim/4 expanded) and the column height used for
+    /// the callback-path bounds and the stock-memo guard. XZ planes
+    /// (heights/biomes/intensities) and the plane index stride (ChunkAreaDim
+    /// 256) never change. Defaults are stock; a non-stock dialect requires a
+    /// paired client mod.
+    layers: usize = stock_layers,
+    y_dim: usize = 256,
     /// Dense precomputed raw plane (65536 BlockValue cells, x + z*16 + y*256).
     /// When set, the block-layer loop and density/water SIMD packs read it
     /// directly. When null, `raws_scratch` is filled once (height-band SIMD or
     /// block_at) and then used the same way.
+    /// Stock-only: the plane type is the 256-tall layout, so non-stock
+    /// profiles must pass null here and rely on the per-layer block_at
+    /// callback path.
     raws: ?*const [65536]u32 = null,
     /// Caller-owned scratch for `raws` (pre-allocated; no hot-path heap). Used
     /// only when `raws` is null. Null disables the memoization: channels fall
@@ -168,6 +179,7 @@ fn blockAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u32 {
 /// fills it once per chunk), else the block_at callback. Hot stream path: the
 /// density and water channels read the plane instead of re-invoking blockAt.
 fn rawAt(opts: EncodeOpts, lx: i32, y: i32, lz: i32) u32 {
+    if (y < 0 or y >= @as(i32, @intCast(opts.y_dim))) return stock_air;
     if (opts.raws) |r| return r[@intCast(lx + lz * 16 + y * 256)];
     return blockAt(opts, lx, y, lz);
 }
@@ -434,14 +446,14 @@ pub fn fillWaterMassFromRaws(raws: []const u32, water_id: u16, vals: []u16) bool
     return has_water;
 }
 
-/// Write one same-value ChunkBlockChannel (all 64 layers null, sameValue filled).
-fn writeChannelSame(w: *binary.Writer, bytes_per_val: usize, fill: []const u8) !void {
+/// Write one same-value ChunkBlockChannel (all layers null, sameValue filled).
+fn writeChannelSame(w: *binary.Writer, bytes_per_val: usize, fill: []const u8, layers: usize) !void {
     // fill length must be bytes_per_val (one value repeated into sameValue slots by read path).
     // Encoder: presence bit 1 (null layer) + sameValue bytes per layer.
     var scratch: [256]u8 = undefined;
     var pos: usize = 0;
     var layer: usize = 0;
-    while (layer < layers_n) : (layer += 1) {
+    while (layer < layers) : (layer += 1) {
         if (pos >= scratch.len) {
             try w.writeBytes(scratch[0..pos]);
             pos = 0;
@@ -471,13 +483,15 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
     try w.writeI32(opts.cz);
     try w.writeU64(opts.ticks);
 
-    // Dense raw plane, filled once when the caller supplies scratch: the 64
-    // block-layer bands, the density channel and the water channel all read the
-    // same per-cell BlockValue, and re-invoking the block_at callback per
-    // channel triples the lookup cost on the stream path. Without scratch the
-    // channels fall back to the callback (tests and cold paths).
+    // Dense raw plane, filled once when the caller supplies scratch: the
+    // layer bands, the density channel and the water channel all read the same
+    // per-cell BlockValue, and re-invoking the block_at callback per channel
+    // triples the lookup cost on the stream path. Without scratch the channels
+    // fall back to the callback (tests and cold paths).
+    // The plane type is the 256-tall layout, so the memo path is stock-only; a
+    // non-stock dialect (taller column) always uses the per-layer callback.
     var opts_memo = opts;
-    if (opts.raws == null) {
+    if (opts.raws == null and opts.y_dim == 256) {
         if (opts.raws_scratch) |scratch| {
             if (opts.block_at == null) {
                 fillDefaultRawsFromHeights(opts.heights, scratch);
@@ -494,9 +508,9 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
         }
     }
 
-    // 64 block layers
+    // block layers (64 stock, y_dim/4 for a taller dialect)
     var layer_i: usize = 0;
-    while (layer_i < layers_n) : (layer_i += 1) {
+    while (layer_i < opts.layers) : (layer_i += 1) {
         const y0: i32 = @intCast(layer_i * 4);
         // Fill dense raw plane (layer cell order), then SIMD any/uniform/pack.
         var raws: [cells_per_layer]u32 = undefined;
@@ -625,7 +639,7 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
 
     // light bpv=1: full sun+block (0xFF). Zero light makes the whole mesh black/grey
     // until client LightChunk runs; seed bright so first mesh is readable.
-    try writeChannelSame(&w, 1, &[_]u8{0xFF});
+    try writeChannelSame(&w, 1, &[_]u8{0xFF}, opts.layers);
     try writeDamageChannel(&w, opts_memo);
     // textures[0] bpv=6: TTS paint, else blocks.xml default Texture packing.
     try writeTextureChannel(&w, opts_memo);
@@ -676,7 +690,7 @@ fn writeDensityChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     // Fast path: dense raw plane + no TTS dens_at → SIMD packDensityFromRaws.
     // dens_at or missing raws falls back to per-cell densityAt (scalar).
     var layer_i: usize = 0;
-    while (layer_i < layers_n) : (layer_i += 1) {
+    while (layer_i < opts.layers) : (layer_i += 1) {
         const y0: i32 = @intCast(layer_i * 4);
         var dens: [cells_per_layer]u8 = undefined;
         if (opts.dens_at == null and opts.raws != null) {
@@ -712,7 +726,7 @@ fn writeDensityChannel(w: *binary.Writer, opts: EncodeOpts) !void {
 fn writeTextureChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     const bpv: usize = 6;
     var band: usize = 0;
-    while (band < layers_n) : (band += 1) {
+    while (band < opts.layers) : (band += 1) {
         const y0: i32 = @intCast(band * 4);
         var vals: [cells_per_layer]u64 = undefined;
         var ly: i32 = 0;
@@ -747,7 +761,7 @@ fn writeTextureChannel(w: *binary.Writer, opts: EncodeOpts) !void {
 /// with water writes presence 0 + two byte-planes (lo, hi) of u16 masses.
 fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     var band: usize = 0;
-    while (band < layers_n) : (band += 1) {
+    while (band < opts.layers) : (band += 1) {
         const y0: i32 = @intCast(band * 4);
         var vals: [cells_per_layer]u16 = .{0} ** cells_per_layer;
         var has_water = false;
@@ -789,13 +803,13 @@ fn writeWaterChannel(w: *binary.Writer, opts: EncodeOpts) !void {
 /// Damage channel (bpv=2): per-cell u16 block HP. Null dmg_at → all-zero.
 fn writeDamageChannel(w: *binary.Writer, opts: EncodeOpts) !void {
     if (opts.dmg_at == null) {
-        try writeChannelSame(w, 2, &[_]u8{ 0, 0 });
+        try writeChannelSame(w, 2, &[_]u8{ 0, 0 }, opts.layers);
         return;
     }
     const f = opts.dmg_at.?;
     const ctx = opts.dmg_ctx;
     var band: usize = 0;
-    while (band < layers_n) : (band += 1) {
+    while (band < opts.layers) : (band += 1) {
         const y0: i32 = @intCast(band * 4);
         var vals: [cells_per_layer]u16 = .{0} ** cells_per_layer;
         var has_dmg = false;

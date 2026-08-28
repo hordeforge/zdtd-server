@@ -65,7 +65,7 @@ fn chunkOf(w: *store.World, px: i32, pz: i32) ?*store.Chunk {
 
 /// Block id at a world position, or 0 when the chunk is not resident.
 fn blockAtWorld(w: *store.World, x: i32, y: i32, z: i32) u16 {
-    if (y < 0 or y >= store.y_dim) return 0;
+    if (y < 0 or y >= w.yDim()) return 0;
     const t = store.World.worldToChunk(x, z);
     const c = chunkOf(w, t.pos.x, t.pos.z) orelse return 0;
     return c.blockAt(t.lx, y, t.lz);
@@ -74,7 +74,7 @@ fn blockAtWorld(w: *store.World, x: i32, y: i32, z: i32) u16 {
 /// Stability byte at a world position; 0 when the chunk is not resident or the
 /// plane is not computed.
 fn stabAtWorld(w: *store.World, x: i32, y: i32, z: i32) u8 {
-    if (y < 0 or y >= store.y_dim) return 0;
+    if (y < 0 or y >= w.yDim()) return 0;
     const t = store.World.worldToChunk(x, z);
     const c = chunkOf(w, t.pos.x, t.pos.z) orelse return 0;
     return c.stabilityAt(t.lx, y, t.lz);
@@ -91,7 +91,7 @@ pub fn ensureComputed(w: *store.World, c: *store.Chunk, allocator: std.mem.Alloc
         var z: i32 = 0;
         while (z < 16) : (z += 1) {
             var y: i32 = 0;
-            while (y < store.y_dim) : (y += 1) {
+            while (y < w.yDim()) : (y += 1) {
                 const id = c.blockAt(x, y, z);
                 if (id == 0) continue;
                 const f = facts(fctx, id);
@@ -111,7 +111,7 @@ pub fn distribute(w: *store.World, c: *store.Chunk, fctx: ?*anyopaque, facts: Fa
         var z: i32 = 0;
         while (z < 16) : (z += 1) {
             var y: i32 = 0;
-            while (y < store.y_dim) : (y += 1) {
+            while (y < w.yDim()) : (y += 1) {
                 const s = c.stabilityAt(x, y, z);
                 if (s > 1) spreadHorizontal(w, c, x, y, z, s, fctx, facts);
             }
@@ -140,7 +140,7 @@ fn spreadHorizontal(w: *store.World, c: *store.Chunk, lx: i32, y: i32, lz: i32, 
 /// Spread into one cell: skip air/liquid/ignore, cap 1 on non-support, set if
 /// higher, then recurse (horizontal + vertical) from support blocks.
 fn spreadCell(w: *store.World, c: *store.Chunk, lx: i32, y: i32, lz: i32, v: u8, fctx: ?*anyopaque, facts: FactsFn) void {
-    if (y < 0 or y >= store.y_dim) return;
+    if (y < 0 or y >= w.yDim()) return;
     // A chunk without a plane reads 0 everywhere, so the value check below
     // would never stop the recursion; never spread into an uncomputed chunk.
     // Its own first-touch distribute covers it.
@@ -163,7 +163,7 @@ fn spreadCell(w: *store.World, c: *store.Chunk, lx: i32, y: i32, lz: i32, v: u8,
 fn spreadVertical(w: *store.World, c: *store.Chunk, lx: i32, y: i32, lz: i32, stab: u8, fctx: ?*anyopaque, facts: FactsFn) void {
     // Upward from y+1 with the same value.
     var uy: i32 = y + 1;
-    while (uy < store.y_dim) : (uy += 1) {
+    while (uy < w.yDim()) : (uy += 1) {
         const id = c.blockAt(lx, uy, lz);
         if (id == 0 or w.isWaterId(id)) break;
         const f = facts(fctx, id);
@@ -212,7 +212,7 @@ fn maxStabilityAround(w: *store.World, x: i32, y: i32, z: i32, fctx: ?*anyopaque
         const nx = x + d[0];
         const ny = y + d[1];
         const nz = z + d[2];
-        if (ny < 0 or ny >= store.y_dim) continue;
+        if (ny < 0 or ny >= w.yDim()) continue;
         const id = blockAtWorld(w, nx, ny, nz);
         if (id == 0) continue;
         const f = facts(fctx, id);
@@ -242,7 +242,7 @@ fn isSupportedByNeighbor(w: *store.World, x: i32, y: i32, z: i32) bool {
         const nx = x + d[0];
         const ny = y + d[1];
         const nz = z + d[2];
-        if (ny < 0 or ny >= store.y_dim) continue;
+        if (ny < 0 or ny >= w.yDim()) continue;
         const t = store.World.worldToChunk(nx, nz);
         const c = chunkOf(w, t.pos.x, t.pos.z) orelse continue;
         const id = c.blockAt(t.lx, ny, t.lz);
@@ -269,7 +269,7 @@ pub fn removeBlockAt(
     fallen: []Pos,
 ) usize {
     var n_fallen: usize = 0;
-    if (y < 0 or y >= store.y_dim) return 0;
+    if (y < 0 or y >= w.yDim()) return 0;
 
     const t0 = store.World.worldToChunk(x, z);
     const c0 = chunkOf(w, t0.pos.x, t0.pos.z) orelse return 0;
@@ -310,7 +310,7 @@ pub fn removeBlockAt(
             const nx = cur.x + d[0];
             const ny = cur.y + d[1];
             const nz = cur.z + d[2];
-            if (ny < 0 or ny >= store.y_dim) continue;
+            if (ny < 0 or ny >= w.yDim()) continue;
             const key = posKey(nx, ny, nz);
             var dup = false;
             var vi: usize = 0;
@@ -393,7 +393,7 @@ pub fn removeBlockAt(
             const nx = pos.x + d[0];
             const ny = pos.y + d[1];
             const nz = pos.z + d[2];
-            if (ny < 0 or ny >= store.y_dim) continue;
+            if (ny < 0 or ny >= w.yDim()) continue;
             const key = posKey(nx, ny, nz);
             var dup = false;
             var vi: usize = 0;
@@ -425,7 +425,7 @@ pub fn placeBlockAt(
     fctx: ?*anyopaque,
     facts: FactsFn,
 ) void {
-    if (y < 0 or y >= store.y_dim) return;
+    if (y < 0 or y >= w.yDim()) return;
     const t = store.World.worldToChunk(x, z);
     const c = chunkOf(w, t.pos.x, t.pos.z) orelse return;
     ensureComputed(w, c, allocator, fctx, facts) catch return;

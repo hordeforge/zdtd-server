@@ -3295,6 +3295,31 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   a resident chunk.
   *Anchors:* `src/world/store.zig:78-342`, `:703-728`, `:736-780`, `:817-904`
 
+- **Malleable world geometry (ADR 0036, 2026-08-28)** `WORKS` (seam; follow-ons listed)
+  Two data-driven layers. (1) `[rules.geometry]` elevation projection: the
+  terrain sources (flat / baked DTM / proc) feed `clamp(height_offset +
+  height_scale * elev_m, 0, ceiling)` with `sea_level` shaping the flat fill
+  and the DTM fallback; identity at stock defaults (byte-identical vanilla
+  worlds). (2) `[wire] profile` column-height dialects: `protocol.WireProfile`
+  (one source of truth `y_dim`; layers/`c_max_height`/plane cell count derive,
+  the index stride stays the fixed `ChunkAreaDim` 256) threads through the
+  chunk store (`Chunk.y_dim`, profile-sized planes), the chunk wire builder
+  (layer band count + column-height bounds; stock bytes golden-pinned) and the
+  save format (ZCH4 carries `y_dim`; stock rejects, mismatched non-stock fails
+  closed). Non-stock dialects need a
+  paired client mod; proven by the synthetic `tall-512` scenario (128-layer
+  wire bodies, ZCH4 round-trip, production chunk_fill stream).
+  *Follow-ons:* dense non-stock chunks can exceed the fixed 512 KiB `body_buf`
+  (profile-sized send buffers); proc worldgen stays 256-tall (fail-closed with
+  non-stock); RealEarth's actual dialect is RE-gated (their patched wire
+  formats are a third-party product; needs research-repo RE + a patched client
+  in the test env). Byte heightmaps stay byte (lossy) like RealEarth's
+  residual `GetTerrainHeight`; tall truth rides the block layers.
+  *Anchors:* `src/protocol.zig` (WireProfile), `src/ecs/rules.zig`
+  (Geometry), `src/world/store.zig` (`yDim`, `Chunk.y_dim`,
+  `projectPlane`), `src/wire/stock_chunk.zig` (layers/y_dim),
+  `src/server/scenarios.zig` (tall-wire-profile)
+
 - **Stock DTM heightmap load** `WORKS`
   6144x6144 u16 samples, world XZ centred at map centre, per-chunk 16x16 height
   fill, consistent with the shipped file size.

@@ -26,6 +26,31 @@ The difficulty-presets ladder and the item stamina-loss legs are wired
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## Batch O 2026-08-28 (malleable world geometry, ADR 0036)
+
+World geometry is now data-driven, not baked into the column format:
+`[rules.geometry]` (auto-bound via ADR 0021) carries the elevation projection
+(`sea_level`, `height_scale`, `height_offset`, `height_ceiling`; identity at
+stock defaults, so vanilla worlds are byte-identical) and the terrain sources
+(flat / baked DTM / proc) feed it — a world can ship compressed mountains,
+a sea-level model or a custom ceiling with a stock client. Layer B is the
+wire-profile seam: `protocol.WireProfile` (one source of truth: `y_dim`;
+layers/`c_max_height`/plane cell count derive; the index stride stays the
+fixed `ChunkAreaDim` 256) flows from `[wire] profile` (zdtd.toml,
+default `stock`) into the chunk store (`Chunk.y_dim`, profile-sized planes),
+the chunk wire builder (layer band count + column-height bounds; `stock`
+bytes pinned by goldens) and the save format (ZCH4 carries
+the column height; a stock loader rejects it and a mismatched non-stock
+loader fails closed). A non-stock dialect needs a paired client mod
+(RealEarth-style engine expand) — the seam is proven by a synthetic
+`tall-512` scenario (128-layer wire bodies, ZCH4 round-trip, production
+chunk_fill stream), not by a real client. Known bound: a dense non-stock
+chunk can exceed the fixed 512 KiB `body_buf` (fails loudly, not corrupts);
+profile-sized send buffers are follow-on. Proc worldgen stays 256-tall
+(fail-closed with non-stock); RealEarth's own dialect is RE-gated future
+work. Research cross-link: `7dtd-engine-research/docs/terrain-height.md`.
+Counts unchanged.
+
 ## Wave 2026-08-20 (surface-parity reconciliation)
 
 GAP_ANALYSIS reconciled against the code (STATUS wins on conflict): five

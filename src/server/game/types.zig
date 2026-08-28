@@ -45,7 +45,9 @@ pub const default_workstation_craft_backlog: f32 = 60;
 
 /// Periodic apm snapshot dump period in ticks (zdtd.toml [apm] dump_every_s,
 /// default 60 s at 20 TPS). Bucket B: docs/APM.md documents the dump.
-pub const default_apm_report_period_ticks: u64 = @import("../../protocol.zig").ticks_per_second * 60;
+const protocol = @import("../../protocol.zig");
+
+pub const default_apm_report_period_ticks: u64 = protocol.ticks_per_second * 60;
 
 // Compile-time array bound for Client.streamed. The cap is the config clamp
 // (zdtd_config sanitizes max_streamed_chunks against it), so there is one
@@ -377,6 +379,10 @@ pub const InitOptions = struct {
     /// mode pack and zdtd.toml overlays (main.zig builds it). Installed on
     /// World.rules at init; the sim reads w.rules.<group>.<field>.
     rules: ecs.rules.Rules = .{},
+    /// Wire geometry profile (ADR geometry/wire-profiles): the column-height
+    /// dialect the server emits (zdtd.toml `[wire] profile`, resolved by
+    /// main.zig; default stock). Non-stock needs a paired client mod.
+    wire_profile: protocol.WireProfile = .{},
     /// Register in-tree sample_hello static plugin (logs once on enable).
     enable_sample_plugin: bool = true,
     /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]

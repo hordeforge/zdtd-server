@@ -17,6 +17,8 @@ const weather_mod = @import("weather.zig");
 const io_fs = @import("../util/io_fs.zig");
 const chunk_flush = @import("chunk_flush.zig");
 const tts = @import("tts.zig");
+const rules_mod = @import("../ecs/rules.zig");
+const protocol = @import("../protocol.zig");
 pub const typeId = tts.typeId;
 
 /// How missing chunks are filled on first touch (on-the-fly, not full-map bake).
@@ -91,12 +93,16 @@ pub const ChunkPos = struct {
 };
 
 fn blockIndex(lx: i32, y: i32, lz: i32) usize {
-    // stock-ish: x + z*16 + y*256
+    // stock-ish: x + z*16 + y*256 (stock column height)
     return @intCast(lx + lz * 16 + y * 256);
 }
 
 pub const Chunk = struct {
     pos: ChunkPos,
+    /// Active column height (wire profile; ADR geometry/wire-profiles). Stock
+    /// 256; a taller profile (paired client mod) sets a bigger plane. Set by
+    /// World.getOrCreate from the World profile at first touch.
+    y_dim: u32 = 256,
     /// Live terrain type ids for the heightmap fallback + solid checks (A38).
     /// Set by World.getOrCreate; null in offline/tests, which keep the module
     /// pins. Points at World.terrain_ids (same lifetime as the World).
@@ -145,6 +151,25 @@ pub const Chunk = struct {
         return .{ .pos = pos };
     }
 
+    /// Block-plane index for (lx, y, lz): x + z*16 + y*256. The y-multiplier
+    /// is the fixed ChunkAreaDim (16×16 = 256) in EVERY dialect — the plane
+    /// only grows in cell count (256 × y_dim), never in index stride.
+    /// `y` must be in bounds (callers check first).
+    pub fn blockIndex(self: *const Chunk, lx: i32, y: i32, lz: i32) usize {
+        _ = self;
+        return @intCast(lx + lz * 16 + y * 256);
+    }
+
+    /// Dense block-plane cell count (16 × y_dim × 16; 65536 stock).
+    pub fn planeCells(self: *const Chunk) usize {
+        return @intCast(16 * self.y_dim * 16);
+    }
+
+    /// dens_set bitset bytes for one chunk (planeCells bits).
+    pub fn densSetBytes(self: *const Chunk) usize {
+        return @intCast((16 * self.y_dim * 16 + 7) / 8);
+    }
+
     /// Biome-aware column fill when layers are set on the owning World.
     pub fn generateColumnIds(h: u16, stack: biome_layers.Stack, out: *[256]u16) void {
         const hc: u8 = if (h > 255) 255 else @intCast(h);
@@ -179,16 +204,16 @@ pub const Chunk = struct {
     }
 
     pub fn texAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u64 {
-        if (y < 0 or y >= y_dim) return 0;
-        if (self.textures) |t| return t[blockIndex(lx, y, lz)];
+        if (y < 0 or y >= self.y_dim) return 0;
+        if (self.textures) |t| return t[self.blockIndex(lx, y, lz)];
         return 0;
     }
 
     pub fn densAt(self: *const Chunk, lx: i32, y: i32, lz: i32) ?u8 {
-        if (y < 0 or y >= y_dim) return null;
+        if (y < 0 or y >= self.y_dim) return null;
         const dens = self.densities orelse return null;
         const set = self.dens_set orelse return null;
-        const idx = blockIndex(lx, y, lz);
+        const idx = self.blockIndex(lx, y, lz);
         const bit: u8 = @as(u8, 1) << @intCast(idx % 8);
         if (set[idx / 8] & bit == 0) return null;
         return dens[idx];
@@ -197,46 +222,46 @@ pub const Chunk = struct {
     /// Absolute damage (u16) at a cell; 0 when the plane is absent (no cell in
     /// this chunk is damaged). Read path for the chunk wire damage channel.
     pub fn dmgAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u16 {
-        if (y < 0 or y >= y_dim) return 0;
+        if (y < 0 or y >= self.y_dim) return 0;
         const d = self.damages orelse return 0;
-        return d[blockIndex(lx, y, lz)];
+        return d[self.blockIndex(lx, y, lz)];
     }
 
     /// Write absolute damage (lazy plane alloc, marks the chunk dirty so ZCH3
     /// persists it). Init/load/admin + per-edit paths; the wire encoder only
     /// reads the plane, never allocates.
     pub fn setDmg(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, abs: u16) !void {
-        if (y < 0 or y >= y_dim) return;
+        if (y < 0 or y >= self.y_dim) return;
         const d = self.damages orelse blk: {
-            const p = try allocator.alloc(u16, blocks_per_chunk);
+            const p = try allocator.alloc(u16, self.planeCells());
             @memset(p, 0);
             self.damages = p;
             if (self.allocator == null) self.allocator = allocator;
             break :blk p;
         };
-        d[blockIndex(lx, y, lz)] = abs;
+        d[self.blockIndex(lx, y, lz)] = abs;
         self.dirty = true;
     }
 
     /// Clear damage at a cell. No-op when the plane is absent.
     pub fn clearDmg(self: *Chunk, lx: i32, y: i32, lz: i32) void {
-        if (y < 0 or y >= y_dim) return;
+        if (y < 0 or y >= self.y_dim) return;
         const d = self.damages orelse return;
-        d[blockIndex(lx, y, lz)] = 0;
+        d[self.blockIndex(lx, y, lz)] = 0;
         self.dirty = true;
     }
 
     /// Stability byte plane (see world/stability.zig); 0 when not computed.
     pub fn stabilityAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u8 {
-        if (y < 0 or y >= y_dim) return 0;
+        if (y < 0 or y >= self.y_dim) return 0;
         const s = self.stability orelse return 0;
-        return s[blockIndex(lx, y, lz)];
+        return s[self.blockIndex(lx, y, lz)];
     }
 
     /// Allocate the per-block stability plane if absent (init/load path).
     pub fn ensureStability(self: *Chunk, allocator: std.mem.Allocator) ![]u8 {
         if (self.stability) |s| return s;
-        const s = try allocator.alloc(u8, blocks_per_chunk);
+        const s = try allocator.alloc(u8, self.planeCells());
         @memset(s, 0);
         self.stability = s;
         if (self.allocator == null) self.allocator = allocator;
@@ -246,7 +271,7 @@ pub const Chunk = struct {
     /// Write one stability byte (plane must exist; caller ensured it).
     pub fn setStabilityByte(self: *Chunk, lx: i32, y: i32, lz: i32, v: u8) void {
         const s = self.stability orelse return;
-        s[blockIndex(lx, y, lz)] = v;
+        s[self.blockIndex(lx, y, lz)] = v;
     }
 
     /// Fill lake water from the water_info.xml sources: every column whose
@@ -268,8 +293,8 @@ pub const Chunk = struct {
                 const h = self.heights[idx];
                 if (h >= wy) continue; // land or shoreline at/above the surface
                 var y: i32 = @as(i32, h) + 1;
-                while (y <= wy and y < y_dim) : (y += 1) {
-                    blocks[blockIndex(lx, y, lz)] = water_id;
+                while (y <= wy and y < self.y_dim) : (y += 1) {
+                    blocks[self.blockIndex(lx, y, lz)] = water_id;
                 }
             }
         }
@@ -289,24 +314,24 @@ pub const Chunk = struct {
         try self.setBlockRaw(allocator, lx, y, lz, raw);
         if (tex != 0 or self.textures != null) {
             if (self.textures == null) {
-                const t = try allocator.alloc(u64, blocks_per_chunk);
+                const t = try allocator.alloc(u64, self.planeCells());
                 @memset(t, 0);
                 self.textures = t;
             }
-            self.textures.?[blockIndex(lx, y, lz)] = tex;
+            self.textures.?[self.blockIndex(lx, y, lz)] = tex;
         }
         if (dens) |d| {
             if (self.densities == null) {
-                const p = try allocator.alloc(u8, blocks_per_chunk);
+                const p = try allocator.alloc(u8, self.planeCells());
                 @memset(p, 0);
                 self.densities = p;
             }
             if (self.dens_set == null) {
-                const bits = try allocator.alloc(u8, (blocks_per_chunk + 7) / 8);
+                const bits = try allocator.alloc(u8, self.densSetBytes());
                 @memset(bits, 0);
                 self.dens_set = bits;
             }
-            const idx = blockIndex(lx, y, lz);
+            const idx = self.blockIndex(lx, y, lz);
             self.densities.?[idx] = d;
             self.dens_set.?[idx / 8] |= @as(u8, 1) << @intCast(idx % 8);
         }
@@ -335,7 +360,7 @@ pub const Chunk = struct {
     pub fn ensureBlocksWithStack(self: *Chunk, allocator: std.mem.Allocator, stack: biome_layers.Stack) !void {
         if (self.blocks != null) return;
         self.allocator = allocator;
-        const b = try allocator.alloc(u32, blocks_per_chunk);
+        const b = try allocator.alloc(u32, self.planeCells());
         const air = (self.terrain orelse &terrain_pins).air;
         @memset(b, air);
         var col: [256]u16 = undefined;
@@ -346,8 +371,8 @@ pub const Chunk = struct {
                 const h = self.heightAt(lx, lz);
                 generateColumnIds(h, stack, &col);
                 var y: i32 = 0;
-                while (y <= h and y < y_dim) : (y += 1) {
-                    b[blockIndex(lx, y, lz)] = col[@intCast(y)];
+                while (y <= h and y < self.y_dim) : (y += 1) {
+                    b[self.blockIndex(lx, y, lz)] = col[@intCast(y)];
                 }
             }
         }
@@ -362,7 +387,7 @@ pub const Chunk = struct {
     pub fn generateProc(self: *Chunk, allocator: std.mem.Allocator, wg: *const worldgen_mod.WorldGen) !void {
         if (self.blocks != null) return;
         self.allocator = allocator;
-        const b = try allocator.alloc(u32, blocks_per_chunk);
+        const b = try allocator.alloc(u32, self.planeCells());
         self.blocks = b;
         wg.generateChunkBlocks(self.pos.x, self.pos.z, &self.heights, b);
         // RWG water table: basins below the stock water level become lakes
@@ -382,8 +407,8 @@ pub const Chunk = struct {
     /// (A38); offline/test chunks keep the module pins via `terrain_pins`.
     pub fn rawAt(self: *const Chunk, lx: i32, y: i32, lz: i32) u32 {
         const t = self.terrain orelse &terrain_pins;
-        if (y < 0 or y >= y_dim) return t.air;
-        if (self.blocks) |b| return b[blockIndex(lx, y, lz)];
+        if (y < 0 or y >= self.y_dim) return t.air;
+        if (self.blocks) |b| return b[self.blockIndex(lx, y, lz)];
         const h = self.heightAt(lx, lz);
         if (y > h) return t.air;
         if (y == 0) return t.bedrock;
@@ -397,10 +422,10 @@ pub const Chunk = struct {
     }
 
     pub fn setBlockRaw(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, raw: u32) !void {
-        if (y < 0 or y >= y_dim) return;
+        if (y < 0 or y >= self.y_dim) return;
         try self.ensureBlocks(allocator);
         const b = self.blocks.?;
-        const idx = blockIndex(lx, y, lz);
+        const idx = self.blockIndex(lx, y, lz);
         b[idx] = raw;
         // Paint/density are co-owned with the cell: a plain type/raw write must
         // drop stale TTS or prior paint so dig/place cannot leave orphan texture.
@@ -418,7 +443,7 @@ pub const Chunk = struct {
         } else if (y == h) {
             var top: i32 = y - 1;
             while (top >= 0) : (top -= 1) {
-                if ((b[blockIndex(lx, top, lz)] & 0xffff) != block_air) break;
+                if ((b[self.blockIndex(lx, top, lz)] & 0xffff) != block_air) break;
             }
             self.setHeight(lx, lz, if (top < 0) 0 else @intCast(top));
         }
@@ -438,9 +463,9 @@ pub const Chunk = struct {
     /// Density and paint are left as they are, mirroring the stock path's
     /// `SetDensityRaw(previous density)`.
     pub fn setBlockDecoRaw(self: *Chunk, allocator: std.mem.Allocator, lx: i32, y: i32, lz: i32, raw: u32) !void {
-        if (y < 0 or y >= y_dim) return;
+        if (y < 0 or y >= self.y_dim) return;
         try self.ensureBlocks(allocator);
-        self.blocks.?[blockIndex(lx, y, lz)] = raw;
+        self.blocks.?[self.blockIndex(lx, y, lz)] = raw;
         self.dirty = true;
     }
 
@@ -462,7 +487,7 @@ pub const Chunk = struct {
     /// `isSolid(heightAt + 1)` is false for every column by construction.
     pub fn standableY(self: *const Chunk, lx: i32, lz: i32, from_y: i32, step_up: i32, drop: i32) ?i32 {
         // Feet at 0 would sit on nothing (y=-1 is outside the world).
-        const top = @min(from_y + step_up, y_dim - body_height);
+        const top = @min(from_y + step_up, self.y_dim - body_height);
         const bottom = @max(from_y - drop, 1);
         var y = top;
         while (y >= bottom) : (y -= 1) {
@@ -507,6 +532,15 @@ pub const World = struct {
     spawn_count: usize = 0,
     /// flat | baked | dem | proc. loadStockMap sets baked; --worldgen-seed sets proc.
     terrain_source: TerrainSource = .flat,
+    /// Active wire geometry profile (ADR geometry/wire-profiles): column height
+    /// and derived layer/stride constants. Default stock (256); set by the Game
+    /// from config. A non-stock profile requires a paired client mod and a
+    /// matching save format; `validate()` is enforced at startup (fail closed).
+    profile: protocol.WireProfile = .{},
+    /// Elevation projection policy (ADR geometry): how the source's natural
+    /// elevation maps onto the column. Set by the Game from `rules.geometry`
+    /// (toml_bind); stock defaults are the identity fast path.
+    geometry: rules_mod.Geometry = .{},
     worldgen: ?worldgen_mod.WorldGen = null,
     /// Door-id oracle (Game wires the blocks table): true when the id is a
     /// door block, so `isSolidWorld` treats an open door as passable.
@@ -575,6 +609,12 @@ pub const World = struct {
         self.syncWorldgenBiomes();
     }
 
+    /// Active column height from the wire profile (stock 256). i32 to be a
+    /// drop-in for the old `store.y_dim` module const in world-space bounds.
+    pub fn yDim(self: *const World) i32 {
+        return @intCast(self.profile.y_dim);
+    }
+
     pub fn isWaterId(self: *const World, id: u16) bool {
         return id == self.terrain_ids.water;
     }
@@ -632,6 +672,19 @@ pub const World = struct {
 
     pub fn loadStockMap(self: *World, map_dir: []const u8) !void {
         try self.loadStockMapEx(map_dir, null);
+    }
+
+    /// u8 fallback height for baked-DTM out-of-bounds samples (geometry sea).
+    fn fallbackSeaU8(geo: rules_mod.Geometry) u8 {
+        const s = @max(0.0, @min(geo.sea_level, 255.0));
+        return @intFromFloat(s);
+    }
+
+    /// Rewrite a filled height plane through the geometry projection. Non-stock
+    /// path only (the identity fast path skips it); profile max 255 until the
+    /// wire-profile layer lands (ADR geometry/wire-profiles).
+    fn projectPlane(heights: *[256]u8, geo: rules_mod.Geometry, profile_max: u32) void {
+        for (heights) |*h| h.* = @intCast(geo.project(@floatFromInt(h.*), profile_max));
     }
 
     pub fn loadStockMapEx(self: *World, map_dir: []const u8, prefabs_data_dir: ?[]const u8) !void {
@@ -755,6 +808,8 @@ pub const World = struct {
             gop.value_ptr.* = Chunk.generateFlat(pos);
             // A38: fallback terrain synthesis reads live ids, not module pins.
             gop.value_ptr.terrain = &self.terrain_ids;
+            // Wire geometry profile: column height + derived plane sizing.
+            gop.value_ptr.y_dim = self.profile.y_dim;
             // Stamped here, not at the tail: the load_state == .full path below
             // returns early.
             gop.value_ptr.last_touch = self.touch_seq;
@@ -776,16 +831,36 @@ pub const World = struct {
                 );
             }
             if (load_state == .full) return gop.value_ptr;
+            const geo = self.geometry;
+            const profile_max: u32 = 255; // stock wire profile (Layer B widens)
             if (self.terrain_source == .proc) {
                 if (self.worldgen) |*wg| {
-                    // 3D density field: blocks first, heights derived from the
-                    // topmost solid cell (overhangs cannot come from a column
-                    // fill). Single-biome materials via defaultStack pins.
-                    try gop.value_ptr.generateProc(self.allocator, wg);
+                    if (geo.isStock()) {
+                        // 3D density field: blocks first, heights derived from the
+                        // topmost solid cell (overhangs cannot come from a column
+                        // fill). Single-biome materials via defaultStack pins.
+                        try gop.value_ptr.generateProc(self.allocator, wg);
+                    } else {
+                        // Projected proc: surface model (height plane -> project ->
+                        // column fill). The W2 density overhangs are lost by
+                        // design: a projected geometry is an explicit non-stock
+                        // elevation model, and the RWG lake table (stock
+                        // water_surface_cell) does not apply to it.
+                        wg.fillHeights(pos.x, pos.z, &gop.value_ptr.heights);
+                        projectPlane(&gop.value_ptr.heights, geo, profile_max);
+                        const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
+                        const stack = self.biome_layers_table.stackFor(biome_id);
+                        try gop.value_ptr.ensureBlocksWithStack(self.allocator, stack);
+                    }
                 }
             } else {
                 if (self.heightmap) |*hm| {
-                    hm.fillChunkHeights(pos.x, pos.z, &gop.value_ptr.heights, sea_level);
+                    hm.fillChunkHeights(pos.x, pos.z, &gop.value_ptr.heights, fallbackSeaU8(geo));
+                    if (!geo.isStock()) projectPlane(&gop.value_ptr.heights, geo, profile_max);
+                } else {
+                    // Flat: the whole surface is the projected sea level
+                    // (identity at stock defaults -> the old sea_level plane).
+                    @memset(&gop.value_ptr.heights, @intCast(geo.project(geo.sea_level, profile_max)));
                 }
                 // Terrain columns from biomes.xml layers (before POI paint / disk load).
                 const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
@@ -805,7 +880,7 @@ pub const World = struct {
                             const lx = wx - pc.base_x;
                             const lz = wz - pc.base_z;
                             if (lx < 0 or lx >= 16 or lz < 0 or lz >= 16) return;
-                            if (wy < 0 or wy >= y_dim) return;
+                            if (wy < 0 or wy >= pc.c.y_dim) return;
                             pc.c.setBlockTexDens(pc.a, lx, wy, lz, raw, tex, dens) catch {
                                 pc.failed +%= 1;
                             };
@@ -1015,7 +1090,7 @@ pub const World = struct {
     fn waterTopAt(self: *World, x: i32, y: i32, z: i32, water_id: u16) i32 {
         if (self.blockWorld(x, y, z) catch 0 != water_id) return -1;
         var top: i32 = y;
-        while (top + 1 < y_dim) : (top += 1) {
+        while (top + 1 < self.yDim()) : (top += 1) {
             if (self.blockWorld(x, top + 1, z) catch 0 != water_id) break;
         }
         return top;
@@ -1039,7 +1114,7 @@ pub const World = struct {
         inline for ([_][2]i32{ .{ 1, 0 }, .{ -1, 0 }, .{ 0, 1 }, .{ 0, -1 } }) |d| {
             surface = @max(surface, self.waterTopAt(ex + d[0], ey, ez + d[1], water_id));
         }
-        if (ey + 1 < y_dim) surface = @max(surface, self.waterTopAt(ex, ey + 1, ez, water_id));
+        if (ey + 1 < self.yDim()) surface = @max(surface, self.waterTopAt(ex, ey + 1, ez, water_id));
         if (surface < 0) return 0;
 
         // BFS through air cells at y <= surface. Water cells are already full
@@ -1054,7 +1129,7 @@ pub const World = struct {
         while (sp > 0 and filled < spread) {
             sp -= 1;
             const c = stack[sp];
-            if (c.y < 0 or c.y >= y_dim) continue;
+            if (c.y < 0 or c.y >= self.yDim()) continue;
             if (c.y > surface) continue;
             if (self.blockWorld(c.x, c.y, c.z) catch 0 != air_id) continue; // water or solid: stop
             const t = worldToChunk(c.x, c.z);
@@ -1144,11 +1219,11 @@ pub const World = struct {
     /// dens_set bitset bytes for one chunk (blocks_per_chunk bits).
     const dens_set_bytes: usize = (blocks_per_chunk + 7) / 8;
 
-    /// Bounds-check a ZCH1/2/3 record for `pos` without mutating chunk state.
+    /// Bounds-check a ZCH1/2/3/4 record for `pos` without mutating chunk state.
     /// Used by fuzz harnesses for torn/corrupt save rejection.
     pub fn validateChunkBytes(data: []const u8, pos: ChunkPos) !void {
         if (data.len < 12) return error.ReadFailed;
-        if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2')) {
+        if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2' or data[3] == '4')) {
             const stored_x = std.mem.readInt(i32, data[4..8], .little);
             const stored_z = std.mem.readInt(i32, data[8..12], .little);
             if (stored_x != pos.x or stored_z != pos.z) return error.ReadFailed;
@@ -1156,10 +1231,22 @@ pub const World = struct {
             const has_blocks = data[12] == 1;
             const has_textures = data[3] == '3' and data[13] == 1;
             const has_densities = data[3] == '3' and data[14] == 1;
-            var required: usize = 16 + 256; // heights plane
-            if (data[3] == '3' and has_blocks) required += blocks_per_chunk * @sizeOf(u32);
-            if (has_textures) required += blocks_per_chunk * @sizeOf(u64);
-            if (has_densities) required += blocks_per_chunk + dens_set_bytes;
+            // ZCH4: column height from the header; channels sized by it. The
+            // saved height must be a structurally valid profile (power of two).
+            const hdr_len: usize = if (data[3] == '4') 20 else 16;
+            var saved_y: u32 = 256;
+            if (data[3] == '4') {
+                if (data.len < 20) return error.ReadFailed;
+                saved_y = std.mem.readInt(u32, data[16..20], .little);
+                const p: protocol.WireProfile = .{ .y_dim = saved_y };
+                if (!p.validate()) return error.ReadFailed;
+            }
+            const plane_cells: usize = @intCast(16 * saved_y * 16);
+            const dset: usize = (plane_cells + 7) / 8;
+            var required: usize = hdr_len + 256; // heights plane
+            if (data[3] == '3' and has_blocks) required += plane_cells * @sizeOf(u32);
+            if (has_textures) required += plane_cells * @sizeOf(u64);
+            if (has_densities) required += plane_cells + dset;
             if (data.len < required) return error.ReadFailed;
             return;
         }
@@ -1179,6 +1266,10 @@ pub const World = struct {
     /// [15]=damages u16 plane (added 2026-08-22; 0 on older v3 files, loaded
     /// with an absent plane = no damage).
     /// (v2 ZCH2 was u16 type-only; discarded on load so rotation/meta is not lost.)
+    /// v4 (non-stock wire profile only): magic ZCH4 | pos | flags | y_dim u32
+    /// | heights | channels sized by y_dim. Written when the chunk's column
+    /// height != 256; a stock loader rejects it and a non-stock loader rejects
+    /// any y_dim mismatch (fail closed). Stock chunks stay ZCH3 byte-identical.
     /// Callers pass `std.heap.page_allocator`: this runs from parallel workers
     /// and World.allocator is a DebugAllocator/GPA, which is not thread-safe.
     pub fn encodeChunk(c: *const Chunk, a: std.mem.Allocator) ![]u8 {
@@ -1186,27 +1277,30 @@ pub const World = struct {
         const has_textures = c.textures != null;
         const has_densities = c.densities != null and c.dens_set != null;
         const has_damages = c.damages != null;
-        var hdr: [16]u8 = undefined;
+        const tall = c.y_dim != 256;
+        const hdr_len: usize = if (tall) 20 else 16;
+        var hdr: [20]u8 = undefined;
         hdr[0] = 'Z';
         hdr[1] = 'C';
         hdr[2] = 'H';
-        hdr[3] = '3';
+        hdr[3] = if (tall) '4' else '3';
         std.mem.writeInt(i32, hdr[4..8], c.pos.x, .little);
         std.mem.writeInt(i32, hdr[8..12], c.pos.z, .little);
         hdr[12] = @intFromBool(has_blocks);
         hdr[13] = @intFromBool(has_textures);
         hdr[14] = @intFromBool(has_densities);
         hdr[15] = @intFromBool(has_damages);
-        var total: usize = hdr.len + c.heights.len + c.topsoil.len;
-        if (has_blocks) total += blocks_per_chunk * @sizeOf(u32);
-        if (has_textures) total += blocks_per_chunk * @sizeOf(u64);
-        if (has_densities) total += blocks_per_chunk + dens_set_bytes;
-        if (has_damages) total += blocks_per_chunk * @sizeOf(u16);
+        if (tall) std.mem.writeInt(u32, hdr[16..20], c.y_dim, .little);
+        var total: usize = hdr_len + c.heights.len + c.topsoil.len;
+        if (has_blocks) total += c.planeCells() * @sizeOf(u32);
+        if (has_textures) total += c.planeCells() * @sizeOf(u64);
+        if (has_densities) total += c.planeCells() + c.densSetBytes();
+        if (has_damages) total += c.planeCells() * @sizeOf(u16);
         const payload = try a.alloc(u8, total);
         errdefer a.free(payload);
         var o: usize = 0;
-        @memcpy(payload[o..][0..hdr.len], &hdr);
-        o += hdr.len;
+        @memcpy(payload[o..][0..hdr_len], hdr[0..hdr_len]);
+        o += hdr_len;
         @memcpy(payload[o..][0..c.heights.len], &c.heights);
         o += c.heights.len;
         if (c.blocks) |b| {
@@ -1220,10 +1314,10 @@ pub const World = struct {
             o += bytes.len;
         }
         if (has_densities) {
-            @memcpy(payload[o..][0..blocks_per_chunk], c.densities.?[0..blocks_per_chunk]);
-            o += blocks_per_chunk;
-            @memcpy(payload[o..][0..dens_set_bytes], c.dens_set.?[0..dens_set_bytes]);
-            o += dens_set_bytes;
+            @memcpy(payload[o..][0..c.planeCells()], c.densities.?[0..c.planeCells()]);
+            o += c.planeCells();
+            @memcpy(payload[o..][0..c.densSetBytes()], c.dens_set.?[0..c.densSetBytes()]);
+            o += c.densSetBytes();
         }
         if (has_damages) {
             const bytes = std.mem.sliceAsBytes(c.damages.?);
@@ -1298,7 +1392,7 @@ pub const World = struct {
         };
         defer self.allocator.free(data);
         if (data.len < 12) return error.ReadFailed;
-        if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2')) {
+        if (data.len >= 16 and data[0] == 'Z' and data[1] == 'C' and data[2] == 'H' and (data[3] == '3' or data[3] == '2' or data[3] == '4')) {
             const stored_x = std.mem.readInt(i32, data[4..8], .little);
             const stored_z = std.mem.readInt(i32, data[8..12], .little);
             if (stored_x != c.pos.x or stored_z != c.pos.z) return error.ReadFailed;
@@ -1308,24 +1402,32 @@ pub const World = struct {
             const has_textures = data[3] == '3' and data[13] == 1;
             const has_densities = data[3] == '3' and data[14] == 1;
             const has_damages = data[3] == '3' and data[15] == 1;
-            var required: usize = 16 + c.heights.len;
-            if (data[3] == '3' and has_blocks) required += blocks_per_chunk * @sizeOf(u32);
-            if (has_textures) required += blocks_per_chunk * @sizeOf(u64);
-            if (has_densities) required += blocks_per_chunk + dens_set_bytes;
-            if (has_damages) required += blocks_per_chunk * @sizeOf(u16);
+            // ZCH4 (non-stock wire profile) carries the column height in the
+            // header; it must match the chunk's active profile (fail closed).
+            const hdr_len: usize = if (data[3] == '4') 20 else 16;
+            if (data[3] == '4') {
+                if (data.len < 20) return error.ReadFailed;
+                const saved_y = std.mem.readInt(u32, data[16..20], .little);
+                if (saved_y != c.y_dim) return error.ReadFailed;
+            }
+            var required: usize = hdr_len + c.heights.len;
+            if (data[3] == '3' and has_blocks) required += c.planeCells() * @sizeOf(u32);
+            if (has_textures) required += c.planeCells() * @sizeOf(u64);
+            if (has_densities) required += c.planeCells() + c.densSetBytes();
+            if (has_damages) required += c.planeCells() * @sizeOf(u16);
             // Validate the complete record before mutating the resident chunk.
             // A torn save must regenerate, never leave a half-loaded plane that
             // suppresses terrain materialization.
             if (data.len < required) return error.ReadFailed;
-            @memcpy(&c.heights, data[16..][0..c.heights.len]);
-            var o: usize = 16 + c.heights.len;
+            @memcpy(&c.heights, data[hdr_len..][0..c.heights.len]);
+            var o: usize = hdr_len + c.heights.len;
             if (has_blocks) {
                 if (data[3] == '3') {
                     // Raw alloc only: the memcpy below fully initializes the
                     // plane, so ensureBlocks' terrain generation would be waste.
                     if (c.blocks == null) {
                         c.allocator = self.allocator;
-                        c.blocks = try self.allocator.alloc(u32, blocks_per_chunk);
+                        c.blocks = try self.allocator.alloc(u32, c.planeCells());
                     }
                     const b = c.blocks.?;
                     const bytes = std.mem.sliceAsBytes(b);
@@ -1336,10 +1438,10 @@ pub const World = struct {
                 // ZCH2 u16 type-only: keep heights only; blocks regenerate from DTM+TTS.
             }
             if (has_textures) {
-                const tex_bytes = blocks_per_chunk * @sizeOf(u64);
+                const tex_bytes = c.planeCells() * @sizeOf(u64);
                 if (data.len < o + tex_bytes) return error.ReadFailed;
                 if (c.textures == null) {
-                    const t = try self.allocator.alloc(u64, blocks_per_chunk);
+                    const t = try self.allocator.alloc(u64, c.planeCells());
                     c.textures = t;
                     c.allocator = self.allocator;
                 }
@@ -1348,26 +1450,26 @@ pub const World = struct {
                 o += tex_bytes;
             }
             if (has_densities) {
-                if (data.len < o + blocks_per_chunk + dens_set_bytes) return error.ReadFailed;
+                if (data.len < o + c.planeCells() + c.densSetBytes()) return error.ReadFailed;
                 if (c.densities == null) {
-                    const p = try self.allocator.alloc(u8, blocks_per_chunk);
+                    const p = try self.allocator.alloc(u8, c.planeCells());
                     c.densities = p;
                     c.allocator = self.allocator;
                 }
                 if (c.dens_set == null) {
-                    const bits = try self.allocator.alloc(u8, dens_set_bytes);
+                    const bits = try self.allocator.alloc(u8, c.densSetBytes());
                     c.dens_set = bits;
                 }
-                @memcpy(c.densities.?[0..blocks_per_chunk], data[o..][0..blocks_per_chunk]);
-                o += blocks_per_chunk;
-                @memcpy(c.dens_set.?[0..dens_set_bytes], data[o..][0..dens_set_bytes]);
-                o += dens_set_bytes;
+                @memcpy(c.densities.?[0..c.planeCells()], data[o..][0..c.planeCells()]);
+                o += c.planeCells();
+                @memcpy(c.dens_set.?[0..c.densSetBytes()], data[o..][0..c.densSetBytes()]);
+                o += c.densSetBytes();
             }
             if (has_damages) {
-                const dmg_bytes = blocks_per_chunk * @sizeOf(u16);
+                const dmg_bytes = c.planeCells() * @sizeOf(u16);
                 if (data.len < o + dmg_bytes) return error.ReadFailed;
                 if (c.damages == null) {
-                    const d = try self.allocator.alloc(u16, blocks_per_chunk);
+                    const d = try self.allocator.alloc(u16, c.planeCells());
                     c.damages = d;
                     c.allocator = self.allocator;
                 }

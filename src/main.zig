@@ -840,6 +840,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (mode_owned) |*mp| ecs_mod.rules.mergeOverlay(&rules_eff, &mp.rules);
     if (toml_owned) |*tf| ecs_mod.rules.mergeOverlay(&rules_eff, &tf.rules);
     init_opts.rules = rules_eff;
+    // Effective wire geometry profile (ADR geometry/wire-profiles): `[wire]
+    // profile` from zdtd.toml; unknown names fail closed. A non-stock profile
+    // changes the chunk wire dialect (needs a paired client mod) and the save
+    // format; proc worldgen stays 256-tall, so seed+non-stock is refused.
+    var wire_profile: protocol.WireProfile = .{};
+    if (toml_owned) |*tf| {
+        wire_profile = protocol.profileForName(tf.wire.profile) orelse
+            fatal("unknown [wire] profile '{s}' (known: stock, tall-512)", .{tf.wire.profile});
+        if (!wire_profile.validate()) fatal("[wire] profile '{s}' failed structural validation", .{tf.wire.profile});
+        if (!wire_profile.isStock() and worldgen_seed != null) {
+            fatal("[wire] profile '{s}' cannot combine with --worldgen-seed (proc gen is 256-tall)", .{tf.wire.profile});
+        }
+    }
+    init_opts.wire_profile = wire_profile;
     // Effective quest policy: mode pack < zdtd.toml (same precedence as
     // rules); defaults = builtin stock values (QuestPolicy{}).
     var qpol: ecs_mod.quest.QuestPolicy = .{};

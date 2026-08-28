@@ -115,6 +115,7 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
     };
     var biome_ctx: BiomeCtx = .{ .g = self, .fallback = biome_id };
     var dmg_ctx: DmgCtx = .{ .g = self, .ch = ch };
+    const profile = self.world.profile;
     // Stock Chunk.write payload inside NetPackageChunk (overwrite=false first delivery).
     const body = try packages.stock_chunk.buildNetPackageChunkNew(&self.body_buf, .{
         .cx = cx,
@@ -122,6 +123,12 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         .heights = &ch.heights,
         .ticks = self.sim.director.clock.worldTimeBits(),
         .biome = biome_id,
+        // Wire geometry profile: layer band count + column height for the
+        // callback-path bounds. Stock keeps the dense-plane fast path; a
+        // taller dialect uses the per-layer block_at callback (the [65536]
+        // plane type is the 256-tall layout only).
+        .layers = @intCast(profile.layers()),
+        .y_dim = @intCast(profile.y_dim),
         // Topsoil bitfield: the chunk's real disturbed state (fresh = clear,
         // dig/upgrade sets bits). The topsoil_all_broken rule forces the
         // legacy all-broken look for worlds without splat maps.
@@ -143,12 +150,13 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         // Dense plane already lives on the chunk after getOrCreate; pass it so
         // encode skips the 65536-cell scratch fill and the density/water SIMD
         // packs read it directly. Scratch remains the fallback when blocks are
-        // still lazy (height-only / unmaterialized).
-        .raws = if (ch.blocks) |b| blk: {
+        // still lazy (height-only / unmaterialized). Stock dialect only.
+        .raws = if (profile.isStock() and ch.blocks != null) blk: {
+            const b = ch.blocks.?;
             std.debug.assert(b.len >= 65536);
             break :blk @as(*const [65536]u32, @ptrCast(b.ptr));
         } else null,
-        .raws_scratch = &self.chunk_raws,
+        .raws_scratch = if (profile.isStock()) &self.chunk_raws else null,
         // Per-cell biome (GAP per-chunk-biome row): the biome map under each
         // column, so transitions follow biomes.png / the proc field instead of
         // snapping to the chunk dominant. Falls back to the cached dominant.
@@ -189,12 +197,12 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
     var last_id: u16 = 0;
     var last_power: ?ecs.powerblocks.Resolved = null;
     var y: i32 = 0;
-    while (y < world_store.y_dim) : (y += 1) {
+    while (y < ch.y_dim) : (y += 1) {
         var lz: i32 = 0;
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
-                const id: u16 = world_store.typeId(blocks[@intCast(lx + lz * 16 + y * 256)]);
+                const id: u16 = world_store.typeId(blocks[ch.blockIndex(lx, y, lz)]);
                 if (id != last_id) {
                     last_id = id;
                     last_power = self.power_registry.lookup(id);
@@ -234,13 +242,13 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     // y outermost so idx advances contiguously (y stride is 1 KiB; the old
     // y-inner order made all 65k reads cache misses across a 256 KiB array).
     var y: i32 = 0;
-    while (y < world_store.y_dim) : (y += 1) {
+    while (y < ch.y_dim) : (y += 1) {
         var lz: i32 = 0;
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
                 cells += 1;
-                const idx = @as(usize, @intCast(lx + lz * 16 + y * 256));
+                const idx = ch.blockIndex(lx, y, lz);
                 const id: u16 = world_store.typeId(blocks[idx]);
                 if (id == 0) continue;
                 if (id != last_id) {

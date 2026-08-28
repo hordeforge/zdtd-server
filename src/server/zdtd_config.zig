@@ -172,6 +172,15 @@ pub const Worldgen = struct {
     seed: ?u64 = null,
 };
 
+/// `[wire]` config section (ADR geometry/wire-profiles): the column-height
+/// dialect the server emits. "stock" (default) = the byte-pinned V3.2.0 format
+/// stock clients read. A non-stock profile (e.g. "tall-512") requires a paired
+/// client mod (RealEarth-style expand) and a matching save format; the server
+/// refuses unknown names at startup (fail closed).
+pub const Wire = struct {
+    profile: []const u8 = "stock",
+};
+
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
 pub const Mode = struct {
     name: ?[]const u8 = null,
@@ -287,6 +296,12 @@ pub const File = struct {
     apm: Apm = .{},
     /// Procedural terrain seed (docs/WORLDGEN.md): `[worldgen] seed`.
     worldgen: Worldgen = .{},
+    /// Wire geometry profile (ADR geometry/wire-profiles): `[wire] profile`
+    /// names a column-height dialect ("stock" or a named profile). Unknown
+    /// names fail closed at startup; non-stock dialects need a paired client
+    /// mod. String (not enum) so the binder's authority enum error stays
+    /// unambiguous; resolved by main.zig via protocol.profileForName.
+    wire: Wire = .{},
     /// Sim rule overlay (ADR 0021): `[rules.combat]` etc. bound here, merged
     /// over the mode pack by main.zig so zdtd.toml wins the precedence order.
     rules: rules_mod.RulesOverlay = .{},

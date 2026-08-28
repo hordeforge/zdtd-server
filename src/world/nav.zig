@@ -13,7 +13,6 @@ const store = @import("store.zig");
 const World = store.World;
 const Chunk = store.Chunk;
 const chunk_size = store.chunk_size;
-const y_dim = store.y_dim;
 const body_height = store.body_height;
 const max_step_up = store.max_step_up;
 
@@ -36,7 +35,7 @@ pub fn cellSurfaceY(w: *const World, wx: i32, wz: i32) ?i32 {
     const bz = wz * cell_size + cell_size / 2;
     const t = World.worldToChunk(bx, bz);
     const ch = w.chunks.getPtr(t.pos.hash()) orelse return null;
-    return ch.standableY(t.lx, t.lz, y_dim - body_height, max_step_up, y_dim);
+    return ch.standableY(t.lx, t.lz, w.yDim() - body_height, max_step_up, w.yDim());
 }
 
 /// BFS path in cell coords from (sx, sz) to (tx, tz). Writes the cell path

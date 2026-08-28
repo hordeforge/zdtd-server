@@ -288,12 +288,16 @@ test, so a retune cannot land silently).
 | `incoming_damage_0`, `incoming_damage_1`, `incoming_damage_2`, `incoming_damage_3`, `incoming_damage_4`, `incoming_damage_5` | 1.0 / 1.0 / 0.75 / 1.0 / 1.0 / 1.0 | GameDifficulty 0..5 → damage multiplier when a server (AI) attacker hits a client entity (stock `IncomingDamageModifier`; difficulty 2 = Adventurer pins the shipped serverconfig code `AAAJABJACJADJARFBNC` decode 0.75; the rest of the ladder waits on a SetupOptions Cecil extraction) |
 | `entity_incoming_damage_0`, `entity_incoming_damage_1`, `entity_incoming_damage_2`, `entity_incoming_damage_3`, `entity_incoming_damage_4`, `entity_incoming_damage_5` | 1.0 (all) | GameDifficulty 0..5 → multiplier for a client hitting a server entity (stock `EntityIncomingDamageModifier`). Stock applies it client-side; the server trusts the claimed strength, so this ladder is config/operator policy and the RE-pin reference, not a server-side re-scale |
 
-`[rules.world]` / `[rules.vehicle]` (ADR 0021):
+`[rules.world]` / `[rules.vehicle]` / `[rules.geometry]` (ADR 0021 / ADR 0036):
 
 | Key | Default | Meaning |
 |---|---|---|
 | `container_open_range` | 8.0 | Container open/use reach in blocks, 3D (R7; authority reach cap, ECS-visible) |
 | `topsoil_all_broken` | false | Force every column's topsoil "broken" on the chunk wire: the client renders block textures instead of MicroSplat splat maps. False = stock (fresh terrain splat-renders; dig/upgrade marks disturbed columns). Worlds without splat maps (the flat demo world) may render grey with the stock mode; set true for them |
+| `sea_level` | 64 | World sea level in blocks (absolute game Y): the flat-world surface and the baked-DTM out-of-bounds fallback. Stock zdtd default 64 (stock 62.88 tracked in the divergence register); RealEarth-style worlds set ~100 |
+| `height_scale` | 1.0 | Elevation projection: `surface_y = clamp(height_offset + height_scale * elev_m, 0, ceiling)`. 1.0 = identity; < 1 compresses mountains into the column; > 1 needs a taller wire profile for headroom (ADR 0036) |
+| `height_offset` | 0.0 | Vertical shift applied after scaling (lift/lower the whole world) |
+| `height_ceiling` | 0 | Hard ceiling for the projected surface Y; 0 = active wire-profile max (stock 255) |
 | `accel_mps2` | 14.0 | Vehicle throttle acceleration (blocks/s^2 per throttle unit; zdtd sim, GAP 4816) |
 | `reverse_frac` | 0.3 | Vehicle reverse speed cap as a fraction of max speed |
 | `coast_decay` | 0.8 | Vehicle coast decay per second with no throttle |

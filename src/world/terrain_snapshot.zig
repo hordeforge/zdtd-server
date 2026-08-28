@@ -50,6 +50,9 @@ pub const Snapshot = struct {
     at: [cap]u16 = .{0} ** cap,
     cols: [max_chunks]ChunkCols = [_]ChunkCols{.{}} ** max_chunks,
     n: usize = 0,
+    /// Column height of the world this snapshot was rebuilt from (wire
+    /// profile; stock 256). Set in `rebuild`.
+    y_dim: i32 = 256,
     /// Probes that fell through to the locked hook (window truncation or a
     /// non-resident chunk). Atomic: `solid` runs on parallel AI workers.
     misses: std.atomic.Value(u64) = .init(0),
@@ -102,6 +105,7 @@ pub const Snapshot = struct {
     pub fn rebuild(self: *Snapshot, w: *store.World, px: []const f32, pz: []const f32) usize {
         std.debug.assert(px.len == pz.len);
         self.clear();
+        self.y_dim = w.yDim();
         for (px, pz) |x, z| {
             const cx = @divFloor(@as(i32, @floor(x)), store.chunk_size);
             const cz = @divFloor(@as(i32, @floor(z)), store.chunk_size);
@@ -154,7 +158,7 @@ pub const Snapshot = struct {
         const idx: usize = @intCast(t.lx * store.chunk_size + t.lz);
         const feet: i32 = @as(i32, self.cols[self.at[slot]].surface[idx]) + 1;
         if (feet > from_y + store.max_step_up or feet < from_y - store.max_drop or
-            feet > store.y_dim - store.body_height)
+            feet > self.y_dim - store.body_height)
         {
             _ = self.misses.fetchAdd(1, .monotonic);
             return null;

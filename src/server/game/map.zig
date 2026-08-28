@@ -41,7 +41,7 @@ pub fn chunkMapColors(self: *Game, cx: i32, cz: i32, out: *[256]u16) void {
             const h = ch.heightAt(@intCast(bx), @intCast(bz));
             var color: u16 = map_atlas.gray_color5;
             var found = false;
-            var y: i32 = @min(@as(i32, h) + map_walk_above, world_store.y_dim - 1);
+            var y: i32 = @min(@as(i32, h) + map_walk_above, self.world.yDim() - 1);
             while (y >= @as(i32, h)) : (y -= 1) {
                 const bid = ch.blockAt(@intCast(bx), y, @intCast(bz));
                 if (bid == 0) continue;
