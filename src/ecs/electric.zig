@@ -197,8 +197,29 @@ pub const PowerGrid = struct {
             }
             return null;
         }
-        const id = self.next_id;
-        self.next_id +%= 1;
+        // Monotonic id; on u16 wrap, reuse a retired id instead of colliding
+        // with a live one (indexOfId would resolve the duplicate to the wrong
+        // node). Removes swap-compact, so nodes[0..node_n] is the live set and
+        // at most max_nodes ids are held: a free id always exists within
+        // max_nodes+1 candidates (bounded, deterministic).
+        const id: u16 = blk: {
+            const cand = self.next_id;
+            if (cand != std.math.maxInt(u16)) {
+                self.next_id = cand + 1;
+                break :blk cand;
+            }
+            var i: u16 = 0;
+            while (true) : (i +%= 1) {
+                var held = false;
+                for (self.nodes[0..self.node_n]) |n| {
+                    if (n.id == i) {
+                        held = true;
+                        break;
+                    }
+                }
+                if (!held) break :blk i;
+            }
+        };
         // Fuel/capacity/burn left 0 unless caller applies stock props (powerblocks.Resolved).
         self.nodes[self.node_n] = .{
             .id = id,
@@ -812,6 +833,28 @@ test "addNodeAt is idempotent by position" {
     const b = g.addNodeAt(.consumer, 3, 70, 4, 50).?;
     try std.testing.expectEqual(a, b);
     try std.testing.expectEqual(@as(usize, 1), g.node_n);
+}
+
+test "node id wrap reuses a retired id instead of colliding" {
+    var g: PowerGrid = .{};
+    // Force the counter to the top of the u16 range: every add from here on
+    // takes the retired-id reuse path.
+    g.next_id = std.math.maxInt(u16);
+    const a = g.addNodeAt(.generator, 0, 70, 0, 100).?;
+    const b = g.addNodeAt(.consumer, 1, 70, 0, 10).?;
+    const c = g.addNodeAt(.consumer, 2, 70, 0, 10).?;
+    // No two live nodes share an id (the first add starts at 0).
+    try std.testing.expect(a != b);
+    try std.testing.expect(c != a and c != b);
+    // Every id still resolves to its own node.
+    try std.testing.expectEqual(@as(usize, 0), g.indexOfId(a).?);
+    try std.testing.expectEqual(@as(usize, 1), g.indexOfId(b).?);
+    try std.testing.expectEqual(@as(usize, 2), g.indexOfId(c).?);
+    // Removing one frees its id for reuse by the next add.
+    try std.testing.expect(g.removeById(b));
+    const d = g.addNodeAt(.consumer, 3, 70, 0, 10).?;
+    try std.testing.expectEqual(b, d);
+    try std.testing.expect(g.indexOfId(d) != null);
 }
 
 test "connectByPos and removeAt drop incident wires" {
