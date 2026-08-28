@@ -23,6 +23,29 @@ Status: **W0/W1/W2 landed** (`src/world/noise.zig`, `src/world/worldgen.zig`,
 Each section tags verified research vs reasoned inference (deep-research
 2026-07-23, 24/25 claims confirmed by 3-vote adversarial verification).
 
+## Usage: the `infinite` mode pack
+
+The "infinite game" is the proc source + the normal stream: chunks generate
+deterministically on first touch as players explore, and the chunk stream
+(view square + pacing + per-chunk deco) serves them like a stock map.
+
+```bash
+zig-out/bin/zdtd --mode infinite            # modes/infinite.toml: seed 7 + [rules.worldgen]
+# or, for a different world:
+zig-out/bin/zdtd --mode infinite --worldgen-seed 12345
+```
+
+Seed precedence: CLI `--worldgen-seed` > zdtd.toml `[worldgen] seed` > the
+pack's `worldgen_seed` (pack < toml < CLI, like rules; `--map` still wins
+over any seed). The seed drives terrain, weather, deco and the subbiome
+noise, so a save reproduces across restarts and hosts.
+
+**Deco on proc worlds** (2026-08-29): proc worlds carry no biomemap, so the
+deco species resolve from the **W3 proc biome field** + the biomes.xml deco
+lists (the same table the baked path uses) — with a game-dir present an
+infinite proc world is not bald. A bare proc world without game-dir biomes.xml
+stays bald (fail closed: no fabricated block ids the client cannot resolve).
+
 ## Design goals
 
 - **On-the-fly, not prebaked.** No "generate world then host" step for the

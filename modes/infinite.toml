@@ -1,0 +1,30 @@
+# infinite: procedural world generation while players are in the game.
+# Chunks generate deterministically on first touch as players explore — the
+# world is unbounded in XZ and streams like a stock map (view square + pacing,
+# deco per streamed chunk). Load: --mode infinite (or zdtd.toml
+# [mode] name = "infinite"). Any seed gives a fresh infinite world; the pack
+# default is overridden by zdtd.toml [worldgen] seed or --worldgen-seed.
+#
+# Note: this is the zdtd procedural generator (docs/WORLDGEN.md), a
+# deterministic density field — not stock RWG. With a game-dir present the
+# proc world still uses the stock biomes.xml deco lists and biome-layered
+# surface stacks (deco resolves from the W3 biome field).
+
+name = "infinite"
+
+# Enables the on-the-fly proc terrain. Same value drives terrain, weather and
+# deco, so a save stays reproducible across restarts and hosts.
+worldgen_seed = 7
+
+# [rules.worldgen] shaping (defaults shown; ADR 0021). Raise height_amp /
+# lower squash for more dramatic mountains; keep noise_weight < 1 (the
+# solid-below / air-above guarantee depends on it).
+[rules.worldgen]
+base_height = 68
+height_amp = 24
+min_surface = 12
+max_surface = 200
+squash = 28
+noise_weight = 0.85
+y_scale = 2.0
+bedrock_h = 3

@@ -3348,7 +3348,11 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   (2026-08-29) the shaping params are config: `[rules.worldgen]`
   (base_height/height_amp/surface band/squash/noise_weight/y_scale/bedrock_h
   via `WorldGen.applyParams`; defaults byte-identical; grid cells + noise
-  recipe stay code).
+  recipe stay code). The "infinite game" ships as `--mode infinite`
+  (modes/infinite.toml: pack `worldgen_seed` + `[rules.worldgen]`; seed
+  precedence CLI > zdtd.toml > pack), and proc deco resolves from the W3
+  biome field + biomes.xml lists (no biomemap on proc worlds), so a
+  game-dir proc world streams trees instead of staying bald.
 
 - **Chunk streaming to the stock client** `WORKS` `(2026-08-22)`
   Hole-free centred square, add/remove deltas, paced 8 adds per 5-tick period.

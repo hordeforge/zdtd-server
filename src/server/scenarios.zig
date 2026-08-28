@@ -5645,6 +5645,47 @@ test "scenario tall wire profile: 512-tall columns, 128-layer wire body, ZCH4 sa
     std.debug.print("PASS tall-wire-profile: y_dim=512 planes={d} wire={d}B vs {d}B ZCH4\n", .{ ch2.planeCells(), body.len, stock_body.len });
 }
 
+test "scenario proc world streams deco from the W3 biome field" {
+    // An infinite proc world (the `infinite` mode pack / --worldgen-seed)
+    // must not be bald: proc worlds carry no biomemap, so deco resolves from
+    // the W3 proc biome field + the biomes.xml deco lists (same table the
+    // baked path uses). Join with a game-dir (biomes.xml decos) + a seed, then
+    // stream past the join window: both the join burst and the streamed
+    // chunks ship deco objects, not the empty firstPackage.
+    if (!stockMapPresent()) return error.SkipZigTest;
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    freshScenarioDir("worlds/zdtd_sc_procdeco");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_procdeco", 0, .{
+        .game_dir = game_dir,
+        .worldgen_seed = 7,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expect(g.world.terrain_source == .proc);
+    try std.testing.expect(g.world.worldgen != null);
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // The join burst shipped deco objects (non-empty DecoUpdate), not the
+    // bald empty firstPackage.
+    const join_marked = c.deco_sent_n;
+    try std.testing.expect(join_marked > 0);
+    // And streaming a fresh region past the join window ships more deco.
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const sp = g.world.primarySpawn();
+    g.sim.transform[ps].x = @as(f32, @floatFromInt(sp.x)) + 160.0;
+    g.sim.transform[ps].z = @as(f32, @floatFromInt(sp.z));
+    cap.clear();
+    try g.streamChunksForClient(c);
+    try std.testing.expect(c.deco_sent_n > join_marked);
+    std.debug.print("PASS proc-deco: infinite proc world streams deco (join={d} streamed={d})\n", .{ join_marked, c.deco_sent_n });
+}
+
 test "scenario wasm T15 hooks: deny death, double block damage and quest reward, trap isolates" {
     // T15 proof (WORK_PLAN): a .wasm module implements a visible mode rule end
     // to end through the event hooks. plugin_rules denies every player death

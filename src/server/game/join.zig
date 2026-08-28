@@ -44,8 +44,15 @@ fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
 /// is worse than no trees.
 fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
     const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
-    const bm = g.world.biomes orelse return .{};
-    const biome_id = bm.atWorld(wx, wz) orelse return .{};
+    // Proc worlds carry no biomemap: resolve the biome from the W3 proc biome
+    // field (the same field that drives the surface fill and the chunk wire
+    // biome), mapped through the biome_layers_table exactly like procBiomeAt.
+    const biome_id: u8 = if (g.world.terrain_source == .proc) blk: {
+        if (g.world.worldgen) |*wg| {
+            break :blk g.world.biome_layers_table.biomeIdAt(wg.biomeAt(@floatFromInt(wx), @floatFromInt(wz)));
+        }
+        break :blk 0;
+    } else if (g.world.biomes) |*bm| (bm.atWorld(wx, wz) orelse return .{}) else return .{};
     // GAP 18: resolve the subbiome per cell (stock decorateChunkRandom ->
     // GetBiomeOrSubAt). A subbiome hit samples its own list, where the
     // tree probability mass lives; otherwise the biome's own list applies.
@@ -62,6 +69,17 @@ fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.Species
         out.n += 1;
     }
     return out;
+}
+
+/// Deco species source is available: biome deco lists from biomes.xml, plus
+/// either the biomemap (baked worlds) or the W3 proc biome field (proc
+/// worlds carry no biomemap). Both are game-dir data; fail closed (a bare
+/// proc world without biomes.xml stays bald rather than sending block ids the
+/// client cannot resolve).
+fn decoAvailable(g: *const Game) bool {
+    if (!g.deco_trees or !g.world.biome_layers_table.hasDecos()) return false;
+    if (g.world.terrain_source == .proc) return g.world.worldgen != null;
+    return g.world.biomes != null;
 }
 
 /// Cell offsets per deco block id for one join burst. The AssignIds map is
@@ -138,10 +156,7 @@ pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamin
 /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
 /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
 pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
-    const has_species = self.deco_trees and
-        self.world.biomes != null and
-        self.world.biome_layers_table.hasDecos();
-    if (!has_species) {
+    if (!decoAvailable(self)) {
         // Empty firstPackage is still required: the `isDecorated` marking loop
         // sits inside the `loadedDecos != null` branch, so without it the
         // client keeps retrying local generation it cannot do.
@@ -236,7 +251,7 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
 /// was not RE'd and is wrong). Mirrors like the join burst; the mirror and the
 /// client both dedupe, so overlapping the join window is harmless.
 pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
-    if (!self.deco_trees or self.world.biomes == null or !self.world.biome_layers_table.hasDecos()) return;
+    if (!decoAvailable(self)) return;
     const dcx = deco.worldToDecoChunk(cx * deco.chunk_side);
     const dcz = deco.worldToDecoChunk(cz * deco.chunk_side);
     const key = packages.makeChunkKey(dcx, dcz);

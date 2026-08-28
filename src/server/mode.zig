@@ -88,6 +88,10 @@ pub const Pack = struct {
     land_claim_offline_durability_modifier: ?u16 = null,
     land_claim_expiry_days: ?u16 = null,
     loot_respawn_days: ?u16 = null,
+    /// Procedural worldgen seed (flat key `worldgen_seed = N`): enables the
+    /// infinite on-the-fly proc terrain. Precedence: CLI --worldgen-seed >
+    /// zdtd.toml [worldgen] seed > this pack value (resolved in main.zig).
+    worldgen_seed: ?u64 = null,
     enable_sample_plugin: ?bool = null,
     /// Sim rule overlay (ADR 0021 decision 3): `[rules.combat]` etc. merged
     /// into World.rules by main.zig before the zdtd.toml overlay.

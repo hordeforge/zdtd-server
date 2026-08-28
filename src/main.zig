@@ -773,6 +773,17 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
+    // Effective worldgen seed precedence: CLI --worldgen-seed > zdtd.toml
+    // [worldgen] seed > mode pack `worldgen_seed` (pack < toml < CLI, like
+    // rules). applyToInitOptions already applied CLI/toml (both null-guarded);
+    // the pack tier lands here so it can never clobber either. `--map` still
+    // wins over any seed at Game init (loadStockMap branch).
+    if (init_opts.worldgen_seed == null) {
+        if (mode_owned) |*mp| {
+            if (mp.worldgen_seed) |s| init_opts.worldgen_seed = s;
+        }
+    }
+
     // PRD 0005: discover mods/ (addons) + plugins/ (first-party core)
     // manifests, resolve tiers + overrides + claims, then load through the
     // plan. `[mods] disabled`/`blacklist` gate discovery.
@@ -849,8 +860,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         wire_profile = protocol.profileForName(tf.wire.profile) orelse
             fatal("unknown [wire] profile '{s}' (known: stock, tall-512)", .{tf.wire.profile});
         if (!wire_profile.validate()) fatal("[wire] profile '{s}' failed structural validation", .{tf.wire.profile});
-        if (!wire_profile.isStock() and worldgen_seed != null) {
-            fatal("[wire] profile '{s}' cannot combine with --worldgen-seed (proc gen is 256-tall)", .{tf.wire.profile});
+        if (!wire_profile.isStock() and init_opts.worldgen_seed != null) {
+            fatal("[wire] profile '{s}' cannot combine with a proc worldgen seed (proc gen is 256-tall)", .{tf.wire.profile});
         }
     }
     init_opts.wire_profile = wire_profile;

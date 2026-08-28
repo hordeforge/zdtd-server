@@ -54,7 +54,12 @@ Also (2026-08-29): the procedural shaping params moved to
 noise_weight/y_scale/bedrock_h via `WorldGen.applyParams`; defaults = the
 pre-lift constants, byte-identical proc output; grid cells, noise recipe and
 the RWG water table stay code) — closes the "documented, not config" ledger
-row. Counts unchanged.
+row. And the "infinite game" ships: `modes/infinite.toml` (`--mode infinite`;
+pack `worldgen_seed` tier — precedence CLI > zdtd.toml `[worldgen] seed` >
+pack, like rules) plus proc deco (species resolve from the W3 biome field +
+biomes.xml lists since proc worlds carry no biomemap; game-dir proc worlds
+stream trees instead of staying bald; bare proc worlds fail closed).
+Counts unchanged.
 
 ## Wave 2026-08-20 (surface-parity reconciliation)
 
