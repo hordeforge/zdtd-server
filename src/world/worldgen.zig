@@ -1,6 +1,7 @@
 //! On-the-fly procedural chunk generation (W0/W1/W2).
 //! Pure function of (seed, chunkX, chunkZ): no full-map bake, no global RNG.
-//! Block ids via AssignIds pins (bundled dump). Stock chunk wire unchanged.
+//! Block ids via live World.terrain_ids (AssignIds pins only until resolve).
+//! Stock chunk wire unchanged.
 //!
 //! W2 replaces the heightmap with a 3D density field (docs/WORLDGEN.md §2):
 //! `final_density(x,y,z) > 0` is solid, where density = a clamped Y-gradient
@@ -203,6 +204,10 @@ pub const WorldGen = struct {
     /// biome resolved, including a single-biome table: materials still come
     /// from XML, only the W3 field stays off (`biome_n <= 1`).
     biome_table: ?*const biome_layers.Table = null,
+    /// Live AssignIds air/stone for the first-pass density splat. Pins until
+    /// World.syncWorldgenBiomes copies World.terrain_ids.
+    air_id: u16 = assignids.air,
+    stone_id: u16 = assignids.terr_stone,
 
     pub fn init(seed: u64) WorldGen {
         return .{
@@ -447,8 +452,8 @@ pub const WorldGen = struct {
                             blocks[col + @as(usize, @intCast(y)) * 256 ..][0..cell_w].* = @select(
                                 u32,
                                 solid,
-                                @as(@Vector(cell_w, u32), @splat(assignids.terr_stone)),
-                                @as(@Vector(cell_w, u32), @splat(assignids.air)),
+                                @as(@Vector(cell_w, u32), @splat(self.stone_id)),
+                                @as(@Vector(cell_w, u32), @splat(self.air_id)),
                             );
                             const hy: u8 = @intCast(y);
                             // Column heights: vector max/select per X run, the
@@ -487,7 +492,7 @@ pub const WorldGen = struct {
             var y: usize = 0;
             while (y <= h) : (y += 1) {
                 const bi = col + y * 256;
-                if (blocks[bi] != assignids.air) blocks[bi] = col_ids[y];
+                if (blocks[bi] != self.air_id) blocks[bi] = col_ids[y];
             }
         }
     }
@@ -500,13 +505,13 @@ pub const WorldGen = struct {
     /// keeps its dry overhang air pocket. Must run after the material pass.
     /// The surface cell is world-constant, so adjacent chunks agree by
     /// construction and the fill cannot seam.
-    pub fn fillWaterTable(heights: *const [256]u8, blocks: []u32, water_id: u16) void {
+    pub fn fillWaterTable(heights: *const [256]u8, blocks: []u32, water_id: u16, air_id: u16) void {
         std.debug.assert(blocks.len >= @as(usize, @intCast(chunk_size * y_dim * chunk_size)));
         const lanes = 16;
         const Vh = @Vector(lanes, u8);
         const Vb = @Vector(lanes, u32);
         const water_v: Vb = @splat(@as(u32, water_id));
-        const air_v: Vb = @splat(@as(u32, assignids.air));
+        const air_v: Vb = @splat(@as(u32, air_id));
         const surface: Vh = @splat(water_surface_cell);
         var row: usize = 0;
         while (row < 256) : (row += lanes) {
@@ -526,7 +531,7 @@ pub const WorldGen = struct {
     }
 
     /// Scalar reference for `fillWaterTable`. Tests only.
-    fn fillWaterTableScalar(heights: *const [256]u8, blocks: []u32, water_id: u16) void {
+    fn fillWaterTableScalar(heights: *const [256]u8, blocks: []u32, water_id: u16, air_id: u16) void {
         var col: usize = 0;
         while (col < 256) : (col += 1) {
             const h = heights[col];
@@ -534,7 +539,7 @@ pub const WorldGen = struct {
             var y: usize = @as(usize, h) + 1;
             while (y <= water_surface_cell) : (y += 1) {
                 const bi = col + y * 256;
-                if (blocks[bi] == assignids.air) blocks[bi] = water_id;
+                if (blocks[bi] == air_id) blocks[bi] = water_id;
             }
         }
     }
@@ -909,7 +914,7 @@ test "RWG water table fills basins to the stock surface cell, not shores" {
     for (heights, 0..) |_, col| {
         heights[col] = 50;
     }
-    WorldGen.fillWaterTable(&heights, &blocks, assignids.water);
+    WorldGen.fillWaterTable(&heights, &blocks, assignids.water, assignids.air);
     const col: usize = 0;
     try std.testing.expectEqual(assignids.water, blocks[col + 51 * 256]);
     try std.testing.expectEqual(assignids.water, blocks[col + 62 * 256]);
@@ -920,7 +925,7 @@ test "RWG water table fills basins to the stock surface cell, not shores" {
     dry_heights[0] = 62;
     dry_heights[1] = 70;
     var dry_blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
-    WorldGen.fillWaterTable(&dry_heights, &dry_blocks, assignids.water);
+    WorldGen.fillWaterTable(&dry_heights, &dry_blocks, assignids.water, assignids.air);
     try std.testing.expectEqual(assignids.air, dry_blocks[0 + 63 * 256]);
     try std.testing.expectEqual(assignids.air, dry_blocks[256 + 63 * 256]);
     // Existing solids (a carved shelf) are never overwritten.
@@ -928,7 +933,7 @@ test "RWG water table fills basins to the stock surface cell, not shores" {
     shelf_heights[0] = 50;
     var shelf_blocks: [16 * 256 * 16]u32 = [_]u32{assignids.air} ** (16 * 256 * 16);
     shelf_blocks[0 + 55 * 256] = assignids.terr_stone;
-    WorldGen.fillWaterTable(&shelf_heights, &shelf_blocks, assignids.water);
+    WorldGen.fillWaterTable(&shelf_heights, &shelf_blocks, assignids.water, assignids.air);
     try std.testing.expectEqual(assignids.terr_stone, shelf_blocks[0 + 55 * 256]);
     try std.testing.expectEqual(assignids.water, shelf_blocks[0 + 54 * 256]);
 }
@@ -943,8 +948,8 @@ test "RWG water table surface is world-constant across adjacent chunks" {
     var bb: [16 * 256 * 16]u32 = undefined;
     g.generateChunkBlocks(0, 0, &ha, &ba);
     g.generateChunkBlocks(1, 0, &hb, &bb);
-    WorldGen.fillWaterTable(&ha, &ba, assignids.water);
-    WorldGen.fillWaterTable(&hb, &bb, assignids.water);
+    WorldGen.fillWaterTable(&ha, &ba, assignids.water, assignids.air);
+    WorldGen.fillWaterTable(&hb, &bb, assignids.water, assignids.air);
     // Every water column tops out at cell 62 in both chunks.
     for (0..256) |col| {
         if (ba[col + 62 * 256] == assignids.water) {
@@ -980,8 +985,18 @@ test "fillWaterTable SIMD matches scalar" {
             cell.* = if (rnd.boolean() and y > 40 and y < 70) assignids.terr_stone else assignids.air;
         }
         var scalar = vectorized;
-        WorldGen.fillWaterTable(&heights, &vectorized, assignids.water);
-        WorldGen.fillWaterTableScalar(&heights, &scalar, assignids.water);
+        WorldGen.fillWaterTable(&heights, &vectorized, assignids.water, assignids.air);
+        WorldGen.fillWaterTableScalar(&heights, &scalar, assignids.water, assignids.air);
         try std.testing.expectEqualSlices(u32, &scalar, &vectorized);
     }
+}
+
+test "worldgen first pass uses live air id, not AssignIds pin" {
+    var g = WorldGen.init(1);
+    g.air_id = 80;
+    g.stone_id = 81;
+    var heights: [256]u8 = undefined;
+    var blocks: [16 * 256 * 16]u32 = undefined;
+    g.generateChunkBlocks(0, 0, &heights, &blocks);
+    try std.testing.expectEqual(@as(u32, 80), blocks[255 * 256]);
 }

@@ -33,7 +33,8 @@ pub const BiomeModRow = struct {
 /// (`depth == 0`) until lower fixed depths need the rest.
 pub const Layer = struct {
     depth: u16 = 0, // 0 = "*"
-    block_id: u16 = assignids.terr_stone,
+    /// 0 = unset (fail closed). Production stacks always set this via idByName.
+    block_id: u16 = 0,
 };
 
 pub const Stack = struct {
@@ -112,6 +113,19 @@ pub fn defaultStack() Stack {
         assignids.terr_stone,
         assignids.terr_bedrock,
     );
+}
+
+/// Same pine-forest-like column, resolved through idByName (live dump). Null
+/// when any of the four names is missing so the caller can fail closed.
+pub fn stackFromLookup(
+    id_by_name: *const fn (?*anyopaque, []const u8) ?u16,
+    ctx: ?*anyopaque,
+) ?Stack {
+    const forest = id_by_name(ctx, "terrForestGround") orelse return null;
+    const dirt = id_by_name(ctx, "terrDirt") orelse return null;
+    const stone = id_by_name(ctx, "terrStone") orelse return null;
+    const bedrock = id_by_name(ctx, "terrBedrock") orelse return null;
+    return stackFromIds(forest, dirt, stone, bedrock);
 }
 
 pub const max_weather_biomes: usize = 16;
@@ -254,7 +268,9 @@ pub const Table = struct {
         if (biome_id < max_biomemap_id and self.stacks[biome_id].n > 0)
             return self.stacks[biome_id];
         if (self.default_stack.n > 0) return self.default_stack;
-        return defaultStack();
+        // Empty table with no seeded default: fail closed (air). Pin
+        // defaultStack would paint the wrong id after a live AssignIds merge.
+        return .{};
     }
 
     /// Distant-decoration set for a biomemap id. Empty (not a fallback) when the
@@ -287,7 +303,8 @@ pub const Table = struct {
         if (h >= 256) return;
         const layers = stack.slice();
         if (layers.len == 0) {
-            fillFallback(h, out);
+            // Fail closed: no layers means no ids to paint. Pin stone/bedrock
+            // would desync after a live AssignIds merge (air stays 0).
             return;
         }
         // Sum fixed depths after each index (for "*" budget).
@@ -330,21 +347,6 @@ pub const Table = struct {
         if (y >= 1 and fill_id != 0) @memset(out[1..@intCast(y + 1)], fill_id);
         if (y >= 0 and bed_id != 0) out[0] = bed_id;
         if (out[0] == 0 and bed_id != 0) out[0] = bed_id;
-    }
-
-    fn fillFallback(h: u8, out: *[256]u16) void {
-        var y: u16 = 0;
-        while (y <= h) : (y += 1) {
-            if (y == 0) {
-                out[y] = assignids.terr_bedrock;
-            } else if (y + 3 < h) {
-                out[y] = assignids.terr_stone;
-            } else if (y == h) {
-                out[y] = assignids.terr_dirt;
-            } else {
-                out[y] = assignids.terr_dirt;
-            }
-        }
     }
 };
 
@@ -750,8 +752,11 @@ pub fn loadFromPath(
         i = close + 8;
     }
 
-    // Default: pine_forest if present, else dirt/stone/bedrock fallback stack.
+    // Default: pine_forest if present, else the same column resolved via
+    // idByName. Pin defaultStack is last-resort offline (lookup miss).
     if (stacks_by_name.get("pine_forest")) |st| {
+        table.default_stack = st;
+    } else if (stackFromLookup(id_by_name, ctx)) |st| {
         table.default_stack = st;
     } else {
         table.default_stack = defaultStack();
@@ -870,6 +875,75 @@ test "fillColumn burnt_forest surface" {
     try std.testing.expectEqual(assignids.terr_bedrock, col[2]);
     try std.testing.expectEqual(assignids.terr_bedrock, col[0]);
     try std.testing.expectEqual(@as(u16, 0), col[61]);
+}
+
+test "fillColumn empty stack fails closed instead of painting pin ids" {
+    const st: Stack = .{};
+    var col: [256]u16 = undefined;
+    Table.fillColumn(st, 10, &col);
+    try std.testing.expectEqual(@as(u16, 0), col[10]);
+    try std.testing.expectEqual(@as(u16, 0), col[0]);
+    try std.testing.expect(col[0] != assignids.terr_stone);
+    try std.testing.expect(col[0] != assignids.terr_bedrock);
+}
+
+test "stackFromLookup uses idByName, not AssignIds pins" {
+    const Ctx = struct {
+        fn lookup(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "terrForestGround")) return 9001;
+            if (std.mem.eql(u8, name, "terrDirt")) return 9002;
+            if (std.mem.eql(u8, name, "terrStone")) return 9003;
+            if (std.mem.eql(u8, name, "terrBedrock")) return 9004;
+            return null;
+        }
+    };
+    const st = stackFromLookup(Ctx.lookup, null) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u16, 9001), st.layers[0].block_id);
+    try std.testing.expectEqual(@as(u16, 9002), st.layers[1].block_id);
+    try std.testing.expectEqual(@as(u16, 9003), st.layers[2].block_id);
+    try std.testing.expectEqual(@as(u16, 9004), st.layers[3].block_id);
+    try std.testing.expect(st.layers[0].block_id != assignids.terr_forest_ground);
+}
+
+test "stackFor empty table fails closed instead of pin defaultStack" {
+    const t: Table = .{ .default_stack = .{} };
+    const st = t.stackFor(3);
+    try std.testing.expectEqual(@as(u8, 0), st.n);
+}
+
+test "biomes.xml without pine_forest resolves default stack via idByName" {
+    const src =
+        \\<biomes>
+        \\<biomemap id="05" name="desert"/>
+        \\<biome name="desert">
+        \\  <layers>
+        \\    <layer depth="1" blockname="terrDesertGround"/>
+        \\    <layer depth="*" blockname="terrStone"/>
+        \\    <layer depth="3" blockname="terrBedrock"/>
+        \\  </layers>
+        \\</biome>
+        \\</biomes>
+    ;
+    const Ctx = struct {
+        fn lookup(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "terrDesertGround")) return 55;
+            if (std.mem.eql(u8, name, "terrForestGround")) return 101;
+            if (std.mem.eql(u8, name, "terrDirt")) return 102;
+            if (std.mem.eql(u8, name, "terrStone")) return 103;
+            if (std.mem.eql(u8, name, "terrBedrock")) return 104;
+            return null;
+        }
+    };
+    const path = ".zdtd_test_biomes_nopine.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+    var t = try loadFromPath(std.testing.allocator, path, Ctx.lookup, null, null);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(u16, 101), t.default_stack.layers[0].block_id);
+    try std.testing.expectEqual(@as(u16, 102), t.default_stack.layers[1].block_id);
+    try std.testing.expectEqual(@as(u16, 103), t.default_stack.layers[2].block_id);
+    try std.testing.expectEqual(@as(u16, 104), t.default_stack.layers[3].block_id);
+    try std.testing.expect(t.default_stack.layers[0].block_id != assignids.terr_forest_ground);
 }
 
 test "fillColumn leftover cells reuse the stack ids, not AssignIds pins" {

@@ -334,7 +334,8 @@ pub const Chunk = struct {
         if (self.blocks != null) return;
         self.allocator = allocator;
         const b = try allocator.alloc(u32, blocks_per_chunk);
-        @memset(b, block_air);
+        const air = (self.terrain orelse &terrain_pins).air;
+        @memset(b, air);
         var col: [256]u16 = undefined;
         var lz: i32 = 0;
         while (lz < 16) : (lz += 1) {
@@ -365,8 +366,8 @@ pub const Chunk = struct {
         // RWG water table: basins below the stock water level become lakes
         // (W4); the id comes from the live terrain set so a modded dump keeps
         // the correct water block.
-        const water_id = (self.terrain orelse &terrain_pins).water;
-        worldgen_mod.WorldGen.fillWaterTable(&self.heights, b, water_id);
+        const t = self.terrain orelse &terrain_pins;
+        worldgen_mod.WorldGen.fillWaterTable(&self.heights, b, t.water, t.air);
     }
 
     /// Block type id (low 16 of rawData).
@@ -559,6 +560,17 @@ pub const World = struct {
                 },
             );
         }
+        // No biomes.xml: the fallback column still has to use live dump ids,
+        // not the comptime pins (those are a second authority after merge).
+        if (!self.biome_layers_table.loaded) {
+            self.biome_layers_table.default_stack = biome_layers.stackFromIds(
+                self.terrain_ids.forest_ground,
+                self.terrain_ids.dirt,
+                self.terrain_ids.stone,
+                self.terrain_ids.bedrock,
+            );
+        }
+        self.syncWorldgenBiomes();
     }
 
     pub fn isWaterId(self: *const World, id: u16) bool {
@@ -591,7 +603,14 @@ pub const World = struct {
         if (self.worldgen) |*wg| {
             const n = self.biome_layers_table.biomeCount();
             wg.biome_n = n;
-            wg.biome_table = if (n >= 1) &self.biome_layers_table else null;
+            wg.air_id = self.terrain_ids.air;
+            wg.stone_id = self.terrain_ids.stone;
+            // Always attach the table when a default stack exists so the
+            // material pass uses live/XML ids, not WorldGen.fillColumn pins.
+            wg.biome_table = if (n >= 1 or self.biome_layers_table.default_stack.n > 0)
+                &self.biome_layers_table
+            else
+                null;
         }
     }
 
@@ -2016,6 +2035,36 @@ test "procBiomeAt follows the surface fill field deterministically" {
         w.biome_layers_table.biomeIdAt(w.worldgen.?.biomeAt(8, 8)),
         w.procBiomeAt(0, 0),
     );
+}
+
+test "resolveTerrainIds seeds default stack from live dump ids" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    const Ctx = struct {
+        fn lookup(_: ?*anyopaque, name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "air")) return 50;
+            if (std.mem.eql(u8, name, "terrStone")) return 51;
+            if (std.mem.eql(u8, name, "terrBedrock")) return 52;
+            if (std.mem.eql(u8, name, "terrDirt")) return 53;
+            if (std.mem.eql(u8, name, "water")) return 54;
+            if (std.mem.eql(u8, name, "terrForestGround")) return 55;
+            if (std.mem.eql(u8, name, "terrainFiller")) return 56;
+            if (std.mem.eql(u8, name, "terrainFillerAdaptive")) return 57;
+            return null;
+        }
+    };
+    w.resolveTerrainIds(Ctx.lookup, null);
+    try std.testing.expectEqual(@as(u16, 55), w.biome_layers_table.default_stack.layers[0].block_id);
+    try std.testing.expectEqual(@as(u16, 53), w.biome_layers_table.default_stack.layers[1].block_id);
+    try std.testing.expectEqual(@as(u16, 51), w.biome_layers_table.default_stack.layers[2].block_id);
+    try std.testing.expectEqual(@as(u16, 52), w.biome_layers_table.default_stack.layers[3].block_id);
+    const c = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    try std.testing.expectEqual(@as(u16, 50), c.blockAt(0, 200, 0));
+    try std.testing.expectEqual(@as(u16, 52), c.blockAt(0, 0, 0));
 }
 
 test "syncWorldgenBiomes keeps XML stacks for a single biome" {

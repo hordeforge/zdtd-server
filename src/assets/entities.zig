@@ -144,6 +144,8 @@ pub const EntityTable = struct {
         for (self.defs) |d| {
             if (d.kind == .zombie and d.spawnable) return d;
         }
+        // XML catalog: no silent builtin HP/speed row (wrong class worse than none).
+        if (self.source != .builtin) return .{ .name = "", .kind = .zombie, .spawnable = false, .max_hp = 0 };
         return builtin_defs[1];
     }
 
@@ -152,6 +154,7 @@ pub const EntityTable = struct {
         for (self.defs) |d| {
             if (d.kind == .animal and d.spawnable) return d;
         }
+        if (self.source != .builtin) return .{ .name = "", .kind = .animal, .spawnable = false, .max_hp = 0, .is_enemy = false };
         return builtin_defs[2];
     }
 
@@ -760,6 +763,21 @@ test "builtin entities" {
     const t = EntityTable.builtin();
     try std.testing.expectEqualStrings("zombieBoe", t.defaultZombie().name);
     try std.testing.expectEqual(unity_hash.class_zombie_boe, t.defaultZombie().hash);
+}
+
+test "xml catalog without zombies does not fall back to builtin HP" {
+    const defs = [_]EntityDef{.{
+        .name = "playerMale",
+        .kind = .player,
+        .spawnable = false,
+        .is_enemy = false,
+        .max_hp = 100,
+    }};
+    const t: EntityTable = .{ .defs = &defs, .source = .xml };
+    try std.testing.expectEqualStrings("", t.defaultZombie().name);
+    try std.testing.expectEqual(@as(f32, 0), t.defaultZombie().max_hp);
+    try std.testing.expectEqualStrings("", t.defaultAnimal().name);
+    try std.testing.expectEqual(@as(f32, 0), t.defaultAnimal().max_hp);
 }
 
 test "unity hash matches known playerMale" {

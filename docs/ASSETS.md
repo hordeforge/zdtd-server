@@ -90,6 +90,8 @@ in `assignids_comptime.zig` (tests / no-game-dir fallback).
 | Unknown placeable item | `itemToBlock` → 0 (not placeable) |
 | Encode missing catalog row | Omit package / stock empty form |
 | Dump version skew vs client | Prefer suppress deco over NRE |
+| Empty biome layer stack | Fail closed (air); never paint AssignIds pins |
+| biomes.xml missing pine_forest | Default column via idByName; pins only if lookup misses |
 
 ## WorldInfo and client assets
 

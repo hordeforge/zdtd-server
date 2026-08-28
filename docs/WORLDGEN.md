@@ -330,8 +330,9 @@ pub const WorldGen = struct {
   flat: on cache miss in procedural mode, call `worldgen` for that chunk only
   (sync stub first; then async job + stream wait). `generateProc` fills
   heights and blocks via `generateChunkBlocks`; loaded biomes.xml stacks
-  apply even for a single biome (pin `defaultStack` only when no table is
-  loaded). Block ids via biomes.xml names + AssignIds. Stock
+  apply even for a single biome. With no biomes.xml, the default column is
+  `stackFromIds` of live `World.terrain_ids` after AssignIds merge (comptime
+  pins only until resolve). Block ids via biomes.xml names + AssignIds. Stock
   chunk wire (`stock_chunk.zig`) unchanged.
 - Stream path (`game.zig` chunk interest) unchanged at the package layer: it
   already demand-loads via `getOrCreate`. Proc mode only changes what miss
