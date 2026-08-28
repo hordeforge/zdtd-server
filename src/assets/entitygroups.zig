@@ -11,6 +11,11 @@ pub const Entry = struct {
     weight: f32 = 1,
 };
 
+/// Ceiling for a parsed `p` weight (f32). Stock weights are <= ~100; the
+/// ceiling (10^7x headroom) keeps the milli-weight u64 fold in pick from
+/// trapping on a modded value.
+pub const max_group_weight: f32 = 1_000_000_000;
+
 /// Entries are a flat arena slice, not a fixed array: stock entitygroups.xml has
 /// 1875 groups, so a per-group fixed array would cost megabytes and any cap on
 /// the group count silently drops the tail (the gamestage horde groups live
@@ -131,7 +136,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !GroupTable 
             var w: f32 = 1;
             if (xml.attr(body, et, "p")) |ps| {
                 // Explicit p="0" disables the entry; do not coerce it to 1.
-                w = @max(0, xml.parseF32(ps) orelse 1);
+                // Non-finite and negative p fail closed at 0 (the pick skips
+                // zero weights); the ceiling keeps a modded p (1e30, nan, inf)
+                // from trapping the milli-weight u64 fold in pick.
+                w = xml.parseF32(ps) orelse 1;
+                if (!std.math.isFinite(w) or w <= 0) {
+                    w = 0;
+                } else {
+                    w = @min(w, max_group_weight);
+                }
             }
             try entry_buf.append(allocator, .{
                 .name = try arena.dupe(u8, en),
@@ -180,6 +193,24 @@ test "group pick same seed is stable" {
         }
     }
     try std.testing.expect(saw_diff);
+}
+
+test "pick tolerates a huge modded weight" {
+    const entries = [_]Entry{
+        .{ .name = "zombieA", .weight = max_group_weight },
+        .{ .name = "zombieB", .weight = 1 },
+    };
+    const groups = [_]Group{.{ .name = "g", .entries = &entries, .weight_sum = max_group_weight + 1 }};
+    var t: GroupTable = .{ .groups = &groups };
+    // The milli-weight u64 fold must not trap; the pick is deterministic.
+    const a = t.pick("g", 1).?;
+    try std.testing.expectEqualStrings(a, t.pick("g", 1).?);
+    try std.testing.expect(std.mem.eql(u8, a, "zombieA") or std.mem.eql(u8, a, "zombieB"));
+    // A group with a NaN weight_sum (entry skipped at load) picks nothing.
+    const nan_entries = [_]Entry{.{ .name = "zombieA", .weight = 0 }};
+    const nan_groups = [_]Group{.{ .name = "g2", .entries = &nan_entries, .weight_sum = 0 }};
+    var t2: GroupTable = .{ .groups = &nan_groups };
+    try std.testing.expect(t2.pick("g2", 1) == null);
 }
 
 test "load stock entitygroups when present" {
