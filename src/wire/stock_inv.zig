@@ -23,9 +23,10 @@ pub const item_value_save_version: u8 = 9;
 pub const toolbelt_slots: usize = 10;
 
 /// EntityPlayer bag size on the wire: CarryCapacity base is 45 (Awake
-/// EffectManager base f32 45 → Bag.ctor). ECS stores only
-/// `components.inv_bag_count` (32); apply truncates, encode pads empties.
-/// ldc.i4.s 99 in Awake is the PassiveEffects enum, not size.
+/// EffectManager base f32 45 → Bag.ctor). ECS stores the full stock layout
+/// (`components.inv_bag_count` = 45; toolbelt 10 + bag 45 + equip 12 = 67,
+/// ADR 0007 amended), so the apply keeps every slot and encode pads only
+/// wire-shape gaps. ldc.i4.s 99 in Awake is the PassiveEffects enum, not size.
 pub const bag_slots: usize = 45;
 
 /// Equipment.m_slots length in ctor.

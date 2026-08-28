@@ -20,17 +20,18 @@ stock catalog ([ADR 0015](../adr/0015-ecs-item-id-vs-stock-type.md)).
 | Range | Role |
 |---|---|
 | 0-9 | Toolbelt (holding index must be here) |
-| 10-41 | Bag (**32** ECS slots; stock bag is **45**; excess C2S indices truncated) |
-| 42-46 | Equipment (5 ECS armor slots; stock equipment array is wider on the wire) |
+| 10-54 | Bag (**45** slots, the stock wire `bag_slots`; ECS stores the full layout since ADR 0007 was amended) |
+| 55-66 | Equipment (**12** slots, stock `equipment_slots`; armor + mods) |
 
-`holding = 0xFFFF` means empty hands. Wire encode pads bag to stock `bag_slots`
-(45) with empties when building PDF/Bag bodies.
+`holding = 0xFFFF` means empty hands. The ECS array is the full 67-slot stock
+layout (`components.max_inv_slots`); wire encode pads only wire-shape gaps
+when building PDF/Bag bodies.
 
 ## Component
 
 ```text
 Inventory {
-  slots[47] { item_id, count, quality, meta }
+  slots[67] { item_id, count, quality, meta }
   holding: u16
   open_container: i32   // net id of open loot bag / TE, or -1
 }
