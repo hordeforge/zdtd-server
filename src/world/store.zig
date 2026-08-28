@@ -696,9 +696,11 @@ pub const World = struct {
 
     /// Rewrite a filled height plane through the geometry projection. Non-stock
     /// path only (the identity fast path skips it); profile max 255 until the
-    /// wire-profile layer lands (ADR geometry/wire-profiles).
+    /// wire-profile layer lands (ADR geometry/wire-profiles). The plane is u8,
+    /// so the result clamps to 255 even if a future caller bypasses the
+    /// [rules.geometry] validation.
     fn projectPlane(heights: *[256]u8, geo: rules_mod.Geometry, profile_max: u32) void {
-        for (heights) |*h| h.* = @intCast(geo.project(@floatFromInt(h.*), profile_max));
+        for (heights) |*h| h.* = @intCast(@min(255, geo.project(@floatFromInt(h.*), profile_max)));
     }
 
     pub fn loadStockMapEx(self: *World, map_dir: []const u8, prefabs_data_dir: ?[]const u8) !void {

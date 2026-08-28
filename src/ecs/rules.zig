@@ -536,6 +536,20 @@ pub const Geometry = struct {
     pub fn isStock(self: Geometry) bool {
         return self.height_scale == 1.0 and self.height_offset == 0.0 and self.height_ceiling == 0;
     }
+
+    /// Fail-closed sanity: the height plane is byte (u8) in EVERY wire
+    /// profile — including tall — so a non-zero ceiling above 255 would make
+    /// the plane fill's @intCast panic. A negative scale inverts the world
+    /// and a negative sea level is nonsense. Validated in main.zig on the
+    /// effective rules, like WorldgenGroup.
+    pub fn validate(self: Geometry) ?[]const u8 {
+        if (self.height_scale < 0) return "[rules.geometry] height_scale must be >= 0";
+        if (self.sea_level < 0) return "[rules.geometry] sea_level must be >= 0";
+        if (self.height_ceiling > 255) {
+            return "[rules.geometry] height_ceiling above 255 is unrepresentable (the height plane is byte in every profile)";
+        }
+        return null;
+    }
 };
 
 /// Vehicle sim tuning (zdtd-owned: the stock dedicated server has no vehicle
@@ -1146,6 +1160,24 @@ test "Geometry projection: identity at stock defaults, clamp at extremes" {
     // 0 ceiling = profile max.
     try std.testing.expectEqual(@as(u32, 255), g.ceiling(255));
     try std.testing.expectEqual(@as(u32, 16383), g.ceiling(16383));
+}
+
+test "Geometry validate rejects crash/absurd projection config" {
+    try std.testing.expect((Geometry{}).validate() == null);
+    // A ceiling above 255 would panic the byte height-plane fill.
+    const tall_ceil: Geometry = .{ .height_ceiling = 1000 };
+    try std.testing.expect(tall_ceil.validate() != null);
+    // Negative scale inverts the world; negative sea level is nonsense.
+    const inverted: Geometry = .{ .height_scale = -1.0 };
+    try std.testing.expect(inverted.validate() != null);
+    const below: Geometry = .{ .sea_level = -5 };
+    try std.testing.expect(below.validate() != null);
+    // 255 is the byte-plane max and stays valid; negative offsets are legal
+    // (lowering the whole world).
+    const capped: Geometry = .{ .height_ceiling = 255 };
+    try std.testing.expect(capped.validate() == null);
+    const lowered: Geometry = .{ .height_offset = -20 };
+    try std.testing.expect(lowered.validate() == null);
 }
 
 test "WorldgenGroup validate rejects degenerate shaping" {
