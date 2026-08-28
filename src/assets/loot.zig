@@ -180,7 +180,10 @@ pub const LootTable = struct {
     fn scaleCount(self: *const LootTable, cnt: u16, apply_abundance: bool) u16 {
         if (!apply_abundance or self.abundance_pct == 100) return @max(cnt, 1);
         const scaled = (@as(u32, cnt) * self.abundance_pct) / 100;
-        return @intCast(@max(scaled, 1));
+        // Clamp before the cast: a modded loot.xml count with a high
+        // LootAbundance (stock range 1..1000) can exceed u16; saturate at
+        // the stack cap rather than trapping the roll.
+        return @intCast(@max(1, @min(scaled, std.math.maxInt(u16))));
     }
 
     pub fn deinit(self: *LootTable) void {
@@ -481,6 +484,24 @@ test "loot abundance scales counts, keeps at least one" {
     const ns = lt.rollContainer("woodenChest", 1, 12345, &small);
     i = 0;
     while (i < ns) : (i += 1) try std.testing.expect(small[i].count >= 1);
+}
+
+test "scaleCount saturates at the u16 cap instead of trapping" {
+    var lt = LootTable.builtin();
+    // Max stock abundance (1000) times a modded count past 6553 would exceed
+    // u16 in the scaled product; the roll saturates at the stack cap.
+    lt.abundance_pct = 1000;
+    try std.testing.expectEqual(@as(u16, std.math.maxInt(u16)), lt.scaleCount(10000, true));
+    try std.testing.expectEqual(@as(u16, std.math.maxInt(u16)), lt.scaleCount(65535, true));
+    // Mid-range values still scale normally.
+    lt.abundance_pct = 200;
+    try std.testing.expectEqual(@as(u16, 200), lt.scaleCount(100, true));
+    // The floor keeps at least one even for a tiny count and abundance.
+    lt.abundance_pct = 1;
+    try std.testing.expectEqual(@as(u16, 1), lt.scaleCount(1, true));
+    // ignore_loot_abundance passes the raw count through unmodified.
+    lt.abundance_pct = 1000;
+    try std.testing.expectEqual(@as(u16, 65535), lt.scaleCount(65535, false));
 }
 
 const builtin_groups = [_]LootGroup{
