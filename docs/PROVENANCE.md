@@ -407,6 +407,11 @@ field-by-field provenance.
 | `max_claimed_explosion_radius` | 6.0 | R | `server/c2s/blocks.zig` cap on C2S-claimed explosion radii (block + entity): largest stock ExplosionData.EntityRadius is 6 (entities.xml `explosion` on cop/feral: radius_blocks 5, radius_entities 6); a forged blob must not carve the whole map or damage every loaded entity (2026-08-27) |
 | `fatal_kill_amount` | 9999 | Z | `server/c2s/misc.zig` **zdtd-owned** honored-`fatal` kill amount vs NPC kinds: stock fatal damage is client-computed; the server honors the flag only against zombies/animals with an amount far above any sim NPC class HP (max class hp 1600; the 9999-HP trader class is excluded by the zombie/animal gate) (2026-08-27) |
 | `quest_giver_fallback_y` | 70 | Z | `server/c2s/quest.zig` **zdtd-owned** fallback quest-giver marker Y when the trader NPC is not yet in the sim (the marker snaps to the real transform once the entity loads); plausible ground height, not stock data - the giver marker is client-side (2026-08-27) |
+| `assets/vehicles.zig max_seat_scan` | 99 | R | `Vehicle::SetSeats` walks seat0..seat98 (asm.il:1344168 IL_0085): the seat-scan bound is RE-pinned, not a tunable |
+| `assets/quests.zig max_quest_vars` | 8 | Z | **zdtd-owned** parse buffer cap for quest `<variable name= value=>` overrides (fixed array; the last occurrence wins across template/body merge; stock QuestVariables is an unbounded dictionary) |
+| `server/game/map.zig map_batch` | 8 | Z | **zdtd-owned** minimap pieces per send (8 = 4128 bytes raw); the stock producer sends the whole window at once, zdtd batches to bound the per-frame cost (2026-08-29 sweep) |
+| `server/game/map.zig map_walk_above` | 64 | Z | **zdtd-owned** perf floor for the top-block minimap walk (stock walks the whole 256 column; a cell above a 64+-block structure stays invisible) (2026-08-29 sweep) |
+| `litenet/peer.zig` resend_ns / ack_yield_ns | 80 ms / 2 ms | Z | **zdtd-owned** LiteNet-compatible transport timings: resend gate in the same ballpark as LiteNet, and the WindowFull pump sleep (far below the resend gate, above loopback RTT) so the reliable window drains between join-burst sends; same class as `join_ack_yield_ns` (2026-08-29 sweep) |
 
 ### 3.9 Divergence register (provenance for the differences)
 
