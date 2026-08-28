@@ -399,9 +399,9 @@ Baked Navezgane / Pregen remain available; **proc mode is live stream gen**.
   `docs/SCALE.md`).
 
 **CLI / world mode:** `--worldgen-seed <u64>` (implies proc terrain source;
-see `src/main.zig`) or serverconfig keys in GAME_OPTIONS; flat and baked map
-modes stay. World dir holds **overlays + cache only**, not a mandatory full
-export.
+see `src/main.zig`) or `zdtd.toml` `[worldgen] seed` (CLI wins; ignored when
+`--map` is set); flat and baked map modes stay. World dir holds **overlays +
+cache only**, not a mandatory full export.
 
 ## Sources
 

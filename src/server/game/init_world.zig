@@ -270,7 +270,9 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         const vk: ecs.components.VehicleKind = .minibike;
         if (self.vehicles.byKind(vk)) |vd| {
             _ = self.sim.spawnVehicleEx(vk, sx + 6, sy, sz - 4, vd.max_hp, vd.velocity_max, vd.seat_count);
-        } else {
+        } else if (!self.stock_catalogs_requested) {
+            // Offline demo only. After a game-dir load, a missing vehicles.xml
+            // row fails closed instead of inventing velocityMax.
             _ = self.sim.spawnVehicle(vk, sx + 6, sy, sz - 4);
         }
     }
@@ -281,16 +283,18 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         const cy: i32 = sp.y;
         const cz: i32 = sp.z + 2;
         const chest_block: u16 = replicate_te.seedChestBlockId(self);
-        if (self.world.setBlockWorld(cx, cy, cz, chest_block)) |_| {
-            if (self.containers.getOrCreate(.{ .x = cx, .y = cy, .z = cz }, 8, chest_block)) |cont| {
-                const wood = self.items.ecsIdByName("resourceWood");
-                const food = self.items.ecsIdByName("foodCanBeef");
-                if (wood != 0) cont.setSlot(0, .{ .item_id = wood, .count = 10, .quality = 1 });
-                if (food != 0) cont.setSlot(1, .{ .item_id = food, .count = 3, .quality = 1 });
+        if (chest_block != 0) {
+            if (self.world.setBlockWorld(cx, cy, cz, chest_block)) |_| {
+                if (self.containers.getOrCreate(.{ .x = cx, .y = cy, .z = cz }, 8, chest_block)) |cont| {
+                    const wood = self.items.ecsIdByName("resourceWood");
+                    const food = self.items.ecsIdByName("foodCanBeef");
+                    if (wood != 0) cont.setSlot(0, .{ .item_id = wood, .count = 10, .quality = 1 });
+                    if (food != 0) cont.setSlot(1, .{ .item_id = food, .count = 3, .quality = 1 });
+                }
+            } else |err| {
+                var ts: [19]u8 = undefined;
+                std.debug.print("zdtd: {s} seed chest block ({d},{d},{d}) failed: {s}\n", .{ clock.wallStamp(&ts), cx, cy, cz, @errorName(err) });
             }
-        } else |err| {
-            var ts: [19]u8 = undefined;
-            std.debug.print("zdtd: {s} seed chest block ({d},{d},{d}) failed: {s}\n", .{ clock.wallStamp(&ts), cx, cy, cz, @errorName(err) });
         }
     }
     util_log.info("zdtd: sim seed zombies z1={?} z2={?} sleeper={?} count={d} spawn=({d},{d},{d})\n", .{

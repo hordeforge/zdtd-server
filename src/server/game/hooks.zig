@@ -11,6 +11,7 @@ const invsys = @import("../../ecs/inventory.zig");
 const rng_util = @import("../../util/rng.zig");
 const prefabs_mod = @import("../../world/prefabs.zig");
 const items = @import("../../assets/items.zig");
+const assignids = @import("../../assets/assignids_comptime.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -462,7 +463,11 @@ pub fn turretStats(ctx: ?*anyopaque) ?ecs.components.TurretBlockStats {
 pub fn itemStackFor(ctx: ?*anyopaque, item_id: u16) u16 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     if (g.items.byId(item_id)) |_| return g.items.stackFor(item_id);
-    return invsys.maxStackBuiltin(item_id);
+    // Offline builtins only. After a game-dir/config load, unknown ids fail
+    // closed (stack 1) instead of the 60000 catch-all in maxStackOffline.
+    if (g.items.source == .builtin and !g.stock_catalogs_requested)
+        return invsys.maxStackBuiltin(item_id);
+    return 1;
 }
 
 /// Held-item light for the PlayerStealth selfLight blend (items.xml
@@ -671,4 +676,40 @@ fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
     const t: f32 = (q - 1.0) / 5.0;
     const v: f64 = @as(f64, d.degradation_min) + (@as(f64, d.degradation_max) - @as(f64, d.degradation_min)) * @as(f64, t);
     return @trunc(v);
+}
+
+test "itemStackFor fails closed after catalogs requested" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expectEqual(@as(u16, 60000), itemStackFor(g, 99));
+    g.stock_catalogs_requested = true;
+    try std.testing.expectEqual(@as(u16, 1), itemStackFor(g, 99));
+    g.items.source = .xml;
+    try std.testing.expectEqual(@as(u16, 1), itemStackFor(g, 99));
+}
+
+test "storage pins are not a second authority after catalogs requested" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const pin: u16 = assignids.cnt_wooden_chest_closed;
+    try std.testing.expect(g.isStorageBlockId(pin));
+    g.stock_catalogs_requested = true;
+    try std.testing.expectEqual(g.maxdamage.isStorageId(pin), g.isStorageBlockId(pin));
+    if (!g.maxdamage.isStorageId(pin)) {
+        try std.testing.expect(g.storagePairId(pin) == null);
+    }
 }

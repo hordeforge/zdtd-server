@@ -28,6 +28,8 @@ max_edit_range_blocks = 96.0
 # for servers running faster vehicles or speed buffs, lower it to tighten the
 # clamp. Must be finite and > 0.
 # max_horizontal_speed_mps = 20.0
+# Vertical envelope (rejects Y-only teleports the horizontal clamp cannot see).
+# max_vertical_speed_mps = 25.0
 max_claimed_damage = 200
 peer_stale_ms = 3000
 # Join rate-limit gap per IP (stock paces ~500 ms/IP; loopback is exempt).
@@ -103,6 +105,11 @@ block_id_mapping = true
 # Operator metrics cadence (docs/APM.md). 0 disables the periodic dump.
 # [apm]
 # dump_every_s = 60
+
+# Procedural terrain (docs/WORLDGEN.md). Not stock RWG. CLI --worldgen-seed
+# wins; ignored when --map is set. Unset keeps the flat/baked default.
+# [worldgen]
+# seed = 42
 
 # Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
 # [mode]

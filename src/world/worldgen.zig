@@ -204,10 +204,14 @@ pub const WorldGen = struct {
     /// biome resolved, including a single-biome table: materials still come
     /// from XML, only the W3 field stays off (`biome_n <= 1`).
     biome_table: ?*const biome_layers.Table = null,
-    /// Live AssignIds air/stone for the first-pass density splat. Pins until
-    /// World.syncWorldgenBiomes copies World.terrain_ids.
+    /// Live AssignIds air/stone/dirt/bedrock/forest for the density splat and
+    /// the no-table material pass. Pins until World.syncWorldgenBiomes copies
+    /// World.terrain_ids (never a second authority after merge).
     air_id: u16 = assignids.air,
     stone_id: u16 = assignids.terr_stone,
+    dirt_id: u16 = assignids.terr_dirt,
+    bedrock_id: u16 = assignids.terr_bedrock,
+    forest_id: u16 = assignids.terr_forest_ground,
 
     pub fn init(seed: u64) WorldGen {
         return .{
@@ -407,7 +411,8 @@ pub const WorldGen = struct {
         }
     }
 
-    /// Single-biome dirt/stone/bedrock column fill (AssignIds pins).
+    /// Single-biome dirt/stone/bedrock column fill (AssignIds pins). Tests /
+    /// standalone WorldGen only; generateChunkBlocks uses live ids.
     pub fn fillColumn(h: u8, out: *[256]u16) void {
         biome_layers.Table.fillColumn(biome_layers.defaultStack(), h, out);
     }
@@ -487,7 +492,11 @@ pub const WorldGen = struct {
                 const real_id = bl.biomeIdAt(self.biomeAt(@floatFromInt(wx), @floatFromInt(wz)));
                 biome_layers.Table.fillColumn(bl.stackFor(real_id), h, &col_ids);
             } else {
-                fillColumn(h, &col_ids);
+                biome_layers.Table.fillColumn(
+                    biome_layers.stackFromIds(self.forest_id, self.dirt_id, self.stone_id, self.bedrock_id),
+                    h,
+                    &col_ids,
+                );
             }
             var y: usize = 0;
             while (y <= h) : (y += 1) {
@@ -578,6 +587,23 @@ test "worldgen heights in band and uses assignids surface" {
     WorldGen.fillColumn(heights[0], &col);
     try std.testing.expectEqual(assignids.terr_bedrock, col[0]);
     try std.testing.expectEqual(assignids.terr_forest_ground, col[heights[0]]);
+}
+
+test "generateChunkBlocks no-table path uses live terrain ids" {
+    var g = WorldGen.init(7);
+    g.forest_id = 9001;
+    g.dirt_id = 9002;
+    g.stone_id = 9003;
+    g.bedrock_id = 9004;
+    g.air_id = 9000;
+    var heights: [256]u8 = undefined;
+    var blocks: [16 * 256 * 16]u32 = undefined;
+    g.generateChunkBlocks(0, 0, &heights, &blocks);
+    const h = heights[0];
+    try std.testing.expectEqual(@as(u32, 9001), blocks[@intCast(0 + 0 * 16 + @as(i32, h) * 256)]);
+    try std.testing.expectEqual(@as(u32, 9004), blocks[0]);
+    try std.testing.expect(blocks[0] != assignids.terr_bedrock);
+    try std.testing.expect(blocks[@intCast(0 + 0 * 16 + @as(i32, h) * 256)] != assignids.terr_forest_ground);
 }
 
 test "worldgen generateChunkBlocks air above surface" {

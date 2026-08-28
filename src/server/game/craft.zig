@@ -70,11 +70,17 @@ pub fn itemIsArmor(ctx: ?*anyopaque, item_id: u16) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     if (g.items.byId(item_id)) |d| {
         if (std.mem.startsWith(u8, d.name, "armor")) return true;
+        // XML catalog: the loaded name is the authority. Offline aliases
+        // must not reclassify a catalog row after a game-dir load.
+        if (g.items.source != .builtin or g.stock_catalogs_requested) return false;
     }
-    if (invsys.builtinStockNameFallback(item_id)) |n| {
-        if (std.mem.startsWith(u8, n, "armor")) return true;
+    if (g.items.source == .builtin and !g.stock_catalogs_requested) {
+        if (invsys.builtinStockNameFallback(item_id)) |n| {
+            if (std.mem.startsWith(u8, n, "armor")) return true;
+        }
+        return invsys.isArmorOffline(item_id);
     }
-    return invsys.isArmorOffline(item_id);
+    return false;
 }
 
 /// Refuel generator at world pos if peer is in range. amount = items.xml FuelValue.
@@ -462,6 +468,22 @@ pub fn tickAlwaysOnRadiusEffects(self: *Game) void {
             }
         }
     }
+}
+
+test "itemIsArmor does not use offline pins after catalogs requested" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    try std.testing.expect(itemIsArmor(g, 11));
+    g.stock_catalogs_requested = true;
+    g.items.source = .xml;
+    try std.testing.expect(!itemIsArmor(g, 99));
 }
 
 test "general craft path rejects workstation/tool/material recipes" {

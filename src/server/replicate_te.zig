@@ -125,10 +125,14 @@ pub fn applyWsGroup(self: *Game, dst: []ecs.components.InvSlot, src: []const pac
 }
 
 /// Runtime AssignIds id for seed chest. Preference order: AssignIds dump
-/// (id_by_name), then optional world-dir override file, then V3.1.4 pin.
+/// (id_by_name), then optional world-dir override file, then V3.1.4 pin
+/// (offline / no game-dir only). A game-dir miss fails closed to 0.
 pub fn seedChestBlockId(self: *Game) u16 {
-    const captured: u16 = self.maxdamage.idByName("cntWoodenChestClosed") orelse
+    const pin: u16 = if (self.stock_catalogs_requested)
+        0
+    else
         @intCast(packages.stock_deco.cnt_wooden_chest_closed);
+    const captured: u16 = self.maxdamage.idByName("cntWoodenChestClosed") orelse pin;
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/seed_chest_block_id", .{self.world.world_dir}) catch return captured;
     var buf: [32]u8 = undefined;

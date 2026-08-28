@@ -92,6 +92,8 @@ in `assignids_comptime.zig` (tests / no-game-dir fallback).
 | Dump version skew vs client | Prefer suppress deco over NRE |
 | Empty biome layer stack | Fail closed (air); never paint AssignIds pins |
 | biomes.xml missing pine_forest | Default column via idByName; pins only if lookup misses |
+| Unknown item after game-dir | stack 1 / not armor / not placeable (never builtin id aliases) |
+| Storage/chest id after game-dir | AssignIds `idByName` only; comptime pins offline |
 
 ## WorldInfo and client assets
 

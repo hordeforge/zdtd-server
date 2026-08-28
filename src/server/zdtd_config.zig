@@ -165,6 +165,13 @@ pub const Apm = struct {
     dump_every_s: ?u64 = null,
 };
 
+/// `[worldgen]` config section: zdtd-invented proc terrain (not stock RWG).
+/// CLI `--worldgen-seed` wins over the file. Ignored when `--map` is set.
+pub const Worldgen = struct {
+    /// Procedural terrain seed. Unset = flat/baked world (existing default).
+    seed: ?u64 = null,
+};
+
 /// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
 pub const Mode = struct {
     name: ?[]const u8 = null,
@@ -278,6 +285,8 @@ pub const File = struct {
     bots: Bots = .{},
     /// Operator metrics cadence (docs/APM.md): `[apm] dump_every_s`.
     apm: Apm = .{},
+    /// Procedural terrain seed (docs/WORLDGEN.md): `[worldgen] seed`.
+    worldgen: Worldgen = .{},
     /// Sim rule overlay (ADR 0021): `[rules.combat]` etc. bound here, merged
     /// over the mode pack by main.zig so zdtd.toml wins the precedence order.
     rules: rules_mod.RulesOverlay = .{},
@@ -343,6 +352,9 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.authority.max_horizontal_speed_mps) |v| {
         if (@hasField(@TypeOf(opts.*), "max_horizontal_speed_mps")) opts.max_horizontal_speed_mps = v;
     }
+    if (f.authority.max_vertical_speed_mps) |v| {
+        if (@hasField(@TypeOf(opts.*), "max_vertical_speed_mps")) opts.max_vertical_speed_mps = v;
+    }
     if (f.authority.max_claimed_damage) |v| opts.max_claimed_damage = v;
     if (f.authority.peer_stale_ms) |v| opts.peer_stale_ms = v;
     if (f.authority.lock_stale_ms) |v| {
@@ -405,6 +417,10 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.airdrop_loot_list) |v| opts.airdrop_loot_list = v;
     if (f.apm.dump_every_s) |v| {
         if (@hasField(@TypeOf(opts.*), "apm_dump_every_s")) opts.apm_dump_every_s = v;
+    }
+    if (f.worldgen.seed) |v| {
+        if (@hasField(@TypeOf(opts.*), "worldgen_seed") and opts.worldgen_seed == null)
+            opts.worldgen_seed = v;
     }
 }
 
@@ -517,6 +533,15 @@ pub fn sanitizeInitOptions(opts: anytype) void {
             .{opts.max_horizontal_speed_mps},
         );
         opts.max_horizontal_speed_mps = 1;
+    }
+    if (@hasField(@TypeOf(opts.*), "max_vertical_speed_mps") and
+        (!std.math.isFinite(opts.max_vertical_speed_mps) or opts.max_vertical_speed_mps <= 0))
+    {
+        util_log.warn(
+            "zdtd: max_vertical_speed_mps={d} invalid; using 1\n",
+            .{opts.max_vertical_speed_mps},
+        );
+        opts.max_vertical_speed_mps = 1;
     }
     if (opts.peer_stale_ms == 0) {
         util_log.warn("zdtd: peer_stale_ms=0 invalid; using 1\n", .{});
@@ -747,6 +772,7 @@ const TestOpts = struct {
     interest_range: f32 = 160,
     max_edit_range: f32 = 96,
     max_horizontal_speed_mps: f32 = 20,
+    max_vertical_speed_mps: f32 = 25,
     max_claimed_damage: i32 = 200,
     peer_stale_ms: u64 = 3000,
     lock_stale_ns: u64 = 30_000_000_000,
@@ -777,6 +803,7 @@ const TestOpts = struct {
     workstation_crafts_per_tick: u16 = 64,
     workstation_craft_backlog: f32 = 60,
     apm_dump_every_s: ?u64 = null,
+    worldgen_seed: ?u64 = null,
     land_claim_size: u16 = 41,
     plugin_budget: struct {
         fuel: u64 = 100_000_000,
@@ -1014,6 +1041,47 @@ test "[authority] max_horizontal_speed_mps parses, merges, and clamps" {
     var zero: TestOpts = .{ .max_horizontal_speed_mps = 0 };
     sanitizeInitOptions(&zero);
     try std.testing.expectEqual(@as(f32, 1), zero.max_horizontal_speed_mps);
+}
+
+test "[authority] max_vertical_speed_mps parses, merges, and clamps" {
+    var f = try parse(
+        std.testing.allocator,
+        \\[authority]
+        \\max_vertical_speed_mps = 18.5
+        \\
+        ,
+    );
+    defer f.deinit();
+    try std.testing.expectApproxEqAbs(@as(f32, 18.5), f.authority.max_vertical_speed_mps.?, 0.01);
+    var o: TestOpts = .{};
+    applyToInitOptions(&f, &o);
+    try std.testing.expectApproxEqAbs(@as(f32, 18.5), o.max_vertical_speed_mps, 0.01);
+
+    var bad: TestOpts = .{ .max_vertical_speed_mps = std.math.nan(f32) };
+    sanitizeInitOptions(&bad);
+    try std.testing.expectEqual(@as(f32, 1), bad.max_vertical_speed_mps);
+    var zero: TestOpts = .{ .max_vertical_speed_mps = 0 };
+    sanitizeInitOptions(&zero);
+    try std.testing.expectEqual(@as(f32, 1), zero.max_vertical_speed_mps);
+}
+
+test "[worldgen] seed parses and does not override a CLI seed" {
+    var f = try parse(
+        std.testing.allocator,
+        \\[worldgen]
+        \\seed = 42
+        \\
+        ,
+    );
+    defer f.deinit();
+    try std.testing.expectEqual(@as(?u64, 42), f.worldgen.seed);
+    var o: TestOpts = .{};
+    applyToInitOptions(&f, &o);
+    try std.testing.expectEqual(@as(?u64, 42), o.worldgen_seed);
+
+    var cli: TestOpts = .{ .worldgen_seed = 99 };
+    applyToInitOptions(&f, &cli);
+    try std.testing.expectEqual(@as(?u64, 99), cli.worldgen_seed);
 }
 
 test "sanitizeInitOptions forces an odd land claim size" {

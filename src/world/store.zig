@@ -605,6 +605,9 @@ pub const World = struct {
             wg.biome_n = n;
             wg.air_id = self.terrain_ids.air;
             wg.stone_id = self.terrain_ids.stone;
+            wg.dirt_id = self.terrain_ids.dirt;
+            wg.bedrock_id = self.terrain_ids.bedrock;
+            wg.forest_id = self.terrain_ids.forest_ground;
             // Always attach the table when a default stack exists so the
             // material pass uses live/XML ids, not WorldGen.fillColumn pins.
             wg.biome_table = if (n >= 1 or self.biome_layers_table.default_stack.n > 0)
@@ -2065,6 +2068,12 @@ test "resolveTerrainIds seeds default stack from live dump ids" {
     const c = try w.getOrCreate(.{ .x = 0, .z = 0 });
     try std.testing.expectEqual(@as(u16, 50), c.blockAt(0, 200, 0));
     try std.testing.expectEqual(@as(u16, 52), c.blockAt(0, 0, 0));
+    w.enableProc(1);
+    try std.testing.expectEqual(@as(u16, 50), w.worldgen.?.air_id);
+    try std.testing.expectEqual(@as(u16, 51), w.worldgen.?.stone_id);
+    try std.testing.expectEqual(@as(u16, 53), w.worldgen.?.dirt_id);
+    try std.testing.expectEqual(@as(u16, 52), w.worldgen.?.bedrock_id);
+    try std.testing.expectEqual(@as(u16, 55), w.worldgen.?.forest_id);
 }
 
 test "syncWorldgenBiomes keeps XML stacks for a single biome" {
