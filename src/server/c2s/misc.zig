@@ -95,6 +95,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // byte-identical to the stock rebuild; the client sends these for
         // EntityAlive.OnEntityDeath (isGameMessageOnDeath), team changes and
         // disconnect (LeftGame), and chat-form announcements.
+        // Same rate gate as the other verbatim relays (SoundAtPosition): an
+        // unthrottled spam loop would fan the raw body out to every peer for
+        // free. The stock client sends these on death/team-change/disconnect,
+        // all infrequent, so the inv bucket never starves legit traffic.
+        if (!self.takeInvToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         if (body.len < 9) {
             self.harness.counters.inc(.c2s_malformed);
             return true;
@@ -152,6 +160,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // entityThatCausedIt, so every client except the causing entity's
         // owner sees the effect (the owner already spawned it locally).
         // Verbatim relay excludes that entity's client, like stock.
+        // Same rate gate as SoundAtPosition (also a cosmetic relay): an
+        // unthrottled spam loop would fan the raw body out to every other
+        // peer for free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         const pe = packages.parseParticleEffectInvoke(body) catch {
             self.harness.counters.inc(.c2s_malformed);
             return true;
@@ -201,6 +216,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         };
         // Owner already ragdolled (SendPacketToTrackedPlayersAndTrackedEntity).
+        // Same rate gate as the other cosmetic relays (SoundAtPosition /
+        // ParticleEffect): an unthrottled spam loop would fan the raw body
+        // out to every other peer for free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
         relayBodyExcept(self, "NetPackageEntityRagdoll", body, rg.entity_id, "EntityRagdoll");
         return true;
     }
