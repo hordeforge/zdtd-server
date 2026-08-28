@@ -63,6 +63,20 @@ pub fn killVerdict(ctx: ?*anyopaque, kind: ecs.Kind, victim: i32, attacker: i32)
 
 pub const max_plugin_cmd_len: usize = 128;
 
+/// Owner callback for HostCtx.withdraw_fn: drop this src's pending commands
+/// and applied spawns/bots. Invoked by WasmHost.reload after on_shutdown.
+pub fn wasmWithdraw(ctx: *plugin_mod.wasm.HostCtx, src: i16) void {
+    const g = gameFromPtr(ctx.data orelse return);
+    game_step.withdrawPluginSrc(g, src);
+}
+
+/// World.pre_drain_fn: withdraw every plugin that disabled itself since the
+/// last pass, immediately before drainCommands applies queued ops.
+pub fn withdrawDisabled(ctx: ?*anyopaque) void {
+    const g = gameFromPtr(ctx orelse return);
+    game_step.withdrawDisabledPlugins(g);
+}
+
 pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void {
     const g = gameFromPtr(ctx.data orelse return);
     if (cmd.len > max_plugin_cmd_len) {
@@ -387,9 +401,10 @@ pub fn adminPlugin(self: *Game, rest: []const u8) void {
             return;
         };
         const path = self.wasm_plugins.slots[idx].name;
-        // Paper HMR: disposing the old instance withdraws its pending commands
-        // and despawns its applied spawns before reinstantiation, so the
-        // reloaded module starts clean instead of inheriting the old queue.
+        // Paper HMR: withdraw applied spawns before dispose so the dying
+        // module's entities are gone before on_shutdown. reload then
+        // withdraws again after on_shutdown (HostCtx.withdraw_fn) so anything
+        // queued during shutdown cannot land on the replacement.
         const src: i16 = @intCast(idx + 1);
         game_step.withdrawPluginSrc(self, src);
         const n_before = self.wasm_plugins.n;

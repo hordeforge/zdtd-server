@@ -141,6 +141,32 @@ test "schedule.run drains commands and clears locals" {
     try std.testing.expectEqual(@as(usize, 0), w.commands.len());
 }
 
+test "drainCommands runs pre_drain before applying ops" {
+    // ADR 0030: withdrawal must happen immediately before drain so a
+    // disabled plugin's pending ops never execute. Damage has no held
+    // inverse, so a drain-then-withdraw would leave the hit applied.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const nid = w.spawnZombie(0, 70, 0, 40).?;
+    const slot = w.slotOfNetId(nid).?;
+    const hp0 = w.health[slot].hp;
+    try std.testing.expect(w.commands.pushSrc(1, .{ .damage = .{ .net_id = nid, .amount = 10 } }));
+    const Cap = struct {
+        fn pre(ctx: ?*anyopaque) void {
+            const buf: *@import("command.zig").Buffer = @ptrCast(@alignCast(ctx.?));
+            var out: [@import("command.zig").max_commands]i32 = undefined;
+            _ = buf.dropFrom(1, &out);
+        }
+    };
+    w.pre_drain_ctx = &w.commands;
+    w.pre_drain_fn = &Cap.pre;
+    const dr = w.drainCommands();
+    try std.testing.expectEqual(@as(u32, 0), dr.damaged);
+    try std.testing.expectEqual(@as(usize, 0), w.commands.len());
+    try std.testing.expectEqual(hp0, w.health[slot].hp);
+}
+
 test "default pipeline order is pinned" {
     // The order encodes a dependency (buffs before ai). A reorder is a
     // behaviour change and must fail here rather than pass silently.

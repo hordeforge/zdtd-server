@@ -331,13 +331,11 @@ pub fn step(self: *Game) !void {
         if (self.tick_n % self.turret_sync_ticks == 0) try self.broadcastTurretSync();
         self.plugins.onTick();
         self.wasm_plugins.onTick();
-        // Temporal composability: a plugin that disabled itself this pass must
-        // not leave queued (undrained) effects behind; withdraw before the
-        // next drain, and despawn its applied spawns (the held inverse, paper
-        // 3.1) so a broken module's entities do not outlive it.
-        var wsrc: [plugin_mod.wasm.max_wasm_plugins]i16 = undefined;
-        const wn = self.wasm_plugins.takeWithdrawn(&wsrc);
-        for (wsrc[0..wn]) |s| withdrawPluginSrc(self, s);
+        // Pending commands are withdrawn immediately before drainCommands
+        // (World.pre_drain_fn). This pass despawns applied spawns the same
+        // tick a module disables during onTick, rather than waiting for the
+        // next drain.
+        withdrawDisabledPlugins(self);
     }
     {
         const cn = self.sim.completed_quests_n;
@@ -512,6 +510,16 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     // truncates out of i32 range.
     if (base >= 2147483648.0) return std.math.maxInt(i32);
     return @max(1, @as(i32, @floor(base)));
+}
+
+/// Withdraw every plugin that disabled itself (trap / fuel) whose pending
+/// effects have not yet been dropped. Called immediately before drain
+/// (World.pre_drain_fn) and after onTick so a broken module's queued ops
+/// never execute and its applied spawns do not outlive it.
+pub fn withdrawDisabledPlugins(self: *Game) void {
+    var wsrc: [plugin_mod.wasm.max_wasm_plugins]i16 = undefined;
+    const wn = self.wasm_plugins.takeWithdrawn(&wsrc);
+    for (wsrc[0..wn]) |s| withdrawPluginSrc(self, s);
 }
 
 /// Withdraw one plugin src: drop its pending commands and despawn its applied

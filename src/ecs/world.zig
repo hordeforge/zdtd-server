@@ -490,6 +490,11 @@ pub const World = struct {
     /// = announcements are dropped (today's behaviour).
     say_ctx: ?*anyopaque = null,
     say_fn: ?*const fn (?*anyopaque, []const u8) void = null,
+    /// Called immediately before drainCommands applies queued ops. Game wires
+    /// this to plugin-effect withdrawal so a disabled module's pending
+    /// commands never execute (ADR 0030). Unset = drain as today.
+    pre_drain_ctx: ?*anyopaque = null,
+    pre_drain_fn: ?*const fn (?*anyopaque) void = null,
     /// Pre-trade price verdict (on_trade_price): (ctx, player_net, item, unit)
     /// -> i32. <0 denies the trade, 0 keeps the price, >0 scales the unit
     /// price by percent. Game wires this to the plugin + wasm host; unset =
@@ -1679,7 +1684,10 @@ pub const World = struct {
     }
 
     /// Apply and clear the ops queued at entry; ops pushed during drain stay for the next tick.
+    /// `pre_drain_fn` runs first (plugin withdrawal) so a disabled module's
+    /// still-pending commands are dropped before they apply.
     pub fn drainCommands(self: *World) command.DrainResult {
+        if (self.pre_drain_fn) |f| f(self.pre_drain_ctx);
         return self.commands.drain(self);
     }
 

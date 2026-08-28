@@ -203,9 +203,11 @@ pub const Client = game_types.Client;
 
 const game_wasm_host = @import("game/wasm_host.zig");
 pub const killVerdict = game_wasm_host.killVerdict;
+pub const withdrawDisabled = game_wasm_host.withdrawDisabled;
 const wasmLog = game_wasm_host.wasmLog;
 const wasmTick = game_wasm_host.wasmTick;
 const wasmQueue = game_wasm_host.wasmQueue;
+const wasmWithdraw = game_wasm_host.wasmWithdraw;
 const wasmSense = game_wasm_host.wasmSense;
 const wasmQuery = game_wasm_host.wasmQuery;
 
@@ -786,6 +788,7 @@ pub const Game = struct {
                 .log_fn = &wasmLog,
                 .tick_fn = &wasmTick,
                 .queue_fn = &wasmQueue,
+                .withdraw_fn = &wasmWithdraw,
                 .sense_fn = &wasmSense,
                 .query_fn = &wasmQuery,
             },

@@ -4302,6 +4302,46 @@ test "scenario plugin withdrawal despawns applied spawns" {
     std.debug.print("PASS plugin withdraw: applied spawns despawned per src\n", .{});
 }
 
+test "scenario plugin disable withdraws pending commands before drain" {
+    // ADR 0030: a module that disables (trap/fuel) must not have its queued
+    // ops applied. Withdrawal runs immediately before drain, not only after
+    // onTick. Damage has no held inverse, so a drain-then-withdraw would
+    // leave the hit applied.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const modules = [_][]const u8{"assets/fixtures/plugin_hello.wasm"};
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .enable_sample_plugin = false,
+        .plugin_modules = &modules,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.count());
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const t = g.sim.transform[ps];
+    const z = g.sim.spawnZombie(t.x + 1, t.y, t.z, 40).?;
+    const zs = g.sim.slotOfNetId(z).?;
+    const hp0 = g.sim.health[zs].hp;
+    g.wasm_plugins.slots[0].disabled = true;
+    try std.testing.expect(g.sim.commands.pushSrc(1, .{ .damage = .{ .net_id = z, .amount = 10 } }));
+    try g.step();
+    try std.testing.expectApproxEqAbs(hp0, g.sim.health[zs].hp, 0.01);
+    try std.testing.expectEqual(@as(usize, 0), g.sim.commands.len());
+
+    std.debug.print("PASS plugin withdraw-before-drain: pending damage dropped\n", .{});
+}
+
 fn writeFileAt(dir: []const u8, name: []const u8, data: []const u8) !void {
     var path_buf: [512]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name });

@@ -103,6 +103,10 @@ pub const HostCtx = struct {
     /// attributable). The owner uses it to withdraw a disabled plugin's
     /// pending effects (paper: temporal composability).
     queue_fn: *const fn (ctx: *HostCtx, src: i16, cmd: []const u8) void,
+    /// Owner withdraws `src` after a plugin's `on_shutdown` (reload) so
+    /// commands queued during shutdown and applied spawns do not outlive the
+    /// disposed instance. Null in tests that do not own a command buffer.
+    withdraw_fn: ?*const fn (ctx: *HostCtx, src: i16) void = null,
     /// Build a read-only world snapshot into `out`, returning bytes written.
     /// 0 when the owner has no sense (a plain event plugin). Signature keeps
     /// this layer free of a Game dependency; the owner casts via `data`.
@@ -919,6 +923,12 @@ pub const WasmHost = struct {
         else
             "";
         _ = self.slots[idx].callHook(.on_shutdown);
+        // Withdraw after on_shutdown and before deinit: shutdown may queue
+        // (or spawn bots) that a pre-reload withdraw would miss, and those
+        // effects must not land on the replacement or a compacted neighbor.
+        if (self.ctx) |ctx| {
+            if (ctx.withdraw_fn) |wf| wf(ctx, @intCast(idx + 1));
+        }
         self.slots[idx].deinit();
         if (self.ctx) |ctx| {
             ctx.rt_slot[idx] = null;
@@ -1988,6 +1998,53 @@ test "host_verbs is the _zdtd_requires vocabulary for host imports" {
     try std.testing.expect(Plugin.isHostVerb("json_obj"));
     try std.testing.expect(!Plugin.isHostVerb("on_tick"));
     try std.testing.expect(!Plugin.isHostVerb("bot"));
+}
+
+test "Hook.names is the _zdtd_requires vocabulary for hooks" {
+    try std.testing.expectEqual(@typeInfo(Hook).@"enum".fields.len, Hook.names.len);
+    inline for (@typeInfo(Hook).@"enum".fields, 0..) |f, i| {
+        try std.testing.expectEqualStrings(f.name, Hook.names[i]);
+    }
+}
+
+test "plugin reload withdraws after on_shutdown before deinit" {
+    // HMR: on_shutdown may queue; the owner must withdraw that src after
+    // shutdown and before deinit so the replacement (or a compacted neighbor
+    // on failed reload) does not inherit the dying fiber's effects.
+    const Cap = struct {
+        var srcs: [4]i16 = undefined;
+        var n: usize = 0;
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+        fn withdrawFn(_: *HostCtx, src: i16) void {
+            if (n < srcs.len) {
+                srcs[n] = src;
+                n += 1;
+            }
+        }
+    };
+    Cap.n = 0;
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .withdraw_fn = &Cap.withdrawFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    const path = host.slots[0].name;
+    try std.testing.expect(host.reload(0, path));
+    try std.testing.expectEqual(@as(usize, 1), Cap.n);
+    try std.testing.expectEqual(@as(i16, 1), Cap.srcs[0]);
+    Cap.n = 0;
+    try std.testing.expect(!host.reload(0, "/no/such/plugin.wasm"));
+    try std.testing.expectEqual(@as(usize, 1), Cap.n);
+    try std.testing.expectEqual(@as(i16, 1), Cap.srcs[0]);
 }
 
 test "queue import attributes commands to the calling plugin slot" {

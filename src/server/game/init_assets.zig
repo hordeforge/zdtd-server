@@ -491,6 +491,11 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // (sender 0 = server). Unset hook = announcements dropped.
         self.sim.say_ctx = self;
         self.sim.say_fn = &game_mod.announceChat;
+        // Plugin withdrawal immediately before drainCommands (ADR 0030): a
+        // module that disabled during net poll or sim must not have its
+        // queued ops applied this tick.
+        self.sim.pre_drain_ctx = self;
+        self.sim.pre_drain_fn = &game_mod.withdrawDisabled;
         // Pre-trade price verdict (on_trade_price): routes the sim buy price
         // to the plugin + wasm host. Unset hook = no plugins.
         self.sim.trade_price_verdict_ctx = self;

@@ -51,6 +51,12 @@ safe runtime components:
    fail closed (drop) instead of running as native src 0. A failed reload that
    drops a slot remaps remaining command and bot srcs so compacted slots keep
    their attribution.
+   Amended 2026-08-28 (drain order): Game wires `World.pre_drain_fn` to
+   `takeWithdrawn` so withdrawal runs immediately before `drainCommands`,
+   covering hooks that fire during net poll or sim (not only after `onTick`).
+   Amended 2026-08-28 (reload shutdown): `WasmHost.reload` invokes the owner's
+   `HostCtx.withdraw_fn` after `on_shutdown` and before `deinit`, so commands
+   queued during shutdown cannot outlive the disposed instance.
 3. **Declarative dependencies.** Modules export `_zdtd_requires` returning a
    comma-separated capability list (hook names + `host_verbs`: `log`/`tick`/
    `queue`/`sense`/`query`/`json_*`). Unknown or un-exported capabilities
