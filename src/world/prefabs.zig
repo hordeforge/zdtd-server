@@ -118,10 +118,23 @@ fn parseVolumeLists(
         const z = z_it.next() orelse break;
         const sp = parseVec3i(s) orelse continue;
         const zp = parseVec3i(z) orelse continue;
-        out_start[n] = .{ @intCast(sp[0]), @intCast(sp[1]), @intCast(sp[2]) };
-        out_size[n] = .{ @intCast(zp[0]), @intCast(zp[1]), @intCast(zp[2]) };
+        // Clamp to the wire ranges (start s8, size u8): a modded prefab XML
+        // value past them must not trap the load-time cast.
+        out_start[n] = .{ clampStart(sp[0]), clampStart(sp[1]), clampStart(sp[2]) };
+        out_size[n] = .{ clampSize(zp[0]), clampSize(zp[1]), clampSize(zp[2]) };
     }
     out_n.* = @intCast(n);
+}
+
+/// Clamp a prefab-local coordinate to the wire s8 range (TraderTeleport /
+/// TraderAreaProtect start fields).
+fn clampStart(v: i32) i8 {
+    return @intCast(std.math.clamp(v, std.math.minInt(i8), std.math.maxInt(i8)));
+}
+
+/// Clamp a prefab-local size to the wire u8 range; negative is nonsense.
+fn clampSize(v: i32) u8 {
+    return @intCast(std.math.clamp(v, 0, std.math.maxInt(u8)));
 }
 
 /// Runtime block id for a stock block name (AssignIds space), null when the
@@ -478,7 +491,7 @@ pub const Index = struct {
             }
             if (xml_util.propertyValue(raw, "TraderAreaProtect")) |v| {
                 if (parseVec3i(v)) |p| {
-                    qd.protect_padding = .{ @intCast(p[0]), @intCast(p[1]), @intCast(p[2]) };
+                    qd.protect_padding = .{ clampStart(p[0]), clampStart(p[1]), clampStart(p[2]) };
                 }
             }
             parseVolumeLists(
@@ -1069,6 +1082,25 @@ test "trader POI data: cell and class tag from the stock install" {
     try std.testing.expectEqual(@as(i32, -1), plain.trader_x);
     try std.testing.expect(plain.trader_tag.len == 0);
     try std.testing.expect(!plain.is_trader_area);
+}
+
+test "teleport clamps keep out-of-range prefab XML from trapping the cast" {
+    try std.testing.expectEqual(@as(i8, 127), clampStart(1000));
+    try std.testing.expectEqual(@as(i8, -128), clampStart(-1000));
+    try std.testing.expectEqual(@as(i8, 0), clampStart(0));
+    try std.testing.expectEqual(@as(i8, 7), clampStart(7));
+    try std.testing.expectEqual(@as(u8, 255), clampSize(300));
+    try std.testing.expectEqual(@as(u8, 0), clampSize(-5));
+    try std.testing.expectEqual(@as(u8, 52), clampSize(52));
+    var starts: [max_teleport_volumes][3]i8 = undefined;
+    var sizes: [max_teleport_volumes][3]u8 = undefined;
+    var n: u8 = 0;
+    parseVolumeLists("1000,0,0#-1000,0,0", "300,1,1#-5,0,0", &starts, &sizes, &n);
+    try std.testing.expectEqual(@as(u8, 2), n);
+    try std.testing.expectEqual(@as(i8, 127), starts[0][0]);
+    try std.testing.expectEqual(@as(i8, -128), starts[1][0]);
+    try std.testing.expectEqual(@as(u8, 255), sizes[0][0]);
+    try std.testing.expectEqual(@as(u8, 0), sizes[1][0]);
 }
 
 test "part decorations paint up to the volume cap" {
