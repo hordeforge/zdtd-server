@@ -3,6 +3,57 @@
 Consumer-visible changes are recorded here. The project follows the release
 and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
+## [Unreleased]
+
+### Added
+
+- Stock client wire V3.2.0 b9 (Mono, EAC off): packed `NetPackageDamageEntity`
+  flags + `KillXPScale` (breaking), POI metadata packages
+  (`NetPackagePOIMetadataRequest`/`Response` replace `NetPackagePOIAround`),
+  `NetPackageConfirmSpawnEntity`, `EntityCreationData` requestedBy/requestKey
+  tail, `ItemValue.Activated` → Flags bitfield (wire-compatible). Grounded in
+  7dtd-engine-research `docs/changelog-3.2.0.md`; the 3.2.0 login gate is
+  live-verified. Caveat: the bundled AssignIds dump is still 3.1.0-era
+  (refresh item in GAP_ANALYSIS §1a).
+- Malleable world geometry (ADR 0036): `[rules.geometry]` elevation projection
+  (`sea_level`/`height_scale`/`height_offset`/`height_ceiling`; identity at
+  stock defaults) and `[wire] profile` column-height dialects — a world can
+  ship compressed mountains, a sea-level model, or a custom ceiling with a
+  stock client; non-stock dialects need a paired client mod. Proc shaping
+  params lifted to `[rules.worldgen]` (byte-identical defaults; fail-closed
+  validate).
+- Infinite procedural world: `--mode infinite` (or `mods/infinite_world`, a
+  config-only mod via the new `[mods] enabled` mechanism) streams chunks on
+  first touch as players explore; deterministic per seed; proc deco resolves
+  from the W3 biome field; clean chunks never persist (save dir grows with
+  edits, not visits).
+- Server-authoritative progression: perk/attribute spend
+  (`NetPackageEntitySetSkillLevelServer` C2S validated against the catalog +
+  the `on_perk_spend` Wasm verdict), per-player levels + skill points persist
+  (players.zsv ZPV11 skill tail), `NetPackagePlayerStats` snapshots to every
+  peer (join + level-up), armor `PhysicalDamageResist`/`ElementalDamageResist`
+  quality curves fold through the passive-effects VM, difficulty presets
+  decode from the embedded stock `sandbox_presets.xml`.
+- New serverconfig properties: `DeathPenalty`, `LandClaimCount`/
+  `LandClaimDeadZone`/`LandClaimOfflineDelay`/`LandClaimDecayMode`,
+  `ServerReservedSlots(+Permission)`/`ServerAdminSlots(+Permission)`, and the
+  GSI browser fields (`ServerDescription`/`ServerWebsiteURL`/`Region`/
+  `Language`/`ServerMatchmakingGroup`); all documented in GAME_OPTIONS.md and
+  shipped in serverconfig.example.xml.
+
+### Fixed
+
+- 3.2.0 login gate P0: the advertised version was the raw 3.1.0 form, so
+  every real V3.2.0 client was kicked with VersionMismatch=4; the advertised
+  `Minor` now matches the 3.2.0 display form (live-verified join).
+- Concurrent-join starvation: the join spawn-area burst now yields ACKs
+  between chunks so a second client's critical packages are not starved
+  behind the flood; full-stock config bundles no longer wedge the reliable
+  window (critical retry budget 250 ms → 1 s).
+- Join cost: the storage-TE scan on clean proc chunks dropped 19.7 M → 262 K
+  cells; a fresh boot's starter chest is no longer clobbered by a reboot
+  with no saved entities; placed deco no longer marks chunks dirty.
+
 ## [0.2.0] - 2026-08-22
 
 ### Added

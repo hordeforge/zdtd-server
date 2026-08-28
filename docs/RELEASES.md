@@ -29,9 +29,12 @@ metadata requires a literal; `make check` rejects drift between them.
 
 ## Compatibility contract
 
-- **Stock client:** only V3.1.0 b14, Mono, EAC off is currently supported. Other
-  V3.x builds are unsupported until they appear in the tested matrix. Package
-  ids are negotiated, but that does not make changed package bodies compatible.
+- **Stock client:** V3.2.0 b9, Mono, EAC off is the current target (the
+  bundled AssignIds dump is still 3.1.0-era; the refresh is tracked in
+  GAP_ANALYSIS §1a). The 3.2.0 login gate is live-verified via loadgen. Other
+  V3.x builds are unsupported until they appear in the tested matrix.
+  Package ids are negotiated, but that does not make changed package bodies
+  compatible.
 - **Zig:** the minimum supported compiler is the
   `build.zig.zon.minimum_zig_version` value. Raising it requires a minor bump
   before 1.0 and a major bump after 1.0. Canonical validation and release
@@ -43,7 +46,10 @@ metadata requires a literal; `make check` rejects drift between them.
 - **Saved worlds:** a release must read the previous released format or provide
   an explicit migration. ZCH3 reads ZCH1 heights and ZCH2 heights. ZCH2 block
   edits are regenerated because the old format discarded required metadata.
-  Downgrade compatibility is not promised. Back up worlds before upgrading.
+  ZCH4 (added with `[wire] profile` dialects, ADR 0036) carries the column
+  height in the header: a stock loader rejects it, and a mismatched non-stock
+  loader fails closed. Downgrade compatibility is not promised. Back up
+  worlds before upgrading.
 - **Wire and saved data:** format changes are consumer-facing even when no Zig
   function signature changes. They must be listed under Breaking changes.
 
