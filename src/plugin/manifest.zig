@@ -109,6 +109,9 @@ pub const Manifest = struct {
         if (self.wasm != null and self.mode != null) {
             return "'wasm' and 'mode' are mutually exclusive (a mod is either a plugin or a config carrier)";
         }
+        if (self.mode != null and (self.override != null or self.points != null or self.requires != null)) {
+            return "'mode' (config-only mod) cannot combine with 'override'/'points'/'requires' (nothing to load or replace)";
+        }
         if (self.mode) |mo| {
             // Same rule as server/mode.zig isValidModeName (plugin must not
             // import server; kept in sync by the resolver test).

@@ -854,7 +854,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Log which discovered mods were skipped (disabled / blacklisted /
     // enabled=false) so the operator sees why something did not load. The
     // loaded set with tiers and replacements is logged by loadResolved.
+    // Config-only mods are not modules: an enabled one activated its mode
+    // pack (logged at load); a disabled one is skipped silently.
     for (discovered) |dm| {
+        if (dm.mode != null) continue;
         var in_plan = false;
         for (mod_plan.modules) |rm| {
             if (std.mem.eql(u8, rm.manifest.name.?, dm.name.?)) {

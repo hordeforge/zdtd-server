@@ -126,6 +126,10 @@ pub fn resolve(
 
     for (discovered) |m| {
         if (m.override != null) continue; // replacers appended below
+        // Config-only mods (mode = "<pack>") are not wasm modules: they only
+        // activate a mode pack (collected below) and never enter the load
+        // list, so the Wasm loader never sees a null wasm path.
+        if (m.mode != null) continue;
         // `enabled = false` in mod.toml: not auto-loaded (demo gates ship
         // off); explicit [plugin] modules paths still load, and `[mods]
         // enabled` forces the mod on.
@@ -145,6 +149,7 @@ pub fn resolve(
     // Append the replacers (their targets were dropped above).
     for (discovered) |m| {
         if (m.override == null) continue;
+        if (m.mode != null) continue; // config-only mods never replace modules
         if (m.enabled) |en| {
             if (!en and !enabled_set.contains(m.name.?)) continue;
         }
@@ -177,11 +182,19 @@ pub fn resolve(
     errdefer name_to_slot.deinit(a);
     for (load.items) |rm| try name_to_slot.put(a, rm.manifest.name.?, rm.slot);
 
-    // Config-only mod: at most one loaded mod may activate a mode pack
+    // Config-only mod: at most one enabled mod may activate a mode pack
     // (modes/<name>.toml). First in load order wins; a second is ambiguous.
+    // Config-only mods never enter `load` (no wasm to load), so scan the
+    // discovered set with the same enabled/disabled/override gates.
     var mode_pack: ?[]const u8 = null;
-    for (load.items) |rm| {
-        const mo = rm.manifest.mode orelse continue;
+    for (discovered) |m| {
+        const mo = m.mode orelse continue;
+        if (m.enabled) |en| {
+            if (!en and !enabled_set.contains(m.name.?)) continue;
+        }
+        if (disabled_set.contains(m.name.?)) continue;
+        if (blacklist_set.contains(m.name.?)) return error.BlacklistedTarget;
+        if (replaced.contains(m.name.?)) continue;
         if (mode_pack != null) return error.DuplicateMode;
         mode_pack = mo;
     }
@@ -372,10 +385,11 @@ test "resolve activates a mode pack from an enabled config-only mod" {
     defer r0.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 0), r0.modules.len);
     try testing.expect(r0.mode_pack == null);
-    // [mods] enabled forces it on; the mode pack activates.
+    // [mods] enabled forces it on; the mode pack activates. Config-only mods
+    // are not wasm modules, so they never enter the load list.
     var r1 = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{"infinite_world"});
     defer r1.deinit(testing.allocator);
-    try testing.expectEqual(@as(usize, 1), r1.modules.len);
+    try testing.expectEqual(@as(usize, 0), r1.modules.len);
     try testing.expectEqualStrings("infinite", r1.mode_pack.?);
     // Two enabled config mods each with a mode: ambiguous, fail closed.
     var c2 = mk("other", "", "user", null, null);
