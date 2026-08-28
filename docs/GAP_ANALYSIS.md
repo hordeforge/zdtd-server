@@ -122,7 +122,7 @@ an entire 13x13-chunk window. Terrain is hard voxel stairs because the DTM's
 sub-block byte is discarded. Nothing ever collapses.
 
 **Progression is nearly complete.** The 57 perks, 8 attributes and 23 crafting
-skills parse from `progression.xml` with their 649 `passive_effect` rows (the
+skills parse from `progression.xml` with their 648 `passive_effect` rows (the
 passive-effects VM applies the tracked deltas); spending is server-authoritative
 (`NetPackageEntitySetSkillLevelServer` C2S + the `on_perk_spend` Wasm verdict),
 and game stage drives spawn tiers and trader stage. The only open leg is the
@@ -465,7 +465,7 @@ area and the concrete work.
     `StaminaChangeOT` penalty and the stage-3 `ModifyStats Health` loss read
     off the active buffs. **Perk curve semantics corrected 2026-08-25**:
     progression.xml carries explicit `level="1,5" value="2,10"` anchor pairs
-    on 640/649 passive rows - `curveAt` now interpolates over the anchors
+    on 617/648 passive rows - `curveAt` now interpolates over the anchors
     (piecewise-linear, out-of-range applies nothing) instead of the implicit
     scaled-index guess, so `perkFortitudeMastery`'s 4,5-anchored HealthMax
     correctly applies nothing below level 4. **APM-instrumented 2026-08-25
@@ -3058,7 +3058,7 @@ and server-to-client XP/level pushes do not exist.
 
 - **progression.xml attribute and perk catalog load** → **non-goal** (2026-08-25):
   the catalog parses (8 attributes, 57 perks, per-perk parent/max_level); a
-  full passive-effects runtime over the 649 `passive_effect` rows is the
+  full passive-effects runtime over the 648 `passive_effect` rows is the
   EffectManager VM, moved to the explicit non-goals list (the sim already
   applies the live effects: armour mitigation + survival buffs).
 
@@ -3073,7 +3073,7 @@ and server-to-client XP/level pushes do not exist.
   *Anchors:* `src/server/c2s/misc.zig:331`, `src/wire/packages.zig:2216-2235`
 
 - **Perk / attribute passive effects applied to gameplay** `PARTIAL (waived)`
-  649 `passive_effect` rows not yet wired; armour mitigation is the only live sim
+  648 `passive_effect` rows not yet wired; armour mitigation is the only live sim
   effect. Needs full `effect_group` VM — waived until progression runtime exists.
   SHIPS 2026-08-27 (bounded VM): level-scaled perk passives fold through the
   passive-effects VM over the tracked stats (armour resist + HealthChangeOT
