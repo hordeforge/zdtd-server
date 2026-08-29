@@ -70,8 +70,6 @@ pub const PackageName = enum {
     NetPackageBag,
     NetPackageDropItemsContainer,
     NetPackageTileEntity,
-    // Appended after the stock set; stock ids 0..15 stay stable for fixtures.
-    NetPackageEntityFlags,
 };
 
 /// Stable server map: index = pkgId (same idea as MockGameServer.DefaultMappings).
@@ -120,7 +118,6 @@ pub const default_mappings = [_][]const u8{
     "NetPackageBag",
     "NetPackageDropItemsContainer",
     "NetPackageTileEntity",
-    "NetPackageEntityFlags",
     "NetPackagePlayerDisconnect",
     "NetPackagePlayerData",
     "NetPackageAuthConfirmation",
