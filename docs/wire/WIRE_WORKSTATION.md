@@ -4,7 +4,7 @@
 
 Related: [PACKAGES.md](PACKAGES.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_CHUNK.md](WIRE_CHUNK.md) · [AUTHORITY.md](../AUTHORITY.md) · `src/wire/stock_te.zig` · `src/world/workstations.zig` · `src/server/c2s/inv.zig`
 
-No `NetPackageRecipe*` exists in the 190-package list. Workstation craft state
+No `NetPackageRecipe*` exists in the package list (192 names on 3.2.0, see [PACKAGES.md](PACKAGES.md); `NetPackageTileEntity` is unchanged from V3.1.0 per the 3.2.0 changelog). Workstation craft state
 rides `NetPackageTileEntity` with `TileEntityType.Workstation = 12` (classic TE,
 not composite). Queue sync is server-authoritative TE re-send, same as storage.
 
