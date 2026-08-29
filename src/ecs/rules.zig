@@ -189,6 +189,14 @@ pub const Ai = struct {
     /// modeled; these floors replace them.
     stealth_hear_feral_sense: f32 = 0.0,
     stealth_hear_detect_us: f32 = 1.0,
+    /// Alert radius for the S2C stealth broadcast (player.zig
+    /// tickStealthBroadcast): any alert zombie within this radius flags the
+    /// player's packed `alert` bit. The stock client computes its own alert UI
+    /// locally (no server-side radius is IL-pinned), so this is the zdtd
+    /// authoritative approximation made operator-tunable. The broadcast
+    /// cadence itself (every 16 ticks) is stock PlayerStealth.TickServer
+    /// IL_0470 and stays pinned in code.
+    stealth_alert_radius: f32 = 12.0,
     /// Sleeper wake: NotifyNoise accumulates the (curved) volume into
     /// sleeperNoiseVolume, capped at 360; reaching the cap wakes sleeper
     /// volumes at the noise position. The cap decays 2.5/tick once the
@@ -799,6 +807,7 @@ pub const AiOverlay = struct {
     stealth_attract_radius_cap_b: ?f32 = null,
     stealth_hear_feral_sense: ?f32 = null,
     stealth_hear_detect_us: ?f32 = null,
+    stealth_alert_radius: ?f32 = null,
     stealth_sleeper_wake_volume: ?f32 = null,
     stealth_sleeper_volume_decay: ?f32 = null,
     stealth_loud_volume: ?f32 = null,

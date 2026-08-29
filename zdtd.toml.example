@@ -222,6 +222,7 @@ block_id_mapping = true
 # sense_dist_sq = 2304.0     # 48^2 sense range, squared blocks
 # chase_speed = 2.2          # floor: entityclasses MoveSpeedAggro wins when set
 # wander_speed = 0.8         # floor: entityclasses MoveSpeed wins when set
+# stealth_alert_radius = 12.0  # S2C stealth alert flag radius (zdtd approx)
 # [rules.bloodmoon]
 # party_enemy_max = 30       # per-party alive ceiling
 # max_parties = 8            # concurrent parties (clamped to the storage cap)

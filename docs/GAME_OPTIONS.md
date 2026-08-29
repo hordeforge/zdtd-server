@@ -226,6 +226,7 @@ test, so a retune cannot land silently).
 | `stealth_attract_radius_cap_a` / `stealth_attract_radius_cap_b` | 40.0 / 15.0 | Attraction radius cap shape (RE TickServer IL_01EF-01FF) |
 | `stealth_hear_feral_sense` | 0.0 | Per-enemy `feralSense` in the heard test (`noiseVolume x (1 + feralSense)`); stock per-entity value not modeled, floor 0 |
 | `stealth_hear_detect_us` | 1.0 | `EntityPlayer.DetectUsScale` in the heard test; stock returns 0.3 for POI-resident sleepers (>60 s in a tier>=1 prefab) — not modeled, floor 1.0 |
+| `stealth_alert_radius` | 12.0 | Alert radius for the S2C stealth broadcast (`player.zig` `tickStealthBroadcast`): any alert zombie within it flags the packed `alert` bit. The stock client computes its own alert UI locally (no server-side radius IL-pinned), so this is the zdtd authoritative approximation. The 16-tick broadcast cadence is stock `PlayerStealth.TickServer` IL_0470 and stays pinned in code |
 | `stealth_sleeper_wake_volume` | 360.0 | Sleeper wake cap: `sleeperNoiseVolume` accumulation at 360 queues a volume wake at the noise position (stock NotifyNoise + CheckSleeperVolumeNoise) |
 | `stealth_sleeper_volume_decay` | 2.5 | `sleeperNoiseVolume` decay per tick once the loud-noise wait window elapses (RE TickServer IL_0195-01BA) |
 | `stealth_loud_volume` / `stealth_loud_wait_ticks` | 11.0 / 20 | A noise at/above this volume holds the sleeper-volume decay for this many ticks (stock NotifyNoise IL_001F-002A) |

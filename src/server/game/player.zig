@@ -231,7 +231,8 @@ pub fn tickStealthBroadcast(self: *Game) void {
             if (!self.sim.mask[zs].transform or !self.sim.zombie_ai[zs].alert) continue;
             const dx = self.sim.transform[zs].x - px;
             const dz = self.sim.transform[zs].z - pz;
-            if (dx * dx + dz * dz <= 12.0 * 12.0) {
+            const ar = self.sim.rules.ai.stealth_alert_radius;
+            if (dx * dx + dz * dz <= ar * ar) {
                 alert = true;
                 break;
             }
