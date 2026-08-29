@@ -24,7 +24,7 @@ Status is one of: **draft**, **in review**, **decided**, **withdrawn**,
 | [0006](0006-honk-doors.md) | Vehicle horn opens trader doors: door TE + honk signal design | draft (answers PRD 0006) |
 | [0007](0007-deco-suppression.md) | Decoration suppression: chunk-keyed footprint gate | draft (answers PRD 0007) |
 
-Numbering: 4-digit, zero-padded, never reused — next is **RFC 0006**. RFC NNNN
+Numbering: 4-digit, zero-padded, never reused — next is **RFC 0008**. RFC NNNN
 is the design counterpart of [PRD NNNN](../prd/README.md) for the same addon.
 RFC 0004 was never written: PRD 0004 (hot restart) shipped with its design
 carried by ADR 0011/0030 + WORK_PLAN T37 instead of a dedicated RFC.

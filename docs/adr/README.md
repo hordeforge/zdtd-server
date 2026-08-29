@@ -39,7 +39,7 @@ Status is one of: **accepted**, **superseded**, **deprecated** — a decision st
 | [0035](0035-game-event-verdict.md) | on_game_event verdict hook: plugins gate/customize GameEvents; the IL=211 sender/party gate lands native (supersedes ADR 0025's execution location) | accepted |
 | [0036](0036-malleable-world-geometry.md) | Malleable world geometry: `[rules.geometry]` elevation projection (meters → column, identity at stock) + `[wire] profile` column-height dialects (chunk store/wire/save follow it; non-stock needs a paired client mod) | accepted |
 
-Numbers 0027–0029 were never assigned. Next free number is **0036**.
+Numbers 0027–0029 were never assigned. Next free number is **0037**.
 
 Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](../ECS_SYSTEMS.md),
 [AUTHORITY.md](../AUTHORITY.md), [INVENTORY.md](../wire/INVENTORY.md),
