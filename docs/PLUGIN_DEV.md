@@ -26,7 +26,7 @@ flowchart LR
     Guest -. "on_enable / on_tick / on_player_join / on_shutdown" .-> Host
     Guest -. "verdict: on_player_death / on_entity_killed / on_block_damage / on_quest_complete" .-> Host
     Guest -. "request/reply: on_admin_command / on_chat / on_player_login" .-> Host
-    Host -. "zdtd.log / tick / queue / sense / query / json_*" .-> Guest
+    Host -. "zdtd.log / tick / queue / sense / query / json_* / config" .-> Guest
 ```
 
 Hook table (observe / verdict / request-reply) is in [Hooks](#hooks) and the full
