@@ -78,7 +78,7 @@ flowchart LR
       E[exports: on_enable / on_tick / verdict hooks]
     end
     subgraph Host[Host zdtd]
-      I[imports: log / tick / queue / sense / query / json_*]
+      I[imports: log / tick / queue / sense / query / json_* / config]
       Budgets[fuel + memory caps]
     end
     E -->|called under budget| Host
