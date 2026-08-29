@@ -189,20 +189,26 @@ fn lootSeedAt(wx: i32, wy: i32, wz: i32) u32 {
 /// plane on first touch. `applyToNode` carries the per-block fuel/capacity
 /// properties; wires are re-added from the block plane the same way.
 pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) void {
-    if (ch.power_scanned) return;
-    const blocks = ch.blocks orelse return;
-    ch.power_scanned = true;
+    // The caller's pointer may have been invalidated by a re-entrant scan
+    // (ensurePrefabStorageInChunk -> blockWorld -> getOrCreate can resize the
+    // inline-value chunk map and move every chunk). Re-fetch by position so
+    // the power_scanned write and the block reads never hit freed memory.
+    _ = ch;
+    const live = self.world.chunkAt(.{ .x = cx, .z = cz }) orelse return;
+    if (live.power_scanned) return;
+    const blocks = live.blocks orelse return;
+    live.power_scanned = true;
     const base_x = cx * 16;
     const base_z = cz * 16;
     var last_id: u16 = 0;
     var last_power: ?ecs.powerblocks.Resolved = null;
     var y: i32 = 0;
-    while (y < ch.y_dim) : (y += 1) {
+    while (y < live.y_dim) : (y += 1) {
         var lz: i32 = 0;
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
-                const id: u16 = world_store.typeId(blocks[ch.blockIndex(lx, y, lz)]);
+                const id: u16 = world_store.typeId(blocks[live.blockIndex(lx, y, lz)]);
                 if (id != last_id) {
                     last_id = id;
                     last_power = self.power_registry.lookup(id);
@@ -287,6 +293,9 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     if (self.world.prefabs) |*pf| {
         const TeCtx = struct {
             g: *Game,
+            ch: *const world_store.Chunk,
+            base_x: i32,
+            base_z: i32,
             found: *u32,
             fn onTe(ctx: ?*anyopaque, wx: i32, wy: i32, wz: i32, te_type: u8, payload: []const u8) void {
                 const tc: *@This() = @ptrCast(@alignCast(ctx.?));
@@ -306,7 +315,19 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                 if (!(te_types.isStorageLike(te_type) or te_type == te_types.powered or te_types.isSignLike(te_type))) return;
                 const pos = containers_mod.PosKey{ .x = wx, .y = wy, .z = wz };
                 if (tc.g.containers.get(pos) != null) return;
-                const block_id: u16 = tc.g.world.blockWorld(wx, wy, wz) catch 0;
+                // Block id from the chunk being scanned, not world.blockWorld:
+                // the callback runs while the caller holds a *Chunk, and
+                // blockWorld re-enters getOrCreate, which can resize the
+                // inline-value chunk map and move every chunk out from under
+                // the caller (2026-08-29 bait-soak segfault, 5/5 ReleaseFast).
+                // The TE is confined to this chunk (foreachTeInChunk bounds),
+                // so a local read is identical and non-re-entrant.
+                const lx = wx - tc.base_x;
+                const lz = wz - tc.base_z;
+                const block_id: u16 = if (lx >= 0 and lx < 16 and lz >= 0 and lz < 16 and wy >= 0 and wy < tc.ch.y_dim)
+                    world_store.typeId(tc.ch.blocks.?[tc.ch.blockIndex(lx, wy, lz)])
+                else
+                    0;
                 const id: u16 = if (block_id != 0) block_id else replicate_te.seedChestBlockId(tc.g);
                 const cont = tc.g.containers.getOrCreate(pos, 8, id) orelse return;
                 // World container (prefab TE, not player-placed).
@@ -321,10 +342,18 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
             }
         };
         var te_found: u32 = found;
-        var tc: TeCtx = .{ .g = self, .found = &te_found };
+        var tc: TeCtx = .{ .g = self, .ch = ch, .base_x = base_x, .base_z = base_z, .found = &te_found };
         pf.foreachTeInChunk(cx, cz, TeCtx.onTe, &tc);
         // Scan complete unless the TE cap truncated it; then retry next send.
-        if (te_found < self.te_scan_te_cap) ch.te_scanned = true;
+        if (te_found < self.te_scan_te_cap) {
+            // The scan re-enters the chunk store (blockWorld -> getOrCreate for
+            // a prefab TE's column), and AutoHashMapUnmanaged stores Chunk
+            // values inline: the backing array can resize mid-scan, moving
+            // every chunk and dangling `ch`. Re-fetch by position before the
+            // write (2026-08-29 bait-soak segfault: 5/5 ReleaseFast under a
+            // concurrent double join, __chk_fail on the canary at this write).
+            if (self.world.chunkAt(.{ .x = cx, .z = cz })) |live| live.te_scanned = true;
+        }
     } else {
         ch.te_scanned = true;
     }

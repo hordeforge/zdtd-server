@@ -84,6 +84,15 @@ live loadgen soak (ReleaseFast, stock Pregen map):
 Soak evidence (2026-08-29, ReleaseFast, Pregen06k01): kite 2/2 pass with
 zombie pressure; wandering-horde 2/2 pass with ~90 concurrent zombies, 0
 join failures, 0 encode/stream/persist errors, mean tick ~2 ms (a single
+early spawn-burst outlier accounts for the max). A bait-mode double-join
+soak exposed a join-crash P0 (5/5 ReleaseFast segfaults: the storage-TE
+scan re-entered the chunk store via blockWorld while the caller held a
+*Chunk, and the inline-value chunk map resize moved every chunk out from
+under it). Fixed by reading the TE column from the scanned chunk (no
+re-entrancy) + re-fetching by position before the te_scanned /
+power_scanned writes; 10/10 bait soaks now pass with joins.
+zombie pressure; wandering-horde 2/2 pass with ~90 concurrent zombies, 0
+join failures, 0 encode/stream/persist errors, mean tick ~2 ms (a single
 early spawn-burst outlier accounts for the max). Provenance dashboard
 regenerates byte-identical at 291/0/0; the hardcode audit re-verified
 2026-08-29 found no new Bucket A/B hits and every current-state doc-to-src

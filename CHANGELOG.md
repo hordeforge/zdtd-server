@@ -112,6 +112,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   now destroyed immediately (previously it lingered as a ghost until the slot
   was reused - a phantom in listents/mem counts and a spawn-on-approach
   candidate for late joiners), and the reap path shares the one drop path.
+- Join-crash P0 (2026-08-29 bait soak, 5/5 ReleaseFast): the spawn-area
+  send held a `*Chunk` while the storage-TE scan read a prefab TE's column
+  via `world.blockWorld`, which re-enters `getOrCreate`; the inline-value
+  chunk map (AutoHashMap) can resize mid-scan and move every chunk, so the
+  held pointer dangled and the `te_scanned` write segfaulted (stack canary
+  trip). The callback now reads the block from the chunk being scanned
+  (identical value: the TE is confined to that chunk), which removes the
+  re-entrancy; the post-scan `te_scanned`/`power_scanned` writes re-fetch
+  the chunk by position as defense in depth. 10/10 live double-join bait
+  soaks now pass (was 5/5 crashes). Hazard class + pointer-stable store
+  follow-on tracked in GAP_ANALYSIS.
 - Admin `listplayers` printed `<unknown>` for platform id and ip, so
   telnet-driven tooling (loadgen zombie pressure matching on
   `pltfmid=Local_` / `ip=127.`) silently spawned nothing. It now emits

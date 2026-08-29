@@ -3430,6 +3430,30 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns),
   loadgen `ChallengeReplied timeout` under concurrent count=2.
 
+- **Chunk pointer stability across re-entrant store access** `PARTIAL` `(2026-08-29)`
+  The spawn-area send holds a `*Chunk` (store.getOrCreate, chunk_fill.zig:41)
+  while `ensurePrefabStorageInChunk` scans it; the prefab-TE callback reads
+  the block at a TE column via `world.blockWorld` (chunk_fill.zig:309), which
+  calls `getOrCreate` again. `World.chunks` is an
+  `AutoHashMapUnmanaged(u64, Chunk)` with the chunk VALUES inline, so any
+  insert that crosses the load factor resizes the backing array and moves
+  every chunk - the held pointer dangles. A live bait soak (ReleaseFast,
+  concurrent double join, Pregen06k01) crashed 5/5 with a segfault at the
+  `ch.te_scanned = true` write (stack canary trip / `__chk_fail`; Debug
+  aborts at chunk_fill.zig:327). Proven by an instrumented run: the map
+  resized 32->64 during the scan of the very chunk being written. Fixed
+  (2026-08-29): the post-re-entry writes re-fetch the chunk by position
+  (`chunkAt` before `te_scanned` / `power_scanned`), and the re-fetched
+  pointer is used for the power block reads. The hazard class is broader:
+  any `*Chunk` held across a re-entrant `getOrCreate`/`blockWorld` dangles on
+  resize. Tracked follow-on: make the chunk store pointer-stable (map of
+  pointers + arena/free-list slots, bounded by `max_resident_chunks`) so
+  chunk pointers are valid for the lifetime of residency instead of only
+  within a non-re-entrant scope.
+  *Evidence:* loadgen bait soak (2 bots, `--mode bait`, concurrent joins),
+  Debug abort at `chunk_fill.zig:327`, ReleaseFast segfault 5/5, instrumented
+  resize log `cap 32->64` during the scan.
+
 - **Resident chunk cap and deterministic eviction** `WORKS`
   4096 resident chunks, min-key victim (not HashMap walk order) so DST replay is
   stable, save-before-free so nothing is discarded unsaved.
