@@ -52,6 +52,18 @@ pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, de
     if (out.record) {
         self.evidence.record(.{ .tick = self.tick_n, .peer_local = peer_local, .entity_id = entity_id, .detector = det, .severity = sev_eff, .surface = surf, .observed = observed, .bound = bound });
         self.harness.counters.inc(.evidence_events);
+        // T21: stream the event to plugin guests (read-only observer; the
+        // ceiling already ran, the guest return is discarded).
+        self.evidenceObserver(
+            @intCast(self.tick_n),
+            peer_local,
+            entity_id,
+            @intFromEnum(det),
+            @intFromEnum(sev_eff),
+            @intFromEnum(surf),
+            @bitCast(observed),
+            @bitCast(bound),
+        );
     }
     switch (out.action) {
         .none => {},

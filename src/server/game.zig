@@ -1477,6 +1477,15 @@ pub const Game = struct {
         self.wasm_plugins.statChanged(player, hp, food, water, stamina, level, xp);
     }
 
+    /// on_evidence observer (T21): fire both plugin hosts with the guard's
+    /// evidence event. Read-only - the T20 severity ceiling already ran, and
+    /// the guest return is discarded. Bounded: one call per recorded
+    /// evidence event.
+    pub fn evidenceObserver(self: *Game, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
+        self.plugins.evidence(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
+        self.wasm_plugins.evidence(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
+    }
+
     pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
         return game_player.skillLevelOf(self, slot, skill);
     }

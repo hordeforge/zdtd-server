@@ -39,6 +39,7 @@ pub const Hook = enum(u8) {
     on_perk_spend = 19,
     on_stat_changed = 20,
     on_game_event = 21,
+    on_evidence = 22,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
@@ -46,7 +47,7 @@ pub const Hook = enum(u8) {
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
         "on_trader_event",  "on_mcp_frame",     "on_trade_price",   "on_perk_spend",
-        "on_stat_changed",  "on_game_event",
+        "on_stat_changed",  "on_game_event",    "on_evidence",
     };
 };
 
@@ -488,6 +489,22 @@ pub const Plugin = struct {
         self.instance.call(fn (i32, i32, i32, i32, i32, i32, i32) void, "on_stat_changed", .{ player, hp, food, water, stamina, level, xp }) catch |err| {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_stat_changed disabled: {s}\n", .{ self.name, @errorName(err) });
+        };
+    }
+
+    /// on_evidence(tick: i32, peer_local: i32, entity_id: i32, detector: i32,
+    /// severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) -
+    /// read-only observer (T21): the guard's evidence ring event, streamed to
+    /// guests for custom detection/alerting. NEVER a gate: the host already
+    /// applied the T20 severity ceiling and the verdict is discarded. Floats
+    /// arrive as f32 bits (@bitCast back in the guest); `severity` is the
+    /// EFFECTIVE severity (post-ceiling).
+    pub fn callEvidence(self: *Plugin, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
+        if (self.disabled) return;
+        if (!self.hook_present[@intFromEnum(Hook.on_evidence)]) return;
+        self.instance.call(fn (i32, i32, i32, i32, i32, i32, i32, i32) void, "on_evidence", .{ tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits }) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_evidence disabled: {s}\n", .{ self.name, @errorName(err) });
         };
     }
 
@@ -1123,6 +1140,13 @@ pub const WasmHost = struct {
     /// Player stat observer (ADR 0034): notify every plugin exporting it.
     pub fn statChanged(self: *WasmHost, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
         for (0..self.n) |i| self.slots[i].callStatChanged(player, hp, food, water, stamina, level, xp);
+    }
+
+    /// Evidence observer (T21): notify every plugin exporting on_evidence.
+    /// Read-only - the guard already applied the T20 ceiling and the guest's
+    /// return is discarded (host authority).
+    pub fn evidence(self: *WasmHost, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
+        for (0..self.n) |i| self.slots[i].callEvidence(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
     }
 
     pub fn questAccept(self: *WasmHost, player: i32, def_id: i32) i32 {

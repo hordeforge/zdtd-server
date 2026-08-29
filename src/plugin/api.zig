@@ -58,6 +58,11 @@ pub const PluginVTable = struct {
     /// stat (hp/food/water/stamina) and on XP awards (level/XP). Pure
     /// observer - the sim stays the authority; plugins react/announce.
     on_stat_changed: ?*const fn (*const Host, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void = null,
+    /// Evidence observer (on_evidence, T21): the guard's evidence-ring event,
+    /// streamed read-only (floats as f32 bits, severity post-ceiling). Never
+    /// a gate: the host already applied the T20 severity ceiling and the
+    /// return is discarded.
+    on_evidence: ?*const fn (*const Host, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void = null,
     on_shutdown: ?*const fn (*const Host) void = null,
     on_player_death: ?*const fn (*const Host, victim: i32) i32 = null,
     on_entity_killed: ?*const fn (*const Host, killed: i32, killer: i32) i32 = null,

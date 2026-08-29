@@ -111,6 +111,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   detector (bounds/movement weigh client-reported values) is downgraded to
   `.strong` and counted (`hard_ceiling_downgrades`), so no client-informed
   signal can trip the kick ladder. Coverage test + scenario pin it.
+- `on_evidence` plugin observer (T21): the guard streams every recorded
+  evidence event to guests on both plugin hosts (detector/severity/surface
+  enums, observed/bound as f32 bits); `severity` is the post-ceiling value
+  and the return is discarded - read-only, never a gate. Host unit test +
+  the T20 scenario cover the wiring.
 
 ### Fixed
 

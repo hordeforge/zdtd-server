@@ -85,6 +85,17 @@ pub const PluginHost = struct {
         }
     }
 
+    /// Evidence observer (T21): the guard's evidence event, read-only. The
+    /// host already applied the T20 severity ceiling; the guest return is
+    /// discarded (never a gate).
+    pub fn evidence(self: *PluginHost, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            if (!self.enabled[i]) continue;
+            if (self.slots[i].on_evidence) |f| f(&self.view, tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits);
+        }
+    }
+
     pub fn traderEvent(self: *PluginHost, player: i32, trader_entity: i32, kind: i32) void {
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
@@ -465,5 +476,32 @@ test "host stat-changed observer fires with the player snapshot" {
     try std.testing.expectEqual(@as(i32, 50), stat_last[1]);
     try std.testing.expectEqual(@as(i32, 40), stat_last[2]);
     try std.testing.expectEqual(@as(i32, 5), stat_last[5]);
+    h.shutdown();
+}
+
+// Test capture for the evidence observer (module scope, same reason).
+var ev_last: [8]i32 = .{0} ** 8;
+
+test "host evidence observer fires with the guard event (T21)" {
+    var h: PluginHost = .{ .sample_enabled = false };
+    ev_last = .{0} ** 8;
+    const obs = api.PluginVTable{
+        .name = "evobs",
+        .on_evidence = struct {
+            fn f(_: *const api.Host, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
+                ev_last = .{ tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits };
+            }
+        }.f,
+    };
+    try std.testing.expect(h.register(&obs));
+    h.enableAll();
+    h.evidence(7, 2, 103, 4, 2, 3, 1123581321, 96);
+    try std.testing.expectEqual(@as(i32, 7), ev_last[0]);
+    try std.testing.expectEqual(@as(i32, 2), ev_last[1]);
+    try std.testing.expectEqual(@as(i32, 103), ev_last[2]);
+    try std.testing.expectEqual(@as(i32, 4), ev_last[3]); // detector .movement
+    try std.testing.expectEqual(@as(i32, 2), ev_last[4]); // severity .strong
+    try std.testing.expectEqual(@as(i32, 3), ev_last[5]); // surface .block
+    try std.testing.expectEqual(@as(i32, 1123581321), ev_last[6]); // observed f32 bits
     h.shutdown();
 }

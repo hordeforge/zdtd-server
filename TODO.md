@@ -212,8 +212,14 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
       (`hard_ceiling_downgrades`); coverage test pins the table, scenario
       "hard ceiling downgrades client-informed detectors" proves bounds
       `.hard` never trips the ladder while phase `.hard` passes.
-- [ ] T21: guest detector feed (`on_evidence` Wasm hook), read-only events out,
+- [x] T21: guest detector feed (`on_evidence` Wasm hook), read-only events out,
       `evidence.Event` in, severity capped by the host, never a gate.
+      **DONE 2026-08-30**: `on_evidence` observer on both plugin hosts - the
+      guard streams every recorded evidence event (detector/severity/surface
+      enums + f32-bit observed/bound) to guests; `severity` is the effective
+      value after the T20 ceiling and the return is discarded (host
+      authority). Host unit test + the T20 scenario assert the wiring and
+      the downgraded severity.
 - [ ] T22: attribution (a finding another player induces never accrues against
       the victim) and suppression (stalls, spawn, teleport, death, chunk
       starvation, packet loss), so the anti-cheat cannot be used to grief.

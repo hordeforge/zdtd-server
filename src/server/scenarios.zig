@@ -6,6 +6,7 @@ const game_mod = @import("game.zig");
 const game_bot = @import("game/bot.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_wasm_host = @import("game/wasm_host.zig");
+const plugin_api = @import("../plugin/api.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
 const wire_frame = @import("../wire/frame.zig");
@@ -35,6 +36,10 @@ const util_log = @import("../util/log.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
 const assets_traders = @import("../assets/traders.zig");
+
+// Module-scope capture for the T21 evidence-observer scenario (the nested
+// vtable fn cannot close over locals).
+var ev_seen: [8]i32 = .{0} ** 8;
 
 /// Scenario worlds must start fresh: persisted state (entities.zen, *.zch)
 /// from a previous run leaks into the next one, and vehicles/turrets have
@@ -4134,12 +4139,32 @@ test "scenario T20 hard ceiling downgrades client-informed detectors" {
     }
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
+    g.tick_n = 100; // a non-zero tick for the evidence stream
+
+    // T21 wiring: a registered evidence observer receives the event with the
+    // EFFECTIVE (post-ceiling) severity. Module-scope capture (the vtable fn
+    // cannot close over locals).
+    ev_seen = .{0} ** 8;
+    const obs = plugin_api.PluginVTable{
+        .name = "evobs",
+        .on_evidence = struct {
+            fn f(_: *const plugin_api.Host, tick: i32, peer_local: i32, entity_id: i32, detector: i32, severity: i32, surface: i32, observed_bits: i32, bound_bits: i32) void {
+                ev_seen = .{ tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits };
+            }
+        }.f,
+    };
+    try std.testing.expect(g.plugins.register(&obs));
+    g.plugins.enableAll();
 
     // A .hard bounds event (client-informed): downgraded, never trips hard.
     const downgrades_before = g.harness.counters.get(.hard_ceiling_downgrades);
     g.noteEvidence(c, 0, c.entity_id, .bounds, .hard, .block, 100, 96);
     try std.testing.expect(g.harness.counters.get(.hard_ceiling_downgrades) > downgrades_before);
     try std.testing.expectEqual(@as(u16, 0), c.guard.hard_n);
+    // The observer saw the downgraded severity (.strong = 2) and the event.
+    try std.testing.expectEqual(@as(i32, 2), ev_seen[4]); // severity post-ceiling
+    try std.testing.expectEqual(@as(i32, 3), ev_seen[3]); // detector .bounds
+    try std.testing.expect(ev_seen[0] > 0); // tick
 
     // A .hard phase event (server-only): passes the ceiling untouched.
     const downgrades_mid = g.harness.counters.get(.hard_ceiling_downgrades);

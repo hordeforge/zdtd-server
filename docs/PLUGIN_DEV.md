@@ -396,6 +396,7 @@ completes the authoring view):
 | `on_game_event` | `(player: i32, event_ptr, event_len, target, var_count: i32) -> i32` | ADR 0035: `<0` deny, `0` keep, `>0` keep (first non-keep wins); the stock sender/party gate runs native before the verdict |
 | `on_player_leave` | `(peer_slot: i32, entity_id: i32) -> ()` | void observer at disconnect (the join counterpart) |
 | `on_stat_changed` | `(player: i32, hp, food, water, stamina, level, xp: i32) -> ()` | ADR 0034: pure observer fired when the survival pass or an XP award changed a tracked stat |
+| `on_evidence` | `(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits: i32) -> ()` | T21: read-only guard evidence event (detector/severity/surface are enum values; the two floats arrive as f32 bits — `@bitCast` back). `severity` is the EFFECTIVE value after the T20 hard ceiling (a client-informed detector's `.hard` arrives as `.strong`). Never a gate: the return is discarded |
 | `on_trader_event` | `(player: i32, trader_entity: i32, kind: i32) -> ()` | void observer on trade open / sell / buy |
 
 Five of the verdict hooks back the ADR 0032 exclusive override points
