@@ -557,11 +557,11 @@ residual bare consts and new drift, not the already-extracted keys.
 
 | Location | Examples | Destination |
 |---|---|---|
-| `server/game.zig` | `max_streamed_chunks=169`, `max_edit_range=96`, `interest_range=160`, `max_claimed_damage=200`, `trader_wallet_dukes=5000`, `stale_ns=3s`, lock_channel[16], `tick_n % 20/10/5/100`, body_buf sizes if policy | zdtd.toml +/or serverconfig |
+| `server/game/types.zig` | `max_streamed_chunks=169`, `max_edit_range=96`, `interest_range=160`, `max_claimed_damage=200`, `trader_wallet_dukes=5000`, `stale_ns=3s`, lock_channel[16], `tick_n % 20/10/5/100`, body_buf sizes if policy | zdtd.toml +/or serverconfig |
 | `server/config.zig` | defaults; STATUS-claimed option not parsed/applied | serverconfig.xml |
-| `ecs/systems.zig` | `full_ai_dist_sq`, `mid_ai_dist_sq`, `sense_dist_sq`, `attack_range_sq`, `despawn_dist_sq=200²`, `execute_delay_scale` | `src/ecs/rules.zig` / zdtd.toml **or** A if entity XML |
+| `ecs/systems.zig` | `full_dist_sq`, `mid_dist_sq`, `sense_dist_sq`, `attack_range_sq`, `despawn_dist_sq=200²`, `execute_delay_scale` | `src/ecs/rules.zig` / zdtd.toml **or** A if entity XML |
 | `ecs/systems.zig` | `attack_damage=8`, `chase_speed=2.2`, `wander_speed=0.8`, `attack_cooldown_s=1.2` | `src/ecs/rules.zig` / zdtd.toml (floors **A first** when entity/items XML loaded; residual floor → B) |
-| `ecs/systems.zig` | `gravity_accel = -9.81`, `vehicleKindDefaultSpeed`, accel/turn constants | `src/ecs/rules.zig` when exposed as tunables; `gravity` stays an **OK** RE literal (`EntityVehicle::cGravity`); projectile `items.xml Gravity`, `blocks.xml FallDamage`, `entityclasses Mass` are **Bucket A** when evaluated |
+| `ecs/systems.zig` | vehicle accel/turn constants | `src/ecs/rules.zig` when exposed as tunables; `gravity` is already lifted to `[rules.vehicle] gravity` (RE `EntityVehicle::cGravity`, asm.il:536018); projectile `items.xml Gravity`, `blocks.xml FallDamage`, `entityclasses Mass` are **Bucket A** when evaluated |
 | `ecs/systems.zig` | wander timers, look intervals, distraction close, territorial radius | **Bucket B** via `src/ecs/rules.zig` (sim tunables), not hard consts - if operator/mode should not tune, keep OK but **name+cite** (not anonymous floats) |
 | `server/movement.zig` | `max_horizontal_speed_mps`, `min/max_dt_s` | **Bucket B** anti-cheat caps (zdtd policy or `worldglobal.xml` when stock has it) - not "physics OK" |
 | `world/worldgen.zig` | `y_scale`, `squash`, `noise_weight` | zdtd invented worldgen - named consts **OK**, but doc the banding/performance cliff (WORLDGEN.md); stock RWG would be data |
