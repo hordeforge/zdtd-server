@@ -124,6 +124,20 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
   by the review is either moved (rules/[sim]/[quests]/[bots]) or kept with a
   reason above. Clock-based announcements (horde night, airdrop) shipped with
   sense v3 + `core_announce` v2 (see above).
+- **2026-08-29 sweep: plugins carry their own config.** New host import
+  `zdtd.config(out_ptr, out_cap) -> i32` serves each mod's `config.toml`
+  (4 KiB cap, raw text; the host never parses it) to the guest, declared via
+  `_zdtd_requires "config"`. All 12 core plugins are now config-driven and
+  self-contained (manifest + wasm + source + config.toml + README in the
+  folder): `core_pricegate`/`core_damagegate`/`core_lootgate`/
+  `core_rewardgate` (`percent`), `core_craftgate`/`core_perkgate`/
+  `core_questgate` (`deny_prefix`), `core_pvp` (`deny`), `core_announce`
+  (announce strings), `core_adminverbs` (`spawn_x/y/z`, `spawn_entity`),
+  `core_killfeed`/`core_tradefeed` (`log_level`). Config-only mods keep the
+  preset channel (`preset.toml` = rules; e.g. `mods/moon_gravity` overrides
+  `[rules.ai]`/`[rules.vehicle]` gravity). The "Bot loadout pool" row above
+  shipped as `[bots] weapon_profiles`; `bot_max_hp` stays a fixed guest
+  contract (ADR 0026), not config.
 - `make check-xml-audit` — green (independent gate).
 
 ## Baseline OOM investigation (goal item 5)
