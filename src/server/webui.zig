@@ -134,6 +134,10 @@ pub const Snapshot = struct {
     guard_quarantines: u64 = 0,
     quarantine_rejects: u64 = 0,
     load_shed_drops: u64 = 0,
+    /// T20 hard-ceiling downgrades (client-informed .hard → .strong).
+    hard_ceiling_downgrades: u64 = 0,
+    /// Evidence-ring events recorded (T21 feed source).
+    evidence_events: u64 = 0,
     // Latency
     tick_mean_ns: u64 = 0,
     tick_p50_ns: u64 = 0,
@@ -1817,6 +1821,8 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         \\<li class="stat"><b class="{s}">{d}</b><span>guard quarantines</span></li>
         \\<li class="stat"><b class="{s}">{d}</b><span>quarantine rejects</span></li>
         \\<li class="stat"><b class="{s}">{d}</b><span>load-shed drops</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>hard-ceiling downgrades</span></li>
+        \\<li class="stat"><b class="{s}">{d}</b><span>evidence events</span></li>
         \\</ul>
     , .{
         alertNumClass(s.guard_kicks, true),
@@ -1829,6 +1835,10 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
         s.quarantine_rejects,
         alertNumClass(s.load_shed_drops, false),
         s.load_shed_drops,
+        alertNumClass(s.hard_ceiling_downgrades, false),
+        s.hard_ceiling_downgrades,
+        alertNumClass(s.evidence_events, false),
+        s.evidence_events,
     });
     return w.buffered();
 }
@@ -1954,7 +1964,7 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
     });
     // Same reject counters as HTML Errors panel / guardstats (tools use this JSON).
     try w.print(
-        \\,"phase_rejects":{d},"ownership_rejects":{d},"bounds_rejects":{d},"movement_rejects":{d},"decode_rejects":{d},"guard_kicks":{d},"guard_would_kicks":{d},"guard_quarantines":{d},"quarantine_rejects":{d},"load_shed_drops":{d}
+        \\,"phase_rejects":{d},"ownership_rejects":{d},"bounds_rejects":{d},"movement_rejects":{d},"decode_rejects":{d},"guard_kicks":{d},"guard_would_kicks":{d},"guard_quarantines":{d},"quarantine_rejects":{d},"load_shed_drops":{d},"hard_ceiling_downgrades":{d},"evidence_events":{d}
     , .{
         s.phase_rejects,
         s.ownership_rejects,
@@ -1966,6 +1976,8 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
         s.guard_quarantines,
         s.quarantine_rejects,
         s.load_shed_drops,
+        s.hard_ceiling_downgrades,
+        s.evidence_events,
     });
     // Compact player roster so tools need not scrape HTML partials.
     try w.writeAll(",\"players\":[");
