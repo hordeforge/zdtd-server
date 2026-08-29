@@ -112,6 +112,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   now destroyed immediately (previously it lingered as a ghost until the slot
   was reused - a phantom in listents/mem counts and a spawn-on-approach
   candidate for late joiners), and the reap path shares the one drop path.
+- Entity kind from stock data: entityclasses `Tags` now classify vehicles
+  (`Tags="vehicle"`) and junk turrets (`Tags="turret,..."`) instead of the
+  name falling through to zombie, so the admin `spawnentity` verb drops its
+  hardcoded name-sniff list and takes vehicle physicals (kind, HP, velocity,
+  seats) from vehicles.xml (unknown classes such as vehicleHelicopter fall
+  back to the 4x4 def).
 
 ## [0.2.0] - 2026-08-22
 

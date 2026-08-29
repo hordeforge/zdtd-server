@@ -1626,25 +1626,17 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             const sy = self.spawnYNearPlayer(tr.x, tr.y, tr.z);
             const sx = tr.x + 3;
             const sz = tr.z + 3;
-            // Name-based vehicle/trader shortcuts (entityclasses often tags them as zombie).
-            const low_vehicle = std.mem.find(u8, nm, "vehicle") != null or std.mem.find(u8, nm, "Bicycle") != null or std.mem.find(u8, nm, "Minibike") != null or std.mem.find(u8, nm, "Motorcycle") != null or std.mem.find(u8, nm, "4x4") != null or std.mem.find(u8, nm, "Truck") != null or std.mem.find(u8, nm, "Gyrocopter") != null;
+            // Kind comes from the stock data (entityclasses.xml Class/Tags via
+            // assets/entities.zig inferKind), never name-sniffing here. Vehicle
+            // physicals (kind, HP, velocity, seats) come from vehicles.xml;
+            // classes without a vehicles.xml entry (vehicleHelicopter) fall
+            // back to the 4x4 def.
             const nid = blk: {
-                if (low_vehicle or def.kind == .vehicle) {
-                    const vk: ecs.components.VehicleKind = if (std.mem.find(u8, nm, "Bicycle") != null or std.mem.find(u8, nm, "bicycle") != null)
-                        .bicycle
-                    else if (std.mem.find(u8, nm, "Minibike") != null or std.mem.find(u8, nm, "minibike") != null)
-                        .minibike
-                    else if (std.mem.find(u8, nm, "Motorcycle") != null or std.mem.find(u8, nm, "motorcycle") != null)
-                        .motorcycle
-                    else if (std.mem.find(u8, nm, "Gyro") != null or std.mem.find(u8, nm, "gyro") != null)
-                        .gyrocopter
-                    else
-                        .four_by_four;
-                    // Seats come from vehicles.xml when that kind is known,
-                    // so a Truck4x4 gets four seats and not one.
-                    const vd = self.vehicles.byKind(vk);
+                if (def.kind == .vehicle) {
+                    const vd = self.vehicles.byName(nm) orelse self.vehicles.byKind(.four_by_four);
+                    const kind: ecs.components.VehicleKind = if (vd) |d| d.kind else .four_by_four;
                     break :blk self.sim.spawnVehicleEx(
-                        vk,
+                        kind,
                         sx,
                         sy,
                         sz,
@@ -1653,7 +1645,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                         if (vd) |d| d.seat_count else 1,
                     );
                 }
-                if (def.kind == .trader or std.mem.startsWith(u8, nm, "npcTrader")) {
+                if (def.kind == .trader) {
                     break :blk self.sim.spawnTrader(nm, sx, sy, sz, self.npc.traderIdForClass(nm), self.trader_wallet_dukes);
                 }
                 if (def.kind == .animal) {

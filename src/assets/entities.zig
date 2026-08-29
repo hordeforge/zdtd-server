@@ -356,6 +356,12 @@ fn inferKind(name: []const u8, tags: []const u8, is_animal: bool) components.Kin
     if (std.mem.startsWith(u8, name, "player") or std.mem.find(u8, tags, "player") != null) return .player;
     if (is_animal or std.mem.startsWith(u8, name, "animal") or std.mem.find(u8, tags, "animal") != null) return .animal;
     if (std.mem.startsWith(u8, name, "npcTrader") or std.mem.find(u8, name, "trader") != null) return .trader;
+    // Stock tags classify rows the name never hints at: vehicleBicycle keeps
+    // `Tags="vehicle"`, junkTurretGun/Sledge `Tags="turret,..."`. Without
+    // these the classes fell through to .zombie and callers needed hardcoded
+    // name-sniff lists (the old admin spawnentity low_vehicle list).
+    if (std.mem.find(u8, tags, "vehicle") != null) return .vehicle;
+    if (std.mem.find(u8, tags, "turret") != null) return .turret;
     return .zombie;
 }
 
@@ -844,6 +850,13 @@ test "load stock entityclasses when present" {
     // A34 on animals: the stag's own HealthMax base_set=100 wins over the 30
     // builtin animal floor (the 10 row in the file is inside an XML comment).
     try std.testing.expectEqual(@as(f32, 100), stag.max_hp);
+    // Kind from the stock Tags, not the name: vehicles carry `Tags="vehicle"`
+    // and junk turrets `Tags="turret,..."` (the old inferKind missed both, so
+    // callers had to sniff names).
+    const bike = t.byName("vehicleBicycle") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(components.Kind.vehicle, bike.kind);
+    const sledge = t.byName("junkTurretSledge") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(components.Kind.turret, sledge.kind);
     const fer = t.byName("zombieBoeFeral") orelse return error.TestExpectedEqual;
     // A34 on the feral ladder: zombieBoeFeral overrides zombieBoe's HealthMax
     // with ^healthNormalFeral = 550 (Extends-chain override + variable lookup).
