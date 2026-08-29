@@ -4116,6 +4116,39 @@ test "scenario observe mode records evidence but does not enforce (T19)" {
     );
 }
 
+test "scenario T20 hard ceiling downgrades client-informed detectors" {
+    // The authority ceiling (T20): `.hard` can trip a kick, so only
+    // server-only detectors may carry it. A `.hard` event from a
+    // client-informed detector (bounds/movement weigh client-reported
+    // values) fails closed to `.strong` - never the hard ladder - and the
+    // downgrade is counted.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_ceiling");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ceiling", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // A .hard bounds event (client-informed): downgraded, never trips hard.
+    const downgrades_before = g.harness.counters.get(.hard_ceiling_downgrades);
+    g.noteEvidence(c, 0, c.entity_id, .bounds, .hard, .block, 100, 96);
+    try std.testing.expect(g.harness.counters.get(.hard_ceiling_downgrades) > downgrades_before);
+    try std.testing.expectEqual(@as(u16, 0), c.guard.hard_n);
+
+    // A .hard phase event (server-only): passes the ceiling untouched.
+    const downgrades_mid = g.harness.counters.get(.hard_ceiling_downgrades);
+    g.noteEvidence(c, 0, c.entity_id, .phase, .hard, .none, 1, 0);
+    try std.testing.expectEqual(downgrades_mid, g.harness.counters.get(.hard_ceiling_downgrades));
+    try std.testing.expect(c.guard.hard_n >= 1);
+    std.debug.print("PASS hard-ceiling: bounds .hard downgraded, phase .hard kept (hard_n={d})\n", .{c.guard.hard_n});
+}
+
 test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele clamps" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_coordbound");

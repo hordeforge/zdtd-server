@@ -105,6 +105,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   client position, never denies - documented) and records observed movement
   violations in the evidence ring instead, so the dashboard no longer claims
   protection observe does not provide.
+- Hard-authority ceiling (T20): `evidence.decisionInputs` classifies every
+  detector by decision-input authority (server_only vs client_informed), and
+  `noteEvidence` fails closed - a `.hard` event from a client-informed
+  detector (bounds/movement weigh client-reported values) is downgraded to
+  `.strong` and counted (`hard_ceiling_downgrades`), so no client-informed
+  signal can trip the kick ladder. Coverage test + scenario pin it.
 
 ### Fixed
 

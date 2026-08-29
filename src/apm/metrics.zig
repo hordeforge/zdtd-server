@@ -34,6 +34,9 @@ pub const CounterId = enum(u16) {
     bounds_rejects,
     /// C2S movement over envelope (clamp or observe count).
     movement_rejects,
+    /// `.hard` evidence downgraded to `.strong` by the T20 authority ceiling
+    /// (a client-informed detector must never trip a hard action).
+    hard_ceiling_downgrades,
     /// C2S dropped by decode validation (NaN/Inf, coord range).
     decode_rejects,
     /// P4 inv cause ledger appends (observe / evidence).

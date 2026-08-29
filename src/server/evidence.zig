@@ -26,6 +26,32 @@ pub const Detector = enum(u8) {
     other = 255,
 };
 
+/// Input authority of a detector's DECISION (T20 ceiling): a detector may be
+/// elevated to `.hard` severity (which can trip a kick) only when every input
+/// that decides the event is server-derived. Detectors that weigh
+/// client-reported values are still server-DECIDED (the client value is only
+/// ever compared against server caps/ranges) but must fail closed to `.strong`.
+pub const DecisionInput = enum(u8) {
+    /// Every decision input is server state (SM phase, parse result, rate
+    /// counters, entity-id ownership, server caps). `.hard` is legal.
+    server_only,
+    /// The observed value is client-reported; the decision is the server's
+    /// comparison against its own caps/ranges. `.hard` is not legal (the
+    /// ceiling downgrades it to `.strong`).
+    client_informed,
+};
+
+/// Authority table, one row per detector (T20 classification). The ceiling
+/// assert (guard.zig noteEvidence) and the coverage test keep this honest.
+pub fn decisionInputs(det: Detector) DecisionInput {
+    return switch (det) {
+        // Client-reported positions/coords/deltas weighed against server caps.
+        .bounds, .movement => .client_informed,
+        // Everything else decides purely on server state.
+        .phase, .ownership, .decode, .throttle, .flood, .farming, .other => .server_only,
+    };
+}
+
 /// Which C2S surface produced the event. Maps 1:1 to the guard quarantine bits,
 /// so a signal can deny only the surface it was observed on. `.none` is an
 /// unattributed signal (movement, phase, flood) and quarantines every surface.
@@ -105,4 +131,19 @@ test "ring wraps and dump" {
     const n = r.dumpText(&buf);
     try std.testing.expect(n > 0);
     try std.testing.expect(std.mem.find(u8, buf[0..n], "\"det\":\"throttle\"") != null);
+}
+
+test "T20 authority classification covers every detector" {
+    // The decision-input table is exhaustive (compile-time) and the mapping
+    // is pinned: only bounds/movement weigh client-reported values; every
+    // other detector decides purely on server state. If a new detector is
+    // added, this test forces a classification decision.
+    inline for (@typeInfo(Detector).@"enum".fields) |f| {
+        const det: Detector = @enumFromInt(f.value);
+        const want: DecisionInput = switch (det) {
+            .bounds, .movement => .client_informed,
+            .phase, .ownership, .decode, .throttle, .flood, .farming, .other => .server_only,
+        };
+        try std.testing.expectEqual(want, decisionInputs(det));
+    }
 }

@@ -38,9 +38,19 @@ pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, de
         self.harness.counters.inc(.load_shed_drops);
         return;
     }
-    const out = guard_policy.evaluate(&c.guard, self.guard, self.tick_n, det, sev, surf, self.authorityCorrects());
+    // T20 authority ceiling: `.hard` can trip a kick, so it is legal only for
+    // detectors whose decision is entirely server-derived. A client-informed
+    // detector (bounds/movement weigh client-reported values against server
+    // caps) fails closed to `.strong` - never hard - and the downgrade is
+    // counted so the operator can see the ceiling working.
+    var sev_eff = sev;
+    if (sev == .hard and evidence_mod.decisionInputs(det) == .client_informed) {
+        sev_eff = .strong;
+        self.harness.counters.inc(.hard_ceiling_downgrades);
+    }
+    const out = guard_policy.evaluate(&c.guard, self.guard, self.tick_n, det, sev_eff, surf, self.authorityCorrects());
     if (out.record) {
-        self.evidence.record(.{ .tick = self.tick_n, .peer_local = peer_local, .entity_id = entity_id, .detector = det, .severity = sev, .surface = surf, .observed = observed, .bound = bound });
+        self.evidence.record(.{ .tick = self.tick_n, .peer_local = peer_local, .entity_id = entity_id, .detector = det, .severity = sev_eff, .surface = surf, .observed = observed, .bound = bound });
         self.harness.counters.inc(.evidence_events);
     }
     switch (out.action) {

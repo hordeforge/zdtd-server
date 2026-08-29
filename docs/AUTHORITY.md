@@ -86,6 +86,24 @@ moves*. That is the whole "weak signals never kick" guarantee: it is a property
 of the control flow, not a threshold, and it has its own unit test. Only
 `.strong` and `.hard` can open a gate.
 
+**Hard ceiling (T20).** `.hard` can trip a kick, so it is legal only for
+detectors whose decision is entirely server-derived (`evidence.decisionInputs`
+== `.server_only`). Detectors that weigh client-reported values
+(`bounds`, `movement`) are server-DECIDED (the client value is only ever
+compared against server caps/ranges) but fail closed: `noteEvidence`
+downgrades their `.hard` to `.strong` and counts `hard_ceiling_downgrades`.
+The classification is one row per detector and pinned by a coverage test.
+
+| Detector | Decision inputs | Authority |
+|---|---|---|
+| `phase` | join-SM state | server_only |
+| `ownership` | entity-id vs peer identity | server_only |
+| `decode` | parse validation | server_only |
+| `throttle` / `flood` / `farming` | server rate counters | server_only |
+| `bounds` | client coords vs server caps | client_informed (`.hard` downgraded) |
+| `movement` | client deltas vs server envelope | client_informed (`.hard` downgraded) |
+| `other` | (unattributed) | server_only |
+
 **Gates (per peer, per window, default 1200 ticks = 60 s).**
 
 - 2 **distinct** Strong detectors (repeating one detector never trips), or

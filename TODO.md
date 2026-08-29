@@ -203,8 +203,15 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
       observe records the observed violation in the evidence ring instead, so
       the dashboard no longer claims protection observe does not provide
       (scenario "observe mode records evidence but does not enforce").
-- [ ] T20: classify every detector by input authority and role; assert the
+- [x] T20: classify every detector by input authority and role; assert the
       ceiling (`hard` requires every decision input server-derived) by test.
+      **DONE 2026-08-30**: `evidence.decisionInputs` classifies every
+      detector (`server_only` vs `client_informed`); `noteEvidence` fails
+      closed - a `.hard` event from a client-informed detector (bounds,
+      movement) is downgraded to `.strong` and counted
+      (`hard_ceiling_downgrades`); coverage test pins the table, scenario
+      "hard ceiling downgrades client-informed detectors" proves bounds
+      `.hard` never trips the ladder while phase `.hard` passes.
 - [ ] T21: guest detector feed (`on_evidence` Wasm hook), read-only events out,
       `evidence.Event` in, severity capped by the host, never a gate.
 - [ ] T22: attribution (a finding another player induces never accrues against
