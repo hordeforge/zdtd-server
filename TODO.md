@@ -197,6 +197,17 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
 - [ ] T18: own the player inventory. ADR 0007's client-trusting C2S apply is the
       largest cheat surface in the server (duplication, spawn-anything) and no
       detector closes it honestly. Worth more than every task below.
+      **2026-08-30 hardening slice (first)**: the stock InventoryTransaction
+      path now REJECTS a non-empty stack that does not resolve to a server
+      catalog item (fail-closed, honest success bit + `c2s_rejects`) instead
+      of silently applying an empty slot with a success ack, and SetAll
+      applies atomically (only when every op resolves). Unknown ids were
+      already empty-slot fail-closed (toEcs), counts are clamped to the
+      catalog max stack (clampStackSlots), and ownership targets the player's
+      own inventory; the wire type is u16-bounded so no huge-type crash
+      vector exists. Remaining: the client-chosen KNOWN item id at max stack
+      (server-sanctioned grants / full stock-transaction ledger) - the core
+      of T18.
 - [x] T19: make `observe` mode honest. **DONE 2026-08-30**: observe stays
       permissive (applies client pos, never denies - documented) but
       `movement_rejects` now counts ENFORCED rejections only (correct mode);

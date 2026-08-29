@@ -658,17 +658,40 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                                         ok = false;
                                         continue;
                                     }
-                                    self.sim.inventory[ps].slots[@intCast(op.index)] = packages.stock_inv.toEcs(op.stack, reverseItemType, self);
+                                    const slot = packages.stock_inv.toEcs(op.stack, reverseItemType, self);
+                                    // T18 hardening: a NON-EMPTY client stack
+                                    // that does not resolve to a server
+                                    // catalog item is a reject, not a silent
+                                    // clear - the ack must tell the client the
+                                    // transaction failed (fail-closed, honest
+                                    // success bit).
+                                    if (op.stack.type_id != 0 and op.stack.count != 0 and slot.item_id == 0) {
+                                        ok = false;
+                                        self.harness.counters.inc(.c2s_rejects);
+                                        continue;
+                                    }
+                                    self.sim.inventory[ps].slots[@intCast(op.index)] = slot;
                                 },
                                 2 => { // SetAll: replace the inventory array
                                     if (op.new_n > ecs.components.max_inv_slots) {
                                         ok = false;
                                         continue;
                                     }
-                                    @memset(&self.sim.inventory[ps].slots, .{});
+                                    var slots: [ecs.components.max_inv_slots]ecs.components.InvSlot = @splat(.{});
                                     var si: u16 = 0;
                                     while (si < op.new_n) : (si += 1) {
-                                        self.sim.inventory[ps].slots[si] = packages.stock_inv.toEcs(op.new_stacks[si], reverseItemType, self);
+                                        const slot = packages.stock_inv.toEcs(op.new_stacks[si], reverseItemType, self);
+                                        // Same T18 reject: an unresolvable
+                                        // non-empty stack fails the whole tx.
+                                        if (op.new_stacks[si].type_id != 0 and op.new_stacks[si].count != 0 and slot.item_id == 0) {
+                                            ok = false;
+                                            self.harness.counters.inc(.c2s_rejects);
+                                            break;
+                                        }
+                                        slots[si] = slot;
+                                    }
+                                    if (ok) {
+                                        @memcpy(&self.sim.inventory[ps].slots, &slots);
                                     }
                                 },
                                 else => ok = false,

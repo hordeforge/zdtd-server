@@ -4258,6 +4258,50 @@ test "scenario guardreport shows the would-kick diff (T23)" {
     std.debug.print("PASS guardreport: {s}\n", .{reply});
 }
 
+test "scenario stock InvTx rejects unresolvable item stacks (T18)" {
+    // T18 hardening: a stock InventoryTransaction SetAbsolute carrying a
+    // non-empty stack that does not resolve to a server catalog item must be
+    // REJECTED (fail-closed, honest success bit + c2s_rejects), not silently
+    // applied as an empty slot with a success ack.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_stocktx");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stocktx", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    // Seed a known item at slot 3 so we can assert it survives a rejected tx.
+    const wood = (g.items.byName("resourceWood") orelse return error.SkipZigTest).id;
+    g.sim.inventory[ps].slots[3] = .{ .item_id = wood, .count = 10 };
+
+    // Stock InvTx: SetAbsolute at index 3 with a bogus, unresolvable type id.
+    var body: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeI32(1); // inventoryCount
+    for (0..16) |i| try w.writeByte(@intCast(i)); // guid
+    try w.writeI32(0); // initialHash
+    try w.writeI32(0); // finalHash
+    try w.writeI32(1); // opCount
+    try w.writeI16(0); // SetAbsolute
+    try packages.stock_inv.writeItemStack(&w, .{ .type_id = packages.stock_inv.items_start_here + 50000, .count = 1 });
+    try w.writeI32(3); // index slot 3
+    var frame_buf: [300]u8 = undefined;
+    const rejects_before = g.harness.counters.get(.c2s_rejects);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryTransactionRequest", w.written()));
+    try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rejects_before);
+    // The slot is untouched (rejected, not cleared).
+    try std.testing.expectEqual(@as(u16, wood), g.sim.inventory[ps].slots[3].item_id);
+    try std.testing.expectEqual(@as(u16, 10), g.sim.inventory[ps].slots[3].count);
+    std.debug.print("PASS stock-tx-reject: c2s_rejects {d}->{d} slot3 intact\n", .{ rejects_before, g.harness.counters.get(.c2s_rejects) });
+}
+
 test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele clamps" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_coordbound");

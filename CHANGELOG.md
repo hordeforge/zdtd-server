@@ -130,6 +130,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   kick/denial state, and the enforcement rung configuration - so an operator
   reviews exactly who WOULD be kicked before enabling a rung. Scenario
   "guardreport shows the would-kick diff".
+- Inventory C2S hardening (T18 slice): the stock InventoryTransaction path
+  now REJECTS a non-empty stack that does not resolve to a server catalog
+  item (fail-closed, honest success bit + `c2s_rejects`) instead of silently
+  applying an empty slot with a success ack, and SetAll applies atomically
+  (only when every op resolves). Scenario "stock InvTx rejects unresolvable
+  item stacks".
 
 ### Fixed
 
