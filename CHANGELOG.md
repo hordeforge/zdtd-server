@@ -55,6 +55,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   THIRD_PARTY.md). Picks up the upstream pre-tag cleanliness sweep (file org,
   build flags, audit fixes) and full WASI 0.3 coverage; no zdtd-facing API
   change.
+- New sim tunables: `[rules.c2s]` per-request caps on untrusted C2S push
+  paths (`eat_units_per_push`, `quest_summon_per_request`) and
+  `[rules.ai] stealth_alert_radius` (S2C stealth alert flag radius; the
+  16-tick broadcast cadence stays the RE-pinned stock value). All bind via
+  `zdtd.toml`/preset packs like the rest of `[rules.*]`.
+- Admin `give` resolves stock item names (e.g. `give 0 resourceWood 5`) in
+  addition to numeric ids, fail-closed on unknown names; `admin help` now
+  lists `loglevel`, `commandpermission`/`cp` and `plugin`.
 
 ### Fixed
 
