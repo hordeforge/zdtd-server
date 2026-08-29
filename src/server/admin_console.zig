@@ -933,7 +933,9 @@ fn replyThreads(self: *Game) void {
 /// tick), and the kick/denial state. An operator reviews exactly who WOULD
 /// be kicked (and by what signal) before enabling an enforcement rung.
 fn replyGuardReport(self: *Game) void {
-    var rb: [2048]u8 = undefined;
+    // 16 KiB covers the full 64-peer table (~150 B/peer) plus header/totals;
+    // the earlier 2 KiB silently truncated the diff past ~14 peers.
+    var rb: [16 * 1024]u8 = undefined;
     var w: std.Io.Writer = .fixed(&rb);
     w.print("guard: dry_run={} enforce={} quarantine={} window_ticks={d}\n", .{ self.guard.dry_run, self.guard.enforce, self.guard.quarantine, self.guard.window_ticks }) catch return;
     var peers: usize = 0;
