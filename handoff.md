@@ -114,6 +114,34 @@
   tests measured). All 22 plugin hooks verified to have live sim call
   sites; no plugin/config-eligible behavior remains native.
 
+## Wave 95 (2026-08-29: soak-driven defect fixes + operator-surface verification)
+
+- **WorldSpawnPoints overflow** (Pregen06k01 soak): the join-time builder used
+  a 512-byte slice but 32 spawn points need 837 bytes - maps with >= 20
+  spawns overflowed every enter (payload errors 18-21/run). Buffer 1024 +
+  regression test; 8K-map soak confirms 0 errors.
+- **POI metadata buffer** (latent): the 3.2.0 response built into 64 KiB,
+  which 512 dense records exceed; hardened to 256 KiB + regression test.
+- **listplayers platform-id/ip** (combat-soak): the row never surfaced the
+  puid or source ip, so the loadgen's spawn flow parsed no ids and
+  --spawn-zombies silently no-oped. Now prints pltfmid={platform}_{id} and
+  the v4 address (incl. v4-mapped ip6); spawnentity flows and zombies spawn.
+- **getoptions effective values** (mode-pack probe): MaxSpawnedZombies/
+  Animals, BloodMoonFrequency/Range, ZombieMove*, BlockDamageAI/AIBM,
+  AirDropFrequency read the base config while the sim used the effective
+  (pack) value; all now read the sim. Verified with horde_lite.
+- **GAME_OPTIONS CLI-flag table** (flag sweep): --config-dir/--config-
+  overrides/--mods-dir/--worldgen-seed/--ticks etc. had no operator doc;
+  added, and the config-path flags functionally verified.
+- Operator surfaces verified live: admin console verbs (give/storm/
+  clearweather/saveworld/setgamepref round-trip), webui auth + /api/cmd
+  + apm.json, MCP handshake + tools + allowlist gate, GSI banner, Server
+  Password gate, --quiet, --serverconfig, determinism (same seed ->
+  byte-identical saves), modlet patch application, config-dir/overrides.
+- Doc sweep: progression counts refreshed to the 3.2.0 file (648 passive
+  rows, 617 anchor-form, 8 attributes), PACKAGES live dispatch/S2C counts,
+  STATE_MACHINES join SM 3.2.0 stages.
+
 ## Docs
 
 - `handoff.md` is a rolling handoff (same file, overwritten each pass): see this file + `git log --oneline -30` for recent commits.
