@@ -232,8 +232,16 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
       the envelope instead of rebaselining, so a player who falls out of the
       world is corrected without counting movement rejects (scenario
       "void rescue suppresses the movement reject").
-- [ ] T23: make the dry run produce a reviewable diff, so no enforcement rung is
+- [x] T23: make the dry run produce a reviewable diff, so no enforcement rung is
       ever enabled without a measured false-positive rate.
+      **DONE 2026-08-30**: the guard records the gate-trip CAUSE (detector +
+      tick) per peer (`PeerState.tripped_det`/`tripped_tick`), and the new
+      `guardreport` admin verb dumps the dry-run diff - per peer the strong
+      detector names, hard count, whether the ladder tripped (by which
+      detector, at which tick), the kick/denial state, and the enforcement
+      rung configuration (dry_run/enforce/quarantine). An operator reviews
+      exactly who WOULD be kicked before enabling a rung. Scenario
+      "guardreport shows the would-kick diff".
 
 ### Custom game modes (config-driven behaviour)
 

@@ -133,6 +133,11 @@ pub const PeerState = struct {
     seen_mask: u64 = 0,
     /// Gate already fired this window (one action per window, not per event).
     tripped: bool = false,
+    /// Detector that tripped the gate this window (the would-kick / kick
+    /// cause, T23). Set once when the gate fires; `guardreport` reads it.
+    tripped_det: evidence.Detector = .other,
+    /// Tick the gate tripped (dry-run diff timestamp).
+    tripped_tick: u64 = 0,
     quarantine: Quarantine = .{},
     /// Non-zero once a policy kick is armed; the tick the peer is dropped.
     kick_at_tick: u64 = 0,
@@ -195,6 +200,10 @@ pub fn evaluate(
         state.hard_n >= policy.hard_repeat;
     if (!tripped or state.tripped) return .{ .record = record };
     state.tripped = true;
+    // T23: record the cause for the dry-run diff (`guardreport`) - which
+    // detector tripped the gate and when.
+    state.tripped_det = det;
+    state.tripped_tick = tick;
 
     if (corrects and policy.enforce and !policy.dry_run)
         return .{ .record = record, .action = .kick, .bits = bitsFor(surf) };

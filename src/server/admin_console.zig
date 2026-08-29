@@ -34,6 +34,7 @@ const isPlayerConsoleCommand = c2s_text.isPlayerConsoleCommand;
 const eqAny = c2s_text.eqAny;
 const apm = @import("../apm/root.zig");
 const world_store = @import("../world/store.zig");
+const evidence_mod = @import("evidence.zig");
 const chatMsgOk = c2s_text.chatMsgOk;
 const ecs = @import("../ecs/root.zig");
 const aidirector = @import("../ecs/aidirector.zig");
@@ -927,6 +928,44 @@ fn replyThreads(self: *Game) void {
     self.adminReply(s);
 }
 
+/// T23: the anti-cheat dry-run diff. Per peer: the strong-detector mask
+/// names, hard count, whether the gate tripped (by which detector, at which
+/// tick), and the kick/denial state. An operator reviews exactly who WOULD
+/// be kicked (and by what signal) before enabling an enforcement rung.
+fn replyGuardReport(self: *Game) void {
+    var rb: [2048]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&rb);
+    w.print("guard: dry_run={} enforce={} quarantine={} window_ticks={d}\n", .{ self.guard.dry_run, self.guard.enforce, self.guard.quarantine, self.guard.window_ticks }) catch return;
+    var peers: usize = 0;
+    for (&self.clients) |*cl| {
+        if (cl.peer == null and !cl.joined) continue;
+        peers += 1;
+        const g = &cl.guard;
+        w.print("  slot={d} entity={d} {s}: strong=", .{ cl.slot, cl.entity_id, cl.name[0..cl.name_len] }) catch return;
+        var first = true;
+        inline for (@typeInfo(evidence_mod.Detector).@"enum".fields) |f| {
+            if (f.value == 0 or f.value > 8) continue; // skip `other` (255)
+            const bit: u16 = @as(u16, 1) << @intCast(f.value - 1);
+            if (g.strong_mask & bit != 0) {
+                w.print("{s}{s}", .{ if (first) "" else "+", f.name }) catch return;
+                first = false;
+            }
+        }
+        if (first) w.writeAll("-") catch return;
+        w.print(" hard={d} tripped={} det={s}@tick {d} kick_at={d}\n", .{
+            g.hard_n, g.tripped, @tagName(g.tripped_det), g.tripped_tick, g.kick_at_tick,
+        }) catch return;
+    }
+    w.print("peers tracked: {d} | would_kicks={d} kicks={d} quarantines={d} ceiling_downgrades={d}\n", .{
+        peers,
+        self.harness.counters.get(.guard_would_kicks),
+        self.harness.counters.get(.guard_kicks),
+        self.harness.counters.get(.guard_quarantines),
+        self.harness.counters.get(.hard_ceiling_downgrades),
+    }) catch return;
+    self.adminReply(w.buffered());
+}
+
 /// Runtime `setgamepref` for the GameStats-backed prefs: parse the value,
 /// clamp to this function's own range (independent of config.zig's startup
 /// ranges — they are not guaranteed to match), and write the sim/Game field
@@ -1275,6 +1314,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
             }
         },
         .listthreads => replyThreads(self),
+        .guardreport => replyGuardReport(self),
         .commandpermission => |cp| {
             if (cp.level) |lvl| {
                 if (self.setCommandLevel(cp.verb, lvl)) {

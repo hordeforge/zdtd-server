@@ -471,6 +471,10 @@ pub const Command = union(enum) {
     loglevel: ?[]const u8,
     /// Stock `listthreads` / `lt`: summary of the server's logical threads.
     listthreads,
+    /// zdtd-only `guardreport`: the anti-cheat dry-run diff - per peer, which
+    /// detector would trip the kick ladder (or already did), the window
+    /// counts, and the enforcement rung state (T23).
+    guardreport,
     /// Stock `commandpermission` / `cp`: per-command required permission
     /// level. `cp <command>` reports; `cp <level> <command>` sets (levels run
     /// 0 = highest .. 255; the caller must be at least as privileged).
@@ -542,6 +546,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "exportcurrentconfigs")) return "exportcurrentconfigs";
     if (std.mem.eql(u8, verb, "loglevel")) return "loglevel [0..4]";
     if (std.mem.eql(u8, verb, "listthreads") or std.mem.eql(u8, verb, "lt")) return "listthreads";
+    if (std.mem.eql(u8, verb, "guardreport")) return "guardreport";
     if (std.mem.eql(u8, verb, "commandpermission") or std.mem.eql(u8, verb, "cp"))
         return "commandpermission <command> | commandpermission <level> <command>";
     if (std.mem.eql(u8, verb, "guardclear") or std.mem.eql(u8, verb, "gc"))
@@ -550,6 +555,7 @@ pub fn usageFor(verb: []const u8) ?[]const u8 {
         return "help [topic]";
     if (std.mem.eql(u8, verb, "status")) return "status";
     if (std.mem.eql(u8, verb, "guardstats") or std.mem.eql(u8, verb, "gs")) return "guardstats";
+    if (std.mem.eql(u8, verb, "guardreport")) return "guardreport";
     if (std.mem.eql(u8, verb, "evidence") or std.mem.eql(u8, verb, "ev")) return "evidence [dump [path]]";
     if (std.mem.eql(u8, verb, "apm") or std.mem.eql(u8, verb, "metrics")) return "apm";
     if (std.mem.eql(u8, verb, "save")) return "save";
@@ -604,6 +610,7 @@ pub fn parseCommand(line: []const u8) Command {
     if (std.mem.eql(u8, cmd, "apm") or std.mem.eql(u8, cmd, "metrics")) return if (it.next() == null) .apm else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "save")) return if (it.next() == null) .save else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "getoptions")) return if (it.next() == null) .getoptions else .{ .bad_args = cmd };
+    if (std.mem.eql(u8, cmd, "guardreport")) return if (it.next() == null) .guardreport else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "exportcurrentconfigs")) return if (it.next() == null) .exportcurrentconfigs else .{ .bad_args = cmd };
     if (std.mem.eql(u8, cmd, "loglevel")) {
         const p = it.next();

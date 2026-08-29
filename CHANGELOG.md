@@ -123,6 +123,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   movement rejects against a legit player. Spawn/respawn/death and admin
   teleports already reset the envelope; stalls/packet loss are rate-covered
   by design. Scenario "void rescue suppresses the movement reject".
+- Dry-run reviewable diff (T23): the guard records the gate-trip cause
+  (detector + tick) per peer, and the new `guardreport` admin verb dumps the
+  anti-cheat diff - per peer, which strong detectors are in the window,
+  whether the kick ladder tripped (by which detector, at which tick), the
+  kick/denial state, and the enforcement rung configuration - so an operator
+  reviews exactly who WOULD be kicked before enabling a rung. Scenario
+  "guardreport shows the would-kick diff".
 
 ### Fixed
 

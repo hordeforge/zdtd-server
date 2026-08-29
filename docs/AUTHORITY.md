@@ -42,7 +42,7 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 | **C2S bounds** | SetBlock / Explosion / TE / DamageEntity | Reach ~96 blocks; damage strength cap 200; fatal damage vs NPC only. |
 | **Ownership** | Bag / InvTx / player entity id / motion pkgs | No cross-player inv writes; entity_id must match peer; `ownership_rejects`. |
 | **Stack bounds** | PlayerInventory / Bag apply | Clamp slot count to items.xml `Stacknumber` (fail closed omit excess). |
-| **Admin** | `guardstats` | Line 1: phase/ownership/bounds/movement/decode reject counters. Line 2: guard policy rungs + outcomes + per-slot quarantine bits. `guardclear <slot>` clears them. |
+| **Admin** | `guardstats` | Line 1: phase/ownership/bounds/movement/decode reject counters. Line 2: guard policy rungs + outcomes + per-slot quarantine bits. `guardclear <slot>` clears them. `guardreport` (T23) dumps the dry-run diff: per peer, the strong detectors in its window, whether the kick ladder tripped (by which detector, at which tick), and the enforcement rung state |
 | **Player inv (interim)** | PlayerInventory / player Bag C2S | **Client-trusting apply** into ECS (ADR 0007). No S2C PlayerInventory echo. Admin `give` = loot bag drop. |
 | **Interest / no self-echo** | `replicate` / scenarios | Motion and entity updates go to observers; sender does not get own PosAndRot echo. Serialize-once: ADR 0008. |
 | **Rate / lock** | join IP throttle; lock channels | ~500 ms join gap (loopback exempt); TE lock holder deny + stale release. |

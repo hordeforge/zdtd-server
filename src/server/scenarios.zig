@@ -4216,6 +4216,48 @@ test "scenario void rescue suppresses the movement reject (T22)" {
     std.debug.print("PASS void-rescue: rejects {d}->{d} y={d:.1}\n", .{ rejects_before, g.harness.counters.get(.movement_rejects), g.sim.transform[idx].y });
 }
 
+test "scenario guardreport shows the would-kick diff (T23)" {
+    // T23: the dry-run must produce a reviewable diff - guardreport names the
+    // peer, the strong detectors in its window, and the detector that tripped
+    // the kick ladder (and when), so an operator reviews exactly who WOULD be
+    // kicked before enabling an enforcement rung.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_guardreport");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guardreport", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.tick_n = 100;
+
+    // Trip the gate with two distinct strong detectors (the default ladder:
+    // 2 distinct strong in a window). The second detector is the cause.
+    g.noteEvidence(c, 0, c.entity_id, .bounds, .strong, .block, 100, 96);
+    try std.testing.expect(!c.guard.tripped);
+    g.noteEvidence(c, 0, c.entity_id, .movement, .strong, .none, 25, 20);
+    try std.testing.expect(c.guard.tripped);
+    try std.testing.expectEqualStrings("movement", @tagName(c.guard.tripped_det));
+    try std.testing.expect(c.guard.tripped_tick > 0);
+
+    // The dry-run diff names the cause and the enforcement state.
+    var sink: [2048]u8 = undefined;
+    g.admin_reply_len = 0;
+    g.admin_reply_sink = &sink;
+    g.runAdminLine("guardreport", "test");
+    g.admin_reply_sink = null;
+    const reply = sink[0..g.admin_reply_len];
+    try std.testing.expect(reply.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, reply, "dry_run=true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply, "tripped=true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply, "det=movement") != null);
+    std.debug.print("PASS guardreport: {s}\n", .{reply});
+}
+
 test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele clamps" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_coordbound");
