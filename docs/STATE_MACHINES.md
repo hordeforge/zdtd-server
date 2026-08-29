@@ -23,9 +23,9 @@ that owns them.
 | 14 | Land claims | `server/game.zig` land claims | [claims](#14-land-claims) |
 | 15 | Party membership | `ecs/party.zig` Manager, `server/game/social.zig` handlePartyActions | [party](#15-party-membership) |
 | 16 | Vending rental | `world/vending.zig`, `server/c2s/quest.zig` NetPackagePlayerVendingMachine | [vending](#16-vending-rental) |
-| 17 | Loot respawn | `server/chunk_stream.zig` maybeRespawnContainer, `world/containers.zig` | [loot-respawn](#17-loot-respawn) |
+| 17 | Loot respawn | `server/game/chunk_stream.zig` maybeRespawnContainer, `world/containers.zig` | [loot-respawn](#17-loot-respawn) |
 | 18 | Guard policy | `server/guard_policy.zig` | [guard](#18-guard-policy) |
-| 19 | Chunk stream backpressure | `server/chunk_stream.zig`, `server/game/net.zig` sendReliablePumped | [chunk-stream](#19-chunk-stream-backpressure) |
+| 19 | Chunk stream backpressure | `server/game/chunk_stream.zig`, `server/game/net.zig` sendReliablePumped | [chunk-stream](#19-chunk-stream-backpressure) |
 | 20 | Buff lifecycle | `ecs/buff.zig`, `ecs/systems.zig` systemBuffs | [buff](#20-buff-lifecycle) |
 
 ## 1. Join / client session SM
@@ -66,7 +66,7 @@ instead of a second PlayerId. The 3.2.0 join additions: the
 `EntityCreationData.requestedBy/requestKey` tail is **not emitted**: it only
 matters for client-requested entity spawns, which zdtd refuses
 (`RequestToSpawnEntity` C2S), and the ECD stays FileVersion 36 so a 3.2.0
-client's `read` skips the tail (`stock_entity.zig`, parse-compatible).
+client's `read` skips the tail (`wire/stock_entity.zig`, parse-compatible).
 
 Owners: `src/server/c2s/join.zig` (8-package join SM: PlayerLogin,
 RequestToEnterGame, AuthConfirmation, SignDataRequest, POIMetadataRequest,
