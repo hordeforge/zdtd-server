@@ -1,4 +1,4 @@
-//! Mod resolution (PRD 0005 / RFC 0005): turn discovered `mod.toml` manifests
+//! Mod resolution (PRD 0005 / RFC 0005): turn discovered `manifest.toml` manifests
 //! plus `[mods] disabled` / `blacklist` / legacy `[plugin] modules` into the
 //! final load list and the exclusive override-point claim table.
 //! Runs once at boot (allocation allowed); the tick path only reads the
@@ -132,7 +132,7 @@ pub fn resolve(
         // activate a preset (collected below) and never enter the load
         // list, so the Wasm loader never sees a null wasm path.
         if (m.preset != null) continue;
-        // `enabled = false` in mod.toml: not auto-loaded (demo gates ship
+        // `enabled = false` in manifest.toml: not auto-loaded (demo gates ship
         // off); explicit [plugin] modules paths still load, and `[mods]
         // enabled` forces the mod on.
         if (m.enabled) |en| {

@@ -66,11 +66,11 @@ itself.
 
 ### In scope (MVP)
 
-- Tier model and tier manifests (`mod.toml` for official and user mods;
+- Tier model and tier manifests (`manifest.toml` for official and user mods;
   core override points declared in the comptime registry in
   `src/plugin/manifest.zig` — the RFC's per-directory `component.toml`
   wording was deliberately not built, see ADR 0032 decision 2).
-- Auto-discovery of `mods/*/mod.toml` at boot.
+- Auto-discovery of `mods/*/manifest.toml` at boot.
 - `[mods] disabled` / `[mods] blacklist` in zdtd.toml.
 - Override points on core components: exclusive claims on named decision
   points; unclaimed points keep native default behaviour.
@@ -96,7 +96,7 @@ itself.
   loading, with one log line saying so.
 - As an operator, I blacklist a broken user mod and the server refuses to
   load it even if another mod names it as an override target or dependency.
-- As a modder, I drop `mods/my_rules/` with a `mod.toml` and a `.wasm`, and
+- As a modder, I drop `mods/my_rules/` with a `manifest.toml` and a `.wasm`, and
   it loads on next boot without touching zdtd.toml.
 - As a modder, I declare `override = "fps_bot"` and my module runs instead
   of the official bot module; the official one is not instantiated.
@@ -113,13 +113,13 @@ itself.
   and user mods. Tier is declared in the module manifest. Core components
   are native and registered host-side; official and user mods are Wasm.
 - **R2 (manifests).** Every loadable module has a manifest. Mods use
-  `mod.toml` in their `mods/<name>/` directory, carrying at least `name`,
+  `manifest.toml` in their `mods/<name>/` directory, carrying at least `name`,
   `version`, `wasm`, and optional `tier`, `override`, `requires`. Core
   components declare their override points host-side in the comptime
   registry (`OverridePoint` + `core_components`,
   `src/plugin/manifest.zig`); a second declarative copy (`component.toml`)
   was rejected as drift-prone (ADR 0032 decision 2).
-- **R3 (discovery).** At boot the server scans `mods/*/mod.toml` and loads
+- **R3 (discovery).** At boot the server scans `mods/*/manifest.toml` and loads
   each mod not disabled or blacklisted. Explicit `[plugin] modules` paths
   keep working as an additional load source.
 - **R4 (disable/blacklist).** `[mods] disabled` skips a mod with an info

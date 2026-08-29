@@ -8,7 +8,7 @@
 and [RFC 0002](../rfc/0002-mcp-server-design.md)).
 **Owner:** server operators / dev tooling (the addon is not a stock feature).
 **Ships as:** an **official mod** (PRD 0005 tier model: shipped in-tree under
-`mods/mcp/`, auto-discovered via `mod.toml`, disable-able via
+`mods/mcp/`, auto-discovered via `manifest.toml`, disable-able via
 `[mods] disabled`, overridable by user mods via `override = "mcp"`). The
 module is Wasm (ADR 0020 / ADR 0030) + a minimal host transport bridge.
 **Protocol reference:** Model Context Protocol (open spec,

@@ -1,6 +1,6 @@
 # Plugin standards: naming and manifest format
 
-> **Purpose:** binding naming and `mod.toml` rules for every plugin under `mods/` and `plugins/` — enforced fail-closed at load.
+> **Purpose:** binding naming and `manifest.toml` rules for every plugin under `mods/` and `plugins/` — enforced fail-closed at load.
 
 Binding rules for every plugin under `mods/` (addons) and `plugins/`
 (first-party core). The host enforces the manifest format at load
@@ -17,7 +17,7 @@ where mechanical.
   prefix whenever possible (`core_announce`, not `core_chat_announcements`).
 - Addons (third-party-ecosystem-shaped, e.g. `mcp`, `fps_bot`) live under
   **`mods/`**.
-- The directory name IS the module name: `mod.toml` `name` must equal the
+- The directory name IS the module name: `manifest.toml` `name` must equal the
   directory name. A mismatch is a load-time defect.
 - Reserve plain topic words for what the module does, not how: `core_pvp`,
   `core_lootgate`, `core_tradefeed`. Gate suffix (`*gate`) marks modules whose
@@ -31,7 +31,7 @@ where mechanical.
 | official addon | ships with zdtd under `mods/` (`fps_bot`, `mcp`) | any; no `core_`/`zdtd_` prefix |
 | user | operator/third-party drop-in under `mods/` | any name; must NOT start with `core_` or `zdtd_` unless replacing an official mod via `override` |
 
-`tier = "core"` in a mod.toml is a load error by design: "core" components are
+`tier = "core"` in a manifest.toml is a load error by design: "core" components are
 native host-side systems (`loot`, `quests`, `damage`, `craft`, `trading`,
 PRD 0005 R4) and can never be claimed by a `.wasm`. The `core_*` *name prefix*
 on a plugin directory marks a first-party Wasm plugin, which is a different
@@ -45,9 +45,9 @@ sense of "core" (shipped in-tree, Zig source, built by
 | root source | yes (core plugins are Zig) | `<module>.zig` — exactly the directory name |
 | build wrapper | yes (Zig plugins) | `main.zig` |
 | committed binary | yes | `<module>.wasm` — exactly the directory name + `.wasm` |
-| manifest | yes | `mod.toml` (fixed name, discovered automatically) |
+| manifest | yes | `manifest.toml` (fixed name, discovered automatically; the manifest, not a "mod file") |
 
-The `wasm` key in mod.toml must be `<module>.wasm` (a path relative to the
+The `wasm` key in manifest.toml must be `<module>.wasm` (a path relative to the
 plugin directory). No other files are read by the host.
 
 ### Exports and capabilities
@@ -60,7 +60,7 @@ plugin directory). No other files are read by the host.
   0030). A typo'd capability is a loud load rejection.
 - Log lines start with the module name: `"core_announce v2.0 enabled ..."`.
 
-## mod.toml format
+## manifest.toml format
 
 TOML, bound by `src/plugin/manifest.zig` through the comptime binder
 (ADR 0021): only declared keys bind; **unknown keys abort the load**

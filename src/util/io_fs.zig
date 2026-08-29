@@ -128,7 +128,7 @@ pub fn listFileNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]co
 /// List subdirectory names under `dir_path`, sorted ascending for
 /// deterministic iteration (sim rule 22). Caller frees each name and the
 /// slice. Used by mod discovery (PRD 0005): a mod is a directory holding
-/// `mod.toml`.
+/// `manifest.toml`.
 pub fn listDirNames(allocator: std.mem.Allocator, dir_path: []const u8) ![][]const u8 {
     var threaded = ioThreaded();
     defer threaded.deinit();

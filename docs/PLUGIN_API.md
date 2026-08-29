@@ -43,7 +43,7 @@ A native ABI could promise neither.
 | Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
 | Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny, magnitude = reason bytes in out; first deny wins (traps treated as allow) |
 | SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick) |
-| Module tiers + discovery (PRD 0005 / ADR 0032) | **implemented**: `mod.toml` manifests, `mods/*/mod.toml` scan, `[mods] disabled`/`blacklist`, five exclusive core override points, `override = <name>` replacement, conflict detection at load (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`, `WasmHost.loadResolved`) |
+| Module tiers + discovery (PRD 0005 / ADR 0032) | **implemented**: `manifest.toml` manifests, `mods/*/manifest.toml` scan, `[mods] disabled`/`blacklist`, five exclusive core override points, `override = <name>` replacement, conflict detection at load (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`, `WasmHost.loadResolved`) |
 
 The static host stays because scenarios need to drive hooks without standing up
 a Wasm runtime in the test path. It is not a way to ship a plugin and is not
@@ -51,7 +51,7 @@ loaded from user configuration.
 
 ### Core override points (ADR 0032)
 
-A mod that claims a point (in `mod.toml` `points = "loot.roll"`) becomes the
+A mod that claims a point (in `manifest.toml` `points = "loot.roll"`) becomes the
 exclusive decision maker for that verdict: the native default is skipped and
 no other subscriber runs. Duplicate claims fail the boot loudly. Unclaimed
 points keep the first-non-zero fan-out above.

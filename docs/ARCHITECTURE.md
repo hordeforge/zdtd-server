@@ -589,7 +589,7 @@ Verdict semantics (first non-zero across plugins wins; a trap is keep):
 | `on_player_death` / `on_entity_killed` / `on_block_damage` / `on_quest_complete` | `< 0` deny, `0` keep, `> 0` adjust as percent | first non-zero wins |
 | Core override points `loot.roll` etc. | exclusive claimant | native default skipped |
 
-Five exclusive core override points (`loot.roll`, `quest.payout`, `damage.player_scale`, `craft.request`, `trade.price`) become single-owner when a `mod.toml` claims `points = "…"`. Duplicate claims fail the boot (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`).
+Five exclusive core override points (`loot.roll`, `quest.payout`, `damage.player_scale`, `craft.request`, `trade.price`) become single-owner when a `manifest.toml` claims `points = "…"`. Duplicate claims fail the boot (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`).
 
 Core plugins under `plugins/core_*/` ship Zig sources built to `.wasm` by `scripts/build-plugins.sh` (shared `mods/plugin_common.zig`). Addons (`mods/fps_bot`, `mods/mcp`, `mods/example_chat_filter`) live under `mods/`. Bot brains are **Wasm only** — `BotManager` is a servant (spawn/replicate/move/LOS/sense/`bot` verbs) and never grows native decision logic (ADR 0026).
 

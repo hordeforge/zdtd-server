@@ -145,7 +145,7 @@ pub const Plugin = struct {
     linker: zwasm.Linker,
     instance: zwasm.Instance,
     name: []const u8,
-    /// PRD 0005: tier from mod.toml (default user for legacy [plugin] modules).
+    /// PRD 0005: tier from manifest.toml (default user for legacy [plugin] modules).
     tier: manifest.Tier = .user,
     /// PRD 0005: manifest name (duped at loadResolved; "" for legacy modules,
     /// which fall back to the path in `name`).

@@ -9349,7 +9349,7 @@ fn mkManifest(name: []const u8, wasm: []const u8, tier: ?[]const u8, override: ?
 }
 
 test "scenario mods AC1: resolver keeps official tiers in discovery order" {
-    // Fresh boot with no zdtd.toml: discovery finds every mods/<name>/mod.toml,
+    // Fresh boot with no zdtd.toml: discovery finds every mods/<name>/manifest.toml,
     // sorted by dir name; official mods keep their tier (AC1).
     var gpa_impl = std.heap.DebugAllocator(.{}){};
     defer _ = gpa_impl.deinit();

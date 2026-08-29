@@ -133,12 +133,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `--preset NAME` (was `--mode`, kept as a deprecated alias), and the
   `zdtd.toml` selector is `[preset] name` (was `[mode] name`, no alias). A
   config-only mod carries its own preset inside the mod folder
-  (`mods/<name>/preset.toml` via the `preset` mod.toml key, replacing the
+  (`mods/<name>/preset.toml` via the `preset` manifest.toml key, replacing the
   old `mode = "<pack>"` that referenced the shared folder), so a mod is
   fully self-contained: config, wasm and assets travel together. The
   infinite world now ships that way (`mods/infinite_world/`); it is no
   longer a stock preset. Renames: `src/server/mode.zig` -> `preset.zig`,
   `Pack` -> `Preset`, `error.DuplicateMode` -> `error.DuplicatePreset`.
+- The plugin/mod manifest file is `manifest.toml` (was `mod.toml`; the parsed
+  shape was already called `Manifest`). The folder keeps its self-contained
+  layout: manifest + optional `preset.toml` + optional `.wasm`.
 
 ## [0.2.0] - 2026-08-22
 

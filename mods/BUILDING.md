@@ -25,7 +25,7 @@ plugin, run the script and commit both source and binary.
 | `<name>.zig` | plugin root: hook exports (`on_*`), optional `_zdtd_requires` |
 | `main.zig` | build wrapper: comptime-imports the root, exports `_start` |
 | `<name>.wasm` | committed build output (do not edit) |
-| `mod.toml` | manifest (naming/format standards in PLUGIN_STANDARDS.md) |
+| `manifest.toml` | manifest (naming/format standards in PLUGIN_STANDARDS.md) |
 
 ## Why the wrapper
 

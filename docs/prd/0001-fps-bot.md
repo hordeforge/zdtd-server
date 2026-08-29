@@ -8,7 +8,7 @@
 [IMPLEMENTATION_PLAN_BOTS.md](../IMPLEMENTATION_PLAN_BOTS.md)).
 **Owner:** server operators / dev staging (the addon is not a stock feature).
 **Ships as:** an **official mod** (PRD 0005 tier model: shipped in-tree under
-`mods/fps_bot/`, auto-discovered via `mod.toml`, disable-able via
+`mods/fps_bot/`, auto-discovered via `manifest.toml`, disable-able via
 `[mods] disabled`, overridable by user mods via `override = "fps_bot"`). The
 module is Wasm (ADR 0020 / ADR 0026) + a small host sense/act surface.
 **Behavioural reference:** `../../../7dtd-fps-bots` (the stock-server FPS bot C# mod),

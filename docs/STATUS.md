@@ -41,7 +41,7 @@ ADR bodies stay historical):
   stock presets we ship (builder, default, horde_lite, survival_crunch).
 - CLI flag `--preset NAME` (was `--mode`, kept as a deprecated alias);
   `zdtd.toml` selector `[preset] name` (was `[mode] name`).
-- A config-only mod is self-contained: `mods/<name>/mod.toml` `preset`
+- A config-only mod is self-contained: `mods/<name>/manifest.toml` `preset`
   key names a preset file inside the mod folder (e.g. `preset.toml`),
   replacing the old `mode = "<pack>"` reference into the shared folder.
   `src/server/mode.zig` -> `src/server/preset.zig` (`Pack` -> `Preset`;
@@ -50,7 +50,7 @@ ADR bodies stay historical):
 - The infinite world is no longer a stock preset: it ships as
   `mods/infinite_world/preset.toml` (its own file). The mod is the only way
   to load it: `[mods] enabled = "infinite_world"` in zdtd.toml (or
-  `mods/infinite_world/mod.toml` `enabled = true`). `--preset infinite`
+  `mods/infinite_world/manifest.toml` `enabled = true`). `--preset infinite`
   fails closed (not a shipped stock preset; the error lists what is).
 
 ## Batch P 2026-08-29 (soak-verified fixes + data-driven entity kind)
@@ -88,7 +88,7 @@ early spawn-burst outlier accounts for the max). Provenance dashboard
 regenerates byte-identical at 291/0/0; the hardcode audit re-verified
 2026-08-29 found no new Bucket A/B hits and every current-state doc-to-src
 reference resolves. All 12 core plugins under `plugins/` conform to
-PLUGIN_STANDARDS.md (directory name == mod.toml name == committed .wasm).
+PLUGIN_STANDARDS.md (directory name == manifest.toml name == committed .wasm).
 Counts unchanged.
 
 ## Batch O 2026-08-28 (malleable world geometry, ADR 0036)
@@ -2196,7 +2196,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | WebUI ops (WU0–WU2) | **PASS** | `--webui-port`+secret; `tcp_listen` + `std.http.Server`; dashboard + POST `/api/cmd`; CSRF; full apm snapshot; default off |
 | Authority spine (P4.0) | **PASS (first cut)** | `phase_gate` matrix; movement envelope + player-coordinate ceiling (`max_player_coord`, C2S reject / admin tele clamp / plugin spawn+query fail-closed); reject counters in apm/webui; `ZdtdAuthorityMode`; inv ledger ring |
 | Static plugins + Wasm runtime | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm-only per ADR 0020: zwasm v2 runtime loads `[plugin] modules` from zdtd.toml, host imports `zdtd_log/tick/queue`, fuel+memory budget disables a looping module within one tick (WORK_PLAN T9, C fixture proven) |
-| Mod tiers + override (PRD 0005 / ADR 0032) | **PASS (first cut)** | `mod.toml` manifests, `mods/*/mod.toml` discovery, `[mods] disabled`/`blacklist` (core components protected), five exclusive core override points (loot.roll, quest.payout, damage.player_scale, craft.request, trade.price), `override = <name>` mod replacement, load-time conflict detection. Gap: kill/death/block/quest-accept hooks stay composition-only (not override points); call-next (`claim_mode = "chain"`) reserved, rejected at load |
+| Mod tiers + override (PRD 0005 / ADR 0032) | **PASS (first cut)** | `manifest.toml` manifests, `mods/*/manifest.toml` discovery, `[mods] disabled`/`blacklist` (core components protected), five exclusive core override points (loot.roll, quest.payout, damage.player_scale, craft.request, trade.price), `override = <name>` mod replacement, load-time conflict detection. Gap: kill/death/block/quest-accept hooks stay composition-only (not override points); call-next (`claim_mode = "chain"`) reserved, rejected at load |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
 | Preset pack | **PASS (first cut)** | `presets/default.toml` + `preset.zig`; `--preset` / `[preset] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS (all ToServer handled)** | parity tool: 0 unhandled dir=1 (**86** dispatch arms across `c2s/*`, counted 2026-08-29; the 3.2.0 ToServer additions - POIMetadataRequest, ConfirmSpawnEntity, EntitySetSkillLevelServer - all have arms); `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10; 190-pkg catalog docs/wire/PACKAGES.md |

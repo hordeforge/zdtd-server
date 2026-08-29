@@ -90,7 +90,7 @@ Where the world and its data come from.
 | [APM.md](APM.md) | Native metrics (`src/apm/`) |
 | [PLUGIN_API.md](PLUGIN_API.md) | Wasm plugin design (ADR 0020) |
 | [PLUGIN_DEV.md](PLUGIN_DEV.md) | Writing a plugin: hooks, limits, and building a .wasm from any language |
-| [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) | Plugin naming standards + mod.toml format (binding rules for mods/) |
+| [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) | Plugin naming standards + manifest.toml format (binding rules for mods/) |
 | [mods/BUILDING.md](../mods/BUILDING.md) | Building the core plugins from their Zig sources |
 | [PRD 0001](prd/0001-fps-bot.md) | FPS Bot addon requirements (with [RFC 0001](rfc/0001-fps-bot-spec.md); ADR 0026) |
 | [PRD 0002](prd/0002-mcp-server.md) | MCP server addon requirements (with [RFC 0002](rfc/0002-mcp-server-design.md); ADR 0031) |

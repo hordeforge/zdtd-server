@@ -11,7 +11,7 @@ deliberately small and documented below; read-only sim views are still open.
 A plugin is a single `.wasm` file. Any language that targets WebAssembly works:
 Rust, TinyGo, Zig, C, AssemblyScript. You do not link against zdtd, you do not
 match a native ABI, and you do not need the zdtd source to build. Ships as an installed
-mod under `mods/` or `plugins/` with a `mod.toml` manifest — see [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md)
+mod under `mods/` or `plugins/` with a `manifest.toml` manifest — see [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md)
 for the manifest format and `mods/BUILDING.md` for the core build layout.
 
 ## The shape of a plugin
@@ -39,14 +39,14 @@ fails, which disables your module.
 
 ## Enabling a plugin
 
-Two ways (PRD 0005): auto-discovery from a `<name>/mod.toml` manifest, or the
+Two ways (PRD 0005): auto-discovery from a `<name>/manifest.toml` manifest, or the
 legacy explicit list.
 
-### Auto-discovery via `mod.toml` (PRD 0005)
+### Auto-discovery via `manifest.toml` (PRD 0005)
 
 Drop a directory under `mods/` (addons) or `plugins/` (first-party core) with
-a `mod.toml` and a `.wasm`; the server scans both `mods/*/mod.toml` and
-`plugins/*/mod.toml` at boot, sorted by directory name, and loads every
+a `manifest.toml` and a `.wasm`; the server scans both `mods/*/manifest.toml` and
+`plugins/*/manifest.toml` at boot, sorted by directory name, and loads every
 manifest it finds (unless disabled/blacklisted). This is how the shipped
 official mods (`fps_bot`, `mcp`) and core plugins (`core_announce`, ...)
 load; a fresh install needs zero config.
