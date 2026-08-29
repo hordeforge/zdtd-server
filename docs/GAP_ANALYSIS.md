@@ -3405,7 +3405,10 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Measured with a live 7dtd-loadgen double join against the infinite
   world (config-only mod `mods/infinite_world`, formerly `--mode infinite`;
   APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
-  net_poll 1.9 s. The join burst is fully synchronous: `sendSpawnArea`
+  net_poll 1.9 s. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
+  same stall to **7.7 s** (max net_poll 7.7 s; the sim itself stayed at
+  p99 <1 ms, so it is the synchronous join/stream work, not the ECS). The
+  join burst is fully synchronous: `sendSpawnArea`
   queues the whole 17x17 view (289 chunks), each proc chunk costs
   generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and
   the deco burst mirrors up to `deco_objects_per_join` (8192) trees. One
