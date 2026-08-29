@@ -4,7 +4,8 @@
 > **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) · [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [MAPS.md](MAPS.md) · [WORLDGEN.md](WORLDGEN.md) · [ECS_SYSTEMS.md](ECS_SYSTEMS.md) · [APM.md](APM.md)
 
 **Version note:** the architecture here was derived from the V3.0.1 RE. The
-project now targets **V3.1.0 b14**, which is what the live gate runs against.
+project now targets **V3.2.0 b9** (see `src/version.zig`), which is what the
+live gate runs against.
 Structure carried over; where a wire detail changed, the wire docs and the code
 comments are the authority, not this document.
 
@@ -258,7 +259,7 @@ Pre-auth challenge: raw 17 bytes [0xCA][Guid16]  // echo back
 2. Advertise it in PackageIds.  
 3. Accept that missing packages = incomplete client experience.
 
-Live capture notes (V3.0.1 loadgen, historical): version fields `1,3,1,4` → display string `V 3.0.1`. The current pin is V3.1.0 b14 and the live map count is **189** in one capture (census ~194 types in DLL; not all mapped every path).
+Live capture notes (V3.0.1 loadgen, historical): version fields `1,3,1,4` → display string `V 3.0.1`. The current pin is V3.2.0 b9 and the zdtd join map carries **191** names (2026-08-29; the 3.1.0-era capture counted 189 with census ~194 types in DLL - not all mapped every path).
 
 ### 4.4 Join state machine (client-compatible)
 
