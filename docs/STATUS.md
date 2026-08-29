@@ -36,7 +36,8 @@ This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full
 
 Every plugin/mod folder is now fully self-contained: manifest.toml + wasm +
 source + optional `config.toml` (default config) + optional `preset.toml`
-(rules for a config-only mod) + `README.md` (all 16 folders shipped one).
+(rules for a config-only mod) + `README.md` (all 17 folders shipped one —
+the 12 `plugins/core_*` plus the 5 `mods/` addons incl. `moon_gravity`).
 
 - New host import `zdtd.config(out_ptr, out_cap) -> i32`: serves the mod's
   `config.toml` (4 KiB cap, raw text) to the guest; the host never parses it.
