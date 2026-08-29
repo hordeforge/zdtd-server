@@ -77,6 +77,11 @@ property load. Dump must match the **connected client** version (STATUS pin).
 | `signs.zig` | Prefabs `*_signs.xml` | world signs |
 | `blocks_nim.zig` | Prefab `<name>.blocks.nim` | local-id → block-name remap for `.tts` types that use local indices rather than AssignIds |
 | `npc.zig` | npc.xml | npc_info entries: trader entity class / display name → traders.xml `<trader_info>` id + quest_list |
+| `item_modifiers.zig` | item_modifiers.xml | mod attachment tag gates (RE items.md ItemModificationsFromXml); a mod's `installable_tags` / `RemoveOnPlace` surface |
+| `modlets.zig` | `Mods/<name>/Config` XPath patches | stock ModManager subset for XML-only modlets (PRD 0003): patched catalogs + join-phase config sync; no DLL / IModApi hosting |
+| `map_atlas.zig` | generated from `ta_*.xml` | texture-atlas minimap colors (gen_atlas_zig.py; do not hand-edit) |
+| `sandbox.zig` + `sandbox_data.zig` | sandbox options (RE sandbox-options §3) | 165-option codec + value-set tables (gen_zig_tables.py) |
+| `sandbox_presets.zig` | `Data/Sandbox/sandbox_presets` TextAsset | GameDifficulty preset ladder, comptime from the embedded asset |
 | `wire/te_types.zig` | RE enum (not XML) | named TileEntityType constants |
 
 Wire/sim code must not pin numeric block ids except dump-validated offline pins
