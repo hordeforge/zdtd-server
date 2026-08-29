@@ -215,9 +215,8 @@ const known_flags = [_][]const u8{
     "--quests",        "--mcp-port",     "--mcp-bind",         "--mcp-token",
     "--mcp-allowlist", "--config-dir",   "--config-overrides", "--worldgen-seed",
     "--mods-dir",      "--ticks",        "--once",             "--quiet",
-    "--version",
-    "--help",          "-V",             "-v",                 "-q",
-    "-h",
+    "--version",       "--help",         "-V",                 "-v",
+    "-q",              "-h",
 };
 
 /// Levenshtein distance, capped by buffer size (flags are short).

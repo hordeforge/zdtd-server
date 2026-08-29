@@ -421,7 +421,13 @@ pub const Command = union(enum) {
     /// Stock `mem` (asm.il 234965).
     mem,
     list,
-    give: struct { peer: usize, item: u16, count: u16 },
+    give: struct {
+        peer: usize,
+        /// Item token: a stock item name (resourceWood) or a numeric ecs id.
+        /// Name is a slice into the original command line.
+        item: []const u8,
+        count: u16,
+    },
     tele: struct { peer: usize, x: f32, y: f32, z: f32 },
     say: []const u8,
     /// Force-kill entity by net id (EntityRemove + loot path).
@@ -516,7 +522,7 @@ fn badSubCommand(sub: ?[]const u8) Command {
 /// topics). Null if unknown.
 pub fn usageFor(verb: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, verb, "unban")) return "unban <iphex>";
-    if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemId> [count]";
+    if (std.mem.eql(u8, verb, "give")) return "give <slot> <itemName|itemId> [count]";
     if (std.mem.eql(u8, verb, "tele") or std.mem.eql(u8, verb, "tp"))
         return "tele|tp <slot> <x> <y> <z>";
     if (std.mem.eql(u8, verb, "say")) return "say <msg>";
@@ -720,7 +726,7 @@ pub fn parseCommand(line: []const u8) Command {
         if (it.next() != null) return .{ .bad_args = cmd };
         return .{ .give = .{
             .peer = std.fmt.parseInt(usize, p, 10) catch return .{ .bad_args = cmd },
-            .item = std.fmt.parseInt(u16, i, 10) catch return .{ .bad_args = cmd },
+            .item = i,
             .count = std.fmt.parseInt(u16, c, 10) catch return .{ .bad_args = cmd },
         } };
     }
@@ -822,8 +828,13 @@ pub fn parseCommand(line: []const u8) Command {
 test "parse give" {
     const c = parseCommand("give 0 2 5");
     try std.testing.expect(c == .give);
-    try std.testing.expectEqual(@as(u16, 2), c.give.item);
+    try std.testing.expectEqualStrings("2", c.give.item);
     try std.testing.expectEqual(@as(u16, 5), c.give.count);
+    // Stock-like: the item token may be a name (resolved by the handler).
+    const cn = parseCommand("give 0 resourceWood 10");
+    try std.testing.expect(cn == .give);
+    try std.testing.expectEqualStrings("resourceWood", cn.give.item);
+    try std.testing.expectEqual(@as(u16, 10), cn.give.count);
 }
 
 test "parse ban kick list" {
@@ -983,7 +994,7 @@ test "bad args carry the verb; unknown verbs stay unknown" {
 
 test "commands alias is help; usageFor covers common verbs" {
     try std.testing.expect(parseCommand("commands") == .help);
-    try std.testing.expectEqualStrings("give <slot> <itemId> [count]", usageFor("give").?);
+    try std.testing.expectEqualStrings("give <slot> <itemName|itemId> [count]", usageFor("give").?);
     try std.testing.expectEqualStrings("wipeplayer <name>", usageFor("wipeplayer").?);
     try std.testing.expectEqualStrings("status", usageFor("status").?);
     try std.testing.expectEqualStrings("getgamepref [filter]", usageFor("gg").?);

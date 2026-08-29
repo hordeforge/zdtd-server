@@ -1540,7 +1540,16 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
                 return;
             };
             const t = self.sim.transform[ps];
-            if (self.sim.spawnLootBag(t.x + 1, t.y, t.z + 1, g.item, g.count)) |nid| {
+            // Stock-like give: the item token may be a name (resourceWood)
+            // resolved through the items catalog, or a numeric ecs id.
+            const item_id: u16 = blk: {
+                if (std.fmt.parseInt(u16, g.item, 10)) |n| break :blk n else |_| {}
+                const id = self.items.ecsIdByName(g.item);
+                if (id != 0) break :blk id;
+                self.adminReply("unknown item\n");
+                return;
+            };
+            if (self.sim.spawnLootBag(t.x + 1, t.y, t.z + 1, item_id, g.count)) |nid| {
                 self.broadcastLootSpawn(nid) catch {};
                 self.adminReply("dropped at player\n");
             } else self.adminReply("give failed\n");
