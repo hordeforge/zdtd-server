@@ -89,6 +89,10 @@ pub const Manifest = struct {
     /// Mod names this module requires to be loaded (binder scalar list).
     requires: ?[]const u8 = null,
     description: ?[]const u8 = null,
+    /// Optional icon path (relative to the mod dir, e.g. `icon = "icon.png"`).
+    /// Metadata only: the host never loads or renders it (the webui module
+    /// list may serve it); the standard is the folder ships `icon.png`.
+    icon: ?[]const u8 = null,
     /// Config-only mods carry a preset file path (relative to the mod dir,
     /// e.g. `preset = "preset.toml"`) instead of a wasm module: enabling the mod
     /// activates the preset (its gameplay keys and [rules.*] override the built-
@@ -120,6 +124,13 @@ pub const Manifest = struct {
         }
         if (self.preset != null and (self.override != null or self.points != null or self.requires != null)) {
             return "'preset' (config-only mod) cannot combine with 'override'/'points'/'requires' (nothing to load or replace)";
+        }
+        if (self.icon) |ic| {
+            // Same rule as preset: a relative path inside the mod dir only.
+            var ok = ic.len > 0 and ic.len <= 128;
+            if (ic.len > 0 and (ic[0] == '/' or ic[0] == '\\')) ok = false;
+            if (std.mem.indexOf(u8, ic, "..") != null) ok = false;
+            if (!ok) return "invalid 'icon' path (must be a relative path inside the mod dir, no '..')";
         }
         if (self.preset) |pr| {
             // Relative path inside the mod dir only: no absolute paths, no
@@ -189,6 +200,7 @@ pub fn free(a: std.mem.Allocator, m: *const Manifest) void {
     if (m.version) |v| a.free(v);
     if (m.wasm) |w| a.free(w);
     if (m.preset) |pr| a.free(pr);
+    if (m.icon) |ic| a.free(ic);
     if (m.tier) |t| a.free(t);
     if (m.override) |o| a.free(o);
     if (m.points) |p| a.free(p);

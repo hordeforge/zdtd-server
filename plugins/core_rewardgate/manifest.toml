@@ -1,5 +1,6 @@
 name = "core_rewardgate"
 version = "0.1.0"
+icon = "icon.png"
 wasm = "core_rewardgate.wasm"
 enabled = false
 description = "Quest-reward scaling via the on_quest_complete verdict (1.5x default; specialize per quest_def). Demo gate: enabled = false, load via [plugin] modules."

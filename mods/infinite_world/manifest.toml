@@ -10,6 +10,7 @@
 name = "infinite_world"
 version = "0.1.0"
 tier = "user"
+icon = "icon.png"
 preset = "preset.toml"
 enabled = false
 description = "Procedural infinite world: chunks generate on first touch as players explore (loads its own preset.toml: seed + [rules.worldgen]). Opt-in: [mods] enabled = [\"infinite_world\"]."

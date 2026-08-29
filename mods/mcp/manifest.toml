@@ -1,5 +1,6 @@
 name = "mcp"
 version = "1.0.0"
+icon = "icon.png"
 wasm = "mcp.wasm"
 tier = "official"
 description = "Official MCP server addon (ADR 0031): JSON-RPC 2.0 over the host transport bridge. Auto-discovered; disable via [mods] disabled = [\"mcp\"]."

@@ -1,5 +1,6 @@
 name = "example_chat_filter"
 version = "0.1.0"
+icon = "icon.png"
 wasm = "example_chat_filter.wasm"
 enabled = false
 description = "Example Wasm plugin that filters chat: suppresses 'bad' and rewrites 'hello' to 'hi'. Demo: enabled = false, load via [plugin] modules."

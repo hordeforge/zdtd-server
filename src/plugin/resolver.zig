@@ -378,6 +378,18 @@ test "resolve explicit [plugin] modules appended as user mods" {
     try testing.expectEqual(.user, r.modules[0].tier);
 }
 
+test "manifest icon is an optional relative path" {
+    var m = mk("with_icon", "x.wasm", "user", null, null);
+    m.icon = "icon.png";
+    try std.testing.expect(m.validate() == null);
+    m.icon = "../escape.png";
+    try std.testing.expect(m.validate() != null);
+    m.icon = "/abs.png";
+    try std.testing.expect(m.validate() != null);
+    m.icon = null;
+    try std.testing.expect(m.validate() == null);
+}
+
 test "resolve activates a preset from an enabled config-only mod" {
     // Config-only mods (preset = "preset.toml", no wasm) ship enabled=false so
     // a fresh boot stays stock; `[mods] enabled` forces them on and activates

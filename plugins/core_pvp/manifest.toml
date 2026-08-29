@@ -1,5 +1,6 @@
 name = "core_pvp"
 version = "0.1.0"
+icon = "icon.png"
 wasm = "core_pvp.wasm"
 enabled = false
 description = "In-tree zdtd module: demo/feed, enabled = false, load via [plugin] modules."

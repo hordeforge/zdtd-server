@@ -1,5 +1,6 @@
 name = "core_damagegate"
 version = "0.1.0"
+icon = "icon.png"
 wasm = "core_damagegate.wasm"
 enabled = false
 description = "Incoming-player damage scaling via the on_player_damage verdict (0.5x default; specialize per attacker). Demo gate: enabled = false, load via [plugin] modules."

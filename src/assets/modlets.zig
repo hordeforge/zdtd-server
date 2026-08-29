@@ -24,6 +24,9 @@ pub const Mod = struct {
     path: []const u8,
     /// The mod's `Config/` dir when present (patch XML source for xml_patch).
     config_dir: ?[]const u8,
+    /// Stock ModInfo `Icon` property (relative path, e.g. "icon.png").
+    /// Metadata only: the host never loads or renders it.
+    icon: ?[]const u8 = null,
     /// `Bundles/` folder present. Tolerated, never read (PRD R11).
     has_bundles: bool,
     /// Any `.dll` at the mod root: code part is not hosted; XML still applies.
@@ -34,6 +37,7 @@ pub const Mod = struct {
         allocator.free(self.display_name);
         allocator.free(self.path);
         if (self.config_dir) |cd| allocator.free(cd);
+        if (self.icon) |ic| allocator.free(ic);
     }
 };
 
@@ -152,6 +156,7 @@ fn parseModInfo(folder: []const u8, info: []const u8) ?struct {
     name: []const u8,
     display_name: []const u8,
     version: []const u8,
+    icon: ?[]const u8,
 } {
     const name = childValue(info, "<Name") orelse {
         util_log.warn("zdtd: [MODS]{s}/ModInfo.xml missing or invalid Name; mod skipped\n", .{folder});
@@ -176,7 +181,8 @@ fn parseModInfo(folder: []const u8, info: []const u8) ?struct {
         util_log.warn("zdtd: [MODS]{s}/ModInfo.xml Version '{s}' invalid; assuming 0.0\n", .{ folder, version });
         version = "0.0";
     }
-    return .{ .name = name, .display_name = display, .version = version };
+    const icon = childValue(info, "<Icon");
+    return .{ .name = name, .display_name = display, .version = version, .icon = icon };
 }
 
 /// Scan `mods_root` for XML-only modlets. A missing root is a no-op (stock:
@@ -257,6 +263,7 @@ pub fn scan(allocator: std.mem.Allocator, mods_root: []const u8) !Scan {
             .display_name = try allocator.dupe(u8, parsed.display_name),
             .path = try allocator.dupe(u8, mod_path),
             .config_dir = config_dir,
+            .icon = if (parsed.icon) |ic| (if (ic.len > 0) try allocator.dupe(u8, ic) else null) else null,
             .has_bundles = has_bundles,
             .has_code = has_code,
         });

@@ -5,6 +5,7 @@
 name = "moon_gravity"
 version = "0.1.0"
 tier = "user"
+icon = "icon.png"
 preset = "preset.toml"
 enabled = false
 description = "Moon gravity: overrides sim gravity (AI entities, falling blocks, vehicles) via its own preset.toml. Opt-in: [mods] enabled = [\"moon_gravity\"]."

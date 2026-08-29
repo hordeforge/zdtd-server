@@ -1,5 +1,6 @@
 name = "fps_bot"
 version = "2.5.0"
+icon = "icon.png"
 wasm = "fps_bot.wasm"
 tier = "official"
 description = "Official FPS bot brain (ADR 0026): sense -> decide -> bot <verb> commands. Auto-discovered; disable via [mods] disabled = [\"fps_bot\"]."

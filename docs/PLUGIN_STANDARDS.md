@@ -48,6 +48,7 @@ sense of "core" (shipped in-tree, Zig source, built by
 | build wrapper | yes (Zig plugins) | `main.zig` |
 | config | no | `config.toml` (fixed name; the module's own default config, served raw via the `zdtd.config` import) |
 | readme | recommended | `README.md` (what it does, its config keys, how to enable) |
+| icon | no | `icon.png` (fixed name; metadata only - the host never loads or renders it). `manifest.toml` `icon = "icon.png"` (relative path, same validation as `preset`) |
 
 The `wasm` key in manifest.toml must be `<module>.wasm` (a path relative to the
 plugin directory). A plugin folder is **self-contained**: manifest + wasm +
