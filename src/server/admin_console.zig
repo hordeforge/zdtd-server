@@ -862,7 +862,7 @@ fn optionValue(self: *Game, v: *const packages.GameStatsValues, name: []const u8
     if (std.mem.eql(u8, name, "PlayerKillingMode")) return std.fmt.bufPrint(buf, "{d}", .{stats.player_killing_mode}) catch null;
     if (std.mem.eql(u8, name, "DayNightLength")) return std.fmt.bufPrint(buf, "{d}", .{stats.day_night_length}) catch null;
     if (std.mem.eql(u8, name, "DayLightLength")) return std.fmt.bufPrint(buf, "{d}", .{stats.day_light_length}) catch null;
-    if (std.mem.eql(u8, name, "MaxSpawnedZombies")) return std.fmt.bufPrint(buf, "{d}", .{cfg.max_spawned_zombies}) catch null;
+    if (std.mem.eql(u8, name, "MaxSpawnedZombies")) return std.fmt.bufPrint(buf, "{d}", .{self.sim.director.max_alive}) catch null;
     if (std.mem.eql(u8, name, "BloodMoonRange")) return std.fmt.bufPrint(buf, "{d}", .{cfg.blood_moon_range}) catch null;
     if (std.mem.eql(u8, name, "ZombieMove")) return std.fmt.bufPrint(buf, "{d}", .{cfg.zombie_move}) catch null;
     if (std.mem.eql(u8, name, "ZombieMoveNight")) return std.fmt.bufPrint(buf, "{d}", .{cfg.zombie_move_night}) catch null;
@@ -874,7 +874,7 @@ fn optionValue(self: *Game, v: *const packages.GameStatsValues, name: []const u8
     if (std.mem.eql(u8, name, "BlockDamagePlayer")) return std.fmt.bufPrint(buf, "{d}", .{stats.block_damage_player}) catch null;
     if (std.mem.eql(u8, name, "BlockDamageAI")) return std.fmt.bufPrint(buf, "{d}", .{cfg.block_damage_ai}) catch null;
     if (std.mem.eql(u8, name, "BlockDamageAIBM")) return std.fmt.bufPrint(buf, "{d}", .{cfg.block_damage_ai_bm}) catch null;
-    if (std.mem.eql(u8, name, "MaxSpawnedAnimals")) return std.fmt.bufPrint(buf, "{d}", .{cfg.max_spawned_animals}) catch null;
+    if (std.mem.eql(u8, name, "MaxSpawnedAnimals")) return std.fmt.bufPrint(buf, "{d}", .{self.sim.director.max_alive_animals}) catch null;
     if (std.mem.eql(u8, name, "AirDropFrequency")) return std.fmt.bufPrint(buf, "{d}", .{cfg.air_drop_frequency}) catch null;
     if (std.mem.eql(u8, name, "DropOnDeath")) return std.fmt.bufPrint(buf, "{d}", .{stats.drop_on_death}) catch null;
     if (std.mem.eql(u8, name, "LandClaimSize")) return std.fmt.bufPrint(buf, "{d}", .{stats.land_claim_size}) catch null;
