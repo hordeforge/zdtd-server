@@ -3494,6 +3494,12 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   instead of only within a non-re-entrant scope. Regression test
   "chunk pointers stay valid across map resizes (pointer-stable store)"
   holds a pointer across 40+ forced resizes and the mid-scan create pattern.
+  A repo-wide sweep for the same hazard class (value-maps whose `getPtr`
+  result is held across a later put) found one more instance, the prefab TTS
+  cache (`world/prefabs.zig`), closed 2026-08-30 the same way (`*TtsBlocks`
+  per-entry allocations; regression test holds a pointer across 11 puts);
+  `quest_cache` and every other value-map (noise, block textures, POD
+  lookups) are accessed by value and hold no pointers into the map.
   *Evidence:* loadgen bait soak (2 bots, `--mode bait`, concurrent joins),
   Debug abort at `chunk_fill.zig:327`, ReleaseFast segfault 5/5, instrumented
   resize log `cap 32->64` during the scan.
