@@ -22,8 +22,9 @@ const flate = std.compress.flate;
 /// start rather than silently truncating what the client `Read`s (PRD R12).
 pub const max_config_blob_len: usize = 384 * 1024;
 
-/// The 42 `SendToClients=true` rows of `xmlsToLoad`
-/// (`../7dtd-engine-research/docs/inventories/xmlsToLoad.md`). `archetypes` is
+/// 42 of the stock `xmlsToLoad` rows (49 total per
+/// `../7dtd-engine-research/docs/inventories/xmlsToLoad.md`: the
+/// `SendToClients`-flagged set plus the clientFile/XUi rows). `archetypes` is
 /// `LoadClientFile` (name-only, RE §5.6). Never sent: rwgmixer, gamestages,
 /// spawning, signs, loadingscreen, subtitles, videos.
 const s2c_names = [_][]const u8{
