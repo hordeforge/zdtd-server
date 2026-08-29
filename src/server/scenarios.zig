@@ -5676,6 +5676,45 @@ test "scenario restart does not re-seed the starter chest" {
     std.debug.print("PASS seed-chest: restart keeps the player's block over the seed spot\n", .{});
 }
 
+test "scenario join spawn area paces through the stream budget" {
+    // GAP "Join-burst tick budget under concurrent load": the synchronous
+    // spawn area is capped at the collision-mesh core (spawn chunk + 8
+    // neighbours) and the outer rings drain at chunk_adds_per_stream_tick
+    // per call, so a join cannot stall the 50 ms tick with a 289-chunk
+    // synchronous burst (previously max tick ~2 s under a concurrent join).
+    freshScenarioDir("worlds/zdtd_sc_pacejoin");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pacejoin", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // attachJoinedClient requests chunk_view_dim 4, so the spawn area is a
+    // 9×9 square (radius 4): rings 0..1 (9 chunks) sent synchronously, the
+    // outer rings (2..4, 72 chunks) pending on the paced drain.
+    try std.testing.expect(c.pending_area_r >= 1);
+    try std.testing.expectEqual(@as(usize, 9), c.streamed_n);
+    const budget = g.chunk_adds_per_stream_tick;
+    var prev = c.streamed_n;
+    var calls: usize = 0;
+    while (c.pending_area_r >= 0 and calls < 100) : (calls += 1) {
+        try g.drainSpawnArea(c);
+        const added = c.streamed_n - prev;
+        try std.testing.expect(added <= budget);
+        prev = c.streamed_n;
+    }
+    try std.testing.expect(c.pending_area_r < 0); // fully drained
+    // Full 9×9 area delivered, nothing double-sent; idle drains are no-ops.
+    try std.testing.expectEqual(@as(usize, 81), c.streamed_n);
+    try g.drainSpawnArea(c);
+    try std.testing.expectEqual(@as(usize, 81), c.streamed_n);
+    std.debug.print("PASS pace-join: core=9 budget={d} calls={d} total={d}\n", .{ budget, calls, c.streamed_n });
+}
+
 test "scenario proc world streams deco from the W3 biome field" {
     // An infinite proc world (the `infinite` mode pack / --worldgen-seed)
     // must not be bald: proc worlds carry no biomemap, so deco resolves from

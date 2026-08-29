@@ -80,6 +80,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   resizes — closing the GAP "Chunk pointer stability" hazard class (bait-soak
   segfault 5/5) at the store, with a regression test forcing 40+ resizes
   while a pointer is held.
+- Join-burst pacing (GAP "Join-burst tick budget"): `sendSpawnArea` sends
+  only the collision-mesh core (spawn chunk + 8 neighbours) synchronously
+  and arms a per-client pending area; `drainSpawnArea` delivers the outer
+  rings at `chunk_adds_per_stream_tick` per tick, center-out, so one join
+  cannot stall the 50 ms tick with a 289-chunk synchronous burst. A sustained
+  loadgen double-join cycle (62 joins) shows join_fail=0 (concurrent-client
+  starvation gone) with the chunk stream bounded at 50 ms.
 
 ### Fixed
 

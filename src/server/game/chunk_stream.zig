@@ -99,6 +99,22 @@ pub fn clientRemoveStreamed(c: *Client, key: i64) void {
     }
 }
 
+/// Ring cell (dx, dz) for the perimeter of the (2r+1)² square: ring r holds
+/// 8r cells (r >= 1), enumerated center-out — side 0 top row (left to
+/// right), side 1 right column (top to bottom), side 2 bottom row (right to
+/// left), side 3 left column (bottom to top).
+fn ringCell(ring: i32, j: u32) struct { dx: i32, dz: i32 } {
+    const side_len: u32 = @intCast(2 * ring);
+    const side: u32 = j / side_len;
+    const i: i32 = @intCast(j % side_len);
+    return switch (side) {
+        0 => .{ .dx = -ring + i, .dz = -ring },
+        1 => .{ .dx = ring, .dz = -ring + i },
+        2 => .{ .dx = ring - i, .dz = ring },
+        else => .{ .dx = -ring, .dz = ring - i },
+    };
+}
+
 pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius: i32) !void {
     const t = world_store.World.worldToChunk(wx, wz);
     // Honor radius 0 (single spawn chunk). Cap 17×17 for viewDist 8 mesh core.
@@ -110,28 +126,94 @@ pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius:
             break;
         }
     }
-    var dz: i32 = -r;
-    while (dz <= r) : (dz += 1) {
-        var dx: i32 = -r;
-        while (dx <= r) : (dx += 1) {
-            const cx = t.pos.x + dx;
-            const cz = t.pos.z + dz;
-            // Re-sending a chunk the client already holds costs reliable
-            // window the missing chunks need, and the client logs
-            // "chunk already loaded" for every one.
+    // Collision-mesh core (rings 0..1 = the spawn chunk + its 8 neighbours)
+    // goes out synchronously: the client needs these meshed before
+    // World.IsPositionAvailable succeeds (join comments on
+    // DynamicClientArrive). The outer rings pace through `drainSpawnArea` at
+    // `chunk_adds_per_stream_tick` per tick, so one join cannot stall the
+    // 50 ms tick with a 289-chunk synchronous burst (GAP "Join-burst tick
+    // budget under concurrent load").
+    const core_r: i32 = @min(r, 1);
+    var ring: i32 = 0;
+    while (ring <= core_r) : (ring += 1) {
+        if (ring == 0) {
+            const key = packages.makeChunkKey(t.pos.x, t.pos.z);
             if (client_ptr) |cl| {
-                if (clientHasStreamed(cl, packages.makeChunkKey(cx, cz))) continue;
+                if (clientHasStreamed(cl, key)) continue;
             }
-            const delivered = try self.sendSpawnChunk(peer, cx, cz);
-            if (delivered) {
-                if (client_ptr) |cl| clientAddStreamed(self, cl, packages.makeChunkKey(cx, cz));
+            if (try self.sendSpawnChunk(peer, t.pos.x, t.pos.z)) {
+                if (client_ptr) |cl| clientAddStreamed(self, cl, key);
             }
-            // Let ACKs land between multi-chunk sends: polling alone races the
-            // loopback RTT, so yield briefly (join-only) to keep the reliable
-            // window draining and other peers' critical packets interleaved.
-            self.pollNetOnce();
-            clock.sleepNs(join_ack_yield_ns);
+        } else {
+            const cells: u32 = @intCast(8 * ring);
+            var j: u32 = 0;
+            while (j < cells) : (j += 1) {
+                const cell = ringCell(ring, j);
+                const cx = t.pos.x + cell.dx;
+                const cz = t.pos.z + cell.dz;
+                const key = packages.makeChunkKey(cx, cz);
+                if (client_ptr) |cl| {
+                    if (clientHasStreamed(cl, key)) continue;
+                }
+                if (try self.sendSpawnChunk(peer, cx, cz)) {
+                    if (client_ptr) |cl| clientAddStreamed(self, cl, key);
+                }
+                // Let ACKs land between multi-chunk sends: polling alone races
+                // the loopback RTT, so yield briefly (join-only) to keep the
+                // reliable window draining and other peers' critical packets
+                // interleaved.
+                self.pollNetOnce();
+                clock.sleepNs(join_ack_yield_ns);
+            }
         }
+    }
+    // Outer rings: arm the paced drain. Idempotent across the two join-phase
+    // call sites (DynamicClientArrive + RequestToSpawnPlayer): a second call
+    // with the same center keeps the drain's ring progress instead of
+    // restarting it.
+    if (r > core_r) {
+        if (client_ptr) |cl| {
+            if (cl.pending_area_r < 0 or cl.pending_area_cx != t.pos.x or cl.pending_area_cz != t.pos.z) {
+                cl.pending_area_r = r;
+                cl.pending_area_cx = t.pos.x;
+                cl.pending_area_cz = t.pos.z;
+                cl.pending_area_ring = core_r + 1;
+                cl.pending_area_idx = 0;
+            }
+        }
+    }
+}
+
+/// Drain a client's pending spawn-area rings at the stream budget
+/// (`chunk_adds_per_stream_tick` per tick, center-out). Called from
+/// replicate for every client with a peer; no-op when nothing is pending.
+/// Overlap with the per-tick view stream is harmless (clientHasStreamed
+/// dedupes, and the stream only runs for entered/world_ready clients).
+pub fn drainSpawnArea(self: *Game, c: *Client) !void {
+    const peer = c.peer orelse return;
+    if (c.pending_area_r < 0) return;
+    var sent: u32 = 0;
+    while (sent < self.chunk_adds_per_stream_tick) {
+        const ring = c.pending_area_ring;
+        if (ring > c.pending_area_r) {
+            c.pending_area_r = -1; // full area drained
+            return;
+        }
+        const cells: u32 = @intCast(8 * ring);
+        if (c.pending_area_idx >= cells) {
+            c.pending_area_ring += 1;
+            c.pending_area_idx = 0;
+            continue;
+        }
+        const cell = ringCell(ring, c.pending_area_idx);
+        c.pending_area_idx += 1;
+        const cx = c.pending_area_cx + cell.dx;
+        const cz = c.pending_area_cz + cell.dz;
+        const key = packages.makeChunkKey(cx, cz);
+        if (clientHasStreamed(c, key)) continue;
+        if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
+        clientAddStreamed(self, c, key);
+        sent += 1;
     }
 }
 

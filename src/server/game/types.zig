@@ -481,6 +481,16 @@ pub const Client = struct {
     /// worldInfoCo only does after createWorld). Chunks sent from here on
     /// are kept, so the tick streamer can start well before the spawn.
     world_ready: bool = false,
+    /// Join-burst pacing (GAP "Join-burst tick budget under concurrent load"):
+    /// the synchronous spawn area is capped at the collision-mesh core (spawn
+    /// chunk + 8 neighbours); the outer rings drain via `drainSpawnArea` at
+    /// `chunk_adds_per_stream_tick` per tick so one join cannot stall the
+    /// 50 ms tick. `pending_area_r < 0` = idle (no pending area).
+    pending_area_r: i32 = -1,
+    pending_area_cx: i32 = 0,
+    pending_area_cz: i32 = 0,
+    pending_area_ring: i32 = 0,
+    pending_area_idx: u32 = 0,
     challenge: [16]u8 = .{0} ** 16,
     slot: usize = 0,
     view_radius: i32 = default_view_radius,

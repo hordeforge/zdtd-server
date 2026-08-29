@@ -32,7 +32,7 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
-## Batch T 2026-08-30 (pointer-stable chunk store)
+## Batch T 2026-08-30 (pointer-stable chunk store + join-burst pacing)
 
 `World.chunks` now maps keys to `*Chunk` (one allocation per chunk, freed on
 eviction/deinit, residency still bounded by `max_resident_chunks`) instead of
@@ -43,6 +43,16 @@ store instead of per-call-site re-fetch. Regression test "chunk pointers
 stay valid across map resizes (pointer-stable store)" holds a pointer across
 40+ forced resizes and the mid-scan create pattern. Scorecard: 294 WORKS,
 1 PARTIAL (join-burst tick budget), 0 MISSING.
+
+GAP "Join-burst tick budget" chunk pacing landed: `sendSpawnArea` sends only
+the collision-mesh core (spawn chunk + 8 neighbours) synchronously and arms
+a per-client pending area; `drainSpawnArea` delivers the outer rings at
+`chunk_adds_per_stream_tick` per tick, center-out. A sustained loadgen
+double-join cycle on the infinite world (62 joins) shows **join_fail=0**
+(the concurrent-client starvation is gone) with the chunk stream bounded at
+50 ms; the residual join tick overrun (max 1.13 s, p99 100 ms) stays tracked
+(W2b async gen + join-handler apm section). Scenario "join spawn area paces
+through the stream budget" covers the drain budget and completion.
 
 ## Batch S 2026-08-29 (parachute mod + ADR 0037 glide boundary)
 

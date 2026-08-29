@@ -23,6 +23,25 @@ pub fn replicate(self: *Game) !void {
     for (&self.clients) |*c| {
         if (c.peer) |p| p.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
     }
+    if (self.wire_chunks) {
+        // Join-burst pacing: drain any client's pending spawn area at the
+        // stream budget every tick (the view stream itself only runs for
+        // entered/world_ready clients, so the join window needs its own
+        // pass). No-op for clients without a pending area.
+        for (&self.clients) |*cl| {
+            if (cl.peer == null) continue;
+            self.drainSpawnArea(cl) catch |err| {
+                self.harness.counters.inc(.stream_errors);
+                const n = self.harness.counters.get(.stream_errors);
+                if (n == 1 or n % 100 == 0) {
+                    std.debug.print(
+                        "zdtd: spawn-area drain failed slot={d} entity={d} n={d}: {s}\n",
+                        .{ cl.slot, cl.entity_id, n, @errorName(err) },
+                    );
+                }
+            };
+        }
+    }
     if (self.wire_chunks and self.tick_n % self.chunk_stream_period_ticks == 0) {
         for (&self.clients) |*cl| {
             if (cl.peer == null or !(cl.entered or cl.world_ready)) continue;

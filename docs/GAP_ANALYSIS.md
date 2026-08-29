@@ -597,11 +597,15 @@ area and the concrete work.
     to 29 s (p99 1.6 s) and 2317 reliable-window drops during the burst —
     the proc-gen amplification made visible without the cap confound. The
     Release binary keeps a tick-budget overrun (max ~260 ms vs 50 ms), not
-    a join failure. Remaining directions: deliver the spawn-area through
+    a join failure. DONE 2026-08-30: the spawn-area now delivers through
     the `chunk_adds_per_stream_tick` stream budget instead of one
-    synchronous flood (the inner 5×5 mesh core stays immediate; the tail
-    paces), and W2b async chunk gen (moves gen + te_scan off the join
-    tick) — both are join-timing changes gated on stock-client validation
+    synchronous flood — the collision-mesh core (inner 3×3) stays
+    immediate, the tail paces via `drainSpawnArea` (see the PARTIAL row:
+    62-join loadgen cycle, join_fail=0, chunk stream bounded 50 ms).
+    Remaining: W2b async chunk gen (moves gen + te_scan off the join
+    tick) and an apm section for the join handler so the residual max-tick
+    (1.13 s) is attributed — both are join-timing changes gated on
+    stock-client validation
     (no client installed; the mesh-core race is documented in c2s/join.zig
     DynamicClientArrive). The per-poll send byte budget direction is
     subsumed by the ACK-yield fix
@@ -3414,18 +3418,18 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Anchors:* `src/server/zdtd_config.zig` max_streamed_chunks_cap,
   `src/server/game/chunk_stream.zig` (bitset + radius), `src/server/game/types.zig`
 
-- **Join-burst tick budget under concurrent load** `PARTIAL` `(2026-08-29)`
+- **Join-burst tick budget under concurrent load** `PARTIAL` `(2026-08-29, pacing 2026-08-30)`
   Measured with a live 7dtd-loadgen double join against the infinite
   world (config-only mod `mods/infinite_world`, formerly `--mode infinite`;
   APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
   net_poll 1.9 s. A 3-client bench on Pregen06k01 (2026-08-29) pushed the
   same stall to **7.7 s** (max net_poll 7.7 s; the sim itself stayed at
   p99 <1 ms, so it is the synchronous join/stream work, not the ECS). The
-  join burst is fully synchronous: `sendSpawnArea`
-  queues the whole 17x17 view (289 chunks), each proc chunk costs
+  join burst was fully synchronous: `sendSpawnArea`
+  queued the whole 17x17 view (289 chunks), each proc chunk costs
   generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and
   the deco burst mirrors up to `deco_objects_per_join` (8192) trees. One
-  poll drains it all, so a second concurrent client's critical packages
+  poll drained it all, so a second concurrent client's critical packages
   (PackageIds retransmit) starve behind the reliable-window flood and its
   join times out at ChallengeReplied (`join_ok=14, join_fail=0` server-side
   - the server accepted everything; the client starved).
@@ -3436,15 +3440,26 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   scan is skipped for clean proc chunks (te_scan_cells 19.7 M -> 262 K at
   join, 75x); and the full-stock config bundle (deflated blocks.xml ~0.5-1
   MB) got a 1 s critical retry budget after 250 ms exhausted it under a
-  concurrent join. The join tick itself still overruns (max ~2 s - the
-  synchronous gen+encode is inherent without async work); the deeper fixes
-  stay tracked: pace the join spawn-area through the
-  `chunk_adds_per_stream_tick` stream budget, and W2b async chunk gen
-  (moves proc gen + te_scan off the join tick; the per-poll send byte
-  budget direction is subsumed by the ACK-yield - the window drains between
-  spawn-area chunks, so a separate budget would be redundant).
-  *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns),
-  loadgen `ChallengeReplied timeout` under concurrent count=2.
+  concurrent join.
+  `(2026-08-30)` **spawn-area pacing landed**: `sendSpawnArea` now sends
+  only the collision-mesh core (rings 0..1 = the spawn chunk + its 8
+  neighbours, which the client needs meshed before `World.IsPositionAvailable`)
+  synchronously and arms a per-client pending area; `drainSpawnArea`
+  (replicate, every tick) delivers the outer rings at
+  `chunk_adds_per_stream_tick` per tick, center-out, so a join cannot stall
+  the tick with a 289-chunk synchronous burst. Idempotent across the two
+  join-phase call sites (DynamicClientArrive + RequestToSpawnPlayer +
+  sendJoinBundle re-send). Re-measured with a sustained loadgen double-join
+  cycle against the infinite world (62 joins): **join_fail=0** - the
+  concurrent-client starvation is gone - and the chunk stream section is
+  bounded at 50 ms (`chunk_stream` max 50.6 ms). The residual join tick
+  still overruns (max 1.13 s, p99 100 ms, down from ~2 s / 201 ms) from the
+  join-bundle/entity send work; the deeper fix stays tracked: W2b async
+  chunk gen (moves proc gen + te_scan off the join tick) and instrumenting
+  the join handler with its own apm section so the residual is attributed.
+  *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns,
+  chunk_stream bounded 50 ms), loadgen 62-join cycle `join_fail=0`,
+  scenario "join spawn area paces through the stream budget".
 
 - **Chunk pointer stability across re-entrant store access** `WORKS` `(2026-08-30)`
   The spawn-area send holds a `*Chunk` (store.getOrCreate, chunk_fill.zig:41)
