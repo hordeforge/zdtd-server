@@ -66,6 +66,9 @@ pub const admin_help_index = [_]admin_cmds.HelpEntry{
     .{ .names = "version", .description = "Get the currently running version" },
     .{ .names = "whitelist", .description = "Manage whitelist entries" },
     .{ .names = "wipeplayer", .description = "zdtd: erase a player record by login name" },
+    .{ .names = "getoptions", .description = "zdtd: dump the effective server options" },
+    .{ .names = "exportcurrentconfigs", .description = "zdtd: write the resolved configs to the world dir" },
+    .{ .names = "listthreads, lt", .description = "lists the server threads" },
 };
 
 pub const logPersistErr = persist.logPersistErr;
