@@ -15,7 +15,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 
 ### Freeze (core playable)
 
-Core join/CGO/demo **83/83**, strict eat (stackDrop + Food ≥+5), hard power-TE fixture, V3.1.0 pin: **freeze** unless TFP patch, full MinEvents eat (+15 chili S2C), or animator human soak reopens work.
+Core join/CGO/demo **83/83**, strict eat (stackDrop + Food ≥+5), hard power-TE fixture, V3.1.0 pin: **freeze lifted 2026-08-30** - the TFP patch condition fired (target is now **V3.2.0 b9** wire; the 3.2.0 login gate, package diffs and changelog-3.2.0 items shipped; see CHANGELOG "3.2.0" entries and docs/GAP_ANALYSIS.md scorecard).
 
 ### Shipped this wave (2026-08-06)
 
