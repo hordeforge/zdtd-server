@@ -923,10 +923,11 @@ required count is a policy floor, both documented in the rows). A 2026-08-22
 recount from the live markers corrected the scorecard: the running totals had
 drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
 MISSING" was an older inventory projection). Recount: 291 canonical features,
-total **250/41/0**. (Current state, recounted 2026-08-29 from the live
-markers: 295 canonical features, **293 WORKS / 2 PARTIAL / 0 MISSING**; the
-two PARTIAL rows are the join-burst tick budget and chunk-pointer stability
-gaps, both dated 2026-08-29 with their residuals recorded in the rows.)
+total **250/41/0**. (Current state, recounted 2026-08-30 from the live
+markers: 295 canonical features, **294 WORKS / 1 PARTIAL / 0 MISSING**; the
+chunk-pointer stability gap closed 2026-08-30 by the pointer-stable chunk
+store, and the join-burst tick budget PARTIAL is paced to the 50 ms budget
+in ReleaseFast with its W2b residual recorded in the row.)
 Then the sleeper group-id cascade landed: a volume with a nonzero
 `SleeperVolumeGroupId` wakes every other volume of the same prefab placement
 sharing the id (stock TouchGroup IL=52), gated on the placement origin so

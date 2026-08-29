@@ -3338,7 +3338,7 @@ expire, repair heals and supports collapse, but the world is visually bald (3
 deco objects per join), terrain is stepped rather than smooth, and block-rotation
 persistence and the HUD day counter each have specific, noticeable gaps.
 
-**44 WORKS · 2 PARTIAL · 0 MISSING**
+**45 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;

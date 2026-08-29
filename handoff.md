@@ -1,15 +1,15 @@
 # Handoff - zdtd refactor + parity push (rolling)
 
-**Date:** 2026-08-29 (waves 56-86: 2026-08-27; waves 87-93: 2026-08-28/29 malleable geometry + 3.2.0 + real-client audit; wave 94: 2026-08-29 review sweep + soak evidence)
+**Date:** 2026-08-30 (waves 56-86: 2026-08-27; waves 87-93: 2026-08-28/29 malleable geometry + 3.2.0 + real-client audit; wave 94: 2026-08-29 review sweep + soak evidence; wave 95+: 2026-08-30 pointer-stable stores, join-burst pacing, starter population, anti-cheat T19-T23)
 **Branch:** `main`
-**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1470 passed / 1 skipped, measured 2026-08-29), `zig build fuzz` green, `make release-check` ok.
+**Toolchain:** Zig 0.16, `zig build` + `bash scripts/lint-architecture.sh` (clean), `zig build test` passes (1488 passed / 1 skipped, measured 2026-08-30), `zig build fuzz` green, `make release-check` ok.
 
 ## Current gates
 
 - `game.zig`: 3437 lines, delegating to 44 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig` (one import + one `test { _ = game_*; }` per shard). The old ≤2500 line convention was never an enforced gate; `lint-architecture.sh` enforces the import structure, not a size cap.
 - `lint-architecture: clean` enforced by `scripts/lint-architecture.sh`.
-- `zig build` + `zig build test` green (1470 passed / 1 skipped, measured 2026-08-29).
-- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **295** features (**293 WORKS / 2 PARTIAL / 0 MISSING**, recounted 2026-08-29 from the live markers; the two PARTIAL rows are the 08-29 join-burst tick budget and chunk-pointer stability gaps; the remaining PARTIAL labels are ad-hoc waived rows not counted).
+- `zig build` + `zig build test` green (1488 passed / 1 skipped, measured 2026-08-30).
+- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **295** features (**294 WORKS / 1 PARTIAL / 0 MISSING**, recounted 2026-08-30 from the live markers; the one PARTIAL row is the 08-29 join-burst tick budget, paced to the 50 ms budget in ReleaseFast with its W2b residual recorded inline; the chunk-pointer stability gap closed 2026-08-30 by the pointer-stable store; the remaining PARTIAL labels are ad-hoc waived rows not counted).
 - Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (201/201 files, 58 constants ledgered) + `make check-xml-audit`.
 - Live stock-client gate **23/23** on a fresh world (`FRESH=1`).
 
@@ -145,9 +145,9 @@
 ## Docs
 
 - `handoff.md` is a rolling handoff (same file, overwritten each pass): see this file + `git log --oneline -30` for recent commits.
-- `docs/STATUS.md` header pins **0 MISSING**, the 295-feature scorecard (293 WORKS / 2 PARTIAL), and the shard count.
-- `docs/WORK_PLAN.md` now heads with the active anti-cheat program (ADR 0022, T18/T19 first); detailed task history is archived in `docs/archive/WORK_PLAN_2026-08-09.md`.
-- `docs/GAP_ANALYSIS.md`: 295 features, 0 MISSING; scorecard recounted from the live markers 2026-08-29 (293 WORKS / 2 PARTIAL).
+- `docs/STATUS.md` header pins **0 MISSING**, the 295-feature scorecard (294 WORKS / 1 PARTIAL), and the shard count.
+- `docs/WORK_PLAN.md` now heads with the active anti-cheat program (ADR 0022, T18 first; T19-T23 done 2026-08-30); detailed task history is archived in `docs/archive/WORK_PLAN_2026-08-09.md`.
+- `docs/GAP_ANALYSIS.md`: 295 features, 0 MISSING; scorecard recounted from the live markers 2026-08-30 (294 WORKS / 1 PARTIAL).
 - `docs/INDEX.md` lists every top-level doc including the disposition reviews (`RULES_CONFIG.md`, `PLUGIN_CONFIG_DISPOSITION.md`, `XML_DATA_AUDIT.md`).
 
 ## Reviews
@@ -159,7 +159,7 @@
 
 ```bash
 zig build                           # compiles clean (0 warnings)
-zig build test                       # exit 0; 1470 passed / 1 skipped (2026-08-29)
+zig build test                       # exit 0; 1488 passed / 1 skipped (2026-08-30)
 bash scripts/lint-architecture.sh   # expect "lint-architecture: clean"
 python3 tools/provenance_scan.py    # expect 201/201
 ```
