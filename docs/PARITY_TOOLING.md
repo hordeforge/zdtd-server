@@ -36,9 +36,13 @@ python3 ../7dtd-engine-research/tools/parity/parity_diff.py parity_old.json pari
 #   → added / removed packages, changed wire (old vs new call seq), enum drift
 #   exit code 1 if anything changed (CI-friendly)
 
-# 2b) coverage → what zdtd handles vs stock
-python3 ../7dtd-engine-research/tools/parity/parity_diff.py --coverage parity_new.json <zdtd_repo>
-#   → stock package count, handled-in-game.zig count,
+# 2b) coverage -> what zdtd handles vs stock
+# NOTE (2026-08-29): the --coverage mode does NOT exist in the current
+# parity_diff.py (it diffs two snapshots only). The last coverage numbers in
+# wire/PACKAGES.md ("86 live dispatch arms", "80 live S2C names") were a
+# manual count on 2026-08-29; reimplement the mode here before regenerating.
+# python3 ../7dtd-engine-research/tools/parity/parity_diff.py --coverage parity_new.json <zdtd_repo>
+#   -> stock package count, handled-in-game.zig count,
 #     UNHANDLED client->server (dir=1) list with read layouts
 ```
 
