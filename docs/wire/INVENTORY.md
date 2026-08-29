@@ -62,8 +62,8 @@ is available.
 | equip | from slot | equip index 0-4 |: |: |
 
 `use` on food (2) / medicine (4) removes 1 and heals.  
-`place` maps wood(7)→`frameShapes:cube`, cobblePlaceable(10)→`cobblestoneShapes:cube` (AssignIds-resolved).  
-`equip` moves armor(11) into equipment slots; each piece grants 10% damage mitigation (cap 50%).
+`place` resolves the item's items.xml `Blockname` (e.g. torch → `wallTorchLightPlayer`) through AssignIds; the invented wood→`frameShapes:cube` / cobble→`cobblestoneShapes:cube` map was removed 2026-08-25 (stock b14 defines no Placeable for them — XML_DATA_AUDIT fix 5).  
+`equip` moves armor(11) into equipment slots; mitigation is the equipped armor's summed items.xml `PhysicalDamageResist` at its quality (stock GetTotalPhysicalArmorRating, XML_DATA_AUDIT fix 2 / GAME_OPTIONS `armor_mitigation_*`), with the flat 10%/piece (cap 50%) as the offline `[rules.combat]` fallback only.
 
 ## Wire packages
 
