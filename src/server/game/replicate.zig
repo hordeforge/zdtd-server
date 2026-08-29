@@ -24,13 +24,15 @@ pub fn replicate(self: *Game) !void {
         if (c.peer) |p| p.resendPending(&self.net.sock) catch self.harness.counters.inc(.net_send_errors);
     }
     if (self.wire_chunks) {
-        // Join-burst pacing: drain any client's pending spawn area at the
-        // stream budget every tick (the view stream itself only runs for
+        // Join-burst pacing: drain any client's pending spawn area at a
+        // SHARED per-tick budget (the view stream itself only runs for
         // entered/world_ready clients, so the join window needs its own
-        // pass). No-op for clients without a pending area.
+        // pass). Concurrent joins split the budget so the tick cannot stack
+        // 16+ chunk bodies. No-op for clients without a pending area.
+        var drain_budget: u32 = self.chunk_adds_per_stream_tick;
         for (&self.clients) |*cl| {
             if (cl.peer == null) continue;
-            self.drainSpawnArea(cl) catch |err| {
+            self.drainSpawnArea(cl, &drain_budget) catch |err| {
                 self.harness.counters.inc(.stream_errors);
                 const n = self.harness.counters.get(.stream_errors);
                 if (n == 1 or n % 100 == 0) {

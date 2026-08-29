@@ -25,11 +25,19 @@ const version_mod = @import("../../version.zig");
 
 const sanitizePlayerName = c2s_text.sanitizePlayerName;
 
+const apm = @import("../../apm/root.zig");
+
 /// Upper bound on C2S RequestToSpawnPlayer.chunkViewDim (viewDist 8 mesh core).
 const max_spawn_chunk_view_dim: i32 = 8;
 
 /// True when handled (join SM package). False lets caller fall through to c2s/*.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
+    // Join-phase attribution (GAP "Join-burst tick budget"): the whole C2S
+    // join handler is one apm section so the residual synchronous join work
+    // (spawn-area core, join bundle, respawn logic) is measurable separately
+    // from the paced chunk drain (.replicate) and the rest of net_poll.
+    const sc = apm.profiler.scope(&self.harness.prof, .join);
+    defer sc.end();
     const sp = self.world.primarySpawn();
     if (std.mem.eql(u8, name, "NetPackagePlayerLogin")) {
         // ServerPassword already enforced at LiteNet ConnectRequest (net.server_password).

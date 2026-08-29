@@ -3452,14 +3452,25 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   sendJoinBundle re-send). Re-measured with a sustained loadgen double-join
   cycle against the infinite world (62 joins): **join_fail=0** - the
   concurrent-client starvation is gone - and the chunk stream section is
-  bounded at 50 ms (`chunk_stream` max 50.6 ms). The residual join tick
-  still overruns (max 1.13 s, p99 100 ms, down from ~2 s / 201 ms) from the
-  join-bundle/entity send work; the deeper fix stays tracked: W2b async
-  chunk gen (moves proc gen + te_scan off the join tick) and instrumenting
-  the join handler with its own apm section so the residual is attributed.
+  bounded at 50 ms (`chunk_stream` max 50.6 ms). `(2026-08-30)` follow-on:
+  the drain gained a **shared per-tick budget** (concurrent joins split
+  `chunk_adds_per_stream_tick`) and per-chunk ACK-yields (a bursted drain
+  batch overflowed the reliable window - measured 257 drops), and the join
+  path gained apm sections (`.join` = the C2S join handler, `.join_drain` =
+  the paced drain pass) so the residual is attributed instead of guessed.
+  **ReleaseFast** (the production binary) re-measured under the same
+  double-join cycle: max tick 140 ms / p99 50.3 ms (the 50 ms budget), drain
+  pass mean 4.6 ms / max 66.6 ms, join handler max 66.8 ms, 0 window drops,
+  36/36 joins pass - vs the pre-pacing ReleaseFast max 262 ms (GAP item 26
+  soak). The Debug-build residual (max tick ~0.5-1 s) is the documented
+  Debug amplification (~1.7 ms/chunk vs ~126 µs ReleaseFast); the deeper fix
+  stays tracked: W2b async chunk gen (moves proc gen + te_scan off the join
+  tick).
   *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns,
-  chunk_stream bounded 50 ms), loadgen 62-join cycle `join_fail=0`,
-  scenario "join spawn area paces through the stream budget".
+  chunk_stream bounded 50 ms; `.join` / `.join_drain` sections), loadgen
+  62-join cycle `join_fail=0`, ReleaseFast 36-join cycle (max tick 140 ms,
+  p99 50 ms, 0 drops), scenario "join spawn area paces through the stream
+  budget".
 
 - **Chunk pointer stability across re-entrant store access** `WORKS` `(2026-08-30)`
   The spawn-area send holds a `*Chunk` (store.getOrCreate, chunk_fill.zig:41)

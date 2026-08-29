@@ -184,16 +184,19 @@ pub fn sendSpawnArea(self: *Game, peer: *ln_peer.Peer, wx: i32, wz: i32, radius:
     }
 }
 
-/// Drain a client's pending spawn-area rings at the stream budget
-/// (`chunk_adds_per_stream_tick` per tick, center-out). Called from
-/// replicate for every client with a peer; no-op when nothing is pending.
-/// Overlap with the per-tick view stream is harmless (clientHasStreamed
-/// dedupes, and the stream only runs for entered/world_ready clients).
-pub fn drainSpawnArea(self: *Game, c: *Client) !void {
+/// Drain a client's pending spawn-area rings against a SHARED per-tick
+/// budget (`chunk_adds_per_stream_tick` across all clients, center-out;
+/// concurrent joins split it so the tick cannot stack 16+ chunk bodies).
+/// Called from replicate for every client with a peer; no-op when nothing is
+/// pending or the shared budget is exhausted. Overlap with the per-tick view
+/// stream is harmless (clientHasStreamed dedupes, and the stream only runs
+/// for entered/world_ready clients).
+pub fn drainSpawnArea(self: *Game, c: *Client, budget: *u32) !void {
     const peer = c.peer orelse return;
     if (c.pending_area_r < 0) return;
-    var sent: u32 = 0;
-    while (sent < self.chunk_adds_per_stream_tick) {
+    const ds = apm.profiler.scope(&self.harness.prof, .join_drain);
+    defer ds.end();
+    while (budget.* > 0) {
         const ring = c.pending_area_ring;
         if (ring > c.pending_area_r) {
             c.pending_area_r = -1; // full area drained
@@ -213,7 +216,13 @@ pub fn drainSpawnArea(self: *Game, c: *Client) !void {
         if (clientHasStreamed(c, key)) continue;
         if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
         clientAddStreamed(self, c, key);
-        sent += 1;
+        budget.* -= 1;
+        // ACK-yield between drain chunks, same as the join core: a bursted
+        // batch overflows the reliable window (measured 257 drops without it;
+        // loopback RTT ~100 µs, so the 500 µs yield drains the window per
+        // chunk). ~20 ms per pass stays inside the tick budget.
+        self.pollNetOnce();
+        clock.sleepNs(join_ack_yield_ns);
     }
 }
 

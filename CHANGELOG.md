@@ -83,10 +83,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Join-burst pacing (GAP "Join-burst tick budget"): `sendSpawnArea` sends
   only the collision-mesh core (spawn chunk + 8 neighbours) synchronously
   and arms a per-client pending area; `drainSpawnArea` delivers the outer
-  rings at `chunk_adds_per_stream_tick` per tick, center-out, so one join
-  cannot stall the 50 ms tick with a 289-chunk synchronous burst. A sustained
-  loadgen double-join cycle (62 joins) shows join_fail=0 (concurrent-client
-  starvation gone) with the chunk stream bounded at 50 ms.
+  rings against a shared `chunk_adds_per_stream_tick` per tick (concurrent
+  joins split it), with per-chunk ACK-yields (a bursted batch overflowed the
+  reliable window; 257 drops measured without them). A sustained loadgen
+  double-join cycle (62 joins) shows join_fail=0 (concurrent-client
+  starvation gone) with the chunk stream bounded at 50 ms; ReleaseFast
+  re-measures max tick 140 ms / p99 50 ms vs the pre-pacing 262 ms. The
+  join path is instrumented with `.join` (C2S join handler) and `.join_drain`
+  (paced drain pass) apm sections.
 
 ### Fixed
 

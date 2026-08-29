@@ -3201,10 +3201,11 @@ pub const Game = struct {
         return game_chunk_stream.sendSpawnArea(self, peer, wx, wz, radius);
     }
 
-    /// Drain a client's pending spawn-area rings at the stream budget
-    /// (join-burst pacing, GAP "Join-burst tick budget under concurrent load").
-    pub fn drainSpawnArea(self: *Game, c: *Client) !void {
-        return game_chunk_stream.drainSpawnArea(self, c);
+    /// Drain a client's pending spawn-area rings against the shared per-tick
+    /// drain budget (join-burst pacing, GAP "Join-burst tick budget under
+    /// concurrent load").
+    pub fn drainSpawnArea(self: *Game, c: *Client, budget: *u32) !void {
+        return game_chunk_stream.drainSpawnArea(self, c, budget);
     }
 
     /// Stream chunks around player and remove far ones (stock ChunkRemove key).

@@ -46,12 +46,17 @@ stay valid across map resizes (pointer-stable store)" holds a pointer across
 
 GAP "Join-burst tick budget" chunk pacing landed: `sendSpawnArea` sends only
 the collision-mesh core (spawn chunk + 8 neighbours) synchronously and arms
-a per-client pending area; `drainSpawnArea` delivers the outer rings at
-`chunk_adds_per_stream_tick` per tick, center-out. A sustained loadgen
-double-join cycle on the infinite world (62 joins) shows **join_fail=0**
-(the concurrent-client starvation is gone) with the chunk stream bounded at
-50 ms; the residual join tick overrun (max 1.13 s, p99 100 ms) stays tracked
-(W2b async gen + join-handler apm section). Scenario "join spawn area paces
+a per-client pending area; `drainSpawnArea` delivers the outer rings at a
+**shared** `chunk_adds_per_stream_tick` per tick (concurrent joins split it),
+with per-chunk ACK-yields (a bursted batch overflowed the reliable window —
+257 drops measured without them). A sustained loadgen double-join cycle on
+the infinite world (62 joins) shows **join_fail=0** (the concurrent-client
+starvation is gone) with the chunk stream bounded at 50 ms; **ReleaseFast**
+re-measures at max tick 140 ms / p99 50 ms (the 50 ms budget), drain pass
+mean 4.6 ms, 0 window drops — vs the pre-pacing ReleaseFast max 262 ms. The
+join path is now instrumented (`.join` handler + `.join_drain` pass
+sections); the residual (Debug max tick ~0.5-1 s from build amplification)
+stays tracked as W2b async chunk gen. Scenario "join spawn area paces
 through the stream budget" covers the drain budget and completion.
 
 ## Batch S 2026-08-29 (parachute mod + ADR 0037 glide boundary)

@@ -28,6 +28,15 @@ pub const Section = enum(u8) {
     /// Per-player survival/effects pass (passive-effects VM + triggered
     /// engine + stat application; tickSurvival).
     survival,
+    /// Join-phase C2S handling on the tick (login/enter/spawn handlers:
+    /// spawn-area core + join bundle + respawn logic). GAP "Join-burst tick
+    /// budget" attribution: the spawn-area CHUNK part is paced via
+    /// drainSpawnArea (replicate, .replicate section); this section isolates
+    /// the residual synchronous join work.
+    join,
+    /// Paced spawn-area drain pass (replicate): one pass = the shared
+    /// per-tick drain budget of chunk bodies + per-chunk ACK yields.
+    join_drain,
     _,
 };
 

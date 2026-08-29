@@ -5702,7 +5702,8 @@ test "scenario join spawn area paces through the stream budget" {
     var prev = c.streamed_n;
     var calls: usize = 0;
     while (c.pending_area_r >= 0 and calls < 100) : (calls += 1) {
-        try g.drainSpawnArea(c);
+        var drain_budget: u32 = g.chunk_adds_per_stream_tick;
+        try g.drainSpawnArea(c, &drain_budget);
         const added = c.streamed_n - prev;
         try std.testing.expect(added <= budget);
         prev = c.streamed_n;
@@ -5710,7 +5711,10 @@ test "scenario join spawn area paces through the stream budget" {
     try std.testing.expect(c.pending_area_r < 0); // fully drained
     // Full 9×9 area delivered, nothing double-sent; idle drains are no-ops.
     try std.testing.expectEqual(@as(usize, 81), c.streamed_n);
-    try g.drainSpawnArea(c);
+    {
+        var idle_budget: u32 = g.chunk_adds_per_stream_tick;
+        try g.drainSpawnArea(c, &idle_budget);
+    }
     try std.testing.expectEqual(@as(usize, 81), c.streamed_n);
     std.debug.print("PASS pace-join: core=9 budget={d} calls={d} total={d}\n", .{ budget, calls, c.streamed_n });
 }
