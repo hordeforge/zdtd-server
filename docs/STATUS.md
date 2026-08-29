@@ -10,9 +10,9 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 291 features: **291 `WORKS`,
-0 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
-53 bullets carry ad-hoc labels and are not counted). Residuals are recorded
+owns all C2S domains. `GAP_ANALYSIS.md` scores 295 features: **293 `WORKS`,
+2 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
+54 bullets carry ad-hoc labels and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
 recorded-not-wired effect classes (block-light/moon/shade light slices,
 client-local consume buffs, group AI, RWG caves/water, animal distress,
@@ -872,7 +872,10 @@ required count is a policy floor, both documented in the rows). A 2026-08-22
 recount from the live markers corrected the scorecard: the running totals had
 drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
 MISSING" was an older inventory projection). Recount: 291 canonical features,
-total **250/41/0**.
+total **250/41/0**. (Current state, recounted 2026-08-29 from the live
+markers: 295 canonical features, **293 WORKS / 2 PARTIAL / 0 MISSING**; the
+two PARTIAL rows are the join-burst tick budget and chunk-pointer stability
+gaps, both dated 2026-08-29 with their residuals recorded in the rows.)
 Then the sleeper group-id cascade landed: a volume with a nonzero
 `SleeperVolumeGroupId` wakes every other volume of the same prefab placement
 sharing the id (stock TouchGroup IL=52), gated on the placement origin so

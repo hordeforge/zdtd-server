@@ -714,7 +714,7 @@ These are the non-negotiables the architecture exists to enforce. When in doubt,
 | Doc | Role |
 |---|---|
 | [STATUS.md](STATUS.md) | What works now — the hub |
-| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Full 291-feature inventory — WORKS/PARTIAL/MISSING |
+| [GAP_ANALYSIS.md](GAP_ANALYSIS.md) | Full 295-feature inventory — WORKS/PARTIAL/MISSING |
 | [WORK_PLAN.md](WORK_PLAN.md) | Ranked next tasks |
 | [STATE_MACHINES.md](STATE_MACHINES.md) | 20 state machines with diagrams and `src/` anchors |
 | [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | SoA columns, queries, groups, tick order |

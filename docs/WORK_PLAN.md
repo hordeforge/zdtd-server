@@ -17,8 +17,8 @@ Active planning is now tracked in the living docs:
 For handoff-ready task shape and house rules, see the archived plan's "How to work a task" § — same grounding/proof/commit expectations apply.
 
 **Status 2026-08-27:** most tasks below shipped and are rescored WORKS in
-[`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) (scorecard: all 291 features WORKS,
-residuals recorded inline) — do not re-open them as gaps. Specifically
+[`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) (scorecard: 293 features WORKS, 2
+PARTIAL, residuals recorded inline) — do not re-open them as gaps. Specifically
 done: T24/T25/T26/T27/T28 (progression + perk spend + VM passives, scorecard
 row 10), T29 (stealth/noise/smell, the AI senses row), T33 (challenges,
 resolved via the client-tracked re-scope, no server challenge wire), T34
