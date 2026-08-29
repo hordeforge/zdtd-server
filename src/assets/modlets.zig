@@ -329,6 +329,19 @@ test "parseModInfo accepts V2 and rejects malformed" {
     try std.testing.expectEqualStrings("TestMod", p.name);
     try std.testing.expectEqualStrings("1.2.3", p.version);
 
+    const with_icon =
+        \\<xml>
+        \\  <Name value="IconMod"/>
+        \\  <DisplayName value="Icon Mod"/>
+        \\  <Version value="1.0"/>
+        \\  <Icon value="icon.png"/>
+        \\</xml>
+    ;
+    const pi = parseModInfo("t", with_icon).?;
+    try std.testing.expectEqualStrings("icon.png", pi.icon.?);
+    // No Icon property: the field is null (not "").
+    try std.testing.expect(parseModInfo("t", ok).?.icon == null);
+
     const no_name =
         \\<xml><DisplayName value="x"/></xml>
     ;
