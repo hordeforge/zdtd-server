@@ -28,7 +28,7 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 | Mode | Behavior |
 |---|---|
 | **correct** | Hard invariants reject/clamp (reach, phase, ownership, damage caps). Production default. |
-| **observe** | Same Hard drops for join phase, reach, ownership, and damage caps. **Soft path today:** movement envelope counts `movement_rejects` but still applies client pos (no clamp, no S2C snap). Other soft-only signals (ledgers, evidence) reserved. |
+| **observe** | Same Hard drops for join phase, reach, ownership, and damage caps. **Soft path today:** movement envelope applies client pos (no clamp, no S2C snap) and records the violation in the evidence ring; `movement_rejects` counts ENFORCED rejections only (correct mode), so observe never inflates it (T19). Other soft-only signals (ledgers, evidence) reserved. |
 
 `permissive` is accepted as an alias of `observe`.
 
@@ -37,7 +37,7 @@ Parsed in `src/server/config.zig`, stored on `Game.authority_mode`
 | Gate | Where | Notes |
 |---|---|---|
 | **Join phase matrix** | `phase_gate.zig` via `handlePackage` | Phases: `connecting` / `joined` / `playing` (`joined`+`entered`). Pre-play: join-SM allowlist only; since 2026-08-08 a pre-login (`connecting`) peer may only send PlayerLogin / PlayerDisconnect, so enter/spawn are unreachable without an identity. Play C2S dropped + `phase_rejects`. Always Hard. |
-| **Movement envelope** | `movement.zig` on PosAndRot / RelPosAndRot | Soft max 20 m/s horizontal over server dt. **correct**: clamp + soft S2C PosAndRot snap; **observe**: count `movement_rejects` only. Reset on spawn/teleport. |
+| **Movement envelope** | `movement.zig` on PosAndRot / RelPosAndRot | Soft max 20 m/s horizontal over server dt. **correct**: clamp + soft S2C PosAndRot snap + `movement_rejects`; **observe**: applies client pos and records the violation in the evidence ring only (no clamp, no snap, no reject count - T19). Reset on spawn/teleport. |
 | **Decode validation** | PosAndRot / Speeds / RelPos | Reject NaN/Inf and out-of-range world coords at parse; `decode_rejects`. |
 | **C2S bounds** | SetBlock / Explosion / TE / DamageEntity | Reach ~96 blocks; damage strength cap 200; fatal damage vs NPC only. |
 | **Ownership** | Bag / InvTx / player entity id / motion pkgs | No cross-player inv writes; entity_id must match peer; `ownership_rejects`. |

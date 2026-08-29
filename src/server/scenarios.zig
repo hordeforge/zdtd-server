@@ -4070,6 +4070,52 @@ test "scenario malicious C2S: speedhack PosAndRot increments movement_rejects" {
     );
 }
 
+test "scenario observe mode records evidence but does not enforce (T19)" {
+    // T19: observe must be honest. It applies the client position (the guard
+    // never denies in observe - AUTHORITY.md) but must NOT count
+    // movement_rejects: that counter means ENFORCED rejections, and counting
+    // applied moves would make the dashboard claim protection observe does
+    // not provide. The evidence ring records the observed violation instead.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_observe");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_observe", 0, .{ .authority_mode = .observe });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    try std.testing.expect(c.entity_id > 0);
+
+    // Seed last-good position so the envelope has a baseline.
+    var pos_body: [64]u8 = undefined;
+    const seed = try packages.buildPosAndRotBody(&pos_body, c.entity_id, 100, 71, 100, 0, 0, 0, true);
+    var frame_buf: [128]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", seed));
+    g.tick_n += 20;
+
+    const rejects_before = g.harness.counters.get(.movement_rejects);
+    const evidence_before = g.harness.counters.get(.evidence_events);
+    // 500 m horizontal in ~1 s >> the 20 m/s soft cap.
+    const hack = try packages.buildPosAndRotBody(&pos_body, c.entity_id, 600, 71, 100, 0, 0, 0, true);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", hack));
+
+    // Not enforced: no reject counted, and the permissive apply keeps the
+    // client position in the sim.
+    try std.testing.expectEqual(rejects_before, g.harness.counters.get(.movement_rejects));
+    const idx = g.sim.slotOfNetId(c.entity_id) orelse return error.MissingEntity;
+    try std.testing.expect(g.sim.transform[idx].x > 500);
+    // Observed: the evidence ring recorded the violation.
+    try std.testing.expect(g.harness.counters.get(.evidence_events) > evidence_before);
+    std.debug.print(
+        "PASS observe-honest: rejects {d}->{d} evidence {d}->{d} x={d:.1}\n",
+        .{ rejects_before, g.harness.counters.get(.movement_rejects), evidence_before, g.harness.counters.get(.evidence_events), g.sim.transform[idx].x },
+    );
+}
+
 test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele clamps" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_coordbound");

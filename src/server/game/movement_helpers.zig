@@ -90,14 +90,20 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     if (!clamp.clamped and !vclamp.clamped) {
         return .{ .x = x, .y = y, .z = z, .applied = true };
     }
-    self.harness.counters.inc(.movement_rejects);
+    // The observed violation is evidence in every mode (the evidence ring is
+    // the honest "seen it" record); the movement_rejects counter and its log
+    // mean ENFORCED rejections, so observe (permissive - the guard never
+    // denies there, AUTHORITY.md "observe records but never denies") must not
+    // count: the dashboard would claim protection observe does not provide
+    // (T19). Correct mode clamps + snaps below.
     self.noteEvidence(c, peer.local_id, entity_id, .movement, .strong, .none, cap, cap);
+    if (self.authority_mode != .correct) {
+        return .{ .x = x, .y = y, .z = z, .applied = true };
+    }
+    self.harness.counters.inc(.movement_rejects);
     const n = self.harness.counters.get(.movement_rejects);
     if (n == 1 or n % 100 == 0) {
         std.debug.print("zdtd: movement envelope reject n={d} local_id={d} entity={d}\n", .{ n, peer.local_id, entity_id });
-    }
-    if (self.authority_mode != .correct) {
-        return .{ .x = x, .y = y, .z = z, .applied = true };
     }
     if (packages.buildPosAndRotBody(self.body_buf[0..64], entity_id, clamp.x, vclamp.y, clamp.z, 0, 0, 0, true)) |sb| {
         self.sendGame(peer, "NetPackageEntityPosAndRot", sb) catch {};

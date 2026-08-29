@@ -100,6 +100,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   populated near players instead of staying near-empty until the first night
   drip. Stock fills loaded regions toward their spawning.xml maxcounts as
   they load; the caps stay stock-faithful (MaxSpawnedZombies/Animals).
+- Observe-mode honesty (T19): `movement_rejects` now counts ENFORCED
+  rejections only (correct mode); observe stays permissive (applies the
+  client position, never denies - documented) and records observed movement
+  violations in the evidence ring instead, so the dashboard no longer claims
+  protection observe does not provide.
 
 ### Fixed
 

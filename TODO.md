@@ -197,9 +197,12 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
 - [ ] T18: own the player inventory. ADR 0007's client-trusting C2S apply is the
       largest cheat surface in the server (duplication, spawn-anything) and no
       detector closes it honestly. Worth more than every task below.
-- [ ] T19: make `observe` mode honest. It counts movement rejects but still
-      applies the client position, so the name promises protection the code does
-      not provide.
+- [x] T19: make `observe` mode honest. **DONE 2026-08-30**: observe stays
+      permissive (applies client pos, never denies - documented) but
+      `movement_rejects` now counts ENFORCED rejections only (correct mode);
+      observe records the observed violation in the evidence ring instead, so
+      the dashboard no longer claims protection observe does not provide
+      (scenario "observe mode records evidence but does not enforce").
 - [ ] T20: classify every detector by input authority and role; assert the
       ceiling (`hard` requires every decision input server-derived) by test.
 - [ ] T21: guest detector feed (`on_evidence` Wasm hook), read-only events out,
