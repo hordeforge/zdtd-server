@@ -244,11 +244,11 @@ area and the concrete work.
    way stock's `EntityStats::SendStatChangePacket` does (asm.il:199650). Until
    this lands, combat has no stakes and a "dead" player is a ghost who cannot
    fight back (`src/ecs/systems.zig:1280-1291`, `:1433-1447`,
-   `src/server/game.zig:5527`).
+   `src/server/game.zig`).
 
 2. **DONE 2026-08-06.** Traders: replicate the trader entity, then deliver
    `TraderData`. Unfiltered `.trader` from both spawn paths
-   (`src/server/game.zig:7178`, `:8829`), gave `class_table[3]` the real
+   (`src/server/game.zig`, ``), gave `class_table[3]` the real
    `npcTraderJen` hash (builtin and XML), and wired `TraderData` onto
    `EntityCreationData.hasTraderData` and the channel-1 `LockResponse` context
    (`src/wire/stock_entity.zig` `writeTraderDataBody`,
@@ -292,7 +292,7 @@ area and the concrete work.
    client's interest box gets `NetPackageEntityRemove(entityId, Unloaded)` sent to
    that one client and its `known_entities` bit dropped, the way stock's
    `NetEntityDistributionEntry::updatePlayerEntity` does (asm.il:801228-801276)
-   (`src/server/game.zig:8871-8891`).
+   (`src/server/game.zig`).
 
 7. **DONE 2026-08-06.** Items: default `Stacknumber` to 500 and resolve
    `Extends`. Absent `Stacknumber` now defaults to stock's 0x1f4 = 500
@@ -383,7 +383,7 @@ area and the concrete work.
     absolute damage (asm.il:657520, :96545). zdtd now treats a lower wire value
     as the new absolute damage instead of a delta to add, so repairing 500 to
     300 sets 300 and a full repair (damage 0) clears the damage
-    (`src/server/game.zig:6024`).
+    (`src/server/game.zig`).
 
 15. **DONE 2026-08-06 (parser + wire kinds).** Quests: implement `template=`
     inheritance and the per-objective Write shapes. `template=` now resolves
@@ -455,7 +455,7 @@ area and the concrete work.
     (unknown names rejected with `buff_rejects`) and owner-gated; the sim
     `BuffSet` applies/removes by def id, ticks durations/expiry and
     `remove_on_death`, and the tick sweep relays adds/removes to observers
-    (`src/ecs/buff.zig`, `src/server/game.zig:10764`). The tracked effect
+    (`src/ecs/buff.zig`, `src/server/game.zig`). The tracked effect
     surface (Health/Food/Water/
     Stamina ChangeOT + max values, Physical/General/ElementalDamageResist
     percents) folds over active buffs (assets/buffs.zig `trackedDeltas` /
@@ -565,7 +565,7 @@ area and the concrete work.
     **DONE 2026-08-07**: every named C2S package with no handler arm hits a
     `c2s_unhandled` counter with a rate-limited log (`n == 1 or n % 100 == 0`)
     at the end of `handlePackage`, so a new stock-client package surfaces
-    instead of vanishing (`src/server/game.zig:7691`). The historical list
+    instead of vanishing (`src/server/game.zig`). The historical list
     (SetBlockTexture, PickupBlock, ItemReload, Waypoint, PlayerVendingMachine,
     QuestGotoPoint, PlayerDisconnect) is now handled: each is either decoded +
     applied or explicitly dropped with a comment.
@@ -619,7 +619,7 @@ re-arms) with the population count as the quest target.
   dedicated-server file and produced `defs=99 lists=6
   starter=quest_whiteRiverCitizen1 max_tier=6 quests_per_tier=10`.
   *Anchors:* `src/assets/quests.zig:514`, `:535`, `:560`,
-  `src/server/game.zig:672`, `:988`
+  `src/server/game.zig`, ``
 
 - **`<quests>` root attributes (starter_quest, max_quest_tier, quests_per_tier)** `WORKS`
   All three parsed off the `<quests>` element, matching `QuestsFromXml`. Probe
@@ -801,7 +801,7 @@ re-arms) with the population count as the quest target.
   overwrote the real quest body with an empty slice and silently lost all
   template content (objectives, rewards, difficulty_tier).
   *Anchors:* `src/assets/quests.zig:380`, `:394`, `:555` (resolveBody),
-  `src/server/game.zig:7440`
+  `src/server/game.zig`
 
 - **Per-objective CurrentValue from the phase graph** `WORKS` `(2026-08-22)`
   Emits 255 for completed phases, clamped progress for the active phase, 0 for
@@ -878,7 +878,7 @@ re-arms) with the population count as the quest target.
   `sleepers_cleared.zsc` store, so a cleared POI does not re-spawn its
   sleepers on the next re-trigger or restart.
   *Anchors:* `src/wire/stock_quest.zig:438`, `:463`, `:478`,
-  `src/server/game.zig:6288`, `:6322`, `src/ecs/systems.zig` advancePhaseGraph,
+  `src/server/game.zig`, ``, `src/ecs/systems.zig` advancePhaseGraph,
   `src/world/sleepers.zig` markClearedRect,
   `asm.il:835620-836087`, `asm.il:999755`
 
@@ -895,7 +895,7 @@ re-arms) with the population count as the quest target.
   All four heads parsed with truncation rejected (round-trip and truncation
   tests); accepted into the server journal; removal matched by QuestCode first
   with a def_id fallback; body forwarded to the named peer or broadcast.
-  *Anchors:* `src/wire/stock_quest.zig:328`, `src/server/game.zig:4686`,
+  *Anchors:* `src/wire/stock_quest.zig:328`, `src/server/game.zig`,
   `src/wire/stock_quest.zig:559`
 
 - **NetPackageQuestObjectiveUpdate handling** `WORKS` (2026-08-25):
@@ -919,7 +919,7 @@ re-arms) with the population count as the quest target.
   *Anchors:* `src/server/c2s/quest.zig` (QuestObjectiveUpdate handler +
   party mirror), `7dtd-engine-research docs/protocol-packages.md`
   (NetPackageQuestObjectiveUpdate)
-  *Anchors:* `src/server/game.zig:6088`, `:6121`, `:6185`,
+  *Anchors:* `src/server/game.zig`, ``, ``,
   `../../7dtd-engine-research/docs/quests-challenges.md` §5 (client owns the quest)
 
 - **Server-side journal: accept, phase advance, turn-in, coins** `WORKS`
@@ -1068,7 +1068,7 @@ parsed, and quest offering is unwired.
   fallback), so the client renders an EntityTrader instead of falling back to
   the zombie class. Proven by the wire test and the trader scenario, which
   asserts the join spawn body carries the trader class and data.
-  *Anchors:* `src/server/game.zig:7178-7230`, `:8829-8910`,
+  *Anchors:* `src/server/game.zig`, ``,
   `src/assets/entities.zig` `defaultTrader`, `src/assets/unity_hash.zig`
   `class_npc_trader_jen`
 
@@ -1102,7 +1102,7 @@ parsed, and quest offering is unwired.
   an inbound one before `Read`. Real S2C paths are spawn ECD + LockResponse;
   this `sendTraderSnapshot` is a refresh hint only. Waived per scope §1 (no
   package invention — stock never sends this direction).
-  *Anchors:* `src/server/game.zig:5482-5527`, `asm.il:843057-843064`
+  *Anchors:* `src/server/game.zig`, `asm.il`
 
 - **TraderData v2 body encoding** `WORKS`
   `buildTraderDataStock` matches `TraderData::Read` / `ReadInventoryData` v2
@@ -1143,7 +1143,7 @@ parsed, and quest offering is unwired.
   (below) and reset_interval is copied onto the stock row and drives
   `systems.traderRestock`'s cadence (-1 never, 0 daily, N every N days).
   *Anchors:* `src/assets/traders.zig:249-288`, `src/assets/npc.zig`,
-  `src/server/game.zig:8345+`, `Data/Config/traders.xml:1240-1280`,
+  `src/server/game.zig`, `Data/Config/traders.xml`,
   `:1469`, `:1472`, `:1488`
 
 - **traders.xml root economy attributes** `WORKS` (2026-08-07, RE'd 2026-08-08):
@@ -1196,7 +1196,7 @@ parsed, and quest offering is unwired.
   trader_info's two `<trader_items>` blocks is still more than 50 stacks,
   so the window keeps the first 50 like stock.
   *Anchors:* `src/ecs/components.zig:271`, `src/assets/traders.zig`,
-  `src/server/game.zig:2616`, `:6762`
+  `src/server/game.zig`, ``
 
 - **Buy/sell pricing from items.xml EconomicValue** `WORKS` (2026-08-25):
   EconomicValue x BuyMarkup/SellMarkdown (root + per-trader overrides) with
@@ -1369,7 +1369,7 @@ parsed, and quest offering is unwired.
   `vending-edit` covers owner apply + non-owner denial. The vending gap row
   is now fully closed.
   *Anchors:* `src/world/vending.zig`, `src/wire/stock_te.zig:789-881`
-  (`buildVendingTeBody`), `src/server/game.zig:6596-6618` (LockRequest vending
+  (`buildVendingTeBody`), `src/server/game.zig` (LockRequest vending
   branch), `:6760-6766` (place/remove lifecycle), `:9425-9480`
   (`sendVendingTe`/`fillVendingStore`), `src/assets/blocks.zig:124-237`
   (Class/TraderID + Extends), `asm.il:440486` (`TileEntityVendingMachine::write`),
@@ -1415,7 +1415,7 @@ parsed, and quest offering is unwired.
   before spending and coins are removed from the bag first, so the sync cannot
   re-mint spent money. The name is hardcoded rather than read from
   `currency_item`, which is a fidelity nit.
-  *Anchors:* `src/server/game.zig:5530`, `src/ecs/systems.zig:625-645`
+  *Anchors:* `src/server/game.zig`, `src/ecs/systems.zig:625-645`
 
 ---
 
@@ -1450,7 +1450,7 @@ encoding is one day high.
   server-simulated horde night and the client-rendered red moon are always
   the same day. `BloodMoonRange` is parsed from serverconfig (clamped 0..15)
   and plumbed to both the clock and the director.
-  *Anchors:* `src/ecs/aidirector.zig:100`, `:116`, `src/server/game.zig:587`,
+  *Anchors:* `src/ecs/aidirector.zig:100`, `:116`, `src/server/game.zig`,
   `:594`, `src/server/config.zig`
   `asm.il:412894`, `src/server/config.zig:231`
 
@@ -1487,7 +1487,7 @@ encoding is one day high.
   blood-moon day against the last-sent value every tick, so a natural day roll
   OR a `settime` jump (forward or backward) re-sends the stats on the next
   tick. A connected client always holds the current horde night.
-  *Anchors:* `src/server/game.zig:6214`, `:6216`, `:6206`, `:3869`,
+  *Anchors:* `src/server/game.zig`, ``, ``, ``,
   `src/wire/packages.zig:1998`, `src/server/game/step.zig`
 
 - **Client blood-moon sky FX** `WORKS`
@@ -1498,7 +1498,7 @@ encoding is one day high.
   frequency multiple), so the red moon lands on the actual horde night even with
   BloodMoonRange > 0.
   *Anchors:* `asm.il:2041922`, `asm.il:2042093`, `src/wire/packages.zig:1998`,
-  `src/ecs/aidirector.zig` (`bloodMoonDayFor`), `src/server/game.zig:589`
+  `src/ecs/aidirector.zig` (`bloodMoonDayFor`), `src/server/game.zig`
   `:1983`
 
 - **Blood-moon warning window (red HUD clock)** `WORKS` (2026-08-20
@@ -1511,7 +1511,7 @@ encoding is one day high.
   §3/§8: empty code = stock defaults, groups encode only changed options), so
   the red clock fires on the real horde night at the configured hour.
   *Anchors:* `asm.il:1574299`, `asm.il:1248240`, `asm.il:2502629`,
-  `asm.il:1913041`, `src/wire/packages.zig:1892`, `:2001`, `src/server/game.zig:393`
+  `asm.il:1913041`, `src/wire/packages.zig:1892`, `:2001`, `src/server/game.zig`
 
 - **NetPackageBloodmoonMusic** `WORKS` `(2026-08-21)`
   Builder is IL-correct; eligibility is now **per player** like stock
@@ -1542,7 +1542,7 @@ encoding is one day high.
   forces each biome to its own `bloodMoon` weather group index once per
   transition, releasing on the falling edge. This is a real S2C
   `NetPackageWeather` change, so a stock client does observe it.
-  *Anchors:* `src/world/weather.zig:106`, `:125`, `src/server/game.zig:8106`,
+  *Anchors:* `src/world/weather.zig:106`, `:125`, `src/server/game.zig`,
   `src/assets/biome_layers.zig:757`, `Data/Config/biomes.xml:190`
 
 - **Horde spawn composition** `WORKS` (2026-08-20 reconciliation)
@@ -1621,7 +1621,7 @@ encoding is one day high.
   class_table fallback (offline/builtin data, no ladder). Test
   `blood-moon HP floor applies only to unresolved fallback classes`.
   *Anchors:* `src/ecs/aidirector.zig:733` (bm_mul gate), `:218`,
-  `src/server/game.zig:3097`, `src/server/config.zig:51`, `:57`
+  `src/server/game.zig`, `src/server/config.zig:51`, `:57`
 
 - **Blood-moon end and despawn at dawn** `WORKS` (2026-08-20)
   The horde window spans dusk to dawn (IsBloodMoonTime); at dawn the director
@@ -1633,7 +1633,7 @@ encoding is one day high.
   *Anchors:* `src/ecs/aidirector.zig:409`, `:413`, `:601`, `aidirector.md`
   EndBloodMoon (412618) / party Tick
   dawn anyway.
-  *Anchors:* `src/ecs/systems.zig:1707`, `:1722`, `src/server/game.zig:8116`,
+  *Anchors:* `src/ecs/systems.zig:1707`, `:1722`, `src/server/game.zig`,
   `asm.il:412618`, `asm.il:413662`
 
 - **Blood-moon bonus loot bags** `PARTIAL (waived)`
@@ -1657,7 +1657,7 @@ encoding is one day high.
   bmDay/bmDayLast/bmDayNextOverride; zdtd's schedule is deterministic from the
   cycle + CalcNextDay jitter, so the day is the only state.)
   *Anchors:* `src/server/game.zig` (`saveClock`/`restoreClock`),
-  `src/ecs/aidirector.zig` (`WorldClock`), `src/server/game.zig:579`
+  `src/ecs/aidirector.zig` (`WorldClock`), `src/server/game.zig`
   `asm.il:412351`, `asm.il:412406`
 
 - **Console/admin visibility of the blood moon** `WORKS`
@@ -1791,7 +1791,7 @@ can walk into every POI but none of them is the building TFP authored.
   `cubeHalfLocalNorthFaceInside`. zdtd also pushes its own blocks NameIdMapping,
   so the client cannot correct it.
   *Anchors:* `src/world/prefabs.zig:222`, `src/world/tts.zig:373`,
-  `src/server/game.zig:6207`, `asm.il:928850-928971`
+  `src/server/game.zig`, `asm.il`
 
 - **POI footprint / AABB placement** `WORKS`
   `boundsXZ` keeps position as the min corner and swaps size_x/size_z for
@@ -1880,7 +1880,7 @@ can walk into every POI but none of them is the building TFP authored.
   authored damage and clears wear on pristine cells.
   *Anchors:* `src/world/tts.zig` (`paintDecoration` dmg pass-through),
   `src/world/store.zig:756-775` (`PaintCtx.put`),
-  `src/server/game.zig:1634-1651` (`resetPoiBlocks`)
+  `src/server/game.zig` (`resetPoiBlocks`)
 
 - **Prefab water plane** `WORKS` (2026-08-07)
   The v>=17 sparse water channel is decoded into a dense per-cell `u16` mass
@@ -1973,7 +1973,7 @@ can walk into every POI but none of them is the building TFP authored.
   on load; older saves read 0 and do not respawn immediately). World containers
   are marked `player_storage=false` at materialization so they are eligible;
   player-placed storage never respawns (stock `bPlayerStorage`).
-  *Anchors:* `src/world/containers.zig:31`, `src/server/game.zig:7445`
+  *Anchors:* `src/world/containers.zig:31`, `src/server/game.zig`
 
 - **POI reset / rebuild** `WORKS` (quest-tag filter residual)
   `resetPoiBlocks` re-paints a POI's baked .tts blocks over the area
@@ -2119,13 +2119,13 @@ gamestage, no wandering hordes, and no screamers.
   DayLightLength; `isBloodMoonNight` honours frequency and range with deterministic
   jitter and probes neighbouring cycles so a jittered day is not missed.
   *Anchors:* `src/ecs/aidirector.zig:6-68`, `:41-61`,
-  `src/server/game.zig:8101-8110`
+  `src/server/game.zig`
 
 - **Blood-moon music trigger** `WORKS`
   Single global bool broadcast on the `bloodmoon_active` edge. Live playtest case
   `combat/blood_moon_music` PASS. Stock sends it per-player; the global broadcast
   is the documented simplification.
-  *Anchors:* `src/server/game.zig:8116-8121`, `src/wire/packages.zig:892-896`,
+  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:892-896`,
   `junit-1784959913.xml`
 
 - **Zombie speed bands** `WORKS`
@@ -2140,7 +2140,7 @@ gamestage, no wandering hordes, and no screamers.
   rule cannot exceed its authored cap even under the global ceiling. The
   stock per-`ChunkAreaBiomeSpawnData` cell structure itself (80 m cells,
   POI-tag enabled flags) remains a separate row.
-  *Anchors:* `src/server/game.zig:581-582`, `src/ecs/aidirector.zig:150-157`,
+  *Anchors:* `src/server/game.zig`, `src/ecs/aidirector.zig:150-157`,
   `:173-178`, `:265-270` (rule_budgets)
 
 - **GameDifficulty HP scaling** `WORKS` (2026-08-25):
@@ -2182,7 +2182,7 @@ gamestage, no wandering hordes, and no screamers.
   A player in the wasteland at midnight now gets `ZombiesWastelandNight` instead
   of pine_forest's `ZombiesNight`. Stock resolves per
   `ChunkAreaBiomeSpawnData` from the actual biome under the chunk.
-  *Anchors:* `src/server/game.zig:1332` (callback wiring), `:8595-8611`
+  *Anchors:* `src/server/game.zig` (callback wiring), ``
   (`biomeGroupName`), `src/assets/biome_layers.zig:159-163` (`nameById`),
   `src/ecs/aidirector.zig:362-371` (per-spawn lookup), `asm.il:1093888`;
   test `server.game.test.biome spawn groups resolve per-biome spawning.xml rules
@@ -2267,7 +2267,7 @@ gamestage, no wandering hordes, and no screamers.
   spawner indirection) spawns a gamestage-appropriate class instead of falling
   through to zombieBoe, and volumes naming a class directly keep their model.
   *Anchors:* `src/server/game/sleeper.zig:109-110`,
-  `src/server/game.zig:2627` resolveSleeperClass,
+  `src/server/game.zig` resolveSleeperClass,
   `Data/Config/gamestages.xml:153`, `Data/Prefabs/POIs/*.xml`
 
 - **Sleeper wake condition** `WORKS` (2026-08-25):
@@ -2364,7 +2364,7 @@ gamestage, no wandering hordes, and no screamers.
   `pathStepAt` resolves through `world.standableWorld` (step-up, drop, headroom)
   with a lock-free terrain snapshot fast path, returning the destination feet Y
   rather than a bool, which is what makes POI floors under roofs distinguishable.
-  *Anchors:* `src/server/game.zig:1319-1330`, `src/ecs/systems.zig:1298-1313`,
+  *Anchors:* `src/server/game.zig`, `src/ecs/systems.zig:1298-1313`,
   `:1372-1387`
 
 - **A* tick budget / replan throttle** `WORKS`
@@ -2401,7 +2401,7 @@ gamestage, no wandering hordes, and no screamers.
   hold the chase projection; block damage at 2 Hz applies base 10 scaled by
   BlockDamageAI/AIBM, respects MaxDamage, and broadcasts on break. Replan clears
   the latch when a detour opens.
-  *Anchors:* `src/ecs/systems.zig:1072-1128`, `src/server/game.zig:3096-3134`,
+  *Anchors:* `src/ecs/systems.zig:1072-1128`, `src/server/game.zig`,
   `src/ecs/systems.zig:1337-1339`
 
 - **Daytime wildlife spawner** `WORKS` `(2026-08-22 re-audit)`
@@ -2419,7 +2419,7 @@ gamestage, no wandering hordes, and no screamers.
   `src/assets/entities.zig:74-80`
 
 - **Enemy animals (wolf, bear, dire wolf, mountain lion, snake, coyote)** `WORKS` (2026-08-27 re-audit: the `EnemyAnimals*` night rules ARE consumed - `biomeGroupName` collects every matching animal rule for the spawn biome (day Any WildGameForest + Night wildlife + Night enemy groups), gated by time-of-day and the POI-tag gate, and rotates across them deterministically by the spawn counter, so wolves/bears/snakes appear at night with their full class stats (A35 class_resolve_fn, bear 2500 HP). Documented approximation: the stock random-start scan over up to min(5, count) groups is a deterministic first-matching-rule walk)
-  *Anchors:* `src/server/game.zig:2803-2845` biomeGroupName,
+  *Anchors:* `src/server/game.zig` biomeGroupName,
   `src/ecs/aidirector.zig:505-575` tickAnimals/spawnAnimalsNearPlayers,
   `Data/Config/spawning.xml:31-33`
 
@@ -2509,13 +2509,13 @@ gamestage, no wandering hordes, and no screamers.
   `saveAll` covers chunks/containers/block-meta/players; entity/director/sleeper
   timers are runtime state that stock also rebuilds on load. Persisting live mobs
   needs `EntityCreationData` snapshot RE — waived as session-lifetime polish.
-  *Anchors:* `src/server/game.zig:8131-8147`
+  *Anchors:* `src/server/game.zig`
 
 - **Entity spawn replication (EntityCreationData v36)** `WORKS`
   Correct zombie/animal empty middle branch, sleeper flag and stressAmount tail.
   Sent on join (capped at 16) and on approach per observer via `known_entities`.
   `combat/zombie_or_npc_nearby` and `combat/zombie_target_has_health` PASS.
-  *Anchors:* `src/wire/stock_entity.zig:161-273`, `src/server/game.zig:6466-6505`,
+  *Anchors:* `src/wire/stock_entity.zig:161-273`, `src/server/game.zig`,
   `:7841-7869`
 
 - **Motion replication (PosAndRot / EntitySpeeds / EntityAliveFlags)** `WORKS`
@@ -2523,14 +2523,14 @@ gamestage, no wandering hordes, and no screamers.
   cell-based interest. Zombies get EntitySpeeds matching
   `NetPackageEntitySpeeds::write` and AliveFlags driven by AiState.
   `combat/alive_flags_self` PASS.
-  *Anchors:* `src/server/game.zig:7885-7939`, `src/ecs/interest.zig:11-45`,
+  *Anchors:* `src/server/game.zig`, `src/ecs/interest.zig:11-45`,
   `asm.il:818303-818382`
 
 - **Entity removal on death / despawn** `WORKS`
   Broadcast on player kill, turret kill, admin kill and far-despawn, and the killer
   gets quest credit, XP and a DroppedLootContainer. `combat/zombie_death_loot` and
   `economy/zombie_removed_after_kill` PASS.
-  *Anchors:* `src/server/game.zig:4936-4970`, `:8076-8098`,
+  *Anchors:* `src/server/game.zig`, ``,
   `src/wire/packages.zig:861-876`
 
 - **EntityRemove(Unloaded) when a mob leaves interest range** `WORKS`
@@ -2542,7 +2542,7 @@ gamestage, no wandering hordes, and no screamers.
   `NetEntityDistributionEntry::updatePlayerEntity`. An observer whose own entity
   slot cannot be resolved is skipped rather than treated as sitting in cell (0,0),
   which would evict its whole known set.
-  *Anchors:* `src/server/game.zig:8871-8891`, `src/wire/packages.zig:861-880`,
+  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:861-880`,
   `asm.il:801228-801276`, `asm.il:1227761`
 
 - **Corpse dwell time (TimeStayAfterDeath)** `WORKS` (corpse harvest residual)
@@ -2571,7 +2571,7 @@ gamestage, no wandering hordes, and no screamers.
 - **Animation / ragdoll / look-at replication for AI** `PARTIAL (waived)`
   Server drives AI position/state; animation/ragdoll/look-at FX are client-predicted.
   Stock FX parity is out of scope (AGENTS: wire is contract, no fake FX - §2a).
-  *Anchors:* `src/server/game.zig:4036-4038`, `src/ecs/systems.zig:1247-1263`
+  *Anchors:* `src/server/game.zig`, `src/ecs/systems.zig:1247-1263`
 
 - **Spawn placement validity** `WORKS`
   Spawn Y is now ground-snapped through the world ground hook for every
@@ -2601,7 +2601,7 @@ gamestage, no wandering hordes, and no screamers.
   `spawnentity` resolves a class name through `entities.byName` and chooses
   spawnAnimal vs spawnZombieClass by kind; admin kill applies lethal damage,
   broadcasts, credits quests and spawns the bag; `killall` sweeps zombies.
-  *Anchors:* `src/server/game.zig:2342-2345`, `:2853-2895`, `:2636-2657`
+  *Anchors:* `src/server/game.zig`, ``, ``
 
 - **Parallel AI execution and LOD** `WORKS`
   `systemZombieAi` runs over disjoint slot ranges above 64 live entities, damage is
@@ -2652,7 +2652,7 @@ unvalidated, and durability, mods and repair do not exist.
   entity_damage drives melee, fuel_value drives generator refuel, food/water/health
   cvars drive the eat path.
   *Anchors:* `src/assets/items.zig:428-456`, `:119-183`,
-  `src/server/game.zig:1353-1401`
+  `src/server/game.zig`
 
 - **ItemValue v9 wire encode/decode** `WORKS`
   Encoder and decoder both follow the stock v9 ReadData shape including the
@@ -2705,7 +2705,7 @@ unvalidated, and durability, mods and repair do not exist.
   by name), so the wood → cobblestone → concrete → steel ladder is data-driven
   and a forged SetBlock cannot swap in arbitrary block ids. Scenario covers the
   legal upgrade, a forged swap and the idempotent rerun.
-  *Anchors:* `src/assets/maxdamage.zig:393-394`, `src/server/game.zig:6670-6680`
+  *Anchors:* `src/assets/maxdamage.zig:393-394`, `src/server/game.zig`
 
 - **recipes.xml load** `WORKS` `(2026-08-22 re-audit)`
   630 recipes with up to 5 ingredients parse fine, including craft_tool (53),
@@ -2772,14 +2772,14 @@ unvalidated, and durability, mods and repair do not exist.
   echo re-emits the client's array lengths so its grids are not resized. Scenario
   test drives C2S, tick, S2C, acknowledge.
   *Anchors:* `src/wire/stock_te.zig:411-453`, `:566+`,
-  `src/server/game.zig:4364-4412`, `src/server/scenarios.zig:1449-1570`
+  `src/server/game.zig`, `src/server/scenarios.zig:1449-1570`
 
 - **Workstation craft tick** `WORKS`
   Mirrors stock `HandleRecipeQueue` orientation (active entry is the last slot),
   stalls instead of dropping when the output array is full, carries the time
   overrun through `cycleRecipeQueue`, and keeps a bounded craft-complete list
   drained by client acknowledgement. Ticks at 2 Hz.
-  *Anchors:* `src/world/workstations.zig:220-337`, `src/server/game.zig:6824-6864`,
+  *Anchors:* `src/world/workstations.zig:220-337`, `src/server/game.zig`,
   `:8056-8060`
 
 - **Workstation fuel burn rate** `WORKS` (2026-08-20)
@@ -2844,7 +2844,7 @@ unvalidated, and durability, mods and repair do not exist.
 - **LootAbundance server setting** `WORKS`
   Clamped 1..1000, scales every rolled stack count with a floor of 1; unit test
   asserts the 2x and 1% cases.
-  *Anchors:* `src/server/config.zig:53`, `:237`, `src/server/game.zig:788`,
+  *Anchors:* `src/server/config.zig:53`, `:237`, `src/server/game.zig`,
   `src/assets/loot.zig:52-57`, `:157-177`
 
 - **Per-block loot list selection** `WORKS`
@@ -2865,7 +2865,7 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/assets/entities.zig` load, `src/ecs/world.zig` damage gate,
   `src/ecs/components.zig` `ClassId.drop_prob`,
   `Data/Config/entityclasses.xml:689`, `Data/Config/loot.xml:9928`
-  *Anchors:* `src/assets/entities.zig:245-247`, `src/server/game.zig:6906-6924`,
+  *Anchors:* `src/assets/entities.zig:245-247`, `src/server/game.zig`,
   `src/assets/loot.zig:119-123`, `Data/Config/entityclasses.xml`,
   `Data/Config/loot.xml:9927`
 
@@ -2912,7 +2912,7 @@ unvalidated, and durability, mods and repair do not exist.
   Parse, range check against the acting player, apply, broadcast. Slot quality and
   meta survive the round trip; containers persist to `containers.zct` sorted by
   world position.
-  *Anchors:* `src/server/game.zig:4335-4360`, `src/wire/stock_te.zig:204-343`,
+  *Anchors:* `src/server/game.zig`, `src/wire/stock_te.zig:204-343`,
   `src/world/containers.zig:129-235`
 
 - **NetPackageInventoryDataRequest / Response** `WORKS` `(2026-08-22 re-audit)`
@@ -2922,7 +2922,7 @@ unvalidated, and durability, mods and repair do not exist.
   `InventoryTransaction.Write` ops (SetAbsolute/SetRelative/SetAll) on the
   player inventory with the minimal stock ack (GAP InvTx row, 2026-08-22), so
   a mutation made through this path lands instead of being dropped.
-  *Anchors:* `src/server/game.zig:4536-4587`, `src/server/c2s/inv.zig:536-591`,
+  *Anchors:* `src/server/game.zig`, `src/server/c2s/inv.zig:536-591`,
   `asm.il:613064-613088`, `asm.il:613124-613223`
 
 - **Loot respawn and destroy_on_close** `WORKS` `(2026-08-22)`
@@ -2986,7 +2986,7 @@ and server-to-client XP/level pushes do not exist.
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
   attrs=8 perks=57`, matching `progression.xml:8`.
   *Anchors:* `src/assets/progression.zig:92-106`, `:123-130`,
-  `src/server/game.zig:834-845`, `server-orch.log:14`
+  `src/server/game.zig`, `server-orch.log`
 
 - **Server-side XP ledger and level-up loop** `WORKS` `(2026-08-22 re-audit)`
   `awardXp` levels correctly against the stock curve, and the ledger is
@@ -3019,7 +3019,7 @@ and server-to-client XP/level pushes do not exist.
 - **XPMultiplier server option** `WORKS`
   Parsed, applied to awards, reported in the GameStats blob. Client log confirms
   `GameStat.XPMultiplier = 100` arrived.
-  *Anchors:* `src/server/config.zig:238`, `src/server/game.zig:3048`, `:6232`,
+  *Anchors:* `src/server/config.zig:238`, `src/server/game.zig`, ``,
   `output_log_client_zdtd_connect.txt:5236`
 
 - **XP from non-kill sources** `PARTIAL (waived)`
@@ -3038,7 +3038,7 @@ and server-to-client XP/level pushes do not exist.
   Client-originated XP is intentionally not authoritative; server ledger drives
   level via `awardXp`/`level-up`. Trusting the client's add would reintroduce
   invented XP. Waived as authority rule.
-  *Anchors:* `src/server/game.zig:4794-4799`, `asm.il:813959`
+  *Anchors:* `src/server/game.zig`, `asm.il`
 
 - **Client to server progression blob (NetPackagePlayerStats)** `PARTIAL (waived)`
   `EntityNetworkStats` blob is intentionally dropped (`accept, no sim`) — stock
@@ -3113,13 +3113,13 @@ and server-to-client XP/level pushes do not exist.
   Validated then relayed, following stock's server branch: a peer may only drive
   its own player entity and only with a buff name the catalog resolves. The
   server can now push a buff onto a player and other clients see it.
-  *Anchors:* `src/server/game.zig:4785-4788`, `asm.il:202415`,
+  *Anchors:* `src/server/game.zig`, `asm.il`,
   `asm.il:202530-202566`
 
 - **NetPackageEntityStatsBuff** `WORKS` (2026-08-06)
   Built and sent: the full buff list of every other joined player rides
   `buildEntityStatsBuffBody` on join.
-  *Anchors:* `src/server/game.zig:4790-4793`
+  *Anchors:* `src/server/game.zig`
 
 - **Health component and client-claimed damage into the sim** `WORKS` `(2026-08-22 re-audit)`
   C2S DamageEntity is validated (actor alive, target alive, both in interest range,
@@ -3191,8 +3191,8 @@ and server-to-client XP/level pushes do not exist.
   deliberately kept alive at hp 0 rather than destroyed (destroying it desyncs the
   client and breaks later net-id lookups). A second hit on a corpse cannot re-fire
   the kill side effects. Live: `PASS finale/player_death_screen dead=True hp=0`.
-  *Anchors:* `src/server/game.zig:4937-4959`, `src/ecs/world.zig:677-705`,
-  `src/server/game.zig:2865-2877`
+  *Anchors:* `src/server/game.zig`, `src/ecs/world.zig:677-705`,
+  `src/server/game.zig`
 
 - **Respawn: heal, teleport, PlayerSpawnedInWorld(died), re-bundle** `WORKS`
   The sequence fires and the client recovers (`PASS finale/player_respawn`),
@@ -3217,7 +3217,7 @@ and server-to-client XP/level pushes do not exist.
   registry and player-choice wire (`NetPackageRequestToSpawnPlayer`). Current
   respawn keeps players in the world (no ghost) and preserves food/water; bed
   placement choice is waived as respawn-choice subsystem.
-  *Anchors:* `src/server/game.zig:5540-5558`, `src/wire/packages.zig:467-468`
+  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:467-468`
 
 - **DropOnDeath backpack** `WORKS` `(2026-08-22 re-audit)`
   The server spawns the death bag itself on the lethal event - both the C2S
@@ -3230,7 +3230,7 @@ and server-to-client XP/level pushes do not exist.
   `NetPackageRequestToSpawnEntity` ECD is still refused (the server bag makes
   it redundant and it proves no ownership), so the "single scrap" placeholder
   bag the row described is gone.
-  *Anchors:* `src/server/game.zig:2677-2701` (`spawnDeathBag`),
+  *Anchors:* `src/server/game.zig` (`spawnDeathBag`),
   `src/server/c2s/misc.zig:513-536`, `src/server/game/replicate_health.zig:30`,
   scenario `AI kill drops the player's real inventory as a death bag`
 
@@ -3245,7 +3245,7 @@ and server-to-client XP/level pushes do not exist.
   operator can now change the client's death flow and the server advertises
   the effective value.
   *Anchors:* `src/server/config.zig` (`death_penalty`),
-  `src/server/game.zig:2148` (`gameStatsValues`),
+  `src/server/game.zig` (`gameStatsValues`),
   `src/server/admin_console.zig:748,905`, `src/server/preset.zig`,
   `src/assets/sandbox_data.zig:126`, `serverconfig.example.xml`
 
@@ -3372,7 +3372,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   paint and disk reload; stacks come from the same biomes.xml the server serves, so
   block ids match the client catalog.
   *Anchors:* `src/world/store.zig:582-589`,
-  `src/assets/biome_layers.zig:174-230`, `src/server/game.zig:944-963`
+  `src/assets/biome_layers.zig:174-230`, `src/server/game.zig`
 
 - **Procedural worldgen** → **non-goal** (2026-08-25):
   the deterministic per-seed density field is the no-map demo fallback;
@@ -3608,7 +3608,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   23-byte records (biomeId, groupIndex, remainingSeconds, 5x f32), no count prefix,
   groupIndex clamped to the biome's group count so `SetWeatherGroup` cannot index
   out of range. Sent on re-join and every 20 ticks, deferred under load shedding.
-  *Anchors:* `src/wire/packages.zig:2057-2075`, `src/server/game.zig:8192-8253`,
+  *Anchors:* `src/wire/packages.zig:2057-2075`, `src/server/game.zig`,
   `:8113`
 
 - **Weather biome padding when biomes.xml yields fewer than 5 weather biomes** `WORKS` `(2026-08-22 re-audit)`
@@ -3619,7 +3619,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   data (stock biomes.xml supplies exactly 5 weather biomes), live for modded
   biomes.xml only - out of stock-scope parity; the clamp keeps fabricated ids from
   overrunning the source group list.
-  *Anchors:* `src/server/game.zig:8211-8235`, `src/wire/packages.zig:2065-2075`,
+  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:2065-2075`,
   `asm.il:2054217-2054277`
 
 - **StormFrequency configurability** `DONE 2026-08-07`
@@ -3653,7 +3653,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   04:00 and dusk = 4 + DayLightLength, broadcast as a u64 every 20 ticks and sent
   once at enter. Blood-moon nights, zombie speed bands and POI lockouts all read
   the same clock.
-  *Anchors:* `src/ecs/aidirector.zig:6-68`, `src/server/game.zig:8101-8103`,
+  *Anchors:* `src/ecs/aidirector.zig:6-68`, `src/server/game.zig`,
   `:6204-6205`
 
 - **World time day number** `WORKS` `(2026-08-21 re-audit)`
@@ -3682,7 +3682,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   tested so a jittered day across the boundary still fires; music package
   edge-triggered on the transition. (Divergences from stock in
   [section 6](#6-blood-moon).)
-  *Anchors:* `src/ecs/aidirector.zig:41-61`, `src/server/game.zig:8114-8121`
+  *Anchors:* `src/ecs/aidirector.zig:41-61`, `src/server/game.zig`
 
 - **Water blocks in the world** `WORKS`
   `water_info.xml` sources fill water blocks from lake bed up to source surface
@@ -3750,7 +3750,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   when it is lower (never adds a lower value as a delta), so repairing 500 to
   300 sets 300 and a full repair (0) clears the damage; the block's hp then
   rises toward max on the next damage write.
-  *Anchors:* `src/server/game.zig:6024` repair branch, `asm.il:657520-657583`,
+  *Anchors:* `src/server/game.zig` repair branch, `asm.il`,
   `asm.il:96545-96562`, `asm.il:96797-96812`
 
 - **Block upgrade (frame to reinforced)** `WORKS` `(2026-08-22 re-audit)`
@@ -3773,7 +3773,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Visible on the small set of multi-stage blocks only. Wire is correct (chunk +
   SetBlock echo) and full block-state downgrade needs `blocks.xml` `DowngradeBlock`
   wiring across the whole pipeline — waived as stage-fidelity, not parity blocker.
-  *Anchors:* `src/server/game.zig:5162-5166`, `asm.il:96828-96833`
+  *Anchors:* `src/server/game.zig`, `asm.il`
 
 - **Zombie block damage** `WORKS` (2026-08-25):
   chase/attack zombies chew the front-column solid cell (feet-to-head probe,
@@ -3787,7 +3787,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Resolved per block id from the parsed table with Extends resolution; fails closed
   to 100 when the catalog is loaded but the id is unknown, and only falls back to
   id-band guesses when no catalog was loaded at all.
-  *Anchors:* `src/server/game.zig:3235-3245`, `src/assets/maxdamage.zig`
+  *Anchors:* `src/server/game.zig`, `src/assets/maxdamage.zig`
 
 - **Explosion block damage** `WORKS`
   Demolition blasts carry per-entity ExplosionData from entityclasses.xml
@@ -3861,7 +3861,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   with sorted keys for deterministic bytes. Round-trip covered by a
   dig/place/reload test.
   *Anchors:* `src/world/store.zig:736-780`, `:1017-1040`,
-  `src/server/game.zig:3350-3412`
+  `src/server/game.zig`
 
 - **Terrain footing snapshot for A*** `WORKS`
   Conservative read-mostly per-column surface descriptor rebuilt on the main thread
@@ -3964,7 +3964,7 @@ persists so little that a restart visibly damages a built base.
   stock; only the party waypoint invite traverses the server, and it now
   relays. The vending C2S buy residual is tracked by the Vending machines
   row.)
-  *Anchors:* `src/server/game.zig:3771-5480`, `src/server/c2s/quest.zig`
+  *Anchors:* `src/server/game.zig`, `src/server/c2s/quest.zig`
   (NetPackageWaypoint), `src/server/c2s/misc.zig:205` (EntityRagdoll relay),
   `asm.il:791490-791510`,
   `asm.il:793038-793060`
@@ -4019,7 +4019,7 @@ persists so little that a restart visibly damages a built base.
   `c2s_unhandled` and rate-limit logs the first and every 100th occurrence with
   the peer local id, so a new stock client package surfaces instead of
   vanishing (no evidence event yet).
-  *Anchors:* `src/server/game.zig:3771-3790`, `:5478-5480`
+  *Anchors:* `src/server/game.zig`, ``
 
 - **S2C package emission coverage** `WORKS` `(2026-08-22 re-audit)`
   57 package names appear in server send calls (sendGame/broadcast/
@@ -4159,7 +4159,7 @@ persists so little that a restart visibly damages a built base.
   `MaxDurationInAuthState` half-open sweep not wired; `peer_stale_ms` reaps on RX
   silence (see also Connect rate limiting PARTIAL). Documented as hardening vs
   blocker for EAC-off direct-IP parity.
-  *Anchors:* `src/server/game.zig:4081-4113`, `asm.il:853692-853711`
+  *Anchors:* `src/server/game.zig`, `asm.il`
 
 - **Connect rate limiting** `WORKS` `(2026-08-21)`
   500 ms/IP (`ConnectionRateLimitMilliseconds = 0x1F4`, asm.il 852995) is now
@@ -4196,7 +4196,7 @@ persists so little that a restart visibly damages a built base.
   advertises `EACEnabled:False`, and no encryption is initiated. Live client log
   confirms "Not started with EAC, anticheat disabled". Players must run the EAC-off
   client and the server can never be advertised as protected.
-  *Anchors:* `src/server/serverinfo_tcp.zig:23`, `src/server/game.zig:3765`,
+  *Anchors:* `src/server/serverinfo_tcp.zig:23`, `src/server/game.zig`,
   `output_log_client_zdtd_connect.txt:61-62`
 
 - **Kick wire (NetPackagePlayerDenied)** `WORKS` `(2026-08-21)`
@@ -4291,7 +4291,7 @@ persists so little that a restart visibly damages a built base.
   inside the 64-slot reliable window shared with chunks and join-critical
   control traffic. Residual: `sendSequenced` still has no callers; the C2S
   RelPos path is not relayed (peers learn positions from the sim replicate).
-  *Anchors:* `src/server/game.zig:2976-3040`, `src/litenet/peer.zig:197-215`,
+  *Anchors:* `src/server/game.zig`, `src/litenet/peer.zig:197-215`,
   `asm.il:816202-816208`, `asm.il:793041-793050`
 
 - **Outbound fragmentation** `WORKS` `(2026-08-21)`
@@ -4335,7 +4335,7 @@ persists so little that a restart visibly damages a built base.
   same-install) - a harness polling artifact, not server behavior; the server now
   deflates the mapping, paces ACK pumps, and never restarts the fragment stream
   for a live peer.
-  *Anchors:* `server-orch.log:39-40`, `:48`, `src/server/game.zig:6207-6283`,
+  *Anchors:* `server-orch.log:39-40`, `:48`, `src/server/game.zig`,
   `:6285-6308`
 
 - **LiteNet Merged packet handling** `WORKS`
@@ -4380,7 +4380,7 @@ persists so little that a restart visibly damages a built base.
   LiteNet disconnect window (1 s ping interval, ~20 s DisconnectTimeout) instead
   of reaping a real-internet peer on a 3 s hiccup; operator-tunable via
   `zdtd.toml` `peer_stale_ms`.
-  *Anchors:* `src/server/game.zig:4081-4113`, `src/server/game/types.zig`
+  *Anchors:* `src/server/game.zig`, `src/server/game/types.zig`
   `default_peer_stale_ms`
 
 - **Admin TCP console** `WORKS` `(2026-08-22)`
@@ -4401,7 +4401,7 @@ persists so little that a restart visibly damages a built base.
   absent: they manipulate the local client's rendering and have no dedi
   counterpart to match (documented design note, not a parity gap).
   *Anchors:* `src/server/admin.zig:21-27`, `:204-300`,
-  `src/server/game.zig:2452-2470`, `:2001-2018`, `asm.il:204226-204320`
+  `src/server/game.zig`, ``, `asm.il`
 
 - **In-game player console (NetPackageConsoleCmdServer)** `WORKS` `(2026-08-22)`
   Handled and answered with ConsoleCmdClient, with a verb-only audit line and a
@@ -4416,7 +4416,7 @@ persists so little that a restart visibly damages a built base.
   `in-game player console` drives the wire end to end: help answers with the
   allowlist text, a player's non-allowlisted verb is denied, and an admin's
   same verb routes through the admin surface with the reply captured.
-  *Anchors:* `src/server/game.zig:2186-2260`, `src/server/c2s_text.zig:38-57`,
+  *Anchors:* `src/server/game.zig`, `src/server/c2s_text.zig:38-57`,
   `src/server/admin_console.zig` (`handleConsoleCmd` admin route), scenario
   `in-game player console`
 
@@ -4450,7 +4450,7 @@ persists so little that a restart visibly damages a built base.
   warning the spaced `V 3.1.0` form produced. The login package's versionLong
   stays the display form (`V 3.1.0`, protocol.md VersionLongString packing).
   *Anchors:* `src/version.zig` `stock_wire_gsi_version`,
-  `src/server/game.zig:1415`, `src/server/game/init_world.zig:118`,
+  `src/server/game.zig`, `src/server/game/init_world.zig:118`,
   `src/server/serverinfo_tcp.zig:21`, `asm.il:795818-795822`
 
 - **GameServerInfo key coverage** `WORKS` `(2026-08-22)`
@@ -4593,7 +4593,7 @@ persists so little that a restart visibly damages a built base.
   block meta, plus players when dirty. `deinit` repeats all four and drains the
   async chunk flusher. Admin `save` and `saveworld` report failure honestly instead
   of claiming success.
-  *Anchors:* `src/server/game.zig:8130-8147`, `:1686-1706`, `:2551-2571`,
+  *Anchors:* `src/server/game.zig`, ``, ``,
   `:2809-2827`
 
 - **Save on disconnect / kick** `WORKS` `(2026-08-21)`
@@ -4624,7 +4624,7 @@ persists so little that a restart visibly damages a built base.
   resident memory tracks traffic; a shared, traffic-sized reassembly pool
   remains a tracked optimization (TODO), not a parity gap.
   *Anchors:* `src/litenet/peer.zig` (`asm_slots:193`, `pending:172`, `deliver_buf:199`, `hold_data:209`, `extra_buf:211`), `src/litenet/server.zig:8-13`,
-  `src/server/game.zig:366-377`
+  `src/server/game.zig`
 
 - **Fuzzing of the network trust boundary** `WORKS`
   `parseConnectRequest`, `parseChannelPayload` (including the compressed path), the
