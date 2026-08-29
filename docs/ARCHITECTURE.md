@@ -404,7 +404,8 @@ Document order is run order. A preset pack may **disable** a phase (`Rules.syste
 flowchart LR
     BEGIN([beginTick<br/>clear TickLocals<br/>clear dirty bits]) --> BUFFS
     BUFFS[buffs<br/>systemBuffs — 20 Hz<br/>stack + duration + expiry] --> DIR
-    DIR[director<br/>systemDirector — clock<br/>blood moon + horde spawns] --> AI
+    DIR[director<br/>systemDirector — clock<br/>blood moon + horde spawns] --> ST
+    ST[stealth<br/>systemStealth — player noise] --> AI
     AI[ai<br/>systemZombieAi — parallel<br/>+ systemDigUpdate] --> VEH
     VEH[vehicles<br/>systemVehicles — driver stick] --> FALL
     FALL[falling<br/>systemFallingBlocks — gravity + landing] --> TUR
@@ -413,13 +414,13 @@ flowchart LR
     CMDS[commands<br/>drainCommands — apply deferred ops<br/>from systems + plugins]
 
     classDef phase fill:#1a3a5c,stroke:#5b8def,color:#dbe6ff
-    class BUFFS,DIR,AI,VEH,FALL,TUR,DESP,CMDS phase
+    class BUFFS,DIR,ST,AI,VEH,FALL,TUR,DESP,CMDS phase
 ```
 
 Pinned in `src/ecs/schedule.zig:order`:
 
 ```
-buffs → director → animals → stealth → ai → vehicles → falling → turrets → despawn → commands
+begin → buffs → director → stealth → ai → vehicles → falling → turrets → despawn → commands
 ```
 
 Power (`ecs/electric.zig:PowerGrid`) resolves once per tick in `Game.step` with real daylight, not inside `schedule.run` — a second resolve doubled the BFS and forced daylight at night. Turrets read last tick's resolve. Command-style systems (`questAccept*`, `questOn*`, `trade`, `vehicleAttach`) run on demand, not every tick.
