@@ -112,6 +112,16 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   now destroyed immediately (previously it lingered as a ghost until the slot
   was reused - a phantom in listents/mem counts and a spawn-on-approach
   candidate for late joiners), and the reap path shares the one drop path.
+- Admin `listplayers` printed `<unknown>` for platform id and ip, so
+  telnet-driven tooling (loadgen zombie pressure matching on
+  `pltfmid=Local_` / `ip=127.`) silently spawned nothing. It now emits
+  `pltfmid=Local_<id>` and the peer's v4 address; a kite soak and a
+  wandering-horde soak both show live pressure (112 `spawnentity` calls,
+  0 errors).
+- Admin `getoptions` read the config base values, not the effective sim
+  values, so mode-pack overrides (horde_lite: BloodMoonFrequency=10,
+  MaxSpawnedZombies=32) never showed. All pack-overridable keys now read
+  the live sim surface.
 - Entity kind from stock data: entityclasses `Tags` now classify vehicles
   (`Tags="vehicle"`) and junk turrets (`Tags="turret,..."`) instead of the
   name falling through to zombie, so the admin `spawnentity` verb drops its

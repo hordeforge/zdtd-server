@@ -4,7 +4,7 @@
 
 > **Related:** gaps [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md)
 
-**Date pin:** 2026-08-28  
+**Date pin:** 2026-08-29  
 **Game line:** V 3.x Mono (connected client **V3.2.0 b9**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
@@ -31,6 +31,44 @@ check-xml-audit, check-release, make release) plus the release binary.
 
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
+
+## Batch P 2026-08-29 (soak-verified fixes + data-driven entity kind)
+
+Soak-driven defect fixes landed since the 08-28 pin, each validated by a
+live loadgen soak (ReleaseFast, stock Pregen map):
+
+- `listplayers` printed `<unknown>` for platform id/ip, so loadgen's
+  telnet zombie pressure matched nothing and spawned 0 zeds. It now emits
+  `pltfmid=Local_<id>` + the v4 address; a kite soak and a wandering-horde
+  soak both show live pressure (`units~=12`, 112 `spawnentity` calls, 0
+  errors).
+- `WorldSpawnPoints` built into a 512-byte buffer but 32 spawn points need
+  837 bytes, so maps with many spawn points (Pregen06k01 has >= 20)
+  overflowed on enter and the client got no spawn points (buffer now 1024
+  with a regression test). POI metadata response hardened 64 KiB -> 256 KiB
+  with a regression test (dense records with long prefab names).
+- `getoptions` read the config base values, not the effective sim values,
+  so pack overrides (horde_lite: BloodMoonFrequency=10,
+  MaxSpawnedZombies=32) never showed. All pack-overridable keys now read
+  the sim.
+- Entity kind is data-driven: `inferKind` classifies `vehicle`/`turret`
+  from the stock `Tags` (`Tags="vehicle"`, `Tags="turret,..."`) instead of
+  falling through to zombie, and the admin `spawnentity` verb dropped its
+  hardcoded name-sniff list; vehicle physicals (kind, HP, velocity, seats)
+  come from vehicles.xml, with a 4x4 fallback for classes without a
+  vehicles.xml entry (vehicleHelicopter is commented out of the stock
+  file, so the fail-closed miss is correct). Live smoke: bicycle,
+  junkTurretGun and npcTraderJoel spawns route correctly.
+
+Soak evidence (2026-08-29, ReleaseFast, Pregen06k01): kite 2/2 pass with
+zombie pressure; wandering-horde 2/2 pass with ~90 concurrent zombies, 0
+join failures, 0 encode/stream/persist errors, mean tick ~2 ms (a single
+early spawn-burst outlier accounts for the max). Provenance dashboard
+regenerates byte-identical at 291/0/0; the hardcode audit re-verified
+2026-08-29 found no new Bucket A/B hits and every current-state doc-to-src
+reference resolves. All 12 core plugins under `plugins/` conform to
+PLUGIN_STANDARDS.md (directory name == mod.toml name == committed .wasm).
+Counts unchanged.
 
 ## Batch O 2026-08-28 (malleable world geometry, ADR 0036)
 
