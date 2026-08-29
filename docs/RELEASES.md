@@ -4,8 +4,9 @@
 > **Related:** [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [INDEX.md](INDEX.md) · [CHANGELOG.md](../CHANGELOG.md)
 
 zdtd is pre-1.0 research software. There are currently no tagged or published
-releases. `0.1.0` identifies the upcoming development release, not a stable API
-commitment.
+releases. `0.2.0` (src/version.zig + build.zig.zon, drift-checked by
+`make check`) is the current development line; a minor bump may land any
+time and does not signal a stable API commitment.
 
 ## Version policy
 
