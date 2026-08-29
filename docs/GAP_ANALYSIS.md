@@ -586,7 +586,11 @@ area and the concrete work.
     **ReleaseFast** build passes 4/4 (56 joins, 0 fails, max tick 262 ms,
     83 overruns, 7 window drops, 1 send drop): the Debug failure is the
     proc-gen amplification (~1.7 ms/chunk Debug vs ~126 µs ReleaseFast)
-    holding the main thread while other peers' enter bundle waits. The
+    holding the main thread while other peers' enter bundle waits. 16-bot
+    bench ramp on the same Debug binary (2026-08-29, Navezgane): 62.5%
+    join pass (10/16), server join_ok=18 / join_fail=165 across two ramps,
+    tick p99 201 ms / max 2.9 s — the same burst-gap class at higher
+    concurrency. The
     Release binary keeps a tick-budget overrun (max ~260 ms vs 50 ms), not
     a join failure. Remaining directions: deliver the spawn-area through
     the `chunk_adds_per_stream_tick` stream budget instead of one
