@@ -180,10 +180,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             var wl_hit = nm.len != 0 and self.whitelist.find(nm) != null;
             var adm_hit = nm.len != 0 and self.admin_list.find(nm) != null;
             if (c.puid_primary.get()) |pid| {
-                var key_buf: [admin_cmds.max_id]u8 = undefined;
-                const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return true;
-                if (!wl_hit) wl_hit = self.whitelist.find(key) != null;
-                if (!adm_hit) adm_hit = self.admin_list.find(key) != null;
+                var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
+                // Fail closed: an identity whose composite key cannot be
+                // built is NOT on the whitelist (the old bufPrint catch
+                // returned early and skipped the gate entirely).
+                if (std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch null) |key| {
+                    if (!wl_hit) wl_hit = self.whitelist.find(key) != null;
+                    if (!adm_hit) adm_hit = self.admin_list.find(key) != null;
+                }
             }
             if (!wl_hit and !adm_hit) {
                 self.harness.counters.inc(.join_fail);

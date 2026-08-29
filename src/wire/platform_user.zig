@@ -31,6 +31,12 @@ pub const max_platform_len = 16;
 /// Steam ids are 17 digits, EOS ProductUserIds 32 hex chars. Anything past this
 /// is not a real identity, so it is rejected rather than truncated.
 pub const max_id_len = 64;
+/// Capacity of the "platform:id" composite key used by the operator lists
+/// (admin/whitelist/ban). The id fields are capped at max_id_len but the
+/// composite adds the platform + separator, so a key buffer sized to
+/// max_id_len alone overflows for a max-length identity - which at the join
+/// whitelist gate used to fail OPEN (the bufPrint catch skipped the gate).
+pub const max_composite_len = max_platform_len + 1 + max_id_len;
 
 pub const Id = struct {
     /// EPlatformIdentifier name; the client resolves it via FromPlatformAndId

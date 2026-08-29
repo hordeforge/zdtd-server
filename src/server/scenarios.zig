@@ -4302,6 +4302,35 @@ test "scenario stock InvTx rejects unresolvable item stacks (T18)" {
     std.debug.print("PASS stock-tx-reject: c2s_rejects {d}->{d} slot3 intact\n", .{ rejects_before, g.harness.counters.get(.c2s_rejects) });
 }
 
+test "scenario whitelist gate fails closed on an un-keyable identity (admin audit)" {
+    // The "platform:id" composite key buffer was sized to max_id (64) while a
+    // max-length identity composite is up to 81 chars; the bufPrint overflow
+    // at the whitelist gate used to `catch return true` - SKIPPING the gate
+    // (fail-open on a whitelist-only server). Now the buffer covers the
+    // composite and an un-keyable identity is simply not on the whitelist
+    // (denied), never a gate skip.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_whitelist");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_whitelist", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // Whitelist-only: a DIFFERENT identity, so this player is not on it.
+    try std.testing.expect(g.whitelist.add("Steam:111", 0));
+    // Max-length id: "EOS:" + 64 chars = 68-char composite > the old 64 cap.
+    var id_buf: [64]u8 = undefined;
+    @memset(&id_buf, 'a');
+    const puid: platform_user.Id = .{ .platform = "EOS", .id = &id_buf };
+    var cap: ln_peer.Capture = .{};
+    try std.testing.expectError(error.JoinFailed, g.attachJoinedClientAs(&cap, puid));
+    // The old fail-open behavior joined this player; now the gate denies.
+    std.debug.print("PASS whitelist-fail-closed: max-length identity denied on whitelist-only\n", .{});
+}
+
 test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele clamps" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_coordbound");

@@ -2635,7 +2635,7 @@ pub const Game = struct {
             if (self.admin_list.find(c.name[0..c.name_len])) |i| return self.admin_list.entries[i].level;
         }
         if (c.puid_primary.get()) |pid| {
-            var key_buf: [admin_cmds.max_id]u8 = undefined;
+            var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
             const key = std.fmt.bufPrint(&key_buf, "{s}:{s}", .{ pid.platform, pid.id }) catch return 1000;
             if (key.len != 0) {
                 if (self.admin_list.find(key)) |i| return self.admin_list.entries[i].level;

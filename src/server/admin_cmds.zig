@@ -179,6 +179,13 @@ pub fn writeHelp(w: *std.Io.Writer, entries: []const HelpEntry) !void {
 
 pub const max_entries: usize = 64;
 pub const max_id: usize = 64;
+/// Capacity of the "platform:id" composite key (admin/whitelist list keys).
+/// The id field caps at max_id (64), but the composite adds the platform +
+/// separator (platform_user.max_platform_len + 1), so a key buffer sized to
+/// max_id alone overflows for a max-length identity - at the join whitelist
+/// gate that overflow used to fail OPEN (the bufPrint catch skipped the
+/// gate). Sized from the wire lengths so the two can never drift.
+pub const max_composite_id: usize = @import("../wire/platform_user.zig").max_platform_len + 1 + max_id;
 pub const max_reason: usize = 96;
 /// Player names (Client.name is 32 bytes; keep one byte of slack).
 pub const max_name: usize = 32;

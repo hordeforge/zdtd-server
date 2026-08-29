@@ -148,7 +148,7 @@ pub fn load(
         warnEntry("file", "larger than 4 MiB");
         return;
     }
-    var key_buf: [admin_cmds.max_id]u8 = undefined;
+    var key_buf: [admin_cmds.max_composite_id]u8 = undefined;
 
     // Admin users: V3.1.0 writes a top-level <users> section; older builds
     // nested it under <admins>. Support both.

@@ -136,6 +136,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   applying an empty slot with a success ack, and SetAll applies atomically
   (only when every op resolves). Scenario "stock InvTx rejects unresolvable
   item stacks".
+- Whitelist gate fail-open fix (admin audit): the "platform:id" composite
+  key buffer was sized to `max_id` (64) while a max-length identity composite
+  is up to 81 chars; the `bufPrint` overflow at the join whitelist gate used
+  to `catch return true` - SKIPPING the gate on a whitelist-only server. The
+  buffer now covers the composite (`max_composite_id`, derived from the wire
+  lengths) and an un-keyable identity is simply not on the whitelist
+  (denied), never a gate skip; the admin.xml composite keys and the
+  admin-level lookup use the same capacity. Scenario "whitelist gate fails
+  closed on an un-keyable identity".
 
 ### Fixed
 
