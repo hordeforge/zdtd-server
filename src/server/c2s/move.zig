@@ -34,8 +34,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
         if (!env.applied) return true;
         // Void rescue only (surface-2 snap desynced mesh; see rescueDeepVoid).
+        // T22 suppression: the rescue is a server correction for a mesh
+        // desync, never a cheat - reset the envelope so the interim client
+        // packets (still falling before it processes the EntityTeleport) are
+        // not counted as movement rejects against a legit player.
         if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, true)) |ny| {
-            self.noteAcceptedMove(c, env.x, ny, env.z);
+            self.resetMoveEnvelopePeer(c.slot, env.x, ny, env.z);
             systems.questTickGoto(&self.sim, c.slot, env.x, ny, env.z);
             systems.questTickStayWithin(&self.sim, c.slot, env.x, env.z);
             return true;
@@ -187,9 +191,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // anywhere and noteAcceptedMove rebaselines the gate to that spot.
         const env = self.applyMovementEnvelope(c, peer, p.entity_id, p.x, p.y, p.z);
         if (!env.applied) return true;
+        // Void rescue: same T22 suppression as the PosAndRot path - reset the
+        // envelope so the fall-out correction never counts as a reject.
         if (try self.rescueDeepVoid(peer, p.entity_id, env.x, env.y, env.z, false)) |ny| {
             // Snapped; do not fan-out void coords.
-            self.noteAcceptedMove(c, env.x, ny, env.z);
+            self.resetMoveEnvelopePeer(c.slot, env.x, ny, env.z);
             return true;
         }
         var yaw: f32 = 0;

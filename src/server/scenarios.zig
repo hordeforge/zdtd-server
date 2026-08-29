@@ -4174,6 +4174,48 @@ test "scenario T20 hard ceiling downgrades client-informed detectors" {
     std.debug.print("PASS hard-ceiling: bounds .hard downgraded, phase .hard kept (hard_n={d})\n", .{c.guard.hard_n});
 }
 
+test "scenario void rescue suppresses the movement reject (T22)" {
+    // T22 suppression: a client that falls out of the mesh (y < -1) is
+    // rescued to the surface - a server correction for a mesh desync, never
+    // a cheat. The envelope resets so the interim packets (the client still
+    // falling before it processes the EntityTeleport) are not counted as
+    // movement rejects against a legit player.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_voidrescue");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_voidrescue", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    var pos_body: [64]u8 = undefined;
+    var frame_buf: [128]u8 = undefined;
+    const sp = g.world.primarySpawn();
+    // Fall in cap-respecting steps (1 block/tick < the 25 m/s cap) from the
+    // surface into the void.
+    var fy: f32 = @as(f32, @floatFromInt(sp.y)) + 0.08;
+    while (fy > -2) : (fy -= 1) {
+        const fb = try packages.buildPosAndRotBody(&pos_body, c.entity_id, @floatFromInt(sp.x), fy, @floatFromInt(sp.z), 0, 0, 0, true);
+        try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", fb));
+        g.tick_n += 1;
+    }
+    const rejects_before = g.harness.counters.get(.movement_rejects);
+    // Still falling before it processes the rescue's EntityTeleport: this
+    // interim void packet must not count as a reject either.
+    const fall2 = try packages.buildPosAndRotBody(&pos_body, c.entity_id, @floatFromInt(sp.x), fy - 1, @floatFromInt(sp.z), 0, 0, 0, true);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageEntityPosAndRot", fall2));
+    try std.testing.expectEqual(rejects_before, g.harness.counters.get(.movement_rejects));
+    // The sim is back at the surface, not in the void.
+    const idx = g.sim.slotOfNetId(c.entity_id) orelse return error.MissingEntity;
+    try std.testing.expect(g.sim.transform[idx].y > 0);
+    std.debug.print("PASS void-rescue: rejects {d}->{d} y={d:.1}\n", .{ rejects_before, g.harness.counters.get(.movement_rejects), g.sim.transform[idx].y });
+}
+
 test "scenario malicious C2S: out-of-range coordinates are rejected, admin tele clamps" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_coordbound");

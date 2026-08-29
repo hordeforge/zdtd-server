@@ -116,6 +116,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   enums, observed/bound as f32 bits); `severity` is the post-ceiling value
   and the return is discarded - read-only, never a gate. Host unit test +
   the T20 scenario cover the wiring.
+- Anti-cheat suppression audit (T22): the void rescue (a player who fell out
+  of the mesh - y < -1 - corrected to the surface) now resets the movement
+  envelope instead of rebaselining, so the interim packets (the client still
+  falling before it processes the EntityTeleport) no longer count as
+  movement rejects against a legit player. Spawn/respawn/death and admin
+  teleports already reset the envelope; stalls/packet loss are rate-covered
+  by design. Scenario "void rescue suppresses the movement reject".
 
 ### Fixed
 

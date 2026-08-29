@@ -220,9 +220,18 @@ Anti-goal: shipping a kick. Ownership and readable evidence solve most of it.
       value after the T20 ceiling and the return is discarded (host
       authority). Host unit test + the T20 scenario assert the wiring and
       the downgraded severity.
-- [ ] T22: attribution (a finding another player induces never accrues against
+- [x] T22: attribution (a finding another player induces never accrues against
       the victim) and suppression (stalls, spawn, teleport, death, chunk
       starvation, packet loss), so the anti-cheat cannot be used to grief.
+      **DONE 2026-08-30 (suppression audit)**: every noteEvidence call site
+      attributes to the acting client (the inducer, by construction); spawn/
+      respawn/death reset the movement envelope (sendJoinBundle) and admin
+      teleports reset it (resetMoveEnvelopePeer); stalls and packet loss are
+      rate-covered by design (the envelope caps per-second, so a long-dt
+      legit move is inside the cap); the void rescue (mesh desync) now resets
+      the envelope instead of rebaselining, so a player who falls out of the
+      world is corrected without counting movement rejects (scenario
+      "void rescue suppresses the movement reject").
 - [ ] T23: make the dry run produce a reviewable diff, so no enforcement rung is
       ever enabled without a measured false-positive rate.
 
