@@ -2272,7 +2272,7 @@ zdtd     → Zig dedi, client wire only, no mods
 | Full columns biome layers + AssignIds terrain ids | `world/store.zig`, `assets/biome_layers.zig` | biomes.xml first `<layers>`; dirt=5 stone=1 bedrock=4 water=240 |
 | ZCH3 chunk persist (`.zch` files, u32 rawData) | `world/store.zig` | ZCH2 u16 blocks are dropped on load (regen from DTM+TTS); heights remain |
 | Stock `NetPackageChunk` write path | `wire/stock_chunk.zig` | full rawData upper24; density repair rules; TTS dens; topsoil broken all-1s; light 0xFF |
-| Spawn/stream ring for light+mesh | `server/game.zig` | defaults r 7..9 (`default_chunk_stream_radius_*`), 8 adds/tick, max_streamed=169; WorldInfo fixedSizeCC=**false** |
+| Spawn/stream ring for light+mesh | `server/zdtd_config.zig` (`[stream] stream_radius_min/max`) | defaults r 7..9, 8 adds/tick, max_streamed=169; WorldInfo fixedSizeCC=**false** |
 | biomes.png color→biomemap id | `world/biomes.zig` | stock biomemapcolor keys; id&lt;50; height fallback |
 | Prefab footprints + water | `world/prefabs.zig`, `water.zig` | height flatten |
 | **TTS paint (rawData+tex+density)** | `world/tts.zig`, `prefabs.zig` | ids remapped by name via `.blocks.nim`; pre-18 `BlockValueV3` converted; skip terrainFiller; rotation bits kept |

@@ -1,6 +1,6 @@
 # Chunk wire formats (zdtd)
 
-> Purpose: stock `NetPackageChunk` / `ChunkRemove` wire plus the ZCH3 disk overlay: what the client `Read`s, what `src/wire/stock_chunk.zig` encodes, and how it differs from test helpers. (ZCH4 is the non-stock `[wire] profile` variant that carries the column height in the header; see STATUS Batch O / ADR 0036.)
+> Purpose: stock `NetPackageChunk` / `ChunkRemove` wire plus the ZCH3/ZCH4 disk overlay: what the client `Read`s, what `src/wire/stock_chunk.zig` encodes, and how it differs from test helpers. (ZCH4 is the non-stock `[wire] profile` variant that carries the column height in the header; see STATUS Batch O / ADR 0036.)
 
 Related: [PACKAGES.md](PACKAGES.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) · [AUTHORITY.md](../AUTHORITY.md) · [PARITY_TOOLING.md](../PARITY_TOOLING.md) · `src/wire/stock_chunk.zig` · `src/world/store.zig` (the chunk store the wire reads)
 
@@ -64,18 +64,25 @@ skeleton) were deleted. Do not reintroduce parallel wire shapes; production is
 
 ## Disk (world overlay)
 
-Per-chunk `.zch` under `--world` (see [ADR 0011](../adr/0011-custom-zch-world-overlay.md)):
+Per-chunk `.zch` under `--world` (see [ADR 0011](../adr/0011-custom-zch-world-overlay.md);
+the writer is `store.zig encodeChunk`):
 
 ```text
-'Z''C''H''3' | cx:i32 | cz:i32 | flags[4]
-heights:u8[256]
-if flags[0]: blocks:u32[65536]          // full rawData
-if flags[1]: textures:u64[65536]        // textureFull paint (optional)
-if flags[2]: dens:u8[65536] + dens_set  // TTS density + bitset (optional)
+v3 (stock 256-tall chunks): 'Z''C''H''3' | cx:i32 | cz:i32 | flags[4]
+v4 (non-stock [wire] profile): 'Z''C''H''4' | cx:i32 | cz:i32 | flags[4] | y_dim:u32
+heights:u8[y_dim*256]                 // v4 channels sized by y_dim (ADR 0036)
+if flags[12]: blocks:u32[65536]       // full rawData
+if flags[13]: textures:u64[65536]     // textureFull paint (optional)
+if flags[14]: dens:u8[65536] + dens_set  // TTS density + bitset (optional)
+if flags[15]: damages:u16[65536]      // absolute damage plane (2026-08-22)
 ```
 
+A chunk whose column height != 256 writes ZCH4; a stock loader rejects it and
+a non-stock loader rejects any y_dim mismatch (fail closed). Stock chunks stay
+ZCH3 byte-identical.
+
 Legacy: ZCH2 u16 type-only loads heights only (blocks regen). Pre-paint ZCH3
-files (flags[1]/[2]=0) remain valid. In-memory paint is co-owned with the cell
+files (flags[13]/[14]=0) remain valid. In-memory paint is co-owned with the cell
 (`setBlock` clears texture/density; `setBlockTexDens` re-applies).
 
 ## Stock network encoder (default S→C)
@@ -95,8 +102,9 @@ and `Chunk.read`s during package.read. Continuous stream uses the same builder.
 Client mesh needs full neighbor rings (`RegenerateNextChunk`). Only **inner**
 chunks (stream radius minus ~2) become displayed GOs. With stream r=4, max CGO
 ≈25; spawn overlay with `fixedSizeCC=false` needs viewDist²−10 (often 39+).
-Join/stream defaults: **r 7..9** (`default_chunk_stream_radius_*` in `game.zig`;
-CGO needs r≥6 at viewDist 7), hole-free, enough adds/tick.
+Join/stream defaults: **r 7..9** (`chunk_stream_radius_min/max` in
+`zdtd_config.zig`, `[stream] stream_radius_min/max`; CGO needs r≥6 at
+viewDist 7), hole-free, enough adds/tick.
 
 ## WorldInfo + terrain textures (not in chunk body)
 
