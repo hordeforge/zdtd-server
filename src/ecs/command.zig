@@ -355,3 +355,28 @@ test "command buffer soft warn at warn_ratio" {
     try std.testing.expect(buf.cap_warned);
     try std.testing.expectEqual(warn_at, buf.len());
 }
+
+test "glide op arms and clears the player glide window (ADR 0037)" {
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const nid = w.spawnPlayer(0, 70, 0, 0) orelse return error.MissingSpawn;
+    const s = w.slotOfNetId(nid).?;
+    try std.testing.expect(w.mask[s].player);
+
+    // Arm: glide window set + src attributed.
+    try std.testing.expect(w.commands.push(.{ .glide = .{ .net_id = nid, .on = true } }));
+    _ = w.commands.drain(&w);
+    try std.testing.expect(w.player[s].glide_until_tick > w.sim_tick);
+    try std.testing.expectEqual(@as(i16, 0), w.player[s].glide_src);
+
+    // Clear.
+    try std.testing.expect(w.commands.push(.{ .glide = .{ .net_id = nid, .on = false } }));
+    _ = w.commands.drain(&w);
+    try std.testing.expectEqual(@as(u64, 0), w.player[s].glide_until_tick);
+
+    // Non-player net id is ignored.
+    try std.testing.expect(w.commands.push(.{ .glide = .{ .net_id = 999999, .on = true } }));
+    const dr = w.commands.drain(&w);
+    try std.testing.expectEqual(@as(u32, 0), dr.applied);
+}

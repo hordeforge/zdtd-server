@@ -119,10 +119,10 @@ pub const Manifest = struct {
         if (self.wasm == null and self.preset == null) {
             return "missing required key 'wasm' (or 'preset' for a config-only mod)";
         }
-        if (self.wasm != null and self.preset != null) {
-            return "'wasm' and 'preset' are mutually exclusive (a mod is either a plugin or a config carrier)";
-        }
-        if (self.preset != null and (self.override != null or self.points != null or self.requires != null)) {
+        // A mod may be a plugin (wasm), a config carrier (preset only), or
+        // both (ADR 0037 parachute: wasm behavior + its own rules/authority
+        // preset). Only the config-only form forbids the plugin fields.
+        if (self.preset != null and self.wasm == null and (self.override != null or self.points != null or self.requires != null)) {
             return "'preset' (config-only mod) cannot combine with 'override'/'points'/'requires' (nothing to load or replace)";
         }
         if (self.icon) |ic| {

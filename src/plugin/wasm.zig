@@ -2666,3 +2666,87 @@ test "core_perkgate.wasm denies forbidden_* perk spends via on_perk_spend" {
     try std.testing.expectEqual(@as(i32, 0), host.perkSpend(100, "perkLightEater", 1, 1));
     try std.testing.expectEqual(@as(usize, 0), host.disabledCount());
 }
+
+test "parachute.wasm deploys glide on a falling worn player and clears on landing (ADR 0037)" {
+    const Cap = struct {
+        var queued: [8][48]u8 = undefined;
+        var queued_len: [8]usize = undefined;
+        var queued_n: usize = 0;
+        var vy: f32 = 0;
+
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
+            if (queued_n >= queued.len) return;
+            const n = @min(cmd.len, queued[queued_n].len);
+            @memcpy(queued[queued_n][0..n], cmd[0..n]);
+            queued_len[queued_n] = n;
+            queued_n += 1;
+        }
+        // One player record (net 2000, kind 0) at the v4 40-byte stride with a
+        // mutable vy and wearing_glider=1 (the armor-slot tag was resolved
+        // server-side).
+        fn writePlayer(b: []u8) void {
+            const base: usize = 24;
+            const r = b[base .. base + 40];
+            @memset(r, 0);
+            std.mem.writeInt(i32, r[0..4], 2000, .little);
+            r[4] = 0; // kind player
+            r[6] = 1; // alive
+            std.mem.writeInt(u32, r[28..32], @bitCast(vy), .little); // f32 bit pattern
+            r[36] = 1; // wearing_glider
+        }
+        fn senseFn(_: *HostCtx, out: []u8) usize {
+            if (out.len < 24 + 40) return 0;
+            std.mem.writeInt(u32, out[0..4], 0x3453425a, .little); // 'ZBS4'
+            std.mem.writeInt(u32, out[4..8], 1, .little); // count
+            std.mem.writeInt(u32, out[8..12], 1, .little); // tick
+            std.mem.writeInt(i32, out[12..16], -1, .little); // self
+            std.mem.writeInt(u32, out[16..20], 0, .little); // world_time
+            std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon
+            writePlayer(out);
+            return 24 + 40;
+        }
+    };
+    Cap.queued_n = 0;
+    Cap.vy = 0;
+
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/parachute/parachute.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+    try std.testing.expect(!host.slots[0].requires_failed);
+
+    // Not falling: no deploy, no queue.
+    Cap.vy = -2.0;
+    host.onTick();
+    try std.testing.expectEqual(@as(usize, 0), Cap.queued_n);
+
+    // Falling fast: deploy after the debounce window (default delay 10 ticks).
+    Cap.vy = -12.0;
+    var t: usize = 0;
+    while (t < 12) : (t += 1) host.onTick();
+    var saw_arm = false;
+    for (Cap.queued[0..Cap.queued_n]) |*c| {
+        if (std.mem.eql(u8, c[0..Cap.queued_len[0]], "glide 2000 1")) saw_arm = true;
+    }
+    try std.testing.expect(saw_arm);
+
+    // Landed (vy near zero): clear the glide.
+    Cap.vy = 0.0;
+    host.onTick();
+    var saw_clear = false;
+    for (Cap.queued[0..Cap.queued_n]) |*c| {
+        if (std.mem.eql(u8, c[0..Cap.queued_len[0]], "glide 2000 0")) saw_clear = true;
+    }
+    try std.testing.expect(saw_clear);
+}

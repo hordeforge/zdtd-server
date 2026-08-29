@@ -63,6 +63,16 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Admin `give` resolves stock item names (e.g. `give 0 resourceWood 5`) in
   addition to numeric ids, fail-closed on unknown names; `admin help` now
   lists `loglevel`, `commandpermission`/`cp` and `plugin`.
+- Parachute mod (`mods/parachute/`, ADR 0037): a fully self-contained mod
+  adding a wearable parachute item (items.xml modlet patch) that deploys
+  when falling fast. The plugin boundary grew sense **v4** (server-derived
+  `vy` + `wearing_glider` per player), a `glide` queue verb (server-side
+  vertical sink while gliding, attributed/withdrawn per plugin), and
+  `[rules.glide] sink_vy_mps` / `item_tag`. Deceleration is
+  server-side (C2S vertical clamp + position broadcast, no client mod
+  needed); fall-damage stays client-owned (stock wire). Sense v4 is a
+  breaking layout change: all shipped guests (fps_bot, mcp, core_announce)
+  were rebuilt for it.
 
 ### Fixed
 

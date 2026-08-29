@@ -92,6 +92,15 @@ pub fn resolve(
     defer name_index.deinit(a);
     for (discovered, 0..) |dm, i| try name_index.put(a, dm.name.?, i);
 
+    // Config-only mod: activates a preset but loads no wasm module. Real
+    // manifests omit the `wasm` key (null); a zero-length path is treated the
+    // same so callers/tests cannot smuggle an empty wasm into the load list.
+    const configOnly = struct {
+        fn is(m: manifest.Manifest) bool {
+            return m.preset != null and (m.wasm == null or m.wasm.?.len == 0);
+        }
+    }.is;
+
     // Collect mods that actually load: skip disabled, reject blacklisted,
     // resolve override edges (target dropped, replacer kept).
     var load = std.ArrayList(ResolvedModule).empty;
@@ -128,10 +137,12 @@ pub fn resolve(
 
     for (discovered) |m| {
         if (m.override != null) continue; // replacers appended below
-        // Config-only mods (preset = "<path>") are not wasm modules: they only
-        // activate a preset (collected below) and never enter the load
-        // list, so the Wasm loader never sees a null wasm path.
-        if (m.preset != null) continue;
+        // Config-only mods (preset without a wasm) are not modules: they only
+        // activate a preset (collected below) and never enter the load list,
+        // so the Wasm loader never sees a null wasm path. A mod with BOTH a
+        // wasm and a preset (ADR 0037 parachute) loads its module AND applies
+        // its preset.
+        if (configOnly(m)) continue;
         // `enabled = false` in manifest.toml: not auto-loaded (demo gates ship
         // off); explicit [plugin] modules paths still load, and `[mods]
         // enabled` forces the mod on.
@@ -151,7 +162,7 @@ pub fn resolve(
     // Append the replacers (their targets were dropped above).
     for (discovered) |m| {
         if (m.override == null) continue;
-        if (m.preset != null) continue; // config-only mods never replace modules
+        if (configOnly(m)) continue; // config-only mods never replace modules
         if (m.enabled) |en| {
             if (!en and !enabled_set.contains(m.name.?)) continue;
         }
@@ -418,4 +429,20 @@ test "resolve activates a preset from an enabled config-only mod" {
     c2.dir = "mods/other";
     const mods2 = [_]manifest.Manifest{ cfg, c2 };
     try testing.expectError(error.DuplicatePreset, resolve(testing.allocator, &mods2, &.{}, &.{}, &.{}, &.{ "infinite_world", "other" }));
+}
+
+test "resolve wasm+preset mod loads module and activates its preset" {
+    // A mod with BOTH a wasm and a preset (ADR 0037 parachute) is a plugin
+    // that also carries gameplay keys: it must enter the load list AND
+    // activate its preset, unlike a config-only mod.
+    var cfg = mk("parachute", "parachute.wasm", "user", null, null);
+    cfg.preset = "preset.toml";
+    cfg.dir = "mods/parachute";
+    cfg.enabled = false;
+    const mods = [_]manifest.Manifest{cfg};
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{"parachute"});
+    defer r.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), r.modules.len);
+    try testing.expectEqualStrings("parachute.wasm", r.modules[0].manifest.wasm.?);
+    try testing.expectEqualStrings("mods/parachute/preset.toml", r.preset_pack.?);
 }

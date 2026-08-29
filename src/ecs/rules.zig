@@ -99,6 +99,25 @@ pub const C2s = struct {
     quest_summon_per_request: u8 = 8,
 };
 
+/// Parachute glide (ADR 0037): while a player's glide flag is armed (plugin
+/// verb `glide`) the server clamps the C2S vertical delta to `sink_vy_mps`
+/// and broadcasts the clamped position, so the fall is slowed server-side
+/// (no client mod needed; fall-damage stays client-owned, stock wire).
+/// `item_tag` marks the worn armor item that reports `wearing_glider` in the
+/// sense v4 record. Preset-overridable via `[rules.glide]` so a mod ships its
+/// own values self-contained.
+pub const Glide = struct {
+    /// Sink speed while the glide flag is armed (parachute, ADR 0037).
+    sink_vy_mps: f32 = 2.5,
+    /// Worn armor item tag that reports `wearing_glider` in sense v4.
+    item_tag: []const u8 = "parachute",
+    /// Global player fall sink (blocks/s) applied WITHOUT the glide flag:
+    /// > 0 clamps every player's C2S vertical delta (server-side fall
+    /// slow-down; the moon_gravity mod sets this to its lunar terminal
+    /// velocity). 0 = stock envelope (no clamp).
+    fall_sink_vy_mps: f32 = 0,
+};
+
 /// Zombie AI tuning read by the systems.zig task table and the despawn pass.
 pub const Ai = struct {
     /// Full-sim range, squared blocks (lodScale step 3).
@@ -752,6 +771,7 @@ pub const Rules = struct {
     systems: Systems = .{},
     combat: Combat = .{},
     c2s: C2s = .{},
+    glide: Glide = .{},
     ai: Ai = .{},
     bloodmoon: Bloodmoon = .{},
     progression: Progression = .{},
@@ -779,6 +799,12 @@ pub const CombatOverlay = struct {
 pub const C2sOverlay = struct {
     eat_units_per_push: ?u8 = null,
     quest_summon_per_request: ?u8 = null,
+};
+
+pub const GlideOverlay = struct {
+    sink_vy_mps: ?f32 = null,
+    item_tag: ?[]const u8 = null,
+    fall_sink_vy_mps: ?f32 = null,
 };
 
 pub const AiOverlay = struct {
@@ -1025,6 +1051,7 @@ pub const RulesOverlay = struct {
     systems: SystemsOverlay = .{},
     combat: CombatOverlay = .{},
     c2s: C2sOverlay = .{},
+    glide: GlideOverlay = .{},
     ai: AiOverlay = .{},
     bloodmoon: BloodmoonOverlay = .{},
     progression: ProgressionOverlay = .{},

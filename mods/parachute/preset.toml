@@ -1,0 +1,13 @@
+# parachute: [rules.glide] server-side deceleration (ADR 0037). While a
+# player's glide flag is armed (set by the mod's wasm via `glide <net_id> 1`),
+# the server clamps the C2S vertical delta to sink_vy_mps (blocks/s) and
+# broadcasts the clamped position - the fall is slowed server-side, no client
+# mod needed. item_tag marks the worn armor item (matches the items.xml
+# patch) for the sense v4 wearing_glider bit. An operator's zdtd.toml
+# [rules.glide] keys still win over this mod preset.
+
+name = "parachute"
+
+[rules.glide]
+sink_vy_mps = 2.5
+item_tag = "parachute"

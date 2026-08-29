@@ -144,6 +144,11 @@ values to a connected stock client:
 - `loot.zig` `rollContainer` falls back to fabricated `resourceScrapIron × 5`
   when a container rolls empty; stock yields an empty container (fail-closed
   change is a separate behavioural decision).
+- **Modlet-added items** (e.g. `mods/parachute/Config/items.xml` adds the
+  `parachute` item, ADR 0037): these are operator-installed game data patched
+  into the catalog before loading (PRD 0003), never hardcoded in `src/`; the
+  item's wire presence needs the same patched items.xml on the client (the
+  mod README documents the pairing).
 
 ## Deferred XML-data items (recorded with reason)
 

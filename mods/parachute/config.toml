@@ -1,0 +1,24 @@
+# parachute deploy tuning (served to the guest verbatim via zdtd.config;
+# the guest parses the minimal key = value subset in plugin_common.Config).
+# All values are mod policy - the sim floors stay stock unless preset.toml
+# changes [authority].
+
+# Vertical velocity (blocks/s, negative = falling) at which deployment arms.
+# Stock terminal fall is ~9.8 blocks/s; -6 arms a bit before terminal so the
+# chute catches the fall.
+deploy_vy_threshold = -6.0
+
+# Consecutive sense ticks below the threshold before the chute deploys
+# (debounce; 20 ticks = 1 s). 0 = deploy immediately.
+deploy_delay_ticks = 10
+
+# Only deploy while the parachute item is worn (armor slot, glider tag).
+require_worn = true
+
+# Item tag that marks the worn item as a glider (must match the items.xml
+# patch tag AND [rules.glide] item_tag in preset.toml).
+item_tag = "parachute"
+
+# Chat announcement on deploy (via the stock chat broadcast).
+announce_on_deploy = true
+announce_text = "deployed their parachute"

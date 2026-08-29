@@ -68,14 +68,22 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     const clamp = movement.clampHorizontal(c.move_x, c.move_z, x, z, dt, cap);
     // Vertical cap: the horizontal clamp cannot see Y-only teleports (fly
     // hacking), so the Y delta is bounded the same way with its own cap.
-    // Glide (ADR 0037): while the player's glide flag is armed the sustained
-    // parachute fall is legal up to glide_vy_cap_mps (still bounded, so a
-    // teleport-scale jump is rejected even gliding). Fail closed: flag unset
-    // or expired -> stock envelope.
+    // Glide (ADR 0037): while the player's glide flag is armed the server
+    // CLAMPS the vertical delta to the glide sink speed (blocks/s) instead of
+    // rejecting it - the clamped position is broadcast back to the player and
+    // observers, so the fall is slowed server-side (no client mod needed).
+    // A teleport-scale jump is still rejected even gliding. Fail closed: flag
+    // unset or expired -> stock envelope.
     var vcap = self.max_vertical_speed_mps;
     if (self.sim.slotOfNetId(entity_id)) |s| {
-        if (self.sim.mask[s].player and self.sim.player[s].glide_until_tick > self.sim.sim_tick) {
-            vcap = -self.glide_vy_cap_mps;
+        if (self.sim.mask[s].player) {
+            // Glide flag (parachute) first; else the global fall sink (e.g.
+            // the moon_gravity mod's lunar terminal velocity); else stock.
+            if (self.sim.player[s].glide_until_tick > self.sim.sim_tick) {
+                vcap = self.sim.rules.glide.sink_vy_mps;
+            } else if (self.sim.rules.glide.fall_sink_vy_mps > 0) {
+                vcap = self.sim.rules.glide.fall_sink_vy_mps;
+            }
         }
     }
     const vclamp = movement.clampVertical(c.move_y, y, dt, vcap);

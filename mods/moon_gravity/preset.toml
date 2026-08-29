@@ -16,3 +16,12 @@ gravity = -1.62
 #   earth -9.81   mars -3.71   moon -1.62   zero-g 0   (negative = downward)
 [rules.vehicle]
 gravity = -1.62
+
+# Player fall: the server has no player vertical physics (players are
+# client-driven), so it slows the fall by clamping the C2S vertical delta to
+# this lunar terminal velocity (blocks/s) and broadcasting the clamped
+# position - server-side, no client mod needed. Jump height stays client-side
+# (the client's own physics), and fall damage stays client-owned (stock wire).
+# 0 = stock envelope.
+[rules.glide]
+fall_sink_vy_mps = 1.5

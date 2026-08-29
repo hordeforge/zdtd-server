@@ -13,10 +13,12 @@ the current plugin boundary cannot express:
 
 1. **Deceleration** — the server has no player vertical physics
    (`src/server/movement.zig` is a horizontal + Y-delta anti-cheat envelope
-   only; players are driven by client C2S positions). The server cannot
-   natively slow a fall; deceleration must live in a paired client mod (the
-   accepted RealEarth pattern). This ADR does not invent server-side player
-   physics or server fall damage (stock has neither server-side).
+   only; players are driven by client C2S positions). This ADR makes the
+   server slow the fall by clamping the C2S vertical delta while the glide
+   flag is armed and broadcasting the clamped position (the stock
+   authority-correction path) - no client mod needed. It does not invent
+   server-side player physics or server fall damage (stock has neither
+   server-side); fall damage stays client-owned.
 2. **Worn state** — armor slots are sim authority (`inv_equip_start=55`,
    12 slots; `ItemDef.tags` parses the items.xml `Tags` property), but
    `zdtd.sense` v3 exposes only net_id/kind/alive/pos/hp/yaw/target.
@@ -36,25 +38,31 @@ Extend the plugin boundary minimally, keeping sim authority native:
 1. **`zdtd.sense` v4** (magic `ZBS4`): per-player records grow by 8 bytes
    (32 → 40) with `vy` (i32, blocks/s, derived server-side from the C2S Y
    history) and `wearing_glider` (u8): the player's armor slots contain an
-   item whose `Tags` include the config `[authority] glider_item_tag`
+   item whose `Tags` include the config `[rules.glide] item_tag`
    (default `parachute`). v3 guests stop working (magic bump = fail loud,
    never a silent layout misinterpretation).
 2. **`zdtd.queue` verb `glide <net_id> <0|1>`**: sets/clears a per-player
    glide flag (`Player.glide_until_tick`). Attributed per plugin src like the
    other verbs; a withdrawn/disabled module's pending glide ops are cleared
    before the drain (paper 3.1 discipline).
-3. **Movement envelope exemption**: while the player's glide flag is set, the
-   vertical rejection cap widens to `[authority] glide_vy_cap_mps` (default
-   -100 blocks/s; stock envelope otherwise). Horizontal envelope unchanged.
-   Fail closed: flag unset → stock envelope.
-4. **Deceleration stays client-side** by design (paired client mod); the
-   server ships the item data, worn-state authority, the exemption, and
-   optional coordination. No server fall-damage leg is invented.
+3. **Server-side deceleration (sink)**: while the player's glide flag is
+   set, the C2S vertical delta is **clamped** to `[rules.glide]
+   sink_vy_mps` (default 2.5 blocks/s) instead of rejected; the clamped
+   position is broadcast back to the player and observers (the stock
+   authority-correction path), so the fall is slowed server-side - no client
+   mod needed. Horizontal envelope unchanged. Fail closed: flag unset →
+   stock envelope. A teleport-scale jump is still rejected even gliding.
+4. **No server fall-damage leg is invented**: the client owns local physics
+   and fall-damage calculation (stock wire), so the chute is a fall
+   slow-down, not a damage cancel; a hard landing right after a short glide
+   may still count a client-side fall hit. The mod ships the item data and
+   the worn-state authority.
 
 ## Consequences
 
 - A mod can now observe player vertical motion and worn state, and legally
-  flag a glide — the parachute mod is expressible over the boundary.
+  flag a glide — the parachute mod is expressible over the boundary, and
+  deceleration is server-side (position clamp + broadcast).
 - sense v4 is a breaking layout change for existing guests (only the shipped
   core plugins + fps_bot/mcp consume sense; all are rebuilt in-repo).
 - `glide` is a trust-bearing verb (a malicious module could exempt itself

@@ -228,9 +228,9 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
         std.mem.writeInt(i32, r[28..32], vy, .little);
         std.mem.writeInt(i32, r[32..36], -1, .little); // target_id
         // v4: wearing_glider — the player's armor slots (55..66) carry an item
-        // whose items.xml Tags include `[authority] glider_item_tag`.
+        // whose items.xml Tags include `[rules.glide] item_tag` (ADR 0037).
         var wearing: u8 = 0;
-        if (k == 0 and g.glider_item_tag.len > 0) {
+        if (k == 0 and g.sim.rules.glide.item_tag.len > 0) {
             if (g.sim.mask[s].inventory) {
                 const inv = &g.sim.inventory[s];
                 var ei: usize = ecs.components.inv_equip_start;
@@ -238,7 +238,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
                     const sl = inv.slots[ei];
                     if (sl.item_id == 0 or sl.count == 0) continue;
                     const def = g.items.byId(sl.item_id) orelse continue;
-                    if (hasTag(def.tags, g.glider_item_tag)) {
+                    if (hasTag(def.tags, g.sim.rules.glide.item_tag)) {
                         wearing = 1;
                         break;
                     }

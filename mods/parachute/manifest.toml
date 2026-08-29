@@ -1,0 +1,15 @@
+# parachute: deployable parachute item (wearable clothing), ADR 0037.
+# Fully self-contained: Config/items.xml patch (the item), preset.toml
+# (the [authority] glide exemption), config.toml (deploy tuning, served to
+# the guest via zdtd.config), parachute.zig/.wasm (the deploy state machine),
+# README.md, icon.png.
+# Opt-in: [mods] enabled = ["parachute"] in zdtd.toml.
+
+name = "parachute"
+version = "0.1.0"
+tier = "user"
+icon = "icon.png"
+wasm = "parachute.wasm"
+preset = "preset.toml"
+enabled = false
+description = "Parachute item (wearable clothing): auto-deploys when falling fast while worn. Deceleration runs client-side (paired client mod); the server exempts the glide fall from the movement envelope and announces deployment."

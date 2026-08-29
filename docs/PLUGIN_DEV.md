@@ -172,7 +172,7 @@ import **field** names are bare (`log`, not `zdtd_log`); importing
 | `zdtd` . `log` | `(level: i32, ptr: i32, len: i32) -> ()` | Write `len` bytes at `ptr` to the server log; `level` 0..3 (debug/info/warn/err). Sanitized and truncated to 200 bytes |
 | `zdtd` . `tick` | `() -> i64` | Current server tick number (1-based, 20 Hz) |
 | `zdtd` . `queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 when the bytes were read, 1 when `ptr`/`len` is out of bounds |
-| `zdtd` . `sense` | `(ptr: i32, len: i32, token: i32) -> i32` | Read-only world snapshot into the guest's memory at `ptr` (RFC 0001 §3); returns bytes written (0 = no sense surface) |
+| `zdtd` . `sense` | `(ptr: i32, len: i32, token: i32) -> i32` | Read-only world snapshot into the guest's memory at `ptr` (RFC 0001 §3; **v4** = magic `ZBS4`, 40-byte records: net_id/kind/self/alive/pos/hp/yaw/vy/target/wearing, ADR 0037); returns bytes written (0 = no sense surface) |
 | `zdtd` . `query` | `(req_ptr: i32, req_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Reverse-direction point query (RFC 0001 §3): write a text request at `req_ptr`, the host answers at `out_ptr`; returns response bytes (0 = no answer) |
 | `zdtd` . `json_parse` | `(ptr: i32, len: i32) -> i32` | Parse the JSON doc at guest memory `(ptr, len)` with Zig's `std.json` (ADR 0031 D3); 0 = ok, <0 = parse error. The parsed doc is per-plugin state, replaced on the next call, stored in a lazily allocated fixed buffer (`json_buf_max`, 64 KiB) reset per frame — no heap on the tick path, and the cap also bounds nesting. One doc at a time: frames must be processed before the next parse |
 | `zdtd` . `json_str` | `(path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Decoded string at a dot-separated key path (`method`, `params.name`, ...); returns the FULL length, 0 = missing or not a string, <0 = no parsed doc / bad path. Compare the length against your buffer cap to detect truncation |
@@ -213,6 +213,7 @@ module importing `wasi_snapshot_preview1` fails to instantiate.
 | `spawn x y z hp` | Queue a zombie spawn at the block coords with the given HP |
 | `despawn id` | Queue removal of the entity with the given net id |
 | `damage id amount` | Queue damage to the entity with the given net id |
+| `glide id 0\|1` | Arm/clear the player's glide (ADR 0037): while armed the server clamps the player's vertical delta to `[rules.glide] sink_vy_mps` (server-side fall slow-down). Attributed per plugin; cleared on plugin withdrawal |
 
 Commands are applied by the sim on a later tick's drain (the fixed 64-slot
 command buffer; a full buffer drops new commands). Unknown or malformed

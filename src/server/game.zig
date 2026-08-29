@@ -607,10 +607,6 @@ pub const Game = struct {
     interest_range: f32 = default_interest_range,
     max_horizontal_speed_mps: f32 = game_types.default_max_horizontal_speed_mps,
     max_vertical_speed_mps: f32 = game_types.default_max_vertical_speed_mps,
-    /// Glide (ADR 0037) vertical cap while a player's glide flag is armed.
-    glide_vy_cap_mps: f32 = -100.0,
-    /// Item tag marking a worn item as a glider (ADR 0037 sense v4).
-    glider_item_tag: []const u8 = "parachute",
     peer_stale_ms: u64 = default_peer_stale_ms,
     lock_stale_ns: u64 = default_lock_stale_ns,
     join_rate_limit_ms: u64 = default_join_rate_limit_ms,
@@ -745,8 +741,6 @@ pub const Game = struct {
             .interest_range = opts.interest_range,
             .max_horizontal_speed_mps = opts.max_horizontal_speed_mps,
             .max_vertical_speed_mps = opts.max_vertical_speed_mps,
-            .glide_vy_cap_mps = opts.glide_vy_cap_mps,
-            .glider_item_tag = opts.glider_item_tag,
             .peer_stale_ms = opts.peer_stale_ms,
             .lock_stale_ns = opts.lock_stale_ns,
             .join_rate_limit_ms = opts.join_rate_limit_ms,

@@ -32,6 +32,19 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## Batch S 2026-08-29 (parachute mod + ADR 0037 glide boundary)
+
+`mods/parachute/` ships fully self-contained (manifest/README/config/preset/
+`Config/items.xml` item patch/wasm/icon): a wearable parachute item that
+deploys when falling fast. ADR 0037 extended the plugin boundary: sense **v4**
+(magic `ZBS4`; 40-byte records gain server-derived `vy` + `wearing_glider`),
+queue verb `glide <net_id> <0|1>` (per-player glide window, attributed +
+withdrawn per plugin), and `[rules.glide] sink_vy_mps` / `item_tag`
+clamping the C2S vertical delta to the glide sink speed
+while gliding - the deceleration is server-side (position clamp + broadcast,
+no client mod needed; fall-damage stays client-owned). All guests
+(fps_bot/mcp/core_announce) rebuilt for v4.
+
 ## Batch R 2026-08-29 (plugins are self-contained: config.toml + README)
 
 Every plugin/mod folder is now fully self-contained: manifest.toml + wasm +

@@ -4,6 +4,7 @@
 const std = @import("std");
 const game_mod = @import("game.zig");
 const game_bot = @import("game/bot.zig");
+const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_wasm_host = @import("game/wasm_host.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
@@ -9733,4 +9734,38 @@ test "scenario animation data relays to the other players" {
         try std.testing.expect(cap_b.findPkgIdEntity(an_id, ca.entity_id) != null);
     }
     std.debug.print("PASS animation-relay: client anim params reach the other players\n", .{});
+}
+
+test "scenario fall_sink clamps player vertical delta without the glide flag (moon_gravity)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .rules = .{ .glide = .{ .fall_sink_vy_mps = 1.5 } },
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // Advance past tick 20 so the envelope dt below spans a full second.
+    var st: u64 = 0;
+    while (st < 25) : (st += 1) try g.step();
+    g.sim.setPos(c.entity_id, 100, 100, 100, 0);
+    game_movement_helpers.resetMoveEnvelopePeer(g, c.slot, 100, 100, 100);
+    c.move_valid = true; // the reset arms the envelope for the next packet
+    // dt from the envelope is (tick_n - move_tick) x 20 Hz: put the last
+    // accepted move 20 ticks ago so the fall delta spans exactly 1 s.
+    c.move_tick = g.tick_n -| 20;
+
+    // A fast fall (dy = -20 over 1 s) is clamped to the 1.5 blocks/s sink.
+    const r = game_movement_helpers.applyMovementEnvelope(g, c, c.peer orelse return error.MissingPeer, c.entity_id, 100, 80, 100);
+    try std.testing.expect(r.applied);
+    // max_dy = 1.5 * dt(1s) = 1.5; clamped y = 100 - 1.5 = 98.5.
+    try std.testing.expectApproxEqAbs(@as(f32, 98.5), r.y, 0.5);
 }

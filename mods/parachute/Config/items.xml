@@ -1,0 +1,15 @@
+<configs>
+  <!-- parachute: a wearable clothing item (ADR 0037). Extends a stock shirt
+       class so the wire/economy/armor plumbing is inherited; the Tags entry
+       is what the server's glider detection keys on ([rules.glide]
+       item_tag = "parachute"). A stock client needs the same patched
+       items.xml (client-side modlet install or the paired client mod) to
+       render the item; without it the item exists server-side only. -->
+  <append xpath="/items">
+    <item name="parachute" extends="shirtPlain">
+      <property name="Tags" value="parachute,clothing"/>
+      <property name="CustomIcon" value="ui_game_symbol_parachute"/>
+      <property name="DescriptionKey" value="parachuteDesc"/>
+    </item>
+  </append>
+</configs>
