@@ -32,6 +32,25 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## Batch R 2026-08-29 (plugins are self-contained: config.toml + README)
+
+Every plugin/mod folder is now fully self-contained: manifest.toml + wasm +
+source + optional `config.toml` (default config) + optional `preset.toml`
+(rules for a config-only mod) + `README.md` (all 16 folders shipped one).
+
+- New host import `zdtd.config(out_ptr, out_cap) -> i32`: serves the mod's
+  `config.toml` (4 KiB cap, raw text) to the guest; the host never parses it.
+  Works for discovered mods and for explicit `[plugin] modules` (config is
+  read from the wasm's own folder). Declared via `_zdtd_requires "config"`.
+- `mods/plugin_common.zig` ships a guest-side `Config` helper (minimal
+  `key = value` subset: comments, quoted values, ints).
+- `core_pricegate` is the reference: its 1.5x multiplier moved out of the
+  wasm into `plugins/core_pricegate/config.toml` (`price_percent`), read at
+  `on_enable` and applied in `on_trade_price`. Live-verified: default file
+  logs 150, edited file logs 200, no rebuild.
+- PLUGIN_STANDARDS codifies the layout (file table + config-only vs wasm
+  split); PLUGIN_API/PLUGIN_DEV document the import + helper.
+
 ## Batch Q 2026-08-29 (game modes -> presets; mods are self-contained)
 
 Terminology and layout rename (ADR 0010 mechanism, terminology changed; the

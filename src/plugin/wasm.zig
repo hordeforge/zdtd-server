@@ -55,7 +55,7 @@ pub const Hook = enum(u8) {
 /// here is an undeclarable capability (`_zdtd_requires` would reject it).
 pub const host_verbs = [_][]const u8{
     "log",        "tick",     "queue",    "sense",    "query",
-    "json_parse", "json_str", "json_raw", "json_obj",
+    "json_parse", "json_str", "json_raw", "json_obj", "config",
 };
 
 /// Verdict convention for the event hooks (T15 / PLUGIN_DEV.md): a return
@@ -150,6 +150,9 @@ pub const Plugin = struct {
     /// PRD 0005: manifest name (duped at loadResolved; "" for legacy modules,
     /// which fall back to the path in `name`).
     display: []const u8 = "",
+    /// Self-contained default config (the mod's config.toml, raw text; "" when
+    /// absent). Served to the guest via the zdtd.config import; owned here.
+    config_bytes: []const u8 = "",
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
     hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
@@ -219,6 +222,7 @@ pub const Plugin = struct {
         self.allocator.destroy(self.engine);
         self.allocator.free(self.name);
         if (self.display.len > 0) self.allocator.free(self.display);
+        if (self.config_bytes.len > 0) self.allocator.free(self.config_bytes);
         self.* = undefined;
     }
 
@@ -830,6 +834,28 @@ pub const WasmHost = struct {
             };
             self.slots[self.n].tier = rm.tier;
             self.slots[self.n].display = allocator.dupe(u8, rm.manifest.name.?) catch "";
+            if (rm.manifest.config.len > 0) {
+                self.slots[self.n].config_bytes = allocator.dupe(u8, rm.manifest.config) catch "";
+            } else if (rm.manifest.dir.len == 0) {
+                // Legacy explicit `[plugin] modules` path (how the shipped core
+                // plugins load): the manifest has no dir, so derive the
+                // self-contained config from the wasm's own folder - a plugin
+                // stays self-contained no matter how it is loaded.
+                if (std.fs.path.dirname(full_path)) |wdir| {
+                    const cfg_path = std.fs.path.join(allocator, &.{ wdir, "config.toml" }) catch null;
+                    if (cfg_path) |cp| {
+                        defer allocator.free(cp);
+                        if (io_fs.fileExists(cp)) {
+                            const cfg = io_fs.readFileAll(allocator, cp) catch null;
+                            if (cfg) |c| {
+                                if (c.len <= manifest.max_config_bytes)
+                                    self.slots[self.n].config_bytes = allocator.dupe(u8, c) catch "";
+                                allocator.free(c);
+                            }
+                        }
+                    }
+                }
+            }
             self.n += 1;
             const tier_s = switch (rm.tier) {
                 .core => "core",
@@ -1298,6 +1324,22 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
             @memcpy(dst, resp[0..copy]);
             return @intCast(copy);
         }
+        // Self-contained config (the mod's config.toml, raw text): copy the
+        // calling module's config bytes into the guest buffer. 0 = no config
+        // (module has none, or the buffer is too small - the guest checks the
+        // returned length). The host never parses it; each plugin owns its
+        // format. Declared via _zdtd_requires "config".
+        fn config(caller: *zwasm.Caller, out_ptr: i32, out_cap: i32) anyerror!i32 {
+            const hc = caller.data(HostCtx);
+            const mem = caller.memory() orelse return 0;
+            if (out_ptr < 0 or out_cap < 0) return 0;
+            const p = pluginForCaller(hc, @ptrCast(caller.rt)) orelse return 0;
+            if (p.config_bytes.len == 0) return 0;
+            const copy = @min(@as(usize, @intCast(out_cap)), p.config_bytes.len);
+            const dst = mem.sliceAt(@intCast(out_ptr), @intCast(copy)) catch return 0;
+            @memcpy(dst, p.config_bytes[0..copy]);
+            return @intCast(copy);
+        }
         // std.json capability (ADR 0031, RFC 0002 §5): parse the JSON
         // doc at guest memory (ptr, len) with std.json; 0 = ok, -1 = parse
         // error. The parsed doc is per-plugin state, replaced on the next
@@ -1344,6 +1386,7 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
     try linker.defineFuncCtx("zdtd", "queue", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.queue);
     try linker.defineFuncCtx("zdtd", "sense", ctx, fn (*zwasm.Caller, i32, i32, i32) anyerror!i32, H.sense);
     try linker.defineFuncCtx("zdtd", "query", ctx, fn (*zwasm.Caller, i32, i32, i32, i32) anyerror!i32, H.query);
+    try linker.defineFuncCtx("zdtd", "config", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.config);
     try linker.defineFuncCtx("zdtd", "json_parse", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.jsonParse);
     try linker.defineFuncCtx("zdtd", "json_str", ctx, fn (*zwasm.Caller, i32, i32, i32, i32) anyerror!i32, H.jsonStr);
     try linker.defineFuncCtx("zdtd", "json_raw", ctx, fn (*zwasm.Caller, i32, i32, i32, i32) anyerror!i32, H.jsonRaw);
@@ -1993,9 +2036,10 @@ test "findByName matches display name and wasm stem suffix" {
 }
 
 test "host_verbs is the _zdtd_requires vocabulary for host imports" {
-    try std.testing.expectEqual(@as(usize, 9), host_verbs.len);
+    try std.testing.expectEqual(@as(usize, 10), host_verbs.len);
     try std.testing.expect(Plugin.isHostVerb("log"));
     try std.testing.expect(Plugin.isHostVerb("json_obj"));
+    try std.testing.expect(Plugin.isHostVerb("config"));
     try std.testing.expect(!Plugin.isHostVerb("on_tick"));
     try std.testing.expect(!Plugin.isHostVerb("bot"));
 }

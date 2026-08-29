@@ -150,6 +150,16 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   infinite world now ships that way (`mods/infinite_world/`); it is no
   longer a stock preset. Renames: `src/server/mode.zig` -> `preset.zig`,
   `Pack` -> `Preset`, `error.DuplicateMode` -> `error.DuplicatePreset`.
+- Plugins are self-contained: every mod folder may ship `config.toml`
+  (default config, served to the guest verbatim via the new `zdtd.config`
+  host import; the host never parses it, each plugin owns its format - the
+  shared `mods/plugin_common.zig` `Config` helper parses the minimal
+  `key = value` subset) and a `README.md`. The channel works for both load
+  paths: discovered mods (manifest dir) and explicit `[plugin] modules`
+  (config.toml is read from the wasm's own folder). Reference plugin
+  `core_pricegate` now reads its `price_percent` from its own config.toml
+  instead of hardcoding 150 - edit the file, no rebuild. Declared via
+  `_zdtd_requires "config"`.
 - The plugin/mod manifest file is `manifest.toml` (was `mod.toml`; the parsed
   shape was already called `Manifest`). The folder keeps its self-contained
   layout: manifest + optional `preset.toml` + optional `.wasm`.

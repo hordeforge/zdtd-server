@@ -86,3 +86,55 @@ test "Buf truncates instead of overrunning" {
     b.put(&big);
     try std.testing.expectEqual(out_cap - 1, b.slice().len);
 }
+
+pub extern "zdtd" fn config(out_ptr: i32, out_cap: i32) i32;
+
+/// Self-contained default config (the mod's config.toml, raw text served by
+/// the host's zdtd.config import). The host never parses it; each plugin owns
+/// its format. `get`/`getInt` handle the minimal `key = value` subset (with
+/// `#` comments and quoted values) that the shipped core plugins use; a
+/// plugin with a richer format can read `bytes` directly.
+pub const Config = struct {
+    bytes: [4096]u8 = undefined,
+    n: usize = 0,
+
+    pub fn load(self: *Config) void {
+        self.n = @intCast(config(@intCast(@intFromPtr(&self.bytes)), @intCast(self.bytes.len)));
+    }
+
+    fn value(self: *const Config, key: []const u8) ?[]const u8 {
+        var i: usize = 0;
+        while (i < self.n) {
+            const nl = std.mem.indexOfScalarPos(u8, self.bytes[0..self.n], i, '\n') orelse self.n;
+            const line = std.mem.trim(u8, self.bytes[i..nl], " \t\r");
+            i = nl + 1;
+            if (line.len == 0 or line[0] == '#') continue;
+            const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
+            if (!std.mem.eql(u8, std.mem.trim(u8, line[0..eq], " \t"), key)) continue;
+            var v = std.mem.trim(u8, line[eq + 1 ..], " \t");
+            if (std.mem.indexOfScalar(u8, v, '#')) |h| v = std.mem.trim(u8, v[0..h], " \t");
+            if (v.len >= 2 and v[0] == '"' and v[v.len - 1] == '"') v = v[1 .. v.len - 1];
+            return v;
+        }
+        return null;
+    }
+
+    pub fn get(self: *const Config, key: []const u8) ?[]const u8 {
+        return self.value(key);
+    }
+
+    pub fn getInt(self: *const Config, key: []const u8) ?i64 {
+        const v = self.value(key) orelse return null;
+        return std.fmt.parseInt(i64, v, 10) catch null;
+    }
+};
+
+test "Config parses key = value lines" {
+    var c: Config = .{};
+    const src = "# a comment\nprice_percent = 150\nname = \"trader\"\n";
+    @memcpy(c.bytes[0..src.len], src);
+    c.n = src.len;
+    try std.testing.expectEqual(@as(i64, 150), c.getInt("price_percent").?);
+    try std.testing.expectEqualStrings("trader", c.get("name").?);
+    try std.testing.expect(c.get("missing") == null);
+}

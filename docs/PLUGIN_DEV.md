@@ -433,6 +433,18 @@ stack. Do not retain either offset past the call.
 every tick will be disabled, which is the system working, but your plugin still
 stops.
 
+### Self-contained config (`config.toml`)
+
+A plugin folder may ship `config.toml` - its own default config. The host
+loads it (size-capped at 4 KiB) and serves the raw text to the module via
+`zdtd.config(out_ptr, out_cap) -> i32` (returns the bytes written; 0 = no
+config). The host never parses it: each plugin owns its format. The shared
+`mods/plugin_common.zig` `Config` helper parses the minimal `key = value`
+subset (`#` comments, quoted values); a plugin with a richer format reads the
+buffer directly. Declare the capability in `_zdtd_requires` as `config`.
+Reference: `core_pricegate` reads `price_percent` from its own config.toml
+and applies it in `on_trade_price` - edit the file, no rebuild.
+
 Fixtures exercising the full surface: `assets/fixtures/plugin_rules.c`
 (deny/double verdicts), `assets/fixtures/plugin_trap.c` (trapping hook),
 `plugin_admin.c`, `plugin_chat.c` and `plugin_login.c` (the request/reply

@@ -42,13 +42,28 @@ sense of "core" (shipped in-tree, Zig source, built by
 
 | File | Required | Name |
 |---|---|---|
+| manifest | yes | `manifest.toml` (fixed name, discovered automatically; the manifest, not a "mod file") |
+| committed binary | yes (wasm plugins) | `<module>.wasm` — exactly the directory name + `.wasm` |
 | root source | yes (core plugins are Zig) | `<module>.zig` — exactly the directory name |
 | build wrapper | yes (Zig plugins) | `main.zig` |
-| committed binary | yes | `<module>.wasm` — exactly the directory name + `.wasm` |
-| manifest | yes | `manifest.toml` (fixed name, discovered automatically; the manifest, not a "mod file") |
+| config | no | `config.toml` (fixed name; the module's own default config, served raw via the `zdtd.config` import) |
+| readme | recommended | `README.md` (what it does, its config keys, how to enable) |
 
 The `wasm` key in manifest.toml must be `<module>.wasm` (a path relative to the
-plugin directory). No other files are read by the host.
+plugin directory). A plugin folder is **self-contained**: manifest + wasm +
+source + optional `config.toml` + optional `preset.toml` (rules for a
+config-only mod) + `README.md` travel together; no behavior is hardcoded in
+the host.
+
+### Config-only vs wasm plugins
+
+- A **wasm plugin** ships `<module>.wasm` (with `<module>.zig` source for
+  core plugins) and may ship `config.toml`, served to the guest verbatim via
+  the `zdtd.config` host import. The host never parses it - each plugin owns
+  its format (the shared `mods/plugin_common.zig` `Config` helper parses the
+  minimal `key = value` subset).
+- A **config-only mod** ships `preset.toml` (rules + gameplay keys; exclusive
+  with `wasm` in the manifest). Example: `mods/infinite_world`.
 
 ### Exports and capabilities
 

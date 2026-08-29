@@ -26,7 +26,7 @@ A native ABI could promise neither.
 | Piece | State |
 |---|---|
 | Wasm runtime, module loading, fuel accounting | **implemented** (`src/plugin/wasm.zig`: `WasmHost`, `Plugin`, `Budget`) |
-| Host function table and capability gating | **implemented**, module `zdtd`, fields `log(level, ptr, len)`, `tick() -> i64`, `queue(ptr, len) -> i32` (bare field names; see [PLUGIN_DEV.md](PLUGIN_DEV.md#host-imports)) |
+| Host function table and capability gating | **implemented**, module `zdtd`, fields `log(level, ptr, len)`, `tick() -> i64`, `queue(ptr, len) -> i32`, `config(out_ptr, out_cap) -> i32` (bare field names; see [PLUGIN_DEV.md](PLUGIN_DEV.md#host-imports)) |
 | `src/plugin/api.zig` | `Host`, vtable, `LogLevel`, `plugin_api_version=1`: in-tree test scaffolding |
 | `src/plugin/host.zig` | Fixed table (22 hooks), register / enable / setTick / onTick / playerJoin / shutdown |
 | `src/plugin/sample_hello.zig` | In-tree sample used by scenarios, not a shipping plugin format |
@@ -43,6 +43,7 @@ A native ABI could promise neither.
 | Chat filter from plugins | Wasm `on_chat(sender,msg_ptr,msg_len,out_ptr,out_cap)->i32` and static `on_chat(sender,msg,out)`; <0 deny, 0 keep, >0 filtered bytes (validate again; bad rewrite = deny); first responder wins |
 | Join gate from plugins | Wasm `on_player_login(peer_slot,name_ptr,name_len,out_ptr,out_cap)->i32` and static `on_player_login(peer_slot,name,out)`; non-zero deny, magnitude = reason bytes in out; first deny wins (traps treated as allow) |
 | SimCommand from plugins | queue lands in the ECS `World.commands` buffer (drained once per tick) |
+| Self-contained config (2026-08-29) | `config.toml` inside the mod folder, served to the guest verbatim via `zdtd.config(out_ptr, out_cap) -> i32` (0 = none; host never parses it); declared via `_zdtd_requires "config"`; reference plugin `core_pricegate` reads `price_percent` from its own config.toml |
 | Module tiers + discovery (PRD 0005 / ADR 0032) | **implemented**: `manifest.toml` manifests, `mods/*/manifest.toml` scan, `[mods] disabled`/`blacklist`, five exclusive core override points, `override = <name>` replacement, conflict detection at load (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`, `WasmHost.loadResolved`) |
 
 The static host stays because scenarios need to drive hooks without standing up

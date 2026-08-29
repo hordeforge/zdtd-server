@@ -13,6 +13,9 @@ const toml_bind = @import("../util/toml_bind.zig");
 
 /// Module tier (PRD 0005 R1): core components are native and registered
 /// host-side; official mods ship with zdtd; user mods are anything else.
+/// Max size for a mod's self-contained config.toml (raw pass-through to the
+/// guest; larger files fail closed to no config).
+pub const max_config_bytes: usize = 4096;
 pub const Tier = enum { core, official, user };
 
 /// Native core components (PRD 0005 R4): always on, cannot be disabled or
@@ -98,6 +101,12 @@ pub const Manifest = struct {
 
     /// Directory the manifest was found in (set by discovery; not a toml key).
     dir: []const u8 = "",
+    /// Raw `<dir>/config.toml` (the plugin's own default config; optional).
+    /// Passed through to the guest verbatim via the zdtd.config import - the
+    /// host does not impose a schema, each plugin parses its own. "" when the
+    /// file is absent or larger than `max_config_bytes` (fail closed: a
+    /// plugin that needs config sees none rather than a truncated blob).
+    config: []const u8 = "",
 
     /// Validate after binding: required fields, tier spelling, known points.
     /// Returns a loud message on failure (fail-closed at load).
@@ -160,6 +169,15 @@ pub fn bindManifest(a: std.mem.Allocator, dir_path: []const u8) !Manifest {
         return error.InvalidManifest;
     }
     m.dir = try a.dupe(u8, dir_path);
+    // Optional self-contained config: raw text passed to the guest verbatim.
+    // A missing or oversized file is not a load error (config is optional;
+    // fail closed to no config, never a truncated blob).
+    const cfg_path = try std.fs.path.join(a, &.{ dir_path, "config.toml" });
+    defer a.free(cfg_path);
+    if (io_fs.fileExists(cfg_path)) {
+        const cfg = try io_fs.readFileAll(a, cfg_path);
+        if (cfg.len <= max_config_bytes) m.config = cfg;
+    }
     return m;
 }
 
@@ -167,6 +185,7 @@ pub fn bindManifest(a: std.mem.Allocator, dir_path: []const u8) !Manifest {
 pub fn free(a: std.mem.Allocator, m: *const Manifest) void {
     a.free(m.dir);
     a.free(m.name.?);
+    if (m.config.len > 0) a.free(m.config);
     if (m.version) |v| a.free(v);
     if (m.wasm) |w| a.free(w);
     if (m.preset) |pr| a.free(pr);
