@@ -87,9 +87,11 @@ stateDiagram-v2
     [*] --> Begin: step()
     Begin --> Buffs: beginTick (locals, dirty bits)
     Buffs --> Director: buff tick/expiry
-    Director --> Ai: director + clock (blood moon, spawns)
+    Director --> Stealth: director + clock (blood moon, spawns)
+    Stealth --> Ai: player movement-noise (before ai, same tick)
     Ai --> Vehicles: zombie AI + path replans
-    Vehicles --> Turrets
+    Vehicles --> Falling: EntityFallingBlock gravity/landing
+    Falling --> Turrets: crush damage (serial, before the parallel pass)
     Turrets --> Despawn: turret fire, kills
     Despawn --> Commands: far-despawn
     Commands --> [*]: drain deferred ops (systems + plugins)
