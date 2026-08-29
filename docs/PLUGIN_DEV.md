@@ -379,6 +379,28 @@ Event hooks (T15, return a verdict):
 | `on_block_damage` | `(x: i32, y: i32, z: i32, dmg: i32) -> i32` | `<0` deny (no damage); `>0` apply that percent (`200` doubles) |
 | `on_quest_complete` | `(player_entity_id: i32, quest_def_id: i32) -> i32` | `<0` withhold the payout; `>0` pay that percent of items/exp |
 
+Remaining verdict hooks and observers (the full host surface is 22 hooks;
+[PLUGIN_API.md](PLUGIN_API.md) is the authoritative contract — this table
+completes the authoring view):
+
+| Export | Signature | Verdict return / when |
+|---|---|---|
+| `on_player_damage` | `(attacker: i32, victim: i32, amount: i32) -> i32` | `<0` deny the damage; `>0` apply that percent (the `damage.player_scale` override point) |
+| `on_quest_accept` | `(player: i32, quest_def_id: i32) -> i32` | first non-zero wins: `<0` deny, `0` keep, `>0` scale |
+| `on_craft_request` | `(player: i32, recipe_ptr, recipe_len, times: i32) -> i32` | `<0` deny the batch; `>0` percent (the `craft.request` override point) |
+| `on_loot_roll` | `(list_ptr, list_len, rolled: i32) -> i32` | `<0` deny the drop, `0` keep, `>0` scale the roll count (re-capped to the roll array; the `loot.roll` override point) |
+| `on_trade_price` | `(player: i32, item: i32, unit_price: i32) -> i32` | `<0` deny, `0` keep, `>0` percent (the `trade.price` override point) |
+| `on_perk_spend` | `(player: i32, skill_ptr, skill_len, level, cost: i32) -> i32` | ADR 0033: `<0` deny the purchase, `0` keep, `>0` scales the skill-point cost by percent |
+| `on_game_event` | `(player: i32, event_ptr, event_len, target, var_count: i32) -> i32` | ADR 0035: `<0` deny, `0` keep, `>0` keep (first non-keep wins); the stock sender/party gate runs native before the verdict |
+| `on_player_leave` | `(peer_slot: i32, entity_id: i32) -> ()` | void observer at disconnect (the join counterpart) |
+| `on_stat_changed` | `(player: i32, hp, food, water, stamina, level, xp: i32) -> ()` | ADR 0034: pure observer fired when the survival pass or an XP award changed a tracked stat |
+| `on_trader_event` | `(player: i32, trader_entity: i32, kind: i32) -> ()` | void observer on trade open / sell / buy |
+
+Five of the verdict hooks back the ADR 0032 exclusive override points
+(`loot.roll`, `quest.payout`, `damage.player_scale`, `craft.request`,
+`trade.price`): a mod that claims the point becomes the sole decision maker
+and the native default is skipped.
+
 The return convention is: **below 0 denies the proposed outcome, 0 keeps
 today's behaviour, above 0 adjusts as a percent** (where a percent is
 meaningful). A module that does not export the hook costs nothing and the
