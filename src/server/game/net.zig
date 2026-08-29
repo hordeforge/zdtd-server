@@ -5,6 +5,13 @@
 //! chunk_stream precedent: helpers take `*Game` as first param and are called as
 //! `game_net.sendGame(g, peer, name, body)`. game.zig keeps one-line forwarders
 //! so existing callers/tests stay unchanged.
+//!
+//! Failure convention: every send/broadcast helper counts the failure in
+//! `net_send_errors` (and logs at a 1/100 throttle) before returning the error.
+//! Callers that deliberately ignore the returned error therefore use a bare
+//! `catch {}` — the accounting and the log live in the helper, so the empty
+//! catch is the documented best-effort form, not an unlogged swallow (AGENTS
+//! rule "empty catch {} only for ... documented non-fatal").
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
