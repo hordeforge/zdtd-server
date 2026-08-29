@@ -591,7 +591,10 @@ area and the concrete work.
     ramp is confounded by the player cap (login server full; the join_fail
     counter counts cap rejections, not burst drops — 62.5% join pass there
     is the 8-slot cap, not the burst); rerun at max_players=16 on the
-    ReleaseFast binary passes 16/16 (100% join, no burst failures). The
+    ReleaseFast binary passes 16/16 (100% join, no burst failures), while
+    the same 16-slot ramp on the Debug binary passes 13/16 with tick spikes
+    to 29 s (p99 1.6 s) and 2317 reliable-window drops during the burst —
+    the proc-gen amplification made visible without the cap confound. The
     Release binary keeps a tick-budget overrun (max ~260 ms vs 50 ms), not
     a join failure. Remaining directions: deliver the spawn-area through
     the `chunk_adds_per_stream_tick` stream budget instead of one
