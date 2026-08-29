@@ -214,7 +214,8 @@ const known_flags = [_][]const u8{
     "--mode",          "--webui-port",   "--webui-bind",       "--webui-secret",
     "--quests",        "--mcp-port",     "--mcp-bind",         "--mcp-token",
     "--mcp-allowlist", "--config-dir",   "--config-overrides", "--worldgen-seed",
-    "--ticks",         "--once",         "--quiet",            "--version",
+    "--mods-dir",      "--ticks",        "--once",             "--quiet",
+    "--version",
     "--help",          "-V",             "-v",                 "-q",
     "-h",
 };
