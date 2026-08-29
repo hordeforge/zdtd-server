@@ -21,6 +21,14 @@ const util_sim = @import("../../util/sim.zig");
 const sky = @import("../../world/sky.zig");
 const plugin_mod = @import("../../plugin/root.zig");
 
+/// Cap datagram polls per tick: one chatty peer must not monopolize the
+/// tick (the loop breaks on `.none` anyway; this bounds a flood).
+const max_net_polls_per_tick: u32 = 64;
+/// GSI info-poll cycles per tick (serverinfo_tcp is a tiny poll).
+const max_info_polls_per_tick: u32 = 8;
+/// Webui console-line drains per tick (the web console is operator-only).
+const max_webui_polls_per_tick: u32 = 4;
+
 pub fn step(self: *Game) !void {
     const sc = apm.profiler.scope(&self.harness.prof, .tick_total);
     var completed = false;
@@ -37,7 +45,7 @@ pub fn step(self: *Game) !void {
         const sn = apm.profiler.scope(&self.harness.prof, .net_poll);
         defer sn.end();
         var polls: u32 = 0;
-        while (polls < 64) : (polls += 1) {
+        while (polls < max_net_polls_per_tick) : (polls += 1) {
             const ev = self.net.poll(&self.recv_buf) catch |err| {
                 self.harness.counters.inc(.net_poll_errors);
                 if (util_sim.isEnabled()) {
@@ -73,10 +81,10 @@ pub fn step(self: *Game) !void {
         self.reapStalePeers();
         self.reapPolicyKicks();
         var info_n: u32 = 0;
-        while (info_n < 8) : (info_n += 1) self.info_tcp.poll();
+        while (info_n < max_info_polls_per_tick) : (info_n += 1) self.info_tcp.poll();
         self.pollAdmin();
         var web_n: u32 = 0;
-        while (web_n < 4) : (web_n += 1) self.pollWebui();
+        while (web_n < max_webui_polls_per_tick) : (web_n += 1) self.pollWebui();
         self.mcp.poll();
     }
 
