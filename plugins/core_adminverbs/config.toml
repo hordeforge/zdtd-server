@@ -1,0 +1,6 @@
+# core_adminverbs default config (zdtd.config import).
+# The `wave <n>` verb spawns this entity at these world coordinates.
+spawn_x = 256
+spawn_y = 70
+spawn_z = 256
+spawn_entity = 100

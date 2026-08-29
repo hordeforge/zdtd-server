@@ -17,10 +17,26 @@ const std = @import("std");
 const common = @import("plugin_common");
 
 var out: common.Buf = .{};
+var cfg: common.Config = .{};
+var spawn_x: i32 = 256;
+var spawn_y: i32 = 70;
+var spawn_z: i32 = 256;
+var spawn_entity: i32 = 100;
 
 export fn on_enable() void {
+    cfg.load();
+    if (cfg.getInt("spawn_x")) |v| spawn_x = @intCast(v);
+    if (cfg.getInt("spawn_y")) |v| spawn_y = @intCast(v);
+    if (cfg.getInt("spawn_z")) |v| spawn_z = @intCast(v);
+    if (cfg.getInt("spawn_entity")) |v| spawn_entity = @intCast(v);
     out.reset();
-    out.put("core_adminverbs v1.0 enabled (verb: wave <n>)");
+    out.put("core_adminverbs v1.0 enabled (verb: wave <n> @ ");
+    out.putInt(spawn_x);
+    out.put(",");
+    out.putInt(spawn_y);
+    out.put(",");
+    out.putInt(spawn_z);
+    out.put(")");
     out.logLine(0);
 }
 
@@ -35,7 +51,14 @@ fn queueWave(count_in: i32, reply: []u8) usize {
     var count = @max(count_in, 1);
     while (count > 0) : (count -= 1) {
         out.reset();
-        out.put("spawn 256 70 256 100");
+        out.put("spawn ");
+        out.putInt(spawn_x);
+        out.put(" ");
+        out.putInt(spawn_y);
+        out.put(" ");
+        out.putInt(spawn_z);
+        out.put(" ");
+        out.putInt(spawn_entity);
         _ = out.send();
     }
     const s = std.fmt.bufPrint(reply, "wave: spawning {d}", .{@max(count_in, 1)}) catch return 0;
@@ -58,4 +81,8 @@ export fn on_admin_command(cmd_ptr: i32, cmd_len: i32, out_ptr: i32, out_cap: i3
     const reply: [*]u8 = @ptrFromInt(@as(usize, @intCast(out_ptr)));
     const cap: usize = @intCast(@max(0, out_cap));
     return @intCast(queueWave(count, reply[0..cap]));
+}
+
+comptime {
+    common.exportRequires("on_admin_command,queue,config,log");
 }

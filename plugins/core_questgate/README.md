@@ -12,7 +12,7 @@ Gates quest acceptance via the `on_quest_accept` verdict (queries the quest def 
 
 ## Config
 
-None shipped.
+`config.toml`: `deny_prefix = "forbidden_"` (quests whose name starts with this prefix cannot be accepted). Edit the file, no rebuild.
 
 ## Enable
 

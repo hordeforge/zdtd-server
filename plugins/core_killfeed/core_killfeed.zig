@@ -16,20 +16,36 @@
 //
 // Build (zig): scripts/build-plugins.sh. Committed as plugins/core_killfeed/core_killfeed.wasm.
 
+const std = @import("std");
 const common = @import("plugin_common");
 
 var out: common.Buf = .{};
+var cfg: common.Config = .{};
+var log_level: i32 = 1;
 
 export fn on_enable() void {
+    cfg.load();
+    if (cfg.get("log_level")) |v| {
+        const t = std.mem.trim(u8, v, " \"'");
+        if (std.mem.eql(u8, t, "off")) {
+            log_level = -1;
+        } else if (std.mem.eql(u8, t, "info")) {
+            log_level = 0;
+        } else if (std.mem.eql(u8, t, "debug")) {
+            log_level = 1;
+        }
+    }
     out.reset();
-    out.put("core_killfeed v1.0 enabled (observer: kill/death/quest hooks)");
-    out.logLine(1);
+    out.put("core_killfeed v1.0 enabled (log_level=");
+    out.putInt(log_level);
+    out.put(")");
+    out.logLine(0);
 }
 
 export fn on_shutdown() void {
     out.reset();
     out.put("core_killfeed shutdown");
-    out.logLine(1);
+    if (log_level >= 0) out.logLine(log_level);
 }
 
 export fn on_player_join(slot: i32, entity_id: i32) void {
@@ -38,7 +54,7 @@ export fn on_player_join(slot: i32, entity_id: i32) void {
     out.putInt(slot);
     out.put(" entity=");
     out.putInt(entity_id);
-    out.logLine(1);
+    if (log_level >= 0) out.logLine(log_level);
 }
 
 export fn on_player_leave(slot: i32, entity_id: i32) void {
@@ -47,7 +63,7 @@ export fn on_player_leave(slot: i32, entity_id: i32) void {
     out.putInt(slot);
     out.put(" entity=");
     out.putInt(entity_id);
-    out.logLine(1);
+    if (log_level >= 0) out.logLine(log_level);
 }
 
 export fn on_entity_killed(killed: i32, killer: i32) i32 {
@@ -56,7 +72,7 @@ export fn on_entity_killed(killed: i32, killer: i32) i32 {
     out.putInt(killer);
     out.put(" killed=");
     out.putInt(killed);
-    out.logLine(1);
+    if (log_level >= 0) out.logLine(log_level);
     return 0; // keep the stock outcome
 }
 
@@ -64,7 +80,7 @@ export fn on_player_death(victim: i32) i32 {
     out.reset();
     out.put("death: victim=");
     out.putInt(victim);
-    out.logLine(1);
+    if (log_level >= 0) out.logLine(log_level);
     return 0;
 }
 
@@ -74,6 +90,6 @@ export fn on_quest_complete(player: i32, quest_def: i32) i32 {
     out.putInt(player);
     out.put(" def=");
     out.putInt(quest_def);
-    out.logLine(1);
+    if (log_level >= 0) out.logLine(log_level);
     return 0;
 }

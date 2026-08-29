@@ -160,12 +160,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `core_pricegate` now reads its `price_percent` from its own config.toml
   instead of hardcoding 150 - edit the file, no rebuild. Declared via
   `_zdtd_requires "config"`.
-- Seven more core plugins migrated to config-driven policy (same channel):
+- All 12 core plugins migrated to config-driven policy (same channel):
   `core_damagegate` (`percent`), `core_lootgate` (`percent`),
-  `core_rewardgate` (`percent`), `core_craftgate` + `core_perkgate`
-  (`deny_prefix`), `core_pvp` (`deny`), `core_announce` (announce strings:
-  `day_prefix`, `blood_moon_rise/fade`, `join/leave_message`). Live-verified
-  (damagegate percent=25); all 13 core wasms rebuilt.
+  `core_rewardgate` (`percent`), `core_craftgate` + `core_perkgate` +
+  `core_questgate` (`deny_prefix`), `core_pvp` (`deny`), `core_announce`
+  (announce strings: `day_prefix`, `blood_moon_rise/fade`,
+  `join/leave_message`), `core_adminverbs` (`spawn_x/y/z`, `spawn_entity`),
+  `core_killfeed` + `core_tradefeed` (`log_level`: off | info | debug).
+  Live-verified (damagegate percent=25, questgate deny_prefix); all 13 core
+  wasms rebuilt.
 - The plugin/mod manifest file is `manifest.toml` (was `mod.toml`; the parsed
   shape was already called `Manifest`). The folder keeps its self-contained
   layout: manifest + optional `preset.toml` + optional `.wasm`.

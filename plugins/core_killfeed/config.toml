@@ -1,0 +1,3 @@
+# core_killfeed default config (zdtd.config import).
+# Observer log verbosity: off | info | debug.
+log_level = "debug"

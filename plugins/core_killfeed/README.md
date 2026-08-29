@@ -12,7 +12,7 @@ Logs kill, death and quest events via the observer hooks.
 
 ## Config
 
-None shipped.
+`config.toml`: `log_level = "debug"` (observer verbosity: off | info | debug). Edit the file, no rebuild.
 
 ## Enable
 

@@ -12,7 +12,7 @@ Observes trade open / sell / buy events via the `on_trader_event` hook.
 
 ## Config
 
-None shipped.
+`config.toml`: `log_level = "debug"` (observer verbosity: off | info | debug). Edit the file, no rebuild.
 
 ## Enable
 

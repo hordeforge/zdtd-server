@@ -12,7 +12,7 @@ Extends the admin console: `wave <n>` verb via the `on_admin_command` request/re
 
 ## Config
 
-None shipped; the verb is built in.
+`config.toml`: `spawn_x/spawn_y/spawn_z` (256/70/256) and `spawn_entity` (100) - what the `wave <n>` verb spawns and where. Edit the file, no rebuild.
 
 ## Enable
 
