@@ -147,7 +147,7 @@ values to a connected stock client:
 
 ## Deferred XML-data items (recorded with reason)
 
-From the value-level audit (2026-08-25); each is either unreachable in stock
+From the value-level audit ([archive/HARDCODE_AUDIT_2026-08-25.md](archive/HARDCODE_AUDIT_2026-08-25.md)); each is either unreachable in stock
 play or needs a boundary/plumbing change before it can carry stock data. None
 ships a wrong value to a connected client.
 
