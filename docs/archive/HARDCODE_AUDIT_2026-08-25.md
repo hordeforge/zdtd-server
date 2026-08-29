@@ -74,3 +74,30 @@ perk gates are plugins (10+ core modules); every operator tunable is a
 survival stage machine, damage application, and stat mutation stay native
 sim authority (the boundary cannot express them). No native behavior was
 found that the boundary could carry.
+
+---
+
+## Re-verification 2026-08-29 (HEAD b723eb6, clean tree)
+
+Fresh run of the section-3 hunts (abs paths, Bucket A hotspots, power/AI/
+terrain/placeables, content enums, stock XML loader coverage) against the
+tree after the 3.2.0 + plugin/config passes:
+
+- **No new Bucket A hits.** `inventory.zig` place_*_block_id pins and
+  `offlineStockName` stay offline/test-gated (`hooks.zig` fires the builtin
+  path only when `items.source == .builtin and !stock_catalogs_requested`);
+  `store.zig` terrain pins resolve live via `TerrainIds.resolve` at
+  `init_assets.zig:135`; `block_stone` uses are test-only.
+- **No new Bucket B hits.** AI bands all read `w.rules.ai.*`; power
+  `battery_capacity_scale` syncs from `[rules.power]` (rules.zig:719); the
+  only bare `chase_speed = 1.1`-style literals are test mocks.
+- **Doc-to-src references:** every `src/...zig` path cited by current-state
+  docs resolves; the four "missing" files (`ecs/challenge|drone|game_event|
+  stealth.zig`) are forward-looking WORK_PLAN / historical ZIG_CLONE refs.
+- **Stock XML coverage:** the 9 unreferenced Config files
+  (blockplaceholders, dmscontent, music, physicsbodies, sandbox_overrides,
+  subtitles, twitch_events, ui_display, videos) are the documented
+  client-side/out-of-scope set; 3.2.0 added no server-side dependency on
+  them.
+- **New since 08-25:** entity kind now classifies `vehicle`/`turret` from
+  stock Tags (b723eb6), removing the admin spawnentity name-sniff list.
