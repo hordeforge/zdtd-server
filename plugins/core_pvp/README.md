@@ -12,7 +12,7 @@ Denies player-vs-player damage via the `on_player_damage` verdict.
 
 ## Config
 
-None shipped; the deny-everything policy is the module's.
+`config.toml`: `deny = true` (false keeps stock PvP). Edit the file, no rebuild.
 
 ## Enable
 

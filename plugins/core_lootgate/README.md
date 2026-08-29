@@ -12,7 +12,7 @@ Scales loot rolls to 50% via the `on_loot_roll` verdict.
 
 ## Config
 
-None shipped; the 50% default is the module's policy.
+`config.toml`: `percent = 50` (percent of the rolled stack count to apply; 0 keeps, <0 denies). Edit the file, no rebuild.
 
 ## Enable
 

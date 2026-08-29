@@ -1,0 +1,3 @@
+# core_pvp default config (zdtd.config import).
+# deny = true blocks all player-vs-player damage; false keeps stock PvP.
+deny = true

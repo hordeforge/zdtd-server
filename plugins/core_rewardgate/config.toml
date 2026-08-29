@@ -1,0 +1,3 @@
+# core_rewardgate default config (zdtd.config import).
+# Percent of the quest payout to grant (150 = 1.5x).
+percent = 150

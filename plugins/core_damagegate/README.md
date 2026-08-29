@@ -12,7 +12,7 @@ Scales incoming player damage via the `on_player_damage` verdict (0.5x default; 
 
 ## Config
 
-None shipped; the 0.5x default is the module's policy.
+`config.toml`: `percent = 50` (percent of incoming player damage to apply; 0 keeps the hit, <0 denies). Edit the file, no rebuild.
 
 ## Enable
 

@@ -12,7 +12,7 @@ Scales quest rewards to 1.5x via the `on_quest_complete` verdict (specialize per
 
 ## Config
 
-None shipped; the 1.5x default is the module's policy.
+`config.toml`: `percent = 150` (percent of the quest payout to grant; 0 keeps, <0 withholds). Edit the file, no rebuild.
 
 ## Enable
 

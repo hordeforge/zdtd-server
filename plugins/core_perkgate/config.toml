@@ -1,0 +1,3 @@
+# core_perkgate default config (zdtd.config import).
+# Perks whose name starts with this prefix cannot be purchased.
+deny_prefix = "forbidden_"

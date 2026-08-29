@@ -12,7 +12,7 @@ Denies craft requests for recipes named `forbidden_*` via the `on_craft_request`
 
 ## Config
 
-None shipped; the deny prefix is the module's policy.
+`config.toml`: `deny_prefix = "forbidden_"` (recipes whose name starts with this prefix are denied). Edit the file, no rebuild.
 
 ## Enable
 

@@ -1,0 +1,3 @@
+# core_craftgate default config (zdtd.config import).
+# Recipes whose name starts with this prefix are denied.
+deny_prefix = "forbidden_"

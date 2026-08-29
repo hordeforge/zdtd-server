@@ -1,48 +1,61 @@
-// core_pvp — a player-damage policy plugin (AGENTS.md rule 29, Wasm-first).
-// Reference module for the on_player_damage verdict + the "kind" query verb:
-// denies all player-vs-player damage while leaving NPC damage untouched.
+// core_pvp — player-vs-player damage gate via the on_player_damage verdict.
 //
-// Build (zig): see mods/BUILDING.md. Committed as core_pvp.wasm.
+// Verdict convention (docs/PLUGIN_DEV.md "Hooks"):
+//   on_player_damage(attacker, victim, amount) -> i32
+//     <0  deny the hit
+//      0  keep it
+//     >0  apply that percent
+//
+// Policy comes from this mod's own config.toml (zdtd.config import):
+// `deny` defaults to true - all player-vs-player damage is denied. Set
+// deny = false to keep stock PvP.
 
 const std = @import("std");
 const common = @import("plugin_common");
 
 var out: common.Buf = .{};
-var qbuf: [8]u8 = undefined;
-
-// "kind <net_id>" -> one byte '0' player / '1' zombie, or 0 when unknown.
-fn queryKind(net_id: i32) i32 {
-    var req: [24]u8 = undefined;
-    const s = std.fmt.bufPrint(&req, "kind {d}", .{net_id}) catch return -1;
-    const qn = common.query(@intCast(@intFromPtr(&req)), @intCast(s.len), @intCast(@intFromPtr(&qbuf)), qbuf.len);
-    if (qn != 1) return -1;
-    return @as(i32, qbuf[0]) - '0';
-}
+var cfg: common.Config = .{};
+var deny: bool = true;
 
 export fn on_enable() void {
+    cfg.load();
+    if (cfg.get("deny")) |v| {
+        if (std.mem.eql(u8, std.mem.trim(u8, v, " \"'"), "false")) deny = false;
+    }
     out.reset();
-    out.put("core_pvp v1.0 enabled (deny player-vs-player damage)");
-    out.logLine(1);
+    out.put("core_pvp v1.0 enabled (deny=");
+    out.put(if (deny) "true" else "false");
+    out.put(")");
+    out.logLine(0);
 }
 
 export fn on_shutdown() void {
     out.reset();
     out.put("core_pvp shutdown");
-    out.logLine(1);
+    out.logLine(0);
 }
 
 export fn on_player_damage(attacker: i32, victim: i32, amount: i32) i32 {
     _ = amount;
-    const ak = queryKind(attacker);
-    const vk = queryKind(victim);
-    if (ak == 0 and vk == 0) {
-        out.reset();
-        out.put("pvp deny: ");
-        out.putInt(attacker);
-        out.put(" -> ");
-        out.putInt(victim);
-        out.logLine(1);
-        return -1; // deny the hit
-    }
-    return 0; // keep everything else
+    if (!deny) return 0;
+    // Deny only player-vs-player damage: ask the host what the attacker is
+    // (zdtd.query "kind <net_id>" -> "0" player, "1" zombie). A non-player
+    // attacker (zombie, animal) keeps the hit.
+    var req_buf: [32]u8 = undefined;
+    const req = std.fmt.bufPrint(&req_buf, "kind {d}", .{attacker}) catch return 0;
+    var resp: [8]u8 = undefined;
+    const n = common.query(@intCast(@intFromPtr(req.ptr)), @intCast(req.len), @intCast(@intFromPtr(&resp)), @intCast(resp.len));
+    if (n < 1) return 0;
+    if (resp[0] != '0') return 0; // attacker is not a player
+    out.reset();
+    out.put("pvp deny: ");
+    out.putInt(attacker);
+    out.put(" -> ");
+    out.putInt(victim);
+    out.logLine(1);
+    return -1; // deny player-vs-player damage
+}
+
+comptime {
+    common.exportRequires("on_player_damage,query,config,log");
 }

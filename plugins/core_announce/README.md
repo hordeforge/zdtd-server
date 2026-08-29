@@ -12,7 +12,7 @@ Broadcasts day changes and blood-moon rise/fade announcements over chat (`say`) 
 
 ## Config
 
-None shipped yet; the announce strings are the module's policy (move to `config.toml` when you customize them).
+`config.toml`: `day_prefix`, `blood_moon_rise`, `blood_moon_fade`, `join_message`, `leave_message`. Edit the file, no rebuild.
 
 ## Enable
 

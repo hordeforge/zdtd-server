@@ -12,7 +12,7 @@ Denies perk purchases for perks named `forbidden_*` via the `on_perk_spend` verd
 
 ## Config
 
-None shipped; the deny prefix is the module's policy.
+`config.toml`: `deny_prefix = "forbidden_"` (perks whose name starts with this prefix cannot be purchased). Edit the file, no rebuild.
 
 ## Enable
 

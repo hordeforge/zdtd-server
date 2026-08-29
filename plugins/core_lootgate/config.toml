@@ -1,0 +1,3 @@
+# core_lootgate default config (zdtd.config import).
+# Percent of the rolled stack count to apply (50 = half).
+percent = 50
