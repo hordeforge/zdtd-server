@@ -509,7 +509,7 @@ stateDiagram-v2
 
 Stock's measured wall is not entity AI but **net**: per-entity × per-player rebuild with no spatial index and per-connection re-serialization of the same bytes. zdtd collapses it:
 
-- **Spatial interest** via a chunk or 16-block grid hash — an entity evaluates only players in nearby cells, and interest rebuilds only when a cell changes.
+- **Spatial interest** via a 32-block grid hash (`ecs/interest.zig` `cell_size` 32) — an entity evaluates only players in nearby cells, and interest rebuilds only when a cell changes.
 - **Dirty bitsets** per entity: `POS | ROT | FLAGS | HP | SPAWN | REMOVE`.
 - **Serialize once** per dirty package kind per tick, then `memcpy` fan-out.
 
