@@ -87,11 +87,11 @@ for lic in LICENSE THIRD_PARTY.md; do
   }
 done
 
-# Operator files: mode packs resolve as modes/<name>.toml from the server's CWD,
+# Operator files: preset packs resolve as presets/<name>.toml from the server's CWD,
 # the example configs are the documented starting point, and the AssignIds dump
 # must sit flat beside the binary (maxdamage.zig tryMergeBundledAssignIds) or a
 # --game-dir run without .blocks.nim silently loses the block id map.
-for operator_file in zdtd.toml.example serverconfig.example.xml assignids_v314.embed.txt modes/default.toml; do
+for operator_file in zdtd.toml.example serverconfig.example.xml assignids_v314.embed.txt presets/default.toml; do
   test -s "zig-out/bin/$operator_file" || {
     echo "smoke-release: missing zig-out/bin/$operator_file in the release artifact" >&2
     exit 1

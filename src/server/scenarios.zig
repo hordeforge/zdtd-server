@@ -5491,10 +5491,10 @@ test "scenario mode pack rules overlay changes sim behaviour" {
     // through the real merge into World.rules, and the sim obeys the rule: the
     // combat damage floor (class_table zero) is the pack's attack_damage, so a
     // zombie in melee deals pack damage, not the default floor.
-    const mode_mod = @import("mode.zig");
+    const preset_mod = @import("preset.zig");
     const rules_mod = @import("../ecs/rules.zig");
 
-    var pack = try mode_mod.parse(std.testing.allocator,
+    var pack = try preset_mod.parse(std.testing.allocator,
         \\name = "scenario_hard"
         \\[rules.combat]
         \\attack_damage = 42.0

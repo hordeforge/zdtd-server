@@ -107,8 +107,8 @@ run: need-zig
 # Copies LICENSE + THIRD_PARTY.md beside the binary: zwasm is Apache-2.0 and
 # statically linked, and section 4(a) requires recipients of the binary to get
 # the license text (THIRD_PARTY.md carries it). The example configs and the
-# mode packs ride along too: the server resolves modes/<name>.toml relative to
-# its CWD, so an artifact without them cannot honour [mode] name.
+# preset packs ride along too: the server resolves presets/<name>.toml relative
+# to its CWD, so an artifact without them cannot honour [preset] name.
 # assignids_v314.embed.txt rides along flat beside the binary: without it a
 # --game-dir run with no .blocks.nim has no AssignIds map and silently falls
 # back to band defaults (src/assets/maxdamage.zig tryMergeBundledAssignIds).
@@ -134,7 +134,7 @@ release: release-check need-zig need-release-tools
 	  bash scripts/release-sbom.sh zig-out/bin/zdtd.cdx.json; \
 	  cp -f LICENSE THIRD_PARTY.md zdtd.toml.example serverconfig.example.xml zig-out/bin/; \
 	  cp -f src/assets/assignids_v314.embed.txt zig-out/bin/; \
-	  rm -rf zig-out/bin/modes && cp -r modes zig-out/bin/modes; \
+	  rm -rf zig-out/bin/presets && cp -r presets zig-out/bin/presets; \
 	  echo "zdtd: release ok $$(cut -d' ' -f1 zig-out/bin/zdtd.sha256)  $$bin"
 
 lint: need-zig lint-webui lint-html

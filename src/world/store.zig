@@ -1687,7 +1687,7 @@ test "proc worlds derive a spawn from the generated surface" {
 }
 
 test "a clean proc session writes no world files (mods leave no trace)" {
-    // --mode infinite is an opt-in overlay: exploring materializes chunks but
+    // --preset infinite is an opt-in overlay: exploring materializes chunks but
     // nothing persists until the player edits, so removing the mod later
     // leaves the world dir exactly as it was (default behavior unchanged;
     // edits are the player's data).

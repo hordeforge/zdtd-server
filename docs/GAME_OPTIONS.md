@@ -1,6 +1,6 @@
 # Server game options (serverconfig.xml)
 
-> **What this is:** how stock `serverconfig.xml` properties map into the sim and the precedence that decides the effective value (CLI > env > zdtd.toml > mode pack > serverconfig XML > code defaults). Stock names, stock defaults, applied wiring.
+> **What this is:** how stock `serverconfig.xml` properties map into the sim and the precedence that decides the effective value (CLI > env > zdtd.toml > preset pack > serverconfig XML > code defaults). Stock names, stock defaults, applied wiring.
 > **Related:** [ARCHITECTURE.md](ARCHITECTURE.md) §10 · [ZIG_CLONE.md](ZIG_CLONE.md) · [RULES_CONFIG.md](RULES_CONFIG.md) · [AUTHORITY.md](AUTHORITY.md) · [PLUGIN_CONFIG_DISPOSITION.md](PLUGIN_CONFIG_DISPOSITION.md) · [serverconfig.example.xml](../serverconfig.example.xml)
 
 `src/server/config.zig` parses the stock `serverconfig.xml` `<property>` list.
@@ -15,10 +15,10 @@ Example template: [`serverconfig.example.xml`](../serverconfig.example.xml).
 
 | Source | Role |
 |---|---|
-| CLI (`--port`, `--mode`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
+| CLI (`--port`, `--preset`, `--admin-port`, `--webui-port`, `--world-name`, …) | Highest; overrides matching file keys |
 | Env `ZDTD_WEBUI_SECRET` | Web UI secret when `--webui-secret` is unset (prefer env: not in `ps`) |
-| `<world>/zdtd.toml` then CWD `zdtd.toml` | stream/authority/feature/sim/plugin + optional `[mode] name`; first existing file wins; **fatal** if present but unreadable |
-| Mode pack `modes/<name>.toml` | When `--mode` or `[mode] name` is set: data-only InitOptions + `[rules.*]` sim-rule overrides (after serverconfig, before stream keys; `zdtd.toml` wins on a rules key) |
+| `<world>/zdtd.toml` then CWD `zdtd.toml` | stream/authority/feature/sim/plugin + optional `[preset] name`; first existing file wins; **fatal** if present but unreadable |
+| Preset pack `presets/<name>.toml` | When `--preset` (or the `--mode` alias) or `[preset] name` is set: data-only InitOptions + `[rules.*]` sim-rule overrides (after serverconfig, before stream keys; `zdtd.toml` wins on a rules key). A config-only mod carries its own preset inside the mod folder |
 | `--serverconfig path` | Stock-like XML; **fatal** if the path cannot be read |
 | Code defaults | Used when neither CLI nor file sets a value |
 
@@ -36,13 +36,13 @@ abort startup (LiteNet uses UDP port+2 and is not checked against TCP).
 `zdtd.toml` / mode-pack stream knobs are sanitized after merge even when no
 toml file is present. Invalid authority modes and mode-file name mismatches
 abort startup. Operator config reads are size-bounded (1 MiB serverconfig,
-256 KiB zdtd.toml, 64 KiB mode pack). Webui listen failures abort startup.
+256 KiB zdtd.toml, 64 KiB preset pack). Webui listen failures abort startup.
 
 ```mermaid
 flowchart LR
     DFLT["code defaults"] --> SC
     SC["serverconfig XML"] --> MODE
-    MODE["mode pack"] --> TCFG
+    MODE["preset pack"] --> TCFG
     TCFG["zdtd.toml"] --> ENV
     ENV["env"] --> CLI
     CLI["CLI"] --> EFF["effective"]
@@ -62,7 +62,7 @@ flags are (full text in `zdtd --help`):
 | `--game-dir DIR` | install root (`Data/Worlds` + `Data/Config`) |
 | `--world-name NAME` | Navezgane / Pregen06k01 / … (needs `--game-dir` unless `--map`) |
 | `--serverconfig PATH` | stock-like ServerSettings XML (see `serverconfig.example.xml`) |
-| `--mode NAME` | gamemode pack `modes/<NAME>.toml` |
+| `--preset NAME` | stock preset pack `presets/<NAME>.toml` (`--mode` is a deprecated alias) |
 | `--admin-port N` | stock telnet console (0 = off; loopback unless `TelnetPassword`) |
 | `--quests PATH` | explicit `quests.xml` (file must exist) |
 | `--config-dir DIR` | stock `Data/Config` dir for XML assets (dir must exist) |
@@ -158,22 +158,22 @@ startup so misspelled operator settings cannot silently use defaults.
 | `[apm]` | `dump_every_s` | Periodic apm snapshot dump cadence in seconds (default 60 = the historic `apm_report_period_ticks`; 0 disables the periodic dump). See `docs/APM.md` |
 | `[worldgen]` | `seed` | Procedural terrain seed (zdtd-invented worldgen, not stock RWG). Unset = flat/baked default. CLI `--worldgen-seed` wins; ignored when `--map` is set. See [WORLDGEN.md](WORLDGEN.md) |
 | `[sim]` | `trader_wallet_dukes`, `min_chat_gap_ns`, `inv_bucket_cap`, `inv_refill_ns`, `block_bucket_cap`, `block_refill_ns`, `min_damage_gap_ns`, `damage_burst_max`, `trader_restock_cap`, `trader_restock_refill`, `craft_max_times`, `sleeper_party_radius`, `storm_frequency`, `te_scan_block_cap`, `te_scan_te_cap`, `workstation_crafts_per_tick`, `workstation_craft_backlog`, `trader_use_range`, `party_shared_kill_range`, `storm_bm_push_ticks`, `sleeper_cap_gate_enabled`, `airdrop_schedule`, `airdrop_day_min`, `airdrop_day_max`, `airdrop_drop_hour`, `airdrop_loot_list` | `trader_wallet_dukes`: Trader `AvailableMoney` display pool (default 5000). Not stock data: `traders.xml` has no wallet key; stock `AvailableMoney` is engine-managed per-day, and zdtd credits the player wallet directly. The rest are per-peer anti-abuse gates: chat broadcast gap, inv/block token bucket shape (mono-ns refill), and the damage-accept gap + burst cap. `trader_restock_cap`/`trader_restock_refill` set the trader restock refill policy (stackables grow toward the cap by at most the refill per restock). `craft_max_times` (default 20) bounds a single InvTx craft batch request. `sleeper_party_radius` (default 100 m) is the sleeper wake/stage radius (`CalcGameStageAround`, asm.il ~1093363; stock uses the volume box + party stage, provenance PROVENANCE.md §3.7). `storm_frequency`: `World::StormFrequency` percent (default 100 = 1.0x; 0 disables storms). V3.1.0 ships no serverconfig key for it (world state in the GameStats blob), so this is the zdtd.toml surface; it feeds both the weather scheduler divisor and the wire value the client is told. `te_scan_block_cap`/`te_scan_te_cap` (default 32/48) bound the per-chunk storage/prefab TE scan. `workstation_crafts_per_tick` (default 64) and `workstation_craft_backlog` (default 60 s) bound the workstation craft catch-up.  `trader_use_range` (default 32) is the trader/vending open-and-echo reach gate (`trader_wire.zig`; closes the rewrite-a-trader-from-anywhere vector). `party_shared_kill_range` (default 100) is the party shared-kill XP credit range (stock GameStats[54] default, no serverconfig key). `storm_bm_push_ticks` (default 5000) pushes storms past a horde night (weather.zig). `sleeper_cap_gate_enabled` (default false) restores the stock sleeper global spawn gate (CanSpawn 2.1x MaxSpawnedZombies) instead of the documented zdtd divergence. `airdrop_schedule` = "interval" (default; every `AirDropFrequency` game-hours) or "days" (stock-like day-count + TOD: every `airdrop_day_min..airdrop_day_max` days at `airdrop_drop_hour`, defaults 3/3/12); `airdrop_loot_list` (default "airDrop") is the loot.xml container for the crate. Defaults match the previous code constants |
-| `[mode]` | `name` | Select gamemode pack `modes/<name>.toml` (CLI `--mode` wins) |
+| `[preset]` | `name` | Select preset pack `presets/<name>.toml` (CLI `--preset` wins) |
 | `[mods]` | `disabled`, `blacklist`, `enabled` | Mod tiers and override (PRD 0005): comma-separated mod-name lists (manifest name or `mods/` dir name). `disabled` skips loading with one info log; `blacklist` refuses (and vetoes any mod overriding/requiring it); `enabled` force-loads discovered mods whose manifest ships `enabled = false`: the opt-in for config-only mods like `mods/infinite_world` |
 | `[wire]` | `profile` | Column-height wire dialect (ADR 0036, `protocol.known_profiles`): `stock` (default, 256-tall, byte-pinned by goldens) or `tall-512` (512-tall for non-stock worlds); a non-stock dialect needs a paired client mod; unknown names fail closed at startup |
-| `[rules.combat]` / `[rules.ai]` / `[rules.bloodmoon]` / `[rules.director]` | any `Rules` field | Sim-rule overlay (ADR 0021), merged over the mode pack so `zdtd.toml` wins; see the `[rules]` section below |
+| `[rules.combat]` / `[rules.ai]` / `[rules.bloodmoon]` / `[rules.director]` | any `Rules` field | Sim-rule overlay (ADR 0021), merged over the preset pack so `zdtd.toml` wins; see the `[rules]` section below |
 | `[plugin]` | `modules`, `fuel`, `max_pages` | Comma-separated `.wasm` paths for the Wasm plugin runtime (ADR 0020, [PLUGIN_DEV.md](PLUGIN_DEV.md)); empty default = no Wasm plugins. `fuel` (default 100000000) is the per-instance fuel budget, armed once at instantiate and never re-armed (a module spending ~10k/tick silently disables after minutes; lower to bound a hostile guest). `max_pages` (default 1024) caps linear memory per instance |
 | `[quests]` | `objective_kinds`, `default_kill_count`, `kill_per_tier`, `goto_radius`, `stay_radius`, `poi_min_dist`, `poi_max_dist`, `max_poi_attempts`, `poi_bed_lockout_radius`, `trader_band_1`, `trader_band_2` | Quest data policy (ADR 0021): the objective `type=` → phase-kind mapping (comma-separated `Type=PhaseKind`, config rows win over the builtin stock table; a new stock objective type is a row here, not a code change), the kill-count default for objectives with no explicit `value` (`default + tier * per_tier`), and the goto/stay radius fallbacks when an objective omits its distance (the parsed `value` still wins). `poi_min_dist`/`poi_max_dist` (default 32/2000) set the POI selection distance band for random-POI-goto objectives and `max_poi_attempts` (default 50) bounds the search loop (RE ObjectiveRandomPOIGoto). `poi_bed_lockout_radius` (default 32) is the respawn-bed lockout radius around a POI center; `trader_band_1`/`trader_band_2` (default 500/1500) are the GetRandomPOINearTrader distance band boundaries. Provenance: PROVENANCE.md §3.7 |
 | `[bots]` | `shoot_damage`, `headshot_multiplier`, `spawn_spread`, `spawn_y`, `max_step_up`, `arrival_dist`, `shot_range_slop`, `weapon_profiles` | Host-side FPS bot policy (ADR 0026): the `bot shoot` damage floor, the headshot multiplier (clanker parity), the `bot count`/`bot spawn` spawn spread + default Y, and the move step-up cap. `weapon_profiles` (empty = builtin pool) is the host loadout as `tag:damage:range:pellets,...` (up to 8 guns). `bot_max_hp` is fixed at 100 (wasm guest contract). Defaults match the pre-config constants |
 
-### `[rules]` sim rules (mode packs and zdtd.toml)
+### `[rules]` sim rules (preset packs and zdtd.toml)
 
 ADR 0021: the sim's rule parameters live in one `Rules` struct
-(`src/ecs/rules.zig`) read as `w.rules.<group>.<field>`. Both a mode pack and
+(`src/ecs/rules.zig`) read as `w.rules.<group>.<field>`. Both a preset pack and
 `zdtd.toml` can set them under `[rules.<group>]` sections (dotted keys); the
 binder reflects the struct, so this table is the struct and the struct is the
 parser (adding a tunable is one field + one row). Precedence for a key set in
-both: **zdtd.toml wins over the mode pack** (operator wins), matching the
+both: **zdtd.toml wins over the preset pack** (operator wins), matching the
 top-level order.
 
 Defaults equal the pre-move code constants (pinned by the `Rules` defaults
@@ -376,11 +376,15 @@ A mode that wants every zombie to hit harder gets a multiplier on the resolved
 per-entity value (the `zombie_speed_scale` shape), never a global that discards
 `entityclasses.xml` (ADR 0021 decision 5, [HARDCODE_AUDIT.md](archive/HARDCODE_AUDIT_2026-08-08.md)).
 
-### Gamemode packs (`modes/`)
+### Preset packs (`presets/`)
 
-ADR 0010: a **mode** is a data-only config pack plus optional static plugin flag.
-No script VM. Sample: [`modes/default.toml`](../modes/default.toml). Loader:
-`src/server/mode.zig`.
+ADR 0010: a **preset** (renamed from "game mode" 2026-08-29) is a data-only
+config pack plus optional static plugin flag. No script VM. The folder holds
+only the stock presets we ship. Sample:
+[`presets/default.toml`](../presets/default.toml). Loader:
+`src/server/preset.zig`. A config-only mod ships its own preset self-contained
+inside the mod folder (`mods/<name>/preset.toml`), so a mod carries its
+config, wasm and assets together.
 
 | Key | Effect on `InitOptions` |
 |---|---|
@@ -410,19 +414,20 @@ behavior pack - `hardcore.toml` = `player_killing_mode = 0`,
 `drop_on_death = 1`, `game_difficulty = 4`, plus `[rules.combat]`
 `attack_damage = 14`, and so on - no code involved.
 
-Shipped examples that exercise the rules surface: [`modes/horde_lite.toml`](../modes/horde_lite.toml)
-(softer), [`modes/survival_crunch.toml`](../modes/survival_crunch.toml) (harsher),
-and [`modes/infinite.toml`](../modes/infinite.toml) (procedural infinite world,
-[WORLDGEN.md](WORLDGEN.md)). The infinite world also ships as a **config-only
-mod**: `[mods] enabled = "infinite_world"` in zdtd.toml activates
-`mods/infinite_world/mod.toml`, whose `mode = "infinite"` loads the same pack
-(explicit `--mode` / `[mode] name` still wins). Mods ship off by default and
-leave no persistent change until the player edits.
+Shipped examples that exercise the rules surface:
+[`presets/horde_lite.toml`](../presets/horde_lite.toml) (softer),
+[`presets/survival_crunch.toml`](../presets/survival_crunch.toml) (harsher).
+The infinite world is **not** a stock preset: it ships as a **config-only
+mod** (`mods/infinite_world/`, self-contained with its own `preset.toml`).
+`[mods] enabled = "infinite_world"` in zdtd.toml activates it (explicit
+`--preset` / `[preset] name` still wins). Mods ship off by default and leave
+no persistent change until the player edits.
 
-Select with `--mode default` or `zdtd.toml` `[mode] name = "default"`. Name must
-be `[A-Za-z0-9_]` only (no path segments). Missing file is fatal when selected.
-Unknown keys, unknown sections, and malformed assignments are also fatal so a
-misspelled mode setting cannot silently fall back to a default.
+Select with `--preset default` or `zdtd.toml` `[preset] name = "default"`.
+Name must be `[A-Za-z0-9_]` only (no path segments). Missing file is fatal
+when selected. Unknown keys, unknown sections, and malformed assignments are
+also fatal so a misspelled preset setting cannot silently fall back to a
+default.
 
 Notes:
 - Land claims register on keystone (`keystoneBlock`) placement, owned by the

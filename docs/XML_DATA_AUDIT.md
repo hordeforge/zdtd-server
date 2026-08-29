@@ -14,7 +14,7 @@ Load-order priority for any value the server needs (ADR 0010 / AGENTS rule 15):
 2. **Config** — server policy (no stock XML source) lives in `zdtd.toml`
    (`util/toml_bind.zig` walks the `Config`/`Rules` struct; adding a field
    auto-configures it).
-3. **Mode packs** — `modes/*.toml` overlay the sim `Rules` floor.
+3. **Preset packs** — `presets/*.toml` overlay the sim `Rules` floor.
 4. **Source code — last resort only** — documented offline fallbacks when no
    game-dir is present, and wire RE constants. Everything in this bucket is
    gated on `--game-dir` absence (builtin tables) or is a wire/protocol fact.

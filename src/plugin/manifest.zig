@@ -86,11 +86,11 @@ pub const Manifest = struct {
     /// Mod names this module requires to be loaded (binder scalar list).
     requires: ?[]const u8 = null,
     description: ?[]const u8 = null,
-    /// Config-only mods carry a mode pack name (modes/<name>.toml) instead of
-    /// a wasm module: enabling the mod activates the pack (its gameplay keys
-    /// and [rules.*] override the built-in defaults, like --mode). The
-    /// explicit --mode / [mode] name still wins over this.
-    mode: ?[]const u8 = null,
+    /// Config-only mods carry a preset file path (relative to the mod dir,
+    /// e.g. `preset = "preset.toml"`) instead of a wasm module: enabling the mod
+    /// activates the preset (its gameplay keys and [rules.*] override the built-
+    /// in defaults, like --preset). The explicit --preset / [preset] name wins.
+    preset: ?[]const u8 = null,
     /// False = do not auto-load via discovery (default true). Demo gates
     /// ship with `enabled = false` so a fresh boot stays stock. `[mods]
     /// enabled` forces a mod on despite this flag.
@@ -103,27 +103,23 @@ pub const Manifest = struct {
     /// Returns a loud message on failure (fail-closed at load).
     pub fn validate(self: *const Manifest) ?[]const u8 {
         if (self.name == null) return "missing required key 'name'";
-        if (self.wasm == null and self.mode == null) {
-            return "missing required key 'wasm' (or 'mode' for a config-only mod)";
+        if (self.wasm == null and self.preset == null) {
+            return "missing required key 'wasm' (or 'preset' for a config-only mod)";
         }
-        if (self.wasm != null and self.mode != null) {
-            return "'wasm' and 'mode' are mutually exclusive (a mod is either a plugin or a config carrier)";
+        if (self.wasm != null and self.preset != null) {
+            return "'wasm' and 'preset' are mutually exclusive (a mod is either a plugin or a config carrier)";
         }
-        if (self.mode != null and (self.override != null or self.points != null or self.requires != null)) {
-            return "'mode' (config-only mod) cannot combine with 'override'/'points'/'requires' (nothing to load or replace)";
+        if (self.preset != null and (self.override != null or self.points != null or self.requires != null)) {
+            return "'preset' (config-only mod) cannot combine with 'override'/'points'/'requires' (nothing to load or replace)";
         }
-        if (self.mode) |mo| {
-            // Same rule as server/mode.zig isValidModeName (plugin must not
-            // import server; kept in sync by the resolver test).
-            var ok = mo.len > 0 and mo.len <= 64;
-            for (mo) |c| {
-                const c_ok = (c >= 'a' and c <= 'z') or
-                    (c >= 'A' and c <= 'Z') or
-                    (c >= '0' and c <= '9') or
-                    c == '_';
-                if (!c_ok) ok = false;
-            }
-            if (!ok) return "invalid 'mode' name (use [A-Za-z0-9_] only)";
+        if (self.preset) |pr| {
+            // Relative path inside the mod dir only: no absolute paths, no
+            // parent traversal (a preset must stay self-contained in the mod
+            // folder). Empty or oversized is a load error.
+            var ok = pr.len > 0 and pr.len <= 128;
+            if (pr.len > 0 and (pr[0] == '/' or pr[0] == '\\')) ok = false;
+            if (std.mem.indexOf(u8, pr, "..") != null) ok = false;
+            if (!ok) return "invalid 'preset' path (must be a relative path inside the mod dir, no '..')";
         }
         if (self.tier) |t| {
             if (!std.mem.eql(u8, t, "official") and !std.mem.eql(u8, t, "user")) {
@@ -173,7 +169,7 @@ pub fn free(a: std.mem.Allocator, m: *const Manifest) void {
     a.free(m.name.?);
     if (m.version) |v| a.free(v);
     if (m.wasm) |w| a.free(w);
-    if (m.mode) |mo| a.free(mo);
+    if (m.preset) |pr| a.free(pr);
     if (m.tier) |t| a.free(t);
     if (m.override) |o| a.free(o);
     if (m.points) |p| a.free(p);

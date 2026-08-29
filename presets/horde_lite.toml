@@ -1,6 +1,6 @@
 # horde_lite: softer blood moons for casual sessions (ADR 0021 mode overlay).
 # Exercises the [rules.*] surface: sim rule numbers, not just serverconfig keys.
-# Load: --mode horde_lite  or  zdtd.toml [mode] name = "horde_lite"
+# Load: --preset horde_lite  or  zdtd.toml [preset] name = "horde_lite"
 
 name = "horde_lite"
 

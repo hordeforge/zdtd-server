@@ -1,7 +1,7 @@
 # zdtd.toml - operator tunables (Bucket B). Not stock serverconfig.
 # Copy to <world>/zdtd.toml or CWD. Precedence:
 #   CLI > env (webui secret) > world/zdtd.toml > CWD zdtd.toml >
-#   mode pack > --serverconfig keys > code defaults
+#   preset pack > --serverconfig keys > code defaults
 # Do not put secrets, MaxFuel, biome colors, item ids, or EconomicValue here.
 # Web UI secret: env ZDTD_WEBUI_SECRET (see .env.example), never this file.
 # Unknown keys and malformed assignments abort startup.
@@ -111,8 +111,8 @@ block_id_mapping = true
 # [worldgen]
 # seed = 42
 
-# Optional gamemode pack under modes/<name>.toml (ADR 0010). CLI --mode wins.
-# [mode]
+# Optional preset pack under presets/<name>.toml (ADR 0010). CLI --preset wins.
+# [preset]
 # name = "default"
 
 # Performance switches (docs/SCALE.md). All default OFF. Each one
@@ -150,7 +150,7 @@ block_id_mapping = true
 #                              # (mods/infinite_world/mod.toml -> modes/infinite.toml)
 
 # Gamemode pack (CLI --mode wins; modes/<name>.toml).
-# [mode]
+# [preset]
 # name = "infinite"
 
 # Procedural terrain seed (zdtd-invented worldgen, not stock RWG; CLI

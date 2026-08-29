@@ -11,7 +11,7 @@ const world_store = @import("world/store.zig");
 const ecs_mod = @import("ecs/root.zig");
 const server_config = @import("server/config.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
-const mode_mod = @import("server/mode.zig");
+const preset_mod = @import("server/preset.zig");
 const plugin_mod = @import("plugin/root.zig");
 const webui_mod = @import("server/webui.zig");
 const io_fs = @import("util/io_fs.zig");
@@ -32,7 +32,8 @@ const help_text =
     \\  --game-dir DIR        install root (Data/Worlds + Data/Config)
     \\  --world-name NAME     Navezgane | Pregen06k01 | … (needs --game-dir unless --map)
     \\  --serverconfig PATH   stock-like ServerSettings XML (file must exist; see serverconfig.example.xml)
-    \\  --mode NAME           gamemode pack modes/<NAME>.toml (data-only; see docs/GAME_OPTIONS.md)
+    \\  --preset NAME         stock preset pack presets/<NAME>.toml (data-only;
+    \\                        see docs/GAME_OPTIONS.md; --mode is a deprecated alias)
     \\  --admin-port N        stock telnet console (0 = off; loopback unless TelnetPassword is set)
     \\  --webui-port N        HTTP ops UI (0 = off; requires secret; see docs/WEBUI.md)
     \\  --webui-bind ADDR     webui bind, loopback only: 127.0.0.1 or localhost (default 127.0.0.1)
@@ -56,12 +57,13 @@ const help_text =
     \\
     \\Value forms: --flag VALUE or --flag=VALUE
     \\Precedence: CLI > env (webui secret) > world/zdtd.toml > CWD zdtd.toml >
-    \\            mode pack (if --mode or [mode] name) > --serverconfig keys > code defaults.
-    \\            See docs/GAME_OPTIONS.md.
+    \\            preset pack (if --preset or [preset] name; a config-only mod's
+    \\            own preset.toml sits below the explicit pick) > --serverconfig keys
+    \\            > code defaults. See docs/GAME_OPTIONS.md.
     \\
     \\Examples:
     \\  zdtd --port 27002 --world worlds/zdtd_default
-    \\  zdtd --mode default --port 27002
+    \\  zdtd --preset default --port 27002
     \\  zdtd --game-dir "$GAME" --world-name Navezgane --world worlds/nav_save
     \\  zdtd --map "$GAME/Data/Worlds/Pregen06k01" --world worlds/pregen_run
     \\  zdtd --serverconfig serverconfig.xml --admin-port 8081
@@ -207,13 +209,14 @@ fn splitFlag(a: []const u8) struct { name: []const u8, value: ?[]const u8 } {
 }
 
 const known_flags = [_][]const u8{
-    "--port",       "--world",            "--map",           "--game-dir",
-    "--world-name", "--serverconfig",     "--mode",          "--admin-port",
-    "--webui-port", "--webui-bind",       "--webui-secret",  "--quests",
-    "--mcp-port",   "--mcp-bind",         "--mcp-token",     "--mcp-allowlist",
-    "--config-dir", "--config-overrides", "--worldgen-seed", "--ticks",
-    "--once",       "--quiet",            "--version",       "--help",
-    "-V",           "-v",                 "-q",              "-h",
+    "--port",          "--world",        "--map",              "--game-dir",
+    "--world-name",    "--serverconfig", "--preset",           "--admin-port",
+    "--mode",          "--webui-port",   "--webui-bind",       "--webui-secret",
+    "--quests",        "--mcp-port",     "--mcp-bind",         "--mcp-token",
+    "--mcp-allowlist", "--config-dir",   "--config-overrides", "--worldgen-seed",
+    "--ticks",         "--once",         "--quiet",            "--version",
+    "--help",          "-V",             "-v",                 "-q",
+    "-h",
 };
 
 /// Levenshtein distance, capped by buffer size (flags are short).
@@ -250,13 +253,14 @@ fn suggestFlag(name: []const u8) ?[]const u8 {
     return best;
 }
 
-/// `--mode NAME` (or `[mode] name`) with no matching pack. Modes resolve as
-/// `modes/<name>.toml` relative to the working directory, so list what is
-/// actually there: a wrong CWD and a typo look identical without it.
-fn fatalUnknownMode(allocator: std.mem.Allocator, name: []const u8) noreturn {
+/// `--preset NAME` (or `[preset] name`) with no matching pack. Presets
+/// resolve as `presets/<name>.toml` relative to the working directory, so
+/// list what is actually there: a wrong CWD and a typo look identical
+/// without it.
+fn fatalUnknownPreset(allocator: std.mem.Allocator, name: []const u8) noreturn {
     var buf: [256]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
-    if (io_fs.listFileNames(allocator, "modes")) |files| {
+    if (io_fs.listFileNames(allocator, "presets")) |files| {
         for (files) |f| {
             const stem = if (std.mem.endsWith(u8, f, ".toml")) f[0 .. f.len - 5] else continue;
             w.print("{s}{s}", .{ if (w.buffered().len == 0) "" else ", ", stem }) catch break;
@@ -264,10 +268,10 @@ fn fatalUnknownMode(allocator: std.mem.Allocator, name: []const u8) noreturn {
     } else |_| {}
     const available = w.buffered();
     if (available.len == 0) {
-        fatal("mode '{s}' not found (expected modes/{s}.toml under the working directory)", .{ name, name });
+        fatal("preset '{s}' not found (expected presets/{s}.toml under the working directory)", .{ name, name });
     }
     fatal(
-        "mode '{s}' not found (expected modes/{s}.toml under the working directory); available: {s}",
+        "preset '{s}' not found (expected presets/{s}.toml under the working directory); available: {s}",
         .{ name, name, available },
     );
 }
@@ -329,7 +333,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var ticks_cli = false;
     var quiet = false;
     var worldgen_seed: ?u64 = null;
-    var mode_name_cli: ?[]const u8 = null;
+    var preset_name_cli: ?[]const u8 = null;
     var map_path_buf: [1024]u8 = undefined;
     var cfg_owned: ?server_config.Config = null;
     defer if (cfg_owned) |*c| c.deinit();
@@ -371,8 +375,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
             world_name_cli = true;
         } else if (std.mem.eql(u8, name, "--serverconfig")) {
             serverconfig_path = flagValue(&it, name, inline_val);
+        } else if (std.mem.eql(u8, name, "--preset")) {
+            preset_name_cli = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--mode")) {
-            mode_name_cli = flagValue(&it, name, inline_val);
+            // Deprecated alias for --preset (kept so operator scripts that
+            // predate the rename keep working; documented in CHANGELOG).
+            preset_name_cli = flagValue(&it, name, inline_val);
         } else if (std.mem.eql(u8, name, "--admin-port")) {
             admin_port = flagInt(u16, name, flagValue(&it, name, inline_val), 10);
             admin_port_cli = true;
@@ -725,18 +733,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
         log.info("zdtd: loaded {s}\n", .{tp});
     }
 
-    // Mode pack: --mode NAME wins over zdtd.toml [mode] name. Optional.
-    const mode_name: ?[]const u8 = blk: {
-        if (mode_name_cli) |m| break :blk m;
+    // Preset pack: --preset NAME wins over zdtd.toml [preset] name. Optional.
+    // A config-only mod's own preset (mod_plan.preset_pack, a resolved path
+    // inside the mod folder) sits below the explicit pick.
+    const preset_name: ?[]const u8 = blk: {
+        if (preset_name_cli) |m| break :blk m;
         if (toml_owned) |*tf| {
-            if (tf.mode.name) |n| break :blk n;
+            if (tf.preset.name) |n| break :blk n;
         }
         break :blk null;
     };
-    var mode_owned: ?mode_mod.Pack = null;
-    defer if (mode_owned) |*mp| mp.deinit();
-    // The mode pack loads after mod resolution: --mode / [mode] name wins,
-    // else a config-only mod's `mode` (mods/<name> activating a pack).
+    var preset_owned: ?preset_mod.Preset = null;
+    defer if (preset_owned) |*pp| pp.deinit();
+    // The preset loads after mod resolution: --preset / [preset] name wins,
+    // else a config-only mod's `preset` (a .toml inside the mod's folder).
 
     if (toml_owned) |*tf| {
         zdtd_config.applyToInitOptions(tf, &init_opts);
@@ -807,66 +817,73 @@ pub fn main(init: std.process.Init.Minimal) !void {
     defer mod_plan.deinit(gpa);
     init_opts.plugin_plan = &mod_plan;
 
-    // Mode pack: --mode / [mode] name wins, else a config-only mod's `mode`
-    // (an enabled mod activating a pack that overrides the built-in
-    // defaults). Optional. When an explicit mode overrides a mod's mode, say
-    // so: the operator enabled the mod expecting its pack, and a silent
-    // override is exactly the "mods override built-ins" surprise to avoid.
-    const mode_name_eff: ?[]const u8 = blk: {
-        if (mode_name) |mn| {
-            if (mod_plan.mode_pack) |mo| {
-                if (!std.mem.eql(u8, mn, mo)) {
-                    log.info("zdtd: mode={s} (explicit) overrides config mod's mode={s}\n", .{ mn, mo });
-                }
+    // Preset: --preset / [preset] name wins, else a config-only mod's own
+    // preset (an enabled mod carrying a preset.toml that overrides the
+    // built-in defaults). Optional. When an explicit preset overrides a mod's
+    // preset, say so: the operator enabled the mod expecting its preset, and
+    // a silent override is exactly the "mods override built-ins" surprise to
+    // avoid.
+    const preset_name_eff: ?[]const u8 = blk: {
+        if (preset_name) |pn| {
+            if (mod_plan.preset_pack) |pp| {
+                log.info("zdtd: preset={s} (explicit) overrides config mod's preset ({s})\n", .{ pn, pp });
             }
-            break :blk mn;
+            break :blk pn;
         }
-        if (mod_plan.mode_pack) |mo| {
-            log.info("zdtd: mode={s} (via mod)\n", .{mo});
-            break :blk mo;
+        if (mod_plan.preset_pack) |pp| {
+            log.info("zdtd: preset={s} (via mod)\n", .{pp});
+            preset_owned = preset_mod.loadFromPath(gpa, pp) catch |err| switch (err) {
+                error.FileNotFound => fatal("config mod's preset not found: {s}", .{pp}),
+                else => fatal("cannot load preset '{s}': {s}", .{ pp, @errorName(err) }),
+            };
+            if (preset_owned) |*ppk| {
+                preset_mod.applyToInitOptions(ppk, &init_opts);
+                log.info("zdtd: preset={s}\n", .{ppk.name});
+            }
+            break :blk null;
         }
         break :blk null;
     };
-    if (mode_name_eff) |mn| {
-        if (!mode_mod.isValidModeName(mn)) {
-            if (mode_name_cli != null) {
-                usageError("invalid --mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
+    if (preset_name_eff) |pn| {
+        if (!preset_mod.isValidPresetName(pn)) {
+            if (preset_name_cli != null) {
+                usageError("invalid --preset name '{s}' (use [A-Za-z0-9_] only)", .{pn});
             }
-            fatal("invalid mode name '{s}' (use [A-Za-z0-9_] only)", .{mn});
+            fatal("invalid preset name '{s}' (use [A-Za-z0-9_] only)", .{pn});
         }
-        mode_owned = mode_mod.loadByName(gpa, mn) catch |err| switch (err) {
+        preset_owned = preset_mod.loadByName(gpa, pn) catch |err| switch (err) {
             // Missing pack is the common operator mistake (typo, or running from
             // the wrong CWD): name the path and what is actually there instead
             // of leaking "FileNotFound".
-            error.FileNotFound => fatalUnknownMode(gpa, mn),
-            else => fatal("cannot load mode '{s}' (modes/{s}.toml): {s}", .{ mn, mn, @errorName(err) }),
+            error.FileNotFound => fatalUnknownPreset(gpa, pn),
+            else => fatal("cannot load preset '{s}' (presets/{s}.toml): {s}", .{ pn, pn, @errorName(err) }),
         };
-        if (mode_owned) |*mp| {
-            if (!std.mem.eql(u8, mp.name, mn)) {
-                fatal("mode file modes/{s}.toml declares name '{s}'", .{ mn, mp.name });
+        if (preset_owned) |*ppk| {
+            if (!std.mem.eql(u8, ppk.name, pn)) {
+                fatal("preset file presets/{s}.toml declares name '{s}'", .{ pn, ppk.name });
             }
-            mode_mod.applyToInitOptions(mp, &init_opts);
-            log.info("zdtd: mode={s}\n", .{mp.name});
+            preset_mod.applyToInitOptions(ppk, &init_opts);
+            log.info("zdtd: preset={s}\n", .{ppk.name});
         }
     }
 
     // Effective worldgen seed precedence: CLI --worldgen-seed > zdtd.toml
-    // [worldgen] seed > mode pack `worldgen_seed` (pack < toml < CLI, like
+    // [worldgen] seed > preset pack `worldgen_seed` (pack < toml < CLI, like
     // rules). applyToInitOptions already applied CLI/toml (both null-guarded);
     // the pack tier lands here so it can never clobber either. `--map` still
     // wins over any seed at Game init (loadStockMap branch).
     if (init_opts.worldgen_seed == null) {
-        if (mode_owned) |*mp| {
-            if (mp.worldgen_seed) |s| init_opts.worldgen_seed = s;
+        if (preset_owned) |*ppk| {
+            if (ppk.worldgen_seed) |s| init_opts.worldgen_seed = s;
         }
     }
     // Log which discovered mods were skipped (disabled / blacklisted /
     // enabled=false) so the operator sees why something did not load. The
     // loaded set with tiers and replacements is logged by loadResolved.
-    // Config-only mods are not modules: an enabled one activated its mode
-    // pack (logged at load); a disabled one is skipped silently.
+    // Config-only mods are not modules: an enabled one activated its preset
+    // (logged at load); a disabled one is skipped silently.
     for (discovered) |dm| {
-        if (dm.mode != null) continue;
+        if (dm.preset != null) continue;
         var in_plan = false;
         for (mod_plan.modules) |rm| {
             if (std.mem.eql(u8, rm.manifest.name.?, dm.name.?)) {
@@ -878,10 +895,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
             log.info("zdtd: mod '{s}' skipped (disabled, blacklisted, or enabled=false)\n", .{dm.name.?});
         }
     }
-    // Effective sim rules: defaults < mode pack < zdtd.toml (ADR 0021). The
+    // Effective sim rules: defaults < preset pack < zdtd.toml (ADR 0021). The
     // pack is the lower-precedence overlay; the operator's zdtd.toml wins.
     var rules_eff: ecs_mod.rules.Rules = .{};
-    if (mode_owned) |*mp| ecs_mod.rules.mergeOverlay(&rules_eff, &mp.rules);
+    if (preset_owned) |*ppk| ecs_mod.rules.mergeOverlay(&rules_eff, &ppk.rules);
     if (toml_owned) |*tf| ecs_mod.rules.mergeOverlay(&rules_eff, &tf.rules);
     init_opts.rules = rules_eff;
     // Fail-closed sanity on the effective [rules.worldgen] / [rules.geometry]
@@ -904,21 +921,21 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
     init_opts.wire_profile = wire_profile;
-    // Effective quest policy: mode pack < zdtd.toml (same precedence as
+    // Effective quest policy: preset pack < zdtd.toml (same precedence as
     // rules); defaults = builtin stock values (QuestPolicy{}).
     var qpol: ecs_mod.quest.QuestPolicy = .{};
-    if (mode_owned) |*mp| {
-        if (mp.quests.objective_kinds.len > 0) qpol.objective_kinds = mp.quests.objective_kinds;
-        if (mp.quests.default_kill_count) |v| qpol.default_kill_count = v;
-        if (mp.quests.kill_per_tier) |v| qpol.kill_per_tier = v;
-        if (mp.quests.goto_radius) |v| qpol.goto_radius = v;
-        if (mp.quests.stay_radius) |v| qpol.stay_radius = v;
-        if (mp.quests.poi_min_dist) |v| qpol.poi_min_dist = v;
-        if (mp.quests.poi_max_dist) |v| qpol.poi_max_dist = v;
-        if (mp.quests.max_poi_attempts) |v| qpol.max_poi_attempts = v;
-        if (mp.quests.poi_bed_lockout_radius) |v| qpol.poi_bed_lockout_radius = v;
-        if (mp.quests.trader_band_1) |v| qpol.trader_band_1 = v;
-        if (mp.quests.trader_band_2) |v| qpol.trader_band_2 = v;
+    if (preset_owned) |*ppk| {
+        if (ppk.quests.objective_kinds.len > 0) qpol.objective_kinds = ppk.quests.objective_kinds;
+        if (ppk.quests.default_kill_count) |v| qpol.default_kill_count = v;
+        if (ppk.quests.kill_per_tier) |v| qpol.kill_per_tier = v;
+        if (ppk.quests.goto_radius) |v| qpol.goto_radius = v;
+        if (ppk.quests.stay_radius) |v| qpol.stay_radius = v;
+        if (ppk.quests.poi_min_dist) |v| qpol.poi_min_dist = v;
+        if (ppk.quests.poi_max_dist) |v| qpol.poi_max_dist = v;
+        if (ppk.quests.max_poi_attempts) |v| qpol.max_poi_attempts = v;
+        if (ppk.quests.poi_bed_lockout_radius) |v| qpol.poi_bed_lockout_radius = v;
+        if (ppk.quests.trader_band_1) |v| qpol.trader_band_1 = v;
+        if (ppk.quests.trader_band_2) |v| qpol.trader_band_2 = v;
     }
     if (toml_owned) |*tf| {
         if (tf.quests.objective_kinds.len > 0) qpol.objective_kinds = tf.quests.objective_kinds;
@@ -934,17 +951,17 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (tf.quests.trader_band_2) |v| qpol.trader_band_2 = v;
     }
     init_opts.quest_policy = qpol;
-    // Effective bot host policy: mode pack < zdtd.toml (same precedence).
+    // Effective bot host policy: preset pack < zdtd.toml (same precedence).
     var bcfg: @import("server/game/bot.zig").BotHostConfig = .{};
-    if (mode_owned) |*mp| {
-        if (mp.bots.shoot_damage) |v| bcfg.shoot_damage = v;
-        if (mp.bots.headshot_multiplier) |v| bcfg.headshot_multiplier = v;
-        if (mp.bots.spawn_spread) |v| bcfg.spawn_spread = v;
-        if (mp.bots.spawn_y) |v| bcfg.spawn_y = v;
-        if (mp.bots.max_step_up) |v| bcfg.max_step_up = v;
-        if (mp.bots.arrival_dist) |v| bcfg.arrival_dist = v;
-        if (mp.bots.shot_range_slop) |v| bcfg.shot_range_slop = v;
-        if (mp.bots.weapon_profiles.len > 0) bcfg.weapon_profiles = mp.bots.weapon_profiles;
+    if (preset_owned) |*ppk| {
+        if (ppk.bots.shoot_damage) |v| bcfg.shoot_damage = v;
+        if (ppk.bots.headshot_multiplier) |v| bcfg.headshot_multiplier = v;
+        if (ppk.bots.spawn_spread) |v| bcfg.spawn_spread = v;
+        if (ppk.bots.spawn_y) |v| bcfg.spawn_y = v;
+        if (ppk.bots.max_step_up) |v| bcfg.max_step_up = v;
+        if (ppk.bots.arrival_dist) |v| bcfg.arrival_dist = v;
+        if (ppk.bots.shot_range_slop) |v| bcfg.shot_range_slop = v;
+        if (ppk.bots.weapon_profiles.len > 0) bcfg.weapon_profiles = ppk.bots.weapon_profiles;
     }
     if (toml_owned) |*tf| {
         if (tf.bots.shoot_damage) |v| bcfg.shoot_damage = v;

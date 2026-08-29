@@ -122,7 +122,7 @@ STRUCTURAL_CONSTANTS = {
     "persisted_container_size", "save_capacity", "meta_shift", "meta2_shift",
     "rot_meta3_shift", "nibble", "six_bits", "max_step", "rotation_shift", "rotation_mask",
     "save_header_bytes", "persisted_workstation_size", "samples_x", "samples_y",
-    "max_serverconfig_bytes", "max_req", "max_token", "max_client_polls", "max_mode_bytes",
+    "max_serverconfig_bytes", "max_req", "max_token", "max_client_polls", "max_preset_bytes",
     "max_test_resp", "readiness_stale_ns", "max_toml_bytes", "lock_target_opaque_len",
     "max_poi_candidates", "map_batch", "map_walk_above", "warn_at", "trigger_type_none",
     "entity_warn_at", "max_quest_vars", "max_seat_scan", "max_wasm_module_bytes",

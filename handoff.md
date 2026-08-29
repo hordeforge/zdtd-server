@@ -70,7 +70,7 @@
   tall-512 synthetic seam proof; non-stock needs a paired client mod).
   Proc shaping params lifted to `[rules.worldgen]` (`WorldGen.applyParams`,
   byte-identical defaults; fail-closed validate on both groups).
-- **Infinite procedural world**: `modes/infinite.toml` (`--mode infinite`)
+- **Infinite procedural world**: config-only mod `mods/infinite_world/` (own preset.toml; `--preset infinite` also works)
   + `mods/infinite_world/` config-only mod (`mode` manifest key + `[mods]
   enabled`; carriers never enter the wasm load list). Proc deco resolves
   from the W3 biome field (game-dir proc worlds stream trees); clean proc

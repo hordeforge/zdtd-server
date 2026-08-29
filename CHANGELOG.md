@@ -128,6 +128,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   hardcoded name-sniff list and takes vehicle physicals (kind, HP, velocity,
   seats) from vehicles.xml (unknown classes such as vehicleHelicopter fall
   back to the 4x4 def).
+- Game modes renamed to **presets**; mods are self-contained. The stock
+  preset folder is now `presets/` (was `modes/`), the CLI flag is
+  `--preset NAME` (was `--mode`, kept as a deprecated alias), and the
+  `zdtd.toml` selector is `[preset] name` (was `[mode] name`, no alias). A
+  config-only mod carries its own preset inside the mod folder
+  (`mods/<name>/preset.toml` via the `preset` mod.toml key, replacing the
+  old `mode = "<pack>"` that referenced the shared folder), so a mod is
+  fully self-contained: config, wasm and assets travel together. The
+  infinite world now ships that way (`mods/infinite_world/`); it is no
+  longer a stock preset. Renames: `src/server/mode.zig` -> `preset.zig`,
+  `Pack` -> `Preset`, `error.DuplicateMode` -> `error.DuplicatePreset`.
 
 ## [0.2.0] - 2026-08-22
 

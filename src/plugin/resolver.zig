@@ -29,16 +29,18 @@ pub const ResolvedResult = struct {
     point_claims: std.StringHashMapUnmanaged(usize),
     /// Mod name -> slot (for admin/ops).
     name_to_slot: std.StringHashMapUnmanaged(usize),
-    /// Config-only mod: the mode pack (modes/<name>.toml) an enabled loaded
-    /// mod activates (null when none). First in load order wins; a second is
-    /// error.DuplicateMode. The explicit --mode / [mode] name still wins.
-    mode_pack: ?[]const u8 = null,
+    /// Config-only mod: the resolved path of the preset (.toml inside the mod
+    /// dir) an enabled loaded mod activates (null when none). Owned by the
+    /// result (freed in deinit). First in load order wins; a second is
+    /// error.DuplicatePreset. The explicit --preset / [preset] name still wins.
+    preset_pack: ?[]const u8 = null,
     /// Synthetic manifests created for legacy [plugin] modules: none of their
     /// fields are owned here (strings point into caller-owned paths), so only
     /// the slice itself is freed.
     synthetic: []manifest.Manifest,
 
     pub fn deinit(self: *ResolvedResult, a: std.mem.Allocator) void {
+        if (self.preset_pack) |pp| a.free(pp);
         if (self.synthetic.len > 0) a.free(self.synthetic);
         a.free(self.modules);
         self.point_claims.deinit(a);
@@ -126,10 +128,10 @@ pub fn resolve(
 
     for (discovered) |m| {
         if (m.override != null) continue; // replacers appended below
-        // Config-only mods (mode = "<pack>") are not wasm modules: they only
-        // activate a mode pack (collected below) and never enter the load
+        // Config-only mods (preset = "<path>") are not wasm modules: they only
+        // activate a preset (collected below) and never enter the load
         // list, so the Wasm loader never sees a null wasm path.
-        if (m.mode != null) continue;
+        if (m.preset != null) continue;
         // `enabled = false` in mod.toml: not auto-loaded (demo gates ship
         // off); explicit [plugin] modules paths still load, and `[mods]
         // enabled` forces the mod on.
@@ -149,7 +151,7 @@ pub fn resolve(
     // Append the replacers (their targets were dropped above).
     for (discovered) |m| {
         if (m.override == null) continue;
-        if (m.mode != null) continue; // config-only mods never replace modules
+        if (m.preset != null) continue; // config-only mods never replace modules
         if (m.enabled) |en| {
             if (!en and !enabled_set.contains(m.name.?)) continue;
         }
@@ -182,21 +184,25 @@ pub fn resolve(
     errdefer name_to_slot.deinit(a);
     for (load.items) |rm| try name_to_slot.put(a, rm.manifest.name.?, rm.slot);
 
-    // Config-only mod: at most one enabled mod may activate a mode pack
-    // (modes/<name>.toml). First in load order wins; a second is ambiguous.
-    // Config-only mods never enter `load` (no wasm to load), so scan the
-    // discovered set with the same enabled/disabled/override gates.
-    var mode_pack: ?[]const u8 = null;
+    // Config-only mod: at most one enabled mod may activate a preset (a
+    // .toml inside the mod's own folder). First in load order wins; a second
+    // is ambiguous. Config-only mods never enter `load` (no wasm to load), so
+    // scan the discovered set with the same enabled/disabled/override gates.
+    // The result is the resolved path `<mod dir>/<preset>` so the caller loads
+    // it without re-locating the mod folder.
+    var preset_pack: ?[]const u8 = null;
+    errdefer if (preset_pack) |pp| a.free(pp);
     for (discovered) |m| {
-        const mo = m.mode orelse continue;
+        const pr = m.preset orelse continue;
         if (m.enabled) |en| {
             if (!en and !enabled_set.contains(m.name.?)) continue;
         }
         if (disabled_set.contains(m.name.?)) continue;
         if (blacklist_set.contains(m.name.?)) return error.BlacklistedTarget;
         if (replaced.contains(m.name.?)) continue;
-        if (mode_pack != null) return error.DuplicateMode;
-        mode_pack = mo;
+        if (preset_pack != null) return error.DuplicatePreset;
+        if (m.dir.len == 0) return error.PresetOutsideMod;
+        preset_pack = try std.fs.path.join(a, &.{ m.dir, pr });
     }
 
     // Legacy [plugin] modules: synthesized user mods, appended after discovery.
@@ -237,7 +243,7 @@ pub fn resolve(
         .modules = try load.toOwnedSlice(a),
         .point_claims = claims,
         .name_to_slot = name_to_slot,
-        .mode_pack = mode_pack,
+        .preset_pack = preset_pack,
         .synthetic = try synthetic.toOwnedSlice(a),
     };
 }
@@ -372,28 +378,32 @@ test "resolve explicit [plugin] modules appended as user mods" {
     try testing.expectEqual(.user, r.modules[0].tier);
 }
 
-test "resolve activates a mode pack from an enabled config-only mod" {
-    // Config-only mods (mode = "pack", no wasm) ship enabled=false so a fresh
-    // boot stays stock; `[mods] enabled` forces them on and activates the
-    // pack, which overrides the built-in defaults like --mode.
+test "resolve activates a preset from an enabled config-only mod" {
+    // Config-only mods (preset = "preset.toml", no wasm) ship enabled=false so
+    // a fresh boot stays stock; `[mods] enabled` forces them on and activates
+    // the mod's own preset file, which overrides the built-in defaults like
+    // --preset.
     var cfg = mk("infinite_world", "", "user", null, null);
-    cfg.mode = "infinite";
+    cfg.preset = "preset.toml";
+    cfg.dir = "mods/infinite_world";
     cfg.enabled = false;
     const mods = [_]manifest.Manifest{cfg};
-    // Off by default: not auto-loaded, no mode pack.
+    // Off by default: not auto-loaded, no preset pack.
     var r0 = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
     defer r0.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 0), r0.modules.len);
-    try testing.expect(r0.mode_pack == null);
-    // [mods] enabled forces it on; the mode pack activates. Config-only mods
-    // are not wasm modules, so they never enter the load list.
+    try testing.expect(r0.preset_pack == null);
+    // [mods] enabled forces it on; the preset activates at its resolved path
+    // inside the mod folder. Config-only mods are not wasm modules, so they
+    // never enter the load list.
     var r1 = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{"infinite_world"});
     defer r1.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 0), r1.modules.len);
-    try testing.expectEqualStrings("infinite", r1.mode_pack.?);
-    // Two enabled config mods each with a mode: ambiguous, fail closed.
+    try testing.expectEqualStrings("mods/infinite_world/preset.toml", r1.preset_pack.?);
+    // Two enabled config mods each with a preset: ambiguous, fail closed.
     var c2 = mk("other", "", "user", null, null);
-    c2.mode = "other";
+    c2.preset = "preset.toml";
+    c2.dir = "mods/other";
     const mods2 = [_]manifest.Manifest{ cfg, c2 };
-    try testing.expectError(error.DuplicateMode, resolve(testing.allocator, &mods2, &.{}, &.{}, &.{}, &.{ "infinite_world", "other" }));
+    try testing.expectError(error.DuplicatePreset, resolve(testing.allocator, &mods2, &.{}, &.{}, &.{}, &.{ "infinite_world", "other" }));
 }

@@ -181,8 +181,8 @@ pub const Wire = struct {
     profile: []const u8 = "stock",
 };
 
-/// Select a gamemode pack under modes/<name>.toml (ADR 0010). Not the pack body.
-pub const Mode = struct {
+/// Select a preset pack under presets/<name>.toml (ADR 0010). Not the pack body.
+pub const Preset = struct {
     name: ?[]const u8 = null,
 };
 
@@ -285,7 +285,7 @@ pub const File = struct {
     feature: Feature = .{},
     perf: Perf = .{},
     sim: Sim = .{},
-    mode: Mode = .{},
+    preset: Preset = .{},
     plugin: Plugin = .{},
     /// Mod tiers and override (PRD 0005).
     mods: Mods = .{},
@@ -673,7 +673,7 @@ test "parse stream and authority" {
         \\workstation_craft_backlog = 30.0
         \\[apm]
         \\dump_every_s = 120
-        \\[mode]
+        \\[preset]
         \\name = "default"
         \\[plugin]
         \\modules = "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm"
@@ -707,7 +707,7 @@ test "parse stream and authority" {
     try std.testing.expectEqual(false, f.feature.deco_trees.?);
     try std.testing.expectEqual(false, f.feature.deco_mirror.?);
     try std.testing.expectEqual(false, f.feature.block_id_mapping.?);
-    try std.testing.expectEqualStrings("default", f.mode.name.?);
+    try std.testing.expectEqualStrings("default", f.preset.name.?);
     try std.testing.expectEqualStrings(
         "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm",
         f.plugin.modules.?,
@@ -901,15 +901,15 @@ test "parse rejects invalid authority mode" {
 
 test "parse preserves hashes in quoted values and rejects malformed sections" {
     var f = try parse(std.testing.allocator,
-        \\[mode]
+        \\[preset]
         \\name = "pve#night" # trailing comment
     );
     defer f.deinit();
-    try std.testing.expectEqualStrings("pve#night", f.mode.name.?);
+    try std.testing.expectEqualStrings("pve#night", f.preset.name.?);
 
     try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[stream] trailing\n"));
     try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[]\n"));
-    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[mode]\nname = \"unterminated\n"));
+    try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[preset]\nname = \"unterminated\n"));
 }
 
 test "sanitizeInitOptions repairs bad radii" {

@@ -1,7 +1,7 @@
 # builder: a creative-leaning mode with nothing hunting you (ADR 0021).
 # Exercises the [rules.systems] surface: turning a whole sim system off, which
 # is the thing a mode pack could not do before.
-# Load: --mode builder  or  zdtd.toml [mode] name = "builder"
+# Load: --preset builder  or  zdtd.toml [preset] name = "builder"
 
 name = "builder"
 

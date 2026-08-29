@@ -7,10 +7,10 @@ Result of the "everything that can be config should be config" review of the
 server's rules/logic. For every hardcoded tunable found, this records the
 disposition: **move** it onto the established config surface (`src/ecs/rules.zig`
 groups, auto-bound via `util/toml_bind.zig` to `zdtd.toml [rules.*]` and overlaid
-by `modes/*.toml`, or the `[sim]`/`[quests]`/`[bots]` sections of
+by `presets/*.toml`, or the `[sim]`/`[quests]`/`[bots]` sections of
 `src/server/zdtd_config.zig`), or **keep** it in code with a reason.
 
-Load-order rule (ADR 0010): stock XML data → config → mode packs → source as the
+Load-order rule (ADR 0010): stock XML data → config → preset packs → source as the
 documented last resort. A `Rules` value is a **floor** where per-entity stock
 data exists; defaults stay identical (a move is not a retune).
 

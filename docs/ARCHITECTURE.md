@@ -179,12 +179,12 @@ flowchart LR
 
 ## 3. Process lifecycle and the 50 ms tick
 
-`src/main.zig` parses CLI + env + `zdtd.toml` + mode pack into `server/config.zig` and `ecs/rules.zig`, constructs `Game`, and runs the fixed-step loop. The loop is **effectively single-threaded for game rules**; parallelism lives inside a phase via `util/parallel`.
+`src/main.zig` parses CLI + env + `zdtd.toml` + preset pack into `server/config.zig` and `ecs/rules.zig`, constructs `Game`, and runs the fixed-step loop. The loop is **effectively single-threaded for game rules**; parallelism lives inside a phase via `util/parallel`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> ParseArgs: main()
-    ParseArgs --> LoadConfig: config.zig + toml_bind + mode pack
+    ParseArgs --> LoadConfig: config.zig + toml_bind + preset pack
     LoadConfig --> InitAssets: init_assets.zig — XML tables, biomes, buffs
     InitAssets --> InitWorld: init_world.zig — store, TTS, prefabs, DTM
     InitWorld --> Listen: litenet/server.zig — bind UDP, LiteNet accept
@@ -398,7 +398,7 @@ flowchart TB
 
 ### 6.1 Schedule
 
-Document order is run order. A mode pack may **disable** a phase (`Rules.systems.<name>`) but never reorder one — the order encodes a real dependency (buffs before AI so movement and damage read this tick's buff state).
+Document order is run order. A preset pack may **disable** a phase (`Rules.systems.<name>`) but never reorder one — the order encodes a real dependency (buffs before AI so movement and damage read this tick's buff state).
 
 ```mermaid
 flowchart LR
@@ -605,7 +605,7 @@ Tuning is data, not parse arms (`util/toml_bind.zig` walks the dest struct — a
 flowchart LR
     CODE["code defaults<br/>ecs/rules.zig<br/>server/config.zig"] --> SC
     SC["--serverconfig XML<br/>ServerSettings"] --> MODE
-    MODE["mode pack<br/>modes/*.toml — --mode NAME"] --> CWD
+    MODE["preset pack<br/>presets/*.toml — --preset NAME"] --> CWD
     CWD["CWD zdtd.toml"] --> WORLD_TOML
     WORLD_TOML["world/zdtd.toml"] --> ENV
     ENV["env — ZDTD_WEBUI_SECRET etc."] --> CLI

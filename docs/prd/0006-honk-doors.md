@@ -18,7 +18,7 @@ feature cannot exist until a minimal door TE exists, and the policy
 
 Server operators who want stock-faithful trader-door behavior (drive up,
 honk, doors open) without client mods, and modpack authors who tune door
-behavior through `zdtd.toml` / mode packs.
+behavior through `zdtd.toml` / preset packs.
 
 ## 3. Goals
 

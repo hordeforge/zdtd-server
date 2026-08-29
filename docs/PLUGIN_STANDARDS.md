@@ -71,8 +71,8 @@ TOML, bound by `src/plugin/manifest.zig` through the comptime binder
 ```toml
 name = "core_announce"            # required; MUST equal the directory name
 version = "0.1.0"                 # semver string; informational
-wasm = "core_announce.wasm"       # required (or `mode`, see below); relative to this directory
-mode = "infinite"                 # config-only mod: activates modes/<name>.toml (no wasm); exclusive with wasm
+wasm = "core_announce.wasm"       # required (or `preset`, see below); relative to this directory
+preset = "preset.toml"            # config-only mod: loads its own preset inside this folder (no wasm); exclusive with wasm
 description = "..."               # one line, says what + which hook(s)
 enabled = true                    # optional; false = skip auto-discovery (demo gates ship off); explicit [plugin] modules paths still load; [mods] enabled forces on
 tier = "official"                 # optional; "official" | "user" ("core" is an error)
@@ -98,13 +98,15 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
    otherwise).
 6. `[mods] disabled = "a,b"` skips mods by name; entries naming a native core
    component are config errors.
-7. **Config-only mods** (PRD 0005 style, no wasm): `mode = "<name>"` activates
-   `modes/<name>.toml` — its gameplay keys and `[rules.*]` override the
-   built-in defaults exactly like `--mode <name>` (explicit `--mode` /
-   `[mode] name` still wins). `wasm` and `mode` are mutually exclusive. Such
-   mods ship `enabled = false` so a fresh boot stays stock; the operator opts
-   in via `[mods] enabled = "a,b"` (or flips `enabled`). At most one loaded
-   mod may carry a `mode` (`DuplicateMode` otherwise).
+7. **Config-only mods** (PRD 0005 style, no wasm): `preset = "<path>"` points
+   at a preset file **inside the mod folder** (e.g. `preset.toml`) — its
+   gameplay keys and `[rules.*]` override the built-in defaults exactly like
+   `--preset <name>` (explicit `--preset` / `[preset] name` still wins). A
+   mod is fully self-contained: config, wasm and assets travel together.
+   `wasm` and `preset` are mutually exclusive. Such mods ship
+   `enabled = false` so a fresh boot stays stock; the operator opts in via
+   `[mods] enabled = "a,b"` (or flips `enabled`). At most one loaded mod may
+   carry a `preset` (`DuplicatePreset` otherwise).
 
 ### Example (minimal)
 

@@ -9,7 +9,7 @@
 pub const game = @import("game.zig");
 pub const config = @import("config.zig");
 pub const zdtd_config = @import("zdtd_config.zig");
-pub const mode = @import("mode.zig");
+pub const preset = @import("preset.zig");
 pub const admin = @import("admin.zig");
 pub const admin_cmds = @import("admin_cmds.zig");
 pub const admin_console = @import("admin_console.zig");
@@ -87,7 +87,7 @@ test {
     _ = game;
     _ = config;
     _ = zdtd_config;
-    _ = mode;
+    _ = preset;
     _ = admin;
     _ = admin_cmds;
     _ = admin_console;

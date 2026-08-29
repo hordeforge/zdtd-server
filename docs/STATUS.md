@@ -32,6 +32,27 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## Batch Q 2026-08-29 (game modes -> presets; mods are self-contained)
+
+Terminology and layout rename (ADR 0010 mechanism, terminology changed; the
+ADR bodies stay historical):
+
+- Stock preset folder is now `presets/` (was `modes/`) and holds only the
+  stock presets we ship (builder, default, horde_lite, survival_crunch).
+- CLI flag `--preset NAME` (was `--mode`, kept as a deprecated alias);
+  `zdtd.toml` selector `[preset] name` (was `[mode] name`).
+- A config-only mod is self-contained: `mods/<name>/mod.toml` `preset`
+  key names a preset file inside the mod folder (e.g. `preset.toml`),
+  replacing the old `mode = "<pack>"` reference into the shared folder.
+  `src/server/mode.zig` -> `src/server/preset.zig` (`Pack` -> `Preset`;
+  `error.DuplicateMode` -> `error.DuplicatePreset`; the resolver now
+  returns the resolved `<mod dir>/<preset>` path).
+- The infinite world is no longer a stock preset: it ships as
+  `mods/infinite_world/preset.toml` (its own file). The mod is the only way
+  to load it: `[mods] enabled = "infinite_world"` in zdtd.toml (or
+  `mods/infinite_world/mod.toml` `enabled = true`). `--preset infinite`
+  fails closed (not a shipped stock preset; the error lists what is).
+
 ## Batch P 2026-08-29 (soak-verified fixes + data-driven entity kind)
 
 Soak-driven defect fixes landed since the 08-28 pin, each validated by a
@@ -71,6 +92,10 @@ PLUGIN_STANDARDS.md (directory name == mod.toml name == committed .wasm).
 Counts unchanged.
 
 ## Batch O 2026-08-28 (malleable world geometry, ADR 0036)
+
+> Terminology: Batch Q (above, 2026-08-29) renamed game modes to presets and
+> moved the infinite preset into its mod folder; this batch's text uses the
+> pre-rename names (modes/, --mode, [mode]).
 
 World geometry is now data-driven, not baked into the column format:
 `[rules.geometry]` (auto-bound via ADR 0021) carries the elevation projection
@@ -766,7 +791,7 @@ redundant. Player progression 13/9/15 -> **14/8/15**; total **246/49/38**.
 Then the DeathPenalty-option row went WORKS: DeathPenalty (0-3) is now a
 real serverconfig property - parsed, sandbox-wired (option 26), passed into
 the Game, emitted in the GameStats blob, settable via setoptions, ranged in
-the mode packs and in serverconfig.example.xml; the client-side death flow
+the preset packs and in serverconfig.example.xml; the client-side death flow
 switches on the stat, so an operator can now change it. Player progression
 14/8/15 -> **15/7/15**; total **247/48/38**.
 Then the respawn row went WORKS: the respawn target is the player's bedroll
@@ -1874,7 +1899,7 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   packs now parse through one comptime-reflected binder - struct fields are
   `[section]`s (dotted `[rules.combat]` recurses), the field type drives value
   parsing, `?T` means unset, and unknown keys/sections abort startup. The
-  per-key chains in `zdtd_config.zig` and `mode.zig` are deleted (net
+  per-key chains in `zdtd_config.zig` and `preset.zig` are deleted (net
   deletion), with aliases/ranges/enum-by-name declared on the struct. Fuzz
   target over `bind` added; the two existing config fuzz targets now exercise
   the binder through the real surfaces.
@@ -1884,11 +1909,11 @@ plus five priority gaps from GAP_ANALYSIS / TODO. 950 unit tests.
   speed), `bloodmoon` (party distances, enemy cap, party count). Defaults pin
   the pre-move literals (a pin test fails loudly on drift); no behavioural
   change.
-- **T13 mode packs are a full overlay**: `modes/<name>.toml` may set any
+- **T13 preset packs are a full overlay**: `presets/<name>.toml` may set any
   `Rules` field via `[rules.*]` sections plus the stock keys it already
   accepted. Precedence stays operator-wins: `zdtd.toml` beats the pack for the
-  same key. Example packs `modes/horde_lite.toml` and
-  `modes/survival_crunch.toml` exercise the rules surface; GAME_OPTIONS.md
+  same key. Example packs `presets/horde_lite.toml` and
+  `presets/survival_crunch.toml` exercise the rules surface; GAME_OPTIONS.md
   carries the generated reference, and a coverage test pins every `Rules`
   field to the doc. Scenario `mode-rules` proves a pack's attack_damage lands
   in the sim (melee 100->16 with the 42 floor).
@@ -2173,7 +2198,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Static plugins + Wasm runtime | **PASS (first cut)** | `src/plugin/` sample_hello; Res/Query/Cmd; stream soft warn; Wasm-only per ADR 0020: zwasm v2 runtime loads `[plugin] modules` from zdtd.toml, host imports `zdtd_log/tick/queue`, fuel+memory budget disables a looping module within one tick (WORK_PLAN T9, C fixture proven) |
 | Mod tiers + override (PRD 0005 / ADR 0032) | **PASS (first cut)** | `mod.toml` manifests, `mods/*/mod.toml` discovery, `[mods] disabled`/`blacklist` (core components protected), five exclusive core override points (loot.roll, quest.payout, damage.player_scale, craft.request, trade.price), `override = <name>` mod replacement, load-time conflict detection. Gap: kill/death/block/quest-accept hooks stay composition-only (not override points); call-next (`claim_mode = "chain"`) reserved, rejected at load |
 | zdtd.toml | **PASS** | world/CWD → stream/authority/feature InitOptions; `zdtd.toml.example` |
-| Gamemode pack | **PASS (first cut)** | `modes/default.toml` + `mode.zig`; `--mode` / `[mode] name` → InitOptions; `enable_sample_plugin` |
+| Preset pack | **PASS (first cut)** | `presets/default.toml` + `preset.zig`; `--preset` / `[preset] name` → InitOptions; `enable_sample_plugin` |
 | C2S package coverage | **PASS (all ToServer handled)** | parity tool: 0 unhandled dir=1 (**86** dispatch arms across `c2s/*`, counted 2026-08-29; the 3.2.0 ToServer additions - POIMetadataRequest, ConfirmSpawnEntity, EntitySetSkillLevelServer - all have arms); `NetPackagePlayerDisconnect` lands the quit immediately, WORK_PLAN T10; 190-pkg catalog docs/wire/PACKAGES.md |
 | Full playable stock dedi | **PASS (core loop); demo partial** | join → in-game (0 NRE) → move/build → fight → death → respawn → loot/craft/trade/persist **partial**. Automated demo residual: craft queue/trader buy client path, explosion close-in. Weather S2C driven by the biomes.xml storm/bloodMoon group state machine; GameStats full persistent blob (HUD day from WorldTime). Cosmetic: deco streams (A22 id-negotiation residual only). Not full-stock parity. |
 

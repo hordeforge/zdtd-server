@@ -450,7 +450,7 @@ See `docs/GAME_OPTIONS.md`. Finding = "default in Zig but not loaded" or
 2. **Precedence (implemented; documented in GAME_OPTIONS, keep in sync):**
    ```text
    CLI flags  >  env (webui secret)  >  world dir zdtd.toml  >  CWD zdtd.toml
-              >  mode pack  >  serverconfig.xml (stock keys)  >  code defaults
+              >  preset pack  >  serverconfig.xml (stock keys)  >  code defaults
    ```
 3. **Two surfaces, clear split:**
    - **Stock-shaped:** `serverconfig.xml` `<property name="ViewRadius" …>` via

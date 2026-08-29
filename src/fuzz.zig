@@ -18,7 +18,7 @@ const stock_party = packages.stock_party;
 const admin = @import("server/admin.zig");
 const components = @import("ecs/components.zig");
 const toml_bind = @import("util/toml_bind.zig");
-const mode_pack = @import("server/mode.zig");
+const preset_mod = @import("server/preset.zig");
 const zdtd_config = @import("server/zdtd_config.zig");
 const serverconfig = @import("server/config.zig");
 const serverinfo = @import("server/serverinfo_tcp.zig");
@@ -682,7 +682,7 @@ test {
 
 const mode_corpus = [_][]const u8{
     "",
-    mode_pack.default_pack_toml,
+    preset_mod.default_pack_toml,
     "name = \"x\"\nmax_spawned_zombies = 64\n",
     "[gameplay]\nblood_moon_frequency = 300\n",
     "max_spawned_zombies = -1\n",
@@ -702,7 +702,7 @@ fn fuzzModePack(_: void, smith: *std.testing.Smith) !void {
     @disableInstrumentation();
     var storage: [4096]u8 = undefined;
     const len: usize = smith.slice(&storage);
-    var p = mode_pack.parse(std.testing.allocator, storage[0..len]) catch return;
+    var p = preset_mod.parse(std.testing.allocator, storage[0..len]) catch return;
     defer p.deinit();
     // Name is either the "default" literal or an arena dupe from the input.
     try std.testing.expect(p.name.len <= @max(len, "default".len));

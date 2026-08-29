@@ -1,6 +1,6 @@
 # default gamemode pack (ADR 0010 step 3).
 # Data-only InitOptions overrides. No script VM.
-# Load: --mode default  or  zdtd.toml [mode] name = "default"
+# Load: --preset default  or  zdtd.toml [preset] name = "default"
 # See docs/GAME_OPTIONS.md.
 
 name = "default"

@@ -474,7 +474,7 @@ pub fn parse(allocator: std.mem.Allocator, raw: []const u8) !Config {
     if (prop(raw, "DayNightLength")) |v| cfg.day_night_length = clampRangeNamed("DayNightLength", v, 10, 1200, cfg.day_night_length);
     if (prop(raw, "DayLightLength")) |v| cfg.day_light_length = clampU8Named("DayLightLength", v, 1, 23, cfg.day_light_length);
     // 0 = no zombie spawns (Director.tick bails at the alive gate), same shape
-    // as MaxSpawnedAnimals; the mode-pack range agrees (src/server/mode.zig).
+    // as MaxSpawnedAnimals; the preset-pack range agrees (src/server/preset.zig).
     if (prop(raw, "MaxSpawnedZombies")) |v| cfg.max_spawned_zombies = clampRangeNamed("MaxSpawnedZombies", v, 0, 2048, cfg.max_spawned_zombies);
     if (prop(raw, "BloodMoonRange")) |v| cfg.blood_moon_range = clampU8Named("BloodMoonRange", v, 0, 15, cfg.blood_moon_range);
     if (prop(raw, "ZombieMove")) |v| cfg.zombie_move = clampU8Named("ZombieMove", v, 0, 4, cfg.zombie_move);

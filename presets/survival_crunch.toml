@@ -1,6 +1,6 @@
 # survival_crunch: harsher zombies and scarcer loot (ADR 0021 mode overlay).
-# Exercises the [rules.*] surface opposite to horde_lite. Load: --mode survival_crunch
-# or zdtd.toml [mode] name = "survival_crunch"
+# Exercises the [rules.*] surface opposite to horde_lite. Load: --preset survival_crunch
+# or zdtd.toml [preset] name = "survival_crunch"
 
 name = "survival_crunch"
 

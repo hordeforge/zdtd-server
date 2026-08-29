@@ -1,5 +1,5 @@
-//! Gamemode = config pack (+ optional static plugin flag). ADR 0010 step 3.
-//! Data-only TOML under modes/<name>.toml. No script VM.
+//! Preset = config pack (+ optional static plugin flag). ADR 0010 step 3.
+//! Data-only TOML under presets/<name>.toml. No script VM.
 //! Apply onto InitOptions after serverconfig, before/with zdtd.toml stream keys.
 //! Parsing is the comptime binder (src/util/toml_bind.zig); the pack may set
 //! stock serverconfig keys (root / [gameplay] / [plugin]) plus any `Rules`
@@ -10,12 +10,12 @@ const io_fs = @import("../util/io_fs.zig");
 const toml_bind = @import("../util/toml_bind.zig");
 const rules_mod = @import("../ecs/rules.zig");
 
-/// Max size for a mode pack file.
-const max_mode_bytes: usize = 64 * 1024;
+/// Max size for a preset pack file.
+const max_preset_bytes: usize = 64 * 1024;
 
-/// Optional InitOptions overrides from a mode pack.
-pub const Pack = struct {
-    pub const toml_label = "mode pack";
+/// Optional InitOptions overrides from a preset pack.
+pub const Preset = struct {
+    pub const toml_label = "preset pack";
     /// Flat keys are gameplay settings (root scope). [gameplay] and [plugin]
     /// are accepted spellings for the same flat keys, as before the binder.
     pub const allow_root = true;
@@ -27,7 +27,7 @@ pub const Pack = struct {
     /// now applied at parse so the stored pack value is already in range.
     pub const ranges = .{
         // 0 is a valid ceiling (Director.tick returns before every spawn
-        // branch), which is what modes/builder.toml asks for.
+        // branch), which is what presets/builder.toml asks for.
         .max_spawned_zombies = .{ 0, 2048 },
         .game_difficulty = .{ 0, 5 },
         .blood_moon_enemy_count = .{ 0, 60 },
@@ -60,7 +60,7 @@ pub const Pack = struct {
 
     name: []const u8 = "default",
     // Gameplay keys (snake_case; same names as InitOptions / serverconfig).
-    // A mode is a complete behavior pack: set any subset, the rest fall
+    // A preset is a complete behavior pack: set any subset, the rest fall
     // through to serverconfig / zdtd.toml / code defaults.
     max_spawned_zombies: ?u16 = null,
     blood_moon_frequency: ?u8 = null,
@@ -96,14 +96,14 @@ pub const Pack = struct {
     /// Sim rule overlay (ADR 0021 decision 3): `[rules.combat]` etc. merged
     /// into World.rules by main.zig before the zdtd.toml overlay.
     rules: rules_mod.RulesOverlay = .{},
-    /// Quest data policy: `[quests] objective_kinds` (mode-pack tier of the
+    /// Quest data policy: `[quests] objective_kinds` (preset-pack tier of the
     /// objective-type -> phase-kind mapping; zdtd.toml wins over the pack).
     quests: @import("zdtd_config.zig").Quests = .{},
-    /// Host-side bot policy (mode-pack tier of `[bots]`; zdtd.toml wins).
+    /// Host-side bot policy (preset-pack tier of `[bots]`; zdtd.toml wins).
     bots: @import("zdtd_config.zig").Bots = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
-    pub fn deinit(self: *Pack) void {
+    pub fn deinit(self: *Preset) void {
         if (self.arena_ptr) |ap| {
             const child = ap.child_allocator;
             ap.deinit();
@@ -113,7 +113,7 @@ pub const Pack = struct {
     }
 };
 
-/// Builtin default pack source (matches modes/default.toml). Tests use this.
+/// Builtin default pack source (matches presets/default.toml). Tests use this.
 pub const default_pack_toml =
     \\name = "default"
     \\max_spawned_zombies = 64
@@ -122,7 +122,7 @@ pub const default_pack_toml =
 ;
 
 /// True when name is a single path segment: [A-Za-z0-9_]{1,64}, no dots/slashes.
-pub fn isValidModeName(name: []const u8) bool {
+pub fn isValidPresetName(name: []const u8) bool {
     if (name.len == 0 or name.len > 64) return false;
     for (name) |c| {
         const ok = (c >= 'a' and c <= 'z') or
@@ -134,48 +134,48 @@ pub fn isValidModeName(name: []const u8) bool {
     return true;
 }
 
-/// Write `modes/<name>.toml` into buf. Caller ensures name is valid.
-pub fn pathForName(name: []const u8, buf: []u8) ![]const u8 {
-    return try std.fmt.bufPrint(buf, "modes/{s}.toml", .{name});
+/// Write `presets/<name>.toml` into buf. Caller ensures name is valid.
+pub fn presetPathForName(name: []const u8, buf: []u8) ![]const u8 {
+    return try std.fmt.bufPrint(buf, "presets/{s}.toml", .{name});
 }
 
-pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Pack {
-    const read_buf = try allocator.alloc(u8, max_mode_bytes + 1);
+pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Preset {
+    const read_buf = try allocator.alloc(u8, max_preset_bytes + 1);
     defer allocator.free(read_buf);
     const data = try io_fs.readFileInto(path, read_buf);
-    if (data.len > max_mode_bytes) return error.ModeTooLarge;
+    if (data.len > max_preset_bytes) return error.PresetTooLarge;
     return try parse(allocator, data);
 }
 
-/// Load modes/<name>.toml from CWD (or relative path). Invalid name → error.BadModeName.
-pub fn loadByName(allocator: std.mem.Allocator, name: []const u8) !Pack {
-    if (!isValidModeName(name)) return error.BadModeName;
+/// Load presets/<name>.toml from CWD (or relative path). Invalid name → error.BadPresetName.
+pub fn loadByName(allocator: std.mem.Allocator, name: []const u8) !Preset {
+    if (!isValidPresetName(name)) return error.BadPresetName;
     var path_buf: [96]u8 = undefined;
-    const path = try pathForName(name, &path_buf);
+    const path = try presetPathForName(name, &path_buf);
     return try loadFromPath(allocator, path);
 }
 
-pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Pack {
+pub fn parse(allocator: std.mem.Allocator, src: []const u8) !Preset {
     var arena = try allocator.create(std.heap.ArenaAllocator);
     errdefer allocator.destroy(arena);
     arena.* = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
     const a = arena.allocator();
 
-    var p: Pack = .{ .arena_ptr = arena };
-    toml_bind.bind(Pack, &p, src, a) catch |err| switch (err) {
-        // The binder reports unknown keys as UnknownTomlKey; the mode pack
+    var p: Preset = .{ .arena_ptr = arena };
+    toml_bind.bind(Preset, &p, src, a) catch |err| switch (err) {
+        // The binder reports unknown keys as UnknownTomlKey; the preset pack
         // surface kept its own error name, which tests rely on.
-        error.UnknownTomlKey => return error.UnknownModeKey,
+        error.UnknownTomlKey => return error.UnknownPresetKey,
         else => return err,
     };
     return p;
 }
 
-/// Merge Pack into InitOptions-like fields. Only non-null keys override.
-/// Values are already range-clamped at parse (Pack.ranges), so this is a plain
+/// Merge Preset into InitOptions-like fields. Only non-null keys override.
+/// Values are already range-clamped at parse (Preset.ranges), so this is a plain
 /// copy; rules are merged by main.zig, not here (they target World.rules).
-pub fn applyToInitOptions(p: *const Pack, opts: anytype) void {
+pub fn applyToInitOptions(p: *const Preset, opts: anytype) void {
     if (p.max_spawned_zombies) |v| opts.max_spawned_zombies = v;
     if (p.blood_moon_frequency) |v| opts.blood_moon_frequency = v;
     if (p.game_difficulty) |v| opts.game_difficulty = v;
@@ -266,36 +266,38 @@ test "applyToInitOptions clamps max_spawned_zombies" {
         \\max_spawned_zombies = 9000
     );
     defer p.deinit();
-    // The clamp now happens at parse (Pack.ranges [1..2048]) instead of apply;
+    // The clamp now happens at parse (Preset.ranges [1..2048]) instead of apply;
     // the observable result through applyToInitOptions is unchanged.
     applyToInitOptions(&p, &o);
     try std.testing.expectEqual(@as(u16, 2048), o.max_spawned_zombies);
 }
 
-test "isValidModeName rejects path traversal" {
-    try std.testing.expect(isValidModeName("default"));
-    try std.testing.expect(isValidModeName("pve_hard"));
-    try std.testing.expect(!isValidModeName(""));
-    try std.testing.expect(!isValidModeName("../etc"));
-    try std.testing.expect(!isValidModeName("a/b"));
-    try std.testing.expect(!isValidModeName("a.b"));
+test "isValidPresetName rejects path traversal" {
+    try std.testing.expect(isValidPresetName("default"));
+    try std.testing.expect(isValidPresetName("pve_hard"));
+    try std.testing.expect(!isValidPresetName(""));
+    try std.testing.expect(!isValidPresetName("../etc"));
+    try std.testing.expect(!isValidPresetName("a/b"));
+    try std.testing.expect(!isValidPresetName("a.b"));
 }
 
 test "loadByName default file when present" {
-    if (!io_fs.fileExists("modes/default.toml")) return;
+    if (!io_fs.fileExists("presets/default.toml")) return;
     var p = try loadByName(std.testing.allocator, "default");
     defer p.deinit();
     try std.testing.expectEqualStrings("default", p.name);
     try std.testing.expect(p.max_spawned_zombies != null);
 }
 
-test "every committed mode pack binds against the current rules schema" {
-    // The committed modes/*.toml packs are not embedded; parse() binds each
+test "every committed preset pack binds against the current rules schema" {
+    // The committed presets/*.toml packs are not embedded; parse() binds each
     // fully (init-options + the [rules.*] overlay) through the fail-closed
     // toml binder, so a stale key surfaces here instead of at runtime load.
-    for ([_][]const u8{ "default", "builder", "horde_lite", "survival_crunch", "infinite" }) |name| {
+    // The infinite preset is not here: it ships self-contained inside
+    // mods/infinite_world/preset.toml (pinned by the test below).
+    for ([_][]const u8{ "default", "builder", "horde_lite", "survival_crunch" }) |name| {
         var buf: [64]u8 = undefined;
-        const path = std.fmt.bufPrint(&buf, "modes/{s}.toml", .{name}) catch continue;
+        const path = std.fmt.bufPrint(&buf, "presets/{s}.toml", .{name}) catch continue;
         if (!io_fs.fileExists(path)) continue;
         var p = try loadByName(std.testing.allocator, name);
         defer p.deinit();
@@ -306,11 +308,12 @@ test "every committed mode pack binds against the current rules schema" {
     }
 }
 
-test "infinite pack pins the mod contract (seed + shaping defaults)" {
-    // mods/infinite_world activates this pack; changing these values silently
-    // changes the mod's world, so pin them here (the resolver test pins the
-    // mode_pack activation itself).
-    var p = try loadByName(std.testing.allocator, "infinite");
+test "infinite mod preset pins the mod contract (seed + shaping defaults)" {
+    // mods/infinite_world ships its preset self-contained; changing these
+    // values silently changes the mod's world, so pin them here (the
+    // resolver test pins the preset_pack activation itself).
+    if (!io_fs.fileExists("mods/infinite_world/preset.toml")) return error.SkipZigTest;
+    var p = try loadFromPath(std.testing.allocator, "mods/infinite_world/preset.toml");
     defer p.deinit();
     try std.testing.expectEqualStrings("infinite", p.name);
     try std.testing.expectEqual(@as(?u64, 7), p.worldgen_seed);
@@ -325,7 +328,7 @@ test "infinite pack pins the mod contract (seed + shaping defaults)" {
 }
 
 test "loadByName rejects bad name" {
-    try std.testing.expectError(error.BadModeName, loadByName(std.testing.allocator, "../x"));
+    try std.testing.expectError(error.BadPresetName, loadByName(std.testing.allocator, "../x"));
 }
 
 test "parse bloodmoon_frequency alias and sections" {
@@ -340,20 +343,20 @@ test "parse bloodmoon_frequency alias and sections" {
     try std.testing.expectEqual(false, p.enable_sample_plugin.?);
 }
 
-test "parse rejects unknown and malformed mode settings" {
-    try std.testing.expectError(error.UnknownModeKey, parse(std.testing.allocator, "max_spawned_zombis = 10\n"));
-    try std.testing.expectError(error.UnknownModeKey, parse(std.testing.allocator, "[unknown]\nname = \"default\"\n"));
+test "parse rejects unknown and malformed preset settings" {
+    try std.testing.expectError(error.UnknownPresetKey, parse(std.testing.allocator, "max_spawned_zombis = 10\n"));
+    try std.testing.expectError(error.UnknownPresetKey, parse(std.testing.allocator, "[unknown]\nname = \"default\"\n"));
     try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "max_spawned_zombies 10\n"));
     try std.testing.expectError(error.BadToml, parse(std.testing.allocator, "[gameplay] trailing\n"));
 }
 
-test "parse preserves hashes inside quoted mode names" {
+test "parse preserves hashes inside quoted preset names" {
     var p = try parse(std.testing.allocator, "name = \"pve#night\" # comment\n");
     defer p.deinit();
     try std.testing.expectEqualStrings("pve#night", p.name);
 }
 
-test "mode pack binds [rules.*] overlay sections" {
+test "preset pack binds [rules.*] overlay sections" {
     var p = try parse(std.testing.allocator,
         \\name = "hard"
         \\max_spawned_zombies = 32
@@ -375,10 +378,10 @@ test "mode pack binds [rules.*] overlay sections" {
 }
 
 test "shipped example packs parse and exercise the rules surface" {
-    // T13 fixtures: modes/horde_lite.toml and modes/survival_crunch.toml must
+    // T13 fixtures: presets/horde_lite.toml and presets/survival_crunch.toml must
     // parse and carry [rules.*] overlays (skip when absent, e.g. dist runs).
-    if (!io_fs.fileExists("modes/horde_lite.toml")) return;
-    var hl = try loadFromPath(std.testing.allocator, "modes/horde_lite.toml");
+    if (!io_fs.fileExists("presets/horde_lite.toml")) return;
+    var hl = try loadFromPath(std.testing.allocator, "presets/horde_lite.toml");
     defer hl.deinit();
     try std.testing.expectEqualStrings("horde_lite", hl.name);
     try std.testing.expectEqual(@as(?f32, 5.0), hl.rules.combat.attack_damage);
@@ -388,8 +391,8 @@ test "shipped example packs parse and exercise the rules surface" {
     rules_mod.mergeOverlay(&r, &hl.rules);
     try std.testing.expectEqual(@as(f32, 5.0), r.combat.attack_damage);
 
-    if (!io_fs.fileExists("modes/survival_crunch.toml")) return;
-    var sc = try loadFromPath(std.testing.allocator, "modes/survival_crunch.toml");
+    if (!io_fs.fileExists("presets/survival_crunch.toml")) return;
+    var sc = try loadFromPath(std.testing.allocator, "presets/survival_crunch.toml");
     defer sc.deinit();
     try std.testing.expectEqualStrings("survival_crunch", sc.name);
     try std.testing.expectEqual(@as(?f32, 12.0), sc.rules.combat.attack_damage);
@@ -398,7 +401,7 @@ test "shipped example packs parse and exercise the rules surface" {
 }
 
 test "GAME_OPTIONS.md documents every Rules field" {
-    // ADR 0021: the mode-pack reference is generated from the Rules struct, so
+    // ADR 0021: the preset-pack reference is generated from the Rules struct, so
     // it cannot drift from the parser. Every leaf field must appear in
     // docs/GAME_OPTIONS.md (skip when the doc is absent, e.g. dist runs).
     if (!io_fs.fileExists("docs/GAME_OPTIONS.md")) return;
@@ -414,7 +417,7 @@ test "GAME_OPTIONS.md documents every Rules field" {
     }
 }
 
-test "mode pack rules overlay merges into Rules in precedence order" {
+test "preset pack rules overlay merges into Rules in precedence order" {
     var r: rules_mod.Rules = .{};
     var p = try parse(std.testing.allocator,
         \\name = "hard"

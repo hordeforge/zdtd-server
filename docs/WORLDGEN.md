@@ -23,16 +23,18 @@ Status: **W0/W1/W2 landed** (`src/world/noise.zig`, `src/world/worldgen.zig`,
 Each section tags verified research vs reasoned inference (deep-research
 2026-07-23, 24/25 claims confirmed by 3-vote adversarial verification).
 
-## Usage: the `infinite` mode pack
+## Usage: the `infinite` preset
 
 The "infinite game" is the proc source + the normal stream: chunks generate
 deterministically on first touch as players explore, and the chunk stream
 (view square + pacing + per-chunk deco) serves them like a stock map.
 
 ```bash
-zig-out/bin/zdtd --mode infinite            # modes/infinite.toml: seed 7 + [rules.worldgen]
-# or, for a different world:
-zig-out/bin/zdtd --mode infinite --worldgen-seed 12345
+# The infinite preset is not stock: it ships as a config-only mod
+# (mods/infinite_world/ carries its own preset.toml). Enable the mod:
+#   zdtd.toml [mods] enabled = "infinite_world"
+# A worldgen seed overrides the mod preset's default (7):
+#   [worldgen] seed = 12345 in zdtd.toml, or --worldgen-seed 12345
 ```
 
 Seed precedence: CLI `--worldgen-seed` > zdtd.toml `[worldgen] seed` > the
@@ -53,7 +55,7 @@ every visited chunk. Baked worlds keep persisting clean chunks (disk reload
 beats DTM+prefab regen; the map is finite).
 
 **Reversibility** (2026-08-29): a mod must not permanently change default
-behavior. `--mode infinite` is an opt-in per-launch overlay — exploring a
+behavior. The mod (`[mods] enabled = "infinite_world"`) is an opt-in overlay — exploring a
 proc world writes nothing until the player edits (pinned by a test; the deco
 mirror's derived trees are re-applied on every stream and never persisted),
 so dropping the mode later returns the server to its default terrain with the

@@ -3246,7 +3246,7 @@ and server-to-client XP/level pushes do not exist.
   the effective value.
   *Anchors:* `src/server/config.zig` (`death_penalty`),
   `src/server/game.zig:2148` (`gameStatsValues`),
-  `src/server/admin_console.zig:748,905`, `src/server/mode.zig`,
+  `src/server/admin_console.zig:748,905`, `src/server/preset.zig`,
   `src/assets/sandbox_data.zig:126`, `serverconfig.example.xml`
 
 - **XP deficit death penalty on the server** `PARTIAL (waived)`
@@ -3382,9 +3382,10 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   (2026-08-29) the shaping params are config: `[rules.worldgen]`
   (base_height/height_amp/surface band/squash/noise_weight/y_scale/bedrock_h
   via `WorldGen.applyParams`; defaults byte-identical; grid cells + noise
-  recipe stay code). The "infinite game" ships as `--mode infinite`
-  (modes/infinite.toml: pack `worldgen_seed` + `[rules.worldgen]`; seed
-  precedence CLI > zdtd.toml > pack), and proc deco resolves from the W3
+  recipe stay code). The "infinite game" ships as a config-only mod (`mods/infinite_world/`,
+  own preset.toml: pack `worldgen_seed` + `[rules.worldgen]`; seed
+  precedence CLI > zdtd.toml > pack; `--preset infinite` also works), and
+  proc deco resolves from the W3
   biome field + biomes.xml lists (no biomemap on proc worlds), so a
   game-dir proc world streams trees instead of staying bald.
 
