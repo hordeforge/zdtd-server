@@ -17,7 +17,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   (refresh item in GAP_ANALYSIS §1a).
 - Malleable world geometry (ADR 0036): `[rules.geometry]` elevation projection
   (`sea_level`/`height_scale`/`height_offset`/`height_ceiling`; identity at
-  stock defaults) and `[wire] profile` column-height dialects — a world can
+  stock defaults) and `[wire] profile` column-height dialects: a world can
   ship compressed mountains, a sea-level model, or a custom ceiling with a
   stock client; non-stock dialects need a paired client mod. Proc shaping
   params lifted to `[rules.worldgen]` (byte-identical defaults; fail-closed

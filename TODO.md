@@ -109,7 +109,7 @@ loads (attributes, perks, costs, passives); per-player levels + skill-point
 balance persist through `players.zsv` (ZPV11 skill tail); spending is
 server-authoritative (`NetPackageEntitySetSkillLevelServer` C2S, validated
 against the catalog: known skill, one level per request, max level, SP cost
-scaled by the `on_perk_spend` Wasm verdict, parent-attribute prereq — the only
+scaled by the `on_perk_spend` Wasm verdict, parent-attribute prereq: the only
 `<level_requirements>` shape the shipped file carries), echoed S2C via
 `NetPackageEntitySetSkillLevelClient` + `NetPackagePlayerStats` snapshots to
 every peer; the passive-effects VM folds the tracked perk/buff deltas
