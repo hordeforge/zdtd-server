@@ -68,7 +68,7 @@ server (client-side or unimplemented surface).
 | sandbox_overrides.xml | `sandbox_data.zig` / `sandbox.zig` | yes |
 | shapes.xml | — | `-` (client) |
 | signs.xml | `signs.zig` (prefab `*_signs.xml`) | yes |
-| sounds.xml | — | `-` (client) |
+| sounds.xml | `noise.zig` (AI noise volume/time/muffle/heat per SoundDataNode) | yes |
 | spawning.xml | `spawning.zig` | yes |
 | subtitles.xml | — | `-` (client) |
 | traders.xml | `traders.zig` | yes |
