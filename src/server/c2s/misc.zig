@@ -465,7 +465,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const zdef = self.entities.defaultZombie();
         const zclass = self.entityClassOf(zdef);
         var k: i32 = 0;
-        while (k < cnt and k < 8) : (k += 1) {
+        const summon_cap: i32 = @intCast(self.sim.rules.c2s.quest_summon_per_request);
+        while (k < cnt and k < summon_cap) : (k += 1) {
             const ang = @as(f32, @floatFromInt(k)) * 1.4;
             // Stop at the entity cap instead of spinning on null spawns.
             // A35: spawn the full resolved class so the quest summons carry stats.

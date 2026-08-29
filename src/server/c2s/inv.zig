@@ -144,7 +144,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
 
         if (self.sim.mask[ps].health and c.entity_id > 0) {
             var ate_any = false;
-            var units_left: u32 = 4;
+            var units_left: u32 = self.sim.rules.c2s.eat_units_per_push;
             // Path A: per-id loss within this package (ECS before → after).
             for (before[0..bn]) |e| {
                 if (units_left == 0) break;

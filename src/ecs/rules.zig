@@ -85,6 +85,20 @@ pub const Combat = struct {
     knockback_seconds: f32 = 0.3,
 };
 
+/// Per-request caps on untrusted C2S push paths (AGENTS rule 20): each bounds
+/// how much one client package may apply, so a single peer cannot spam a
+/// multi-unit effect past the intended budget. Stock eats one unit per action
+/// and spawns the quest entity per journal event; these caps bound the
+/// stack-loss / multi-spawn pushes without changing the one-at-a-time default.
+pub const C2s = struct {
+    /// Eat effect units applied per ItemActionEat C2S push (cap on multi-unit
+    /// stack loss; the client normally pushes one unit per action).
+    eat_units_per_push: u8 = 4,
+    /// Entities spawned per journal quest-summon C2S request (cap; the client
+    /// requests one summon per journal event).
+    quest_summon_per_request: u8 = 8,
+};
+
 /// Zombie AI tuning read by the systems.zig task table and the despawn pass.
 pub const Ai = struct {
     /// Full-sim range, squared blocks (lodScale step 3).
@@ -729,6 +743,7 @@ pub const Power = struct {
 pub const Rules = struct {
     systems: Systems = .{},
     combat: Combat = .{},
+    c2s: C2s = .{},
     ai: Ai = .{},
     bloodmoon: Bloodmoon = .{},
     progression: Progression = .{},
@@ -751,6 +766,11 @@ pub const CombatOverlay = struct {
     stamina_usage_multiplier: ?f32 = null,
     knockback_speed: ?f32 = null,
     knockback_seconds: ?f32 = null,
+};
+
+pub const C2sOverlay = struct {
+    eat_units_per_push: ?u8 = null,
+    quest_summon_per_request: ?u8 = null,
 };
 
 pub const AiOverlay = struct {
@@ -995,6 +1015,7 @@ pub const PowerOverlay = struct {
 pub const RulesOverlay = struct {
     systems: SystemsOverlay = .{},
     combat: CombatOverlay = .{},
+    c2s: C2sOverlay = .{},
     ai: AiOverlay = .{},
     bloodmoon: BloodmoonOverlay = .{},
     progression: ProgressionOverlay = .{},

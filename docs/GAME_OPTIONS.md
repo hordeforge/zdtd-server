@@ -202,6 +202,9 @@ test, so a retune cannot land silently).
 | `armor_mitigation_per_piece` / `armor_mitigation_cap` | 0.1 / 0.5 | **Fallback floor**: with a game-dir present, mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality (items.xml curves, stock GetTotalPhysicalArmorRating / Equipment.CalcDamage, combat-damage.md), capped by `armor_mitigation_cap`. `armor_mitigation_per_piece` applies only when no XML row resolved (offline/builtin catalog) |
 | `stamina_usage_multiplier` | 1.0 | Per-attack stamina cost multiplier (stock ItemActionAttack.StaminaUsageMultiplier, sandbox option): a landed melee swing drains the held item's items.xml StaminaLoss x this factor (RE ItemActionMelee IL) |
 | `knockback_speed` / `knockback_seconds` | 8.0 / 0.3 | Melee knockback impulse: shove speed (blocks/s) and hit window (s); 0.3 s at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark) |
+| `[rules.c2s]` | | Per-request caps on untrusted C2S push paths (AGENTS rule 20): how much one client package may apply |
+| `eat_units_per_push` | 4 | Eat effect units applied per `ItemActionEat` C2S push. Stock eats one unit per action; the cap bounds a multi-unit stack-loss push (`c2s/inv.zig`) |
+| `quest_summon_per_request` | 8 | Entities spawned per journal quest-summon C2S request. Stock spawns the quest entity per journal event; the cap bounds a hostile multi-spawn push (`c2s/misc.zig`) |
 | `[rules.ai]` | | |
 | `full_dist_sq` | 4096.0 | Policy (AI LOD step) |
 | `mid_dist_sq` | 225.0 | Policy (AI LOD step) |

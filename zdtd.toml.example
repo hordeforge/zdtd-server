@@ -225,3 +225,6 @@ block_id_mapping = true
 # [rules.bloodmoon]
 # party_enemy_max = 30       # per-party alive ceiling
 # max_parties = 8            # concurrent parties (clamped to the storage cap)
+# [rules.c2s]
+# eat_units_per_push = 4     # eat effect units applied per ItemActionEat push
+# quest_summon_per_request = 8  # entities spawned per journal quest-summon request
