@@ -106,6 +106,43 @@ block_id_mapping = true
 # [apm]
 # dump_every_s = 60
 
+# Host-side FPS bot policy (ADR 0026; the brain is mods/fps_bot): damage
+# floor, headshot multiplier, spawn spread + default Y, move step-up cap,
+# arrival tolerance, fire-range slop, and the loadout pool
+# (tag:damage:range:pellets, up to 8 guns; empty = builtin pool).
+# bot_max_hp is fixed at 100 (wasm guest contract), not config.
+# [bots]
+# shoot_damage = 12.0
+# headshot_multiplier = 2.0
+# spawn_spread = 2.0
+# spawn_y = 70
+# max_step_up = 1.5
+# arrival_dist = 0.05
+# shot_range_slop = 2.0
+# weapon_profiles = ""
+
+# Quest data policy (ADR 0021): objective type -> phase-kind mapping rows
+# (Type=PhaseKind, config wins over the builtin stock table), kill-count
+# default + per-tier, goto/stay radius fallbacks, POI distance band and the
+# respawn-bed lockout radius (docs/GAME_OPTIONS.md [quests]).
+# [quests]
+# objective_kinds = ""
+# default_kill_count = 3
+# kill_per_tier = 2
+# goto_radius = 4.0
+# stay_radius = 8.0
+# poi_min_dist = 32
+# poi_max_dist = 2000
+# max_poi_attempts = 50
+# poi_bed_lockout_radius = 32
+# trader_band_1 = 500
+# trader_band_2 = 1500
+
+# Column-height wire dialect (ADR 0036): stock (256-tall, byte-pinned by
+# goldens) or tall-512 (non-stock worlds; needs a paired client mod).
+# [wire]
+# profile = "stock"
+
 # Procedural terrain (docs/WORLDGEN.md). Not stock RWG. CLI --worldgen-seed
 # wins; ignored when --map is set. Unset keeps the flat/baked default.
 # [worldgen]
