@@ -122,7 +122,8 @@ Replacing a whole component means claiming all of its points.
 A module may export `_zdtd_requires() -> (ptr, len)` returning a comma-
 separated list of capabilities it needs (hook names + the host verbs
 `log` / `tick` / `queue` / `sense` / `query` / `json_parse` / `json_str` /
-`json_raw` / `json_obj`). The host validates the list at load and **rejects
+`json_raw` / `json_obj` / `config`). The host validates the list at load and
+**rejects
 the module loudly** when a capability is unknown or a declared hook is not
 actually exported. This is fail-closed at load: a typo'd hook name cannot
 silently never fire.
