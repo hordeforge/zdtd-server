@@ -49,7 +49,7 @@ server (client-side or unimplemented surface).
 | events.xml | — | `-` |
 | gameevents.xml | — | `-` |
 | gamestages.xml | `gamestages.zig` | yes |
-| item_modifiers.xml | — | `F`/`-` (set/quality bonuses are client-side) |
+| item_modifiers.xml | `item_modifiers.zig` (mod attachment tag gates, RE items.md ItemModificationsFromXml) | yes |
 | items.xml | `items.zig` (stack, econ, fuel, eat, distraction, **Blockname**) | yes |
 | loadingscreen.xml | — | `-` (client UI) |
 | loot.xml | `loot.zig` | yes |
