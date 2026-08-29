@@ -262,7 +262,7 @@ footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}}
 <main id="main-content">
 <section id="scorecard" aria-labelledby="scorecard-heading">
 <h2 id="scorecard-heading">Stock game systems · GAP_ANALYSIS scorecard</h2>
-<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">{total_w}</b> WORKS / <b class="num">{total_p}</b> PARTIAL / <b class="num">{total_m}</b> MISSING of <b class="num">{total_rows}</b> scored features = <b>{pct}%</b> fully ported, <b>{any_pct}%</b> at least partial (recount 2026-08-22 from the live markers; GAP_ANALYSIS scorecard wins on conflict).</p>
+<p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">{total_w}</b> WORKS / <b class="num">{total_p}</b> PARTIAL / <b class="num">{total_m}</b> MISSING of <b class="num">{total_rows}</b> scored features = <b>{pct}%</b> fully ported, <b>{any_pct}%</b> at least partial (recounted from the live GAP_ANALYSIS markers; GAP_ANALYSIS scorecard wins on conflict).</p>
 <div class="toolbar">
 <label class="sr-only" for="filter">Filter categories and features</label>
 <input id="filter" type="search" placeholder="Filter categories and features… (e.g. sleeper, trader, ZPV, quest)" autocomplete="off">
