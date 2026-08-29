@@ -184,7 +184,12 @@ pub const Index = struct {
     /// Prefab content root (Data/Prefabs) for size lookup; may be empty.
     prefabs_root: []const u8 = "",
     /// Lazy .tts block cache keyed by decoration name (stable name_storage slices).
-    tts_cache: std.StringHashMapUnmanaged(tts.TtsBlocks),
+    // Pointer-stable TTS cache (same hazard class as the chunk store, GAP
+    // "Chunk pointer stability"): the map holds *TtsBlocks (one allocation
+    // per entry, freed on deinit/setIdLookup), so a pointer returned by
+    // getTtsBlocks stays valid across a later put that resizes the map -
+    // a value-map moved every entry on resize and dangled the held pointer.
+    tts_cache: std.StringHashMapUnmanaged(*tts.TtsBlocks),
     /// Lazy QuestTags/DifficultyTier cache keyed by decoration name (tags owned
     /// by self.allocator; absent prefabs are cached with empty tags).
     quest_cache: std.StringHashMapUnmanaged(QuestData),
@@ -194,7 +199,10 @@ pub const Index = struct {
 
     pub fn deinit(self: *Index) void {
         var it = self.tts_cache.iterator();
-        while (it.next()) |e| e.value_ptr.deinit();
+        while (it.next()) |e| {
+            e.value_ptr.*.deinit();
+            self.allocator.destroy(e.value_ptr.*);
+        }
         self.tts_cache.deinit(self.allocator);
         var qit = self.quest_cache.iterator();
         while (qit.next()) |e| {
@@ -306,7 +314,10 @@ pub const Index = struct {
     pub fn setIdLookup(self: *Index, l: IdLookup) void {
         self.id_lookup = l;
         var it = self.tts_cache.iterator();
-        while (it.next()) |e| e.value_ptr.deinit();
+        while (it.next()) |e| {
+            e.value_ptr.*.deinit();
+            self.allocator.destroy(e.value_ptr.*);
+        }
         self.tts_cache.clearRetainingCapacity();
     }
 
@@ -415,8 +426,11 @@ pub const Index = struct {
     }
 
     /// Load (or cache) TTS block types for a prefab name, in runtime block ids.
+    /// The returned pointer is stable for the cache's lifetime (pointer-map,
+    /// freed on deinit/setIdLookup), so callers may hold it across later
+    /// cache puts.
     pub fn getTtsBlocks(self: *Index, name: []const u8) ?*const tts.TtsBlocks {
-        if (self.tts_cache.getPtr(name)) |p| return p;
+        if (self.tts_cache.get(name)) |p| return p;
         var path_buf: [2048]u8 = undefined;
         const path = self.findTtsPath(name, &path_buf) orelse return null;
         // Path exists (findTtsPath); load failure is corrupt TTS / OOM, not "no prefab".
@@ -425,13 +439,20 @@ pub const Index = struct {
             return null;
         };
         self.remapToRuntimeIds(name, &loaded);
-        self.tts_cache.put(self.allocator, name, loaded) catch {
-            var tmp = loaded;
-            tmp.deinit();
+        // Per-entry allocation so the map's backing array can resize without
+        // moving the cached blocks (hazard class of the chunk store).
+        const slot = self.allocator.create(tts.TtsBlocks) catch {
+            loaded.deinit();
+            return null;
+        };
+        slot.* = loaded;
+        self.tts_cache.put(self.allocator, name, slot) catch {
+            slot.deinit();
+            self.allocator.destroy(slot);
             std.debug.print("zdtd: tts cache put failed for {s}\n", .{name});
             return null;
         };
-        return self.tts_cache.getPtr(name);
+        return slot;
     }
 
     /// QuestTags + DifficultyTier from the prefab's `<name>.xml`, cached (lazy
@@ -1043,6 +1064,58 @@ test "prefab type ids remap through blocks.nim into runtime ids" {
         // The defect: those cells used to be stamped with the local id.
         try std.testing.expect(changed > 0);
     }
+}
+
+test "tts cache pointers stay valid across cache resizes (pointer-stable)" {
+    // Same hazard class as the chunk store (GAP "Chunk pointer stability"):
+    // the TTS cache maps names to per-entry allocations, so a *const
+    // TtsBlocks held across later cache puts survives the map resize that a
+    // value-map would dangle.
+    const root = stock_prefab_root;
+    if (!io_fs.fileExists(root ++ "/POIs/abandoned_house_01.tts")) return error.SkipZigTest;
+    var table = maxdamage.Table.empty();
+    defer table.deinit();
+    table.tryMergeBundledAssignIds(std.testing.allocator);
+    if (table.id_by_name.count() == 0) return error.SkipZigTest;
+    const xml =
+        \\<prefabs>
+        \\  <decoration type="model" name="abandoned_house_01" position="0,60,0" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_02" position="0,60,10" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_03" position="0,60,20" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_04" position="0,60,30" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_05" position="0,60,40" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_06" position="0,60,50" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_07" position="0,60,60" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_08" position="0,60,70" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_09" position="0,60,80" rotation="0" />
+        \\  <decoration type="model" name="abandoned_house_10" position="0,60,90" rotation="0" />
+        \\  <decoration type="model" name="cave_01" position="0,60,100" rotation="0" />
+        \\  <decoration type="model" name="cave_02" position="0,60,110" rotation="0" />
+        \\</prefabs>
+    ;
+    var idx = try parseXml(std.testing.allocator, xml, root);
+    defer idx.deinit();
+    const Look = struct {
+        fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+            const t: *const maxdamage.Table = @ptrCast(@alignCast(ctx.?));
+            return t.idByName(name);
+        }
+    };
+    idx.setIdLookup(.{ .ctx = &table, .lookup = Look.lookup });
+
+    // Hold a pointer while the cache grows past several resizes.
+    const first = idx.getTtsBlocks("abandoned_house_01") orelse return error.SkipZigTest;
+    const types_len = first.types.len;
+    const sx = first.sx;
+    var loaded: usize = 1;
+    for ([_][]const u8{ "abandoned_house_02", "abandoned_house_03", "abandoned_house_04", "abandoned_house_05", "abandoned_house_06", "abandoned_house_07", "abandoned_house_08", "abandoned_house_09", "abandoned_house_10", "cave_01", "cave_02" }) |n| {
+        if (idx.getTtsBlocks(n) != null) loaded += 1;
+    }
+    if (loaded < 6) return error.SkipZigTest; // need a resize for the test to mean anything
+    // Same identity, same data: the held pointer is still the cached entry.
+    try std.testing.expectEqual(first, idx.getTtsBlocks("abandoned_house_01").?);
+    try std.testing.expectEqual(types_len, first.types.len);
+    try std.testing.expectEqual(sx, first.sx);
 }
 
 test "quest data and part filter from the stock install" {

@@ -41,7 +41,10 @@ inline `Chunk` values, so a `*Chunk` held across a re-entrant
 GAP "Chunk pointer stability" hazard class (bait-soak segfault 5/5) at the
 store instead of per-call-site re-fetch. Regression test "chunk pointers
 stay valid across map resizes (pointer-stable store)" holds a pointer across
-40+ forced resizes and the mid-scan create pattern. Scorecard: 294 WORKS,
+40+ forced resizes and the mid-scan create pattern. The same hazard class in
+the prefab TTS cache (`world/prefabs.zig`) was closed the same way
+(`*TtsBlocks` per-entry allocations; regression test holds a pointer across
+11 cache puts). Scorecard: 294 WORKS,
 1 PARTIAL (join-burst tick budget), 0 MISSING.
 
 GAP "Join-burst tick budget" chunk pacing landed: `sendSpawnArea` sends only

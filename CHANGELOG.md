@@ -79,7 +79,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   held across a re-entrant `getOrCreate`/`blockWorld` stays valid across map
   resizes — closing the GAP "Chunk pointer stability" hazard class (bait-soak
   segfault 5/5) at the store, with a regression test forcing 40+ resizes
-  while a pointer is held.
+  while a pointer is held. The same hazard class in the prefab TTS cache
+  (`tts_cache` in `world/prefabs.zig`) was closed the same way: the map now
+  holds `*TtsBlocks` (per-entry allocations, freed on deinit/setIdLookup)
+  with a regression test holding a pointer across 11 cache puts.
 - Join-burst pacing (GAP "Join-burst tick budget"): `sendSpawnArea` sends
   only the collision-mesh core (spawn chunk + 8 neighbours) synchronously
   and arms a per-client pending area; `drainSpawnArea` delivers the outer
