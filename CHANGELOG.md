@@ -73,6 +73,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   needed); fall-damage stays client-owned (stock wire). Sense v4 is a
   breaking layout change: all shipped guests (fps_bot, mcp, core_announce)
   were rebuilt for it.
+- Pointer-stable chunk store: `World.chunks` maps keys to `*Chunk` (one
+  allocation per chunk, freed on eviction/deinit, residency bounded by
+  `max_resident_chunks`) instead of inline `Chunk` values, so a `*Chunk`
+  held across a re-entrant `getOrCreate`/`blockWorld` stays valid across map
+  resizes — closing the GAP "Chunk pointer stability" hazard class (bait-soak
+  segfault 5/5) at the store, with a regression test forcing 40+ resizes
+  while a pointer is held.
 
 ### Fixed
 

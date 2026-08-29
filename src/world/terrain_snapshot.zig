@@ -10,7 +10,7 @@
 //! main thread, before the AI phase, and answers probes lock-free. It is
 //! conservative by construction:
 //!
-//!   * built with `chunks.getPtr`, never `getOrCreate`, so a hit returns the
+//!   * built with `chunks.get`, never `getOrCreate`, so a hit returns the
 //!     same footing the hook would have computed;
 //!   * it only answers the surface case (feet one above the topmost solid
 //!     block). A column whose surface is out of the body's step/drop band could
@@ -115,9 +115,9 @@ pub const Snapshot = struct {
                 while (dx <= snap_radius_chunks) : (dx += 1) {
                     const pos: store.ChunkPos = .{ .x = cx + dx, .z = cz + dz };
                     const key = pos.hash();
-                    // getPtr only: generating here would change which chunks
+                    // get only: generating here would change which chunks
                     // exist and when, i.e. change sim outcomes.
-                    const ch = w.chunks.getPtr(key) orelse continue;
+                    const ch = w.chunks.get(key) orelse continue;
                     const at = self.put(key) orelse continue;
                     fillCols(ch, &self.cols[at]);
                 }

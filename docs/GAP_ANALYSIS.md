@@ -68,7 +68,7 @@ are unloaded instead of standing frozen in your world forever.
 ### What a player cannot do
 
 *Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
-[scorecard](#2-scorecard): all but two of the 295 features WORKS (293 WORKS, 2 PARTIAL, 0 MISSING); the
+[scorecard](#2-scorecard): all but one of the 295 features WORKS (294 WORKS, 1 PARTIAL, 0 MISSING); the
 bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -151,9 +151,10 @@ Recount 2026-08-22 from the live per-feature markers (the source of truth):
 **291 features** carry a canonical WORKS/PARTIAL/MISSING tag and the scorecard
 rows below are corrected to those counts. Recount 2026-08-29 (this pass):
 rows added or re-tagged since then bring the canonical set to **295 features
-(293 WORKS, 2 PARTIAL, 0 MISSING)**; the two PARTIAL rows are the 2026-08-29
-join-burst tick budget and chunk-pointer stability gaps, both with their
-residual recorded in the row. The 2026-08-21 "333 features / 44
+(294 WORKS, 1 PARTIAL, 0 MISSING)**; the one PARTIAL row is the 2026-08-29
+join-burst tick budget (its residual recorded in the row); the chunk-pointer
+stability gap was closed 2026-08-30 by the pointer-stable chunk store. The
+2026-08-21 "333 features / 44
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
@@ -204,9 +205,9 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Entities and AI](#8-entities-and-ai) | 40 | 0 | 0 | 40 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; population is still thin |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 23 | 0 | 0 | 23 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
-| [World systems](#11-world-systems) | 44 | 2 | 0 | 46 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses |
+| [World systems](#11-world-systems) | 45 | 1 | 0 | 46 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 49 | 0 | 0 | 49 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **293** | **2** | **0** | **295** | All but two features WORKS; the 2 PARTIAL rows are the 2026-08-29 join-burst tick budget and chunk-pointer stability gaps; residuals are recorded inline (RE-blocked or non-goal) |
+| **Total** | **294** | **1** | **0** | **295** | All but one feature WORKS; the 1 PARTIAL row is the 2026-08-29 join-burst tick budget (residual recorded inline); chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3445,26 +3446,28 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   *Evidence:* APM dump `zdtd_apm` counters (tick_total/net_poll max_ns),
   loadgen `ChallengeReplied timeout` under concurrent count=2.
 
-- **Chunk pointer stability across re-entrant store access** `PARTIAL` `(2026-08-29)`
+- **Chunk pointer stability across re-entrant store access** `WORKS` `(2026-08-30)`
   The spawn-area send holds a `*Chunk` (store.getOrCreate, chunk_fill.zig:41)
   while `ensurePrefabStorageInChunk` scans it; the prefab-TE callback reads
   the block at a TE column via `world.blockWorld` (chunk_fill.zig:309), which
-  calls `getOrCreate` again. `World.chunks` is an
+  calls `getOrCreate` again. `World.chunks` used to be an
   `AutoHashMapUnmanaged(u64, Chunk)` with the chunk VALUES inline, so any
-  insert that crosses the load factor resizes the backing array and moves
-  every chunk - the held pointer dangles. A live bait soak (ReleaseFast,
+  insert that crosses the load factor resized the backing array and moved
+  every chunk - the held pointer dangled. A live bait soak (ReleaseFast,
   concurrent double join, Pregen06k01) crashed 5/5 with a segfault at the
   `ch.te_scanned = true` write (stack canary trip / `__chk_fail`; Debug
   aborts at chunk_fill.zig:327). Proven by an instrumented run: the map
-  resized 32->64 during the scan of the very chunk being written. Fixed
+  resized 32->64 during the scan of the very chunk being written. First fix
   (2026-08-29): the post-re-entry writes re-fetch the chunk by position
   (`chunkAt` before `te_scanned` / `power_scanned`), and the re-fetched
-  pointer is used for the power block reads. The hazard class is broader:
-  any `*Chunk` held across a re-entrant `getOrCreate`/`blockWorld` dangles on
-  resize. Tracked follow-on: make the chunk store pointer-stable (map of
-  pointers + arena/free-list slots, bounded by `max_resident_chunks`) so
-  chunk pointers are valid for the lifetime of residency instead of only
-  within a non-re-entrant scope.
+  pointer is used for the power block reads. Closed 2026-08-30: the store is
+  now **pointer-stable** - `World.chunks` maps keys to `*Chunk` (one
+  allocation per chunk, freed on eviction/deinit, residency still bounded by
+  `max_resident_chunks`), so any `*Chunk` held across a re-entrant
+  `getOrCreate`/`blockWorld` stays valid for the lifetime of residency
+  instead of only within a non-re-entrant scope. Regression test
+  "chunk pointers stay valid across map resizes (pointer-stable store)"
+  holds a pointer across 40+ forced resizes and the mid-scan create pattern.
   *Evidence:* loadgen bait soak (2 bots, `--mode bait`, concurrent joins),
   Debug abort at `chunk_fill.zig:327`, ReleaseFast segfault 5/5, instrumented
   resize log `cap 32->64` during the scan.

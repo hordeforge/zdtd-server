@@ -32,6 +32,18 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## Batch T 2026-08-30 (pointer-stable chunk store)
+
+`World.chunks` now maps keys to `*Chunk` (one allocation per chunk, freed on
+eviction/deinit, residency still bounded by `max_resident_chunks`) instead of
+inline `Chunk` values, so a `*Chunk` held across a re-entrant
+`getOrCreate`/`blockWorld` stays valid when the map resizes — closing the
+GAP "Chunk pointer stability" hazard class (bait-soak segfault 5/5) at the
+store instead of per-call-site re-fetch. Regression test "chunk pointers
+stay valid across map resizes (pointer-stable store)" holds a pointer across
+40+ forced resizes and the mid-scan create pattern. Scorecard: 294 WORKS,
+1 PARTIAL (join-burst tick budget), 0 MISSING.
+
 ## Batch S 2026-08-29 (parachute mod + ADR 0037 glide boundary)
 
 `mods/parachute/` ships fully self-contained (manifest/README/config/preset/

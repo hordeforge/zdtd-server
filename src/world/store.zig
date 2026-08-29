@@ -516,7 +516,14 @@ pub const max_step_up: i32 = 1;
 pub const max_drop: i32 = 3;
 
 pub const World = struct {
-    chunks: std.AutoHashMapUnmanaged(u64, Chunk),
+    // Pointer-stable chunk store (GAP "Chunk pointer stability", 2026-08-29
+    // PARTIAL): the map holds *Chunk (one allocation per chunk) instead of
+    // inline Chunk values, so a chunk pointer held across a re-entrant
+    // getOrCreate/blockWorld stays valid when the map resizes - a value-map
+    // moved every chunk on resize and dangled the held pointer (bait-soak
+    // segfault 5/5). Chunks are freed on eviction/deinit; residency is still
+    // bounded by `max_resident_chunks`.
+    chunks: std.AutoHashMapUnmanaged(u64, *Chunk),
     world_dir: []u8,
     allocator: std.mem.Allocator,
     heightmap: ?dtm.Heightmap = null,
@@ -766,7 +773,10 @@ pub const World = struct {
         // detached or still-running writer would lose queued saves at exit.
         self.flush.deinit();
         var it = self.chunks.iterator();
-        while (it.next()) |e| e.value_ptr.deinitBlocks();
+        while (it.next()) |e| {
+            e.value_ptr.*.deinitBlocks();
+            self.allocator.destroy(e.value_ptr.*);
+        }
         if (self.heightmap) |*hm| hm.deinit();
         if (self.prefabs) |*p| p.deinit();
         if (self.water) |*w| w.deinit();
@@ -800,14 +810,14 @@ pub const World = struct {
         while (it.next()) |e| {
             const k = e.key_ptr.*;
             if (k == keep_key) continue;
-            const t = e.value_ptr.last_touch;
+            const t = e.value_ptr.*.last_touch;
             if (best_key == null or t < best_touch or (t == best_touch and k < best_key.?)) {
                 best_key = k;
                 best_touch = t;
             }
         }
         const victim = best_key orelse return error.NoEvictionCandidate;
-        const c = self.chunks.getPtr(victim) orelse return error.NoEvictionCandidate;
+        const c = self.chunks.get(victim) orelse return error.NoEvictionCandidate;
         // Never discard a resident chunk unless its latest state reached disk.
         // The caller can reject the new chunk request and retry later.
         // Eviction goes through the same FIFO as every other write (the queue
@@ -816,6 +826,7 @@ pub const World = struct {
         try self.saveChunk(c);
         c.deinitBlocks();
         _ = self.chunks.remove(victim);
+        self.allocator.destroy(c);
     }
 
     pub fn getOrCreate(self: *World, pos: ChunkPos) !*Chunk {
@@ -826,16 +837,23 @@ pub const World = struct {
         const gop = try self.chunks.getOrPut(self.allocator, k);
         self.touch_seq += 1;
         if (!gop.found_existing) {
-            gop.value_ptr.* = Chunk.generateFlat(pos);
+            // Pointer-stable: the chunk lives in its own allocation, so a
+            // caller-held *Chunk survives map resizes (and re-entrant
+            // getOrCreate/blockWorld inside this very init, e.g. the
+            // prefab-TE scan). Freed on eviction/deinit only.
+            const c = try self.allocator.create(Chunk);
+            c.* = Chunk.generateFlat(pos);
             // A38: fallback terrain synthesis reads live ids, not module pins.
-            gop.value_ptr.terrain = &self.terrain_ids;
+            c.terrain = &self.terrain_ids;
             // Wire geometry profile: column height + derived plane sizing.
-            gop.value_ptr.y_dim = self.profile.y_dim;
+            c.y_dim = self.profile.y_dim;
             // Stamped here, not at the tail: the load_state == .full path below
             // returns early.
-            gop.value_ptr.last_touch = self.touch_seq;
+            c.last_touch = self.touch_seq;
+            gop.value_ptr.* = c;
             errdefer {
-                gop.value_ptr.deinitBlocks();
+                c.deinitBlocks();
+                self.allocator.destroy(c);
                 _ = self.chunks.remove(k);
             }
             // Disk load first: a v3 save with blocks is authoritative for every
@@ -843,15 +861,15 @@ pub const World = struct {
             // Heights-only / v2 saves still regen, then re-load to keep edits.
             const LoadState = enum { none, heights_only, full };
             var load_state: LoadState = .none;
-            if (self.loadChunk(gop.value_ptr)) {
-                load_state = if (gop.value_ptr.blocks != null) .full else .heights_only;
+            if (self.loadChunk(c)) {
+                load_state = if (c.blocks != null) .full else .heights_only;
             } else |err| {
                 if (err != error.FileNotFound) std.debug.print(
                     "zdtd: chunk ({d},{d}) load failed: {s}; regenerated\n",
                     .{ pos.x, pos.z, @errorName(err) },
                 );
             }
-            if (load_state == .full) return gop.value_ptr;
+            if (load_state == .full) return c;
             const geo = self.geometry;
             const profile_max: u32 = 255; // stock wire profile (Layer B widens)
             if (self.terrain_source == .proc) {
@@ -860,35 +878,35 @@ pub const World = struct {
                         // 3D density field: blocks first, heights derived from the
                         // topmost solid cell (overhangs cannot come from a column
                         // fill). Single-biome materials via defaultStack pins.
-                        try gop.value_ptr.generateProc(self.allocator, wg);
+                        try c.generateProc(self.allocator, wg);
                     } else {
                         // Projected proc: surface model (height plane -> project ->
                         // column fill). The W2 density overhangs are lost by
                         // design: a projected geometry is an explicit non-stock
                         // elevation model, and the RWG lake table (stock
                         // water_surface_cell) does not apply to it.
-                        wg.fillHeights(pos.x, pos.z, &gop.value_ptr.heights);
-                        projectPlane(&gop.value_ptr.heights, geo, profile_max);
+                        wg.fillHeights(pos.x, pos.z, &c.heights);
+                        projectPlane(&c.heights, geo, profile_max);
                         const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
                         const stack = self.biome_layers_table.stackFor(biome_id);
-                        try gop.value_ptr.ensureBlocksWithStack(self.allocator, stack);
+                        try c.ensureBlocksWithStack(self.allocator, stack);
                     }
                 }
             } else {
                 if (self.heightmap) |*hm| {
-                    hm.fillChunkHeights(pos.x, pos.z, &gop.value_ptr.heights, fallbackSeaU8(geo));
-                    if (!geo.isStock()) projectPlane(&gop.value_ptr.heights, geo, profile_max);
+                    hm.fillChunkHeights(pos.x, pos.z, &c.heights, fallbackSeaU8(geo));
+                    if (!geo.isStock()) projectPlane(&c.heights, geo, profile_max);
                 } else {
                     // Flat: the whole surface is the projected sea level
                     // (identity at stock defaults -> the old sea_level plane).
-                    @memset(&gop.value_ptr.heights, @intCast(geo.project(geo.sea_level, profile_max)));
+                    @memset(&c.heights, @intCast(geo.project(geo.sea_level, profile_max)));
                 }
                 // Terrain columns from biomes.xml layers (before POI paint / disk load).
                 const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
                 const stack = self.biome_layers_table.stackFor(biome_id);
-                try gop.value_ptr.ensureBlocksWithStack(self.allocator, stack);
+                try c.ensureBlocksWithStack(self.allocator, stack);
                 if (self.prefabs) |*pf| {
-                    pf.applyToChunkHeights(pos.x, pos.z, &gop.value_ptr.heights);
+                    pf.applyToChunkHeights(pos.x, pos.z, &c.heights);
                     // Stock .tts block paint into this chunk only (no setBlockWorld re-entry).
                     const PaintCtx = struct {
                         c: *Chunk,
@@ -917,7 +935,7 @@ pub const World = struct {
                         }
                     };
                     var pc: PaintCtx = .{
-                        .c = gop.value_ptr,
+                        .c = c,
                         .a = self.allocator,
                         .base_x = pos.x * 16,
                         .base_z = pos.z * 16,
@@ -937,7 +955,7 @@ pub const World = struct {
                             return s.c.blockAt(lx, wy, lz);
                         }
                     };
-                    var terr_ctx: TerrainCtx = .{ .c = gop.value_ptr, .base_x = pos.x * 16, .base_z = pos.z * 16 };
+                    var terr_ctx: TerrainCtx = .{ .c = c, .base_x = pos.x * 16, .base_z = pos.z * 16 };
                     pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, TerrainCtx.at, &terr_ctx, PaintCtx.put, &pc);
                     if (pc.failed > 0) {
                         std.debug.print(
@@ -947,8 +965,8 @@ pub const World = struct {
                     }
                 }
                 if (self.water) |*wt| {
-                    wt.applyToChunkHeights(pos.x, pos.z, &gop.value_ptr.heights);
-                    gop.value_ptr.applyWaterSources(pos.x, pos.z, wt, self.terrain_ids.water);
+                    wt.applyToChunkHeights(pos.x, pos.z, &c.heights);
+                    c.applyWaterSources(pos.x, pos.z, wt, self.terrain_ids.water);
                 }
             }
             // Player edits / first-touch cache win over regen (heights-only or
@@ -956,15 +974,15 @@ pub const World = struct {
             // Note: for a legacy ZCH2/v2 proc save the restored heights can
             // disagree with the density-derived plane (overhangs are not
             // expressible in a heightmap). Pre-existing; v3 saves carry blocks.
-            if (load_state == .heights_only) self.loadChunk(gop.value_ptr) catch |err| {
+            if (load_state == .heights_only) self.loadChunk(c) catch |err| {
                 std.debug.print(
                     "zdtd: chunk ({d},{d}) edit re-load failed: {s}\n",
                     .{ pos.x, pos.z, @errorName(err) },
                 );
             };
         }
-        gop.value_ptr.last_touch = self.touch_seq;
-        return gop.value_ptr;
+        gop.value_ptr.*.last_touch = self.touch_seq;
+        return gop.value_ptr.*;
     }
 
     pub fn worldToChunk(wx: i32, wz: i32) struct { pos: ChunkPos, lx: i32, lz: i32 } {
@@ -980,7 +998,7 @@ pub const World = struct {
     /// Non-materializing resident-chunk lookup (read/write paths: damage, meta).
     /// Null when the chunk is not resident; callers fall back to defaults.
     pub fn chunkAt(self: *const World, pos: ChunkPos) ?*Chunk {
-        return self.chunks.getPtr(pos.hash());
+        return self.chunks.get(pos.hash());
     }
 
     pub fn setBlockWorld(self: *World, x: i32, y: i32, z: i32, id: u16) !void {
@@ -1018,7 +1036,7 @@ pub const World = struct {
             const nz: i32 = if (lz == 0) c.pos.z - 1 else if (lz == 15) c.pos.z + 1 else c.pos.z;
             const nl: i32 = if (lx == 0) 15 else if (lx == 15) 0 else lx;
             const nlz: i32 = if (lz == 0) 15 else if (lz == 15) 0 else lz;
-            if (self.chunks.getPtr(ChunkPos.hash(.{ .x = nx, .z = nz }))) |nc| {
+            if (self.chunks.get(ChunkPos.hash(.{ .x = nx, .z = nz }))) |nc| {
                 nc.setTopSoilBroken(nl, nlz);
             }
         }
@@ -1533,7 +1551,7 @@ pub const World = struct {
         var dirty_n: usize = 0;
         var count_it = self.chunks.iterator();
         while (count_it.next()) |e| {
-            if (e.value_ptr.dirty) dirty_n += 1;
+            if (e.value_ptr.*.dirty) dirty_n += 1;
         }
         if (dirty_n == 0) return;
 
@@ -1545,7 +1563,7 @@ pub const World = struct {
         var kn: usize = 0;
         var it = self.chunks.iterator();
         while (it.next()) |e| {
-            if (!e.value_ptr.dirty) continue;
+            if (!e.value_ptr.*.dirty) continue;
             keys[kn] = e.key_ptr.*;
             kn += 1;
         }
@@ -1555,7 +1573,7 @@ pub const World = struct {
         var list: [512]*Chunk = undefined;
         var n: usize = 0;
         for (keys[0..kn]) |k| {
-            const c = self.chunks.getPtr(k) orelse continue;
+            const c = self.chunks.get(k) orelse continue;
             if (!c.dirty) continue;
             if (n >= list.len) {
                 try self.saveChunkSlice(list[0..n]);
@@ -1629,6 +1647,7 @@ test "proc worldgen getOrCreate heights from seed" {
     if (w.chunks.fetchRemove(ChunkPos.hash(.{ .x = 2, .z = -1 }))) |kv| {
         var dead = kv.value;
         dead.deinitBlocks();
+        w.allocator.destroy(dead);
     }
     const c2 = try w.getOrCreate(.{ .x = 2, .z = -1 });
     try std.testing.expectEqual(h0, c2.heightAt(5, 7));
@@ -1711,7 +1730,7 @@ test "a clean proc session writes no world files (mods leave no trace)" {
     // reload, so it must not dirty the chunk or write files either — a clean
     // session truly leaves no trace (real edits still persist).
     try w.setBlockDecoWorld(3, 10, 3, block_stone);
-    try std.testing.expect(!w.chunks.getPtr(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);
+    try std.testing.expect(!w.chunks.get(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);
     try w.saveAll();
     try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = 0, .z = 0 }, &path_buf)));
     // An edit is the one thing that persists.
@@ -1732,9 +1751,9 @@ test "flat world set dig persist" {
     try w.setBlockWorld(6, 71, 5, block_stone);
     try std.testing.expectEqual(block_dirt, try w.blockWorld(5, 70, 5));
     try std.testing.expectEqual(block_stone, try w.blockWorld(6, 71, 5));
-    try std.testing.expect(w.chunks.getPtr(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);
+    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);
     try w.saveAll();
-    try std.testing.expect(!w.chunks.getPtr(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);
+    try std.testing.expect(!w.chunks.get(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);
 
     var w2 = try World.init(std.testing.allocator, dir);
     defer w2.deinit();
@@ -1843,7 +1862,7 @@ test "evictOneChunk picks the coldest chunk, min key on ties (DST)" {
     _ = try tied.getOrCreate(.{ .x = 6, .z = 0 });
     _ = try tied.getOrCreate(.{ .x = 5, .z = 0 });
     var it = tied.chunks.iterator();
-    while (it.next()) |e| e.value_ptr.last_touch = 0;
+    while (it.next()) |e| e.value_ptr.*.last_touch = 0;
     try tied.evictOneChunk(ChunkPos.hash(.{ .x = 7, .z = 0 }));
     try std.testing.expect(tied.chunks.get(ChunkPos.hash(.{ .x = 5, .z = 0 })) == null);
 }
@@ -1938,7 +1957,7 @@ test "topsoil bitfield: fresh clear, dig marks, ZCH3 round-trips" {
     // neighbor exists; never created on demand).
     try w.setBlockWorld(15, g, 0, block_air); // lx=15, column bit 15 (byte 1 bit 7)
     try std.testing.expectEqual(@as(u8, 0x80), c.topsoil[1]);
-    try std.testing.expect(w.chunks.getPtr(ChunkPos.hash(.{ .x = 1, .z = 0 })) == null);
+    try std.testing.expect(w.chunks.get(ChunkPos.hash(.{ .x = 1, .z = 0 })) == null);
 
     // ZCH3 round-trip: the disturbed bits survive a reload; old files without
     // the tail load all-clear.
@@ -2091,7 +2110,7 @@ test "asyncEnabled is false under force-serial (DST keeps the sync path)" {
     try w.setBlockWorld(1, 70, 1, block_stone);
     io_fs.injectWriteFailures(1);
     defer io_fs.injectWriteFailures(0);
-    try std.testing.expectError(error.DiskQuota, w.saveChunk(w.chunks.getPtr(ChunkPos.hash(.{ .x = 0, .z = 0 })).?));
+    try std.testing.expectError(error.DiskQuota, w.saveChunk(w.chunks.get(ChunkPos.hash(.{ .x = 0, .z = 0 })).?));
 }
 
 test "evict then reload of a queued key reads the newest bytes" {
@@ -2431,4 +2450,36 @@ test "water leveling: the spread cap bounds one pour" {
     try std.testing.expectEqual(@as(u32, 2), w.levelWaterTick(4, 2, 8));
     try std.testing.expectEqual(block_water, try w.blockWorld(1, 51, 0));
     try std.testing.expectEqual(block_air, try w.blockWorld(1, 53, 0));
+}
+
+test "chunk pointers stay valid across map resizes (pointer-stable store)" {
+    // GAP "Chunk pointer stability" (PARTIAL 2026-08-29): the store maps keys
+    // to per-chunk allocations instead of inline Chunk values, so a *Chunk
+    // held across a re-entrant getOrCreate survives the map resize that a
+    // value-map would dangle (bait-soak segfault 5/5, Debug abort at
+    // chunk_fill.zig:327). Regression: same identity + same data after many
+    // resizes, and the mid-scan create pattern stays readable.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+
+    const held = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    const h0 = held.heightAt(0, 0);
+    // Force several map resizes while the pointer is held.
+    var x: i32 = 1;
+    while (x < 40) : (x += 1) {
+        _ = try w.getOrCreate(.{ .x = x, .z = 0 });
+    }
+    // Same identity, same data: the held pointer is still the resident chunk.
+    try std.testing.expectEqual(held, w.chunks.get(ChunkPos.hash(.{ .x = 0, .z = 0 })).?);
+    try std.testing.expectEqual(h0, held.heightAt(0, 0));
+    // Re-entrant mid-scan pattern (chunk_fill.zig te_scan): a pointer held
+    // while another chunk is created must stay readable.
+    const mid = try w.getOrCreate(.{ .x = 41, .z = 0 });
+    const mid_h = mid.heightAt(0, 0);
+    _ = try w.getOrCreate(.{ .x = 42, .z = 0 });
+    try std.testing.expectEqual(mid_h, mid.heightAt(0, 0));
 }

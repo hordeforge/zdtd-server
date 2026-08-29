@@ -34,7 +34,7 @@ pub fn cellSurfaceY(w: *const World, wx: i32, wz: i32) ?i32 {
     const bx = wx * cell_size + cell_size / 2;
     const bz = wz * cell_size + cell_size / 2;
     const t = World.worldToChunk(bx, bz);
-    const ch = w.chunks.getPtr(t.pos.hash()) orelse return null;
+    const ch = w.chunks.get(t.pos.hash()) orelse return null;
     return ch.standableY(t.lx, t.lz, w.yDim() - body_height, max_step_up, w.yDim());
 }
 

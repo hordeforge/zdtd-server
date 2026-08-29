@@ -60,7 +60,7 @@ const dirs = [_][3]i32{
 
 fn chunkOf(w: *store.World, px: i32, pz: i32) ?*store.Chunk {
     const pos = store.ChunkPos{ .x = px, .z = pz };
-    return w.chunks.getPtr(pos.hash());
+    return w.chunks.get(pos.hash());
 }
 
 /// Block id at a world position, or 0 when the chunk is not resident.
@@ -502,7 +502,7 @@ test "stability: terrain supports a column; cutting the base fells it" {
     const t = store.World.worldToChunk(2, 2);
     const c = blk: {
         const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z };
-        break :blk w.chunks.getPtr(p.hash()).?;
+        break :blk w.chunks.get(p.hash()).?;
     };
     try ensureComputed(w, c, gpa, null, testFacts);
     // Column base sits on terrain (15) and the blocks above inherit support.
@@ -544,7 +544,7 @@ test "stability: overhang beyond support falls after the support goes" {
     const t = store.World.worldToChunk(10, 10);
     const c = blk: {
         const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z };
-        break :blk w.chunks.getPtr(p.hash()).?;
+        break :blk w.chunks.get(p.hash()).?;
     };
     try ensureComputed(w, c, gpa, null, testFacts);
     // The overhang keeps the base's stability (sideways spread at the same level).
@@ -582,7 +582,7 @@ test "stability: non-support blocks cap at 1 and never carry support" {
     const t = store.World.worldToChunk(4, 4);
     const c = blk: {
         const p = store.ChunkPos{ .x = t.pos.x, .z = t.pos.z };
-        break :blk w.chunks.getPtr(p.hash()).?;
+        break :blk w.chunks.get(p.hash()).?;
     };
     try ensureComputed(w, c, gpa, null, testFacts);
     // The non-support block caps at 1; the block above it is stable (15).
