@@ -3402,8 +3402,9 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   `src/server/game/chunk_stream.zig` (bitset + radius), `src/server/game/types.zig`
 
 - **Join-burst tick budget under concurrent load** `PARTIAL` `(2026-08-29)`
-  Measured with a live 7dtd-loadgen double join against `--mode infinite`
-  (APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
+  Measured with a live 7dtd-loadgen double join against the infinite
+  world (config-only mod `mods/infinite_world`, formerly `--mode infinite`;
+  APM dump): p99 tick 201 ms, max tick **1.9 s** (budget 50 ms), max
   net_poll 1.9 s. The join burst is fully synchronous: `sendSpawnArea`
   queues the whole 17x17 view (289 chunks), each proc chunk costs
   generation + te_scan (19.7 M cells in one join) + a ~40 KB payload, and
