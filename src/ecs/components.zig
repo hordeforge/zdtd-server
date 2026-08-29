@@ -64,6 +64,13 @@ pub const Player = struct {
     /// player's movement noise for the AI hearing gate and shrinks sleeper
     /// attack-detect (RE entity-ai.md PlayerStealth).
     crouching: bool = false,
+    /// Glide flag (ADR 0037 parachute): while `glide_until_tick > world tick`
+    /// the movement envelope allows a sustained fall up to
+    /// `[authority] glide_vy_cap_mps`. Set by the `glide` plugin verb;
+    /// `glide_src` is the issuing plugin (paper 3.1 attribution) so a
+    /// withdrawn module's applied glide is cleared.
+    glide_until_tick: u64 = 0,
+    glide_src: i16 = 0,
 };
 
 pub const ClassId = struct {

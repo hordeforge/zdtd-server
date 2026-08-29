@@ -540,5 +540,13 @@ pub fn withdrawPluginSrc(self: *Game, src: i16) void {
     for (spawn_out[0..sn]) |id| {
         if (self.sim.slotOfNetId(id)) |es| self.sim.destroy(es);
     }
+    // Applied glide flags (ADR 0037) attributed to this src: a withdrawn
+    // module must not leave the player envelope-exempt (paper 3.1).
+    for (&self.sim.player) |*pl| {
+        if (pl.glide_src == src) {
+            pl.glide_until_tick = 0;
+            pl.glide_src = 0;
+        }
+    }
     self.bots.dropFrom(src);
 }

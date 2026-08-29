@@ -9015,15 +9015,15 @@ test "scenario bot count floor spawns bots and fillSense emits them" {
     try std.testing.expect(g.bots.handleCommand(g, "bot count 2", 0));
     try std.testing.expectEqual(@as(usize, 2), g.bots.n);
 
-    // The sense snapshot then carries both bots as kind==2 records.
+    // The sense snapshot then carries both bots as kind==2 records (v4 40-byte).
     var out: [256]u8 = undefined;
-    std.mem.writeInt(u32, out[0..4], 0x3353425a, .little); // 'ZBS3'
+    std.mem.writeInt(u32, out[0..4], 0x3453425a, .little); // 'ZBS4'
     std.mem.writeInt(u32, out[4..8], 0, .little);
     var n: usize = 0;
     g.bots.fillSense(&out, 24, 2, &n);
     try std.testing.expectEqual(@as(usize, 2), n);
     try std.testing.expectEqual(@as(u8, 2), out[24 + 4]); // kind bot
-    try std.testing.expectEqual(@as(u8, 2), out[56 + 4]);
+    try std.testing.expectEqual(@as(u8, 2), out[64 + 4]);
 }
 
 test "scenario applyCountFloor tops up across repeated calls" {

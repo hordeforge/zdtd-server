@@ -332,6 +332,15 @@ pub const InitOptions = struct {
     max_horizontal_speed_mps: f32 = default_max_horizontal_speed_mps,
     /// Vertical envelope cap (zdtd.toml [authority] max_vertical_speed_mps).
     max_vertical_speed_mps: f32 = default_max_vertical_speed_mps,
+    /// Glide (parachute, ADR 0037) vertical cap while a player's glide flag is
+    /// set: a sustained glide fall is legal up to this magnitude (blocks/s),
+    /// still bounding teleport-scale abuse. Default -100 (generous glide).
+    glide_vy_cap_mps: f32 = -100.0,
+    /// Item tag that marks a worn item as a glider (ADR 0037): a player whose
+    /// armor slots carry an item whose items.xml `Tags` include this value is
+    /// reported `wearing_glider` in the sense v4 record. Mods set their own
+    /// tag via items.xml patch + this key (mod preset). Empty = no glider.
+    glider_item_tag: []const u8 = "parachute",
     peer_stale_ms: u64 = default_peer_stale_ms,
     /// Container lock auto-release (zdtd.toml [authority] lock_stale_ms).
     lock_stale_ns: u64 = default_lock_stale_ns,
@@ -532,6 +541,10 @@ pub const Client = struct {
     move_y: f32 = 0,
     move_z: f32 = 0,
     move_tick: u64 = 0,
+    /// Server-derived vertical velocity (blocks/s) from the C2S position
+    /// history (ADR 0037): fed to the sense v4 record so plugins observe the
+    /// player's fall without a sim-side physics model.
+    vy_blocks_per_s: f32 = 0,
     /// Running total of eatable units last seen (cross-package stack-loss).
     last_eatable_units: u32 = 0,
     /// Once: soft warn when streamed_n crosses ~80% of max_streamed_chunks.

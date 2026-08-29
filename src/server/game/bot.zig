@@ -84,8 +84,11 @@ const bot_spawn_spread: f32 = bot_host_defaults.spawn_spread;
 /// Config: `[bots] spawn_y`.
 const bot_spawn_y: f32 = bot_host_defaults.spawn_y;
 /// Horizontal arrival tolerance: move intent clears when within this distance.
-/// Sense record byte size (RFC 0001 §3): one fixed 32-byte record per entity.
-pub const sense_record_len: usize = 32;
+/// Sense record byte size (RFC 0001 §3; ADR 0037 sense v4): one fixed
+/// 40-byte record per entity. Layout: net_id i32, kind u8, self u8, alive u8,
+/// pad u8, pos 3xf32, hp f32, yaw f32, vy i32, target_id i32, wearing u8,
+/// pad 3. v3 was 32 bytes; v4 added vy (blocks/s) + wearing_glider.
+pub const sense_record_len: usize = 40;
 /// Sense kind value for a bot (RFC 0001 §3: 0 player, 1 zombie, 2 bot).
 const sense_kind_bot: u8 = 2;
 /// Damage-event records in the sense trailer cap (RFC 0001 §3): at most this
@@ -654,7 +657,9 @@ pub const BotManager = struct {
             std.mem.writeInt(u32, r[16..20], @bitCast(b.z), .little);
             std.mem.writeInt(u32, r[20..24], @bitCast(b.hp), .little);
             std.mem.writeInt(u32, r[24..28], @bitCast(b.yaw), .little);
-            std.mem.writeInt(i32, r[28..32], -1, .little); // target_id
+            std.mem.writeInt(i32, r[28..32], 0, .little); // vy (no sim model)
+            std.mem.writeInt(i32, r[32..36], -1, .little); // target_id
+            r[36] = 0; // wearing (bots wear nothing)
             n.* += 1;
         }
     }
@@ -820,18 +825,18 @@ test "BotManager move integration steps toward dest without overshooting" {
     try std.testing.expectApproxEqAbs(x0, m.bots[0].x, 0.001);
 }
 
-test "BotManager fillSense writes the fixed 32-byte sense layout" {
+test "BotManager fillSense writes the fixed 40-byte sense layout (v4)" {
     var m: BotManager = .{};
     m.bots[0] = .{ .net_id = 100, .x = 1.5, .y = 70.25, .z = -3.5, .yaw = 45, .hp = 60, .alive = true };
     m.bots[1] = .{ .net_id = 101, .x = 0, .y = 70, .z = 0, .hp = 100, .alive = true };
     m.n = 2;
 
-    var out: [16 + 2 * 32]u8 = [_]u8{0} ** (16 + 2 * 32);
+    var out: [16 + 2 * sense_record_len]u8 = [_]u8{0} ** (16 + 2 * sense_record_len);
     var n: usize = 0;
     m.fillSense(&out, 16, 2, &n);
     try std.testing.expectEqual(@as(usize, 2), n);
 
-    const r0 = out[16..48];
+    const r0 = out[16 .. 16 + sense_record_len];
     try std.testing.expectEqual(@as(i32, 100), std.mem.readInt(i32, r0[0..4], .little));
     try std.testing.expectEqual(@as(u8, 2), r0[4]); // kind bot
     try std.testing.expectEqual(@as(u8, 0), r0[5]); // self
@@ -842,7 +847,9 @@ test "BotManager fillSense writes the fixed 32-byte sense layout" {
     try std.testing.expectApproxEqAbs(@as(f32, -3.5), @as(f32, @bitCast(std.mem.readInt(u32, r0[16..20], .little))), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 60), @as(f32, @bitCast(std.mem.readInt(u32, r0[20..24], .little))), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 45), @as(f32, @bitCast(std.mem.readInt(u32, r0[24..28], .little))), 0.001);
-    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, r0[28..32], .little));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, r0[28..32], .little)); // vy
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, r0[32..36], .little)); // target
+    try std.testing.expectEqual(@as(u8, 0), r0[36]); // wearing
 
     // Dead bots are skipped.
     m.bots[1].alive = false;
@@ -1007,17 +1014,18 @@ test "BotManager fillSense appends after existing ECS actor records" {
     var out: [256]u8 = undefined;
     @memset(&out, 0xAA); // host_buf-style unwritten tail (would leak as garbage)
 
-    // Two ECS actor records already occupy offsets 16 and 48; base is the
-    // header end (16) and `n` is the running record count. Regression: the bot
-    // must land at record index 2 (offset 80), NOT at a doubled offset (144),
-    // which would leave a garbage gap and push it past the copied region.
+    // Two ECS actor records already occupy offsets 16 and 56 (v4 40-byte);
+    // base is the header end (16) and `n` is the running record count.
+    // Regression: the bot must land at record index 2 (offset 96), NOT at a
+    // doubled offset, which would leave a garbage gap and push it past the
+    // copied region.
     var n: usize = 2;
     m.fillSense(&out, 16, 8, &n);
     try std.testing.expectEqual(@as(usize, 3), n);
-    try std.testing.expectEqual(@as(u8, 2), out[80 + 4]); // kind bot at the right slot
-    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, out[80..84], .little));
-    // The gap record (offset 48+4, the pre-existing actor slot) is untouched.
-    try std.testing.expectEqual(@as(u8, 0xAA), out[48 + 4]);
+    try std.testing.expectEqual(@as(u8, 2), out[96 + 4]); // kind bot at the right slot
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, out[96..100], .little));
+    // The gap record (offset 56+4, the pre-existing actor slot) is untouched.
+    try std.testing.expectEqual(@as(u8, 0xAA), out[56 + 4]);
 }
 
 test "dropFrom withdraws a plugin's bots and its count floor" {

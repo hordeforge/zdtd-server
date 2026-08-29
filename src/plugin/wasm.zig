@@ -1673,7 +1673,7 @@ test "core_announce.wasm (zig-built) join/leave says + clock announcements" {
         }
         fn senseFn(_: *HostCtx, out_buf: []u8) usize {
             if (out_buf.len < 24) return 0;
-            std.mem.writeInt(u32, out_buf[0..4], 0x3353425a, .little); // 'ZBS3'
+            std.mem.writeInt(u32, out_buf[0..4], 0x3453425a, .little); // 'ZBS3'
             std.mem.writeInt(u32, out_buf[4..8], 0, .little);
             std.mem.writeInt(u32, out_buf[8..12], 1, .little);
             std.mem.writeInt(i32, out_buf[12..16], -1, .little);
@@ -2149,7 +2149,8 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             return 1;
         }
         fn writeRec(b: []u8, base: usize, net: i32, kind: u8, is_self: u8, alive: u8, x: f32, y: f32, z: f32, hp: f32, yaw: f32, target: i32) void {
-            const r = b[base .. base + 32];
+            // v4 (ADR 0037): 40-byte records (vy i32@28, target i32@32, wearing u8@36).
+            const r = b[base .. base + 40];
             std.mem.writeInt(i32, r[0..4], net, .little);
             r[4] = kind;
             r[5] = is_self;
@@ -2160,7 +2161,9 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             std.mem.writeInt(u32, r[16..20], @bitCast(z), .little);
             std.mem.writeInt(u32, r[20..24], @bitCast(hp), .little);
             std.mem.writeInt(u32, r[24..28], @bitCast(yaw), .little);
-            std.mem.writeInt(i32, r[28..32], target, .little);
+            std.mem.writeInt(i32, r[28..32], 0, .little); // vy
+            std.mem.writeInt(i32, r[32..36], target, .little);
+            r[36] = 0; // wearing
         }
         // One 16-byte trailer record (RFC 0001 §3 event layout).
         fn writeEv(b: []u8, base: usize, kind: u8, a: i32, c: i32, amount: f32) void {
@@ -2172,9 +2175,9 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             std.mem.writeInt(u32, r[12..16], @bitCast(amount), .little);
         }
         fn senseFn(_: *HostCtx, out: []u8) usize {
-            // header: magic 'ZBS3' (24 bytes: magic, count, tick, self,
+            // header: magic 'ZBS4' (24 bytes: magic, count, tick, self,
             // world_time, blood_moon), records at base 24.
-            std.mem.writeInt(u32, out[0..4], 0x3353425a, .little);
+            std.mem.writeInt(u32, out[0..4], 0x3453425a, .little);
             const count: u32 = if (hide_player)
                 1
             else
@@ -2192,19 +2195,19 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             n += 1;
             if (!hide_player) {
                 // a player at (10, 0, 10) unless hidden (LOS pull-down)
-                writeRec(out, 24 + 32, 2000, 0, 0, 1, 10.0, 0.0, 10.0, 100.0, 0.0, -1);
+                writeRec(out, 24 + 40, 2000, 0, 0, 1, 10.0, 0.0, 10.0, 100.0, 0.0, -1);
                 n += 1;
             }
             if (show_zombie) {
                 // a zombie CLOSER to the bot (9,10) than the player (10,10);
                 // player-preference targeting must still pick the player.
-                writeRec(out, 24 + 64, 3000, 1, 0, 1, 9.0, 0.0, 10.0, 100.0, 0.0, -1);
+                writeRec(out, 24 + 80, 3000, 1, 0, 1, 9.0, 0.0, 10.0, 100.0, 0.0, -1);
                 n += 1;
             }
             if (show_flanker) {
                 // a player BEHIND the bot (facing +X, yaw 0) and closer than the
                 // visible player: the FOV cone must exclude it.
-                writeRec(out, 24 + @as(usize, n) * 32, 4000, 0, 0, 1, -12.0, 0.0, 0.0, 100.0, 0.0, -1);
+                writeRec(out, 24 + @as(usize, n) * 40, 4000, 0, 0, 1, -12.0, 0.0, 0.0, 100.0, 0.0, -1);
                 n += 1;
             }
             if (with_trailer) {
@@ -2212,13 +2215,13 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
                 // sniper, weapon_id 3) followed by a kind-3 damage event (player
                 // 2000 hit bot 1000 for 42). The guest must keep parsing records
                 // at the 32-byte stride and derive the trailer from the length.
-                const eb = 24 + @as(usize, n) * 32;
+                const eb = 24 + @as(usize, n) * 40;
                 writeEv(out, eb, 4, 1000, 0, 0);
                 out[eb + 1] = 3; // weapon_id sniper (loadout-pool index 3)
                 writeEv(out, eb + 16, 3, 2000, 1000, 42.0);
-                return 24 + @as(usize, n) * 32 + 32;
+                return 24 + @as(usize, n) * 40 + 40;
             }
-            return 24 + @as(usize, n) * 32;
+            return 24 + @as(usize, n) * 40;
         }
     };
     Cap.queued_n = 0;
@@ -2465,7 +2468,8 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
             queued_n += 1;
         }
         fn writeRec(b: []u8, base: usize, net: i32, kind: u8, x: f32, y: f32, z: f32, hp: f32) void {
-            const r = b[base .. base + 32];
+            // v4 (ADR 0037): 40-byte records (vy i32@28, target i32@32, wearing u8@36).
+            const r = b[base .. base + 40];
             std.mem.writeInt(i32, r[0..4], net, .little);
             r[4] = kind;
             r[5] = 0; // is_self
@@ -2476,20 +2480,22 @@ test "mcp.wasm: MCP protocol core (session, ping, tools, errors)" {
             std.mem.writeInt(u32, r[16..20], @bitCast(z), .little);
             std.mem.writeInt(u32, r[20..24], @bitCast(hp), .little);
             std.mem.writeInt(u32, r[24..28], @bitCast(@as(f32, 0.0)), .little);
-            std.mem.writeInt(i32, r[28..32], -1, .little);
+            std.mem.writeInt(i32, r[28..32], 0, .little); // vy
+            std.mem.writeInt(i32, r[32..36], -1, .little); // target
+            r[36] = 0; // wearing
         }
         fn senseFn(_: *HostCtx, out: []u8) usize {
             if (!sense_enabled) return 0;
-            // header: magic 'ZBS3' (24 bytes), 2 records, tick 42, self -1
-            std.mem.writeInt(u32, out[0..4], 0x3353425a, .little);
+            // header: magic 'ZBS4' (24 bytes), 2 records, tick 42, self -1
+            std.mem.writeInt(u32, out[0..4], 0x3453425a, .little);
             std.mem.writeInt(u32, out[4..8], 2, .little);
             std.mem.writeInt(u32, out[8..12], 42, .little);
             std.mem.writeInt(i32, out[12..16], -1, .little);
             std.mem.writeInt(u32, out[16..20], 0, .little); // world_time
             std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon
             writeRec(out, 24, 2000, 0, 10.0, 0.0, 10.0, 100.0); // player
-            writeRec(out, 56, 3000, 1, 9.0, 0.0, 10.0, 100.0); // zombie
-            return 24 + 64;
+            writeRec(out, 64, 3000, 1, 9.0, 0.0, 10.0, 100.0); // zombie
+            return 24 + 80;
         }
         fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
             if (!std.mem.eql(u8, req, "mcp.allowlist")) return 0;

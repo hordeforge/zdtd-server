@@ -48,7 +48,7 @@ const ClockState = struct { day: i32, blood_moon: i32 };
 fn clockState() ?ClockState {
     const n = common.sense(@intCast(@intFromPtr(&sense_buf)), sense_cap, 0);
     if (n < 24) return null;
-    if (!std.mem.eql(u8, sense_buf[0..4], "ZBS3")) return null;
+    if (!std.mem.eql(u8, sense_buf[0..4], "ZBS4")) return null;
     const world_time = std.mem.readInt(u32, sense_buf[16..20], .little);
     const bm = std.mem.readInt(u32, sense_buf[20..24], .little);
     // world_time is in ticks per stock convention; a day is 24000 ticks.

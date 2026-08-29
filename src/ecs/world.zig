@@ -226,6 +226,10 @@ pub const EntityClass = struct {
 pub const World = struct {
     const no_player_slot = std.math.maxInt(Slot);
 
+    /// Monotonic sim tick (incremented in beginTick; the drain and systems
+    /// read it for windowed flags like the ADR 0037 glide exemption).
+    sim_tick: u64 = 0,
+
     alive: [max_entities]bool = .{false} ** max_entities,
     mask: [max_entities]Mask = [_]Mask{.{}} ** max_entities,
 
@@ -801,6 +805,7 @@ pub const World = struct {
 
     /// Clear tick locals at the start of each sim frame (schedule / tickAll).
     pub fn beginTick(self: *World) void {
+        self.sim_tick +%= 1;
         @memset(&self.freed_this_tick, false);
         // Budget for this tick from last tick's demand (granted + refused).
         // Read on the main thread with the AI phase quiesced, so the sum is a

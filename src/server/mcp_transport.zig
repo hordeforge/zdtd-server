@@ -516,7 +516,8 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
             queued_n += 1;
         }
         fn writeRec(b: []u8, base: usize, net: i32, kind: u8, x: f32, y: f32, z: f32, hp: f32) void {
-            const r = b[base .. base + 32];
+            // v4 (ADR 0037): 40-byte records (vy i32@28, target i32@32, wearing u8@36).
+            const r = b[base .. base + 40];
             std.mem.writeInt(i32, r[0..4], net, .little);
             r[4] = kind;
             r[5] = 0; // is_self
@@ -527,18 +528,20 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
             std.mem.writeInt(u32, r[16..20], @bitCast(z), .little);
             std.mem.writeInt(u32, r[20..24], @bitCast(hp), .little);
             std.mem.writeInt(u32, r[24..28], @bitCast(@as(f32, 0.0)), .little);
-            std.mem.writeInt(i32, r[28..32], -1, .little);
+            std.mem.writeInt(i32, r[28..32], 0, .little); // vy
+            std.mem.writeInt(i32, r[32..36], -1, .little); // target
+            r[36] = 0; // wearing
         }
         fn senseFn(_: *plugin_mod.HostCtx, out: []u8) usize {
-            // header: magic 'ZBS3' (24 bytes), 1 record (player 2000), tick 42, self -1
-            std.mem.writeInt(u32, out[0..4], 0x3353425a, .little);
+            // header: magic 'ZBS4' (24 bytes), 1 record (player 2000), tick 42, self -1
+            std.mem.writeInt(u32, out[0..4], 0x3453425a, .little);
             std.mem.writeInt(u32, out[4..8], 1, .little);
             std.mem.writeInt(u32, out[8..12], 42, .little);
             std.mem.writeInt(i32, out[12..16], -1, .little);
             std.mem.writeInt(u32, out[16..20], 0, .little); // world_time
             std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon
             writeRec(out, 24, 2000, 0, 10.0, 0.0, 10.0, 100.0);
-            return 24 + 32;
+            return 24 + 40;
         }
         fn queryFn(_: *plugin_mod.HostCtx, req: []const u8, out: []u8) usize {
             if (!std.mem.eql(u8, req, "mcp.allowlist")) return 0;

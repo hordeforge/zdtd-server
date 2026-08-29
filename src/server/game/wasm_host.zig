@@ -150,6 +150,19 @@ fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {
             .amount = std.fmt.parseFloat(f32, amt) catch return null,
         } };
     }
+    if (std.mem.eql(u8, verb, "glide")) {
+        // ADR 0037: `glide <net_id> <0|1>` arms/clears the player's glide
+        // window (movement-envelope exemption). `1`/`on`/`true` arm.
+        const id = it.next() orelse return null;
+        const on = it.next() orelse return null;
+        if (it.next() != null) return null;
+        const on_b = std.mem.eql(u8, on, "1") or std.mem.eql(u8, on, "on") or std.mem.eql(u8, on, "true");
+        if (!on_b and !std.mem.eql(u8, on, "0") and !std.mem.eql(u8, on, "off") and !std.mem.eql(u8, on, "false")) return null;
+        return .{ .glide = .{
+            .net_id = std.fmt.parseInt(i32, id, 10) catch return null,
+            .on = on_b,
+        } };
+    }
     return null;
 }
 
@@ -169,13 +182,14 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     // truncated tail would desync its offsets).
     const bot_mod = @import("bot.zig");
     const trailer_cap = (bot_mod.max_sense_info + bot_mod.max_sense_events) * bot_mod.sense_event_len;
-    const max_records = if (out.len >= sense_header_len + trailer_cap) (out.len - sense_header_len - trailer_cap) / 32 else (out.len - sense_header_len) / 32;
-    std.mem.writeInt(u32, out[0..4], 0x3353425a, .little); // 'ZBS3' (v3: world_time + blood_moon in the header)
+    const rec_len = bot_mod.sense_record_len;
+    const max_records = if (out.len >= sense_header_len + trailer_cap) (out.len - sense_header_len - trailer_cap) / rec_len else (out.len - sense_header_len) / rec_len;
+    std.mem.writeInt(u32, out[0..4], 0x3453425a, .little); // 'ZBS4' (v4: vy + wearing_glider per record)
     std.mem.writeInt(u32, out[4..8], 0, .little); // count, filled below
     // Header ABI is u32; tick and world-time wrap at 2^32 by design.
     std.mem.writeInt(u32, out[8..12], @truncate(g.tick_n), .little);
     std.mem.writeInt(i32, out[12..16], 0, .little); // self_net_id
-    // v3: world ticks (low 32) + blood-moon flag, so announcement/clock
+    // v3+: world ticks (low 32) + blood-moon flag, so announcement/clock
     // modules can schedule from the header without a separate query.
     std.mem.writeInt(u32, out[16..20], @truncate(g.sim.director.clock.worldTimeBits()), .little);
     std.mem.writeInt(u32, out[20..24], @as(u32, @intFromBool(g.sim.director.bloodmoon_active)), .little);
@@ -190,8 +204,8 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
             // Non-combat world objects are not combat candidates; omit.
             .trader, .vehicle, .turret, .loot_bag, .falling_block => continue,
         };
-        const base = sense_header_len + n * 32;
-        const r = out[base .. base + 32];
+        const base = sense_header_len + n * rec_len;
+        const r = out[base .. base + rec_len];
         std.mem.writeInt(i32, r[0..4], g.sim.network_id[s].id, .little);
         r[4] = k;
         r[5] = 0; // self
@@ -203,7 +217,35 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
         std.mem.writeInt(u32, r[16..20], @bitCast(t.z), .little);
         std.mem.writeInt(u32, r[20..24], @bitCast(g.sim.health[s].hp), .little);
         std.mem.writeInt(u32, r[24..28], @bitCast(t.yaw), .little);
-        std.mem.writeInt(i32, r[28..32], -1, .little); // target_id
+        // v4 (ADR 0037): server-derived vertical velocity (blocks/s) from the
+        // C2S position history (Client.vy_blocks_per_s); 0 when no peer.
+        var vy: i32 = 0;
+        if (k == 0) {
+            if (g.sim.player[s].peer_slot >= 0 and g.sim.player[s].peer_slot < game_mod.max_clients) {
+                vy = @intFromFloat(g.clients[@intCast(g.sim.player[s].peer_slot)].vy_blocks_per_s);
+            }
+        }
+        std.mem.writeInt(i32, r[28..32], vy, .little);
+        std.mem.writeInt(i32, r[32..36], -1, .little); // target_id
+        // v4: wearing_glider — the player's armor slots (55..66) carry an item
+        // whose items.xml Tags include `[authority] glider_item_tag`.
+        var wearing: u8 = 0;
+        if (k == 0 and g.glider_item_tag.len > 0) {
+            if (g.sim.mask[s].inventory) {
+                const inv = &g.sim.inventory[s];
+                var ei: usize = ecs.components.inv_equip_start;
+                while (ei < ecs.components.inv_equip_start + ecs.components.inv_equip_count) : (ei += 1) {
+                    const sl = inv.slots[ei];
+                    if (sl.item_id == 0 or sl.count == 0) continue;
+                    const def = g.items.byId(sl.item_id) orelse continue;
+                    if (hasTag(def.tags, g.glider_item_tag)) {
+                        wearing = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        r[36] = wearing;
         n += 1;
     }
     // Host-side bots (ADR 0026) are not ECS entities; append them after the
@@ -216,7 +258,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     // weapon map), then kind-3 damage events (attributed hits since the last
     // sense pass — the guest keys on victim == its own bot net id to
     // retaliate).
-    const ev_base = sense_header_len + n * 32;
+    const ev_base = sense_header_len + n * rec_len;
     const info_n = g.bots.fillSenseBotInfo(out, ev_base, bot_mod.max_sense_info);
     var ev_n: usize = 0;
     const ev_base2 = ev_base + info_n * bot_mod.sense_event_len;
@@ -224,7 +266,18 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
         ev_n = g.bots.drainSenseEvents(out, ev_base2, bot_mod.max_sense_events);
     }
     std.mem.writeInt(u32, out[4..8], @intCast(n), .little);
-    return sense_header_len + n * 32 + (info_n + ev_n) * bot_mod.sense_event_len;
+    return sense_header_len + n * rec_len + (info_n + ev_n) * bot_mod.sense_event_len;
+}
+
+/// True when the comma-separated item Tags string contains `tag`
+/// (ADR 0037 glider detection; case-sensitive like stock FastTags).
+fn hasTag(tags: []const u8, tag: []const u8) bool {
+    if (tags.len == 0 or tag.len == 0) return false;
+    var it = std.mem.splitScalar(u8, tags, ',');
+    while (it.next()) |t| {
+        if (std.mem.eql(u8, std.mem.trim(u8, t, " \t"), tag)) return true;
+    }
+    return false;
 }
 
 /// `zdtd.query(req_ptr, req_len, out_ptr, out_cap)` — reverse-direction point

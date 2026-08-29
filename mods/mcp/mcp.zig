@@ -49,7 +49,7 @@ const sense_scratch_len = 2048; // host_sense_max (src/plugin/wasm.zig)
 const query_req_len = 128;
 const query_resp_len = 64; // query_resp_max (src/plugin/wasm.zig)
 const sense_header_len = 24;
-const sense_record_len = 32;
+const sense_record_len = 40; // v4 (ADR 0037): vy i32@28 + target i32@32 + wearing u8@36
 const sbuf_len = 96; // decoded strings: jsonrpc, method, tool name
 const vbuf_len = 128; // decoded admin_command verb
 const rbuf_len = 96; // raw JSON-RPC id echo
@@ -219,7 +219,7 @@ fn hostJsonObj(path: [:0]const u8) i32 {
 
 // text result for a tool that reads the snapshot; returns false on overflow.
 fn toolTextSnapshot(w: *Wbuf, snap: []const u8, snap_len: usize, tool: usize) bool {
-    if (snap_len < sense_header_len or std.mem.readInt(u32, snap[0..4], .little) != 0x3353425a) return false; // 'ZBS3'
+    if (snap_len < sense_header_len or std.mem.readInt(u32, snap[0..4], .little) != 0x3453425a) return false; // 'ZBS4'
     const count = std.mem.readInt(u32, snap[4..8], .little);
     const tick = std.mem.readInt(u32, snap[8..12], .little);
     // Records follow at a fixed stride; the snapshot may also carry a 16-byte

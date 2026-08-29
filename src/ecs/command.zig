@@ -9,6 +9,10 @@ pub const max_commands: usize = 64;
 /// Soft capacity warning threshold (fraction of max_commands).
 pub const warn_ratio: f32 = 0.8;
 const warn_at: usize = @trunc(@as(f32, @floatFromInt(max_commands)) * warn_ratio);
+/// Glide (ADR 0037) window length in ticks: one `glide <id> 1` keeps the
+/// movement-envelope exemption for this long (5 s at 20 TPS); the plugin
+/// re-arms while gliding. Bounds a stale flag if a module forgets to clear.
+pub const glide_window_ticks: u64 = 100;
 
 pub const Op = union(enum) {
     spawn_zombie: struct { x: f32, y: f32, z: f32, hp: f32 },
@@ -19,6 +23,10 @@ pub const Op = union(enum) {
     /// closed, never a dangling slice). Routed through World.say_fn (Game
     /// wires it to the stock chat broadcast).
     say: struct { text: [64]u8, len: u8 },
+    /// Glide flag (ADR 0037): `glide <net_id> <0|1>` sets/clears the player's
+    /// glide window (movement-envelope exemption). Attributed per plugin src
+    /// like the other verbs; a withdrawn module's applied glide is cleared.
+    glide: struct { net_id: NetId, on: bool },
 };
 
 pub const DrainResult = struct {
@@ -186,6 +194,20 @@ pub const Buffer = struct {
                         f(w.say_ctx, s.text[0..s.len]);
                         r.said += 1;
                         r.applied += 1;
+                    }
+                },
+                .glide => |gl| {
+                    if (w.slotOfNetId(gl.net_id)) |s| {
+                        if (w.mask[s].player) {
+                            if (gl.on) {
+                                w.player[s].glide_until_tick = w.sim_tick + glide_window_ticks;
+                                w.player[s].glide_src = self.srcs[i];
+                            } else {
+                                w.player[s].glide_until_tick = 0;
+                                w.player[s].glide_src = 0;
+                            }
+                            r.applied += 1;
+                        }
                     }
                 },
             }

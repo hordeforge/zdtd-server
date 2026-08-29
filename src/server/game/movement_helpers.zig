@@ -11,6 +11,16 @@ const movement = @import("../movement.zig");
 const packages = @import("../../wire/packages.zig");
 
 pub fn noteAcceptedMove(self: *Game, c: *Client, x: f32, y: f32, z: f32) void {
+    // Server-derived vertical velocity (ADR 0037): delta over the server dt
+    // from the last accepted move. Signed blocks/s (positive = rising);
+    // feeds the sense v4 record (no sim-side player physics model).
+    if (c.move_valid) {
+        const tick_s: f32 = @as(f32, @floatFromInt(protocol.tick_ns)) / 1_000_000_000.0;
+        const dt = movement.dtFromTicks(c.move_tick, self.tick_n, tick_s);
+        c.vy_blocks_per_s = if (dt > 0) (y - c.move_y) / dt else 0;
+    } else {
+        c.vy_blocks_per_s = 0;
+    }
     c.move_valid = true;
     c.move_x = x;
     c.move_y = y;
@@ -58,7 +68,17 @@ pub fn applyMovementEnvelope(self: *Game, c: *Client, peer: *ln_peer.Peer, entit
     const clamp = movement.clampHorizontal(c.move_x, c.move_z, x, z, dt, cap);
     // Vertical cap: the horizontal clamp cannot see Y-only teleports (fly
     // hacking), so the Y delta is bounded the same way with its own cap.
-    const vclamp = movement.clampVertical(c.move_y, y, dt, self.max_vertical_speed_mps);
+    // Glide (ADR 0037): while the player's glide flag is armed the sustained
+    // parachute fall is legal up to glide_vy_cap_mps (still bounded, so a
+    // teleport-scale jump is rejected even gliding). Fail closed: flag unset
+    // or expired -> stock envelope.
+    var vcap = self.max_vertical_speed_mps;
+    if (self.sim.slotOfNetId(entity_id)) |s| {
+        if (self.sim.mask[s].player and self.sim.player[s].glide_until_tick > self.sim.sim_tick) {
+            vcap = -self.glide_vy_cap_mps;
+        }
+    }
+    const vclamp = movement.clampVertical(c.move_y, y, dt, vcap);
     if (!clamp.clamped and !vclamp.clamped) {
         return .{ .x = x, .y = y, .z = z, .applied = true };
     }

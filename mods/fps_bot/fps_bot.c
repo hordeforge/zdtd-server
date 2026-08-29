@@ -226,16 +226,16 @@ static int query_path(float bx, float bz, float tx, float tz, float *ox, float *
 // ---------------------------------------------------------------------------
 // Sense snapshot parsing.
 //
-// Layout (RFC 0001 §3, all little-endian): header 24 bytes, fixed-stride
-// 32-byte entity records, then an optional 16-byte damage-event trailer.
-// Parsed by explicit offsets so a C struct can never drift from the Zig
-// packed records.
-//   hdr: magic u32@0 ('ZBS3'), count u32@4, tick u32@8, self_net_id i32@12,
+// Layout (RFC 0001 §3; ADR 0037 sense v4, all little-endian): header 24
+// bytes, fixed-stride 40-byte entity records, then an optional 16-byte
+// damage-event trailer. Parsed by explicit offsets so a C struct can never
+// drift from the Zig packed records.
+//   hdr: magic u32@0 ('ZBS4'), count u32@4, tick u32@8, self_net_id i32@12,
 //        world_time u32@16 (world ticks, low 32), blood_moon u32@20 (0/1)
-//   (v3: header grew by 8 bytes; the record/event bases move with it)
-//   rec stride 32: net_id i32@0, kind u8@4, is_self u8@5, alive u8@6, pad@7,
+//   (v4: header unchanged from v3; the record stride grew 32 -> 40)
+//   rec stride 40: net_id i32@0, kind u8@4, is_self u8@5, alive u8@6, pad@7,
 //                  x f32@8, y f32@12, z f32@16, hp f32@20, yaw f32@24,
-//                  target_id i32@28
+//                  vy i32@28, target_id i32@32, wearing u8@36, pad@37..39
 //   ev  stride 16: kind u8@0 (3 = damage), pad@1..3, attacker i32@4,
 //                  victim i32@8, amount f32@12
 // ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ static char sense[SENSE_CAP];
 static int sense_n = 0;
 static int sense_recs = 0; // record count from the header (event offsets base)
 
-#define REC_STRIDE 32
+#define REC_STRIDE 40
 #define EV_STRIDE 16
 #define KIND_PLAYER 0
 #define KIND_ZOMBIE 1
@@ -281,7 +281,7 @@ static int rec_self(int i)       { return s8(REC_OFF(i) + 5); }
 static float rec_hp(int i)       { return sf32(REC_OFF(i) + 20); }
 static float rec_yaw(int i)      { return sf32(REC_OFF(i) + 24); }
 static float rec_target(int i) __attribute__((unused));
-static float rec_target(int i)   { return s32(REC_OFF(i) + 28); }
+static float rec_target(int i)   { return s32(REC_OFF(i) + 32); } // v4: target moved to 32 (vy at 28)
 
 // Refresh the snapshot. Returns the number of entity records (0 on
 // failure/empty). The header's count is authoritative; the event trailer is
@@ -289,7 +289,7 @@ static float rec_target(int i)   { return s32(REC_OFF(i) + 28); }
 static int sense_refresh(void) {
   sense_n = zdtd_sense((int)(long)&sense[0], SENSE_CAP, 0);
   if (sense_n < 24) { sense_n = 0; sense_recs = 0; return 0; }
-  if (s32(0) != 0x3353425a) { sense_n = 0; sense_recs = 0; return 0; } // 'ZBS3'
+  if (s32(0) != 0x3453425a) { sense_n = 0; sense_recs = 0; return 0; } // 'ZBS4'
   const int n = s32(4);
   const int avail = (sense_n - 24) / REC_STRIDE;
   if (n > avail || n < 0) { sense_n = 0; sense_recs = 0; return 0; } // lies: drop
