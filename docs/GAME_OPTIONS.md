@@ -57,6 +57,7 @@ flags are (full text in `zdtd --help`):
 
 | Flag | Effect |
 |---|---|
+| `--port N` | TCP info port 0..65533; LiteNet uses N+2 (default 26902; 0 = offline deterministic, pair with `--once`/`--ticks`) |
 | `--world DIR` | zdtd save/overlay dir (default `worlds/zdtd_default`) |
 | `--map DIR` | stock `Data/Worlds/<Name>` (dtm + prefabs); conflicts with `--worldgen-seed` |
 | `--game-dir DIR` | install root (`Data/Worlds` + `Data/Config`) |
@@ -70,6 +71,8 @@ flags are (full text in `zdtd --help`):
 | `--mods-dir DIR` | stock `Mods` root for XML/assetbundle modlets (default `GAME_DIR/Mods`) |
 | `--worldgen-seed U64` | procedural terrain seed (decimal or 0x hex); conflicts with `--map` |
 | `--ticks N` / `--once` | run N ticks (or one) then save and exit |
+| `-q, --quiet` | suppress startup banners (keeps config line, warnings, errors) |
+| `-V, -v, --version` / `-h, --help` | print versions / show usage |
 
 Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 (`--mcp-port/bind/token/allowlist`) in RFC 0002.
