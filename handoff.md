@@ -9,7 +9,7 @@
 - `game.zig`: 3437 lines, delegating to 44 shards in `src/server/game/*.zig` aggregated through `src/server/root.zig` (one import + one `test { _ = game_*; }` per shard). The old ≤2500 line convention was never an enforced gate; `lint-architecture.sh` enforces the import structure, not a size cap.
 - `lint-architecture: clean` enforced by `scripts/lint-architecture.sh`.
 - `zig build` + `zig build test` green (1470 passed / 1 skipped, measured 2026-08-29).
-- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **291** features (**291 WORKS / 0 PARTIAL / 0 MISSING**, recounted 2026-08-22; the remaining PARTIAL labels are ad-hoc waived rows not counted).
+- `GAP_ANALYSIS.md`: **0 MISSING** feature rows. Scorecard **295** features (**293 WORKS / 2 PARTIAL / 0 MISSING**, recounted 2026-08-29 from the live markers; the two PARTIAL rows are the 08-29 join-burst tick budget and chunk-pointer stability gaps; the remaining PARTIAL labels are ad-hoc waived rows not counted).
 - Hardcode audit: the live `docs/reviews/HARDCODE_AUDIT.md` copy was removed from the repo on 2026-08-23; the archived snapshot `docs/archive/HARDCODE_AUDIT_2026-08-08.md` survives and is what docs link to. The deterministic gate is `tools/provenance_scan.py` (201/201 files, 58 constants ledgered) + `make check-xml-audit`.
 - Live stock-client gate **23/23** on a fresh world (`FRESH=1`).
 
@@ -145,9 +145,9 @@
 ## Docs
 
 - `handoff.md` is a rolling handoff (same file, overwritten each pass): see this file + `git log --oneline -30` for recent commits.
-- `docs/STATUS.md` header pins **0 MISSING**, the 291-feature scorecard, and the shard count.
+- `docs/STATUS.md` header pins **0 MISSING**, the 295-feature scorecard (293 WORKS / 2 PARTIAL), and the shard count.
 - `docs/WORK_PLAN.md` now heads with the active anti-cheat program (ADR 0022, T18/T19 first); detailed task history is archived in `docs/archive/WORK_PLAN_2026-08-09.md`.
-- `docs/GAP_ANALYSIS.md`: 291 features, 0 MISSING; scorecard recounted from the live markers 2026-08-22.
+- `docs/GAP_ANALYSIS.md`: 295 features, 0 MISSING; scorecard recounted from the live markers 2026-08-29 (293 WORKS / 2 PARTIAL).
 - `docs/INDEX.md` lists every top-level doc including the disposition reviews (`RULES_CONFIG.md`, `PLUGIN_CONFIG_DISPOSITION.md`, `XML_DATA_AUDIT.md`).
 
 ## Reviews
