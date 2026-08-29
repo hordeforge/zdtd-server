@@ -145,6 +145,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   (denied), never a gate skip; the admin.xml composite keys and the
   admin-level lookup use the same capacity. Scenario "whitelist gate fails
   closed on an un-keyable identity".
+- Player-console per-command permission fix (admin audit): the check was
+  inverted vs stock (`req > caller` instead of stock's `req >= caller` with
+  levels 0 = highest), so a level-5 admin could run owner-only commands and
+  the owner was locked out of delegated commands. Now deny = `req < caller`
+  (stock IsAllowed, console-commands.md IL). The player-console scenario
+  covers the matrix: owner (0) allowed a req-5 command, level-5 admin denied
+  a req-0 command.
 
 ### Fixed
 

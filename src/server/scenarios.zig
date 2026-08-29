@@ -2635,6 +2635,18 @@ test "scenario in-game player console: allowlist, deny, and admin routing" {
     const adm = try sendCmd(g, c, &cap, "kick nobody", &abuf);
     try std.testing.expect(std.mem.find(u8, adm, "permission denied") == null);
     try std.testing.expect(adm.len > 0);
+    // Per-command permission matrix (stock IsAllowed = req >= caller, levels
+    // run 0 = highest): an owner (level 0) may run a delegated command
+    // (req 5), and a level-5 admin is DENIED an owner-only command (req 0).
+    // The check used to be inverted (req > caller), letting a level-5 admin
+    // run owner commands and locking the owner out of delegated ones.
+    try std.testing.expect(g.setCommandLevel("kick", 5));
+    const owner_delegated = try sendCmd(g, c, &cap, "kick nobody", &abuf);
+    try std.testing.expect(std.mem.find(u8, owner_delegated, "permission denied") == null); // owner(0) >= req(5)
+    try std.testing.expect(g.setCommandLevel("kick", 0));
+    try std.testing.expect(g.admin_list.add("Bot", 5)); // re-level the admin
+    const mid_owner_cmd = try sendCmd(g, c, &cap, "kick nobody", &abuf);
+    try std.testing.expect(std.mem.find(u8, mid_owner_cmd, "permission denied") != null); // caller(5) < req(0)
     std.debug.print("PASS player-console: allowlist + deny + admin routing with captured reply\n", .{});
 }
 

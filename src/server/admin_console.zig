@@ -312,11 +312,12 @@ pub fn handleConsoleCmd(self: *Game, peer: *ln_peer.Peer, c: *Client, body: []co
         // command surface, same path as the TCP/webui consoles.
         if (self.permLevelOf(c) < 1000) {
             // Per-command permission (stock ConsoleCmdCommandPermission): a
-            // command whose required level is less privileged than the
-            // caller's is denied before routing (levels run 0 = highest).
+            // command whose required level is MORE privileged than the
+            // caller's is denied before routing (levels run 0 = highest;
+            // stock IsAllowed = req >= caller, IL console-commands.md).
             const caller_level = self.permLevelOf(c);
             const req = self.commandLevel(verb);
-            if (req > caller_level) {
+            if (req < caller_level) {
                 var denied: ConsoleOut = .{};
                 denied.line("permission denied");
                 const resp = try packages.buildConsoleCmdClient(self.body_buf[0..8192], denied.lines[0..denied.n], false);
