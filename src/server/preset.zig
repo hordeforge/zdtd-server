@@ -327,6 +327,21 @@ test "infinite mod preset pins the mod contract (seed + shaping defaults)" {
     try std.testing.expectEqual(@as(?i32, 3), p.rules.worldgen.bedrock_h);
 }
 
+test "moon_gravity mod preset pins the gravity overlay" {
+    // mods/moon_gravity ships its gravity rules self-contained; changing
+    // them silently changes the mod's sim, so pin them here.
+    if (!io_fs.fileExists("mods/moon_gravity/preset.toml")) return error.SkipZigTest;
+    var p = try loadFromPath(std.testing.allocator, "mods/moon_gravity/preset.toml");
+    defer p.deinit();
+    try std.testing.expectEqualStrings("moon_gravity", p.name);
+    try std.testing.expectEqual(@as(?f32, -1.62), p.rules.ai.gravity);
+    try std.testing.expectEqual(@as(?f32, -1.62), p.rules.vehicle.gravity);
+    var r: rules_mod.Rules = .{};
+    rules_mod.mergeOverlay(&r, &p.rules);
+    try std.testing.expectEqual(@as(f32, -1.62), r.ai.gravity);
+    try std.testing.expectEqual(@as(f32, -1.62), r.vehicle.gravity);
+}
+
 test "loadByName rejects bad name" {
     try std.testing.expectError(error.BadPresetName, loadByName(std.testing.allocator, "../x"));
 }

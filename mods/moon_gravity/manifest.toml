@@ -1,0 +1,10 @@
+# moon_gravity: config-only mod (no wasm) that overrides the sim's gravity
+# via [rules.ai] / [rules.vehicle] (ADR 0021). Opt-in: [mods] enabled.
+# Edit preset.toml for any gravity you want (earth, moon, mars, zero-g...).
+
+name = "moon_gravity"
+version = "0.1.0"
+tier = "user"
+preset = "preset.toml"
+enabled = false
+description = "Moon gravity: overrides sim gravity (AI entities, falling blocks, vehicles) via its own preset.toml. Opt-in: [mods] enabled = [\"moon_gravity\"]."

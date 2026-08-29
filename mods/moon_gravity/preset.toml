@@ -1,0 +1,18 @@
+# moon_gravity: set the sim's gravity to moon gravity (1.62 blocks/s^2).
+# The values are the [rules] overlay tier (ADR 0021): an operator's zdtd.toml
+# [rules.*] still wins over this mod. Enabled via
+#   [mods] enabled = "moon_gravity"
+# (or flip enabled = true in manifest.toml). Removing the mod restores stock.
+
+name = "moon_gravity"
+
+# AI entity + falling-block body gravity (blocks/s^2; stock zombie sim -1.6,
+# which is already low - the real change below is the vehicles).
+[rules.ai]
+gravity = -1.62
+
+# Vehicle vertical gravity (blocks/s^2; stock EntityVehicle::cGravity -9.81).
+# Moon gravity: 1.62. Other worlds:
+#   earth -9.81   mars -3.71   moon -1.62   zero-g 0   (negative = downward)
+[rules.vehicle]
+gravity = -1.62
