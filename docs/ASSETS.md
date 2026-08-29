@@ -113,6 +113,9 @@ requires WorldInfo `fixedSizeCC=false` (FromRaw client provider). See
 | `src/util/io_fs.zig` | `readFileAll` / `writeFile` / `fileExists` / mkdir / delete (via `std.Io`) |
 | `src/assets/paths.zig` | `resolveConfigXml`, `tryLoadConfig(file, T, loadFn, …)` |
 | `src/assets/xml_util.zig` | `stripComments`, `attr`, `propertyValue`, `nextElement`, `putDupeKey` |
+| `src/assets/xml_patch.zig` | XPath patch application for `--config-overrides` / modlets |
+| `src/assets/unity_hash.zig` | Unity string hash (fed by stock names; never hardcode the numeric result) |
+| `src/assets/root.zig` | package facade |
 
 New loaders: call these; do not reimplement open/read or config path resolution.
 
