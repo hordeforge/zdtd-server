@@ -8,7 +8,11 @@ Direction: ToServer=client→server (server MUST handle), ToClient=server→clie
 (server may send), Both=either. `handled` = a dispatch arm in `c2s/*` (the join/move/inv/quest/misc domains, formerly game.zig onData);
 **Totals:** 190 stock catalog rows; 33 ToServer (all handled); handled cases 72 (snapshot) / **86 live dispatch arms**; S2C emitted 46 (snapshot) / **80 live S2C names** (sendGame* 54 ∪ broadcast* 41, counted 2026-08-29).  
 **Join map:** `packages.default_mappings` has **192** names (runtime `package_maps=192`; the 3.2.0 additions - ConfirmSpawnEntity, POIMetadataRequest, POIMetadataResponse - lifted the count from the 190 pinned in the original parity run). 8 mapped names are not yet in this generated table - the five the parity run noted (NetPackageDroneDataSync, NetPackageDroneParticleEffect, NetPackageEntityFlags, NetPackageLight, NetPackageTreeFade) plus those three; conversely `NetPackagePOIAround` still appears in the table but is removed in 3.2.0 (replaced by POIMetadata, see the delta section above). Regenerate via the parity tooling below rather than hand-editing.
-`sent` = zdtd emits it S2C. Regenerate with ../../../7dtd-engine-research/tools/parity + this script.
+`sent` = zdtd emits it S2C. `?` direction = unknown in the parity snapshot
+(R/E-unknown; not yet confirmed C2S - the dispatch audit confirmed every
+`ToServer` row is handled by `src/server/c2s/*`, and the `?` rows are the
+remaining RE backlog, not confirmed client sends). Regenerate with
+../../../7dtd-engine-research/tools/parity + this script.
 
 The `read wire (head)` column lists `BinaryReader` virtual calls only, so it
 under-reports every package carrying a `PlatformUserIdentifierAbs`:
