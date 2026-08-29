@@ -9,7 +9,7 @@ validation, mutation and broadcast steps plus the owning `src/` anchors.
 
 ## 1. Craft (player inventory)
 
-`NetPackageInventoryTransactionRequest` with `op = craft` (c2s/inv.zig:480)
+`NetPackageInventoryTransactionRequest` with `op = craft` (c2s/inv.zig:700)
 calls `tryCraft` → `tryCraftRecipe`. Ingredients are aggregated by ECS item id
 so duplicate or alias ingredient lines are not double-counted; the whole
 transaction is atomic over a snapshot of the bag. On success the output goes
@@ -33,9 +33,9 @@ flowchart TD
     J --> K[InventoryTransactionResponse]
 ```
 
-Anchors: `src/server/c2s/inv.zig:507` (craft op dispatch),
+Anchors: `src/server/c2s/inv.zig:700` (craft op dispatch),
 `src/server/game/craft.zig` (`tryCraft` → `tryCraftRecipe`),
-`src/ecs/systems.zig:430` (`questOnCraft`). `times` is clamped to
+`src/ecs/systems.zig:1081` (`questOnCraft`). `times` is clamped to
 `craft_max_times`; zero means one. Any missing ingredient name or an output
 that fails to deposit restores the exact pre-craft bag.
 
@@ -78,16 +78,16 @@ flowchart TD
     U --> Q
 ```
 
-Anchors: `src/server/c2s/inv.zig:341` (workstation TE apply), `:354`
-(`getOrCreate`), `src/world/workstations.zig:236` (`handleRecipeQueue`), `:276`
-(`completeOneCraft`), `:293` (`addCraftComplete`), `:339`
-(`cycleRecipeQueue`), `:361` (`addOutput`), `src/server/game/craft.zig:181`
+Anchors: `src/server/c2s/inv.zig:363` (workstation TE apply), `:479`
+(`getOrCreate`), `src/world/workstations.zig:225` (`tick` burn/craft advance),
+`:229` (`tickResolved` queue processing), `:357` (`setCraftComplete`),
+`:434` (`getOrCreate`), `src/server/game/craft.zig:298`
 (`tickWorkstations`, also feeds the heat map).
 
 Notes: `max_crafts_per_tick = 64` bounds one tick; a non-finite or huge
 client-written `CraftingTimeLeft` is clamped to `max_craft_backlog`.
-`addCraftComplete` merges by crafted item and drops the oldest entry at cap;
-`setCraftComplete` replaces the record list with what the client acknowledged.
+`setCraftComplete` merges by crafted item (dropping the oldest entry at cap)
+and replaces the record list with what the client acknowledged.
 
 ## 3. Trade buy / sell
 
@@ -305,7 +305,7 @@ the client position.
 | [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture — M0-M6 and system overview |
 | [AUTHORITY.md](AUTHORITY.md) | Join phases, C2S validation, interest, mode |
 | [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | SoA columns, queries, groups, tick order |
-| [wire/PACKAGES.md](wire/PACKAGES.md) | 190-package catalog |
+| [wire/PACKAGES.md](wire/PACKAGES.md) | 191-name join map catalog |
 | [STATUS.md](STATUS.md) | What works now — the hub |
 
 ## Keeping this document honest
