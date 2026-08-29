@@ -177,6 +177,14 @@ World_generation / Noise_settings):
 
 ### What W2 actually shipped
 
+All shaping parameters are `[rules.worldgen]` fields (ADR 0021): the values
+below are the shipped defaults (`base_height` 68, `height_amp` 24,
+`min_surface` 12, `max_surface` 200, `squash` 28, `noise_weight` 0.85,
+`y_scale` 2.0, `bedrock_h` 3) - an operator overrides them in zdtd.toml or a
+preset without touching Zig, and `validate` rejects a band that breaks the
+solid-below / air-above guarantee (min >= max, noise_weight >= 1, negative
+squash/height_amp/bedrock_h).
+
 `src/world/worldgen.zig` implements this section for a single biome:
 
 - `columnTarget(x, z)` is the `cache_2d`: the W1 2D shaping stack (continental
