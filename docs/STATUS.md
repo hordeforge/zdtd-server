@@ -62,6 +62,14 @@ sections); the residual (Debug max tick ~0.5-1 s from build amplification)
 stays tracked as W2b async chunk gen. Scenario "join spawn area paces
 through the stream budget" covers the drain budget and completion.
 
+GAP "population is still thin" (Entities/AI): the starter population fill
+landed — the director spawns toward `[rules.director] initial_population_frac`
+(0.25) of the alive cap once at boot, batched at 4/tick, so a fresh world is
+populated near players instead of staying near-empty until the first night
+drip (stock fills loaded regions toward their spawning.xml maxcounts as they
+load). The caps stay stock-faithful (MaxSpawnedZombies/MaxSpawnedAnimals).
+Scenario "starter population fills toward the cap once, batched".
+
 ## Batch S 2026-08-29 (parachute mod + ADR 0037 glide boundary)
 
 `mods/parachute/` ships fully self-contained (manifest/README/config/preset/

@@ -706,6 +706,11 @@ pub const Director = struct {
     /// was 20..45). The periodic wildlife drip itself is a zdtd mechanic.
     animal_spawn_ring_min: f32 = 48.0,
     animal_spawn_ring_max: f32 = 70.0,
+    /// Starter population fraction of the alive cap spawned once near players
+    /// shortly after boot (stock fills loaded regions toward their maxcounts
+    /// as they load; without it a fresh world stays near-empty until the
+    /// first night drip). 0 disables the starter fill.
+    initial_population_frac: f32 = 0.25,
     /// Night horde drip cadence (zdtd population mechanic; stock has no
     /// periodic drip, GAP 2011-2017). 45 s normal, 8 s during a blood moon.
     horde_drip_cd: f32 = 45.0,
@@ -997,6 +1002,7 @@ pub const DirectorOverlay = struct {
     enemy_spawn_ring_max: ?f32 = null,
     animal_spawn_ring_min: ?f32 = null,
     animal_spawn_ring_max: ?f32 = null,
+    initial_population_frac: ?f32 = null,
     horde_drip_cd: ?f32 = null,
     bloodmoon_horde_drip_cd: ?f32 = null,
     scout_drip_cd: ?f32 = null,

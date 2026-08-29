@@ -94,6 +94,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   re-measures max tick 140 ms / p99 50 ms vs the pre-pacing 262 ms. The
   join path is instrumented with `.join` (C2S join handler) and `.join_drain`
   (paced drain pass) apm sections.
+- Starter population fill (GAP "population is still thin"): the director
+  spawns toward `[rules.director] initial_population_frac` (default 0.25) of
+  the alive cap once at boot, batched at 4/tick, so a fresh world is
+  populated near players instead of staying near-empty until the first night
+  drip. Stock fills loaded regions toward their spawning.xml maxcounts as
+  they load; the caps stay stock-faithful (MaxSpawnedZombies/Animals).
 
 ### Fixed
 

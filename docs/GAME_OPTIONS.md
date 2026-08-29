@@ -328,6 +328,7 @@ test, so a retune cannot land silently).
 | `heat_event_ticks` | 720.0 | Heat-event duration (world ticks) stamped on heat sources (forge runs, campfire activity, craft.zig notifyActivity) |
 | `enemy_spawn_ring_min` / `enemy_spawn_ring_max` | 28.0 / 54.0 | Enemy spawn ring around players. Stock `cEnemyMin/MaxDistance` (spawning.md); was 18..28 (on-camera) before the R4 alignment |
 | `animal_spawn_ring_min` / `animal_spawn_ring_max` | 48.0 / 70.0 | Animal spawn ring. Stock `cAnimalMin/MaxDistance` (spawning.md); was 20..45 before the R4 alignment |
+| `initial_population_frac` | 0.25 | Starter population: one-time fill toward this fraction of the alive cap near players at boot (stock fills loaded regions toward their spawning.xml maxcounts as they load; the drip alone leaves a fresh world near-empty until the first night). 0 disables |
 | `horde_drip_cd` / `bloodmoon_horde_drip_cd` | 45.0 / 8.0 | Night horde drip cadence (zdtd population mechanic; stock has no periodic drip, GAP 2011-2017) |
 | `scout_drip_cd` | 120.0 | Daytime scout drip cadence (zdtd mechanic; stock scouts come from heat events only, GAP 1407) |
 | `animal_drip_cd` | 60.0 | Daytime wildlife drip cadence (zdtd mechanic) |

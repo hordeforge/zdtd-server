@@ -5,6 +5,11 @@ const rules_mod = @import("rules.zig");
 const director_defaults: rules_mod.Director = .{};
 const ecs_world = @import("world.zig");
 
+/// Starter population batch per tick (initial_population_frac fill): 4
+/// spawns per tick caps the fill at ~200 ms of sim work on a cold boot
+/// instead of one tick spawning the whole population.
+const initial_population_batch: u32 = 4;
+
 /// Sim world clock. Starts day 1, 07:00 (stock dedicated boot time, observed
 /// live 2026-08-11: `gettime` on a fresh stock server reads "Day 1, 07:00").
 /// seconds_per_hour is the sim's time scale default (30 s per in-game hour);
@@ -347,6 +352,9 @@ pub const Director = struct {
     /// MaxSpawnedAnimals: daytime wildlife cap (0 disables animal spawning).
     max_alive_animals: u32 = 0,
     animals_cd: f32 = 0,
+    /// Starter population fill has run (one-time per world; stock fills loaded
+    /// regions toward their maxcounts as they load - see tick()).
+    initial_population_done: bool = false,
 
     /// Alive-zombie ceiling: stock MaxSpawnedZombies default is 64; we keep a
     /// smaller dev cap so long soaks do not accrete entities without despawn.
@@ -442,6 +450,24 @@ pub const Director = struct {
         else
             self.max_alive;
         const spawn_z = w.rules.systems.director and alive_z < cap;
+
+        // Starter population (GAP "population is still thin"): stock fills
+        // loaded regions toward their spawning.xml maxcounts as they load, so
+        // a player never sees an empty world; the zdtd drip alone (2 per 45 s
+        // at night, 1 per 120 s by day) leaves a fresh world near-empty until
+        // the first night. Fill once toward `initial_population_frac x cap`,
+        // batched so one tick cannot spawn the whole population. The
+        // spawning.xml per-rule budget gate still applies per spawn
+        // (spawnNearPlayers -> budgetFor/budgetAllows).
+        if (spawn_z and !self.initial_population_done) {
+            const target: u32 = @intFromFloat(@as(f32, @floatFromInt(cap)) * w.rules.director.initial_population_frac);
+            const gap: u32 = if (alive_z < target) target - alive_z else 0;
+            if (gap == 0) {
+                self.initial_population_done = true;
+            } else {
+                spawned += self.spawnNearPlayers(w, @min(gap, initial_population_batch), w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, "");
+            }
+        }
 
         if (w.rules.systems.director) {
             if (spawn_z and self.clock.isNight() and self.horde_cd <= 0) {
@@ -1109,6 +1135,35 @@ test "director spawns at night near player ecs" {
     try std.testing.expect(dir.total_spawned >= 1);
 }
 
+test "starter population fills toward the cap once, batched" {
+    // GAP "population is still thin": a fresh world stays near-empty until
+    // the first night drip (the day drip is 1 scout per 120 s); the starter
+    // fill (initial_population_frac of the alive cap) populates near players
+    // once at boot, batched, and never re-fires after the target is reached.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    w.director.max_alive = 64;
+    // Daytime: the night horde drip is gated out, so only the starter fill
+    // can populate before dusk.
+    w.director.clock = .{ .day = 1, .hours = 12.0 };
+    _ = w.spawnPlayer(0, 70, 0, 0);
+
+    // Step until the fill completes (batched at 4/tick -> ~4 ticks to the
+    // 16 target), then verify it landed within the target and never re-fires.
+    var ticks: u32 = 0;
+    while (ticks < 200 and !w.director.initial_population_done) : (ticks += 1) _ = w.director.tick(&w, 0.05);
+    try std.testing.expect(w.director.initial_population_done);
+    try std.testing.expect(w.countKind(.zombie) > 0);
+    // Never overshoots the target (0.25 x 64 = 16).
+    const target: u32 = @intFromFloat(64.0 * w.rules.director.initial_population_frac);
+    try std.testing.expect(w.countKind(.zombie) <= target);
+    // The fill does not re-fire: daytime has no horde drip, so the count
+    // stays put once the target is reached.
+    const after_fill = w.countKind(.zombie);
+    for (0..120) |_| _ = w.director.tick(&w, 0.05);
+    try std.testing.expectEqual(after_fill, w.countKind(.zombie));
+}
+
 test "zombie speed scale follows day/night/bloodmoon config" {
     // Day = walk (0 → 0.5), night = sprint (3 → 1.4), blood moon = bm setting.
     var dir: Director = .{
@@ -1330,6 +1385,7 @@ test "blood moon wave size is capped by the stage maxAlive" {
         }
     };
     var w: ecs_world.World = .{};
+    w.rules.director.initial_population_frac = 0; // isolate the wave branch from the starter fill
     _ = w.spawnPlayer(0, 70, 0, 0);
     // Blood moon night with a generous BloodMoonEnemyCount; maxAlive=2 wins.
     var dir: Director = .{
@@ -1348,6 +1404,7 @@ test "blood moon wave size is capped by the stage maxAlive" {
 
 test "director without stage hooks keeps its unstaged behaviour" {
     var w: ecs_world.World = .{};
+    w.rules.director.initial_population_frac = 0; // isolate the wave count from the starter fill
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
         .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
