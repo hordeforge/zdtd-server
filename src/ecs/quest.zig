@@ -181,10 +181,12 @@ pub const ObjectiveKindMap = struct {
     kind: PhaseKind,
 };
 
-/// Builtin default mapping for the stock objective family — the 16 `type=`
-/// spellings the shipped `Data/Config/quests.xml` uses (facts of the stock
-/// game, like wire constants). Config entries override or extend these: the
-/// merged table the catalog carries scans config rows before these defaults.
+/// Builtin default mapping for the stock objective family — 23 `type=`
+/// spellings, covering the 16 used by the shipped `Data/Config/quests.xml`
+/// (2026-08-09 census) plus stock variants the shipped quests do not
+/// exercise (facts of the stock game, like wire constants). Config entries
+/// override or extend these: the merged table the catalog carries scans
+/// config rows before these defaults.
 pub const builtin_objective_kinds = [_]ObjectiveKindMap{
     .{ .obj_type = "RallyPoint", .kind = .rally },
     .{ .obj_type = "ClearSleepers", .kind = .kill_zombies },
