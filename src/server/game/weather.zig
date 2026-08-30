@@ -1,4 +1,4 @@
-//! Weather S2C helpers — extracted verbatim from game.zig.
+//! Weather S2C helpers - extracted verbatim from game.zig.
 //! anyEnteredClient, the NetPackageWeather body builder and its send paths.
 
 const std = @import("std");

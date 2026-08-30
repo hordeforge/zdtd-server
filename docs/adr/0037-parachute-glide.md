@@ -11,7 +11,7 @@
 A fully self-contained parachute mod (`mods/parachute/`) needs three things
 the current plugin boundary cannot express:
 
-1. **Deceleration** — the server has no player vertical physics
+1. **Deceleration** - the server has no player vertical physics
    (`src/server/movement.zig` is a horizontal + Y-delta anti-cheat envelope
    only; players are driven by client C2S positions). This ADR makes the
    server slow the fall by clamping the C2S vertical delta while the glide
@@ -19,13 +19,13 @@ the current plugin boundary cannot express:
    authority-correction path) - no client mod needed. It does not invent
    server-side player physics or server fall damage (stock has neither
    server-side); fall damage stays client-owned.
-2. **Worn state** — armor slots are sim authority (`inv_equip_start=55`,
+2. **Worn state** - armor slots are sim authority (`inv_equip_start=55`,
    12 slots; `ItemDef.tags` parses the items.xml `Tags` property), but
    `zdtd.sense` v3 exposes only net_id/kind/alive/pos/hp/yaw/target.
-3. **Anti-cheat exemption** — a gliding player falls at a sustained high vy;
+3. **Anti-cheat exemption** - a gliding player falls at a sustained high vy;
    the movement envelope (`clampVertical`, `max_vertical_speed_mps`) would
    reject it as a Y-teleport unless the sim knows the player is gliding.
-   `zdtd.queue` verbs are spawn/despawn/damage/say/bot — nothing can flag a
+   `zdtd.queue` verbs are spawn/despawn/damage/say/bot - nothing can flag a
    glide.
 
 Per AGENTS rule 29, the boundary cannot carry this, so the affordances are
@@ -61,7 +61,7 @@ Extend the plugin boundary minimally, keeping sim authority native:
 ## Consequences
 
 - A mod can now observe player vertical motion and worn state, and legally
-  flag a glide — the parachute mod is expressible over the boundary, and
+  flag a glide - the parachute mod is expressible over the boundary, and
   deceleration is server-side (position clamp + broadcast).
 - sense v4 is a breaking layout change for existing guests (only the shipped
   core plugins + fps_bot/mcp consume sense; all are rebuilt in-repo).

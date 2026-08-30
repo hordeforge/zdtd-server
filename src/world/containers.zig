@@ -9,7 +9,7 @@ pub const max_container_slots: usize = 54; // 9x6 common chest
 /// sized for a long-lived world; the save path buffers on the heap, not the
 /// stack. GAP 12: 256 silently dropped the 257th container on save (raised to
 /// 512, then 2026-08-21 to 4096 + world-container eviction, because Navezgane
-/// alone has thousands of loot containers and a hard cap truncates the tail —
+/// alone has thousands of loot containers and a hard cap truncates the tail  -
 /// every container past it comes back empty).
 pub const max_containers: usize = 4096;
 const persisted_container_size: usize = 20 + max_container_slots * 7 + 4 + 2; // + touched_day u32 + size_x/size_y u8 (ZCT2)

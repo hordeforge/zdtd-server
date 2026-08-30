@@ -11,7 +11,7 @@
 //! ecs/rules.zig imports assets/sandbox_presets.zig to seed the
 //! `[rules.difficulty] incoming_damage_0..5` field defaults from the
 //! comptime-embedded stock sandbox_presets XML. The import is compile-time
-//! constants only — no runtime assets access (production uses hooks, as
+//! constants only - no runtime assets access (production uses hooks, as
 //! above); the server-side alternative could not preserve operator toml
 //! overrides without binder presence tracking.
 

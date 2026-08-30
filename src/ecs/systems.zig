@@ -281,7 +281,7 @@ fn targetLive(w: *const World, net_id: i32) bool {
 }
 
 /// Nearest live bot within `range_sq` of (zx, zz), or an empty snap (id -1).
-/// `exact >= 0` resolves that one net id instead (any range — revenge); the
+/// `exact >= 0` resolves that one net id instead (any range - revenge); the
 /// World's `bot_snap_fn` (Game side, BotManager) answers both. A null hook
 /// means no bots exist. Read-only against the BotManager, which is quiescent
 /// during the parallel AI pass (bots integrate after it in the tick).
@@ -669,7 +669,7 @@ fn completeQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
     s.ready_turn_in = false;
     if (w.catalog.byId(s.def_id) != null) {
         // reward_coin pays at the tick-end payout (step.zig), through the
-        // on_quest_complete verdict like items/exp — paying here would let a
+        // on_quest_complete verdict like items/exp - paying here would let a
         // deny/scaling plugin never touch the coin leg.
         if (w.completed_quests_n < w.completed_quests_ring.len) {
             w.completed_quests_ring[w.completed_quests_n] = .{ .slot = ps, .def_id = s.def_id };
@@ -2705,7 +2705,7 @@ fn stealthNotifyNoise(w: *World, s: Slot, ev: c.StealthNoiseEvent) void {
 }
 
 /// Stock PlayerStealth.TickServer (IL=430): per-tick noise decay (NoiseCleanup
-/// + CalcVolume), sleeper-volume decay, and the attraction pass — a zombie
+/// + CalcVolume), sleeper-volume decay, and the attraction pass - a zombie
 /// hears when `noiseVolume x (1+feralSense) / (dist x 0.6 + 0.4) x
 /// detectUsScale >= 1` inside the attraction radius.
 fn stealthTick(w: *World, s: Slot) void {
@@ -5443,7 +5443,7 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     // RE `ItemActionAttack.difficultyModifier` (combat-damage.md): a server
     // (AI) attacker vs a client entity scales by IncomingDamageModifier,
     // `round(strength x modifier)`; PvP and AI-vs-AI leave strength
-    // unchanged. The default world is Adventurer (difficulty 1 — the stock
+    // unchanged. The default world is Adventurer (difficulty 1 - the stock
     // default game: the shipped serverconfig SandboxCode is the Adventurer
     // preset and a live dedi reports GameDifficulty stat = 1, whose
     // IncomingDamage decodes to 0.75 from the embedded preset XML).
@@ -6699,7 +6699,7 @@ test "stealth noise: a loud clip folds into the player and alerts a zombie" {
     // RE entity-ai.md PlayerStealth: a relayed sound with a sounds.xml Noise
     // row accumulates into the player's stealth list; CalcVolume + the heard
     // test alert an idle zombie within the attraction radius (it investigates
-    // the player's spot, same tick — stealth runs before the AI pass).
+    // the player's spot, same tick - stealth runs before the AI pass).
     var w: World = .{ .rules = .{ .ai = .{ .sense_dist_sq = 4 * 4 } } };
     defer w.deinit();
     const p = w.spawnPlayer(0, 70, 0, 0).?;
@@ -6781,7 +6781,7 @@ test "stealth noise: a sleeping zombie that hears wakes" {
     const z = w.spawnSleeperDef(5, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie }, 0).?;
     const zs = w.slotOfNetId(z).?;
     try std.testing.expect(!w.sleeper[zs].awake);
-    // stepbush (V3.1.4): volume 11 — radius 6.6 covers 5 m, heard ~ 7 >= 1.
+    // stepbush (V3.1.4): volume 11 - radius 6.6 covers 5 m, heard ~ 7 >= 1.
     w.pushStealthNoise(ps, 0, 70, 0, 11, 60, 0.507, 0, 0);
     systemStealth(&w);
     try std.testing.expect(w.sleeper[zs].awake);
@@ -6801,7 +6801,7 @@ test "stealth noise: heat rows feed the activity map" {
     systemStealth(&w);
     try std.testing.expectEqual(@as(usize, 1), w.director.heat_n);
     // notifyActivity: activity = value, decay = value / (duration_ticks / 20)
-    // per second — 90 s x 10 ticks = 900 ticks → 1.0 / 45 s.
+    // per second - 90 s x 10 ticks = 900 ticks → 1.0 / 45 s.
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.director.heat[0].activity, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 45.0), w.director.heat[0].decay, 0.0001);
 }

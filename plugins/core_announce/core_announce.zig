@@ -1,4 +1,4 @@
-// core_announce — day + blood-moon + join/leave announcements over chat.
+// core_announce - day + blood-moon + join/leave announcements over chat.
 // Reads the sim clock via zdtd.sense and broadcasts `say` commands on the
 // on_tick / on_player_join / on_player_leave observers.
 //

@@ -1,4 +1,4 @@
-//! Wasm host shims for Game — callbacks the plugin layer calls back into.
+//! Wasm host shims for Game - callbacks the plugin layer calls back into.
 //! Extracted verbatim so game.zig keeps only a re-export.
 
 const std = @import("std");
@@ -227,7 +227,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
         }
         std.mem.writeInt(i32, r[28..32], vy, .little);
         std.mem.writeInt(i32, r[32..36], -1, .little); // target_id
-        // v4: wearing_glider — the player's armor slots (55..66) carry an item
+        // v4: wearing_glider - the player's armor slots (55..66) carry an item
         // whose items.xml Tags include `[rules.glide] item_tag` (ADR 0037).
         var wearing: u8 = 0;
         if (k == 0 and g.sim.rules.glide.item_tag.len > 0) {
@@ -251,12 +251,12 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
     // Host-side bots (ADR 0026) are not ECS entities; append them after the
     // ECS actor records as kind==2, sharing the same 32-byte record layout.
     // fillSense offsets by its own running `n` (which already counts the ECS
-    // actor records), so base must be the header end (16), NOT 16 + n*32 —
+    // actor records), so base must be the header end (16), NOT 16 + n*32  -
     // the latter double-offsets the bot records past the copied region.
     g.bots.fillSense(out, sense_header_len, max_records, &n);
     // Event trailer (RFC 0001 §3): kind-4 bot-info records first (the guest's
     // weapon map), then kind-3 damage events (attributed hits since the last
-    // sense pass — the guest keys on victim == its own bot net id to
+    // sense pass - the guest keys on victim == its own bot net id to
     // retaliate).
     const ev_base = sense_header_len + n * rec_len;
     const info_n = g.bots.fillSenseBotInfo(out, ev_base, bot_mod.max_sense_info);
@@ -280,7 +280,7 @@ fn hasTag(tags: []const u8, tag: []const u8) bool {
     return false;
 }
 
-/// `zdtd.query(req_ptr, req_len, out_ptr, out_cap)` — reverse-direction point
+/// `zdtd.query(req_ptr, req_len, out_ptr, out_cap)` - reverse-direction point
 /// query (RFC 0001 §3; the sense `token` stays reserved). The guest writes a
 /// text request, the host writes a text response into the guest's out buffer
 /// and returns bytes written (0 = no answer). Requests are host-budgeted
@@ -380,7 +380,7 @@ pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usiz
     return s.len;
 }
 
-/// `path <sx> <sz> <tx> <tz>` — nav-grid waypoints from the source to the
+/// `path <sx> <sz> <tx> <tz>` - nav-grid waypoints from the source to the
 /// target in world block coords. Response: `<n> <x1> <z1> ... <xn> <zn>` (cell
 /// centers), or empty when no path / a cell is unwalkable / the chunk is not
 /// loaded. The guest buffer must hold the full response (see QRY_PATH_CAP).

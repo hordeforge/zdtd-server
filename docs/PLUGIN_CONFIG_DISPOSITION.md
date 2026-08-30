@@ -1,19 +1,19 @@
 # Plugin/config disposition (ADR 0020/0026 review)
 
-> **Purpose:** audit of every behavioral rule against the plugin boundary — which decisions belong in Wasm, in config, or stay native.
+> **Purpose:** audit of every behavioral rule against the plugin boundary - which decisions belong in Wasm, in config, or stay native.
 
 Classification of every behavioral rule/decision point in the server's
 rules/logic against the plugin boundary. The rule (ADR 0020/0026, AGENTS 28/29):
 **Related:** [PLUGIN_API.md](PLUGIN_API.md) · [PLUGIN_DEV.md](PLUGIN_DEV.md) · [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) · [RULES_CONFIG.md](RULES_CONFIG.md) · [STATE_MACHINES.md](STATE_MACHINES.md) · [GAMEPLAY.md](GAMEPLAY.md)
 
-1. **Wasm module** — anything the boundary can express: `zdtd.sense` /
+1. **Wasm module** - anything the boundary can express: `zdtd.sense` /
    `zdtd.queue` / `zdtd.query` plus the event hooks and verdict convention
    (`<0` deny, `0` keep, `>0` percent-adjust). Modules live in `mods/`
    (addons) or `plugins/` (first-party core, AGENTS rule 31).
-2. **Config** — operator policy that is data, not plugin logic: `rules.zig`
+2. **Config** - operator policy that is data, not plugin logic: `rules.zig`
    groups (`zdtd.toml [rules.*]`, mode-pack overlaid), `[sim]`, `[quests]`,
    `[bots]`, serverconfig.
-3. **Native** — only what the boundary *cannot* express: wire encode/emit,
+3. **Native** - only what the boundary *cannot* express: wire encode/emit,
    LiteNet, interest/replication, chunk stream, direct sim mutation, world
    store/persistence, config loading, plugin runtime, APM, and
    determinism-critical stock-fidelity sim.
@@ -58,11 +58,11 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
 
 | Gap | Today | Fix | Unlocks |
 |---|---|---|---|
-| Zombie-melee player damage bypasses `on_player_damage` | verdict only in player-melee C2S (`c2s/misc.zig:464`) + bot shots; the ECS zombie attack path (`applyDeferredDamage`) called only `killVerdict` on death | **SHIPPED** — `player_damage_verdict_fn` on `World` (like `kill_verdict_fn`), consulted in `applyDeferredDamage` for player victims; Game routes to plugin + wasm host with attacker unknown; **`plugins/core_damagegate`** (incoming damage ×N) + scenario test | "incoming damage ×N", "deny fall/drowning", zombie friendly-fire policy |
-| Announcements / event feed | `on_tick` + `zdtd.tick` can watch the clock, but `zdtd.queue` has no `say`/announce verb and there is no chat-broadcast host import | **SHIPPED** — `say` queue verb routed through the stock chat broadcast + `zdtd.sense` header v3 exposes world time + blood-moon day flag; **`plugins/core_announce`** v2 announces horde night, blood-moon countdown and airdrops from `on_tick` + scenario test | horde-night / blood-moon / airdrop / first-join announcements |
-| Pre-trade price verdict | `on_trader_event` fires after a trade | **SHIPPED** — pre-trade price verdict hook (`on_trade_price`: `<0` deny, `>0` percent-adjust buy price); **`plugins/core_pricegate`** (1.5x trader prices per player) + scenario test | "trader prices ×N per player" module (reward/tax policy) |
+| Zombie-melee player damage bypasses `on_player_damage` | verdict only in player-melee C2S (`c2s/misc.zig:464`) + bot shots; the ECS zombie attack path (`applyDeferredDamage`) called only `killVerdict` on death | **SHIPPED** - `player_damage_verdict_fn` on `World` (like `kill_verdict_fn`), consulted in `applyDeferredDamage` for player victims; Game routes to plugin + wasm host with attacker unknown; **`plugins/core_damagegate`** (incoming damage ×N) + scenario test | "incoming damage ×N", "deny fall/drowning", zombie friendly-fire policy |
+| Announcements / event feed | `on_tick` + `zdtd.tick` can watch the clock, but `zdtd.queue` has no `say`/announce verb and there is no chat-broadcast host import | **SHIPPED** - `say` queue verb routed through the stock chat broadcast + `zdtd.sense` header v3 exposes world time + blood-moon day flag; **`plugins/core_announce`** v2 announces horde night, blood-moon countdown and airdrops from `on_tick` + scenario test | horde-night / blood-moon / airdrop / first-join announcements |
+| Pre-trade price verdict | `on_trader_event` fires after a trade | **SHIPPED** - pre-trade price verdict hook (`on_trade_price`: `<0` deny, `>0` percent-adjust buy price); **`plugins/core_pricegate`** (1.5x trader prices per player) + scenario test | "trader prices ×N per player" module (reward/tax policy) |
 
-> Correction: the `on_block_damage` gap was investigated and does NOT exist —
+> Correction: the `on_block_damage` gap was investigated and does NOT exist  -
 > zombie chew (`tick.zig:275,383`) and explosions (`world.zig:313`) already
 > route through the `addBlockDamage` choke point (`world.zig:190`) which applies
 > the verdict. A "zombies can't break blocks" module works today.
@@ -71,8 +71,8 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
 
 | Candidate | Hook | Module shape |
 |---|---|---|
-| Quest-reward scaling | `on_quest_complete` (>0 = percent) — already wired at `game/step.zig:315`, today only observed by core_killfeed | `core_rewardgate`: scale items/exp/coins per quest def |
-| Immortal horde / no-death gates | `on_entity_killed` / `on_player_death` deny (killVerdict <0 → victim survives at 1 HP) — works today | `peaceful` / per-entity kill gates (user mod; no `core_`/`zdtd_` prefix) |
+| Quest-reward scaling | `on_quest_complete` (>0 = percent) - already wired at `game/step.zig:315`, today only observed by core_killfeed | `core_rewardgate`: scale items/exp/coins per quest def |
+| Immortal horde / no-death gates | `on_entity_killed` / `on_player_death` deny (killVerdict <0 → victim survives at 1 HP) - works today | `peaceful` / per-entity kill gates (user mod; no `core_`/`zdtd_` prefix) |
 | Custom admin verbs | `on_admin_command` (only bot uses it) | `givequest`, `spawnwave`, `setdifficulty` as module verbs instead of native console arms |
 
 ## Config-eligible logic (non-scalar policy, not yet config-driven)
@@ -87,11 +87,11 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
 
 ## Implementation status
 
-- `docs/RULES_CONFIG.md` — tunables disposition (moves re-applied; `zig build`
+- `docs/RULES_CONFIG.md` - tunables disposition (moves re-applied; `zig build`
   compiles; suite verification subject to the pre-existing baseline OOM at
-  commit `ff17497` — the concurrent session's committed regression, reproduced
+  commit `ff17497` - the concurrent session's committed regression, reproduced
   with no local changes).
-- This doc — the plugin/config classification.
+- This doc - the plugin/config classification.
 - **Shipped:** `[quests] poi_bed_lockout_radius` + `trader_band_1/2` (was
   hardcoded in hooks.zig); `on_player_damage` verdict in the ECS zombie-melee
   path (`player_damage_verdict_fn` on World + Game adapter); the `say` queue
@@ -118,7 +118,7 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
   + `move_scale_0..4` (per-tier scalars, binder is scalar-only);
   `[sim] airdrop_schedule/day_min/day_max/drop_hour/loot_list` (stock-like
   day-count + TOD schedule mode; the default loot list also fixes the stale
-  "supplyCrate" name that rolled empty crates — stock is "airDrop");
+  "supplyCrate" name that rolled empty crates - stock is "airDrop");
   `[bots] weapon_profiles` host loadout string table (default = builtin pool).
 - The config surface is complete: every config-eligible candidate identified
   by the review is either moved (rules/[sim]/[quests]/[bots]) or kept with a
@@ -138,7 +138,7 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
   `[rules.ai]`/`[rules.vehicle]` gravity). The "Bot loadout pool" row above
   shipped as `[bots] weapon_profiles`; `bot_max_hp` stays a fixed guest
   contract (ADR 0026), not config.
-- `make check-xml-audit` — green (independent gate).
+- `make check-xml-audit` - green (independent gate).
 
 ## Baseline OOM investigation (goal item 5)
 
@@ -185,7 +185,7 @@ included):
 reproduce.** The suite is green end-to-end (`zig build test` exit 0; 3× direct
 full-suite runs green). Residuals, each with a reason:
 
-1. **Zig 0.16 runner cosmetic "failed command:" tail on success** (above) —
+1. **Zig 0.16 runner cosmetic "failed command:" tail on success** (above)  -
    the output looks like a failure but the exit code is 0 and all 1294 tests
    pass; harmless, cosmetic only.
 2. **Host cache-lock contention.** This host runs several other projects'
@@ -221,10 +221,10 @@ nothing plugin-eligible or config-eligible remains native.
 
 | Item | Lift |
 |---|---|
-| Quest **coin** rewards bypassed `on_quest_complete` (completeQuest paid `reward_coin` before the tick-end verdict; deny/scaling could not touch coins) | **FIXED** — coins pay at the payout through the same verdict (`step.zig`), deny withholds, >0 scales; ECS/scenario tests drain the completed-quest ring (4-slot, drained every tick in production); rewardgate module doc + fixture `reward_coin=100` prove the scaled coin leg |
-| Kill-XP floor `100` in `xpGainFor` | **MOVED** — `[rules.progression] kill_xp_fallback` (binder + overlay + GAME_OPTIONS row) |
-| Bot host move-arrival `0.05` + fire-range slop `2.0` | **MOVED** — `[bots] arrival_dist`, `[bots] shot_range_slop` (binder, main merge, Bot carries from cfg) |
-| `on_entity_killed` positive verdict (>0 percent) unconsumed — kill plugins could not scale kill XP | **SHIPPED (boundary extension)** — the positive verdict rides `DamageResult.kill_scale_pct` to `killXpAward`; `plugin_rules.wasm` now scales kills 150% and the host test asserts it; trap-kill path passes 100 |
+| Quest **coin** rewards bypassed `on_quest_complete` (completeQuest paid `reward_coin` before the tick-end verdict; deny/scaling could not touch coins) | **FIXED** - coins pay at the payout through the same verdict (`step.zig`), deny withholds, >0 scales; ECS/scenario tests drain the completed-quest ring (4-slot, drained every tick in production); rewardgate module doc + fixture `reward_coin=100` prove the scaled coin leg |
+| Kill-XP floor `100` in `xpGainFor` | **MOVED** - `[rules.progression] kill_xp_fallback` (binder + overlay + GAME_OPTIONS row) |
+| Bot host move-arrival `0.05` + fire-range slop `2.0` | **MOVED** - `[bots] arrival_dist`, `[bots] shot_range_slop` (binder, main merge, Bot carries from cfg) |
+| `on_entity_killed` positive verdict (>0 percent) unconsumed - kill plugins could not scale kill XP | **SHIPPED (boundary extension)** - the positive verdict rides `DamageResult.kill_scale_pct` to `killXpAward`; `plugin_rules.wasm` now scales kills 150% and the host test asserts it; trap-kill path passes 100 |
 
 Closed with reason (re-audit): `world/worldgen.zig` terrain/noise constants are
 zdtd-owned procedural worldgen; `electric.zig` max-node-watts and the interest/

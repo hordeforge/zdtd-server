@@ -21,9 +21,9 @@ Stock content is loaded from `Data/Config` and `Data/Worlds/<Name>` via `src/ass
 ```mermaid
 flowchart TB
     GAME_DIR["--game-dir / Data/Config + Data/Worlds"] --> ASSETS_MAP["assets/* loaders + AssignIds idByName"]
-    ASSETS_MAP --> WORLD_STORE["world/store — chunks, TTS, prefabs, DTM"]
-    WORLD_STORE --> WIRE_CHUNK["wire/stock_chunk — stock Chunk.write order"]
-    WIRE_CHUNK --> CLIENT["stock client — fixedSizeCC + splat load"]
+    ASSETS_MAP --> WORLD_STORE["world/store - chunks, TTS, prefabs, DTM"]
+    WORLD_STORE --> WIRE_CHUNK["wire/stock_chunk - stock Chunk.write order"]
+    WIRE_CHUNK --> CLIENT["stock client - fixedSizeCC + splat load"]
 ```
 
 ## Coordinate mapping

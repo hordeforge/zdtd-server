@@ -1,4 +1,4 @@
-// core_pricegate — trader price scaling via the on_trade_price pre-trade
+// core_pricegate - trader price scaling via the on_trade_price pre-trade
 // verdict (ADR-worthy boundary extension; on_trader_event fires only AFTER a
 // trade, so this hook is the pre-execution price slot).
 //

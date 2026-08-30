@@ -1,6 +1,6 @@
 # Writing a zdtd plugin
 
-> **Purpose:** authoring guide for Wasm plugins — module shape, host imports, hook signatures, budgets, and how to build a `.wasm` from any language.
+> **Purpose:** authoring guide for Wasm plugins - module shape, host imports, hook signatures, budgets, and how to build a `.wasm` from any language.
 
 **Status:** shipped (T9 runtime 2026-08-06; T15 event hooks + deny/adjust
 2026-08-07). The runtime loads `.wasm` modules named in zdtd.toml and calls the
@@ -11,7 +11,7 @@ deliberately small and documented below; read-only sim views are still open.
 A plugin is a single `.wasm` file. Any language that targets WebAssembly works:
 Rust, TinyGo, Zig, C, AssemblyScript. You do not link against zdtd, you do not
 match a native ABI, and you do not need the zdtd source to build. Ships as an installed
-mod under `mods/` or `plugins/` with a `manifest.toml` manifest — see [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md)
+mod under `mods/` or `plugins/` with a `manifest.toml` manifest - see [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md)
 for the manifest format and `mods/BUILDING.md` for the core build layout.
 
 ## The shape of a plugin
@@ -174,7 +174,7 @@ import **field** names are bare (`log`, not `zdtd_log`); importing
 | `zdtd` . `queue` | `(ptr: i32, len: i32) -> i32` | Queue a text `SimCommand`; returns 0 when the bytes were read, 1 when `ptr`/`len` is out of bounds |
 | `zdtd` . `sense` | `(ptr: i32, len: i32, token: i32) -> i32` | Read-only world snapshot into the guest's memory at `ptr` (RFC 0001 §3; **v4** = magic `ZBS4`, 40-byte records: net_id/kind/self/alive/pos/hp/yaw/vy/target/wearing, ADR 0037); returns bytes written (0 = no sense surface) |
 | `zdtd` . `query` | `(req_ptr: i32, req_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Reverse-direction point query (RFC 0001 §3): write a text request at `req_ptr`, the host answers at `out_ptr`; returns response bytes (0 = no answer) |
-| `zdtd` . `json_parse` | `(ptr: i32, len: i32) -> i32` | Parse the JSON doc at guest memory `(ptr, len)` with Zig's `std.json` (ADR 0031 D3); 0 = ok, <0 = parse error. The parsed doc is per-plugin state, replaced on the next call, stored in a lazily allocated fixed buffer (`json_buf_max`, 64 KiB) reset per frame — no heap on the tick path, and the cap also bounds nesting. One doc at a time: frames must be processed before the next parse |
+| `zdtd` . `json_parse` | `(ptr: i32, len: i32) -> i32` | Parse the JSON doc at guest memory `(ptr, len)` with Zig's `std.json` (ADR 0031 D3); 0 = ok, <0 = parse error. The parsed doc is per-plugin state, replaced on the next call, stored in a lazily allocated fixed buffer (`json_buf_max`, 64 KiB) reset per frame - no heap on the tick path, and the cap also bounds nesting. One doc at a time: frames must be processed before the next parse |
 | `zdtd` . `json_str` | `(path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Decoded string at a dot-separated key path (`method`, `params.name`, ...); returns the FULL length, 0 = missing or not a string, <0 = no parsed doc / bad path. Compare the length against your buffer cap to detect truncation |
 | `zdtd` . `json_raw` | `(path_ptr: i32, path_len: i32, out_ptr: i32, out_cap: i32) -> i32` | Raw JSON bytes of the value at a path (for echoing an id verbatim); FULL length, 0 = missing, <0 = error |
 | `zdtd` . `json_obj` | `(path_ptr: i32, path_len: i32) -> i32` | 1 = the value at the path is an object, 0 = absent or another type, <0 = error |
@@ -266,16 +266,16 @@ behavior, not server.
 | Craft-request policy (which recipes a player may craft, batch caps) | **Plugin already** | `on_craft_request` verdict (added 2026-08-20, `<0` deny / `>0` cap at the `tryCraft` gate, recipe name is the key); `plugins/core_craftgate` is the reference (denies `forbidden_*` recipes) |
 | Loot-roll policy (loot abundance / empty rolls) | **Plugin already** | `on_loot_roll` verdict (added 2026-08-20, `<0` empty / `>0` scale the rolled stack count by percent, at both the bag and container chokepoints); `plugins/core_lootgate` is the reference (50% loot) |
 | Quest reward scaling | **Plugin already** | `on_quest_complete` verdict `>0` scales the payout (`step.zig`) |
-| Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`; also the C2S player-dig delta since 2026-08-20 — every block-damage path routes through it) |
+| Block-damage policy | **Plugin already** | `on_block_damage` verdict (`world.zig:20`; also the C2S player-dig delta since 2026-08-20 - every block-damage path routes through it) |
 | Player-death policy | **Plugin already** | `on_player_death` verdict (`killVerdict`) |
 | Admin commands / tooling | **Plugin already** | `on_admin_command` |
 | Login gate (allow/deny names) | **Plugin already** | `on_player_login` deny gate (`join.zig:72`) |
 | Bot brains | **Plugin already** | `mods/fps_bot` (ADR 0026) |
 | Player-damage policy (PvP / friendly-fire rules) | **Plugin already** | `on_player_damage` verdict (added 2026-08-20) + the `kind` query verb; `plugins/core_pvp` is the reference (denies all player-vs-player damage, keeps the rest) |
-| Guard / anti-cheat policy ladder | **Not yet** — technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
-| Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) — `plugins/core_killfeed` logs both |
-| Trader announcements (window open, buy, sell) | **Plugin already** | `on_trader_event` (added 2026-08-20; kind 0 open / 1 buy / 2 sell, fired at the LockResponse open and the typed trade path) — `plugins/core_tradefeed` is the reference |
-| Announcements wired to more events (vehicle) | **Not yet** — technically expressible | Missing hooks for those events; add hooks, do not add native announcement code |
+| Guard / anti-cheat policy ladder | **Not yet** - technically expressible but needs per-peer counter/quarantine verbs | Guard state is rate/authority; a plugin verdict surface for it is a deliberate boundary extension |
+| Announcements wired to join/leave | **Plugin already** | `on_player_join` / `on_player_leave` (the latter added 2026-08-19; `session_drop.zig`) - `plugins/core_killfeed` logs both |
+| Trader announcements (window open, buy, sell) | **Plugin already** | `on_trader_event` (added 2026-08-20; kind 0 open / 1 buy / 2 sell, fired at the LockResponse open and the typed trade path) - `plugins/core_tradefeed` is the reference |
+| Announcements wired to more events (vehicle) | **Not yet** - technically expressible | Missing hooks for those events; add hooks, do not add native announcement code |
 | Wire encode/emit, LiteNet, chunk stream, interest/replication | **Cannot be a plugin** | Boundary never touches wire bytes or package layout (enforced) |
 | ECS sim mutation: inventory, blocks, quests, trading authority | **Cannot be a plugin** | Plugins mutate only via `queue` verbs the server already understands; no direct sim access |
 | World store, persistence (ZCH3/ZPV3/…), config loading | **Cannot be a plugin** | Filesystem/capability-gated; init-time, not tick |
@@ -319,36 +319,36 @@ layout, build recipe, and [PLUGIN_STANDARDS.md](PLUGIN_STANDARDS.md) for naming
 and manifest rules). The one exception is `bot`, which is C by design
 (ADR 0026):**
 
-- `mods/fps_bot/fps_bot.wasm` — the bot brain (ADR 0026): sense → decide →
+- `mods/fps_bot/fps_bot.wasm` - the bot brain (ADR 0026): sense → decide →
   `bot <verb>` commands; the flagship plugin (C source).
-- `plugins/core_killfeed/core_killfeed.wasm` — a minimal event observer: logs
+- `plugins/core_killfeed/core_killfeed.wasm` - a minimal event observer: logs
   kills, player deaths and quest completions via the verdict hooks and keeps
   every outcome (0). Use it as the template for announcements, kill-feeds,
   scoreboards and integrations.
-- `plugins/core_pvp/core_pvp.wasm` — a player-damage policy module: uses the
+- `plugins/core_pvp/core_pvp.wasm` - a player-damage policy module: uses the
   `on_player_damage` verdict + the `kind` query verb to deny all
   player-vs-player damage while leaving NPC damage untouched. Use it as the
   template for PvP/friendly-fire and damage-scaling policies.
-- `plugins/core_questgate/core_questgate.wasm` — a quest-acceptance policy
+- `plugins/core_questgate/core_questgate.wasm` - a quest-acceptance policy
   module: uses the `on_quest_accept` verdict + the `quest` query verb to deny
   quests named `forbidden_*` and log every acceptance. Use it as the template
   for quest gating (whitelists, class/level restrictions).
-- `plugins/core_craftgate/core_craftgate.wasm` — a craft-request policy module:
+- `plugins/core_craftgate/core_craftgate.wasm` - a craft-request policy module:
   uses the `on_craft_request` verdict to deny recipes named `forbidden_*` and
   log every request. Use it as the template for recipe blacklists and batch
   caps.
-- `plugins/core_lootgate/core_lootgate.wasm` — a loot-roll policy module: uses
+- `plugins/core_lootgate/core_lootgate.wasm` - a loot-roll policy module: uses
   the `on_loot_roll` verdict to scale every rolled loot count to 50%. Use it
   as the template for loot-abundance and empty-loot policies.
-- `plugins/core_tradefeed/core_tradefeed.wasm` — a trader-event observer module:
+- `plugins/core_tradefeed/core_tradefeed.wasm` - a trader-event observer module:
   uses `on_trader_event` (kind 0 open / 1 buy / 2 sell) to log every trade
   window event. Use it as the template for trader/vehicle announcements.
 - `plugins/core_announce/core_announce.wasm`, `plugins/core_damagegate`,
   `plugins/core_pricegate`, `plugins/core_rewardgate`,
-  `plugins/core_adminverbs`, `mods/mcp` (ADR 0031) — the remaining core
+  `plugins/core_adminverbs`, `mods/mcp` (ADR 0031) - the remaining core
   plugins: clock/join announcements, damage/price/reward scaling verdicts,
   operator verbs via `on_admin_command`, and the MCP server addon.
-- `mods/example_chat_filter/` — a drop-in example layout (C), not a core
+- `mods/example_chat_filter/` - a drop-in example layout (C), not a core
   plugin.
 
 ## Data across the boundary
@@ -382,7 +382,7 @@ Event hooks (T15, return a verdict):
 | `on_quest_complete` | `(player_entity_id: i32, quest_def_id: i32) -> i32` | `<0` withhold the payout; `>0` pay that percent of items/exp |
 
 Remaining verdict hooks and observers (the full host surface is 22 hooks;
-[PLUGIN_API.md](PLUGIN_API.md) is the authoritative contract — this table
+[PLUGIN_API.md](PLUGIN_API.md) is the authoritative contract - this table
 completes the authoring view):
 
 | Export | Signature | Verdict return / when |
@@ -396,7 +396,7 @@ completes the authoring view):
 | `on_game_event` | `(player: i32, event_ptr, event_len, target, var_count: i32) -> i32` | ADR 0035: `<0` deny, `0` keep, `>0` keep (first non-keep wins); the stock sender/party gate runs native before the verdict |
 | `on_player_leave` | `(peer_slot: i32, entity_id: i32) -> ()` | void observer at disconnect (the join counterpart) |
 | `on_stat_changed` | `(player: i32, hp, food, water, stamina, level, xp: i32) -> ()` | ADR 0034: pure observer fired when the survival pass or an XP award changed a tracked stat |
-| `on_evidence` | `(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits: i32) -> ()` | T21: read-only guard evidence event (detector/severity/surface are enum values; the two floats arrive as f32 bits — `@bitCast` back). `severity` is the EFFECTIVE value after the T20 hard ceiling (a client-informed detector's `.hard` arrives as `.strong`). Never a gate: the return is discarded |
+| `on_evidence` | `(tick, peer_local, entity_id, detector, severity, surface, observed_bits, bound_bits: i32) -> ()` | T21: read-only guard evidence event (detector/severity/surface are enum values; the two floats arrive as f32 bits - `@bitCast` back). `severity` is the EFFECTIVE value after the T20 hard ceiling (a client-informed detector's `.hard` arrives as `.strong`). Never a gate: the return is discarded |
 | `on_trader_event` | `(player: i32, trader_entity: i32, kind: i32) -> ()` | void observer on trade open / sell / buy |
 
 Five of the verdict hooks back the ADR 0032 exclusive override points
@@ -419,7 +419,7 @@ reply back out of it):
 | `on_admin_command` | `(cmd_ptr, cmd_len, out_ptr, out_cap: i32) -> i32` | `>0` bytes of reply written at `out_ptr` (handled); `<=0` not handled, so the next plugin, then core's `unknown`, gets a turn |
 | `on_chat` | `(sender, msg_ptr, msg_len, out_ptr, out_cap: i32) -> i32` | `<0` deny the message; `0` keep it unchanged; `>0` bytes of the rewritten body at `out_ptr`. A rewrite that is not valid chat text is treated as deny |
 | `on_player_login` | `(peer_slot, name_ptr, name_len, out_ptr, out_cap: i32) -> i32` | `0` allow; non-zero deny, where the magnitude is the number of reason bytes written at `out_ptr` (`-4` and `4` both mean "deny, 4 bytes of reason"). A deny with 0 bytes reads back as "denied" |
-| `on_mcp_frame` | `(frame_ptr, frame_len, out_ptr, out_cap: i32) -> i32` | MCP transport bridge (ADR 0031): the host copies one client JSON-RPC frame into your memory, you write your response back; return the bytes written (`0` = nothing to send: a notification, a closed session, or an overflowed response). JSON is parsed by the host (`json_*` imports) — the guest never parses JSON. A trap disables only that module |
+| `on_mcp_frame` | `(frame_ptr, frame_len, out_ptr, out_cap: i32) -> i32` | MCP transport bridge (ADR 0031): the host copies one client JSON-RPC frame into your memory, you write your response back; return the bytes written (`0` = nothing to send: a notification, a closed session, or an overflowed response). JSON is parsed by the host (`json_*` imports) - the guest never parses JSON. A trap disables only that module |
 
 For these request/reply hooks the first plugin that responds wins, and a trap
 or fuel exhaustion disables that module while the request proceeds as if it
@@ -480,7 +480,7 @@ mv my_plugin.wasm my_plugin_final.wasm
 
 `zig build-exe` needs an entry point even for freestanding targets; add a
 one-line `export fn _start() void {}` to your module (the committed core
-plugins put it in a separate `main.zig` wrapper — see
+plugins put it in a separate `main.zig` wrapper - see
 [mods/BUILDING.md](../mods/BUILDING.md)). zwasm runs the start section only if
 the module declares one, which ours never do, so `_start` is never invoked.
 

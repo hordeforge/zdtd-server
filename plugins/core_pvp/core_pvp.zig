@@ -1,4 +1,4 @@
-// core_pvp — player-vs-player damage gate via the on_player_damage verdict.
+// core_pvp - player-vs-player damage gate via the on_player_damage verdict.
 //
 // Verdict convention (docs/PLUGIN_DEV.md "Hooks"):
 //   on_player_damage(attacker, victim, amount) -> i32

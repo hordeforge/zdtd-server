@@ -85,12 +85,12 @@ pub const PluginVTable = struct {
     on_game_event: ?*const fn (*const Host, player: i32, event: []const u8, target: i32, var_count: i32) i32 = null,
     /// Admin command hook: receives the full console line (verb + args), writes
     /// a reply into `out` and returns the written slice. Null return means not
-    /// handled — the next plugin is tried, then core reports unknown.
+    /// handled - the next plugin is tried, then core reports unknown.
     on_admin_command: ?*const fn (*const Host, cmd: []const u8, out: []u8) ?[]const u8 = null,
     /// Chat hook: after core validation (rate limit, UTF-8), before broadcast.
     /// Return null to let core broadcast as-is, a slice of `out` to replace the
     /// message (validate again), or an empty slice "" to suppress it. Plugins
-    /// must not bypass the stock wire — only the chat body is filtered.
+    /// must not bypass the stock wire - only the chat body is filtered.
     /// `sender` is the authenticated entity id.
     on_chat: ?*const fn (*const Host, sender: i32, msg: []const u8, out: []u8) ?[]const u8 = null,
     /// Join gate: after PlayerLogin name sanitized, before ban/whitelist and

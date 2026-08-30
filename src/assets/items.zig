@@ -156,10 +156,10 @@ pub const ItemDef = struct {
     /// full EffectManager aggregation over worn items - the recorded
     /// passive-effects-VM non-goal; only the held-tool leg is wired here.
     harvest_rows: []const HarvestCountRow = &.{},
-    /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two —
+    /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two  -
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
-    /// placeable (fail closed — resourceWood etc. carry no Blockname and do
+    /// placeable (fail closed - resourceWood etc. carry no Blockname and do
     /// not place in stock).
     place_block_name: []const u8 = "",
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
@@ -1547,7 +1547,7 @@ test "load stock items.xml when present" {
         try std.testing.expectApproxEqAbs(@as(f32, 0.45), gun.light_value, 0.001);
     }
     // Melee damage: club/axe declare it as the EntityDamage passive effect
-    // (base_set) — property-less items must not resolve to 0.
+    // (base_set) - property-less items must not resolve to 0.
     if (t.byName("meleeWpnClubT0WoodenClub")) |club| {
         try std.testing.expectEqual(@as(f32, 12), club.entity_damage);
     }

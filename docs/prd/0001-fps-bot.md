@@ -1,6 +1,6 @@
-# FPS Bot Addon — Product Requirements (PRD)
+# FPS Bot Addon - Product Requirements (PRD)
 
-> **Purpose:** product requirements for the FPS bot addon — what the bot addon must do, for whom, and how it is accepted.
+> **Purpose:** product requirements for the FPS bot addon - what the bot addon must do, for whom, and how it is accepted.
 
 **Number:** PRD 0001
 **Status:** shipped (bot module + host surface live: `mods/fps_bot/`,
@@ -22,11 +22,11 @@ Q3 / Doom 3 bot AI distilled there.
 zdtd is a clean-room dedicated server for 7 Days to Die. A stand-alone server
 is empty until humans join; there is tension, zombie pressure to hold back, and
 no one to populate a map for testing or for low-population periods. The stock
-ecosystem has a bot mod (`../../../7dtd-fps-bots`), but it is a **C# stock-host mod** —
+ecosystem has a bot mod (`../../../7dtd-fps-bots`), but it is a **C# stock-host mod**  -
 which, per ADR 0003, zdtd does not host.
 
-We want the same end result — *a server populated with credible, shootable,
-killable FPS bots* — delivered the way zdtd extends itself: as a **Wasm
+We want the same end result - *a server populated with credible, shootable,
+killable FPS bots* - delivered the way zdtd extends itself: as a **Wasm
 plugin addon**. This gives operators bots that:
 
 - fill empty or low-population periods with hostile NPCs;
@@ -36,11 +36,11 @@ plugin addon**. This gives operators bots that:
 
 ## 2. Personas
 
-- **Operator** — runs a zdtd server, wants a populated-but-fair world,
+- **Operator** - runs a zdtd server, wants a populated-but-fair world,
   spawns/removes/counts bots, tunes difficulty.
-- **Developer/QA** — needs stable, scriptable targets for loadgen / client
+- **Developer/QA** - needs stable, scriptable targets for loadgen / client
   playtest; wants to observe bot behaviour deterministically.
-- **Player** — on a vanilla client, wants to meet and fight believable enemy
+- **Player** - on a vanilla client, wants to meet and fight believable enemy
   NPCs that move, dodge, and shoot back, using normal game mechanics.
 
 ## 3. Goals
@@ -48,7 +48,7 @@ plugin addon**. This gives operators bots that:
 1. Enable bots as a drop-in addon (one `.wasm` in `[plugin] modules`), no host
    fork, no client mod.
 2. Bots are **believable enemy NPCs**: they hunt players, lead-fire, strafe,
-   dodge when hit, and respect difficulty, health, and death — like the
+   dodge when hit, and respect difficulty, health, and death - like the
    Q3/Doom 3 skill model the reference implements.
 3. **Authority is preserved**: bots obey the same move caps, collision, line of
    sight and damage/verdict rules as clients (server authoritative).
@@ -146,7 +146,7 @@ plugin addon**. This gives operators bots that:
   range; a bot does **not** teleport or exceed the move envelope.
 - AC-4. `bot remove all` empties the world; `bot count <n>` restores to `n`.
 - AC-5. Disabling/removing the module makes `bot` commands report clearly as
-  unknown — the server is not coupled to the addon.
+  unknown - the server is not coupled to the addon.
 - AC-6. A bot that traps/exhausts fuel disables itself without taking the
   server or other plugins down.
 
@@ -164,15 +164,15 @@ plugin addon**. This gives operators bots that:
 
 ## 10. Milestones (see IMPLEMENTATION_PLAN_BOTS.md)
 
-- **M0** — host surface: `bot` kind + `BotDef` + command ops + `sense` import.
-- **M1** — guest: Q3/Doom 3 brain module + admin commands (spawn/remove/list/
+- **M0** - host surface: `bot` kind + `BotDef` + command ops + `sense` import.
+- **M1** - guest: Q3/Doom 3 brain module + admin commands (spawn/remove/list/
   count/skill).
-- **M2** — movement + LOS + shoot integration (the triad validation).
-- **M3** — polishing: skill presets, per-bot cfg, docs final pass, `make check`
+- **M2** - movement + LOS + shoot integration (the triad validation).
+- **M3** - polishing: skill presets, per-bot cfg, docs final pass, `make check`
   green, loadgen smoke + stock-client evidence.
 
 ## 11. Out-of-scope signpost
 
 Pathfinding/A*, BotVs teaming/scoreboards, persistent rosters, quest-aware
-bots, client-side integration — deliberately deferred; revisit only with real
+bots, client-side integration - deliberately deferred; revisit only with real
 demand, not speculative scope.

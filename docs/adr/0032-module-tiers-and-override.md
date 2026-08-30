@@ -1,4 +1,4 @@
-# ADR 0032: Module tiers and override — core / official mod / user mod
+# ADR 0032: Module tiers and override - core / official mod / user mod
 
 - **Status:** accepted
 - **Date:** 2026-08-23

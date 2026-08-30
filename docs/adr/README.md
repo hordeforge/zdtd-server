@@ -1,7 +1,7 @@
 # Architecture Decision Records (ADR)
 
 Short, numbered decisions for zdtd. Format: context → decision → consequences.
-Status is one of: **accepted**, **superseded**, **deprecated** — a decision still being made is an RFC, not a proposed ADR. New ADRs start from [TEMPLATE.md](TEMPLATE.md).
+Status is one of: **accepted**, **superseded**, **deprecated** - a decision still being made is an RFC, not a proposed ADR. New ADRs start from [TEMPLATE.md](TEMPLATE.md).
 
 | ADR | Title | Status |
 |---|---|---|
@@ -51,5 +51,5 @@ Related long-form design: [PLUGIN_API.md](../PLUGIN_API.md), [ECS_SYSTEMS.md](..
 [INDEX.md](../INDEX.md).
 
 Sibling series: [PRD](../prd/README.md) (product requirements) ·
-[RFC](../rfc/README.md) (technical spec/design) — an ADR's product context and
+[RFC](../rfc/README.md) (technical spec/design) - an ADR's product context and
 design detail live in the paired PRD/RFC of the same number.

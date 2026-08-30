@@ -47,7 +47,7 @@ Spot-check summary vs the prior audit claims:
 **CLOSED 2026-08-20** (A36 verified landed; A37/A38 fixed in the terrain-id pass): `spawnSurface` already reads `World.terrain_ids.dirt` (game.zig `spawnSurface`); the TTS filler skip now takes the resolved `terrain_ids.terrain_filler(_adaptive)` ids instead of comptime pins, and `Chunk.rawAt`/`isSolid` fall back to `World.terrain_ids` (via a `terrain` pointer set in `World.getOrCreate`; offline chunks keep the pins).
 | **A41** | `ecs/aidirector.zig:163-164` (`heat_cooldown_seconds=120`, `heat_neighbor_cooldown_seconds=60`) | Region cooldown 120 s, neighbor 60 s | Stock `AIDirectorChunkData`: `FindBestEventAndReset` region cooldown **240 s**; `StartCooldownOnNeighbors` neighbor table **180 s / 720 s** (aidirector.md 2026-08-07, asm.il 414504-415200) | **P2** (AI pacing divergence, semi-documented GAP_ANALYSIS 2037) | Align to 240 / 180-720 after IL re-verify, or expose as `[rules.ai]` tunables | Changes scout cadence (2x-3x slower); not default-preserving |
 
-**CLOSED 2026-08-20**: defaults aligned to the RE-verified stock literals — `[rules.director] heat_cooldown_seconds` 240.0 (was 120), `heat_neighbor_cooldown_seconds` 180.0 (was 60), both still operator-tunable (ADR 0021). The stock long forms (1320/720) are modelled as the feral 2x roll (documented approximation); the pin test now asserts 240/180. Scout cadence roughly halves; GAME_OPTIONS.md updated.
+**CLOSED 2026-08-20**: defaults aligned to the RE-verified stock literals - `[rules.director] heat_cooldown_seconds` 240.0 (was 120), `heat_neighbor_cooldown_seconds` 180.0 (was 60), both still operator-tunable (ADR 0021). The stock long forms (1320/720) are modelled as the feral 2x roll (documented approximation); the pin test now asserts 240/180. Scout cadence roughly halves; GAME_OPTIONS.md updated.
 | **A37** | `world/tts.zig:418` | Filler skip compares comptime pins `assignids.terrain_filler(_adaptive)` | AssignIds names `terrainFiller` / `terrainFillerAdaptive` (dump-verified values 2/3) | **P3** | Resolve both names via idByName once at world init (alongside `terrain_ids`) | Identical |
 
 **CLOSED 2026-08-20** (see A36 note): filler ids are fields of `TerrainIds`, resolved by `resolveTerrainIds`, and threaded into `tts.paintDecoration` / `Index.applyTtsPaintToChunk`.
@@ -147,13 +147,13 @@ through the listed loader or is documented NONE with no code dependency.
 | challenges.xml | none | NONE, no dependency (challengegroup_reward_* quest names are name-keys, quests.xml side) |
 | dialogs.xml | none | NONE, no dependency (trader dialog is client-side XUiM; server sends TraderData) |
 | dmscontent.xml | none | NONE, no dependency |
-| entityclasses.xml | entities.zig | **HAVE** (hash, kind, loot, speeds, sight, HandItem; HP via `HealthMax` passive_effect + variables — A34 closed 2026-08-20) |
+| entityclasses.xml | entities.zig | **HAVE** (hash, kind, loot, speeds, sight, HandItem; HP via `HealthMax` passive_effect + variables - A34 closed 2026-08-20) |
 | entitygroups.xml | entitygroups.zig | HAVE (weighted picks; parse cap 512 of 1892, GAP_ANALYSIS 1820) |
 | events.xml | none | NONE, no dependency |
 | gameevents.xml | none | NONE, no dependency |
 | gamestages.xml | gamestages.zig | HAVE (stage ladders + player/party stage math) |
 | item_modifiers.xml | none | NONE, no dependency |
-| items.xml | items.zig | HAVE (Stacknumber via Extends, EconomicValue, **EconomicSellScale — A39 closed 2026-08-20**, DamageEntity, FuelValue, Eat cvars, stock type assign) |
+| items.xml | items.zig | HAVE (Stacknumber via Extends, EconomicValue, **EconomicSellScale - A39 closed 2026-08-20**, DamageEntity, FuelValue, Eat cvars, stock type assign) |
 | loadingscreen.xml | none | NONE, no dependency (client UI) |
 | loot.xml | loot.zig | HAVE (groups/containers, count=all, force_prob, quality template) |
 | materials.xml | via blocks/maxdamage | HAVE (block Material props ride blocks.xml rows) |
@@ -282,7 +282,7 @@ values are Bucket A (stock data), never zdtd.toml.
    stag ~50. Loadgen soak to confirm zombie TTK. Not default-preserving by
    design; do it as its own PR with STATUS/TODO update. **LANDED** (the
    passive_effect + variable parsing and the `class_resolve_fn` hook shipped
-   after the audit; this pass added the stock-file HP assertions — see the
+   after the audit; this pass added the stock-file HP assertions - see the
    CLOSED notes on A34/A35).
 2. **A35 (P2, after A34)**: expand reachable classes in the sim (class_table or
    director hook). Separate PR. **LANDED** (director `class_resolve_fn`).
@@ -324,9 +324,9 @@ dwell). All R1-R9 rows are now fixed; nothing remains open from the re-scan.
 src/server (non-game), persist, plugin, util, apm, main for stock-data
 hardcodes. Result: no Bucket A hardcode (every name-keyed lookup resolves
 through a loader table; config.zig stock serverconfig key spellings verified
-against V3.1.0). Follow-ups: **B1** fixed — GSI `world_size` was a hardcoded
+against V3.1.0). Follow-ups: **B1** fixed - GSI `world_size` was a hardcoded
 6144, now `Game.worldSize()` reads the DTM `HeightMapSize` (fallback 6144);
-**B2** fixed — dead `consoleSetTime` ("night" 22.0, disagreeing with the
+**B2** fixed - dead `consoleSetTime` ("night" 22.0, disagreeing with the
 RE-cited settime parse) deleted; **B3/B4** noted (admin-only vehicle-kind
 heuristic with vehicles.xml fallback; `kill` 99999 admin literal), no change.
 

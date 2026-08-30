@@ -1,6 +1,6 @@
-//! Tick orchestration — extracted from game.zig; helpers take *Game.
+//! Tick orchestration - extracted from game.zig; helpers take *Game.
 //! Bodies are verbatim copies from src/server/game.zig (stock asm.il comments kept).
-//! game.zig is not edited in this extraction — it retains its own methods as
+//! game.zig is not edited in this extraction - it retains its own methods as
 //! forwarding wrappers will be added by the main swarm step.
 
 const std = @import("std");
@@ -22,7 +22,7 @@ const io_fs = @import("../../util/io_fs.zig");
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
 /// Food/Water deplete with in-game time. Base drain is engine-driven
-/// (`Rules.progression` — no XML row carries the rate, see buffs.Survival),
+/// (`Rules.progression` - no XML row carries the rate, see buffs.Survival),
 /// but the damage, regen and thresholds come from `buffs.xml` when `Game.buffs`
 /// carries them: `buffs.survival()` resolves the stage thresholds, the
 /// starvation HP loss and the stamina penalty. Runs after tickAll so the world

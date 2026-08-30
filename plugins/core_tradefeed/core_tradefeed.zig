@@ -1,4 +1,4 @@
-// core_tradefeed — a trader-event observer plugin (AGENTS.md rule 29,
+// core_tradefeed - a trader-event observer plugin (AGENTS.md rule 29,
 // Wasm-first). Reference module for trader/vehicle announcements: observes
 // on_trader_event (kind 0 open / 1 buy / 2 sell) and logs every trade window
 // event, always keeping the stock outcome.

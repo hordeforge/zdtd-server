@@ -1,6 +1,6 @@
 # Inventory system (ECS)
 
-> Purpose: ECS inventory layout, `inventory.Op` surface, and the stock `NetPackagePlayerInventory` / `Bag` / `ItemValue` wire that `src/wire/stock_inv.zig` encodes — the trust boundary `AUTHORITY.md` summarizes.
+> Purpose: ECS inventory layout, `inventory.Op` surface, and the stock `NetPackagePlayerInventory` / `Bag` / `ItemValue` wire that `src/wire/stock_inv.zig` encodes - the trust boundary `AUTHORITY.md` summarizes.
 
 Related: [PACKAGES.md](PACKAGES.md) · [WIRE_CHUNK.md](WIRE_CHUNK.md) · [WIRE_WORKSTATION.md](WIRE_WORKSTATION.md) · [AUTHORITY.md](../AUTHORITY.md) · [PARITY_TOOLING.md](../PARITY_TOOLING.md) · `src/ecs/inventory.zig` · `src/wire/stock_inv.zig`
 
@@ -62,7 +62,7 @@ is available.
 | equip | from slot | equip index 0-4 |: |: |
 
 `use` on food (2) / medicine (4) removes 1 and heals.  
-`place` resolves the item's items.xml `Blockname` (e.g. torch → `wallTorchLightPlayer`) through AssignIds; the invented wood→`frameShapes:cube` / cobble→`cobblestoneShapes:cube` map was removed 2026-08-25 (stock b14 defines no Placeable for them — XML_DATA_AUDIT fix 5).  
+`place` resolves the item's items.xml `Blockname` (e.g. torch → `wallTorchLightPlayer`) through AssignIds; the invented wood→`frameShapes:cube` / cobble→`cobblestoneShapes:cube` map was removed 2026-08-25 (stock b14 defines no Placeable for them - XML_DATA_AUDIT fix 5).  
 `equip` moves armor(11) into equipment slots; mitigation is the equipped armor's summed items.xml `PhysicalDamageResist` at its quality (stock GetTotalPhysicalArmorRating, XML_DATA_AUDIT fix 2 / GAME_OPTIONS `armor_mitigation_*`), with the flat 10%/piece (cap 50%) as the offline `[rules.combat]` fallback only.
 
 ## Wire packages

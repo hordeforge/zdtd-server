@@ -257,7 +257,7 @@ pub const PluginHost = struct {
 
     /// Chat hook: first plugin that rewrites or suppresses wins. The handler
     /// writes the filtered message into `out` and returns it; null means keep
-    /// the original, "" means suppress. Validate after — a bad rewrite is
+    /// the original, "" means suppress. Validate after - a bad rewrite is
     /// treated as suppress.
     pub fn chatFilter(self: *PluginHost, sender: i32, msg: []const u8, out: []u8) ?[]const u8 {
         var i: usize = 0;

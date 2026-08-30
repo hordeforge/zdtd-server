@@ -1,4 +1,4 @@
-// core_questgate — a quest-acceptance policy plugin (AGENTS.md rule 29,
+// core_questgate - a quest-acceptance policy plugin (AGENTS.md rule 29,
 // Wasm-first). Reference module for quest gating (whitelists, class/level
 // restrictions): uses the on_quest_accept verdict + the `quest` query verb to
 // deny quests named `forbidden_*` and log every acceptance.

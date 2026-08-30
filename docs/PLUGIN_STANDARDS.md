@@ -1,6 +1,6 @@
 # Plugin standards: naming and manifest format
 
-> **Purpose:** binding naming and `manifest.toml` rules for every plugin under `mods/` and `plugins/` — enforced fail-closed at load.
+> **Purpose:** binding naming and `manifest.toml` rules for every plugin under `mods/` and `plugins/` - enforced fail-closed at load.
 
 Binding rules for every plugin under `mods/` (addons) and `plugins/`
 (first-party core). The host enforces the manifest format at load
@@ -43,8 +43,8 @@ sense of "core" (shipped in-tree, Zig source, built by
 | File | Required | Name |
 |---|---|---|
 | manifest | yes | `manifest.toml` (fixed name, discovered automatically; the manifest, not a "mod file") |
-| committed binary | yes (wasm plugins) | `<module>.wasm` — exactly the directory name + `.wasm` |
-| root source | yes (core plugins are Zig) | `<module>.zig` — exactly the directory name |
+| committed binary | yes (wasm plugins) | `<module>.wasm` - exactly the directory name + `.wasm` |
+| root source | yes (core plugins are Zig) | `<module>.zig` - exactly the directory name |
 | build wrapper | yes (Zig plugins) | `main.zig` |
 | config | no | `config.toml` (fixed name; the module's own default config, served raw via the `zdtd.config` import) |
 | readme | recommended | `README.md` (what it does, its config keys, how to enable) |
@@ -94,13 +94,13 @@ enabled = true                    # optional; false = skip auto-discovery (demo 
 tier = "official"                 # optional; "official" | "user" ("core" is an error)
 override = "<other-mod-name>"     # optional; full replacement of that module (PRD 0005 R7)
 points = "damage.player_scale"    # optional; comma-separated core override points (PRD 0005 R5)
-claim_mode = "chain"              # reserved; rejected at load (RFC 0005 3.3) — omit it
+claim_mode = "chain"              # reserved; rejected at load (RFC 0005 3.3) - omit it
 requires = "<other-mod-name>"     # optional; comma-separated mods that must load first
 ```
 
 ### Rules
 
-1. Scalars only — no TOML arrays (the binder binds scalars; lists are
+1. Scalars only - no TOML arrays (the binder binds scalars; lists are
    comma-separated strings).
 2. `name` == directory name; `wasm` == `<name>.wasm`.
 3. `enabled = false` skips auto-discovery (`manifest.discover`); the module is
@@ -115,7 +115,7 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
 6. `[mods] disabled = "a,b"` skips mods by name; entries naming a native core
    component are config errors.
 7. **Config-only mods** (PRD 0005 style, no wasm): `preset = "<path>"` points
-   at a preset file **inside the mod folder** (e.g. `preset.toml`) — its
+   at a preset file **inside the mod folder** (e.g. `preset.toml`) - its
    gameplay keys and `[rules.*]` override the built-in defaults exactly like
    `--preset <name>` (explicit `--preset` / `[preset] name` still wins). A
    mod is fully self-contained: config, wasm and assets travel together.

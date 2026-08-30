@@ -30,7 +30,7 @@ plugin, run the script and commit both source and binary.
 ## Why the wrapper
 
 `zig build-exe` requires an entry point even for freestanding targets, but the
-plugin ABI has none — zwasm runs the start section only when the module
+plugin ABI has none - zwasm runs the start section only when the module
 declares one, which ours never do. So each plugin has a two-line wrapper that
 comptime-references the real module graph and exports an `_start` that is
 never invoked.

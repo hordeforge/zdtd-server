@@ -1,6 +1,6 @@
-# zdtd FPS Bot Addon — Technical Specification
+# zdtd FPS Bot Addon - Technical Specification
 
-> **Purpose:** technical contract for the FPS bot addon — what crosses the plugin boundary, in what shape, and who owns what.
+> **Purpose:** technical contract for the FPS bot addon - what crosses the plugin boundary, in what shape, and who owns what.
 
 **Number:** RFC 0001
 **Status:** decided and shipped (the host integration facts landed: `sense`/
@@ -70,7 +70,7 @@ owns decisions.
 | `on_admin_command` | `(cmd_ptr, cmd_len, out_ptr, out_cap) -> i32` | `bot help/list/status/spawn/remove/count/skill/...` |
 
 `on_player_join` and the four verdict hooks are **not** required by bots v1
-(pure additive addon), but a bot module *may* export them — e.g. an
+(pure additive addon), but a bot module *may* export them - e.g. an
 `on_entity_killed` observer for kill feeds. Missing exports cost nothing.
 
 ### 2.2 Host imports the module may use
@@ -81,7 +81,7 @@ owns decisions.
 | `zdtd.tick` | `() -> i64` | existing; gives the guest tick number |
 | `zdtd.queue` | `(ptr, len) -> i32` | existing; raises its length bound (see §4) |
 | `zdtd.sense` | `(ptr, len, token) -> i32` | **new**; host fills a world view into guest memory, returns bytes written |
-| `zdtd.query` | `(req_ptr, req_len, out_ptr, out_cap) -> i32` | **new**; reverse-direction point query — the guest writes a text request, the host writes a text response, returns bytes written (0 = no answer) |
+| `zdtd.query` | `(req_ptr, req_len, out_ptr, out_cap) -> i32` | **new**; reverse-direction point query - the guest writes a text request, the host writes a text response, returns bytes written (0 = no answer) |
 
 `sense` is capability-gated: a module that does not import it cannot read the
 sim, and a module that does is still read-only (it cannot mutate anything
@@ -149,7 +149,7 @@ sense_event {
 - **Kind 3 (damage):** someone attributed a hit on a live bot. The host writes
   one per attributed hit (`BotManager.damageFrom`, from both the C2S player
   damage path and `bot shoot`) and drains the buffer on the next sense call.
-  The guest uses them for retaliation (§5.1), never for authority — the host
+  The guest uses them for retaliation (§5.1), never for authority - the host
   already applied the damage.
 - **Kind 4 (bot info):** the host writes one per live bot each sense pass,
   before the damage events, carrying the bot's host-assigned `weapon_id`
@@ -161,7 +161,7 @@ The host caps `count` at a named limit so the record set plus the event
 trailer fit the guest's fixed scratch buffer (the plugin host reserves room for
 `max_sense_events` before counting records). The host decides *which* entities
 are visible (view distance from the bot; a named cap). Do **not** retain the
-offset past the call — copy what you need (ADR 0020).
+offset past the call - copy what you need (ADR 0020).
 
 The `token` argument is reserved for future reverse-direction reads (e.g. ask
 for a specific entity or a point query); v1 callers pass `0`. Reverse-direction
@@ -183,7 +183,7 @@ ticks for anything but `is_self`.
 
 The guest enqueues text commands; the host parses, validates, and applies them
 on the tick's drain (the fixed 64-slot command buffer; a full buffer drops new
-commands — same as today). The 128-byte bound in
+commands - same as today). The 128-byte bound in
 `src/server/game/wasm_host.zig` is raised to a named const (e.g. 256) so these
 fit; the drain stays allocation-free.
 
@@ -201,7 +201,7 @@ Existing verbs are unchanged (`spawn`, `despawn`, `damage`). New bot verbs:
 
 The host treats a bot move exactly like a client move for authority (ADR 0004):
 clamp, reject, apply the **resulting** state, and let interest replication
-broadcast it — no self-echo, no redundant blobs.
+broadcast it - no self-echo, no redundant blobs.
 
 ---
 
@@ -227,7 +227,7 @@ broadcast it — no self-echo, no redundant blobs.
   validated, claimed strength capped, interest-range gated); the hit is
   attributed to the player so the guest can retaliate. **Zombies fight bots
   too:** the zombie AI reaches bots through the World's `bot_snap_fn` /
-  `bot_damage_fn` hooks (wired by Game) — with no player sensed, a zombie
+  `bot_damage_fn` hooks (wired by Game) - with no player sensed, a zombie
   acquires the nearest live bot within its sight range (proximity aggro), and
   a bot's shot sets the zombie's revenge target so it hunts the shooter even
   at range; in melee the zombie applies its normal attack damage through
@@ -266,7 +266,7 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   jitters. Low-skill bots spray; high-skill bots are near-deadly.
 - **Target selection.** Nearest alive non-self candidate within vision wins, but
   players are preferred over zombies/other bots at equal distance (player score
-  `* 0.82`, other bot `* 0.9`, squared for the d2 comparison — cross-pollinated
+  `* 0.82`, other bot `* 0.9`, squared for the d2 comparison - cross-pollinated
   from clanker `BotBrain.FindTarget`). Candidates beyond a skill-scaled FOV cone
   (`skill_fov`, ~90 deg at skill 0 to ~170 deg at skill 4) are not acquired
   unless they are within `CLOSE_SPOT_RANGE` blocks, mirroring clanker's
@@ -319,7 +319,7 @@ from the net id and slot index (AZ 22). Improvements are cross-pollinated with
   `WeaponProfile.MagSize/ReloadSec`): every trigger pull consumes a round
   whether it hits or misses, and an empty magazine starts a reload during
   which the bot holds fire (and keeps strafing / seeking cover). Purely
-  guest-side pacing — the host applies damage per accepted `bot shoot` and
+  guest-side pacing - the host applies damage per accepted `bot shoot` and
   never sees a magazine.
 - **Weapon-aware tactics (clanker `WeaponProfile` parity).** The host picks
   each bot's loadout at spawn and exposes it via the kind-4 bot-info sense
@@ -382,7 +382,7 @@ which is honest: no bot addon, no bot commands.
 
 - **Fuel/memory:** the guest runs under the existing per-instance budget
   (default 100 M fuel, 1024 pages). `on_tick` work must be small; a guest that
-  burns its budget every tick is disabled by the runtime — the system working,
+  burns its budget every tick is disabled by the runtime - the system working,
   not a bug (PLUGIN_DEV.md).
 - **No heap in host hot path:** the sense view is written into a fixed guest
   scratch region; bot commands dispatch straight to the host `BotManager`
@@ -397,28 +397,28 @@ which is honest: no bot addon, no bot commands.
 
 ## 8. Files (expected shape; exact edits per implementation plan)
 
-- `src/server/game/bot.zig` — the host-side `BotManager`: fixed 16-slot bot
+- `src/server/game/bot.zig` - the host-side `BotManager`: fixed 16-slot bot
   table, `bot move/look/shoot/spawn/remove/count` parsing + dispatch, move
   integration, and the sense `fillSense` record writer. No wire imports.
-- `src/server/game.zig` — owns a `BotManager` field, `allocBotNetId` (shared
+- `src/server/game.zig` - owns a `BotManager` field, `allocBotNetId` (shared
   sim id counter), and the `tickBots` delegate.
-- `src/server/game/wasm_host.zig` — `wasmQueue` routes `bot ...` commands to
+- `src/server/game/wasm_host.zig` - `wasmQueue` routes `bot ...` commands to
   the BotManager; `wasmSense` merges ECS actor records with the BotManager's
   bots (kind 2) and the damage-event trailer (kind 3) in one snapshot;
   `parsePluginCommand` keeps only the ECS verbs
   (`spawn`/`despawn`/`damage`).
-- `src/server/game/replicate.zig` — the non-ECS bot replication path
+- `src/server/game/replicate.zig` - the non-ECS bot replication path
   (spawn-on-approach / range-remove / PosAndRot) plus per-client
   `Client.known_bots` tracking.
-- `src/plugin/wasm.zig` — add the `zdtd.sense` import to `defineImports`;
+- `src/plugin/wasm.zig` - add the `zdtd.sense` import to `defineImports`;
   add a `sense` host-fn dispatch.
-- `mods/fps_bot/bot.c` (+ `.wasm` output) — the guest brain (Q3/Doom 3
+- `mods/fps_bot/bot.c` (+ `.wasm` output) - the guest brain (Q3/Doom 3
   model), unchanged: it only talks through `zdtd.sense` / `zdtd.queue`. Build
   via the same clang→wasm32 path as `assets/fixtures/*.c`.
-- `assets/fixtures/plugin_bot.c` / `.wasm` — a minimal bot host-surface
+- `assets/fixtures/plugin_bot.c` / `.wasm` - a minimal bot host-surface
   fixture used by unit/scenario tests (sense round-trip, command parse).
 - `docs/rfc/0001-fps-bot-spec.md` (RFC 0001), `docs/prd/0001-fps-bot.md` (PRD 0001),
-  `docs/adr/0026-*.md`, `docs/IMPLEMENTATION_PLAN_BOTS.md` — this contract and its plan.
+  `docs/adr/0026-*.md`, `docs/IMPLEMENTATION_PLAN_BOTS.md` - this contract and its plan.
 
 ## 9. Acceptance criteria (technical)
 
@@ -429,7 +429,7 @@ which is honest: no bot addon, no bot commands.
    (`bot shoot` applies through the existing verdict path). Verified with
    loadgen smoke + stock client (EAC off) + apm (ADR 0019).
 3. `zdtd.sense` returns a correct, versioned snapshot (magic, count, self id,
-   positions/hp) — proven by a unit test with a real compiled fixture, not
+   positions/hp) - proven by a unit test with a real compiled fixture, not
    assumed.
 4. A bot obeys move caps and LOS: a far/out-of-LOS shot is rejected as a
    no-op; a move beyond the envelope is clamped (ADR 0004).

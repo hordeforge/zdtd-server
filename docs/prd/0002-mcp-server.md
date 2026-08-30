@@ -1,6 +1,6 @@
 # MCP Server Addon - Product Requirements (PRD)
 
-> **Purpose:** product requirements for the MCP server addon — what the MCP bridge must do and how it is validated.
+> **Purpose:** product requirements for the MCP server addon - what the MCP bridge must do and how it is validated.
 
 **Number:** PRD 0002
 **Status:** shipped (module + transport live: `mods/mcp/`,
@@ -59,7 +59,7 @@ the same authority rules as a console command.
 2. Protocol logic lives in the **guest** (session lifecycle, tool registry,
    spec error responses over a parsed view); the host provides the transport
    bridge **and the JSON parsing** (Zig std.json exposed as `json_*` imports,
-   ADR 0031 D3) — the guest never parses JSON itself.
+   ADR 0031 D3) - the guest never parses JSON itself.
 3. Tools map 1:1 onto the existing plugin boundary: reads via `sense`/`query`,
    actions via `queue` verbs with a config allowlist. No new authority model.
 4. Fail closed: malformed frames get spec JSON-RPC errors, unknown tools error,

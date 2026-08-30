@@ -1,4 +1,4 @@
-//! Net ingress extracted from game.zig — onConnected / onData / dispatchGamePayload.
+//! Net ingress extracted from game.zig - onConnected / onData / dispatchGamePayload.
 //! Verbatim bodies; game.zig keeps one-line forwarders.
 
 const std = @import("std");

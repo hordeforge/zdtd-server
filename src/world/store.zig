@@ -152,7 +152,7 @@ pub const Chunk = struct {
     }
 
     /// Block-plane index for (lx, y, lz): x + z*16 + y*256. The y-multiplier
-    /// is the fixed ChunkAreaDim (16×16 = 256) in EVERY dialect — the plane
+    /// is the fixed ChunkAreaDim (16×16 = 256) in EVERY dialect - the plane
     /// only grows in cell count (256 × y_dim), never in index stride.
     /// `y` must be in bounds (callers check first).
     pub fn blockIndex(self: *const Chunk, lx: i32, y: i32, lz: i32) usize {
@@ -463,7 +463,7 @@ pub const Chunk = struct {
     /// Density and paint are left as they are, mirroring the stock path's
     /// `SetDensityRaw(previous density)`.
     /// Mirror-write for the deco mirror (derived decoration, re-applied on
-    /// every stream/reload — stock ChunkCluster.addDistantDecorationBlocks).
+    /// every stream/reload - stock ChunkCluster.addDistantDecorationBlocks).
     /// Deliberately does NOT mark the chunk dirty: mirrored trees are not the
     /// player's data, so a clean session leaves no files (the deco mirror
     /// re-derives them). Real edits to a deco cell (harvest/place) go through
@@ -1727,7 +1727,7 @@ test "a clean proc session writes no world files (mods leave no trace)" {
     try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = 1, .z = 0 }, &path_buf)));
     try std.testing.expect(!io_fs.fileExists(try w.chunkPath(.{ .x = -2, .z = 3 }, &path_buf)));
     // Derived decoration (the deco mirror) is re-derived on every stream and
-    // reload, so it must not dirty the chunk or write files either — a clean
+    // reload, so it must not dirty the chunk or write files either - a clean
     // session truly leaves no trace (real edits still persist).
     try w.setBlockDecoWorld(3, 10, 3, block_stone);
     try std.testing.expect(!w.chunks.get(ChunkPos.hash(.{ .x = 0, .z = 0 })).?.dirty);

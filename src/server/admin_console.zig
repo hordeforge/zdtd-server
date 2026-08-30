@@ -973,7 +973,7 @@ fn replyGuardReport(self: *Game) void {
 
 /// Runtime `setgamepref` for the GameStats-backed prefs: parse the value,
 /// clamp to this function's own range (independent of config.zig's startup
-/// ranges — they are not guaranteed to match), and write the sim/Game field
+/// ranges - they are not guaranteed to match), and write the sim/Game field
 /// the stats blob reads, so the client HUD follows. Unknown or startup-only
 /// prefs (ServerPort, world paths) return false and the caller keeps the
 /// honest read-only reply.
@@ -1184,7 +1184,7 @@ pub fn runAdminLine(self: *Game, line: []const u8, source: []const u8) void {
         .unknown => {
             // Plugin admin commands: a plugin can handle a verb the core does
             // not know. Auth has already gated runAdminLine (admin TCP auth),
-            // so a plugin cannot bypass it — it just handles a verb the core
+            // so a plugin cannot bypass it - it just handles a verb the core
             // would otherwise report as unknown.
             if (tryDispatchPluginAdmin(self, trimmed)) return;
             // Surface the first token so typos are obvious (matches player console).

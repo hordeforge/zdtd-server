@@ -146,7 +146,7 @@ pub const Sim = struct {
     /// divergence (spawn regardless of the global cap).
     sleeper_cap_gate_enabled: ?bool = null,
     /// Airdrop policy (`[sim] airdrop_*`; the stock server has no key for
-    /// these — AirDropFrequency is the interval). `airdrop_schedule` is
+    /// these - AirDropFrequency is the interval). `airdrop_schedule` is
     /// "interval" (default: every `AirDropFrequency` game-hours, the
     /// pre-config behavior) or "days" (stock-like day-count + TOD: every
     /// `airdrop_day_min..airdrop_day_max` days at `airdrop_drop_hour`).
@@ -290,7 +290,7 @@ pub const File = struct {
     /// Mod tiers and override (PRD 0005).
     mods: Mods = .{},
     /// Quest data policy: the objective `type=` -> phase-kind mapping is
-    /// config, not code (ADR 0021) — a new stock objective type is a row here,
+    /// config, not code (ADR 0021) - a new stock objective type is a row here,
     /// `"Type=PhaseKind, ..."` (see assets/quests.zig parseObjectiveKinds).
     quests: Quests = .{},
     /// Host-side bot policy (ADR 0026): damage floor, headshot multiplier,

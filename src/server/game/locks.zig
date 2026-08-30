@@ -1,4 +1,4 @@
-//! Lock helpers extracted from game.zig — pack/unpack + slot bookkeeping.
+//! Lock helpers extracted from game.zig - pack/unpack + slot bookkeeping.
 
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;

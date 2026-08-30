@@ -37,7 +37,7 @@ This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full
 `World.chunks` now maps keys to `*Chunk` (one allocation per chunk, freed on
 eviction/deinit, residency still bounded by `max_resident_chunks`) instead of
 inline `Chunk` values, so a `*Chunk` held across a re-entrant
-`getOrCreate`/`blockWorld` stays valid when the map resizes — closing the
+`getOrCreate`/`blockWorld` stays valid when the map resizes - closing the
 GAP "Chunk pointer stability" hazard class (bait-soak segfault 5/5) at the
 store instead of per-call-site re-fetch. Regression test "chunk pointers
 stay valid across map resizes (pointer-stable store)" holds a pointer across
@@ -51,19 +51,19 @@ GAP "Join-burst tick budget" chunk pacing landed: `sendSpawnArea` sends only
 the collision-mesh core (spawn chunk + 8 neighbours) synchronously and arms
 a per-client pending area; `drainSpawnArea` delivers the outer rings at a
 **shared** `chunk_adds_per_stream_tick` per tick (concurrent joins split it),
-with per-chunk ACK-yields (a bursted batch overflowed the reliable window —
+with per-chunk ACK-yields (a bursted batch overflowed the reliable window  -
 257 drops measured without them). A sustained loadgen double-join cycle on
 the infinite world (62 joins) shows **join_fail=0** (the concurrent-client
 starvation is gone) with the chunk stream bounded at 50 ms; **ReleaseFast**
 re-measures at max tick 140 ms / p99 50 ms (the 50 ms budget), drain pass
-mean 4.6 ms, 0 window drops — vs the pre-pacing ReleaseFast max 262 ms. The
+mean 4.6 ms, 0 window drops - vs the pre-pacing ReleaseFast max 262 ms. The
 join path is now instrumented (`.join` handler + `.join_drain` pass
 sections); the residual (Debug max tick ~0.5-1 s from build amplification)
 stays tracked as W2b async chunk gen. Scenario "join spawn area paces
 through the stream budget" covers the drain budget and completion.
 
 GAP "population is still thin" (Entities/AI): the starter population fill
-landed — the director spawns toward `[rules.director] initial_population_frac`
+landed - the director spawns toward `[rules.director] initial_population_frac`
 (0.25) of the alive cap once at boot, batched at 4/tick, so a fresh world is
 populated near players instead of staying near-empty until the first night
 drip (stock fills loaded regions toward their spawning.xml maxcounts as they
@@ -87,7 +87,7 @@ no client mod needed; fall-damage stays client-owned). All guests
 
 Every plugin/mod folder is now fully self-contained: manifest.toml + wasm +
 source + optional `config.toml` (default config) + optional `preset.toml`
-(rules for a config-only mod) + `README.md` (all 17 folders shipped one —
+(rules for a config-only mod) + `README.md` (all 17 folders shipped one  -
 the 12 `plugins/core_*` plus the 5 `mods/` addons incl. `moon_gravity`).
 
 - New host import `zdtd.config(out_ptr, out_cap) -> i32`: serves the mod's
@@ -181,7 +181,7 @@ World geometry is now data-driven, not baked into the column format:
 `[rules.geometry]` (auto-bound via ADR 0021) carries the elevation projection
 (`sea_level`, `height_scale`, `height_offset`, `height_ceiling`; identity at
 stock defaults, so vanilla worlds are byte-identical) and the terrain sources
-(flat / baked DTM / proc) feed it — a world can ship compressed mountains,
+(flat / baked DTM / proc) feed it - a world can ship compressed mountains,
 a sea-level model or a custom ceiling with a stock client. Layer B is the
 wire-profile seam: `protocol.WireProfile` (one source of truth: `y_dim`;
 layers/`c_max_height`/plane cell count derive; the index stride stays the
@@ -191,7 +191,7 @@ the chunk wire builder (layer band count + column-height bounds; `stock`
 bytes pinned by goldens) and the save format (ZCH4 carries
 the column height; a stock loader rejects it and a mismatched non-stock
 loader fails closed). A non-stock dialect needs a paired client mod
-(RealEarth-style engine expand) — the seam is proven by a synthetic
+(RealEarth-style engine expand) - the seam is proven by a synthetic
 `tall-512` scenario (128-layer wire bodies, ZCH4 round-trip, production
 chunk_fill stream), not by a real client. Known bound: a dense non-stock
 chunk can exceed the fixed 512 KiB `body_buf` (fails loudly, not corrupts);
@@ -202,9 +202,9 @@ Also (2026-08-29): the procedural shaping params moved to
 `[rules.worldgen]` (base_height/height_amp/min+max_surface/squash/
 noise_weight/y_scale/bedrock_h via `WorldGen.applyParams`; defaults = the
 pre-lift constants, byte-identical proc output; grid cells, noise recipe and
-the RWG water table stay code) — closes the "documented, not config" ledger
+the RWG water table stay code) - closes the "documented, not config" ledger
 row. And the "infinite game" ships: `modes/infinite.toml` (`--mode infinite`;
-pack `worldgen_seed` tier — precedence CLI > zdtd.toml `[worldgen] seed` >
+pack `worldgen_seed` tier - precedence CLI > zdtd.toml `[worldgen] seed` >
 pack, like rules) plus proc deco (species resolve from the W3 biome field +
 biomes.xml lists since proc worlds carry no biomemap; game-dir proc worlds
 stream trees instead of staying bald; bare proc worlds fail closed).
@@ -212,7 +212,7 @@ And save growth: clean proc chunks are no longer persisted on eviction (they
 regenerate deterministically from the seed; edits carry `dirty` and persist),
 so an infinite world's save dir grows with edits, not visits.
 And delivery as a mod: the infinite world ships as `mods/infinite_world/`
-(a config-only mod — new `mode` manifest key activating modes/infinite.toml,
+(a config-only mod - new `mode` manifest key activating modes/infinite.toml,
 mutually exclusive with `wasm`; off by default, opted in via `[mods]
 enabled = "infinite_world"`). Mods stay reversible: nothing persists until
 the player edits, so removing the mod restores the default terrain.
@@ -343,7 +343,7 @@ restart; closes the NetPackageQuestEvent row's open item), total
 **196/93/44**. Then the phase-graph row went WORKS: quests carry a flat
 per-objective list (def.objectives) and a phase advances only when ALL its
 non-optional objectives complete (stock refreshQuestCompletion, asm.il
-983645-983904) — the shared tier1_clear phase 3 (ClearSleepers +
+983645-983904) - the shared tier1_clear phase 3 (ClearSleepers +
 POIStayWithin) and always-active phase-0 objectives are enforced,
 per-objective progress rides the journal wire and the ZPV6 save, and a
 ForcePhaseFinish objective can fail a quest (0 stock uses, unit-tested); the
@@ -1150,7 +1150,7 @@ row's claim was corrected and the missing trigger caller marked RE-blocked.
 The dashboard
 (docs/provenance.html) is synced. Then the terrain harvest-drop path went
 WORKS (2026-08-26): the server rolls the broken block's
-`<drop event="Harvest">` rows at the dig choke — `BlockDef.harvest_drops`
+`<drop event="Harvest">` rows at the dig choke - `BlockDef.harvest_drops`
 parses count/prob/stick_chance/tool_category/tag from blocks.xml (count via
 ParseMinMaxCount, prob × the block's ResourceScale property, Extends
 inheritance per CopyDroppedFrom IL=89 own-wins-per-name), and the roll is

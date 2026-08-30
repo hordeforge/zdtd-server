@@ -5,7 +5,7 @@
 //! owns players, zombies, traders, vehicles, turrets, loot bags and animals
 //! only.
 //!
-//! The BotManager exposes data only — replication knowledge stays in
+//! The BotManager exposes data only - replication knowledge stays in
 //! game/replicate.zig, which reads `self.bots.bots` for spawn/pos/remove
 //! fan-out against the same interest grid as ECS entities.
 
@@ -54,7 +54,7 @@ pub const bot_shoot_damage: f32 = bot_host_defaults.shoot_damage;
 /// Config: `[bots] headshot_multiplier`.
 pub const bot_headshot_multiplier: f32 = bot_host_defaults.headshot_multiplier;
 /// Default bot max HP (ADR 0026; the brain normalizes hurt against 100).
-/// Guest contract — the wasm `BOT_MAX_HP` matches; not config (see
+/// Guest contract - the wasm `BOT_MAX_HP` matches; not config (see
 /// BotHostConfig).
 pub const bot_max_hp: f32 = 100;
 
@@ -104,7 +104,7 @@ pub const sense_kind_bot_info: u8 = 4;
 /// Max bot-info records in the sense trailer (one per live bot; cap = slots).
 pub const max_sense_info: usize = max_bots;
 /// Sense event record byte size (RFC 0001 §3): kind u8 + 3 pad, attacker i32,
-/// victim i32, amount f32 — packed, little-endian.
+/// victim i32, amount f32 - packed, little-endian.
 pub const sense_event_len: usize = 16;
 
 /// One sense damage event (RFC 0001 §3). Host-recorded whenever a live bot
@@ -116,7 +116,7 @@ pub const SenseEvent = struct {
     amount: f32 = 0,
 };
 
-/// One host-side bot. Pure data — the guest brain never touches this struct
+/// One host-side bot. Pure data - the guest brain never touches this struct
 /// directly, only the sense snapshot and queued commands.
 pub const Bot = struct {
     net_id: i32 = -1,
@@ -266,7 +266,7 @@ pub const BotManager = struct {
         return id;
     }
 
-    /// Slot of a live bot by net id, or null. O(max_bots) — 16 slots, fine.
+    /// Slot of a live bot by net id, or null. O(max_bots) - 16 slots, fine.
     pub fn find(self: *BotManager, net_id: i32) ?usize {
         if (net_id < 0) return null;
         for (self.bots, 0..) |b, i| {
@@ -328,7 +328,7 @@ pub const BotManager = struct {
         if (self.damageFrom(target, dmg, shooter)) return;
         // ECS target (player/zombie/...): damage resolves to no-op on absence.
         // damageFrom attributes the bot as the attacker (zombie revenge target,
-        // kill attribution) — `damage` would leave it unattributed.
+        // kill attribution) - `damage` would leave it unattributed.
         // Wasm-first (AGENTS rule 29): a bot damaging a PLAYER passes the
         // on_player_damage plugin verdict (PvP/friendly-fire, damage scaling).
         if (g.sim.slotOfNetId(target)) |es| {
@@ -376,7 +376,7 @@ pub const BotManager = struct {
     }
 
     /// Zombie-melee damage from the parallel AI workers (ADR 0026): atomic
-    /// fixed-point accumulation only — no hp/event/attacker mutation on the
+    /// fixed-point accumulation only - no hp/event/attacker mutation on the
     /// worker. False when the bot is gone (the melee whiffs). The main thread
     /// drains `drainWorkerDamage` after the AI pass joins.
     pub fn damageFromWorker(self: *BotManager, bot_net: i32, attacker_net: i32, amount: f32) bool {
@@ -694,7 +694,7 @@ fn stepMove(b: *Bot, dt: f32) void {
 
 /// True when a solid block occupies the bot's standing cells at (x, y, z):
 /// the cell the feet sit in and the one above (head). Terrain itself is not a
-/// wall here — the caller grounds y onto the surface first — so only true
+/// wall here - the caller grounds y onto the surface first - so only true
 /// obstacles (walls, cliffs' faces) block.
 fn botSolidAt(g: *Game, x: f32, y: f32, z: f32) bool {
     const ix: i32 = @floor(x);

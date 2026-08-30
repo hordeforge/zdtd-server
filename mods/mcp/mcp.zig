@@ -1,4 +1,4 @@
-// mcp — MCP server addon (ADR 0031, PRD 0002, RFC 0002).
+// mcp - MCP server addon (ADR 0031, PRD 0002, RFC 0002).
 //
 // A WebAssembly plugin that implements the Model Context Protocol server side:
 // JSON-RPC 2.0 framing, session lifecycle, capabilities, and a tool registry.
@@ -15,7 +15,7 @@
 // frame, and unavailable data becomes an `isError` tool result instead of
 // invented values (ADR 0014).
 //
-// Host imports (module "zdtd", bare field names — PLUGIN_DEV.md):
+// Host imports (module "zdtd", bare field names - PLUGIN_DEV.md):
 //   log(level, ptr, len)        write a log line
 //   tick() -> i64               current server tick
 //   queue(ptr, len) -> i32      queue a text SimCommand

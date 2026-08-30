@@ -59,7 +59,7 @@ pub const WireProfile = struct {
     }
     /// Dense block-plane cell count: ChunkAreaDim × y_dim = 256 × y_dim
     /// (65536 stock, 131072 at 512). The plane INDEX stride is the fixed
-    /// ChunkAreaDim 256 (`x + z*16 + y*256`) in every dialect — only the cell
+    /// ChunkAreaDim 256 (`x + z*16 + y*256`) in every dialect - only the cell
     /// count and the layer band count grow with the column height.
     pub fn plane_cells(self: WireProfile) u32 {
         return 256 * self.y_dim;

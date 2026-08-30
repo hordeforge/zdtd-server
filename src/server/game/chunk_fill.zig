@@ -486,7 +486,7 @@ pub fn tryContainerSpill(self: *Game, x: i32, y: i32, z: i32) void {
 /// item-side bonus legs, recorded). Deterministic: position + tick-seeded
 /// stream (the one sim PRNG policy; stock seeds GameUtils.random from a
 /// timestamp, which zdtd deliberately replaces per rule 22). Returns the
-/// total rolled count — the `count` of stock
+/// total rolled count - the `count` of stock
 /// AddLevelExp(material.Experience * count).
 /// Roll a block's drop rows for one event (RE Block.DropItemsOnEvent
 /// IL=246): per row, count = RandomRange(min, max+1), skip 0, drop when

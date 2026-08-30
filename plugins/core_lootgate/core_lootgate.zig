@@ -1,4 +1,4 @@
-// core_lootgate — loot roll scaling via the on_loot_roll verdict.
+// core_lootgate - loot roll scaling via the on_loot_roll verdict.
 //
 // Verdict convention (docs/PLUGIN_DEV.md "Hooks"):
 //   on_loot_roll(list_ptr, list_len, rolled: i32) -> i32

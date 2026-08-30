@@ -475,7 +475,7 @@ pub const Turret = struct {
 
 pub const max_journal: usize = 8;
 /// Max flat objectives per quest (indexes QuestProgress.obj_progress; kept in
-/// lockstep with quest.max_phases — a phase has at most one objective per
+/// lockstep with quest.max_phases - a phase has at most one objective per
 /// flat slot, and there are at most max_phases phases).
 pub const max_quest_objectives: usize = 32;
 /// Stock TraderInfo.MaxItems (50): the trader window holds up to 50 stacks.
@@ -541,7 +541,7 @@ pub const QuestProgress = struct {
     /// 1-based phase matching stock quest objective phase attributes.
     phase: u8 = 1,
     /// Per-flat-objective progress (index == flat objective order; only the
-    /// XML-parsed quests with `def.objectives` use it — legacy defs use
+    /// XML-parsed quests with `def.objectives` use it - legacy defs use
     /// `progress`). Stock refreshQuestCompletion reads each objective's
     /// CurrentValue.
     obj_progress: [max_quest_objectives]u16 = [_]u16{0} ** max_quest_objectives,
@@ -970,7 +970,7 @@ pub const StealthNoiseEvent = struct {
     volume: f32,
     /// `time` × 20 (stock NotifyNoise converts seconds to ticks).
     duration_ticks: i32,
-    /// `muffled_when_crouched` — applied when the owner is crouching.
+    /// `muffled_when_crouched` - applied when the owner is crouching.
     muffled_when_crouched: f32,
     /// `heat_map_strength` (> 0 feeds NotifyActivity, the noise-to-heat leg).
     heat_map_strength: f32,

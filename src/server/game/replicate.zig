@@ -1,5 +1,5 @@
 //! Serialize-once replicate fan-out extracted from game.zig.
-//! Verbatim move — called via forwarder in game.zig.
+//! Verbatim move - called via forwarder in game.zig.
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -345,7 +345,7 @@ pub fn replicate(self: *Game) !void {
 /// they get their own spawn-on-approach / range-remove / PosAndRot fan-out
 /// against the same observer grid computed for the ECS entities in replicate().
 /// Per-client knowledge is the Client.known_bots bitset (bit = bot slot); it is
-/// cleaned only here — never by the ECS dead-entity reconcile, which has no
+/// cleaned only here - never by the ECS dead-entity reconcile, which has no
 /// knowledge of bots (they are not in alive_bits).
 fn replicateBots(
     self: *Game,

@@ -1,12 +1,12 @@
-# <Addon> — Technical Proposal (RFC NNNN)
+# <Addon> - Technical Proposal (RFC NNNN)
 
 **Number:** RFC NNNN
 **Status:** draft | in review | decided | withdrawn | superseded
-**Source:** `PRD NNNN` — the requirements this answers
+**Source:** `PRD NNNN` - the requirements this answers
 
 ## 1. Decision to make
 
-One sentence phrased as the question the review must answer — "which X do we
+One sentence phrased as the question the review must answer - "which X do we
 adopt for Y", not "we should adopt X".
 
 ## 2. Current state

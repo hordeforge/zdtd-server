@@ -1,6 +1,6 @@
 # ADR 0026: FPS bots as a Wasm module: a host sense/act boundary, not a core bot brain
 
-- **Status:** accepted (amended 2026-08-12: bots are **not** ECS entities —
+- **Status:** accepted (amended 2026-08-12: bots are **not** ECS entities  -
   decisions 1 and 3 below are superseded by the host-side `BotManager` in
   `src/server/game/bot.zig`; the sense/command boundary, decisions 2 and 4,
   stand unchanged)
@@ -17,7 +17,7 @@
 People who operate a zdtd server want populated worlds without real players.
 The reference behaviour is the `../7dtd-fps-bots` C# mod (a stock-server mode that
 spawns player-mesh FPS bots that hunt, shoot and strafe, driven by a
-Quake 3 / Doom 3-inspired brain — see `../7dtd-fps-bots/docs/q3-inspiration-notes.md`
+Quake 3 / Doom 3-inspired brain - see `../7dtd-fps-bots/docs/q3-inspiration-notes.md`
 and the ported `BotCharacter` / `BotAimAtEnemy` / `BotCheckAttack` /
 `BotChangeViewAngles` model). We want the same gameplay as an **addon**, not a
 fork, and `src/plugin/` already exposes a Wasm plugin host.
@@ -27,7 +27,7 @@ bot. What a guest can do today (PLUGIN_DEV.md):
 
 - **See:** nothing. The only data a guest can read back is `zdtd.tick() -> i64`.
   A bot cannot learn a target's position, health, or its own state.
-- **Act:** `zdtd.queue` accepts three text verbs — `spawn`, `despawn`,
+- **Act:** `zdtd.queue` accepts three text verbs - `spawn`, `despawn`,
   `damage`. There is no way to move an entity, face it, or make it fire.
 - **Exist:** there is no bot entity. Spawning a zombie is not a named,
   player-mesh shooter that hunts *real players*.
@@ -45,7 +45,7 @@ bytes, invents wire types, or touches sim memory directly. That model is a
 feature and must survive. Therefore:
 
 - The **guest** owns the *brain*: target selection, aim/leading, reaction
-  timing, strafe/dodge decisions — the Q3/Doom 3 skill model.
+  timing, strafe/dodge decisions - the Q3/Doom 3 skill model.
 - The **host** owns the *body*: the bot entity's lifecycle, replication to
   clients, collision/move caps, LOS validity, and damage application.
 
@@ -73,7 +73,7 @@ players, zombies, traders, vehicles, turrets, loot bags and animals only. The
 guest brain is unchanged: it still talks only through `zdtd.sense` /
 `zdtd.queue`, and the host still applies the bot's *commanded intent* each tick
 and broadcasts resulting state to clients (a bot never bypasses move caps or
-the kill/verdict path — see decision 2/3 below). Bots allocate net ids from the
+the kill/verdict path - see decision 2/3 below). Bots allocate net ids from the
 shared sim counter (`Game.allocBotNetId`) and replicate through a dedicated
 non-ECS path in `src/server/game/replicate.zig` (player-mesh class, never
 leaking into other kinds). The client needs no mod: it sees a normal player-mesh
@@ -112,7 +112,7 @@ The 128-byte queue bound and the allocation-free hot path stand; the BotManager
 is a fixed array (no heap on the tick path).
 
 Spawn-point selection, move blocking, LOS and damage are **core, stock-legal
-operations** — never guest-side guesses.
+operations** - never guest-side guesses.
 
 ### 4. commands (add/remove/list) live behind the existing plugin admin hook
 
@@ -121,7 +121,7 @@ The `bot <verb>` console/admin commands are handled by the guest's exported
 through to core `unknown` when the plugin is absent. `bot help`, `bot list`,
 `bot status`, `bot spawn`, `bot remove`, `bot count`, `bot skill` all ship in
 the module; the host routes unknown admin verbs to plugins exactly as today.
-If the module is not loaded, `bot ...` reports as unknown — no host-side bot
+If the module is not loaded, `bot ...` reports as unknown - no host-side bot
 command parser is added.
 
 ## Consequences

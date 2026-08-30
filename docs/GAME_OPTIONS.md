@@ -229,7 +229,7 @@ test, so a retune cannot land silently).
 | `stealth_attract_sense_scale` | 0.0 | `EAIManager.CalcSenseScale` analog in the attraction radius (`min(sum x 0.6 x (1 + sense x 1.6), 40 + 15 x sense)`); stock default 0 |
 | `stealth_attract_radius_cap_a` / `stealth_attract_radius_cap_b` | 40.0 / 15.0 | Attraction radius cap shape (RE TickServer IL_01EF-01FF) |
 | `stealth_hear_feral_sense` | 0.0 | Per-enemy `feralSense` in the heard test (`noiseVolume x (1 + feralSense)`); stock per-entity value not modeled, floor 0 |
-| `stealth_hear_detect_us` | 1.0 | `EntityPlayer.DetectUsScale` in the heard test; stock returns 0.3 for POI-resident sleepers (>60 s in a tier>=1 prefab) — not modeled, floor 1.0 |
+| `stealth_hear_detect_us` | 1.0 | `EntityPlayer.DetectUsScale` in the heard test; stock returns 0.3 for POI-resident sleepers (>60 s in a tier>=1 prefab) - not modeled, floor 1.0 |
 | `stealth_alert_radius` | 12.0 | Alert radius for the S2C stealth broadcast (`player.zig` `tickStealthBroadcast`): any alert zombie within it flags the packed `alert` bit. The stock client computes its own alert UI locally (no server-side radius IL-pinned), so this is the zdtd authoritative approximation. The 16-tick broadcast cadence is stock `PlayerStealth.TickServer` IL_0470 and stays pinned in code |
 | `stealth_sleeper_wake_volume` | 360.0 | Sleeper wake cap: `sleeperNoiseVolume` accumulation at 360 queues a volume wake at the noise position (stock NotifyNoise + CheckSleeperVolumeNoise) |
 | `stealth_sleeper_volume_decay` | 2.5 | `sleeperNoiseVolume` decay per tick once the loud-noise wait window elapses (RE TickServer IL_0195-01BA) |
@@ -334,7 +334,7 @@ test, so a retune cannot land silently).
 | `animal_drip_cd` | 60.0 | Daytime wildlife drip cadence (zdtd mechanic) |
 | `bloodmoon_wave_cd` | 6.0 | Blood-moon wave cadence (zdtd approximation of the stock wave system) |
 | `bloodmoon_hp_mult` | 1.5 | Blood-moon HP floor for classes the gamestage ladder cannot resolve (offline/builtin data). Stock has no flat multiplier: with stock data the ladder's feral/radiated classes carry their own HP |
-| `difficulty_hp_0`, `difficulty_hp_1`, `difficulty_hp_2`, `difficulty_hp_3`, `difficulty_hp_4`, `difficulty_hp_5` | 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 | GameDifficulty 0..5 → zombie HP multiplier (Scavenger..Insane). Stock tier semantic; numbers zdtd-tuned (R9, no RE pin) — operator policy |
+| `difficulty_hp_0`, `difficulty_hp_1`, `difficulty_hp_2`, `difficulty_hp_3`, `difficulty_hp_4`, `difficulty_hp_5` | 0.5 / 0.75 / 1.0 / 1.25 / 1.5 / 2.0 | GameDifficulty 0..5 → zombie HP multiplier (Scavenger..Insane). Stock tier semantic; numbers zdtd-tuned (R9, no RE pin) - operator policy |
 | `move_scale_0`, `move_scale_1`, `move_scale_2`, `move_scale_3`, `move_scale_4` | 0.5 / 0.75 / 1.0 / 1.4 / 1.7 | ZombieMove 0..4 → speed multiplier (walk/jog/run/sprint/nightmare). Stock tier semantic; numbers zdtd-tuned (R9) |
 | `[rules.difficulty]` | | GameDifficulty damage scaling (RE: ItemActionAttack.difficultyModifier, combat-damage.md; provenance PROVENANCE.md §3.7) |
 | `incoming_damage_0`, `incoming_damage_1`, `incoming_damage_2`, `incoming_damage_3`, `incoming_damage_4`, `incoming_damage_5` | 1.0 / 1.0 / 0.75 / 1.0 / 1.0 / 1.0 | GameDifficulty 0..5 → damage multiplier when a server (AI) attacker hits a client entity (stock `IncomingDamageModifier`; difficulty 2 = Adventurer pins the shipped serverconfig code `AAAJABJACJADJARFBNC` decode 0.75; the rest of the ladder waits on a SetupOptions Cecil extraction) |

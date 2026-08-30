@@ -2,10 +2,10 @@
 //
 // A WebAssembly plugin that commands player-mesh FPS bots through the host's
 // sense/act boundary. The servant (host) owns spawn/tick/replicate/kill/LOS
-// and move caps; this module owns the *brain* — target selection, skill-scaled
+// and move caps; this module owns the *brain* - target selection, skill-scaled
 // aim error and hit accuracy, lead-fire prediction, reaction gate, fire
 // throttle, strafe/backpedal, low-health survival retreat, lost-sight combat
-// memory and hit retaliation — distilled from the Quake 3 / Doom 3 bot model,
+// memory and hit retaliation - distilled from the Quake 3 / Doom 3 bot model,
 // cross-pollinated with the 7dtd-clanker C# port (docs/q3-inspiration-notes.md,
 // RFC 0001 §5.1). All inference is deterministic (per-slot LCG, no wall-clock
 // noise).
@@ -24,13 +24,13 @@
 //     backpedal                                (WeaponProfile parity)
 //   - cover-seeking retreat: a retreating bot asks `zdtd.query` for a point
 //     not visible from the threat and holds there                  (FindCover)
-//   - ammo pacing: per-weapon magazines and reload pauses — an empty mag
+//   - ammo pacing: per-weapon magazines and reload pauses - an empty mag
 //     starts a reload during which the bot holds fire and keeps strafing
 //                                                      (Q3 bots managed ammo)
 // Improvements this guest already carried that clanker borrowed back:
 //   - per-slot LCG + deterministic burst cadence  (Bot.cs "bot parity")
 //
-// Host imports (module "zdtd", bare field names — PLUGIN_DEV.md):
+// Host imports (module "zdtd", bare field names - PLUGIN_DEV.md):
 //   log(level, ptr, len)   write a log line
 //   tick() -> i64          current server tick
 //   queue(ptr, len)        queue a text SimCommand (spawn/move/look/shoot/...)
@@ -267,7 +267,7 @@ static float sf32(int off) {
 }
 
 // Reparse the sense buffer into hosts (preserving its first `recs` records is
-// not needed; we read offsets directly instead — see accessors below).
+// not needed; we read offsets directly instead - see accessors below).
 #define REC_OFF(i) (24 + (i) * REC_STRIDE)
 static int rec_net(int i)        { return s32(REC_OFF(i) + 0); }
 static int rec_kind(int i)       { return s8(REC_OFF(i) + 4); }
@@ -351,7 +351,7 @@ static int   bot_grudge[MAX_BOTS];      // net id we want revenge on (-1 = none)
 static int   bot_grudge_ticks[MAX_BOTS];// remaining ticks of the grudge
 // Per-bot personality (Q3 BotCharacter subset, cross-pollinated FROM
 // 7dtd-clanker BotCharacter): aggression, self-preservation, vengefulness,
-// camper, alertness — rolled deterministically from (skill, net id) at slot
+// camper, alertness - rolled deterministically from (skill, net id) at slot
 // alloc, overridable per-bot via `bot cfg` (negative value resets).
 static float bot_agg[MAX_BOTS];
 static float bot_selfpres[MAX_BOTS];
@@ -378,7 +378,7 @@ static int   bot_ammo[MAX_BOTS];
 static int   bot_reload_ticks[MAX_BOTS];
 static int bot_count_static;        // our remembered `bot count` floor (host also enforces)
 
-// (forward; bodies with the other weapon tables below — bot_init reads them)
+// (forward; bodies with the other weapon tables below - bot_init reads them)
 static int weapon_mag(int w);
 static float weapon_reload(int w);
 
@@ -471,7 +471,7 @@ static float weapon_lead(int w) {
   }
 }
 // Magazine size and reload seconds by weapon (Q3 bots managed ammo; a visible
-// reload pause makes fights feel real — cross-pollinated to clanker
+// reload pause makes fights feel real - cross-pollinated to clanker
 // WeaponProfile MagSize/ReloadSec). The guest tracks per-bot ammo purely as
 // pacing: the host applies damage per accepted `bot shoot` and never sees a
 // magazine, so a bot "clicking empty" simply stops ordering shots.
@@ -502,7 +502,7 @@ static float clampf01(float v) {
   return v < 0.f ? 0.f : (v > 1.f ? 1.f : v);
 }
 
-// Deterministic per-bot personality default from (skill, net id) — the same
+// Deterministic per-bot personality default from (skill, net id) - the same
 // call shape is used at slot alloc and on `bot cfg` reset, so no RNG state is
 // consumed. Mirrors the clanker BotCharacter DB (Aggression/SelfPreservation/
 // Vengefulness/Camper/Alertness) with skill scaling + a stable per-id jitter.
@@ -647,7 +647,7 @@ static int move_dirty(int bslot, float mx, float mz) {
 #define DODGE_TICKS 10
 #define DODGE_BACK_TICKS 4
 // Ticks without any movement before a patrol bot re-picks its wander point
-// (or jukes a memory-pursue destination) — cross-pollinated from clanker's
+// (or jukes a memory-pursue destination) - cross-pollinated from clanker's
 // stuck timer (`_stuckSince` + JumpOrStrafe). 20 ticks = 1 s.
 #define STUCK_TICKS 20
 // Bot spawn health used to normalize the hurt fraction (host spawns ~100 hp).
@@ -664,7 +664,7 @@ static int move_dirty(int bslot, float mx, float mz) {
 // Skill- and distance-scaled hit probability (cross-pollinated from
 // 7dtd-clanker TryShootBurst: spread / AimJitterDegrees scaled down by skill).
 // A tiny per-bot trait jitter (net-id hash, ~±3 %) so two skill-2 bots don't
-// behave identically — mirrors clanker BotCharacter Camper/Aggression spread.
+// behave identically - mirrors clanker BotCharacter Camper/Aggression spread.
 static float bot_trait_jitter(int net) {
   unsigned h = (unsigned)net * 2654435761u;
   h = h * 1103515245u + 12345u;
@@ -780,7 +780,7 @@ static void brain_tick(void) {
     bot_last_hp[bslot] = rec_hp(bi);
 
     // Retaliation (cross-pollinated FROM 7dtd-clanker Bot.OnDamaged: aggro
-    // swap on being hit — quicker reaction when shot). Damage events ride the
+    // swap on being hit - quicker reaction when shot). Damage events ride the
     // sense trailer (RFC 0001 §3); a victim that is this bot sets a grudge on
     // the attacker. The grudge biases target selection below (GRUDGE_SCORE)
     // and decays after GRUDGE_TICKS. The dodge itself already fires from the
@@ -828,7 +828,7 @@ static void brain_tick(void) {
     // Pick the nearest hostile candidate within vision (players/zombies/other
     // bots, not ourselves). Players are preferred over zombies/bots at equal
     // distance (cross-pollinated from clanker BotBrain.FindTarget: EntityPlayer
-    // score * 0.82, other bots * 0.9 — squared here since we compare d2).
+    // score * 0.82, other bots * 0.9 - squared here since we compare d2).
     // A candidate beyond the skill-scaled FOV cone is not acquired unless it
     // is very close (clanker: close targets always spotted).
     const float fov_half = skill_fov(skill) * 0.5f;
@@ -846,7 +846,7 @@ static void brain_tick(void) {
       const float d2 = dx * dx + dy * dy + dz * dz;
       // Aggression gates how far a bot will chase (clanker ShouldChase:
       // Aggression < 0.35 => don't chase far). A grudged target is always
-      // chased — vengeance overrides caution.
+      // chased - vengeance overrides caution.
       if (rec_net(j) != bot_grudge[bslot]) {
         const float chase_max = 26.f + bot_agg[bslot] * 30.f;
         if (d2 > chase_max * chase_max) continue;
@@ -1024,7 +1024,7 @@ static void brain_tick(void) {
 
     // Weapon-aware engagement range (clanker WeaponProfile.Range parity): the
     // bot engages at the weapon's comfortable range (mildly skill-scaled)
-    // instead of a skill-only constant — a sniper bot keeps ~70 m, a shotgun
+    // instead of a skill-only constant - a sniper bot keeps ~70 m, a shotgun
     // bot closes to ~18 m. Stays under the host's enforced weapon range + 2 so
     // an ordered shot is never rejected as out-of-range.
     const float attack_range = weapon_range(w) * (0.85f + 0.05f * (float)skill);
@@ -1032,7 +1032,7 @@ static void brain_tick(void) {
     // bot backpedals instead of letting the target close (sniper/magnum tact).
     const int keep_range = weapon_range(w) > 40.f && dist < weapon_range(w) * 0.5f;
     // Cross-pollinated from 7dtd-clanker: low-health bots retreat
-    // (self-preservation, BotCharacter.WantsToRetreat) — hold fire and back
+    // (self-preservation, BotCharacter.WantsToRetreat) - hold fire and back
     // off. Fleeing at HP_FLEE_FRAC is skill/personality-independent survival.
     const float hp_frac = rec_hp(bi) / BOT_MAX_HP;
     // Retreat threshold from self-preservation + aggression (clanker
@@ -1122,14 +1122,14 @@ static void brain_tick(void) {
       // Cross-pollinated from clanker TryShootBurst: a burst volley whose size
       // follows the weapon profile (clanker WeaponProfile BurstMin/BurstMax:
       // sniper/shotgun 1, pistol 2, ak 3, smg/auto 4), each shot with its own
-      // skill/distance hit roll and a skill-scaled headshot roll — low-skill
+      // skill/distance hit roll and a skill-scaled headshot roll - low-skill
       // bots miss a lot, high-skill bots land burst damage. The host applies
       // damage per `bot shoot`.
       //
       // Ammo pacing (Q3 bots managed ammo): every trigger pull consumes a
       // round whether it hits or misses; an empty magazine starts a reload
       // (weapon_reload seconds) during which the bot holds fire and keeps
-      // strafing. Purely guest-side — the host never sees ammo.
+      // strafing. Purely guest-side - the host never sees ammo.
       if (!retreating && bot_react[bslot] <= 0.f && bot_throttle[bslot] <= 0.f) {
         if (bot_reload_ticks[bslot] > 0) {
           // Reloading: hold fire (movement continues via the branch above).
@@ -1272,7 +1272,7 @@ int on_admin_command(int cmd_ptr, int cmd_len, int out_ptr, int out_cap) {
   static char reply_buf[600];
   int rn = 0;
 
-  // Tokenize a_cmd (length-limited) — we copy into a local nul-terminated
+  // Tokenize a_cmd (length-limited) - we copy into a local nul-terminated
   // shadow to avoid touching guest memory past the call bounds.
   char copy[160];
   int cl = cmd_len < 159 ? cmd_len : 159;

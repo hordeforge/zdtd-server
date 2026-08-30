@@ -1,6 +1,6 @@
 # Pure XML / Assetbundle Modlet Compatibility - Implementation Plan
 
-> **Purpose:** implementation plan for pure XML/assetbundle modlet support — discovery, patch ops, S2C sync, and fixtures.
+> **Purpose:** implementation plan for pure XML/assetbundle modlet support - discovery, patch ops, S2C sync, and fixtures.
 
 **Number:** RFC 0003
 **Source:** [PRD 0003](../prd/0003-modlets.md) (requirements R1-R12, wire

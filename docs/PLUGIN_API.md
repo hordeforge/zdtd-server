@@ -1,6 +1,6 @@
 # Plugin API: Wasm guests (design)
 
-> **Purpose:** the host/guest contract for Wasm plugins — runtime, host imports, hook table, budgets, and composition rules.
+> **Purpose:** the host/guest contract for Wasm plugins - runtime, host imports, hook table, budgets, and composition rules.
 
 **Status:** shipped first cut (2026-08-06, WORK_PLAN T9). A plugin is a `.wasm`
 module ([ADR 0020](adr/0020-wasm-only-plugin-api.md),

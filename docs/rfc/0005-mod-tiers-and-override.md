@@ -1,10 +1,10 @@
-# Module Tiers and Mod Override — Technical Proposal (RFC 0005)
+# Module Tiers and Mod Override - Technical Proposal (RFC 0005)
 
-> **Purpose:** technical proposal for the mod tier and override model — manifest shape, discovery, override claims, and conflict rules.
+> **Purpose:** technical proposal for the mod tier and override model - manifest shape, discovery, override claims, and conflict rules.
 
 **Number:** RFC 0005
 **Status:** decided (shipped; implements PRD 0005, recorded in ADR 0032)
-**Source:** [PRD 0005](../prd/0005-mod-tiers-and-override.md) — the requirements this answers
+**Source:** [PRD 0005](../prd/0005-mod-tiers-and-override.md) - the requirements this answers
 **Related:** [PRD 0005](../prd/0005-mod-tiers-and-override.md) · [ADR 0032](../adr/0032-module-tiers-and-override.md) · [PLUGIN_API.md](../PLUGIN_API.md) · [PLUGIN_STANDARDS.md](../PLUGIN_STANDARDS.md)
 
 ## 1. Decision to make
@@ -25,7 +25,7 @@ core components and other mods, with conflicts failing loudly at load?
   runtime.
 - Official addons: `mods/fps_bot` (ADR 0026) and `mods/mcp` (ADR 0031)
   are shipped in-tree but load through the same flat list as user mods.
-- Modlets (PRD 0003/RFC 0003): auto-discovery precedent exists —
+- Modlets (PRD 0003/RFC 0003): auto-discovery precedent exists  -
   `Mods/<name>/Config` XPath patches under the game dir, joined into patched
   catalogs; `src/assets/modlets.zig`. This is data-only, but it is the
   discovery pattern to mirror.
@@ -54,7 +54,7 @@ already an operator trap (a typo silently loads nothing).
 Tier as a config key per entry (e.g. `[mods] official = [...]`). Adds
 discovery + disable/blacklist without a manifest format. But: no `override`
 story, modders cannot self-declare anything, and tier becomes operator
-assertion rather than provenance — exactly the confusion PRD §9 flags.
+assertion rather than provenance - exactly the confusion PRD §9 flags.
 
 ### 3.3 Tiered manifest model with exclusive override claims (recommended)
 

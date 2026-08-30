@@ -1,8 +1,8 @@
-# Vehicle horn opens trader doors — Technical Proposal (RFC 0006)
+# Vehicle horn opens trader doors - Technical Proposal (RFC 0006)
 
 **Number:** RFC 0006
 **Status:** draft
-**Source:** `PRD 0006` — the requirements this answers
+**Source:** `PRD 0006` - the requirements this answers
 
 ## 1. Decision to make
 

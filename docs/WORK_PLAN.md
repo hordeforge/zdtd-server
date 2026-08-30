@@ -1,6 +1,6 @@
 # Work plan (current)
 
-> **What this is:** the handoff-ready queue for the next build slice — one scoped task per section with grounding, proof, and acceptance, in build order.
+> **What this is:** the handoff-ready queue for the next build slice - one scoped task per section with grounding, proof, and acceptance, in build order.
 
 > **Related:** hub [STATUS.md](STATUS.md) (wins on conflict) · gaps [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md) · backlog [../TODO.md](../TODO.md)
 
@@ -8,17 +8,17 @@ Archived detailed task history: [`archive/WORK_PLAN_2026-08-09.md`](archive/WORK
 
 Active planning is now tracked in the living docs:
 
-- [`STATUS.md`](STATUS.md) — what works now (hub; wins on conflict).
-- [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) — gap inventory with RE anchors; see §3 priority band for "what to build next".
-- [`../TODO.md`](../TODO.md) — open items + backlog below the fold.
-- [`RE_GAP_CLOSURE.md`](RE_GAP_CLOSURE.md) — per-gap RE spec map (stock docs → gap ID).
-- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — phased milestones (banner is authoritative; detail sections are historical work packages).
+- [`STATUS.md`](STATUS.md) - what works now (hub; wins on conflict).
+- [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) - gap inventory with RE anchors; see §3 priority band for "what to build next".
+- [`../TODO.md`](../TODO.md) - open items + backlog below the fold.
+- [`RE_GAP_CLOSURE.md`](RE_GAP_CLOSURE.md) - per-gap RE spec map (stock docs → gap ID).
+- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) - phased milestones (banner is authoritative; detail sections are historical work packages).
 
-For handoff-ready task shape and house rules, see the archived plan's "How to work a task" § — same grounding/proof/commit expectations apply.
+For handoff-ready task shape and house rules, see the archived plan's "How to work a task" § - same grounding/proof/commit expectations apply.
 
 **Status 2026-08-30:** most tasks below shipped and are rescored WORKS in
 [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) (scorecard: 294 features WORKS, 1
-PARTIAL, residuals recorded inline) — do not re-open them as gaps. Specifically
+PARTIAL, residuals recorded inline) - do not re-open them as gaps. Specifically
 done: T24/T25/T26/T27/T28 (progression + perk spend + VM passives, scorecard
 row 10), T29 (stealth/noise/smell, the AI senses row), T33 (challenges,
 resolved via the client-tracked re-scope, no server challenge wire), T34
@@ -36,7 +36,7 @@ severity ceiling (client-informed detectors fail closed to .strong, counted),
 T21 the on_evidence guest observer, T22 void-rescue suppression, T23 the
 guardreport dry-run diff verb. The remaining T18 core (server-sanctioned
 grants / a full stock-transaction ledger) stays recorded in the task text.
-Still open / recorded, not wired: T30 (drone companion — zero stock AITask
+Still open / recorded, not wired: T30 (drone companion - zero stock AITask
 uses, deferred). T38 (always-on radius effects) shipped 2026-08-26; T35
 (air-drop marker) resolved 2026-08-26 (the entity-tied marker dies with the
 bag's EntityRemove). The per-task "Why" text below is historical; GAP/STATUS
@@ -825,7 +825,7 @@ crafts of the same recipe). `src/server/game/craft.zig`'s `tryCraft` (not
 research doc's "derived from ingredient `CraftComponentExp` when absent"
 clause describes an **editor-only export step**
 ("The editor export twin... sums each ingredient's `ItemClass.CraftComponentExp`")
-— and `CraftComponentExp` has **zero occurrences** in the shipped `items.xml`,
+-  and `CraftComponentExp` has **zero occurrences** in the shipped `items.xml`,
 confirming that derivation bakes a value into the file at content-authoring
 time and does not run in the dedicated server's IL at all. Since the shipped
 file was evidently not re-baked for the 622 undeclared recipes, what the
@@ -838,7 +838,7 @@ documented for the lower bound, and guessing here risks *subtracting* XP on
 **Change:** parse `craft_exp_gain` (present on 17 recipes, always `0` in the
 shipped file) and wire the plumbing (`AddLevelExp`-equivalent call,
 per-recipe craft counter, diminishing-returns division) so it is *correct* for
-whatever a modded or future recipe file declares — but do not invent a value
+whatever a modded or future recipe file declares - but do not invent a value
 for the 622 recipes that declare nothing. Fail closed there (grant 0, matching
 what the confirmed 17 already do), and log a note that these recipes have no
 stock-declared crafting XP rather than silently normalizing them to the same
@@ -862,7 +862,7 @@ sample of the 17 declaring recipes, and a scenario crafting an undeclared
 recipe asserting XP is unchanged (not silently non-zero from a guessed
 formula).
 
-**Out of scope:** resolving the undeclared-recipe question definitively —
+**Out of scope:** resolving the undeclared-recipe question definitively  -
 that needs an IL read of what `AddLevelExp` does with a negative or absent
 input, which is a research task (file it against
 `../../7dtd-engine-research/docs/crafting-recipes.md` if picked up), not an
@@ -959,7 +959,7 @@ progression tail's buff list is followed by a bedroll presence byte, then
 `bed_x/y/z:i32` when present. A version byte gates the field rather than "more
 bytes remain in the file", which turned out to be ambiguous whenever another
 record follows the current one in the file (the next record's own name_len
-byte would misread as this record's presence byte) — caught by an existing
+byte would misread as this record's presence byte) - caught by an existing
 test (`players zpv3 restore skips a preceding record's progression tail`)
 that broke under the first, byte-existence-gated version of this change and
 forced the version-gated rewrite. A v2 or v3 file upgrades in place on the

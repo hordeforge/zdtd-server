@@ -136,7 +136,7 @@ pub const default_craft_max_times: u16 = 20;
 pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
 pub const default_deco_objects_per_join: usize = 8192;
 
-/// Reliable-window retry pacing — see game_net.zig for the policy comment.
+/// Reliable-window retry pacing - see game_net.zig for the policy comment.
 /// Kept here so InitOptions / Game defaults and the tuning docs cite one place.
 pub const window_fast_attempts: u32 = 16;
 pub const window_retry_sleep_ns: u64 = 1_000_000;

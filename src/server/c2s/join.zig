@@ -1,4 +1,4 @@
-//! Join state machine — extracted from game.zig handlePackage (stock SM).
+//! Join state machine - extracted from game.zig handlePackage (stock SM).
 //! Owns the 7 join packages that must stay coherent: PlayerLogin →
 //! RequestToEnterGame → AuthConfirmation → SignDataRequest →
 //! WorldInitInfoRequest → DynamicClientArrive → RequestToSpawnPlayer.

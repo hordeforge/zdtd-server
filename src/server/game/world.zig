@@ -1,4 +1,4 @@
-//! Domain — extracted from game.zig; helpers take *Game
+//! Domain - extracted from game.zig; helpers take *Game
 //! World / claims / block meta / locks. Bodies copied verbatim from game.zig
 //! (keeps stock asm.il comments). Persist-owned save/load are intentionally
 //! left in persist.zig and not duplicated here:
@@ -160,7 +160,7 @@ pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
 
 /// materials.xml Experience for a broken block (harvest XP; stock
 /// AddLevelExp(material.Experience * count), RE items.md HarvestOnAttack;
-/// the caller multiplies by the harvested count — 1 for a block with no
+/// the caller multiplies by the harvested count - 1 for a block with no
 /// Harvest rows, the rolled total otherwise). Resolves via AssignIds id →
 /// name → Material → Experience; 0 = no harvest XP (offline catalog, air,
 /// or material without Experience).
@@ -486,7 +486,7 @@ pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
     return true;
 }
 
-/// Ground/surface Y a bot stands on at world (x, z) — chunk heightAt + 1,
+/// Ground/surface Y a bot stands on at world (x, z) - chunk heightAt + 1,
 /// matching the Wasm `heightAtWorld` callback (hooks.zig). Materializes the
 /// chunk on demand; falls back to y=61 when the probe errors (same fallback as
 /// the Wasm hook). Backs bot spawn grounding and move-time y tracking so bots
@@ -511,7 +511,7 @@ fn coverSolidAt(self: *Game, p: [3]f32) bool {
     return false;
 }
 
-/// A nearby point that is not visible from `threat` — Doom 3 idAASFindCover /
+/// A nearby point that is not visible from `threat` - Doom 3 idAASFindCover /
 /// clanker `BotBrain.FindCover` port for the `zdtd.query` "cover" verb
 /// (RFC 0001 §3). Samples 8 directions at `dist` (default 10 m), grounds each
 /// candidate, keeps the ones that are reachable (not solid at body height) and

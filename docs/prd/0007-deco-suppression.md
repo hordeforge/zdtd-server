@@ -1,4 +1,4 @@
-# Decoration suppression (AllowDecorations) — Product Requirements (PRD 0007)
+# Decoration suppression (AllowDecorations) - Product Requirements (PRD 0007)
 
 **Number:** PRD 0007
 **Status:** draft

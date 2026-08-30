@@ -1,5 +1,5 @@
 //! ECS hooks: sim callbacks that read Game / World state.
-//! Verbatim move from game.zig — thin wrappers remain there as `ctx: ?*anyopaque` adapters.
+//! Verbatim move from game.zig - thin wrappers remain there as `ctx: ?*anyopaque` adapters.
 
 const std = @import("std");
 const game_mod = @import("../game.zig");
@@ -340,7 +340,7 @@ fn biomeInList(name: []const u8, list: []const u8) bool {
 }
 
 /// Zombie AI bot snap (ADR 0026): `exact >= 0` resolves one live bot by net id
-/// (any range — revenge); `exact < 0` returns the nearest live bot within
+/// (any range - revenge); `exact < 0` returns the nearest live bot within
 /// `range_sq` of (zx, zz) (proximity aggro). Returns net_id -1 when nothing
 /// qualifies. Read-only over the BotManager, which is quiescent during the
 /// parallel AI pass (bots integrate after it in the tick).
@@ -558,7 +558,7 @@ pub fn questSleeperCount(ctx: ?*anyopaque, rect: ecs.components.PoiRect) u16 {
 }
 
 /// QuestActionSpawnGSEnemy (il/full-v3.1.0/_global/QuestActionSpawnGSEnemy):
-/// spawn `count_min..count_max` gamestage-scaled enemies around the player —
+/// spawn `count_min..count_max` gamestage-scaled enemies around the player  -
 /// stock SpawnQuestEntity places them at player.position + random unit
 /// direction × (12 + RandomFloat*12) metres, resolving the entity via
 /// GameStageDefinition.GetGameStage(list).GetStage(PartyGameStage)

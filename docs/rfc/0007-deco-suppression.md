@@ -1,8 +1,8 @@
-# Decoration suppression (AllowDecorations) — Technical Proposal (RFC 0007)
+# Decoration suppression (AllowDecorations) - Technical Proposal (RFC 0007)
 
 **Number:** RFC 0007
 **Status:** draft
-**Source:** `PRD 0007` — the requirements this answers
+**Source:** `PRD 0007` - the requirements this answers
 
 ## 1. Decision to make
 

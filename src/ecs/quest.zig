@@ -129,7 +129,7 @@ pub const PoiSelect = struct {
     center_y: f32 = 0,
     center_z: f32 = 0,
     /// Prefab name; a slice into the prefab index (stable for the Game's
-    /// lifetime — the caller must not retain it past the index).
+    /// lifetime - the caller must not retain it past the index).
     name: []const u8 = "",
 
     pub fn valid(self: PoiSelect) bool {
@@ -181,7 +181,7 @@ pub const ObjectiveKindMap = struct {
     kind: PhaseKind,
 };
 
-/// Builtin default mapping for the stock objective family — 23 `type=`
+/// Builtin default mapping for the stock objective family - 23 `type=`
 /// spellings, covering the 16 used by the shipped `Data/Config/quests.xml`
 /// (2026-08-09 census) plus stock variants the shipped quests do not
 /// exercise (facts of the stock game, like wire constants). Config entries
@@ -218,7 +218,7 @@ pub const builtin_objective_kinds = [_]ObjectiveKindMap{
 /// builtin defaults); the stock `Goto`/`RandomGoto` `id="trader"` special case
 /// is a hardcoded game fact and wins; an unknown type degrades to `.auto`
 /// scaffolding (fail-closed: the phase auto-completes rather than deadlocking
-/// the quest — see phaseIsScaffolding).
+/// the quest - see phaseIsScaffolding).
 pub fn kindForObjective(table: []const ObjectiveKindMap, obj_type: []const u8, obj_id: ?[]const u8) PhaseKind {
     if (obj_id) |id| {
         if ((std.mem.eql(u8, obj_type, "Goto") or std.mem.eql(u8, obj_type, "RandomGoto")) and
@@ -251,7 +251,7 @@ pub const PhaseKind = enum(u8) {
 /// One phase of the quest graph: the advancing objective kind + required count.
 /// Grounded in Quest.refreshQuestCompletion (asm.il 983645-983904): a phase
 /// completes when its tracked count objective reaches its required Value.
-/// `radius` (metres) carries the ObjectiveGoto/StayWithin distance — stock
+/// `radius` (metres) carries the ObjectiveGoto/StayWithin distance - stock
 /// parses those `value`s as a float distance, not a count; 0 = the sim default
 /// (4 m goto, `max(8, required)` stay-within). Ignored by count kinds.
 pub const PhaseSpec = struct {
@@ -469,7 +469,7 @@ pub const Catalog = struct {
     /// parseCatalog replaces the default with the merged table.
     objective_kinds: []const ObjectiveKindMap = builtin_objective_kinds[0..],
     /// Effective quest sim-policy tunables (ADR 0021): kill-count defaults,
-    /// goto/stay radius fallbacks — merged from `[quests]` by main.zig.
+    /// goto/stay radius fallbacks - merged from `[quests]` by main.zig.
     policy: QuestPolicy = .{},
 
     pub fn builtin() Catalog {

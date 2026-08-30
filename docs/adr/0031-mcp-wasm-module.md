@@ -41,12 +41,12 @@ found -32601, invalid params -32602, internal error -32603).
 
 The host owns everything that is bytes on a wire or a parser: the listener,
 HTTP/SSE framing, per-session queues, auth, the bounded copy of frames into and
-out of guest memory, **and the JSON parsing itself** — the host parses each
+out of guest memory, **and the JSON parsing itself** - the host parses each
 frame with Zig's `std.json` and exposes the parsed document to the guest
 through the `zdtd.json_*` imports (D3). The guest never parses JSON, never sees
 a socket, never parses HTTP, and never touches the game wire. This is the same
 guest/host split ADR 0026 made for bots: the guest is the brain, the host is
-the body — plus the parser, because hand-rolling JSON in a freestanding guest
+the body - plus the parser, because hand-rolling JSON in a freestanding guest
 is exactly the kind of correctness risk the boundary exists to absorb.
 
 ### D2. Transport: MCP Streamable HTTP on a dedicated listener
@@ -149,7 +149,7 @@ for MCP.
 - Unit tests for the guest-facing protocol core: framing, session, error
   table, tool registry, `tools/call` argument validation.
 - A harness end-to-end test: the real guest `.wasm` behind the transport's
-  HTTP framing (same test-mode capture as webui — raw requests in, responses
+  HTTP framing (same test-mode capture as webui - raw requests in, responses
   out), driving `initialize` / `notifications/initialized` / `tools/list` /
   `tools/call` including an allowlisted `admin_command`.
 - `zig build test` and `make check` stay green. No loadgen/stock-client leg:

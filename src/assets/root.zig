@@ -2,7 +2,7 @@
 //!
 //! Dependency direction: may import util and pure ecs types (QuestKind,
 //! InvSlot, Kind) for catalog → sim mapping. Must not import world, server,
-//! or wire. ecs must not import this package (keeps assets→ecs one-way) —
+//! or wire. ecs must not import this package (keeps assets→ecs one-way)  -
 //! single comptime-only exception: ecs/rules.zig reads sandbox_presets.zig
 //! (the embedded stock difficulty-preset XML ladder; see ecs/root.zig).
 //! Wire body builders belong in wire/ (SignData batch encode lives in

@@ -1,4 +1,4 @@
-# Vehicle horn opens trader doors — Product Requirements (PRD 0006)
+# Vehicle horn opens trader doors - Product Requirements (PRD 0006)
 
 **Number:** PRD 0006
 **Status:** draft

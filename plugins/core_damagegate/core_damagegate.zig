@@ -1,4 +1,4 @@
-// core_damagegate — incoming player damage scaling via the on_player_damage
+// core_damagegate - incoming player damage scaling via the on_player_damage
 // verdict (fires after the native PvP/armor gate, before the hit applies).
 //
 // Verdict convention (docs/PLUGIN_DEV.md "Hooks"):

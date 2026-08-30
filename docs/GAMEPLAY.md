@@ -1,6 +1,6 @@
 # Gameplay behavior flows
 
-> **What this is:** flow reference for the player-visible gameplay verbs — craft, workstation queue, trade, trader roll, loot, survival, movement and the blood moon window. Lifecycle state machines (join, quest, weather, power, sleepers, trader hours, party, vending, buffs, guard) live in [STATE_MACHINES.md](STATE_MACHINES.md); system overview and tick order live in [ZIG_CLONE.md](ZIG_CLONE.md) and [STATE_MACHINES.md](STATE_MACHINES.md). Diagrams are Mermaid; the `src/` anchors are the authority when a diagram and a comment disagree.
+> **What this is:** flow reference for the player-visible gameplay verbs - craft, workstation queue, trade, trader roll, loot, survival, movement and the blood moon window. Lifecycle state machines (join, quest, weather, power, sleepers, trader hours, party, vending, buffs, guard) live in [STATE_MACHINES.md](STATE_MACHINES.md); system overview and tick order live in [ZIG_CLONE.md](ZIG_CLONE.md) and [STATE_MACHINES.md](STATE_MACHINES.md). Diagrams are Mermaid; the `src/` anchors are the authority when a diagram and a comment disagree.
 
 The core gameplay behaviors as flows (what happens when a player crafts,
 trades, rolls loot, survives or moves). This file covers the flow shapes that
@@ -302,11 +302,11 @@ the client position.
 | Doc | Role |
 |---|---|
 | [STATE_MACHINES.md](STATE_MACHINES.md) | 20 state lifecycles with diagrams and `src/` anchors |
-| [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture — M0-M6 and system overview |
+| [ZIG_CLONE.md](ZIG_CLONE.md) | Architecture - M0-M6 and system overview |
 | [AUTHORITY.md](AUTHORITY.md) | Join phases, C2S validation, interest, mode |
 | [ECS_SYSTEMS.md](ECS_SYSTEMS.md) | SoA columns, queries, groups, tick order |
 | [wire/PACKAGES.md](wire/PACKAGES.md) | 191-name join map catalog |
-| [STATUS.md](STATUS.md) | What works now — the hub |
+| [STATUS.md](STATUS.md) | What works now - the hub |
 
 ## Keeping this document honest
 

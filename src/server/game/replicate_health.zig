@@ -1,4 +1,4 @@
-//! Health replicate path — extracted verbatim from game.zig.
+//! Health replicate path - extracted verbatim from game.zig.
 //! Thin forwarder keeps callers unchanged.
 
 const game_mod = @import("../game.zig");

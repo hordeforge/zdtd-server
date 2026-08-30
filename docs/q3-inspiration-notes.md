@@ -25,7 +25,7 @@ boundary (ADR 0026).
 - **Fire throttle.** Holding fire is gated by a burst cadence rather than a
   per-frame check, so a bot cannot machine-gun every tick. Each fire window
   queues a 2-3 shot burst volley (higher skill, more shots), every shot with
-  its own hit and headshot roll — mirroring clanker `Weapon.BurstMin/BurstMax`.
+  its own hit and headshot roll - mirroring clanker `Weapon.BurstMin/BurstMax`.
 - **Target selection.** Nearest *alive* non-self candidate within vision wins,
   but players are preferred over zombies/other bots at equal distance
   (cross-pollinated from clanker `BotBrain.FindTarget`: player score `* 0.82`,
@@ -53,13 +53,13 @@ boundary (ADR 0026).
 - **Dodge-on-hit.** The guest watches its own hp across sense passes; a drop
   means it was hit, so the bot breaks into a short evasive dodge (backpedal,
   then a hard strafe on a randomized direction) whose moves bypass command
-  gating — mirroring clanker `Bot.OnDamaged` (which reads the damage event via
+  gating - mirroring clanker `Bot.OnDamaged` (which reads the damage event via
   a patch; the wasm guest infers it from its own hp).
 - **Skill/distance hit accuracy.** A shot only lands when a deterministic roll
   beats `skill_hit_chance(skill, dist)`, cross-pollinated from clanker
   `TryShootBurst` (spread scaled down by difficulty), so low-skill bots miss. A
   second skill-scaled roll flags a headshot (`skill_headshot`), and the host
-  applies the 2x `bot_headshot_multiplier` — mirroring clanker
+  applies the 2x `bot_headshot_multiplier` - mirroring clanker
   `HeadshotChance`/`HeadshotMultiplier`.
 - **Backpedal + low-hp retreat.** Bots back away when an enemy is inside
   `BACKPEDAL_RANGE` (clanker `BotBrain.Backpedal`); low-health, low-skill bots

@@ -1,4 +1,4 @@
-//! Asset loading for Game.init — extracted verbatim from game.zig.
+//! Asset loading for Game.init - extracted verbatim from game.zig.
 //! Takes *Game and InitOptions, mirrors the original inline sequence so the
 //! wire/sim behaviour is byte-for-byte. Allocation happens here (init path only).
 
@@ -115,7 +115,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // Movement-noise model data (sounds.xml `<Noise>` rows): the per-clip
     // volume/time/muffle/heat the sound relay feeds into player stealth.
     // Empty without a game-dir: sounds relay with no AI noise (data-gated,
-    // matching stock with no data — the table comes from the game's own
+    // matching stock with no data - the table comes from the game's own
     // Data/Config/sounds.xml, never hardcoded values in code).
     if (logged("sounds.xml noise table", assets_noise.tryLoad(allocator, opts.game_dir, opts.config_dir))) |nt| {
         self.noise_table.deinit();

@@ -1,6 +1,6 @@
 # Server Hot Restart - Product Requirements (PRD)
 
-> **Purpose:** hot-restart continuity contract — what must survive a full process restart, inventoried in one place.
+> **Purpose:** hot-restart continuity contract - what must survive a full process restart, inventoried in one place.
 
 **Number:** PRD 0004
 **Status:** shipped (v1). One new requirement (R1, webui operator-session continuity,

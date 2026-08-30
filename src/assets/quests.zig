@@ -321,7 +321,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
             .kind = o.kind,
             // Arrival objectives (goto/stay/trader/rally) parse `value` as a
             // distance, never a count (stock ObjectiveGoto::distance), so
-            // their required is 1 — the single arrival completes them. Only
+            // their required is 1 - the single arrival completes them. Only
             // count kinds (kill/fetch/craft/block) use the target.
             .required = if (objectiveIsArrival(o.kind)) 1 else if (o.target == 0) 1 else o.target,
             .optional = o.optional,
@@ -730,7 +730,7 @@ fn phaseKindFromName(name: []const u8) ?quest.PhaseKind {
 /// Parse the `[quests] objective_kinds` spec into an arena table with the
 /// builtin stock defaults appended: `"Type=Kind, Type2=Kind2"` where Kind is a
 /// PhaseKind tag name. Config rows are scanned first (they win on a matching
-/// type — ADR 0021 precedence); a new stock objective type needs a config row,
+/// type - ADR 0021 precedence); a new stock objective type needs a config row,
 /// not a code change. Malformed rows are logged and skipped.
 fn parseObjectiveKinds(arena: std.mem.Allocator, spec: ?[]const u8) ![]const quest.ObjectiveKindMap {
     const s = spec orelse "";

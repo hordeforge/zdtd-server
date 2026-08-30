@@ -1,4 +1,4 @@
-// core_perkgate — perk spend gate via the on_perk_spend verdict (ADR 0033).
+// core_perkgate - perk spend gate via the on_perk_spend verdict (ADR 0033).
 //
 // Verdict convention (docs/PLUGIN_DEV.md "Hooks"):
 //   on_perk_spend(player, name_ptr, name_len, level, cost) -> i32

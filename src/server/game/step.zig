@@ -1,4 +1,4 @@
-//! Main tick step — extracted verbatim from game.zig.
+//! Main tick step - extracted verbatim from game.zig.
 //! `Game.step` and helpers that are only called from the step.
 
 const std = @import("std");

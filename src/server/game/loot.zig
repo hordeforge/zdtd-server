@@ -1,4 +1,4 @@
-//! Loot / item-table helpers — extracted verbatim from game.zig.
+//! Loot / item-table helpers - extracted verbatim from game.zig.
 //! ecsIdFromItemName, loot bags, and loot-spawn broadcasts.
 
 const std = @import("std");

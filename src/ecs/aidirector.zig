@@ -140,7 +140,7 @@ pub const WorldClock = struct {
     }
 
     /// The scheduled blood-moon day for the client's stat 58 (GameStats
-    /// BloodMoonDay): the horde day of the active cycle — the next persisted
+    /// BloodMoonDay): the horde day of the active cycle - the next persisted
     /// schedule day at/after `today` (stock CalcNextDay). NOT the plain
     /// frequency multiple: with BloodMoonRange jitter the horde can land on
     /// day c*freq+1, and the old multiple put the client's red moon on the

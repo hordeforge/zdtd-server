@@ -136,7 +136,7 @@ pub const Ai = struct {
     /// Sight view-cone half-angle, degrees. Stock `EntityAlive.maxViewAngle`
     /// cctor default is 180 (full cone; IsInFrontOfMe halves it → 90 half =
     /// only excludes targets strictly behind), overridden per class by
-    /// entityclasses.xml `MaxViewAngle` — that per-class value wins here via
+    /// entityclasses.xml `MaxViewAngle` - that per-class value wins here via
     /// `viewHalfDeg` (systems.zig). RE entity-ai.md EntityAlive cctor.
     view_cone_half_deg: f32 = 90.0,
     /// CanSeeStealth light-threshold floor pair (RE entity-ai.md CanSeeStealth
@@ -282,7 +282,7 @@ pub const Ai = struct {
     /// else <this>`).
     wander_speed: f32 = 0.8,
     // -------------------------------------------------------------------------
-    // AI timing / radii — extracted from systems.zig file-scope consts so
+    // AI timing / radii - extracted from systems.zig file-scope consts so
     // a mode pack or zdtd.toml [rules.ai] controls them without forking.
     // -------------------------------------------------------------------------
     /// How often (s) a chasing zombie re-solves A* toward the player (20 TPS
@@ -579,7 +579,7 @@ pub const Geometry = struct {
     }
 
     /// Fail-closed sanity: the height plane is byte (u8) in EVERY wire
-    /// profile — including tall — so a non-zero ceiling above 255 would make
+    /// profile - including tall - so a non-zero ceiling above 255 would make
     /// the plane fill's @intCast panic. A negative scale inverts the world
     /// and a negative sea level is nonsense. Validated in main.zig on the
     /// effective rules, like WorldgenGroup.
@@ -665,7 +665,7 @@ pub const WorldgenGroup = struct {
 /// distance/size, plus the chunk-heat spawner constants (heat threshold,
 /// check/cooldown cadence, scout distance/count, feral roll). Only constants
 /// the code actually reads are surfaced (YAGNI; `heat_event_ticks` was doc-only
-/// until craft.zig started stamping it — it now is a rule). Provenance:
+/// until craft.zig started stamping it - it now is a rule). Provenance:
 /// PROVENANCE.md §3.7.
 pub const Director = struct {
     /// Wandering hordes only start after this world tick (day 1 end ~28000).
@@ -725,7 +725,7 @@ pub const Director = struct {
     /// Blood-moon zombie HP multiplier (zdtd policy; 1.5x).
     bloodmoon_hp_mult: f32 = 1.5,
     /// GameDifficulty 0..5 → zombie HP multiplier (Scavenger..Insane). Stock
-    /// tier semantic; numbers zdtd-tuned (R9, no RE pin) — operator policy.
+    /// tier semantic; numbers zdtd-tuned (R9, no RE pin) - operator policy.
     /// Per-tier scalars because toml_bind is scalar-only.
     difficulty_hp_0: f32 = 0.5,
     difficulty_hp_1: f32 = 0.75,

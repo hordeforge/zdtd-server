@@ -1,4 +1,4 @@
-// core_killfeed — a minimal event-observer plugin (AGENTS.md rule 29,
+// core_killfeed - a minimal event-observer plugin (AGENTS.md rule 29,
 // "Wasm-first": anything that is discretionary behavior ships as a Wasm
 // plugin). Reference module for announcements, kill-feeds, scoreboards and
 // external integrations: it observes the event/verdict hooks, logs each event

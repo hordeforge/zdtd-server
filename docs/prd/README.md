@@ -1,6 +1,6 @@
 # Product Requirements Documents (PRD)
 
-> **Purpose:** registry and guide for PRDs — product requirements for each addon, paired with the RFC of the same number.
+> **Purpose:** registry and guide for PRDs - product requirements for each addon, paired with the RFC of the same number.
 
 Numbered product-requirements documents for zdtd. Format: background →
 scope → requirements (R1…) → acceptance. Status is one of: **draft**,
@@ -18,7 +18,7 @@ start from [TEMPLATE.md](TEMPLATE.md).
 | [0006](0006-honk-doors.md) | Vehicle horn opens trader doors | draft (design: RFC 0006) |
 | [0007](0007-deco-suppression.md) | Decoration suppression (AllowDecorations) | draft (design: RFC 0007) |
 
-Numbering: 4-digit, zero-padded, never reused — next is **PRD 0008**. PRD and
+Numbering: 4-digit, zero-padded, never reused - next is **PRD 0008**. PRD and
 RFC numbers pair by addon: the design answering PRD NNNN lives in
 [RFC NNNN](../rfc/README.md).
 

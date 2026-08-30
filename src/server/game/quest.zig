@@ -1,4 +1,4 @@
-//! Quest helpers — journal snapshots + trader offers + POI quest events.
+//! Quest helpers - journal snapshots + trader offers + POI quest events.
 //! Extracted from game.zig; helpers take *Game (called as game_quest.foo(g, …)).
 //! Bodies are verbatim copies (stock asm.il comments kept).
 

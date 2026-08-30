@@ -1,4 +1,4 @@
-# <Addon> — Product Requirements (PRD)
+# <Addon> - Product Requirements (PRD)
 
 **Number:** PRD NNNN
 **Status:** draft | in review | shipped
@@ -22,7 +22,7 @@ Numbered, verifiable; each traceable to an acceptance criterion in §8.
 
 ### Out of scope (later, only with demand)
 
-What this deliberately does not do — this stops the next reader from
+What this deliberately does not do - this stops the next reader from
 "fixing" a deliberate omission.
 
 ## 5. User stories

@@ -15,7 +15,7 @@ die-on-trap components: a module that trapped stayed disabled until the
 server restarted, its queued-but-undrained commands still executed, and a
 typo'd hook name failed silently (never fired). We adopted three properties
 from "A Programming Paradigm for Spatiotemporal Composability" (Shi, Zhang,
-Cui — Peking Univ / DeepSeek-AI; the Cordis meta-framework) to make plugins
+Cui - Peking Univ / DeepSeek-AI; the Cordis meta-framework) to make plugins
 safe runtime components:
 
 - **Temporal composability** (paper §3.1, revertible effects): every effect a
@@ -75,7 +75,7 @@ safe runtime components:
 - Review gate: `docs/prompts/plugin-composability-review.md`; the invariant
   is also AGENTS.md rule 30.
 - Not adopted: the paper's full fiber/provision calculus and dependency
-  typing/versioning (§6.6) — overkill for a fixed hook table; revisited only
+  typing/versioning (§6.6) - overkill for a fixed hook table; revisited only
   if plugins gain mutual provisioning.
 - Reactive coeffects (§3.2): adopted as load-time validation. The paper
   classifies runtime context changes against the spec to drive activation;

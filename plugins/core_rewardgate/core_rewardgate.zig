@@ -1,4 +1,4 @@
-// core_rewardgate — quest reward scaling via the on_quest_complete verdict.
+// core_rewardgate - quest reward scaling via the on_quest_complete verdict.
 //
 // Verdict convention (docs/PLUGIN_DEV.md "Hooks"):
 //   on_quest_complete(player, quest_def_id) -> i32

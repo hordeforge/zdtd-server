@@ -1,4 +1,4 @@
-//! nav.zig — coarse walkability grid + BFS pathfinding over loaded chunks.
+//! nav.zig - coarse walkability grid + BFS pathfinding over loaded chunks.
 //!
 //! Borrowed in spirit from the Recast/Detour navmesh used by the Unvanquished
 //! bots (see `../7dtd-fps-bots/docs/oss-fps-bot-survey.md`): the host owns the

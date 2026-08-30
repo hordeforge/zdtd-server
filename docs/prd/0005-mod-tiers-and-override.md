@@ -1,6 +1,6 @@
-# Module Tiers and Mod Override — Product Requirements (PRD)
+# Module Tiers and Mod Override - Product Requirements (PRD)
 
-> **Purpose:** product requirements for the mod tier and override model — which modules are the server, which are replaceable, and how conflicts fail closed.
+> **Purpose:** product requirements for the mod tier and override model - which modules are the server, which are replaceable, and how conflicts fail closed.
 
 **Number:** PRD 0005
 **Status:** shipped (ADR 0032; AC1-AC8 covered by `scenarios.zig` mods tests + resolver unit tests)
@@ -37,12 +37,12 @@ itself.
 
 ## 2. Personas
 
-- **Operator** — runs a zdtd server, wants bots and MCP on by default, wants
+- **Operator** - runs a zdtd server, wants bots and MCP on by default, wants
   to turn a feed off with one line, wants a loud error when two mods fight
   over the same behaviour instead of silent nondeterminism.
-- **Modder** — wants to drop a folder under `mods/` and have it load, declare
+- **Modder** - wants to drop a folder under `mods/` and have it load, declare
   "I replace X", and have the whole thing work without forking the server.
-- **Core developer** — wants the boundary between core and mods explicit and
+- **Core developer** - wants the boundary between core and mods explicit and
   enforced, so gameplay policy keeps flowing through Wasm (ADR 0020 rule 29)
   and core stays authoritative and fast.
 
@@ -68,7 +68,7 @@ itself.
 
 - Tier model and tier manifests (`manifest.toml` for official and user mods;
   core override points declared in the comptime registry in
-  `src/plugin/manifest.zig` — the RFC's per-directory `component.toml`
+  `src/plugin/manifest.zig` - the RFC's per-directory `component.toml`
   wording was deliberately not built, see ADR 0032 decision 2).
 - Auto-discovery of `mods/*/manifest.toml` at boot.
 - `[mods] disabled` / `[mods] blacklist` in zdtd.toml.

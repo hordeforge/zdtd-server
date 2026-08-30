@@ -1,6 +1,6 @@
 # Workstation TE wire (RE notes, V3.1.0 b14 IL)
 
-> Purpose: stock `TileEntityWorkstation` (type 12) network/persist body and the queue sim that rides `NetPackageTileEntity` — field order from `asm.il` so encode/decode and `world/workstations.zig` stay RE-faithful.
+> Purpose: stock `TileEntityWorkstation` (type 12) network/persist body and the queue sim that rides `NetPackageTileEntity` - field order from `asm.il` so encode/decode and `world/workstations.zig` stay RE-faithful.
 
 Related: [PACKAGES.md](PACKAGES.md) · [INVENTORY.md](INVENTORY.md) · [WIRE_CHUNK.md](WIRE_CHUNK.md) · [AUTHORITY.md](../AUTHORITY.md) · `src/wire/stock_te.zig` · `src/world/workstations.zig` · `src/server/c2s/inv.zig`
 

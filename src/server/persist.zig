@@ -964,7 +964,7 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 // ZPV5 persists the POI rect (stock PositionData[2/3]), so a
                 // restored quest keeps the prefab it was handed; legacy files
                 // have none and re-resolve from the world (stock re-derives
-                // QuestPrefab from the position data it persisted — old zdtd
+                // QuestPrefab from the position data it persisted - old zdtd
                 // saves simply lack the data, so the nearest-POI fallback is
                 // the honest equivalent, audit B26).
                 if (self.sim.journal[ps].slots[fq].poi.valid()) continue;
@@ -1210,7 +1210,7 @@ pub fn loadEntities(self: *Game) !void {
                 const seats = r.readByte() catch return error.Truncated;
                 const max_speed = r.readF32() catch return error.Truncated;
                 // Restore the loader's per-kind max HP (EntityVehicle C#
-                // constants: gyro 250, 4x4 300, rest 200) — a saved gyro/4x4
+                // constants: gyro 250, 4x4 300, rest 200) - a saved gyro/4x4
                 // must not come back at the flat 200.
                 const vhp: f32 = if (self.vehicles.byKind(kind)) |vd| vd.max_hp else 200;
                 if (self.sim.spawnVehicleEx(kind, x, y, z, vhp, max_speed, seats)) |nid| {

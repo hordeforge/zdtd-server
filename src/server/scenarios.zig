@@ -5071,7 +5071,7 @@ test "scenario interest: mob leaving interest gets EntityRemove(Unloaded)" {
 }
 
 /// First NetPackageEntityStatChanged body for `entity_id` with EnumStat `kind`
-/// (0 Health, 7 Food, 8 Water — PlayerEntityStats::Tick). The survival loop
+/// (0 Health, 7 Food, 8 Water - PlayerEntityStats::Tick). The survival loop
 /// also emits Food/Water stats, so tests must pick the stat they mean.
 fn findStatBody(cap: *const ln_peer.Capture, stat_id: u16, entity_id: i32, kind: u8) ?[]const u8 {
     var i: usize = 0;
@@ -6373,7 +6373,7 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 1));
     systems.drainQuestCoins(&g.sim, c.slot);
 
-    // goto_point: the parsed radius gates the arrival — outside does nothing,
+    // goto_point: the parsed radius gates the arrival - outside does nothing,
     // inside the target (the bound POI center 8,8) completes it.
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 2));
     systems.questTickGoto(&g.sim, c.slot, 0, 70, 0); // ~11 m from the target
@@ -6382,7 +6382,7 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 2));
     systems.drainQuestCoins(&g.sim, c.slot);
 
-    // fetch_item via the treasure_complete event — the wire the stock client
+    // fetch_item via the treasure_complete event - the wire the stock client
     // sends when it digs the chest (NetPackageQuestObjectiveUpdate).
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 3));
     const fq = systems.questFindActive(&g.sim, c.slot, 3).?;
@@ -6413,7 +6413,7 @@ test "scenario every quest kind completes end-to-end (kill/goto/fetch/trader/cra
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 5));
     systems.drainQuestCoins(&g.sim, c.slot);
 
-    // stay_within: the parsed radius gates it — outside does nothing, inside
+    // stay_within: the parsed radius gates it - outside does nothing, inside
     // the bound POI center completes it.
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, 6));
     systems.questTickStayWithin(&g.sim, c.slot, 20, 20); // ~17 m from 8,8
@@ -7399,7 +7399,7 @@ test "scenario quest POI selection matches stock tags/tier/bands and feeds offer
         .quest_cache = .empty,
     };
     // Tags must be allocator-owned (Index.deinit frees each entry's tags),
-    // and distinct per entry — a shared pointer would be freed N times.
+    // and distinct per entry - a shared pointer would be freed N times.
     const tags_clear = try gpa.dupe(u8, "clear");
     const tags_fetch_b = try gpa.dupe(u8, "fetch");
     const tags_fetch_c = try gpa.dupe(u8, "fetch");
@@ -7549,7 +7549,7 @@ test "scenario block_activated objective event advances the phase" {
 }
 
 /// Encode a NetPackagePartyActions body (currentOperation, invitedBy, invited,
-/// voiceLobbyId — RE parties-factions.md §3).
+/// voiceLobbyId - RE parties-factions.md §3).
 fn buildPartyActionBody(buf: []u8, action: u8, invited_by: i32, invited: i32) ![]u8 {
     return packages.stock_party.buildActionsBody(buf, .{
         .action = action,
@@ -8669,7 +8669,7 @@ test "scenario harvest drops roll into the breaker (terrStone → resourceRockSm
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", d));
 
     // Block gone, and the rolled Harvest stack sits in the breaker's
-    // inventory (55 rocks, prob 1 — the deterministic roll cannot miss).
+    // inventory (55 rocks, prob 1 - the deterministic roll cannot miss).
     try std.testing.expectEqual(@as(u16, 0), g.world.blockWorld(bx, by, bz) catch 0);
     const ps = g.sim.playerByPeer(c.slot).?;
     var found: u32 = 0;
@@ -9211,7 +9211,7 @@ test "scenario wasmQuery cover: none on open ground, found behind a wall" {
     try g.world.setBlockWorld(1, hh + 2, 1, world_store.block_stone);
     const n = game_wasm_host.wasmQuery(&g.wasm_ctx, "cover 0 0 10 10", &out);
     try std.testing.expect(n >= 3);
-    // Response is "<cx> <cz>" — a two-float answer with a space separator.
+    // Response is "<cx> <cz>" - a two-float answer with a space separator.
     const sep = std.mem.findScalar(u8, out[0..n], ' ');
     try std.testing.expect(sep != null);
     const cx = std.fmt.parseFloat(f32, out[0..sep.?]) catch 0;

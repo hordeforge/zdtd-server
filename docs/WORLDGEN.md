@@ -1,6 +1,6 @@
 # Procedural world generation (design)
 
-> **What this is:** streaming procedural terrain plan for `src/world/worldgen.zig` — the density-field, biome and structure design that complements baked DTM worlds without prebaking the map.
+> **What this is:** streaming procedural terrain plan for `src/world/worldgen.zig` - the density-field, biome and structure design that complements baked DTM worlds without prebaking the map.
 
 > **Related:** [ARCHITECTURE §7](ARCHITECTURE.md#7-world-and-chunks) · [MAPS](MAPS.md) · [ASSETS](ASSETS.md) · [ECS_SYSTEMS](ECS_SYSTEMS.md) · [SCALE](SCALE.md) · [STATUS](STATUS.md) · [GAP_ANALYSIS](GAP_ANALYSIS.md)
 
@@ -44,18 +44,18 @@ noise, so a save reproduces across restarts and hosts.
 
 **Deco on proc worlds** (2026-08-29): proc worlds carry no biomemap, so the
 deco species resolve from the **W3 proc biome field** + the biomes.xml deco
-lists (the same table the baked path uses) — with a game-dir present an
+lists (the same table the baked path uses) - with a game-dir present an
 infinite proc world is not bald. A bare proc world without game-dir biomes.xml
 stays bald (fail closed: no fabricated block ids the client cannot resolve).
 
 **Save growth** (2026-08-29): an untouched proc chunk regenerates from the
-seed, so `saveChunk` skips clean proc chunks — only edited (dirty) chunks
+seed, so `saveChunk` skips clean proc chunks - only edited (dirty) chunks
 persist. An infinite world's save dir grows with the player's edits, not with
 every visited chunk. Baked worlds keep persisting clean chunks (disk reload
 beats DTM+prefab regen; the map is finite).
 
 **Reversibility** (2026-08-29): a mod must not permanently change default
-behavior. The mod (`[mods] enabled = "infinite_world"`) is an opt-in overlay — exploring a
+behavior. The mod (`[mods] enabled = "infinite_world"`) is an opt-in overlay - exploring a
 proc world writes nothing until the player edits (pinned by a test; the deco
 mirror's derived trees are re-applied on every stream and never persisted),
 so dropping the mode later returns the server to its default terrain with the

@@ -580,7 +580,7 @@ area and the concrete work.
     gen + encode) still peaks ~2 s (budget 50 ms) after the ACK-yield,
     clean-proc te_scan skip (19.7 M → 262 K cells) and config-budget fixes.
     Soak evidence (2026-08-29, 4-way bot rejoin churn on the proc world):
-    the **Debug** build can FAIL a concurrent join — one of four clients
+    the **Debug** build can FAIL a concurrent join - one of four clients
     wedged (entity=-1, ~3105 packages received but `everJoined` never set;
     max tick 7.1 s, 531 reliable-window drops, 3 non-critical XP send
     drops) and was disconnected after ~63 s. The same churn on a
@@ -590,21 +590,21 @@ area and the concrete work.
     holding the main thread while other peers' enter bundle waits. 16-bot
     bench ramp (2026-08-29, Navezgane): at the default max_players=8 the
     ramp is confounded by the player cap (login server full; the join_fail
-    counter counts cap rejections, not burst drops — 62.5% join pass there
+    counter counts cap rejections, not burst drops - 62.5% join pass there
     is the 8-slot cap, not the burst); rerun at max_players=16 on the
     ReleaseFast binary passes 16/16 (100% join, no burst failures), while
     the same 16-slot ramp on the Debug binary passes 13/16 with tick spikes
-    to 29 s (p99 1.6 s) and 2317 reliable-window drops during the burst —
+    to 29 s (p99 1.6 s) and 2317 reliable-window drops during the burst  -
     the proc-gen amplification made visible without the cap confound. The
     Release binary keeps a tick-budget overrun (max ~260 ms vs 50 ms), not
     a join failure. DONE 2026-08-30: the spawn-area now delivers through
     the `chunk_adds_per_stream_tick` stream budget instead of one
-    synchronous flood — the collision-mesh core (inner 3×3) stays
+    synchronous flood - the collision-mesh core (inner 3×3) stays
     immediate, the tail paces via `drainSpawnArea` (see the PARTIAL row:
     62-join loadgen cycle, join_fail=0, chunk stream bounded 50 ms).
     Remaining: W2b async chunk gen (moves gen + te_scan off the join
     tick) and an apm section for the join handler so the residual max-tick
-    (1.13 s) is attributed — both are join-timing changes gated on
+    (1.13 s) is attributed - both are join-timing changes gated on
     stock-client validation
     (no client installed; the mesh-core race is documented in c2s/join.zig
     DynamicClientArrive). The per-poll send byte budget direction is
@@ -668,9 +668,9 @@ re-arms) with the population count as the quest target.
 
 - **Objective type to executable phase kind mapping** `WORKS`
   Data-driven since 2026-08-19: the mapping is the catalog's
-  `objective_kinds` table — `[quests] objective_kinds = "Type=PhaseKind, ..."`
+  `objective_kinds` table - `[quests] objective_kinds = "Type=PhaseKind, ..."`
   in zdtd.toml / a mode pack (config rows win, then the builtin stock
-  defaults) — so a NEW stock objective type is a config row, not a code
+  defaults) - so a NEW stock objective type is a config row, not a code
   change (scenario `objective-kinds mapping is data-driven`). The builtin
   table covers all 16 stock types incl. `POIStayWithin` and
   `POIBlockActivate`; unmapped types degrade to `.auto` scaffolding
@@ -691,7 +691,7 @@ re-arms) with the population count as the quest target.
   message / event / gamestage_list / count properties). **UnlockPOI fires
   server-side on phase entry**: the phase-gated action releases the quest's POI
   lock (stock `QuestActionUnlockPOI`, asm.il 1390421-1390429). 2026-08-21:
-  **SpawnGSEnemy fires too** — on phase entry the Game spawns
+  **SpawnGSEnemy fires too** - on phase entry the Game spawns
   `count_min..count_max` gamestage-scaled enemies around the player (stock
   SpawnQuestEntity placement: player position + random direction ×
   (12 + rand*12) m; gamestage list resolved at the party gamestage, entity
@@ -719,12 +719,12 @@ re-arms) with the population count as the quest target.
   `buildPhaseGraph` mirrors `QuestClass.HighestPhase` and emits a flat
   per-objective list (`def.objectives`, stock CreateQuest order) beside the
   per-phase advancing spec. A phase advances only when **all** its non-optional
-  objectives complete (stock `refreshQuestCompletion`, asm.il 983645-983904) —
-  including always-active phase-0 objectives — so the `POIStayWithin`
+  objectives complete (stock `refreshQuestCompletion`, asm.il 983645-983904)  -
+  including always-active phase-0 objectives - so the `POIStayWithin`
   constraint on `tier1_clear` phase 3 (ClearSleepers + stay) and the second
   half of shared phases are enforced; every phase kind receives its events
   (`phaseHasKind` gates, not the single advancing spec kind). Arrival
-  objectives (goto/stay/trader/rally) keep required=1 — their `value` is a
+  objectives (goto/stay/trader/rally) keep required=1 - their `value` is a
   distance (stock ObjectiveGoto::distance), never a count. `Optional`
   objectives never block; `ForcePhaseFinish` fails the quest when the phase is
   incomplete (slot flips to the wire's Failed state, not re-offered;
@@ -859,7 +859,7 @@ re-arms) with the population count as the quest target.
   The offer list is filtered by the requested tier (stock DifficultyTier ==
   tierLevel, asm.il 827746-827975; scenario proves a tier-2 fetch gets nothing
   from a tier-1 list). 2026-08-21: every offer is now **pre-positioned** like
-  stock — the EntityTrader offer loop runs Quest.SetupPosition per quest, so
+  stock - the EntityTrader offer loop runs Quest.SetupPosition per quest, so
   each QuestPacketEntry carries the real QuestLocation (POI center at terrain
   height), QuestSize (bbox size) and POIName, selected by the stock
   tag/tier/biome/band engine (DynamicPrefabDecorator.GetRandomPOINearTrader;
@@ -889,8 +889,8 @@ re-arms) with the population count as the quest target.
   9, SetupFetch 12, SetupRestorePower 13, FinishManagedQuest 14,
   ResetTraderQuests 16) do not block zdtd's fetch/clear quests, which complete
   through the action hooks (`questOnFetchItem` / `questOnZombieKilled`).
-  2026-08-21: the open item — stock's ClearSleeper suppression of sleeper
-  re-arm — is closed: completing a ClearSleepers phase (POI-gated kills)
+  2026-08-21: the open item - stock's ClearSleeper suppression of sleeper
+  re-arm - is closed: completing a ClearSleepers phase (POI-gated kills)
   marks the bound POI's sleeper volumes cleared in the persistent
   `sleepers_cleared.zsc` store, so a cleared POI does not re-spawn its
   sleepers on the next re-trigger or restart.
@@ -961,7 +961,7 @@ re-arms) with the population count as the quest target.
 
 - **Kill / fetch / goto / stay-within / craft progress hooks** `WORKS` `(2026-08-22)`
   All five are wired. 2026-08-19: fetch quests now complete through **real
-  triggers** — the client's `treasure_complete` QuestObjectiveUpdate event
+  triggers** - the client's `treasure_complete` QuestObjectiveUpdate event
   (treasure digs) and a container-loot hook (FetchFromContainer), and the old
   "every zombie kill also advances fetch" hack is gone; goto/stay-within use
   the objective's parsed distance in metres (`PhaseSpec.radius`, stock
@@ -972,7 +972,7 @@ re-arms) with the population count as the quest target.
   ClearSleepers is an N-kills-anywhere counter rather than "clear this POI's
   sleeper volume" (the stock `QuestEvent_SleepersCleared` suppression of
   sleeper re-arm is the open part). 2026-08-21: the ClearSleepers leg went
-  real — kills only count inside the quest's bound POI (victim position rides
+  real - kills only count inside the quest's bound POI (victim position rides
   the kill event; `PhaseSpec.poi_gated` from the ClearSleepers objective
   type), and completing the phase suppresses the POI's sleeper volumes
   (persistent `sleepers_cleared.zsc`, so a cleared POI does not re-arm on
@@ -994,8 +994,8 @@ re-arms) with the population count as the quest target.
   completed starter survives restart instead of being overwritten and
   re-offered, and a failed one is never re-granted. This matches the stock
   gate (SandboxOptionManager.UpdateInGameValuesWithSandboxOptions IL ~0A26:
-  grant when `FindQuest(starter, -1) == null` and the `StarterQuest` cvar —
-  set to 1 by the starter's SetCVar action — is 0; the slot scan is the
+  grant when `FindQuest(starter, -1) == null` and the `StarterQuest` cvar  -
+  set to 1 by the starter's SetCVar action - is 0; the slot scan is the
   journal equivalent of the FindQuest half, and the active/completed/failed
   check covers the cvar's "already started" state). The grant is shared with
   the post-join party (stock ShareAllQuestsWithParty), and the join PDF
@@ -1010,10 +1010,10 @@ re-arms) with the population count as the quest target.
   (the stock Quest.Write identity, `Quest.Write` IL writes `ID` as a string) and
   the POI rect (stock PositionData[2/3] bbox origin + size) alongside the
   def_id/quest_code/flags/progress/phase core. On restore the quest resolves by
-  name first — a quests.xml edit or `--config-overrides` patch no longer
+  name first - a quests.xml edit or `--config-overrides` patch no longer
   reshuffles a saved quest into a different one (byName wins over the stored
   parse-order def_id; a def dropped from the file keeps its stored id rather
-  than silently rebinding) — and the accepted POI rect comes back verbatim
+  than silently rebinding) - and the accepted POI rect comes back verbatim
   instead of re-resolving to the nearest prefab. ZPV2/3/4 files still read and
   upgrade in place (v<5 records are re-encoded, not carried byte-for-byte, as
   the journal grew). Scenarios `quest-persist` (round-trip keeps def + rect
@@ -1118,7 +1118,7 @@ parsed, and quest offering is unwired.
   Body encoding is correct but stock direction is ToServer, so the client drops
   an inbound one before `Read`. Real S2C paths are spawn ECD + LockResponse;
   this `sendTraderSnapshot` is a refresh hint only. Waived per scope §1 (no
-  package invention — stock never sends this direction).
+  package invention - stock never sends this direction).
   *Anchors:* `src/server/game.zig`, `asm.il`
 
 - **TraderData v2 body encoding** `WORKS`
@@ -1663,7 +1663,7 @@ encoding is one day high.
 - **Blood-moon corpse decay / chunk pinning** `PARTIAL (waived)`
   Stock horde `bIsChunkObserver` / 3x gib cleanup is noted but not wired: the
   chunk pin needs stock dedi layout RE and `IsBloodMoon` is not on the wire
-  either. Horde itself is parity-path, pinning is retention polish — waived.
+  either. Horde itself is parity-path, pinning is retention polish - waived.
   *Anchors:* `asm.il:412595`, `asm.il:413978`
 
 - **Blood-moon schedule persistence across restart** `WORKS`
@@ -2210,13 +2210,13 @@ gamestage, no wandering hordes, and no screamers.
   fire inside commercial/industrial POIs; wilderness rules stay active
   outside them, stock POITags/noPOITags Test_AnySet). Approximation: zdtd
   tests the single POI under the spawn point where stock unions tags over
-  the 80 m area (GetPOIsAtXZ) — that area structure is the chunk-area
+  the 80 m area (GetPOIsAtXZ) - that area structure is the chunk-area
   ledger waiver.
 
 - **Chunk-area spawn ledger** `PARTIAL (waived)`
   Stock keeps per-group counts, DecMaxCount/IncCount and `OnEntityUnloaded`
   ledger; zdtd uses one global alive + fixed cooldowns. Per-area density needs
-  the chunk-group state machine — waived as spawn-balance polish.
+  the chunk-group state machine - waived as spawn-balance polish.
   *Anchors:* `asm.il:1093735-1093863`, `src/ecs/aidirector.zig:159-178`
 
 - **entitygroups.xml weighted group table** `WORKS` `(2026-08-22 re-audit)`
@@ -2403,7 +2403,7 @@ gamestage, no wandering hordes, and no screamers.
   shoves entities, jumps or digs when fully blocked, and `applyGravity` runs
   once per AI tick snapping Y to the ground or falling with gravity), so a
   wandering body settles on terrain and cannot walk through walls. 2026-08-21:
-  the remaining "does not path" gap is closed — `wanderUpdate` now routes the
+  the remaining "does not path" gap is closed - `wanderUpdate` now routes the
   same A* chase machinery (`chaseAlongPath` + `replanPath`, step_fn-gated) as
   the chase, so a wanderer detours around obstacles on the navmesh instead of
   sliding straight into them (stock EAIWander walks to the spot via the
@@ -2442,7 +2442,7 @@ gamestage, no wandering hordes, and no screamers.
 
 - **Vultures / flying entities** `PARTIAL (waived)`
   No flying `EntityKind`/vertical AI; vultures not spawned. Needs vertical
-  movement + `EntityFlying` parity — waived as entity-variety, not parity gate.
+  movement + `EntityFlying` parity - waived as entity-variety, not parity gate.
   *Anchors:* `src/ecs/components.zig:5-13`
 
 - **Animals never despawn** `WORKS` `(2026-08-22)`
@@ -2525,7 +2525,7 @@ gamestage, no wandering hordes, and no screamers.
 - **AIDirector / sleeper state persistence across restart** `PARTIAL (waived)`
   `saveAll` covers chunks/containers/block-meta/players; entity/director/sleeper
   timers are runtime state that stock also rebuilds on load. Persisting live mobs
-  needs `EntityCreationData` snapshot RE — waived as session-lifetime polish.
+  needs `EntityCreationData` snapshot RE - waived as session-lifetime polish.
   *Anchors:* `src/server/game.zig`
 
 - **Entity spawn replication (EntityCreationData v36)** `WORKS`
@@ -2712,7 +2712,7 @@ unvalidated, and durability, mods and repair do not exist.
   `RepairItem` payload is intentionally ignored (hard-flagged false); item repair
   via workstation queue is client-FX + inventory-authoritative durability refs.
   True `ItemClass.RepairTime` scheduling would reimplement the workstation craft
-  queue — stock-parallel path out of scope vs wire contract.
+  queue - stock-parallel path out of scope vs wire contract.
   *Anchors:* `src/wire/stock_te.zig:389`, `:532-536`
 
 - **Block upgrade path (hammer upgrade)** `WORKS`
@@ -3058,7 +3058,7 @@ and server-to-client XP/level pushes do not exist.
   *Anchors:* `src/server/game.zig`, `asm.il`
 
 - **Client to server progression blob (NetPackagePlayerStats)** `PARTIAL (waived)`
-  `EntityNetworkStats` blob is intentionally dropped (`accept, no sim`) — stock
+  `EntityNetworkStats` blob is intentionally dropped (`accept, no sim`) - stock
   `ToEntity` level relay would trust client stats. Server persists level/XP
   authority. S2C snapshots ship 2026-08-27: the server-authored
   `NetPackagePlayerStats` body goes to every peer on join/progression changes
@@ -3091,7 +3091,7 @@ and server-to-client XP/level pushes do not exist.
 
 - **Perk / attribute passive effects applied to gameplay** `PARTIAL (waived)`
   648 `passive_effect` rows not yet wired; armour mitigation is the only live sim
-  effect. Needs full `effect_group` VM — waived until progression runtime exists.
+  effect. Needs full `effect_group` VM - waived until progression runtime exists.
   SHIPS 2026-08-27 (bounded VM): level-scaled perk passives fold through the
   passive-effects VM over the tracked stats (armour resist + HealthChangeOT
   regen), revertibly like buffs.
@@ -3819,7 +3819,7 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   Stock `DamageBlock` can downgrade via `Stage2Health`; zdtd always clears to air.
   Visible on the small set of multi-stage blocks only. Wire is correct (chunk +
   SetBlock echo) and full block-state downgrade needs `blocks.xml` `DowngradeBlock`
-  wiring across the whole pipeline — waived as stage-fidelity, not parity blocker.
+  wiring across the whole pipeline - waived as stage-fidelity, not parity blocker.
   *Anchors:* `src/server/game.zig`, `asm.il`
 
 - **Zombie block damage** `WORKS` (2026-08-25):
@@ -5332,7 +5332,7 @@ Honest gaps:
 | TurnIn at correct trader NPC | PARTIAL (any trader open) |
 | Stock quest wire packages | WORKS (2026-08-21 reconciliation: stock_quest.zig matches QuestJournal.Write v5 + Quest.Write (FileVersion 8) + NPCQuestList FetchList + SharedQuest - the journal body is stock-shaped, not zdtd-native; the remaining objective-execution gaps (one advancing objective per phase, phase-0 always-active) are sim semantics tracked in S6.1, not wire) |
 | Localization.csv titles | WORKS (2026-08-21 reconciliation: the server sends localization keys - quest_id, item/entity names - and the stock client resolves them from its own Localization.txt, exactly like the stock server; no server-side localization table is needed) |
-| Reward choice / loot groups | WORKS (2026-08-26: the reward-choice blocker resolved by fresh DLL dumps — the C2S field does NOT exist in V3.1.0 b14: every CloseQuest/RefreshQuestCompletion caller passes a null rewardChoice (objective paths, DialogActionCompleteQuest.PerformAction IL=37 whose Value string is parsed then discarded), NetPackageQuestEvent's 17 event types carry no choice field, and the client's pick is applied in its LOCAL sim (XUiC_QuestTurnInRewardsWindow.BtnAccept_OnPress builds the chosen BaseReward list for the local CloseQuest) and rides the player inventory sync — the same trust model as harvest loot. So the stock dedi grants only non-ischosen rewards; zdtd's server payout now skips ischosen rewards exactly like stock (the previous server-side roll granted every choice group — fixed 2026-08-26, scenario core_rewardgate asserts the ischosen fixture reward is not granted). The non-chosen payout, tier loot groups and quest-tier rolls stay WORKS) |
+| Reward choice / loot groups | WORKS (2026-08-26: the reward-choice blocker resolved by fresh DLL dumps - the C2S field does NOT exist in V3.1.0 b14: every CloseQuest/RefreshQuestCompletion caller passes a null rewardChoice (objective paths, DialogActionCompleteQuest.PerformAction IL=37 whose Value string is parsed then discarded), NetPackageQuestEvent's 17 event types carry no choice field, and the client's pick is applied in its LOCAL sim (XUiC_QuestTurnInRewardsWindow.BtnAccept_OnPress builds the chosen BaseReward list for the local CloseQuest) and rides the player inventory sync - the same trust model as harvest loot. So the stock dedi grants only non-ischosen rewards; zdtd's server payout now skips ischosen rewards exactly like stock (the previous server-side roll granted every choice group - fixed 2026-08-26, scenario core_rewardgate asserts the ischosen fixture reward is not granted). The non-chosen payout, tier loot groups and quest-tier rolls stay WORKS) |
 | Trader tiers / quest_list offers | WORKS (2026-08-20 reconciliation: per-trader quest_list resolves via npc.xml + class-hash fallbacks, offers are tier-filtered and sent through NetPackageNPCQuestList FetchList, and the remove_quest accept marker journals the quest - the stock trader quest window is driven end to end) |
 | `traders.xml` inventory | WORKS (2026-08-21 reconciliation: per-trader `<trader_items>` refs (or the traderAlways fallback) are parsed with name/group/count/prob/quality/unique_only, and group refs are rolled prob-weighted via stock SpawnLootItemsFromList (asm.il:863343) - group rolls are not skipped; the stock TraderData window is populated end to end) |
 | Duke tokens / currency stock | PARTIAL (coins wallet) |

@@ -1,4 +1,4 @@
-//! Player progression / gamestage / XP — extracted from game.zig; helpers take *Game.
+//! Player progression / gamestage / XP - extracted from game.zig; helpers take *Game.
 //!
 //! Extracted from game.zig following the chunk_stream / replicate_te / persist /
 //! game_net precedent: helpers take `*Game` as first param and are called as

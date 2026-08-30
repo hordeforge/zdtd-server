@@ -1,9 +1,9 @@
 # MCP Server Addon - Design (RFC 0002)
 
-> **Purpose:** concrete design for the MCP server addon — guest/host split, transport bridge, frame flow, caps, and test harness.
+> **Purpose:** concrete design for the MCP server addon - guest/host split, transport bridge, frame flow, caps, and test harness.
 
 **Number:** RFC 0002
-**Status:** decided — implements [PRD 0002](../prd/0002-mcp-server.md) and
+**Status:** decided - implements [PRD 0002](../prd/0002-mcp-server.md) and
 [ADR 0031](../adr/0031-mcp-wasm-module.md). Decisions below are recorded in the
 ADR; this document fixes the concrete shape: layout, transport bridge, frame
 flow, caps, tests.
@@ -61,7 +61,7 @@ guest.
 
 One `Transport` struct, constructed when `--mcp-port != 0`, in the same style
 as `webui.zig`. **Polled from the main loop like webui/admin (ADR 0012
-single-threaded tick) — there are no transport threads, queues, or condvars:**
+single-threaded tick) - there are no transport threads, queues, or condvars:**
 one connection and one complete request per `poll()` call, processed
 synchronously through the frame handler.
 
@@ -115,7 +115,7 @@ Static memory only (no heap, no libc):
   `json_*` lookups (`sbuf`/`rbuf`/`vbuf`, 96/96/128 bytes).
 - **JSON access:** the guest calls `zdtd.json_parse(frame_ptr, frame_len)`
   once per frame; the host parses with `std.json` into the plugin's fixed
-  buffer (`json_buf_max`, 64 KiB, reset per frame — also the nesting bound).
+  buffer (`json_buf_max`, 64 KiB, reset per frame - also the nesting bound).
   Fields are then read by dot-path: `json_str("method")`,
   `json_str("params.name")`, `json_obj("params.arguments")`,
   `json_str("params.arguments.verb")`, and `json_raw("id")` for the verbatim
@@ -224,10 +224,10 @@ All named module consts, no magic numbers on the path.
 2. **Transport unit tests** (`src/server/mcp_transport.zig`): auth accept/
    reject, path/method gates, frame cap (413), transfer-encoding rejection,
    notification 202, loopback-only binding.
-3. **Harness e2e** (`mcp_transport.zig` test, server side — the transport is
+3. **Harness e2e** (`mcp_transport.zig` test, server side - the transport is
    top-of-stack and may load the plugin runtime): the real
    `mods/mcp/mcp.wasm` behind the transport's test-mode HTTP framing
-   (same pattern as webui's testServeHttp — raw requests in, captured
+   (same pattern as webui's testServeHttp - raw requests in, captured
    responses out, no kernel socket), driven through initialize ->
    notifications/initialized -> tools/list -> tools/call(server_status) ->
    tools/call(admin_command) with a sense/query Cap standing in for Game.

@@ -9,7 +9,7 @@
 //! Failure convention: every send/broadcast helper counts the failure in
 //! `net_send_errors` (and logs at a 1/100 throttle) before returning the error.
 //! Callers that deliberately ignore the returned error therefore use a bare
-//! `catch {}` — the accounting and the log live in the helper, so the empty
+//! `catch {}` - the accounting and the log live in the helper, so the empty
 //! catch is the documented best-effort form, not an unlogged swallow (AGENTS
 //! rule "empty catch {} only for ... documented non-fatal").
 

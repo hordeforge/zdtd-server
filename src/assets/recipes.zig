@@ -26,7 +26,7 @@ pub const RecipeDef = struct {
     /// recipes.xml: only 17 of 639 recipes declare it, and every declared
     /// value is 0; the remaining 622 are left at -1 rather than a guessed
     /// derivation (the doc's ingredient-cost fallback is an editor-only export
-    /// step, not something the dedicated server IL runs — items.xml ships zero
+    /// step, not something the dedicated server IL runs - items.xml ships zero
     /// CraftComponentExp rows to derive from even if it did).
     craft_exp_gain: i32 = -1,
     /// recipes.xml craft_tool: the tool name a recipe requires (53 stock

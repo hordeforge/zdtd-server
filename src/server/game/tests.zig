@@ -1440,7 +1440,7 @@ test "world clock persists across a restart (BM calendar survives)" {
             g.deinit();
             std.testing.allocator.destroy(g);
         }
-        // Day 5, 12:30 — deinit saves clock.zcl.
+        // Day 5, 12:30 - deinit saves clock.zcl.
         g.sim.director.clock.day = 5;
         g.sim.director.clock.hours = 12.5;
     }

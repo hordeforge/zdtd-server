@@ -14,7 +14,7 @@ Load-order rule (ADR 0010): stock XML data → config → preset packs → sourc
 documented last resort. A `Rules` value is a **floor** where per-entity stock
 data exists; defaults stay identical (a move is not a retune).
 
-## Moved (rules.zig — new fields, defaults identical)
+## Moved (rules.zig - new fields, defaults identical)
 
 | Group | Field | Default | Source (pre-move) |
 |---|---|---|---|
@@ -58,7 +58,7 @@ data exists; defaults stay identical (a move is not a retune).
 | `[quests]` | `max_poi_attempts` | 50 | `hooks.zig` search loop bound |
 
 Wiring changes that accompany the moves (non-field fixes, same behavior):
-- `world.zig` revenge window read `components.revenge_window_s` → `rules.ai.revenge_window_s` (the rule was already surfaced but inert — real bug fixed).
+- `world.zig` revenge window read `components.revenge_window_s` → `rules.ai.revenge_window_s` (the rule was already surfaced but inert - real bug fixed).
 - `systems.zig` falling-block terminal velocity reuses `rules.ai.fall_max_vy` (-30) instead of a duplicate literal.
 - Removed the now-dead module consts: `components.kb_speed/kb_seconds/revenge_window_s`, `systems.dig_*`, `aidirector.heat_*`, `electric.default_trigger_pulse_s`, `powerblocks.battery_*`, `poi_lock.unlock_grace`, `craft.vehicle_fuel_max/refuel_reach`, `trader_wire.trade_use_range`, `player.party_shared_kill_range_sq`, `hooks.poi_*`, `weather.blood_moon_storm_push`.
 
@@ -66,13 +66,13 @@ Wiring changes that accompany the moves (non-field fixes, same behavior):
 
 | Candidate | Reason |
 |---|---|
-| `store.zig` sea_level 64 | Used in comptime default literals (`.{sea_level} ** 256`); runtime config would be a structural refactor. (The projection surface around it — `[rules.geometry]` sea_level/height_scale/height_offset/height_ceiling, ADR 0036 — IS config.) |
+| `store.zig` sea_level 64 | Used in comptime default literals (`.{sea_level} ** 256`); runtime config would be a structural refactor. (The projection surface around it - `[rules.geometry]` sea_level/height_scale/height_offset/height_ceiling, ADR 0036 - IS config.) |
 | `store.zig`/`water.zig` water-source radius 12 | Worldgen-only carve; low value. |
 | `dem.zig` elevation mapping, `prefabs.zig` paint cap, trader gate scan margins, `sleeper.zig` scatter cap 8, `join.zig` mob burst cap 16, `bot.zig` weapon profiles | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
-| RE wire/protocol facts | `tts.zig` blockvalue_version 18, `components.buff_ticks_per_second 20`, `c2s/move.zig` 1/32 scale, trigger-duration enum table — not tunables. |
-| PERF compile-time budgets | Table/array caps (bm_parties, path replans/stride, max_poi_candidates, noise/dig/sleeper wake rings, max_workstations/containers/vending/lights/nodes/wires, max_resident_chunks, flush queues, terrain-snapshot window, `dmg_scale`) — compile-time bounds by design. |
-| FAIL safety guards | `electric.max_node_watts` 100k, movement dt envelope, explosion-radius clamp 6, `max_poi_candidates` — fail-closed bounds. |
-| STOCK fallbacks (offline/no-XML) | `world.stock_zombie_hp 200`, `stock_turret_watts 15`, eat props, maxStackOffline, trader price/markup fallbacks, weather default params, sleepers 5,5 — XML/offline data, covered by the XML audit. |
+| RE wire/protocol facts | `tts.zig` blockvalue_version 18, `components.buff_ticks_per_second 20`, `c2s/move.zig` 1/32 scale, trigger-duration enum table - not tunables. |
+| PERF compile-time budgets | Table/array caps (bm_parties, path replans/stride, max_poi_candidates, noise/dig/sleeper wake rings, max_workstations/containers/vending/lights/nodes/wires, max_resident_chunks, flush queues, terrain-snapshot window, `dmg_scale`) - compile-time bounds by design. |
+| FAIL safety guards | `electric.max_node_watts` 100k, movement dt envelope, explosion-radius clamp 6, `max_poi_candidates` - fail-closed bounds. |
+| STOCK fallbacks (offline/no-XML) | `world.stock_zombie_hp 200`, `stock_turret_watts 15`, eat props, maxStackOffline, trader price/markup fallbacks, weather default params, sleepers 5,5 - XML/offline data, covered by the XML audit. |
 
 Moved since this table was written:
 - **`[rules.worldgen]`** (2026-08-29, was line 70 above): the procedural shaping
@@ -84,8 +84,8 @@ Moved since this table was written:
   (sea_level 64, height_scale 1.0, height_offset 0.0, height_ceiling 0) on
   the block store; identity at stock defaults; fail-closed validate.
 - **`[rules.director]` tier ladders** (was line 69 above): the per-tier
-  scalars exist — `difficulty_hp_0..5` (0.5–2.0) and `move_scale_0..4`
-  (0.5–1.7) — read by `aidirector.zig` from the rules (the 11-field scalar
+  scalars exist - `difficulty_hp_0..5` (0.5–2.0) and `move_scale_0..4`
+  (0.5–1.7) - read by `aidirector.zig` from the rules (the 11-field scalar
   expansion the old row said was needed already happened).
 
 ## Verification
@@ -95,10 +95,10 @@ Moved since this table was written:
 
 ## 2026-08-25 additions (lift sweep)
 
-- `[rules.progression] kill_xp_fallback` (100) — kill-XP floor when
+- `[rules.progression] kill_xp_fallback` (100) - kill-XP floor when
   entityclasses ExperienceGain did not resolve (was a flat literal in
   `xpGainFor`); binder + overlay + GAME_OPTIONS row ship with the field.
-- `[bots] arrival_dist` (0.05) / `[bots] shot_range_slop` (2.0) — bot host
+- `[bots] arrival_dist` (0.05) / `[bots] shot_range_slop` (2.0) - bot host
   move-arrival tolerance and fire-range slop (were module constants in
   `bot.zig`); binder + main merge + GAME_OPTIONS row ship with the fields.
 - Re-audit found no dead `Rules` fields and no unconsumed config keys; the

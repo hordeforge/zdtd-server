@@ -1,6 +1,6 @@
 # ECS simulation architecture and systems
 
-> **What this is:** the SoA ECS layout, schedule order, queries/groups and the per-system inventory for `src/ecs/*` — the sim plane that ticks at 20 Hz inside [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule).
+> **What this is:** the SoA ECS layout, schedule order, queries/groups and the per-system inventory for `src/ecs/*` - the sim plane that ticks at 20 Hz inside [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule).
 
 > **Related:** [ARCHITECTURE §6](ARCHITECTURE.md#6-ecs-simulation-and-schedule) · [ARCHITECTURE §8](ARCHITECTURE.md#8-interest-and-replication-serialize-once) · [STATE_MACHINES](STATE_MACHINES.md) · [GAMEPLAY](GAMEPLAY.md) · [AUTHORITY](AUTHORITY.md) · [ASSETS](ASSETS.md) · [STATUS](STATUS.md) · [GAP_ANALYSIS](GAP_ANALYSIS.md) · [APM](APM.md)
 

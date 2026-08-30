@@ -1,6 +1,6 @@
 # Pure XML / Assetbundle Modlet Compatibility - Product Requirements (PRD)
 
-> **Purpose:** product requirements for pure XML/assetbundle modlet compatibility — discovery, XML patching, and join-phase config sync.
+> **Purpose:** product requirements for pure XML/assetbundle modlet compatibility - discovery, XML patching, and join-phase config sync.
 
 **Number:** PRD 0003
 **Status:** shipped (Mods/ discovery + patch pipeline + `NetPackageConfigFile`

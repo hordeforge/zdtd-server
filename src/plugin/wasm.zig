@@ -1417,7 +1417,7 @@ fn defineImports(linker: *zwasm.Linker, ctx: *HostCtx) !void {
     try linker.defineFuncCtx("zdtd", "json_obj", ctx, fn (*zwasm.Caller, i32, i32) anyerror!i32, H.jsonObj);
 }
 
-test "wasm runtime instantiates a trivial module and calls on_enable" { // Hand-built minimal wasm: (module (func (export "on_enable"))) — a no-op
+test "wasm runtime instantiates a trivial module and calls on_enable" { // Hand-built minimal wasm: (module (func (export "on_enable"))) - a no-op
     // void hook.
     const bytes = [_]u8{
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
@@ -1448,7 +1448,7 @@ test "wasm runtime instantiates a trivial module and calls on_enable" { // Hand-
 }
 
 test "wasm runtime disables a looping module on fuel exhaustion" {
-    // (module (func (export "on_tick") (loop (br 0)))) — an infinite loop that
+    // (module (func (export "on_tick") (loop (br 0)))) - an infinite loop that
     // burns fuel until the budget is exhausted.
     const bytes = [_]u8{
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
@@ -1742,7 +1742,7 @@ test "core_announce.wasm (zig-built) join/leave says + clock announcements" {
 test "core_killfeed.wasm observer keeps every verdict and never disables" {
     // The reference event-observer plugin (AGENTS.md rule 29, Wasm-first):
     // loaded from the committed module, its verdict hooks must always keep
-    // (0) and the module must never trap/disable — a pure observer is a
+    // (0) and the module must never trap/disable - a pure observer is a
     // zero-risk addition (docs/PLUGIN_DEV.md "What belongs in a plugin").
     const Cap = struct {
         fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
@@ -2150,7 +2150,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
     // pipe (RFC 0001 §3 / ADR 0026). The brain must NOT be modified; this is
     // the host-side regression the uncommitted work dropped.
     const Cap = struct {
-        // queueFn COPIES each command into owned bytes — the guest reuses one
+        // queueFn COPIES each command into owned bytes - the guest reuses one
         // `out` buffer per queue call, so storing a slice would alias.
         var queued: [8][64]u8 = undefined;
         var queued_n: usize = 0;
@@ -2335,7 +2335,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
 
     // Tick 4 (dodge-on-hit): player visible again and the bot took damage
     // (hp 100 -> 60). The brain must enter an evasive dodge and FORCE a move at
-    // the dodge speed (4.00 — no other branch uses it), bypassing command
+    // the dodge speed (4.00 - no other branch uses it), bypassing command
     // gating even though the scene is otherwise unchanged.
     Cap.hide_player = false;
     Cap.bot_hp = 60;
@@ -2377,7 +2377,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
     try std.testing.expect(burst_count >= 2);
 
     // Tick (flee phase): a nearly-dead bot (hp 15, 0.15 < HP_FLEE_FRAC) of ANY
-    // skill (skill 4 was set earlier) must retreat and HOLD fire — no shoot is
+    // skill (skill 4 was set earlier) must retreat and HOLD fire - no shoot is
     // queued across several ticks, while it still moves (backpedal).
     Cap.bot_hp = 15;
     var flee_ticks: usize = 0;
@@ -2414,7 +2414,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
 
     // Trailer phase: a sense pass that ALSO carries kind-4 bot-info (sniper)
     // and kind-3 damage-event records (player 2000 hit bot 1000 for 42) must
-    // not desync the brain's record offsets — it still tracks and drives on
+    // not desync the brain's record offsets - it still tracks and drives on
     // the player (the grudge keeps it locked), proving the v2 event trailer
     // parses end-to-end (RFC 0001 §3).
     Cap.with_trailer = true;
@@ -2437,7 +2437,7 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
     // Ammo/reload phase: the trailer gives bot 1000 a SNIPER (weapon_id 3,
     // mag 5, burst 1, ~0.6 s between shots). Firing must run the mag dry and
     // then hold fire through a reload gap (weapon_reload 2.5 s = 50 ticks)
-    // before resuming — proving ammo pacing end-to-end (RFC 0001 §5.1).
+    // before resuming - proving ammo pacing end-to-end (RFC 0001 §5.1).
     var shoot_ticks: [64]usize = undefined;
     var shoot_n: usize = 0;
     var t: usize = 0;

@@ -1,4 +1,4 @@
-// core_craftgate — craft request gate via the on_craft_request verdict.
+// core_craftgate - craft request gate via the on_craft_request verdict.
 //
 // Verdict convention (docs/PLUGIN_DEV.md "Hooks"):
 //   on_craft_request(player, name_ptr, name_len, times) -> i32

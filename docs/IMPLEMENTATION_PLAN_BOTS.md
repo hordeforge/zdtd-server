@@ -1,4 +1,4 @@
-# FPS Bot Addon — Implementation Plan
+# FPS Bot Addon - Implementation Plan
 
 > **What this is:** execution plan for the FPS bot addon (ADR 0026 / RFC 0001 / PRD 0001), milestones M0–M3 from host surface to guest brain.
 > **Related:** [INDEX.md](INDEX.md) · [STATUS.md](STATUS.md) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) · [WORK_PLAN.md](WORK_PLAN.md) · [PLUGIN_API.md](PLUGIN_API.md) · [PLUGIN_DEV.md](PLUGIN_DEV.md)
@@ -34,7 +34,7 @@ brain to core; the guest owns decisions, the host owns the body and the wire.
   `step.zig:239-240`, **after** `systems.tickAll` (which drained the command
   buffer at `schedule.zig:85`, returned at `step.zig:94`). Therefore commands
   the guest enqueues during `onTick` are drained at the **start of the next
-  tick** — an inherent **one-tick latency** between a plugin command and its
+  tick** - an inherent **one-tick latency** between a plugin command and its
   replicated-visible effect. This is accepted for v1 and documented in the
   spec/ADR (FPS bots do not need sub-tick response).
 - **No LOS primitive exists.** There is `World.isSolidWorld(x,y,z)`
@@ -45,13 +45,13 @@ brain to core; the guest owns decisions, the host owns the body and the wire.
 
 ---
 
-## M0 — Host surface: bot entity + sense/act (core, tested)
+## M0 - Host surface: bot entity + sense/act (core, tested)
 
 1. `src/ecs/components.zig`
    - Add `bot` to `Kind` (line 5-13).
    - Add `BotDef` component (per-bot skill params: `skill: u8`, `reaction_s`,
      `vision_range`, `vision_angle`, `fire_throttle_s`, `strafe_chance`,
-     `dodge_chance`, `aggression`, `self_preservation`) — Q3/BotCharacter
+     `dodge_chance`, `aggression`, `self_preservation`) - Q3/BotCharacter
      inspired fields.
    - Add `mask.bot` flag (use a free `_pad` bit at `components.zig:804`).
 2. `src/ecs/world.zig`
@@ -70,7 +70,7 @@ brain to core; the guest owns decisions, the host owns the body and the wire.
    - Add drain arms (72-94): spawn/destroy via `w.spawnBot` / `w.destroy`;
      move/look mutate transform through the client-move envelope already used
      for players; shoot → LOS check + `w.damage`.
-4. **New LOS primitive** — a `rayHasClearLineOfSight(w, x0,y0,z0, x1,y1,z1)`
+4. **New LOS primitive** - a `rayHasClearLineOfSight(w, x0,y0,z0, x1,y1,z1)`
    voxel march against `isSolidWorld`, placed in `src/world` or `src/ecs`
    (host-owned). Unit-test solid/air blockage.
 5. `src/server/game/wasm_host.zig`
@@ -81,9 +81,9 @@ brain to core; the guest owns decisions, the host owns the body and the wire.
 6. `src/plugin/wasm.zig`
    - Register `zdtd.sense(ptr,len,token)->i32` in `defineImports` (:494-519);
      add the `sense_fn` dispatch to `HostCtx` (:56-63).
-7. `src/server/game/replicate.zig` — add `.bot` to `is_mob` (:85-87) so bots
+7. `src/server/game/replicate.zig` - add `.bot` to `is_mob` (:85-87) so bots
    replicate to observers.
-8. `src/ecs/schedule.zig` — no phase reorder needed (commands drain last as
+8. `src/ecs/schedule.zig` - no phase reorder needed (commands drain last as
    today); a bot-intent reflect step can live in the `ai` phase rename or stay
    command-driven. Keep the pinned-order test (:123-135) untouched unless a
    phase genuinely moves.
@@ -95,7 +95,7 @@ in replication output (scenario test).
 
 ---
 
-## M1 — Sense view (host -> guest) + first guest module skeleton
+## M1 - Sense view (host -> guest) + first guest module skeleton
 
 - `sense` snapshot layout (locked in RFC 0001 §3): a versioned header + fixed-
   stride records (net_id, kind, is_self, alive, x/y/z, hp, yaw, target_id),
@@ -113,7 +113,7 @@ verb and the host drains them.
 
 ---
 
-## M2 — Guest brain module (Q3/Doom 3) + admin commands
+## M2 - Guest brain module (Q3/Doom 3) + admin commands
 
 - `mods/fps_bot/bot.c` → `fps_bot.wasm` (same clang→wasm32 build path
   as `assets/fixtures/*.c`, no WASI, no libc deps).
@@ -138,14 +138,14 @@ scripted scenario.
 
 ---
 
-## M3 — Dynamics + validation + docs finalise
+## M3 - Dynamics + validation + docs finalise
 
 - Response to being hit (dodge), death/re-respawn via the floor, corpse sweep.
 - Per-bot `bot cfg` overrides applied to `BotDef`.
 - `make check` green (provenance rows for every new `src/` file per
   `tools/provenance_scan.py`, AGENTS rule 15).
 - Triad validation: loadgen smoke + stock client (EAC off) + zdtd apm dumps
-  (ADR 0019) — bots visible to a real client, killable, obeying move caps.
+  (ADR 0019) - bots visible to a real client, killable, obeying move caps.
 - Final pass on RFC 0001 / PRD 0001 / ADR 0026 against what was actually built;
   update INDEX.md.
 
@@ -153,7 +153,7 @@ scripted scenario.
 
 ## Delivery order (recommended sequence of PRs/commits)
 
-1. ADR 0026 + SPEC + PRD + this plan (+ INDEX row) — the documentation slice.
+1. ADR 0026 + SPEC + PRD + this plan (+ INDEX row) - the documentation slice.
 2. M0 host: `bot` kind, `Mask.bot`, `BotDef`, command ops + drain, LOS march,
    `is_mob` replication, `parsePluginCommand` extension.
 3. M1: `sense` import + snapshot builder + C fixture + test.

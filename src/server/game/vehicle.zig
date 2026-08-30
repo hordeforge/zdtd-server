@@ -1,4 +1,4 @@
-//! Vehicle seat + positions S2C helpers — extracted verbatim from game.zig.
+//! Vehicle seat + positions S2C helpers - extracted verbatim from game.zig.
 //! seatRider / unseatRider (NetPackageEntityAttach) and the periodic
 //! NetPackageVehiclePositions broadcast.
 

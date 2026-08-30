@@ -2,7 +2,7 @@
 //! for the movement-noise model. Stock `SoundsFromXml::Parse` builds
 //! `Audio.XmlData` per `SoundDataNode name`, and `Audio.Manager::AddAudioData`
 //! (IL=85) feeds each node's `noiseData` into `AIDirectorData::AddNoisySound`
-//! keyed by the node name — the same key the client sends as the
+//! keyed by the node name - the same key the client sends as the
 //! `audioClipName` of a relayed `NetPackageSoundAtPosition`. Data, not code:
 //! stock `Data/Config/sounds.xml` holds 1312 `<Noise>` rows (footsteps 3–11,
 //! gunfire 60+, explosions 120, each with `muffled_when_crouched` and optional
@@ -56,7 +56,7 @@ pub const Table = struct {
     }
 
     /// Look up a relayed clip name (read-only, safe off the net thread once
-    /// the table is fully built — no writes happen after init).
+    /// the table is fully built - no writes happen after init).
     pub fn get(self: *const Table, name: []const u8) ?Noise {
         return self.map.get(name);
     }
@@ -116,7 +116,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             }
         } else break;
         // The node's own Noise element: find the first `<Noise ` inside the
-        // body — stock sounds.xml has at most one per SoundDataNode.
+        // body - stock sounds.xml has at most one per SoundDataNode.
         var noise: Noise = .{};
         if (std.mem.findPos(u8, clean, pi, "<Noise ")) |ni| {
             if (ni < body_end) {

@@ -100,7 +100,7 @@ pub fn clientRemoveStreamed(c: *Client, key: i64) void {
 }
 
 /// Ring cell (dx, dz) for the perimeter of the (2r+1)² square: ring r holds
-/// 8r cells (r >= 1), enumerated center-out — side 0 top row (left to
+/// 8r cells (r >= 1), enumerated center-out - side 0 top row (left to
 /// right), side 1 right column (top to bottom), side 2 bottom row (right to
 /// left), side 3 left column (bottom to top).
 fn ringCell(ring: i32, j: u32) struct { dx: i32, dz: i32 } {

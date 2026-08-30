@@ -1,6 +1,6 @@
 # Stock config assets
 
-> **What this is:** policy and loader map for stock XML, AssignIds and patched catalogs — how `src/assets/*` turns `--game-dir` into the ids and tables the sim and wire builders consume.
+> **What this is:** policy and loader map for stock XML, AssignIds and patched catalogs - how `src/assets/*` turns `--game-dir` into the ids and tables the sim and wire builders consume.
 
 > **Related:** [ARCHITECTURE §10](ARCHITECTURE.md#10-config-assets-and-persistence) · [MAPS](MAPS.md) · [WORLDGEN](WORLDGEN.md) · [PROVENANCE](PROVENANCE.md) · [ZIG_CLONE](ZIG_CLONE.md) · [STATUS](STATUS.md) · [wire/PACKAGES](wire/PACKAGES.md) · [AUTHORITY](AUTHORITY.md)
 

@@ -507,7 +507,7 @@ pub const World = struct {
     trade_price_verdict_fn: ?*const fn (?*anyopaque, i32, u16, u32) i32 = null,
     /// Optional host-side bot snap for the zombie AI (ADR 0026). Bots are NOT
     /// ECS entities, so the AI asks the Game through this hook instead of a
-    /// slot: `exact >= 0` resolves that one net id (any range — revenge);
+    /// slot: `exact >= 0` resolves that one net id (any range - revenge);
     /// `exact < 0` returns the nearest live bot within `range_sq` of (zx, zz)
     /// (proximity aggro). Null hook → no bots (pure ECS server).
     bot_snap_ctx: ?*anyopaque = null,

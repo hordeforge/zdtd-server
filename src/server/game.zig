@@ -222,7 +222,7 @@ pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
 
 /// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
 /// Wasm-first): runs the static then wasm hosts with the given attacker and
-/// returns the post-verdict amount — 0 when denied (<0), percent-scaled
+/// returns the post-verdict amount - 0 when denied (<0), percent-scaled
 /// (>0), unchanged when no plugin votes (0). Used by damage sources outside
 /// the C2S/ECS melee paths: environmental survival damage (drowning,
 /// radiation, starvation, attacker -1) and explosion damage (attacker = the
@@ -468,7 +468,7 @@ pub const Game = struct {
     gamestages: assets_gamestages.Table = assets_gamestages.Table.empty(),
     maxdamage: assets_maxdamage.Table = assets_maxdamage.Table.empty(),
     /// sounds.xml `<Noise>` rows keyed by sound-group name (the movement-noise
-    /// model's per-clip volume/time/muffle/heat; empty without a game-dir —
+    /// model's per-clip volume/time/muffle/heat; empty without a game-dir  -
     /// the relay then passes sound through with no AI noise, matching stock
     /// with no data).
     noise_table: assets_noise.Table = assets_noise.Table.empty(),
@@ -2557,7 +2557,7 @@ pub const Game = struct {
         if (std.mem.startsWith(u8, name, "tier")) return true;
         // Other stock quest-name families the client's quests.xml knows
         // (intro_buried_supplies, the test_* fixtures, challengegroup_reward_*,
-        // treasure_* — stock ships 7 treasure maps).
+        // treasure_* - stock ships 7 treasure maps).
         if (std.mem.startsWith(u8, name, "intro_")) return true;
         if (std.mem.startsWith(u8, name, "test_")) return true;
         if (std.mem.startsWith(u8, name, "challengegroup_reward_")) return true;
@@ -2581,7 +2581,7 @@ pub const Game = struct {
         return game_quest.fillStockJournalWrites(self, peer_slot, out, reward_store, obj_val_store, kind_store, pos_store);
     }
 
-    // _fillStockJournalWritesImpl removed — body lives in game/quest.zig
+    // _fillStockJournalWritesImpl removed - body lives in game/quest.zig
 
     /// Build trader FetchList offers from a quest_list id (stock quest names
     /// only). A quest already active in the player's journal is not re-offered:
