@@ -174,6 +174,17 @@ check:
 	# runs in check, so a syntax error there would otherwise land unseen.
 	python3 -m py_compile tools/*.py scripts/gen_provenance.py
 	python3 tools/provenance_scan.py
+	# Dashboard freshness gate: gen_provenance.py regenerates docs/provenance.html
+	# from the live GAP_ANALYSIS markers; fail when the committed page is stale
+	# (regenerate and commit it with the doc change). Same pattern as the webui
+	# page-freshness gate in lint-webui.sh.
+	python3 scripts/gen_provenance.py >/dev/null
+	if git rev-parse --git-dir >/dev/null 2>&1; then \
+	  git diff --quiet -- docs/provenance.html || { \
+	    echo "make check: docs/provenance.html is stale (run python3 scripts/gen_provenance.py and commit the regenerated page)" >&2; \
+	    exit 1; \
+	  }; \
+	fi
 	$(MAKE) check-xml-audit
 	$(MAKE) build
 	$(MAKE) test

@@ -4557,7 +4557,7 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/world/store.zig:694-695`, `:702-727`, `:736-780`
 
 - **Player save (players.zsv)** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
-  **ZPV9** records (ZPV2-8 still read and upgraded in place) keyed by **login
+  **ZPV12** records (ZPV2-11 still read and upgraded in place) keyed by **login
   name** per ADR 0017 (not platform id, so two players with the same name share
   a save and a rename loses it). Each record holds position, coins, inventory
   slots (11-byte with use_times), journal quests (name + POI rect +
@@ -5488,11 +5488,11 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | `.zch` height overlay | HAVE |
 | Full chunk block save | HAVE (ZCH3 `.zch` u32 columns) |
 | Stock region `.ttc` | PARTIAL - non-client-visible (documented 2026-08-21: save-format internal, out of scope; ZCH3 `.zch` + blockmeta are the zdtd store) |
-| Player profile / inventory save | HAVE (players.zsv **ZPV3**: quality/meta + journal + level/XP/food/water/buffs; ZPV2 still read) |
+| Player profile / inventory save | HAVE (players.zsv **ZPV12**: quality/meta + journal + level/XP/food/water/buffs + skill tail; ZPV2 still read) |
 | Bedroll / last logout pos | WORKS (2026-08-20: bedroll respawn point + logout pos) |
 | Map ownership / claims | PARTIAL (LandClaim keystone + deny + `claims.zlc` persist) |
 | AIDirector / sleeper save blobs | PARTIAL - non-client-visible (save-format internal, out of scope per the parity objective: clock.zcl + weather.zwt persist the sim-critical state; the full stock AIDirector blob layout (world seed, horde schedule position, heat regions) is a save-format internal the client never observes - the client-visible horde schedule persists via ZCL2) |
-| Quest journal save | HAVE (players.zsv ZPV3) |
+| Quest journal save | HAVE (players.zsv ZPV12) |
 | Vehicle / turret persistence | WORKS (`entities.zen`; power wire edges persist by position; trader quest offers are derived from quest_list + journal, see appendix "Vehicle, turret, power and quest-NPC persistence") |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
 | Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |

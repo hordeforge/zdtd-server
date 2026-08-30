@@ -44,7 +44,7 @@ after restart (TTS re-stamp then block overlay without paint channels).
 | File | Magic (writes) | Still read | Owner |
 |---|---|---|---|
 | `c_X_Z.zch` | **ZCH3** | pre-paint ZCH3 (flags decide channels) | decision §2; `src/world/store.zig` |
-| `players.zsv` | **ZPV10** | **ZPV2**–**ZPV9** | `src/server/persist.zig` (`savePlayers`). Grew from the ZPV3 base (name, pos, coins, inventory, journal, progression tail) by version bumps: bedroll (v4+), journal name + POI rect (v5+), slot `use_times` (v7+), tail hp (v8+), born world time (v9+), slot seed (v10). Merge-write keeps offline names and upgrades old records. Key = login name ([ADR 0017](0017-player-identity-login-name.md)). |
+| `players.zsv` | **ZPV12** | **ZPV2**–**ZPV11** | `src/server/persist.zig` (`savePlayers`). Grew from the ZPV3 base (name, pos, coins, inventory, journal, progression tail) by version bumps: bedroll (v4+), journal name + POI rect (v5+), slot `use_times` (v7+), tail hp (v8+), born world time (v9+), slot seed (v10), skill tail (v11, purchased attribute/perk levels + skill_points), 4 attached mod ids per slot (v12). Merge-write keeps offline names and upgrades old records. Key = login name ([ADR 0017](0017-player-identity-login-name.md)). |
 | `containers.zct` | **ZCT2** | **ZCT1** | `src/world/containers.zig` (ZCT2 adds touched_day + grid size_x/size_y) |
 | `blockmeta.zbm` | **ZBM2** | **ZBM1** | `src/server/game/blockmeta.zig` (ZBM2 adds the damage plane) |
 | `claims.zlc` | **ZCLC** | - | `src/server/persist.zig`: `x,y,z:i32 \| name_len:u8 \| name[32] \| owner_seen_day:u32`. Owner entity is not stored; re-mapped on login by name. |

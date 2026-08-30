@@ -286,8 +286,8 @@ footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}}
 <thead><tr><th scope="col">Surface</th><th scope="col">Status</th><th scope="col">Provenance</th></tr></thead>
 <tbody>
 <tr><th scope="row">Wire and package parity</th><td>190-pkg catalog; 33/33 ToServer handled; 46 S2C emitted</td><td>R: protocol.md, protocol-packages.md, parity tooling · docs/wire/PACKAGES.md</td></tr>
-<tr><th scope="row">Persistence</th><td>ZPV9 players, claims.zlc, containers.zct, blockmeta.zbm, entities.zen, weather.zwt, workstations.zws, allies.zal</td><td>R: save-persistence.md · Z: world/store + persist.zig (ZCH3/ZPV9, zdtd-owned layouts)</td></tr>
-<tr><th scope="row">Wasm plugin surface</th><td>16 verdict/event hooks + sense/queue/query; 6 reference modules</td><td>Z: ADR 0020, PLUGIN_DEV.md expressibility audit · plugins/ (bot, core_killfeed, core_pvp, core_questgate, core_craftgate, core_lootgate)</td></tr>
+<tr><th scope="row">Persistence</th><td>ZPV12 players, entities.zen, claims.zlc, clock.zcl, weather.zwt, blockmeta.zbm, containers.zct, workstations.zws, allies.zal, traders.zst</td><td>R: save-persistence.md · Z: world/store + persist.zig (ZCH3/ZPV12, zdtd-owned layouts)</td></tr>
+<tr><th scope="row">Wasm plugin surface</th><td>23 hooks + sense/queue/query; 12 core plugins + 6 addon mods</td><td>Z: ADR 0020, PLUGIN_DEV.md expressibility audit · plugins/ (12 core_*: adminverbs, announce, craftgate, damagegate, killfeed, lootgate, perkgate, pricegate, pvp, questgate, rewardgate, tradefeed) · mods/ (fps_bot, mcp, parachute, moon_gravity, infinite_world, example_chat_filter)</td></tr>
 <tr><th scope="row">Config-driven policy</th><td>Rules + mode packs + serverconfig through one toml_bind; no hand-written key chains</td><td>Z: ADR 0021, GAME_OPTIONS.md, src/util/toml_bind.zig</td></tr>
 <tr><th scope="row">Bots</th><td>Wasm-only brains; host BotManager is a servant</td><td>Z: ADR 0026, PRD 0001, RFC 0001, mods/fps_bot</td></tr>
 <tr><th scope="row">Native metrics</th><td>apm sections + counters + webui snapshot; 7dtd-server-apm not required</td><td>Z: docs/APM.md, src/apm/*</td></tr>
