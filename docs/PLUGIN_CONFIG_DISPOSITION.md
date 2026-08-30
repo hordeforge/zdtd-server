@@ -20,11 +20,12 @@ rules/logic against the plugin boundary. The rule (ADR 0020/0026, AGENTS 28/29):
 
 ## The boundary today
 
-`src/plugin/wasm.zig` Hook enum (19): `on_enable, on_tick, on_player_join,
+`src/plugin/wasm.zig` Hook enum (23): `on_enable, on_tick, on_player_join,
 on_shutdown, on_player_death, on_entity_killed, on_block_damage,
 on_quest_complete, on_admin_command, on_chat, on_player_login, on_player_leave,
 on_player_damage, on_quest_accept, on_craft_request, on_loot_roll,
-on_trader_event, on_mcp_frame, on_trade_price`. Host: `src/server/game/wasm_host.zig`
+on_trader_event, on_mcp_frame, on_trade_price, on_perk_spend, on_stat_changed,
+on_game_event, on_evidence`. Host: `src/server/game/wasm_host.zig`
 (wasmTick / killVerdict / wasmQueue / wasmSense / wasmQuery / adminPlugin).
 
 Existing modules (`plugins/`): core_craftgate (craft verdict), core_killfeed
