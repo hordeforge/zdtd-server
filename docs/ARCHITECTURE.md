@@ -592,7 +592,7 @@ Verdict semantics (first non-zero across plugins wins; a trap is keep):
 
 Five exclusive core override points (`loot.roll`, `quest.payout`, `damage.player_scale`, `craft.request`, `trade.price`) become single-owner when a `manifest.toml` claims `points = "…"`. Duplicate claims fail the boot (`src/plugin/manifest.zig`, `src/plugin/resolver.zig`).
 
-Core plugins under `plugins/core_*/` ship Zig sources built to `.wasm` by `scripts/build-plugins.sh` (shared `mods/plugin_common.zig`). Addons (`mods/fps_bot`, `mods/mcp`, `mods/example_chat_filter`) live under `mods/`. Bot brains are **Wasm only** - `BotManager` is a servant (spawn/replicate/move/LOS/sense/`bot` verbs) and never grows native decision logic (ADR 0026).
+Core plugins under `plugins/core_*/` ship Zig sources built to `.wasm` by `scripts/build-plugins.sh` (shared `mods/plugin_common.zig`). Addons (`mods/example_chat_filter`, `mods/fps_bot`, `mods/infinite_world`, `mods/mcp`, `mods/moon_gravity`, `mods/parachute`) live under `mods/`, each self-contained (manifest + default config + rules + wasm + README). Bot brains are **Wasm only** - `BotManager` is a servant (spawn/replicate/move/LOS/sense/`bot` verbs) and never grows native decision logic (ADR 0026).
 
 ---
 
@@ -643,18 +643,18 @@ Mutations surviving a restart go through `world/*` / `server/persist.zig`, not j
 ```mermaid
 flowchart TB
     subgraph save["On save interval - saveAll"]
-        CHUNKS["world/store.zig - .zch ZCH3 chunks"]
-        CONTAINERS["world/containers.zig - containers.zch"]
-        TTS["world/tts.zig - TTS deco"]
-        WS["workstations - .zbf"]
-        VEND["world/vending.zig - vending.zch"]
-        CLAIMS["claims - .zcl"]
-        ENTITIES["entities - .zent"]
+        CHUNKS["world/store.zig - c_*_*.zch ZCH3 chunks"]
+        CONTAINERS["world/containers.zig - containers.zct"]
+        TTS["deco paints the chunk raw plane<br/>(no separate deco file)"]
+        WS["workstations - workstations.zws"]
+        VEND["world/vending.zig - vending.zvn ZVNM"]
+        CLAIMS["claims - claims.zlc"]
+        ENTITIES["entities - entities.zen (vehicles, turrets, wires)"]
         WEATHER["world/weather.zig - weather.zwt ZWTH1"]
-        CLOCK["world clock - clock.zwt"]
-        PLAYERS["PlayerDataFile - .ttp per player"]
-        ALLIES["allies - .zal"]
-        META["block meta - .zbm"]
+        CLOCK["world clock - clock.zcl"]
+        PLAYERS["players - players.zsv ZPV12 per-world"]
+        ALLIES["allies - allies.zal"]
+        META["block meta - blockmeta.zbm"]
     end
     WORLD_DIR[("world/ - flat overlay dir")] --- save
     TICK2["Game.step - tick_n % save_interval_ticks == 0"] --> save
