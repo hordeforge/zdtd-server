@@ -72,9 +72,9 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
 
 | Candidate | Hook | Module shape |
 |---|---|---|
-| Quest-reward scaling | `on_quest_complete` (>0 = percent) - already wired at `game/step.zig:315`, today only observed by core_killfeed | `core_rewardgate`: scale items/exp/coins per quest def |
+| Quest-reward scaling | **SHIPPED** - `on_quest_complete` (>0 = percent) wired at the payout (`game/step.zig:315`); **`plugins/core_rewardgate`** scales items/exp/coins per quest def | `core_rewardgate` reference module ships |
 | Immortal horde / no-death gates | `on_entity_killed` / `on_player_death` deny (killVerdict <0 → victim survives at 1 HP) - works today | `peaceful` / per-entity kill gates (user mod; no `core_`/`zdtd_` prefix) |
-| Custom admin verbs | `on_admin_command` (only bot uses it) | `givequest`, `spawnwave`, `setdifficulty` as module verbs instead of native console arms |
+| Custom admin verbs | **SHIPPED** - `on_admin_command` (used by **`plugins/core_adminverbs`**: `wave`, custom operator verbs) | `givequest`, `spawnwave`, `setdifficulty` as module verbs instead of native console arms |
 
 ## Config-eligible logic (non-scalar policy, not yet config-driven)
 
@@ -82,9 +82,9 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
 |---|---|---|
 | Airdrop policy (`game/tick.zig:177`) | **SHIPPED** - `[sim] airdrop_schedule` (interval \| day/TOD), `airdrop_day_min..day_max` days at `airdrop_drop_hour`, `airdrop_loot_list` (loot.xml container for the crate) | the proposed `[sim] airdrop` block shipped as `airdrop_*` flat keys (stock has no AirDrop* keys; AirDropFrequency stays the interval) |
 | Director scale tables (`ecs/aidirector.zig:365`) | **SHIPPED** - per-tier scalars `[rules.director] difficulty_hp_0..5` / `move_scale_0..4` (was hardcoded `[N]f32` arrays, zdtd-tuned R9, no RE pin; now config-overridable, defaults unchanged) | toml_bind scalar binding per tier (the proposed single `difficulty_hp_scale` key shipped as per-tier keys) |
-| Sleeper spawn-cap divergence (`game/sleeper.zig:100`) | documented divergence (spawns ignore the stock global gate) | `[sim] sleeper_cap_gate_enabled` toggle |
-| Bot loadout pool (`game/bot.zig:61`) | per-weapon damage/range/pellets host constants | `[bots] weapon_table` (per-weapon fields) |
-| Quest-POI constants (`game/hooks.zig:559,310`) | bed lockout 32 m, trader distance bands 500/1500 m hardcoded where neighbours are `[quests]` | `[quests] poi_bed_lockout_radius`, `trader_band_distances` |
+| Sleeper spawn-cap divergence (`game/sleeper.zig:100`) | **SHIPPED** - `[sim] sleeper_cap_gate_enabled` toggle (default off = documented divergence preserved) | config toggle shipped |
+| Bot loadout pool (`game/bot.zig:61`) | **SHIPPED** - `[bots] weapon_profiles` (per-weapon tag:damage:range:pellets table, up to 8 guns; empty = builtin pool) | the proposed `weapon_table` shipped as `weapon_profiles` |
+| Quest-POI constants (`game/hooks.zig:559,310`) | **SHIPPED** - `[quests] poi_bed_lockout_radius`, `trader_band_1`/`trader_band_2` (the proposed `trader_band_distances` shipped as per-band keys) | bed lockout 32 m + trader bands 500/1500 m now config |
 
 ## Implementation status
 
