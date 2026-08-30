@@ -203,23 +203,25 @@ Also (2026-08-29): the procedural shaping params moved to
 noise_weight/y_scale/bedrock_h via `WorldGen.applyParams`; defaults = the
 pre-lift constants, byte-identical proc output; grid cells, noise recipe and
 the RWG water table stay code) - closes the "documented, not config" ledger
-row. And the "infinite game" ships: `modes/infinite.toml` (`--mode infinite`;
-pack `worldgen_seed` tier - precedence CLI > zdtd.toml `[worldgen] seed` >
-pack, like rules) plus proc deco (species resolve from the W3 biome field +
-biomes.xml lists since proc worlds carry no biomemap; game-dir proc worlds
-stream trees instead of staying bald; bare proc worlds fail closed).
+row. And the "infinite game" ships as the `mods/infinite_world` config-only
+mod (its own `preset.toml`: pack `worldgen_seed` tier - precedence CLI >
+zdtd.toml `[worldgen] seed` > pack, like rules) plus proc deco (species
+resolve from the W3 biome field + biomes.xml lists since proc worlds carry no
+biomemap; game-dir proc worlds stream trees instead of staying bald; bare
+proc worlds fail closed).
 And save growth: clean proc chunks are no longer persisted on eviction (they
 regenerate deterministically from the seed; edits carry `dirty` and persist),
 so an infinite world's save dir grows with edits, not visits.
 And delivery as a mod: the infinite world ships as `mods/infinite_world/`
-(a config-only mod - new `mode` manifest key activating modes/infinite.toml,
-mutually exclusive with `wasm`; off by default, opted in via `[mods]
-enabled = "infinite_world"`). Mods stay reversible: nothing persists until
-the player edits, so removing the mod restores the default terrain.
+(a config-only mod - the `preset` manifest key activates the mod's own
+`preset.toml`, mutually exclusive with `wasm`; off by default, opted in via
+`[mods] enabled = ["infinite_world"]`). Mods stay reversible: nothing
+persists until the player edits, so removing the mod restores the default
+terrain.
 And a live-loadgen audit (2026-08-29) caught a P0 (PackageIds advertised
 the 3.1.0 raw version while the login gate wants 3.2.0 - every real client
 was kicked with VersionMismatch=4; fixed, and a loadgen join now PASSES
-against `--mode infinite`, live-verifying the previously-inferred 3.2.0
+against the infinite world, live-verifying the previously-inferred 3.2.0
 login gate) and measured a join-burst perf gap (p99 tick 201 ms / max 1.9 s
 under a concurrent double join on the proc world; the synchronous
 spawn-area burst starves a second client's critical packages - tracked in
