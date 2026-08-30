@@ -16,8 +16,8 @@ Active planning is now tracked in the living docs:
 
 For handoff-ready task shape and house rules, see the archived plan's "How to work a task" § — same grounding/proof/commit expectations apply.
 
-**Status 2026-08-27:** most tasks below shipped and are rescored WORKS in
-[`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) (scorecard: 293 features WORKS, 2
+**Status 2026-08-30:** most tasks below shipped and are rescored WORKS in
+[`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) (scorecard: 294 features WORKS, 1
 PARTIAL, residuals recorded inline) — do not re-open them as gaps. Specifically
 done: T24/T25/T26/T27/T28 (progression + perk spend + VM passives, scorecard
 row 10), T29 (stealth/noise/smell, the AI senses row), T33 (challenges,
@@ -29,6 +29,13 @@ dispatch engine) is **superseded by ADR 0035**: its consumers were re-scoped
 away (challenges client-tracked, zero stock GameEvent data uses, hordes
 native) and execution policy is now plugin-owned via the on_game_event
 verdict; the IL=211 sender/party gate shipped 2026-08-27.
+The anti-cheat program (T18-T23, ADR 0022) shipped 2026-08-29/30: T18 first
+slice (stock InvTx rejects unresolvable non-empty stacks, SetAll atomic),
+T19 observe-mode honesty (movement_rejects = enforced only), T20 the hard
+severity ceiling (client-informed detectors fail closed to .strong, counted),
+T21 the on_evidence guest observer, T22 void-rescue suppression, T23 the
+guardreport dry-run diff verb. The remaining T18 core (server-sanctioned
+grants / a full stock-transaction ledger) stays recorded in the task text.
 Still open / recorded, not wired: T30 (drone companion — zero stock AITask
 uses, deferred). T38 (always-on radius effects) shipped 2026-08-26; T35
 (air-drop marker) resolved 2026-08-26 (the entity-tied marker dies with the
