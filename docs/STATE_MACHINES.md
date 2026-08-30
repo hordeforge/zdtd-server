@@ -223,7 +223,7 @@ Owners: `src/ecs/aidirector.zig:61` (`isBloodMoonNight`), `:68`
 broadcast).
 
 Notes: `Director.bm_stage_frozen` latches the party gamestage at dusk and
-clears at dawn with the horde marks (`aidirector.zig:333` / `clearHordeMarks`);
+clears at dawn with the horde marks (`aidirector.zig:818` / `clearHordeMarks`);
 parties cluster players within 80 m and horde zombies teleport back to their
 party focus past 150 m; one wave spawns per party every 6 s.
 
