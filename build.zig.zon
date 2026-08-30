@@ -14,7 +14,7 @@
         ".zigversion",
         "src",
         "assets/fixtures",
-        "modes",
+        "presets",
         "scripts",
         "Makefile",
         "serverconfig.example.xml",
