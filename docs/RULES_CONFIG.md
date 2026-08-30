@@ -68,7 +68,7 @@ Wiring changes that accompany the moves (non-field fixes, same behavior):
 |---|---|
 | `store.zig` sea_level 64 | Used in comptime default literals (`.{sea_level} ** 256`); runtime config would be a structural refactor. (The projection surface around it - `[rules.geometry]` sea_level/height_scale/height_offset/height_ceiling, ADR 0036 - IS config.) |
 | `store.zig`/`water.zig` water-source radius 12 | Worldgen-only carve; low value. |
-| `dem.zig` elevation mapping, `prefabs.zig` paint cap, trader gate scan margins, `join.zig` mob burst cap 16 | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
+| `dem.zig` elevation mapping, `prefabs.zig` paint cap, `join.zig` mob burst cap 16 | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
 | RE wire/protocol facts | `tts.zig` blockvalue_version 18, `components.buff_ticks_per_second 20`, `c2s/move.zig` 1/32 scale, trigger-duration enum table - not tunables. |
 | PERF compile-time budgets | Table/array caps (bm_parties, path replans/stride, max_poi_candidates, noise/dig/sleeper wake rings, max_workstations/containers/vending/lights/nodes/wires, max_resident_chunks, flush queues, terrain-snapshot window, `dmg_scale`) - compile-time bounds by design. |
 | FAIL safety guards | `electric.max_node_watts` 100k, movement dt envelope, explosion-radius clamp 6, `max_poi_candidates` - fail-closed bounds. |
