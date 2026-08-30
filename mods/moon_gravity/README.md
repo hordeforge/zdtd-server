@@ -17,10 +17,12 @@ ADR 0021), so the mod is a preset overlay - no wasm, no native changes. Set
 | zero-g | 0 |
 | upside down | positive value |
 
-Note: player movement/fall is simulated client-side, so the server-side
-gravity here changes zombies, falling blocks and vehicles. A full
-player-experience moon-gravity needs a paired client mod (like the
-RealEarth-style engine-expand caveat in `docs/WORLDGEN.md`).
+Note: the player has no server vertical physics (the client simulates its own
+fall), so this mod changes zombies, falling blocks and vehicles via
+`[rules.ai]`/`[rules.vehicle]` gravity, and the player's fall through the
+C2S vertical clamp (`[rules.glide] fall_sink_vy_mps = 1.5`, a lunar terminal
+velocity) - server-side, no client mod needed. Jump height stays client-side
+(the client's own physics), and fall damage stays client-owned (stock wire).
 
 ## Enable
 
