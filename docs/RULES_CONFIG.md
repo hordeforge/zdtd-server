@@ -72,7 +72,7 @@ Wiring changes that accompany the moves (non-field fixes, same behavior):
 | RE wire/protocol facts | `tts.zig` blockvalue_version 18, `components.buff_ticks_per_second 20`, `c2s/move.zig` 1/32 scale, trigger-duration enum table - not tunables. |
 | PERF compile-time budgets | Table/array caps (bm_parties, path replans/stride, max_poi_candidates, noise/dig/sleeper wake rings, max_workstations/containers/vending/lights/nodes/wires, max_resident_chunks, flush queues, terrain-snapshot window, `dmg_scale`) - compile-time bounds by design. |
 | FAIL safety guards | `electric.max_node_watts` 100k, movement dt envelope, explosion-radius clamp 6, `max_poi_candidates` - fail-closed bounds. |
-| STOCK fallbacks (offline/no-XML) | `world.zig` class-table zombie max_hp 40 (generic) / 550 (zombieBoeFeral), `stock_turret_watts 15` (`powerblocks.zig` autoTurret), eat props, maxStackOffline, trader price/markup fallbacks, weather default params, sleepers 5,5 - XML/offline data, covered by the XML audit. |
+| STOCK fallbacks (offline/no-XML) | `world.zig` class-table zombie max_hp 40 (generic) / 550 (zombieBoeFeral), `hooks.zig` turretWatts no-game-dir 15 W floor (autoTurret), maxStackOffline, trader price/markup fallbacks, weather default params, sleepers 5,5 - XML/offline data, covered by the XML audit. |
 
 Moved since this table was written:
 - **`[bots] weapon_profiles`** (2026-08-25, was `bot.zig` weapon profiles above):
