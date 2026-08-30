@@ -1,4 +1,4 @@
-//! Wire constants from ../../7dtd-engine-research/docs/protocol.md (V3.x loadgen golden; wire pin V3.1.0).
+//! Wire constants from ../../7dtd-engine-research/docs/protocol.md (V3.2.0 pin; V3.1.0/V3.0.1-era goldens still cited).
 //! Package IDs are dynamic (PackageIds map); never hard-code across builds.
 //! Decision: docs/adr/0009-dynamic-package-ids.md. Tick model: ticks_per_second / tick_ns.
 //!
