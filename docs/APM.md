@@ -53,7 +53,8 @@ flowchart LR
 `c2s_throttle`, `c2s_malformed`, `c2s_rejects`, `c2s_unhandled`,
 `c2s_version_rejects`, `c2s_stock_invtx`,
 `evidence_events`, `guard_quarantines`, `guard_kicks`, `guard_would_kicks`,
-`quarantine_rejects`, `load_shed_drops`,
+`quarantine_rejects`, `load_shed_drops`, `hard_ceiling_downgrades` (T20:
+client-informed `.hard` events downgraded to `.strong` at the authority ceiling),
 `survival_players`, `vm_recomputes`, `path_replans_denied`, …
 
 Privileged admin and player-console activity is counted by `admin_commands`
@@ -115,6 +116,8 @@ never silently truncate a report.
 | `te_scan` | One-time storage-TE block scan of a streamed chunk |
 | `chunk_gen` | Resident-miss chunk materialization: disk load or procedural gen |
 | `survival` | Per-player passive-effects VM + survival stats pass (P4b; `survival_players` / `vm_recomputes`) |
+| `join` | Join-phase C2S handling on the tick (login/enter/spawn handlers: spawn-area core + join bundle + respawn logic) |
+| `join_drain` | Paced spawn-area drain pass: one pass = the shared per-tick drain budget of chunk bodies + per-chunk ACK yields |
 
 `save_encode`, `save_flush_wait`, `terrain_snap`, `sleeper_scan`, `te_scan` and
 `chunk_gen`
