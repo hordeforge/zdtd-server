@@ -214,7 +214,7 @@ regenerate deterministically from the seed; edits carry `dirty` and persist),
 so an infinite world's save dir grows with edits, not visits.
 And delivery as a mod: the infinite world ships as `mods/infinite_world/`
 (a config-only mod - the `preset` manifest key activates the mod's own
-`preset.toml`, mutually exclusive with `wasm`; off by default, opted in via
+`preset.toml` and carries no wasm; off by default, opted in via
 `[mods] enabled = ["infinite_world"]`). Mods stay reversible: nothing
 persists until the player edits, so removing the mod restores the default
 terrain.

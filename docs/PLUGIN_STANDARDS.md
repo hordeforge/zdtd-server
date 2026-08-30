@@ -62,9 +62,11 @@ the host.
   core plugins) and may ship `config.toml`, served to the guest verbatim via
   the `zdtd.config` host import. The host never parses it - each plugin owns
   its format (the shared `mods/plugin_common.zig` `Config` helper parses the
-  minimal `key = value` subset).
-- A **config-only mod** ships `preset.toml` (rules + gameplay keys; exclusive
-  with `wasm` in the manifest). Example: `mods/infinite_world`.
+  minimal `key = value` subset). A wasm plugin may also carry a `preset.toml`
+  (resolver: "a mod with BOTH a wasm and a preset (ADR 0037 parachute) loads
+  its module AND applies its preset").
+- A **config-only mod** ships `preset.toml` (rules + gameplay keys) and no
+  `wasm` (only `preset` in the manifest). Example: `mods/infinite_world`.
 
 ### Exports and capabilities
 
@@ -88,7 +90,7 @@ TOML, bound by `src/plugin/manifest.zig` through the comptime binder
 name = "core_announce"            # required; MUST equal the directory name
 version = "0.1.0"                 # semver string; informational
 wasm = "core_announce.wasm"       # required (or `preset`, see below); relative to this directory
-preset = "preset.toml"            # config-only mod: loads its own preset inside this folder (no wasm); exclusive with wasm
+preset = "preset.toml"            # optional preset inside this folder; loads with the wasm module (parachute) or alone (config-only mod, no wasm)
 description = "..."               # one line, says what + which hook(s)
 enabled = true                    # optional; false = skip auto-discovery (demo gates ship off); explicit [plugin] modules paths still load; [mods] enabled forces on
 tier = "official"                 # optional; "official" | "user" ("core" is an error)
@@ -119,7 +121,9 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
    gameplay keys and `[rules.*]` override the built-in defaults exactly like
    `--preset <name>` (explicit `--preset` / `[preset] name` still wins). A
    mod is fully self-contained: config, wasm and assets travel together.
-   `wasm` and `preset` are mutually exclusive. Such mods ship
+   `preset` is not exclusive with `wasm`: a wasm plugin may carry both (ADR
+   0037 parachute loads its module AND applies its preset); a mod with only
+   `preset` is config-only and never enters the Wasm load list. Such mods ship
    `enabled = false` so a fresh boot stays stock; the operator opts in via
    `[mods] enabled = "a,b"` (or flips `enabled`). At most one loaded mod may
    carry a `preset` (`DuplicatePreset` otherwise).
