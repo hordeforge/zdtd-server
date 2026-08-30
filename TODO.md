@@ -78,10 +78,15 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
 
 ### Next up
 
-The ranked, handoff-ready list lives in [docs/WORK_PLAN.md](docs/WORK_PLAN.md).
-Wave 1 is T1 traders (unblocks most of traders and quests), then T2 loot tables
-and T3 item stack sizes in parallel. Harness tasks W1-W3 are cheap and
-independent; do W3 first if `make check` flakiness is costing time.
+The ranked, handoff-ready list lives in [docs/WORK_PLAN.md](docs/WORK_PLAN.md)
+and the priority band in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) §3
+(STATUS wins on conflict). The scorecard is 294 WORKS / 1 PARTIAL / 0 MISSING;
+the one scored gap is the join-burst tick budget (W2b async chunk gen, GAP
+item 26) - the spawn-area already streams through
+`chunk_adds_per_stream_tick` instead of one synchronous flood; the remaining
+work moves gen + te_scan off the join tick and adds an apm section for the
+join handler. Open-but-annotated items below (T18 core, EAI residual, chunk
+stream workers, scale items) stay recorded, not wired.
 
 ### Shipped this wave (2026-08-04..05)
 
@@ -141,14 +146,23 @@ this file. Decision for the largest item: [ADR 0025](docs/adr/0025-gameevent-sco
 reasoning as ADR 0023's requirement evaluator). Plan:
 [docs/WORK_PLAN.md](docs/WORK_PLAN.md) T32-T37.
 
-- [ ] T32: the GameEvent dispatch engine. Currently a pure echo
-      (`NetPackageGameEventRequest` → `buildGameEventResponse(body)`, sent back
-      unchanged); no sequence/phase/action machinery exists anywhere. Blocks
-      T33, blood-moon boss triggers, and quest `<action type=GameEvent>`
-      elements.
-- [ ] T33: the challenge system (needs T32). Scored MISSING with no
-      elaboration section; zero implementation, `ChallengeJournal` is a
-      permanent empty stub.
+- [x] T32: the GameEvent dispatch engine. **SUPERSEDED 2026-08-27 by ADR
+      0035** (`on_game_event` verdict hook): the native dispatch engine's
+      consumers were re-scoped away (challenges client-tracked, zero stock
+      GameEvent data uses, hordes native) and execution policy is now
+      plugin-owned via the verdict; the stock ProcessPackage IL=211 sender/
+      party gate ships (C2S request sender/party validated, walked to its
+      variables count, verdict-gated APPROVED response). No native phase
+      machine is built (missing beats fake; see the GAP "Game events" WORKS
+      row).
+- [x] T33: the challenge system (was blocked on T32). **RESOLVED 2026-08-21**
+      by the RE re-scope (quests-challenges.md §5): challenges are
+      client-tracked - the client loads challenges.xml locally and advances
+      objectives via its own event hub. The server surface is the
+      `challengegroup_reward_*` quests (accepted/completed through the quest
+      system; catalog covers all stock defs) plus `GameEventRequest` acks.
+      Scored WORKS in the GAP scorecard; no server-required challenge wire
+      exists.
 - [x] T34: crafting XP, re-scoped after checking the shipped `recipes.xml`
       (17 of 639 recipes declare `craft_exp_gain`, all declare it `0`) and
       landed against what's confirmed rather than the originally assumed
