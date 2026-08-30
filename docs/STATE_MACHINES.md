@@ -54,9 +54,9 @@ stateDiagram-v2
 ```
 
 Notes: `WorldInfo` goes out at Entering, never in the spawn bundle (a second
-WorldInfo restarts the client's createWorld; `src/server/c2s/join.zig:137` is
-the one send site). The chunk streamer starts earlier, at WorldInitInfoRequest
-(`Client.world_ready`, `c2s/join.zig:179`); the spawn area is also streamed
+WorldInfo restarts the client's createWorld; `src/server/c2s/join.zig:256` is
+the one send site, in the RequestToEnterGame handler). The chunk streamer starts earlier, at WorldInitInfoRequest
+(`Client.world_ready`, `c2s/join.zig:343`); the spawn area is also streamed
 before the bundle while
 the client still waits on its spawn request. Death respawn re-enters Spawning
 while `entered` stays true; the re-bundle then sends Spawned(died) + teleport
