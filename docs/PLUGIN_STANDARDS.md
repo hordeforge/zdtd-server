@@ -28,7 +28,7 @@ where mechanical.
 | Tier | Who ships it | Naming |
 |---|---|---|
 | official core plugin | ships with zdtd under `plugins/` | `core_<topic>` |
-| official addon | ships with zdtd under `mods/` (`fps_bot`, `mcp`) | any; no `core_`/`zdtd_` prefix |
+| official addon | ships with zdtd under `mods/` (`fps_bot`, `mcp`, `parachute`, `moon_gravity`, `infinite_world`, `example_chat_filter`) | any; no `core_`/`zdtd_` prefix |
 | user | operator/third-party drop-in under `mods/` | any name; must NOT start with `core_` or `zdtd_` unless replacing an official mod via `override` |
 
 `tier = "core"` in a manifest.toml is a load error by design: "core" components are
