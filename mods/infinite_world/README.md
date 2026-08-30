@@ -5,9 +5,11 @@ Procedural infinite world: chunks generate on first touch as players explore.
 ## What it is
 
 A config-only mod (no wasm): its own `preset.toml` carries the seed +
-`[rules.worldgen]` shaping that override the built-in defaults, exactly like
-`--preset infinite`. Removing the mod later restores the default terrain (a
-clean session writes no world files; see `docs/WORLDGEN.md`).
+`[rules.worldgen]` shaping that override the built-in defaults (the pack's
+name is `infinite`; it activates via `[mods] enabled`, not `--preset`, since
+the shipped `presets/` folder holds only the stock packs). Removing the mod
+later restores the default terrain (a clean session writes no world files;
+see `docs/WORLDGEN.md`).
 
 ## Config
 
