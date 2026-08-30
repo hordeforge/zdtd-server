@@ -12,4 +12,4 @@ icon = "icon.png"
 wasm = "parachute.wasm"
 preset = "preset.toml"
 enabled = false
-description = "Parachute item (wearable clothing): auto-deploys when falling fast while worn. Deceleration runs client-side (paired client mod); the server exempts the glide fall from the movement envelope and announces deployment."
+description = "Parachute item (wearable clothing): auto-deploys when falling fast while worn. Deceleration is server-side: the glide flag arms the C2S vertical clamp (sink_vy_mps) and the envelope exemption; fall-damage stays client-owned (stock wire). The stock client needs the patched items.xml to render the item (client modlet install or the paired client mod); without it the item exists server-side only."
