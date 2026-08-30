@@ -113,6 +113,7 @@ Where the world and its data come from.
 | Doc | Role |
 |---|---|
 | [WEBUI.md](WEBUI.md) | Operator web UI, security model, roadmap |
+| [PRODUCT.md](../PRODUCT.md) | Web UI product brief: users, purpose, positioning |
 | [PRD 0004](prd/0004-hot-restart.md) | What survives a server restart: persistence inventory + operator webui session continuity |
 
 ## Scale
