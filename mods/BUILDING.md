@@ -13,7 +13,7 @@ make plugins                     # or: scripts/build-plugins.sh
 ```
 
 This rebuilds every `plugins/<name>/<name>.wasm` from
-`plugins/<name>/<name>.zig` (plus the Zig addons in `mods/`, currently `mcp`)
+`plugins/<name>/<name>.zig` (plus the Zig addons in `mods/` (`mcp` + `parachute`))
 and leaves nothing else to do by hand. The committed `.wasm` files are build
 outputs checked in so operators do not need a Zig toolchain; after changing a
 plugin, run the script and commit both source and binary.
