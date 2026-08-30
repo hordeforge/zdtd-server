@@ -183,17 +183,8 @@ block_id_mapping = true
 # [mods]
 # disabled = "zdtd_killfeed"   # skip loading, one info log per mod
 # blacklist = "evil_mod"       # refuse; also vetoes overrides/requires of it
-# enabled = ["infinite_world"] # config-only mods: activates its `mode` pack
-#                              # (mods/infinite_world/manifest.toml -> modes/infinite.toml)
-
-# Gamemode pack (CLI --mode wins; modes/<name>.toml).
-# [preset]
-# name = "infinite"
-
-# Procedural terrain seed (zdtd-invented worldgen, not stock RWG; CLI
-# --worldgen-seed wins; ignored with --map).
-# [worldgen]
-# seed = 7
+# enabled = ["infinite_world"] # config-only mods: activates its preset pack
+#                              # (mods/infinite_world/manifest.toml -> mods/infinite_world/preset.toml)
 
 # Malleable world geometry (ADR 0036): elevation projection + [rules.worldgen]
 # shaping. Identity at the stock defaults; see docs/GAME_OPTIONS.md.
@@ -212,7 +203,7 @@ block_id_mapping = true
 # bedrock_h = 3
 
 # Sim rule overlay (ADR 0021, docs/GAME_OPTIONS.md "[rules] sim rules"). Both
-# this file and a mode pack can set [rules.*]; the operator's zdtd.toml wins
+# this file and a preset pack can set [rules.*]; the operator's zdtd.toml wins
 # over the pack for the same key. Defaults equal the code constants.
 # [rules.combat]
 # attack_damage = 8.0        # floor: items.xml DamageEntity wins when non-zero
