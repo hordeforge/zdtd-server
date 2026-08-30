@@ -2,7 +2,7 @@
 # Override toolchain: `make ZIG=/path/to/zig build`
 # Release binary: `make release` (ReleaseSafe + strip + sha256 sidecar).
 
-.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit
+.PHONY: all build test fuzz run check check-clean-build lint lint-webui lint-html webui-ts fmt release-check release repro smoke smoke-modlet clean need-zig need-release-tools need-python3 need-oxlint need-java check-xml-audit
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
