@@ -485,7 +485,7 @@ below is therefore the surviving record of the final live statuses.
 | Perk requirement graphs / effect application | **Not built yet**: planned as `docs/adr/0023-perk-attribute-system.md`; zdtd has no perk system, so no provenance claim is made until the ADR lands (rules.zig `Progression.*` are placeholders, WORK_PLAN T16) |
 
 | B38 | `world/sleepers.zig:10` (8192), `litenet/server.zig:8` (64), `util/parallel.zig:7-9` (8/24) | Fixed-size architecture caps | zdtd engineering (Z), documented as fixed-size architecture |
-| B39 | `game.zig:3969` + `game/sleeper.zig:13` | `sleeper_party_radius=100.0` duplicated | R: CalcGameStageAround radius (asm.il ~1093363); dedupe tracked P3 |
+| B39 | `game.zig:352` | `sleeper_party_radius` (default 100.0), now a single `[sim]`-bound field (deduped; was duplicated at game.zig:3969 + game/sleeper.zig:13) | R: CalcGameStageAround radius (asm.il ~1093363) |
 | B40 | `ecs/inventory.zig:67-83` | `offlineStockName` mirrors `assets/items.zig` `builtinStockName` | zdtd mirror; divergence caught by existing id tests |
 
 ## 4. Coverage and maintenance
