@@ -381,7 +381,7 @@ Event hooks (T15, return a verdict):
 | `on_block_damage` | `(x: i32, y: i32, z: i32, dmg: i32) -> i32` | `<0` deny (no damage); `>0` apply that percent (`200` doubles) |
 | `on_quest_complete` | `(player_entity_id: i32, quest_def_id: i32) -> i32` | `<0` withhold the payout; `>0` pay that percent of items/exp |
 
-Remaining verdict hooks and observers (the full host surface is 22 hooks;
+Remaining verdict hooks and observers (the full host surface is 23 hooks;
 [PLUGIN_API.md](PLUGIN_API.md) is the authoritative contract - this table
 completes the authoring view):
 
