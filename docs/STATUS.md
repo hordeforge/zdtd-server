@@ -10,8 +10,8 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 295 features: **293 `WORKS`,
-2 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
+owns all C2S domains. `GAP_ANALYSIS.md` scores 295 features: **294 `WORKS`,
+1 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
 54 bullets carry ad-hoc labels and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
 recorded-not-wired effect classes (block-light/moon/shade light slices,
