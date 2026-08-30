@@ -1210,6 +1210,67 @@ pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, d
     };
 }
 
+test "DamageEntity V3.2.0 golden layout: packed flags + KillXPScale at fixed offsets" {
+    // The 3.1.0 ten-boolean wire was repacked (changelog-3.2.0 §3.1); the
+    // stock client Reads this body on the C2S damage path, so the byte
+    // layout is pinned here, not just the build/parse roundtrip (a
+    // self-consistent build+parse break would still pass scenarios but
+    // desync the real client's Read). Offsets derived from the builder's
+    // write order: entityId 0, flags 4, source 8, dtype 9, strength 10,
+    // hitDirection 12, bodyPart 13, movementState 15, attacker 16, ...,
+    // KillXPScale 65, damageMultiplier 69.
+    var buf: [128]u8 = undefined;
+    const body = try buildDamageBody(&buf, 0x11223344, 1, 3, 100, true, 0x55667788);
+    try std.testing.expectEqual(@as(usize, 88), body.len);
+    try std.testing.expectEqual(@as(i32, 0x11223344), std.mem.readInt(i32, body[0..4], .little));
+    // fatal=true -> pain_hit | fatal = 0x100 | 0x010.
+    try std.testing.expectEqual(@as(u32, 0x110), std.mem.readInt(u32, body[4..8], .little));
+    try std.testing.expectEqual(@as(u8, 1), body[8]); // source
+    try std.testing.expectEqual(@as(u8, 3), body[9]); // dtype
+    try std.testing.expectEqual(@as(u16, 100), std.mem.readInt(u16, body[10..12], .little));
+    try std.testing.expectEqual(@as(i32, 0x55667788), std.mem.readInt(i32, body[16..20], .little));
+    // KillXPScale (V3.2.0 addition) sits at 65; damageMultiplier at 69.
+    const kxs: f32 = @bitCast(std.mem.readInt(u32, body[65..69], .little));
+    try std.testing.expectEqual(@as(f32, 1.0), kxs);
+    const dm: f32 = @bitCast(std.mem.readInt(u32, body[69..73], .little));
+    try std.testing.expectEqual(@as(f32, 1.0), dm);
+    const head = try parseDamageHead(body);
+    try std.testing.expectEqual(@as(i32, 0x11223344), head.entity_id);
+    try std.testing.expectEqual(@as(u16, 100), head.strength);
+    try std.testing.expect(head.fatal);
+    try std.testing.expect(!head.trap_kill_xp);
+}
+
+test "DamageEntity packed flags: fatal and trap_kill_xp bits parse independently" {
+    var buf: [128]u8 = undefined;
+    // trap_kill_xp only (0x400): fatal must be false, trap true. The head
+    // needs the full 16 bytes (entityId+flags+source+dtype+strength+
+    // hitDirection+bodyPart+movementState) before parseDamageHead accepts it.
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(7);
+    try w.writeU32(dmg_trap_kill_xp);
+    try w.writeByte(0); // source
+    try w.writeByte(0); // dtype
+    try w.writeU16(5); // strength
+    try w.writeByte(0); // hitDirection
+    try w.writeI16(0); // bodyPart
+    try w.writeByte(0); // movementState
+    const body = buf[0..w.written().len];
+    const head = try parseDamageHead(body);
+    try std.testing.expect(!head.fatal);
+    try std.testing.expect(head.trap_kill_xp);
+    try std.testing.expectEqual(@as(u16, 5), head.strength);
+}
+
+test "ConfirmSpawnEntity golden layout: i64 id + 16-byte request key (V3.2.0)" {
+    const key = [16]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    var buf: [32]u8 = undefined;
+    const body = try buildConfirmSpawnEntityBody(&buf, -5, &key);
+    try std.testing.expectEqual(@as(usize, 24), body.len);
+    try std.testing.expectEqual(@as(i64, -5), std.mem.readInt(i64, body[0..8], .little));
+    try std.testing.expectEqualSlices(u8, &key, body[8..24]);
+}
+
 /// Stock `PrefabInstance.POIMetadata` record (read ctor IL=35, changelog-3.2.0
 /// §3.2): the minimal per-POI metadata the client's DynamicPrefabDecorator
 /// consumes for LOD/trader rendering.
