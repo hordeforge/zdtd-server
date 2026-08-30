@@ -14,4 +14,4 @@ Makefile text eol=lf
 *.zig text eol=lf
 build.zig.zon text eol=lf
 .zigversion text eol=lf
-modes/*.toml text eol=lf
+presets/*.toml text eol=lf

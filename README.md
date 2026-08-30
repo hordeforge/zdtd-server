@@ -24,15 +24,14 @@ wire tests.
 
 ## 📚 Modding Best Practices
 
-See the canonical **[HordeForge 7DTD Modding Best Practices Guide](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)** for engine load order rules, EAC-off requirements, `ModInfo.xml` specifications, and V3.1.0 compatibility notes.  
+See the canonical **[HordeForge 7DTD Modding Best Practices Guide](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)** for engine load order rules, EAC-off requirements, `ModInfo.xml` specifications, and V3.2.0 compatibility notes.  
 That is **not** sibling `7dtd-server-apm` (stock Mono dedi).
 
 ## Status
 
 **Client-wire dedi:** core stock loop playable (EAC off). Join, dig/build, fight,
-death/respawn, loot, craft/workstation, trade, persist; live stock-client gate
-**23/23** on a fresh world each run (`FRESH=1`), demo residuals closed
-(2026-08-09, see STATUS).
+death/respawn, loot, craft/workstation, trade, persist; scorecard **294 WORKS /
+1 PARTIAL / 0 MISSING** (2026-08-30, see STATUS).
 See [docs/STATUS.md](docs/STATUS.md).
 
 ```bash
@@ -68,7 +67,7 @@ Milestones / architecture: [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md).
 
 | Not supported | Why |
 |---|---|
-| **Mods** (Harmony, ModAPI, XML-only mods, EfficientServer, RealEarth) | Clean-room Zig process; no managed game assembly |
+| **Mods** (Harmony, ModAPI, DLL code mods, EfficientServer, RealEarth) | Clean-room Zig process; no managed game assembly. Pure XML/assetbundle modlets (`Mods/<name>/Config` XPath patches, `Bundles/`, `Localization.csv`) load as stock data (PRD 0003); Wasm plugins are the behavioral extension surface (ADR 0020) |
 | **7dtd-server-apm as a dependency** | Different process; use **zdtd `src/apm/`** instead |
 | **EAC-on clients** | Custom server path |
 
@@ -113,7 +112,7 @@ cd zdtd-server
 make                 # Debug binary → zig-out/bin/zdtd
 make test
 make check           # pin + lint + provenance/XML audits + build + test + fuzz (serial; safe under -j)
-make release         # stripped linux-x86_64 ReleaseSafe binary + sha256 + licenses, examples, modes/
+make release         # stripped linux-x86_64 ReleaseSafe binary + sha256 + licenses, examples, presets/
 # or: zig build / zig build test (dev builds use the native host target)
 ```
 
