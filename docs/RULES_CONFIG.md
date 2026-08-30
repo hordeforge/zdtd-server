@@ -68,13 +68,16 @@ Wiring changes that accompany the moves (non-field fixes, same behavior):
 |---|---|
 | `store.zig` sea_level 64 | Used in comptime default literals (`.{sea_level} ** 256`); runtime config would be a structural refactor. (The projection surface around it - `[rules.geometry]` sea_level/height_scale/height_offset/height_ceiling, ADR 0036 - IS config.) |
 | `store.zig`/`water.zig` water-source radius 12 | Worldgen-only carve; low value. |
-| `dem.zig` elevation mapping, `prefabs.zig` paint cap, trader gate scan margins, `sleeper.zig` scatter cap 8, `join.zig` mob burst cap 16, `bot.zig` weapon profiles | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
+| `dem.zig` elevation mapping, `prefabs.zig` paint cap, trader gate scan margins, `sleeper.zig` scatter cap 8, `join.zig` mob burst cap 16 | Operator feel is not worth the surface today (YAGNI); each is named + commented in code. |
 | RE wire/protocol facts | `tts.zig` blockvalue_version 18, `components.buff_ticks_per_second 20`, `c2s/move.zig` 1/32 scale, trigger-duration enum table - not tunables. |
 | PERF compile-time budgets | Table/array caps (bm_parties, path replans/stride, max_poi_candidates, noise/dig/sleeper wake rings, max_workstations/containers/vending/lights/nodes/wires, max_resident_chunks, flush queues, terrain-snapshot window, `dmg_scale`) - compile-time bounds by design. |
 | FAIL safety guards | `electric.max_node_watts` 100k, movement dt envelope, explosion-radius clamp 6, `max_poi_candidates` - fail-closed bounds. |
 | STOCK fallbacks (offline/no-XML) | `world.stock_zombie_hp 200`, `stock_turret_watts 15`, eat props, maxStackOffline, trader price/markup fallbacks, weather default params, sleepers 5,5 - XML/offline data, covered by the XML audit. |
 
 Moved since this table was written:
+- **`[bots] weapon_profiles`** (2026-08-25, was `bot.zig` weapon profiles above):
+  the per-weapon loadout pool (tag:damage:range:pellets, up to 8 guns; empty =
+  builtin) is config via `[bots] weapon_profiles`, parsed at init.
 - **`[rules.worldgen]`** (2026-08-29, was line 70 above): the procedural shaping
   params (base_height 68, height_amp 24, min/max_surface 12/200, squash 28,
   noise_weight 0.85, y_scale 2.0, bedrock_h 3) are config via
