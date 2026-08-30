@@ -11,7 +11,7 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-08-30):** `make check` exit 0 · **1488/1489** tests (1 skipped; 2026-08-30 fresh run) · `lint-architecture: clean` · live stock-client gate **23/23**. GAP **0 MISSING** (295 features: **294 WORKS, 1 PARTIAL** - the join-burst tick budget, paced to the 50 ms budget in ReleaseFast with its W2b residual recorded in the row). Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
+**Gates (2026-08-30):** `make check` exit 0 · **1493/1494** tests (1 skipped; 2026-08-30 fresh run) · `lint-architecture: clean` · live stock-client gate **23/23**. GAP **0 MISSING** (295 features: **294 WORKS, 1 PARTIAL** - the join-burst tick budget, paced to the 50 ms budget in ReleaseFast with its W2b residual recorded in the row). Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
 
 ### Freeze (core playable)
 
