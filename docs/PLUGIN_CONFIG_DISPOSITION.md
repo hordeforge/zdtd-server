@@ -80,7 +80,7 @@ core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
 
 | Area | Today | Config surface |
 |---|---|---|
-| Airdrop policy (`game/tick.zig:177`) | interval-since-last-drop simplification, drop above first joined player, `0 = off` divergence from stock day-count+TOD | `[sim] airdrop`: `schedule_mode` (interval vs day/TOD), `day_min/day_max`, `drop_hour`, `target`, `loot_list` |
+| Airdrop policy (`game/tick.zig:177`) | **SHIPPED** - `[sim] airdrop_schedule` (interval \| day/TOD), `airdrop_day_min..day_max` days at `airdrop_drop_hour`, `airdrop_loot_list` (loot.xml container for the crate) | the proposed `[sim] airdrop` block shipped as `airdrop_*` flat keys (stock has no AirDrop* keys; AirDropFrequency stays the interval) |
 | Director scale tables (`ecs/aidirector.zig:365`) | **SHIPPED** - per-tier scalars `[rules.director] difficulty_hp_0..5` / `move_scale_0..4` (was hardcoded `[N]f32` arrays, zdtd-tuned R9, no RE pin; now config-overridable, defaults unchanged) | toml_bind scalar binding per tier (the proposed single `difficulty_hp_scale` key shipped as per-tier keys) |
 | Sleeper spawn-cap divergence (`game/sleeper.zig:100`) | documented divergence (spawns ignore the stock global gate) | `[sim] sleeper_cap_gate_enabled` toggle |
 | Bot loadout pool (`game/bot.zig:61`) | per-weapon damage/range/pellets host constants | `[bots] weapon_table` (per-weapon fields) |
