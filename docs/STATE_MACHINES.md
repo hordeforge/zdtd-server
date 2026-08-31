@@ -141,7 +141,8 @@ Per player slot, per quest. `QuestProgress` walks a phase graph (each phase =
 one advancing objective kind + required count); `ready_turn_in` parks the quest
 at the highest phase until the trader is opened. Wallet coins credit in the
 sim; item and exp rewards pay out through the tick-end completed-quest ring.
-`Optional` / `ForcePhaseFinish` (quest failure) are not modelled.
+`Optional` objectives do not block phase advance; `ForcePhaseFinish` fails the
+quest when left incomplete (`QuestProgress.failed`, journal keeps the entry).
 
 ```mermaid
 stateDiagram-v2
@@ -155,12 +156,12 @@ stateDiagram-v2
 ```
 
 Owners: `src/ecs/quest.zig` (`QuestDef`, `PhaseSpec`, `RewardSpec`),
-`src/ecs/components.zig:349` (`QuestProgress`, `Journal`),
-`src/ecs/systems.zig:185` (`completeQuest`), `:377` (`questOnTraderOpen`),
-`:301` (`questAccept`), `src/server/game/step.zig` (tick-end payout drain).
+`src/ecs/components.zig` (`QuestProgress`, `Journal`),
+`src/ecs/systems.zig` (`completeQuest`, `questOnTraderOpen`, `questAccept`),
+`src/server/game/step.zig` (tick-end payout drain).
 
 Shared quests: `QuestProgress.is_shared` latches when the owner's party is
-handed the quest (`server/game/social.zig:266` `shareQuestWithParty`); when the
+handed the quest (`server/game/social.zig` `shareQuestWithParty`); when the
 owner disconnects, the party gets `remove_quest` events so their mirrors clear
 (`src/server/game/session_drop.zig` `dropClientSlot`). Rally markers:
 `rally_activated` latches per quest; a rally
