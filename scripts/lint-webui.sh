@@ -55,6 +55,26 @@ fi
 # type module: the vendored anti-slop plugin source is ESM; without the field
 # node reparses it with a MODULE_TYPELESS_PACKAGE_JSON warning.
 [ -f "$cache_dir/package.json" ] || printf '{"type":"module"}\n' > "$cache_dir/package.json"
+# Compile the anti-slop TypeScript plugin to JavaScript (oxlint loads plugins
+# through Node.js, which does not understand TypeScript). Use bun build to
+# transpile each .ts file to .js in place, rewriting .ts import extensions to
+# .js and marking @oxlint imports as external (they resolve from the parent
+# node_modules at runtime). Only compile if the compiled output is missing or
+# older than the source.
+if [ ! -f "$cache_dir/anti-slop-src/index.js" ] || \
+   [ "$cache_dir/anti-slop-src/index.ts" -nt "$cache_dir/anti-slop-src/index.js" ]; then
+  ( cd "$cache_dir/anti-slop-src" && \
+    while IFS= read -r -d '' f; do
+      # Skip test files (the plugin does not need them).
+      [[ "$f" == *.test.ts ]] && continue
+      out="${f%.ts}.js"
+      bun build "$f" --outfile "$out" --target=node --format=esm \
+        --external=@oxlint/plugins --external=oxlint/plugins-dev
+      # Rewrite .ts import extensions to .js so Node.js can load them.
+      sed -i 's|from "\(\..*\)\.ts"|from "\1.js"|g' "$out"
+      sed -i "s|from '\(\..*\)\.ts'|from '\1.js'|g" "$out"
+    done < <(find . -name '*.ts' -type f -print0) )
+fi
 ( cd "$cache_dir" && bun add --silent \
     "@rikalabs/oxlint-standards@$oxlint_standards_version" \
     "oxlint-tsgolint@$oxlint_tsgolint_version" \
