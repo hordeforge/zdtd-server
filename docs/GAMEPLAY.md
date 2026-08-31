@@ -9,7 +9,7 @@ validation, mutation and broadcast steps plus the owning `src/` anchors.
 
 ## 1. Craft (player inventory)
 
-`NetPackageInventoryTransactionRequest` with `op = craft` (c2s/inv.zig:700)
+`NetPackageInventoryTransactionRequest` with `op = craft` (c2s/inv.zig)
 calls `tryCraft` → `tryCraftRecipe`. Ingredients are aggregated by ECS item id
 so duplicate or alias ingredient lines are not double-counted; the whole
 transaction is atomic over a snapshot of the bag. On success the output goes
@@ -33,9 +33,9 @@ flowchart TD
     J --> K[InventoryTransactionResponse]
 ```
 
-Anchors: `src/server/c2s/inv.zig:700` (craft op dispatch),
+Anchors: `src/server/c2s/inv.zig` (craft op dispatch),
 `src/server/game/craft.zig` (`tryCraft` → `tryCraftRecipe`),
-`src/ecs/systems.zig:1081` (`questOnCraft`). `times` is clamped to
+`src/ecs/systems.zig` (`questOnCraft`). `times` is clamped to
 `craft_max_times`; zero means one. Any missing ingredient name or an output
 that fails to deposit restores the exact pre-craft bag.
 
@@ -78,10 +78,9 @@ flowchart TD
     U --> Q
 ```
 
-Anchors: `src/server/c2s/inv.zig:363` (workstation TE apply), `:479`
-(`getOrCreate`), `src/world/workstations.zig:225` (`tick` burn/craft advance),
-`:229` (`tickResolved` queue processing), `:357` (`setCraftComplete`),
-`:434` (`getOrCreate`), `src/server/game/craft.zig:298`
+Anchors: `src/server/c2s/inv.zig` (workstation TE apply),
+`src/world/workstations.zig` (`tick` burn/craft advance, `tickResolved` queue
+processing, `setCraftComplete`, `getOrCreate`), `src/server/game/craft.zig`
 (`tickWorkstations`, also feeds the heat map).
 
 Notes: `max_crafts_per_tick = 64` bounds one tick; a non-finite or huge
@@ -153,12 +152,10 @@ flowchart TD
     M --> N[wallet regrown to wallet_default, last_restock_day pinned]
 ```
 
-Anchors: `src/assets/traders.zig:134` (`rollAllRefs`), `:176`
-(`spawnLootItemsFromList`), `:205` (`spawnItemsFromGroup`), `:228`
-(`spawnItem`), `:243` (`randomSpawnCount`), `src/server/game/trader.zig:141`
-(`rollStockRefs`), `:167` (`fillTraderFromXml`), `:204`
-(`maybeRestockTrader`), `src/ecs/systems.zig:751` (`traderRestock` daily
-timer).
+Anchors: `src/assets/traders.zig` (`rollAllRefs`, `spawnLootItemsFromList`,
+`spawnItemsFromGroup`, `spawnItem`, `randomSpawnCount`),
+`src/server/game/trader.zig` (`rollStockRefs`, `fillTraderFromXml`,
+`maybeRestockTrader`), `src/ecs/systems.zig` (`traderRestock` daily timer).
 
 ## 5. Loot roll pipeline
 
@@ -195,10 +192,10 @@ flowchart TD
     O -- yes --> Q[return stacks]
 ```
 
-Anchors: `src/assets/loot.zig:196` (`rollContainer`), `:262` (`rollGroup`),
-`:142` (`probGate`), `:123` (`resolveQuality`), `:154` (`scaleCount`),
-`src/server/game/chunk_fill.zig` (`fillContainerFromLoot` feeds the stacks
-into a container and stamps `touched_day`). The loot stage is the party loot
+Anchors: `src/assets/loot.zig` (`rollContainer`, `rollGroup`, `probGate`,
+`resolveQuality`, `scaleCount`), `src/server/game/chunk_fill.zig`
+(`fillContainerFromLoot` feeds the stacks into a container and stamps
+`touched_day`). The loot stage is the party loot
 stage; the seed is deterministic per position and respawn
 cycle (see [STATE_MACHINES.md#17-loot-respawn](STATE_MACHINES.md#17-loot-respawn)).
 
@@ -235,10 +232,10 @@ flowchart TD
     N -- no --> P[cd -= dt]
 ```
 
-Anchors: `src/server/game/tick.zig:23` (`tickSurvival`), `src/assets/buffs.zig:396`
-(`survival()` resolves thresholds and per-second HP loss), `src/ecs/rules.zig:169`
+Anchors: `src/server/game/tick.zig` (`tickSurvival`), `src/assets/buffs.zig`
+(`survival()` resolves thresholds and per-second HP loss), `src/ecs/rules.zig`
 (`progression` defaults: depletion, starvation, well-fed, stamina drain/regen,
-sync cadence), `src/server/c2s/move.zig:156` (sprint state from
+sync cadence), `src/server/c2s/move.zig` (sprint state from
 `NetPackageEntitySpeeds`).
 
 ## 7. Blood moon schedule
@@ -247,8 +244,8 @@ The blood moon window (scheduled day, dusk start, party stage freeze, dawn
 end) is a state lifecycle and is covered in STATE_MACHINES section 6 with the
 `WorldClock` transitions. Gameplay-relevant notes that belong to flows:
 `Director.bm_stage_frozen` latches the party gamestage at dusk and clears at
-dawn (`src/ecs/aidirector.zig:333`); one horde wave spawns per party every 6 s
-(`:344`); horde zombies teleport back to their party focus past 150 m. See
+dawn (`src/ecs/aidirector.zig`); one horde wave spawns per party every 6 s;
+horde zombies teleport back to their party focus past 150 m. See
 [STATE_MACHINES.md#6-blood-moon-window](STATE_MACHINES.md#6-blood-moon-window).
 
 ## 8. Movement authority
@@ -283,12 +280,12 @@ flowchart TD
     N --> O[questTickGoto + questTickStayWithin]
 ```
 
-Anchors: `src/server/c2s/move.zig:20` (PosAndRot handler), `:86` (RelPos
-handler), `:151` (Teleport handler), `src/server/game/movement_helpers.zig`
-(`applyMovementEnvelope`), `src/server/movement.zig:31` (`clampHorizontal`),
+Anchors: `src/server/c2s/move.zig` (PosAndRot, RelPos and Teleport
+handlers), `src/server/game/movement_helpers.zig`
+(`applyMovementEnvelope`), `src/server/movement.zig` (`clampHorizontal`),
 `src/server/game/movement_helpers.zig` (`noteAcceptedMove`, rebaselines and
 fires pressure plates), `src/server/game/rescue.zig` (`rescueDeepVoid`),
-`src/server/c2s/move.zig:144` (`NetPackageEntitySpeeds` sprint state).
+`src/server/c2s/move.zig` (`NetPackageEntitySpeeds` sprint state).
 
 Notes: the gate is `move_valid` false after spawn/teleport
 (`resetMoveEnvelopePeer`, `src/server/game/movement_helpers.zig`), so the
