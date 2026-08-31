@@ -1,10 +1,11 @@
 # infinite: procedural world generation while players are in the game.
 # Chunks generate deterministically on first touch as players explore - the
 # world is unbounded in XZ and streams like a stock map (view square + pacing,
-# deco per streamed chunk). Load: --preset infinite (or zdtd.toml
-# [preset] name = "infinite"), or via the mod itself (mods/infinite_world
-# carries this file as its self-contained preset). Any seed gives a fresh
-# infinite world; the pack
+# deco per streamed chunk). Load via the mod itself: `mods/infinite_world`
+# carries this self-contained preset and `[mods] enabled = "infinite_world"`
+# activates it. `--preset infinite` is intentionally unavailable because the
+# main presets folder ships stock-only packs. Any seed gives a fresh infinite
+# world; the pack
 # default is overridden by zdtd.toml [worldgen] seed or --worldgen-seed.
 #
 # Note: this is the zdtd procedural generator (docs/WORLDGEN.md), a

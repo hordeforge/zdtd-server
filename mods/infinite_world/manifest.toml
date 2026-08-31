@@ -1,8 +1,8 @@
 # infinite_world: procedural world generation while players are in the game.
 # Self-contained config-only mod (no wasm): its own preset.toml (the `preset`
 # key, relative to this folder) carries the gameplay keys and [rules.*] that
-# override the built-in defaults, exactly like --preset infinite. Ships
-# enabled = false so a fresh boot stays stock; enable via zdtd.toml
+# override the built-in defaults. It is not a stock `--preset infinite` pack;
+# enable the manifest mod via zdtd.toml
 # [mods] enabled = ["infinite_world"] (or flip enabled = true). Removing it
 # later restores the default terrain (a clean session writes no world files;
 # see docs/WORLDGEN.md).

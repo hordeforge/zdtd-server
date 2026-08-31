@@ -3401,7 +3401,8 @@ persistence and the HUD day counter each have specific, noticeable gaps.
   via `WorldGen.applyParams`; defaults byte-identical; grid cells + noise
   recipe stay code). The "infinite game" ships as a config-only mod (`mods/infinite_world/`,
   own preset.toml: pack `worldgen_seed` + `[rules.worldgen]`; seed
-  precedence CLI > zdtd.toml > pack; `--preset infinite` also works), and
+  precedence CLI > zdtd.toml > pack; `--preset infinite` intentionally fails
+  because the main presets folder ships stock-only packs), and
   proc deco resolves from the W3
   biome field + biomes.xml lists (no biomemap on proc worlds), so a
   game-dir proc world streams trees instead of staying bald.
