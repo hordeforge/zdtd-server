@@ -438,8 +438,7 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
         if (@hasField(@TypeOf(opts.*), "apm_dump_every_s")) opts.apm_dump_every_s = v;
     }
     if (f.worldgen.seed) |v| {
-        if (@hasField(@TypeOf(opts.*), "worldgen_seed") and opts.worldgen_seed == null)
-            opts.worldgen_seed = v;
+        if (@hasField(@TypeOf(opts.*), "worldgen_seed")) opts.worldgen_seed = v;
     }
 }
 
@@ -1084,7 +1083,7 @@ test "[authority] max_vertical_speed_mps parses, merges, and clamps" {
     try std.testing.expectEqual(@as(f32, 1), zero.max_vertical_speed_mps);
 }
 
-test "[worldgen] seed parses and does not override a CLI seed" {
+test "[worldgen] seed parses and overlays a preset seed" {
     var f = try parse(
         std.testing.allocator,
         \\[worldgen]
@@ -1098,9 +1097,11 @@ test "[worldgen] seed parses and does not override a CLI seed" {
     applyToInitOptions(&f, &o);
     try std.testing.expectEqual(@as(?u64, 42), o.worldgen_seed);
 
-    var cli: TestOpts = .{ .worldgen_seed = 99 };
-    applyToInitOptions(&f, &cli);
-    try std.testing.expectEqual(@as(?u64, 99), cli.worldgen_seed);
+    // main.zig restores the separately recorded CLI seed after this TOML
+    // overlay. At this layer TOML must replace the prior preset value.
+    var preset: TestOpts = .{ .worldgen_seed = 99 };
+    applyToInitOptions(&f, &preset);
+    try std.testing.expectEqual(@as(?u64, 42), preset.worldgen_seed);
 }
 
 test "sanitizeInitOptions forces an odd land claim size" {
