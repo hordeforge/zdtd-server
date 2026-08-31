@@ -78,9 +78,13 @@ WorldInitInfoRequest, DynamicClientArrive, RequestToSpawnPlayer),
 ## 2. Sim tick pipeline
 
 The 20 TPS main loop. Phases run in document order; parallelism stays inside a
-phase (`systemZombieAi` / `systemTurrets` via the `util/parallel` pool). The
-command buffer drains once per tick after the sim settles; plugin-queued
-commands land on the next tick's drain.
+phase (`systemZombieAi` / `systemTurrets` via the `util/parallel` pool).
+`Game.step` polls the net first, then `systems.tickAll` (`schedule.run`) runs
+the phases below and drains the command buffer once at the end of that
+pipeline. Queues from net-poll hooks or from systems earlier in the same
+`tickAll` drain that tick. Plugin `onTick` (and other post-sim hooks) run
+after `tickAll`, so their queued commands land on the next tick's drain.
+Withdrawal (`World.pre_drain_fn`) runs immediately before each drain.
 
 ```mermaid
 stateDiagram-v2
