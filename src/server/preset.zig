@@ -1,7 +1,7 @@
 //! Preset = config pack (+ optional static plugin flag). ADR 0010 step 3.
 //! Data-only TOML under presets/<name>.toml. No script VM.
-//! Apply onto InitOptions after serverconfig, before/with zdtd.toml stream keys.
-//! Parsing is the comptime binder (src/util/toml_bind.zig); the pack may set
+//! Apply onto InitOptions after serverconfig and before the zdtd.toml operator
+//! overlay. Parsing is the comptime binder (src/util/toml_bind.zig); the pack may set
 //! stock serverconfig keys (root / [gameplay] / [plugin]) plus any `Rules`
 //! field via `[rules.*]` sections (ADR 0021 decision 3).
 

@@ -748,21 +748,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // The preset loads after mod resolution: --preset / [preset] name wins,
     // else a config-only mod's `preset` (a .toml inside the mod's folder).
 
-    if (toml_owned) |*tf| {
-        zdtd_config.applyToInitOptions(tf, &init_opts);
-        // [plugin] modules is a comma-separated list; applyToInitOptions cannot
-        // allocate, so split it here and free the list after the Game is created
-        // (paths point into the toml arena; Game dupes the names it keeps).
-        if (tf.plugin.modules) |m| init_opts.plugin_modules = splitPluginModules(gpa, m);
-        if (tf.plugin.fuel) |fuel| init_opts.plugin_budget.fuel = fuel;
-        if (tf.plugin.max_pages) |pages| init_opts.plugin_budget.max_memory_pages = pages;
-        // authority.mode is validated + canonicalised at parse (binder
-        // enum_by_name), so this is a straight apply.
-        if (tf.authority.mode) |mode_s| {
-            if (server_config.AuthorityMode.parse(mode_s)) |am| init_opts.authority_mode = am;
-        }
-    }
-
     // PRD 0005: discover mods/ (addons) + plugins/ (first-party core)
     // manifests, resolve tiers + overrides + claims, then load through the
     // plan. `[mods] disabled`/`blacklist` gate discovery; `[mods] enabled`
@@ -802,11 +787,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
         break :blk splitPluginModules(gpa, s);
     } else &.{};
     defer if (enabled_list.len > 0) gpa.free(enabled_list);
+    // Resolver input only: `[plugin] modules` is needed to decide the plan
+    // before the complete TOML operator overlay lands after the preset.
+    const explicit_plugin_modules = if (toml_owned) |*tf| blk: {
+        const s = tf.plugin.modules orelse "";
+        break :blk splitPluginModules(gpa, s);
+    } else &.{};
+    defer if (explicit_plugin_modules.len > 0) gpa.free(explicit_plugin_modules);
 
     var mod_plan = plugin_mod.resolver.resolve(
         gpa,
         discovered,
-        init_opts.plugin_modules,
+        explicit_plugin_modules,
         disabled_list,
         blacklist_list,
         enabled_list,
@@ -867,15 +859,31 @@ pub fn main(init: std.process.Init.Minimal) !void {
         }
     }
 
-    // Effective worldgen seed precedence: CLI --worldgen-seed > zdtd.toml
-    // [worldgen] seed > preset pack `worldgen_seed` (pack < toml < CLI, like
-    // rules). applyToInitOptions already applied CLI/toml (both null-guarded);
-    // the pack tier lands here so it can never clobber either. `--map` still
-    // wins over any seed at Game init (loadStockMap branch).
-    if (init_opts.worldgen_seed == null) {
-        if (preset_owned) |*ppk| {
-            if (ppk.worldgen_seed) |s| init_opts.worldgen_seed = s;
+    // TOML is the operator overlay: it must apply after the preset (whether
+    // built-in or supplied by an enabled config-only/Wasm mod) so the published
+    // precedence holds: defaults < serverconfig < preset < zdtd.toml < CLI.
+    if (toml_owned) |*tf| {
+        zdtd_config.applyToInitOptions(tf, &init_opts);
+        // [plugin] modules is a comma-separated list; applyToInitOptions cannot
+        // allocate, so split it here and free the list after the Game is created
+        // (paths point into the toml arena; Game dupes the names it keeps).
+        if (tf.plugin.modules) |m| init_opts.plugin_modules = splitPluginModules(gpa, m);
+        if (tf.plugin.fuel) |fuel| init_opts.plugin_budget.fuel = fuel;
+        if (tf.plugin.max_pages) |pages| init_opts.plugin_budget.max_memory_pages = pages;
+        // authority.mode is validated + canonicalised at parse (binder
+        // enum_by_name), so this is a straight apply.
+        if (tf.authority.mode) |mode_s| {
+            if (server_config.AuthorityMode.parse(mode_s)) |am| init_opts.authority_mode = am;
         }
+    }
+
+    // Effective worldgen seed precedence: CLI --worldgen-seed > zdtd.toml
+    // [worldgen] seed > preset pack `worldgen_seed` (pack < toml < CLI).
+    // The chosen preset set its fallback before TOML, TOML overlaid it above,
+    // and the parsed CLI value is restored last. `--map` still wins over any
+    // seed at Game init (loadStockMap branch).
+    if (worldgen_seed) |s| {
+        init_opts.worldgen_seed = s;
     }
     // Log which discovered mods were skipped (disabled / blacklisted /
     // enabled=false) so the operator sees why something did not load. The
