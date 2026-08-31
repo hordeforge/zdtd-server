@@ -132,8 +132,8 @@ stateDiagram-v2
     Chase --> [*]: death / despawn
 ```
 
-Owners: `src/ecs/components.zig:66` (`AiState`), `:79` (`TaskId`),
-`src/ecs/systems.zig` AiCtx (`zombie_tasks` table).
+Owners: `src/ecs/components.zig` (`AiState`, `TaskId`),
+`src/ecs/systems.zig` (`zombie_tasks` table).
 
 ## 4. Quest lifecycle
 
