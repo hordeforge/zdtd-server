@@ -20,10 +20,10 @@ that owns them.
 | 11 | Ally status | `server/ally.zig` | [allies](#11-ally-status) |
 | 12 | Plugin lifecycle | `plugin/host.zig`, `plugin/wasm.zig` | [plugins](#12-plugin-lifecycle) |
 | 13 | LiteNet peer | `litenet/peer.zig` | [peer](#13-litenet-peer) |
-| 14 | Land claims | `server/game.zig` land claims | [claims](#14-land-claims) |
+| 14 | Land claims | `server/game/world.zig`, `server/persist.zig`, `Game.reclaimForName` | [claims](#14-land-claims) |
 | 15 | Party membership | `ecs/party.zig` Manager, `server/game/social.zig` handlePartyActions | [party](#15-party-membership) |
 | 16 | Vending rental | `world/vending.zig`, `server/c2s/quest.zig` NetPackagePlayerVendingMachine | [vending](#16-vending-rental) |
-| 17 | Loot respawn | `server/game/chunk_stream.zig` maybeRespawnContainer, `world/containers.zig` | [loot-respawn](#17-loot-respawn) |
+| 17 | Loot respawn | `server/game/chunk_fill.zig`, `Game.maybeRespawnContainer`, `world/containers.zig` | [loot-respawn](#17-loot-respawn) |
 | 18 | Guard policy | `server/guard_policy.zig` | [guard](#18-guard-policy) |
 | 19 | Chunk stream backpressure | `server/game/chunk_stream.zig`, `server/game/net.zig` sendReliablePumped | [chunk-stream](#19-chunk-stream-backpressure) |
 | 20 | Buff lifecycle | `ecs/buff.zig`, `ecs/systems.zig` systemBuffs | [buff](#20-buff-lifecycle) |
@@ -54,9 +54,9 @@ stateDiagram-v2
 ```
 
 Notes: `WorldInfo` goes out at Entering, never in the spawn bundle (a second
-WorldInfo restarts the client's createWorld; `src/server/c2s/join.zig:256` is
+WorldInfo restarts the client's createWorld; `src/server/c2s/join.zig` is
 the one send site, in the RequestToEnterGame handler). The chunk streamer starts earlier, at WorldInitInfoRequest
-(`Client.world_ready`, `c2s/join.zig:343`); the spawn area is also streamed
+(`Client.world_ready`, `c2s/join.zig`); the spawn area is also streamed
 before the bundle while
 the client still waits on its spawn request. Death respawn re-enters Spawning
 while `entered` stays true; the re-bundle then sends Spawned(died) + teleport
@@ -101,7 +101,7 @@ stateDiagram-v2
     Commands --> [*]: drain deferred ops (systems + plugins)
 ```
 
-Owners: `src/ecs/schedule.zig:9` (`Phase`, `Rules.systems` per-phase gate),
+Owners: `src/ecs/schedule.zig` (`Phase`, `Rules.systems` per-phase gate),
 `src/server/game/step.zig` (the `step()` body), `src/server/game/tick.zig`
 (player survival / stamina; `buffs.xml` thresholds when the table is loaded,
 otherwise `Rules.progression`), `src/server/game/deco.zig` (deco mirror,
@@ -205,8 +205,8 @@ stateDiagram-v2
     BloodMoon --> Clear: dawn (release global override)
 ```
 
-Owners: `src/world/weather.zig:36` (`BiomeState.storm_state` 0/1/2),
-`:106` (`tick`), `:125` (`forceBloodMoon`), `:302` (persistence).
+Owners: `src/world/weather.zig` (`BiomeState.storm_state` 0/1/2,
+`tick`, `forceBloodMoon`, `weather.zwt` persistence).
 
 ## 6. Blood moon window
 
@@ -223,12 +223,12 @@ stateDiagram-v2
     NormalDay --> NormalDay: day rolls (BloodMoonDay re-sent)
 ```
 
-Owners: `src/ecs/aidirector.zig:61` (`isBloodMoonNight`), `:68`
-(`isBloodMoonDay`), `src/server/game.zig` (`bloodMoonDayFor` + day-roll
-broadcast).
+Owners: `src/ecs/aidirector.zig` (`isBloodMoonNight`, private `isBloodMoonDay`,
+`WorldClock.bloodMoonDayFor`, `clearHordeMarks`), `src/server/game.zig`
+(day-roll `GameStats.blood_moon_day` broadcast via `bloodMoonDayFor`).
 
 Notes: `Director.bm_stage_frozen` latches the party gamestage at dusk and
-clears at dawn with the horde marks (`aidirector.zig:818` / `clearHordeMarks`);
+clears at dawn with the horde marks (`aidirector.zig` / `clearHordeMarks`);
 parties cluster players within 80 m and horde zombies teleport back to their
 party focus past 150 m; one wave spawns per party every 6 s.
 
@@ -273,14 +273,14 @@ stateDiagram-v2
     Triggered --> [*]: volume spent
 ```
 
-Owners: `src/world/sleepers.zig:38` (`triggered`),
-`src/server/game/sleeper.zig` (`tickSleeperVolumes`), `src/ecs/systems.zig:987`
+Owners: `src/world/sleepers.zig` (`triggered`),
+`src/server/game/sleeper.zig` (`tickSleeperVolumes`), `src/ecs/systems.zig`
 (per-entity `Sleeper.awake` wake: a player inside `volume_r` of the home cell;
 sleepers are exempt from distraction targeting and far-despawn).
 
 ## 9. Trader SM
 
-The trader surface (`TraderStock`, `ecs/components.zig:597`) owns the open
+The trader surface (`TraderStock`, `ecs/components.zig`) owns the open
 hours latch, the restock cadence and the money pool. Open/close is an
 edge-latched cycle driven by the world clock; restock is lazy (triggered by the
 window open) plus a daily timer; the wallet is server-owned.
@@ -312,7 +312,7 @@ a sell) and resets on restock.
 
 ## 10. Vehicle multi-seat
 
-`Vehicle` (`ecs/components.zig:225`) keeps one seat per rider
+`Vehicle` (`ecs/components.zig`) keeps one seat per rider
 (`seats[max_seats=6]`, -1 = free; `driver_seat = 0`). Seats flip between free
 and occupied; only losing the driver stops the hull.
 
@@ -325,10 +325,9 @@ stateDiagram-v2
     Free --> [*]: vehicle destroyed / despawned
 ```
 
-Owners: `src/ecs/systems.zig:1890` (`vehicleAttach`), `:1934`
-(`vehicleDetach`), `:1862` (`vehicleFindSeat`), `:1872` (`vehicleOfRider`),
-`src/server/c2s/misc.zig:520` (NetPackageEntityAttach, rider identity check),
-`:504` (NetPackageVehicleSpawn op 0/1/2; only the seat-0 driver may steer).
+Owners: `src/ecs/systems.zig` (`vehicleAttach`), (`vehicleDetach`), (`vehicleFindSeat`), (`vehicleOfRider`),
+`src/server/c2s/misc.zig` (NetPackageEntityAttach, rider identity check),
+(NetPackageVehicleSpawn op 0/1/2; only the seat-0 driver may steer).
 
 An explicit request for an occupied seat is refused (the request comes off the
 wire and must not evict another rider); re-requesting the held seat is a
@@ -352,7 +351,7 @@ stateDiagram-v2
     Allies --> NotAllied: unfriend
 ```
 
-Owners: `src/server/ally.zig:31` (`Status`), `:39` (`mirror`).
+Owners: `src/server/ally.zig` (`Status`), (`mirror`).
 
 ## 12. Plugin lifecycle
 
@@ -373,7 +372,7 @@ stateDiagram-v2
     Disabled --> [*]: shutdown (hook skipped)
 ```
 
-Owners: `src/plugin/host.zig:10`, `src/plugin/wasm.zig:49`.
+Owners: `src/plugin/host.zig`, `src/plugin/wasm.zig`.
 Now also `on_admin_command` (first >0 reply wins; traps = allow), `on_chat`
 (deny/rewrite; bad UTF-8 treated as deny), and `on_player_login`
 (sanitized name; first deny wins); same isolation and fuel+memory budget.
@@ -394,7 +393,7 @@ stateDiagram-v2
     Authenticated --> Authenticated: reliable window ack pump (fast then paced)
 ```
 
-Owners: `src/litenet/peer.zig:129` (`Peer`), `src/server/game.zig`
+Owners: `src/litenet/peer.zig` (`Peer`), `src/server/game.zig`
 (`reapStalePeers`, WindowFull retry pacing).
 
 ## 14. Land claims
@@ -411,13 +410,13 @@ stateDiagram-v2
     Expired --> [*]: claim cleared
 ```
 
-Owners: `src/server/game/world.zig:26` (`registerClaim`), `:65`
-(`removeClaimAt`), `:89` (`expireClaims`), `src/server/persist.zig:517`
-(`saveClaims`), `:547` (`loadClaims`), `:586` (`reclaimForName`, re-maps the
-restored claim to the entity id a player got at login and refreshes the seen
-day). Expiry counts offline days only (`day - owner_seen_day >
-land_claim_expiry_days`, 0 disables); a re-placement at the same keystone
-replaces the owner instead of appending.
+Owners: `src/server/game/world.zig` (`registerClaim`, `removeClaimAt`,
+`expireClaims`), `src/server/persist.zig` (`saveClaims`, `loadClaims`),
+`src/server/game.zig` (`reclaimForName`, re-maps the restored claim to the
+entity id a player got at login and refreshes the seen day). Expiry counts
+offline days only (`day - owner_seen_day > land_claim_expiry_days`, 0
+disables); a re-placement at the same keystone replaces the owner instead of
+appending.
 
 
 ## 15. Party membership
@@ -440,9 +439,9 @@ stateDiagram-v2
     Ungrouped --> [*]: session ends
 ```
 
-Owners: `src/ecs/party.zig:64` (`Manager`, `next_party_id` starts at 1),
-`:132` (`acceptInvite`), `:148` (`setLeader`), `:160` (`removePlayer`),
-`:190` (`autoJoin`), `src/server/game/social.zig:118` (`handlePartyActions`,
+Owners: `src/ecs/party.zig` (`Manager`, `next_party_id` starts at 1),
+(`acceptInvite`), (`setLeader`), (`removePlayer`),
+(`autoJoin`), `src/server/game/social.zig` (`handlePartyActions`,
 validates member/leader identity before each mutation),
 `src/server/game/session_drop.zig` (`dropClientSlot`: disconnect removal +
 shared-quest cleanup).
@@ -450,7 +449,7 @@ shared-quest cleanup).
 Notes: `max_party_members = 8` (stock `IsFull` refuses), and a party of one
 is not kept (the last member's removal disbands it). `setVoiceLobby` is a
 wire round-trip only; zdtd owns no voice lobby. A shared quest latches
-`QuestProgress.is_shared` (`server/game/social.zig:266`) and the party gets
+`QuestProgress.is_shared` (`server/game/social.zig`) and the party gets
 `remove_quest` events when the owner disconnects (`session_drop.zig`).
 
 ## 16. Vending rental
@@ -470,9 +469,8 @@ stateDiagram-v2
     Unowned --> [*]: block removed
 ```
 
-Owners: `src/world/vending.zig:64` (`Vending.rental_end_day`), `:88`
-(`clear`, keeps pos / block_id / trader_id / stock),
-`src/server/c2s/quest.zig:252` (`NetPackagePlayerVendingMachine`: rent and
+Owners: `src/world/vending.zig` (`Vending.rental_end_day`), (`clear`, keeps pos / block_id / trader_id / stock),
+`src/server/c2s/quest.zig` (`NetPackagePlayerVendingMachine`: rent and
 clear, `CanRent` gates), `src/server/game/step.zig` (day-roll rental expiry).
 
 Notes: rentability comes from `trader_info rentable`; the request acts only
@@ -498,10 +496,10 @@ stateDiagram-v2
 ```
 
 Owners: `src/server/game/chunk_fill.zig` (`fillContainerFromLoot`, stamps
-`touched_day`, and `maybeRespawnContainer`), `src/server/game.zig`
-(forwarding methods), `src/server/c2s/inv.zig` (re-roll before serving
-`NetPackageInventoryDataRequest`), `src/world/containers.zig:33`
-(`touched` / `touched_day`), `:44` (`setSlot`).
+`touched_day`), `src/server/game.zig` (`maybeRespawnContainer` + forwarding
+methods), `src/server/c2s/inv.zig` (re-roll before serving
+`NetPackageInventoryDataRequest`), `src/world/containers.zig`
+(`touched` / `touched_day`, `setSlot`).
 
 Notes: `loot_respawn_days = 0` disables the re-roll; the guard order is
 `player_storage` → `!touched` → not empty → `day <= touched_day` →
@@ -530,9 +528,9 @@ stateDiagram-v2
     Quarantined --> [*]: session end
 ```
 
-Owners: `src/server/guard_policy.zig:71` (`Policy` rungs and thresholds),
-`:114` (`PeerState`: strong_mask, hard_n, tripped, quarantine, kick_at_tick),
-`:152` (`evaluate`), `src/server/game/guard.zig` (`noteEvidence`,
+Owners: `src/server/guard_policy.zig` (`Policy` rungs and thresholds),
+(`PeerState`: strong_mask, hard_n, tripped, quarantine, kick_at_tick),
+(`evaluate`), `src/server/game/guard.zig` (`noteEvidence`,
 `applyQuarantine`, `armPolicyKick`, and `quarantineDenies` at the C2S trust
 boundaries: damage / container / block), `src/server/game/tick.zig`
 (`reapPolicyKicks`).
@@ -597,12 +595,12 @@ stateDiagram-v2
     Absent --> [*]: entity destroyed
 ```
 
-Owners: `src/ecs/buff.zig:40` (`add`, stacking rules), `:95` (`remove` flags
-for the next tick), `:123` (`tick`), `:166` (`clearOnDeath`),
-`src/ecs/systems.zig:2134` (`systemBuffs`, per entity per tick),
-`src/ecs/schedule.zig:64` (buffs phase; `TickResult.buff_expired`),
-`src/server/game/social.zig:109` (`broadcastBuffExpiries` → relayBuff remove),
-`src/server/c2s/join.zig:249` (death respawn silently clears
+Owners: `src/ecs/buff.zig` (`add`, stacking rules), (`remove` flags
+for the next tick), (`tick`), (`clearOnDeath`),
+`src/ecs/systems.zig` (`systemBuffs`, per entity per tick),
+`src/ecs/schedule.zig` (buffs phase; `TickResult.buff_expired`),
+`src/server/game/social.zig` (`broadcastBuffExpiries` → relayBuff remove),
+`src/server/c2s/join.zig` (death respawn silently clears
 `remove_on_death` buffs, stock BuffClass::RemoveOnDeath).
 
 Notes: `duration <= 0` never expires; the update flag fires and clears within
