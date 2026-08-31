@@ -157,9 +157,9 @@ bounded by the host boundary, reloading it recovers everything it installed.
 Queued commands (`zdtd.queue`) are attributed to the plugin that issued them.
 When a module disables itself (hook trap / fuel exhaustion), its still-queued,
 not-yet-applied commands are **withdrawn** before the next drain, and its
-applied ECS spawns and attributed bots (including a `bot count` floor) are
-despawned, so a broken module cannot leave side effects behind. Re-enabling
-requires a reload.
+applied ECS spawns, attributed bots (including a `bot count` floor), and
+attributed glide flags are cleared/despawned, so a broken module cannot leave
+side effects behind. Re-enabling requires a reload.
 
 ## Host imports
 
