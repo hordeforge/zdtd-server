@@ -32,8 +32,9 @@ Existing modules (`plugins/`): core_craftgate (craft verdict), core_killfeed
 (kill feed observer), core_lootgate (loot scaling), core_pvp (player-damage
 verdicts), core_questgate (quest-accept verdict), core_tradefeed (trader
 feed), core_damagegate (incoming damage ×N), core_pricegate (trade price
-×N), core_rewardgate (quest reward ×N), core_announce (join/clock feed),
-core_adminverbs (custom admin verbs). Addons (`mods/`): example_chat_filter
+×N), core_perkgate (perk-spend verdict), core_rewardgate (quest reward ×N),
+core_announce (join/clock feed), core_adminverbs (custom admin verbs). Addons
+(`mods/`): example_chat_filter
 (chat), fps_bot (bot brains, ADR 0026), mcp (MCP protocol).
 
 ## Already correctly placed (no action)
