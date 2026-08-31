@@ -50,9 +50,24 @@ fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result))
 pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.InitOptions) !void {
     const assets_paths = @import("../../assets/paths.zig");
     const modlets = @import("../../assets/modlets.zig");
-    // Stock Mods/ scan (PRD R1): XML/assetbundle modlets. Mod patches apply
-    // before --config-overrides (PRD R6 order). Scan/parse failures are fatal:
-    // a modlet that cannot be applied changes AssignIds vs the client.
+    // Stock Mods/ scan (PRD R1) + self-contained manifest mods' Config/ dirs
+    // (PRD 0003): merged into one patch list so both apply to the patched
+    // catalogs - stock Mods/ first, then manifest mods (each existence-
+    // checked). Operator --config-overrides still apply last (PRD R6 order).
+    // Scan/parse failures are fatal: a modlet that cannot be applied changes
+    // AssignIds vs the client.
+    const io_fs = @import("../../util/io_fs.zig");
+    var merged_mod_dirs = std.ArrayList(modlets.ModDir).empty;
+    // Stock scan ModDirs are owned by the global `installed` Scan (freed at
+    // teardown), so only the manifest-allocated tail is freed here.
+    var manifest_tail: usize = 0;
+    defer {
+        for (merged_mod_dirs.items[manifest_tail..]) |md| {
+            allocator.free(md.config_dir);
+            allocator.free(md.mod_path);
+        }
+        merged_mod_dirs.deinit(allocator);
+    }
     var mods_root_buf: [2048]u8 = undefined;
     const mods_root: ?[]const u8 = if (opts.mods_dir) |md|
         md
@@ -65,8 +80,33 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             util_log.err("zdtd: mods scan '{s}' failed: {s}\n", .{ root, @errorName(err) });
             return err;
         };
-        assets_paths.setModDirs(allocator, mod_dirs);
+        merged_mod_dirs.appendSlice(allocator, mod_dirs) catch |err| {
+            util_log.err("zdtd: mods scan '{s}' merge failed: {s}\n", .{ root, @errorName(err) });
+            return err;
+        };
+        manifest_tail = merged_mod_dirs.items.len;
         util_log.info("zdtd: modlets config dirs={d}\n", .{mod_dirs.len});
+    }
+    if (opts.plugin_plan) |plan| {
+        for (plan.config_dirs) |dir| {
+            var cfg_buf: [2048]u8 = undefined;
+            const cfg = std.fmt.bufPrint(&cfg_buf, "{s}/Config", .{dir}) catch continue;
+            if (!io_fs.dirExists(cfg)) continue;
+            const config_dir = allocator.dupe(u8, cfg) catch continue;
+            const mod_path = allocator.dupe(u8, dir) catch {
+                allocator.free(config_dir);
+                continue;
+            };
+            merged_mod_dirs.append(allocator, .{ .config_dir = config_dir, .mod_path = mod_path }) catch {
+                allocator.free(config_dir);
+                allocator.free(mod_path);
+                continue;
+            };
+            util_log.info("zdtd: manifest mod patch dir: {s}\n", .{cfg});
+        }
+    }
+    if (merged_mod_dirs.items.len > 0) {
+        assets_paths.setModDirs(allocator, merged_mod_dirs.items);
     }
     assets_paths.setOverrideDirs(opts.config_overrides);
     if (opts.config_overrides.len > 0) {

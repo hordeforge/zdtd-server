@@ -52,9 +52,12 @@ sense of "core" (shipped in-tree, Zig source, built by
 
 The `wasm` key in manifest.toml must be `<module>.wasm` (a path relative to the
 plugin directory). A plugin folder is **self-contained**: manifest + wasm +
-source + optional `config.toml` + optional `preset.toml` (rules for a
-config-only mod) + `README.md` travel together; no behavior is hardcoded in
-the host.
+source + optional `config.toml` + optional `preset.toml` + optional
+`Config/*.xml` XPath patches + `README.md` travel together; no behavior is
+hardcoded in the host. When the manifest mod is enabled, its existing `Config/`
+directory joins the XML patch path after stock `Mods/` patches and before
+operator `--config-overrides`; the merged catalog is what the server parses and
+sends as `NetPackageConfigFile` during join.
 
 ### Config-only vs wasm plugins
 

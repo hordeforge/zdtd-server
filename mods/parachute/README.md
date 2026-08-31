@@ -33,9 +33,10 @@ item patch, the authority keys, the guest).
 
 ## How it works
 
-1. **Item**: the modlet patch adds `parachute` to `items.xml` (patched catalog
-   ships to clients via `NetPackageConfigFile`, the stock modlet path). Wear
-   it in any armor slot.
+1. **Item**: the mod's `Config/items.xml` XPath patch adds `parachute` to
+   `items.xml` when the manifest mod is enabled. Its directory joins the XML
+   patch path after stock `Mods/` patches; the merged catalog ships to clients
+   via `NetPackageConfigFile`. Wear it in any armor slot.
 2. **Detection**: the guest reads the sense v4 snapshot each tick. A player is
    `wearing_glider` when an armor slot holds an item tagged `parachute`
    (`[rules.glide] item_tag`); the snapshot also carries the server-

@@ -38,9 +38,19 @@ pub const ResolvedResult = struct {
     /// fields are owned here (strings point into caller-owned paths), so only
     /// the slice itself is freed.
     synthetic: []manifest.Manifest,
+    /// Mod dir of every enabled discovered mod (wasm or config-only, incl.
+    /// replacers; dropped override targets / disabled / blacklisted excluded),
+    /// for XML modlet patches: `assets/init_assets.zig` merges each
+    /// `<dir>/Config` into the patch path, so a self-contained mod's
+    /// `Config/*.xml` patches (e.g. `mods/parachute/Config/items.xml`) apply
+    /// to the patched catalogs (PRD 0003). Owned by the result (freed in
+    /// deinit). Empty when no discovered mod is enabled.
+    config_dirs: []const []const u8 = &.{},
 
     pub fn deinit(self: *ResolvedResult, a: std.mem.Allocator) void {
         if (self.preset_pack) |pp| a.free(pp);
+        for (self.config_dirs) |d| a.free(d);
+        if (self.config_dirs.len > 0) a.free(self.config_dirs);
         if (self.synthetic.len > 0) a.free(self.synthetic);
         a.free(self.modules);
         self.point_claims.deinit(a);
@@ -250,12 +260,34 @@ pub fn resolve(
         try name_to_slot.put(a, path, load.items.len - 1);
     }
 
+    // Self-contained mod XML patch dirs: every enabled discovered mod (wasm
+    // or config-only, incl. replacers) contributes its `<dir>` so the caller
+    // merges `<dir>/Config` into the modlet patch path. Same gates as the
+    // load list above; the caller existence-checks each `Config` dir, so a
+    // mod without one is a no-op.
+    var config_dirs = std.ArrayList([]const u8).empty;
+    errdefer {
+        for (config_dirs.items) |d| a.free(d);
+        config_dirs.deinit(a);
+    }
+    for (discovered) |m| {
+        if (m.dir.len == 0) continue;
+        if (m.enabled) |en| {
+            if (!en and !enabled_set.contains(m.name.?)) continue;
+        }
+        if (disabled_set.contains(m.name.?)) continue;
+        if (blacklist_set.contains(m.name.?)) return error.BlacklistedTarget;
+        if (replaced.contains(m.name.?)) continue;
+        try config_dirs.append(a, try a.dupe(u8, m.dir));
+    }
+
     return ResolvedResult{
         .modules = try load.toOwnedSlice(a),
         .point_claims = claims,
         .name_to_slot = name_to_slot,
         .preset_pack = preset_pack,
         .synthetic = try synthetic.toOwnedSlice(a),
+        .config_dirs = try config_dirs.toOwnedSlice(a),
     };
 }
 
@@ -445,4 +477,44 @@ test "resolve wasm+preset mod loads module and activates its preset" {
     try testing.expectEqual(@as(usize, 1), r.modules.len);
     try testing.expectEqualStrings("parachute.wasm", r.modules[0].manifest.wasm.?);
     try testing.expectEqualStrings("mods/parachute/preset.toml", r.preset_pack.?);
+}
+
+test "resolve collects config dirs of enabled mods only" {
+    // Every enabled discovered mod (wasm or config-only, incl. replacers)
+    // contributes its dir so the caller merges `<dir>/Config` into the modlet
+    // patch path; dropped override targets / disabled / blacklisted are out.
+    var chute = mk("parachute", "parachute.wasm", "user", null, null);
+    chute.dir = "mods/parachute";
+    chute.enabled = false; // needs [mods] enabled
+    var chute_v2 = mk("parachute_v2", "parachute_v2.wasm", "user", "parachute", null);
+    chute_v2.dir = "mods/parachute_v2";
+    var moon = mk("moon_gravity", "", "user", null, null);
+    moon.preset = "preset.toml";
+    moon.dir = "mods/moon_gravity";
+    moon.enabled = true; // self-opted-in
+    var off = mk("off", "off.wasm", "user", null, null);
+    off.dir = "mods/off"; // enabled defaults to null = auto-loaded
+    var banned = mk("banned", "banned.wasm", "user", null, null);
+    banned.dir = "mods/banned";
+    const mods = [_]manifest.Manifest{ chute, chute_v2, moon, off, banned };
+    // A discovered blacklisted target is a loud resolver error, so use the
+    // disabled list for the non-participating rows in this successful-path
+    // collection test.
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{ "off", "banned" }, &.{}, &.{"parachute"});
+    defer r.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), r.config_dirs.len);
+    // Active: parachute_v2 (replacer) and moon_gravity (self-enabled
+    // config-only). Dropped: parachute (override target), off (disabled),
+    // banned (disabled).
+    var found_v2 = false;
+    var found_moon = false;
+    for (r.config_dirs) |d| {
+        if (std.mem.eql(u8, d, "mods/parachute_v2")) found_v2 = true;
+        if (std.mem.eql(u8, d, "mods/moon_gravity")) found_moon = true;
+        try testing.expect(!std.mem.eql(u8, d, "mods/parachute"));
+        try testing.expect(!std.mem.eql(u8, d, "mods/off"));
+        try testing.expect(!std.mem.eql(u8, d, "mods/banned"));
+    }
+    try testing.expect(found_v2);
+    try testing.expect(found_moon);
 }

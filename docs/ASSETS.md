@@ -12,7 +12,8 @@ Policy hub for loading game data from the operator's install (`--game-dir`). Sto
 |---|---|
 | `--game-dir` | Install root → `$game/Data/Config/*` |
 | `--config-dir` | Replace Config root (full files) |
-| `--config-overrides DIR` | **Repeatable.** Dir of xpath patch XMLs; files applied in **filename order** (then dir order). Clean-room subset of stock XmlPatcher: `set`/`setattribute`, `remove`, `append` with simple `/tag[@attr='v']/.../@attr` paths. |
+| enabled manifest mod `Config/` | Each enabled self-contained `mods/<name>/Config/` XPath patch dir is applied after stock `GAME_DIR/Mods/*/Config` dirs (and before operator overrides). A mod without `Config/` is a no-op; disabled/blacklisted/replaced manifests contribute nothing. |
+| `--config-overrides DIR` | **Repeatable.** Dir of xpath patch XMLs; files applied after stock + enabled manifest mod dirs, in **filename order** (then dir order). Clean-room subset of stock XmlPatcher: `set`/`setattribute`, `remove`, `append` with simple `/tag[@attr='v']/.../@attr` paths. |
 
 Optional root: `<configs file="blocks.xml">…</configs>`. If `file=` omitted, target is inferred from the first xpath tag (`/blocks/…` → blocks.xml). Loader: `src/assets/xml_patch.zig`.
 
