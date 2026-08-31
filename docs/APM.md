@@ -38,7 +38,9 @@ flowchart LR
     CNT --> SNAP[snapshot<br/>apm/report.zig]
     PRF --> SNAP
     SNAP --> TXT[text dump<br/>--ticks/--once]
-    SNAP --> JSON[JSON line<br/>stdout + /api/apm.json]
+    SNAP --> JSON[JSON line<br/>stdout zdtd_apm]
+    LOOP --> WEBUI[tick-end WebSnapshot<br/>server/webui.zig]
+    WEBUI --> API[/api/apm.json<br/>zdtd_webui_apm]
 ```
 
 ### Counters (`CounterId`)
@@ -130,14 +132,21 @@ Histograms: power-of-two ns buckets; report mean / p50 / p99 / max.
 ## Output
 
 - **Text:** printed when a bounded `--ticks N` or `--once` run exits; also via
-  admin TCP / WebUI console command `apm` (alias `metrics`)
-- **JSON line:** `{"type":"zdtd_apm",...}` is emitted once per minute during
-  unbounded runs and is also available through the report API. When emitted from
-  the live loop it includes an `"ops"` object with instantaneous gauges
-  (`tick`, `joined`, `entered`, `peers_alive`, `zombies`, `chunks`) so scrapers
-  get load and counters in one event. It is written to **stdout** (human
-  diagnostics stay on stderr), so `1>metrics.jsonl 2>server.log` yields a
-  parseable line stream without interleaved `zdtd:` free text.
+  admin TCP / WebUI console command `apm` (alias `metrics`). This dump walks
+  every `CounterId` and `Section` from `src/apm/`.
+- **JSON line (stdout):** `{"type":"zdtd_apm",...}` from
+  `apm.report.writeJsonLine`, emitted once per minute during unbounded runs.
+  It carries the full counter and section maps. When emitted from the live
+  loop it also includes an `"ops"` object with instantaneous gauges
+  (`tick`, `joined`, `entered`, `peers_alive`, `zombies`, `chunks`). Written
+  to **stdout** (human diagnostics stay on stderr), so
+  `1>metrics.jsonl 2>server.log` yields a parseable line stream without
+  interleaved `zdtd:` free text.
+- **WebUI `/api/apm.json`:** a different schema,
+  `{"type":"zdtd_webui_apm",...}` from `server/webui.zig` `renderApmJson`.
+  It is a tick-end `WebSnapshot` subset for the dashboard (load, selected
+  error counters, section means/p99, player roster), not the full
+  `CounterId` map. See [WEBUI.md](WEBUI.md).
 - **Admin `status`:** one-line load + key error counters (overruns, encode/send
   errors, window drops, persist errors). `guardstats` remains authority rejects.
 

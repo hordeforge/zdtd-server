@@ -204,18 +204,20 @@ At end of `Game.step` (or every N ticks), copy into a `WebSnapshot` behind a
 mutex or double-buffer:
 
 ```text
-WebSnapshot {
-  tick_n, day, hours, bloodmoon_day
+WebSnapshot {  // src/server/webui.zig Snapshot
+  tick_n, last_tick_ns, day, hours, bloodmoon_active/frequency/in_days
   joined, entered, peers_alive, max_players
-  zombies, animals, chunk_count
-  tick_overruns, encode_errors, stream_errors, ...
-  apm_counters[…]
-  apm_sections p50/p99 (pre-summarized)
-  players: [{ slot, name, entity_id, x, y, z, entered }]
-  world_name, terrain_source, seed_opt
-  version strings
+  zombies, animals, traders, vehicles, turrets, loot_bags, players_ent, chunks
+  selected counters (net/errors/join/guard/evidence), not the full CounterId map
+  section means/p50/p99 for tick/net/sim/repl/stream + save_mean_ns
+  players: [{ slot, name, entity_id, x, y, z, ... }]
+  modules: [{ name, disabled }]
+  world_name, view/interest/stream caps, ports, auth flags, OS gauges
 }
 ```
+`/api/apm.json` is `{"type":"zdtd_webui_apm",...}` from this snapshot
+(`renderApmJson`). Full `CounterId`/`Section` dumps stay on stdout as
+`{"type":"zdtd_apm",...}` (see [APM.md](APM.md)).
 
 HTTP handlers **only read** the snapshot (clone under lock, then render). No
 walking live `clients` from the HTTP thread without the snapshot protocol.
