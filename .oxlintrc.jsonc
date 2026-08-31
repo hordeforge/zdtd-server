@@ -63,7 +63,7 @@
   // npm invocation.
   "jsPlugins": [
     "@rikalabs/oxlint-standards/plugin",
-    { "name": "anti-slop", "specifier": "./anti-slop-src/index.ts" }
+    { "name": "anti-slop", "specifier": "./anti-slop-src/index.js" }
   ],
   // Declaring `plugins` replaces oxlint's default-on set, so list every plugin
   // the rules below reference (same list as the baseline's strict-core preset);
