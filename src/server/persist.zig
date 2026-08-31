@@ -1,5 +1,5 @@
 //! Save/restore for zdtd-owned persistence: players.zsv (ZPV12), entities.zen
-//! (ZENT1), claims.zlc (ZCL1), clock.zcl, weather.zwt (ZWTH1) and the chunk
+//! (ZENT), claims.zlc (ZCLC), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
 //! Extracted from game.zig following the replicate_te precedent: these take
