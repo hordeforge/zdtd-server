@@ -3,9 +3,11 @@
 > **Purpose:** product requirements for pure XML/assetbundle modlet compatibility - discovery, XML patching, and join-phase config sync.
 
 **Number:** PRD 0003
-**Status:** shipped (Mods/ discovery + patch pipeline + `NetPackageConfigFile`
-join sync live: `src/assets/modlets.zig`, `src/wire/packages.zig`
-`buildConfigFileBody`, `src/server/game/config_files.zig`). Exception: R10's
+**Status:** partial, fail-closed (Mods/ discovery + the implemented XML patch
+pipeline + `NetPackageConfigFile` join sync live: `src/assets/modlets.zig`,
+`src/wire/packages.zig` `buildConfigFileBody`,
+`src/server/game/config_files.zig`). Residuals: R3's `conditional` op is
+unimplemented and rejected loudly (RE gap G5), and R10's
 `NetPackageLocalization` send is descoped per §8 G8 and stays in the backlog.
 **Owner:** zdtd server core (modlet support is a stock-data loading path, not a
 mod host).
@@ -204,11 +206,13 @@ Acceptance is per requirement; the whole feature is done only when §9 passes.
 
 ### Patching
 
-- **R3** Apply each mod's `Config/*.xml` files in stock order (G3) with the full
-  verified op catalog: set/setattribute(/byxpath), append/prepend(/byxpath),
+- **R3** **PARTIAL, fail-closed.** Apply each mod's `Config/*.xml` files in
+  stock order (G3) with the implemented op catalog:
+  set/setattribute(/byxpath), append/prepend(/byxpath),
   insertafter/insertbefore(/byxpath), remove/removeattribute(/byxpath),
-  csvoperations, conditional, include. Ops are selected by element local name,
-  case-insensitive, like stock's registry lookup.
+  csvoperations, and include. Ops are selected by element local name,
+  case-insensitive, like stock's registry lookup. `conditional` remains an RE
+  gap (G5) and is deliberately rejected under R6 rather than silently skipped.
 - **R4** XPath subset stays text-level but must cover the ops' target forms,
   including trailing `/@attr` (already supported) and the `[@name='x']` filter
   form. `file=` root attribute and root-xpath file inference (existing

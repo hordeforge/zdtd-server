@@ -4,11 +4,11 @@
 
 **Number:** RFC 0003
 **Source:** [PRD 0003](../prd/0003-modlets.md) (requirements R1-R12, wire
-contract §7, RE gaps G1-G8). **Status:** decided and shipped (Phase 0 gaps
-resolved with the fallbacks recorded in PRD 0003 §8; Phase 1-2 live in
-`src/assets/modlets.zig` / `xml_patch.zig` / `game/config_files.zig`; the
-localization phase is descoped per G8). Plan phases gate on
-acceptance checks; `make check` must stay green at every commit.
+contract §7, RE gaps G1-G8). **Status:** decided, partial and fail-closed:
+the implemented Phase 1-2 pipeline lives in `src/assets/modlets.zig` /
+`xml_patch.zig` / `game/config_files.zig`; `conditional` remains RE gap G5
+and is rejected loudly, while localization is descoped per G8. Plan phases
+gate on acceptance checks; `make check` must stay green at every commit.
 **Related:** [PRD 0003](../prd/0003-modlets.md) · [ASSETS.md](../ASSETS.md) · [AUTHORITY.md](../AUTHORITY.md) (join order) · [wire/PACKAGES.md](../wire/PACKAGES.md)
 
 ```mermaid

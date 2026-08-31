@@ -12,7 +12,7 @@ start from [TEMPLATE.md](TEMPLATE.md).
 |---|---|---|
 | [0001](0001-fps-bot.md) | FPS Bot addon requirements | shipped |
 | [0002](0002-mcp-server.md) | MCP server addon requirements | shipped |
-| [0003](0003-modlets.md) | Pure XML/assetbundle modlet compatibility | shipped (localization send descoped, §8 G8) |
+| [0003](0003-modlets.md) | Pure XML/assetbundle modlet compatibility | partial, fail-closed (`conditional` XML op RE gap G5 rejected; localization send descoped, §8 G8) |
 | [0004](0004-hot-restart.md) | Server hot restart: persistence + operator-session continuity | shipped (v1) |
 | [0005](0005-mod-tiers-and-override.md) | Module tiers and mod override (core vs official vs user mods) | shipped (ADR 0032) |
 | [0006](0006-honk-doors.md) | Vehicle horn opens trader doors | draft (design: RFC 0006) |
