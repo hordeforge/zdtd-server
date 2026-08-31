@@ -108,9 +108,11 @@ requires = "<other-mod-name>"     # optional; comma-separated mods that must loa
 1. Scalars only - no TOML arrays (the binder binds scalars; lists are
    comma-separated strings).
 2. `name` == directory name; `wasm` == `<name>.wasm`.
-3. `enabled = false` skips auto-discovery (`manifest.discover`); the module is
-   still loadable via an explicit `[plugin] modules` path. Demo gates/feeds
-   ship off by default so a fresh boot stays stock.
+3. `enabled = false` makes the discovered manifest inert until `[mods] enabled`
+   names it (or an explicit `[plugin] modules` path loads it). Its `override`,
+   `requires`, `points`, `preset`, and `Config/*.xml` entries are inert too:
+   an invalid disabled replacer cannot drop a target or block boot. Demo
+   gates/feeds ship off by default so a fresh boot stays stock.
 4. Known override points (values for `points`), each mapping to one verdict
    hook: `loot.roll`, `quest.payout`, `damage.player_scale`, `craft.request`,
    `trade.price`. Anything else is rejected at bind time.

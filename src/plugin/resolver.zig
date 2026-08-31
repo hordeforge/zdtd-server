@@ -118,24 +118,38 @@ pub fn resolve(
     var replaced: std.StringHashMapUnmanaged(void) = .empty;
     defer replaced.deinit(a);
 
-    // First mark every override target as replaced (a target replaced twice is
-    // a DuplicateClaim: two mods override the same mod).
+    // First mark every *active* override target as replaced (a target
+    // replaced twice is a DuplicateClaim: two active mods override the same
+    // mod). A disabled or enabled=false replacer is inert; it must not drop
+    // its target, trip duplicate/unknown-target errors, or veto boot.
     for (discovered) |m| {
         const t = m.override orelse continue;
+        if (m.enabled) |en| {
+            if (!en and !enabled_set.contains(m.name.?)) continue;
+        }
+        if (disabled_set.contains(m.name.?)) continue;
         if (blacklist_set.contains(t)) return error.BlacklistedTarget;
         if (replaced.contains(t)) return error.DuplicateClaim;
         try replaced.put(a, t, {});
     }
     // Override target must exist among discovered or explicit paths; else the
-    // replacer cannot load.
+    // active replacer cannot load.
     for (discovered) |m| {
         const t = m.override orelse continue;
+        if (m.enabled) |en| {
+            if (!en and !enabled_set.contains(m.name.?)) continue;
+        }
+        if (disabled_set.contains(m.name.?)) continue;
         if (!name_index.contains(t)) return error.UnknownOverrideTarget;
     }
 
     // A blacklisted name is also vetoed as a `requires` dependency (ADR 0032
-    // decision 3): nothing that pulls in a blacklisted mod can load.
+    // decision 3): nothing active that pulls in a blacklisted mod can load.
     for (discovered) |m| {
+        if (m.enabled) |en| {
+            if (!en and !enabled_set.contains(m.name.?)) continue;
+        }
+        if (disabled_set.contains(m.name.?)) continue;
         const reqs = m.requires orelse continue;
         var rit = std.mem.splitScalar(u8, reqs, ',');
         while (rit.next()) |r_raw| {
@@ -370,6 +384,23 @@ test "resolve blacklist vetoes requires dependencies" {
     var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 2), r.modules.len);
+}
+
+test "resolve inactive replacer leaves target and bad metadata inert" {
+    var off = mk("off", "off.wasm", null, "missing_target", null);
+    off.enabled = false;
+    const disabled = mk("disabled", "disabled.wasm", null, "missing_target_2", null);
+    const mods = [_]manifest.Manifest{ mk("base", "base.wasm", null, null, null), off, disabled };
+    var r = try resolve(testing.allocator, &mods, &.{}, &.{"disabled"}, &.{}, &.{});
+    defer r.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 1), r.modules.len);
+    try testing.expectEqualStrings("base", r.modules[0].manifest.name.?);
+
+    // Activating the enabled=false row makes its invalid override loud.
+    try testing.expectError(
+        error.UnknownOverrideTarget,
+        resolve(testing.allocator, &mods, &.{}, &.{"disabled"}, &.{}, &.{"off"}),
+    );
 }
 
 test "resolve override drops target, keeps replacer" {
