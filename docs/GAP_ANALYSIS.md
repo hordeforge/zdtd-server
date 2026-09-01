@@ -1,6 +1,6 @@
 # Gap analysis: what a player can and cannot do on Navezgane
 
-> **What this is:** the full 295-feature inventory for the V3.1.0 b14 stock-client play path, with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
+> **What this is:** the full 297-feature inventory for the V3.1.0 b14 stock-client play path, with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
 
 > **Related:** hub [STATUS.md](STATUS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md)
 
@@ -68,7 +68,7 @@ are unloaded instead of standing frozen in your world forever.
 ### What a player cannot do
 
 *Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
-[scorecard](#2-scorecard): all but one of the 295 features WORKS (294 WORKS, 1 PARTIAL, 0 MISSING); the
+[scorecard](#2-scorecard): all but two of the 297 features WORK (295 WORKS, 2 PARTIAL, 0 MISSING); the
 bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -150,19 +150,26 @@ closed: power grid nodes rebuild from the chunk block grid
 Recount 2026-08-22 from the live per-feature markers (the source of truth):
 **291 features** carry a canonical WORKS/PARTIAL/MISSING tag and the scorecard
 rows below are corrected to those counts. Recount 2026-08-29 (this pass):
-rows added or re-tagged since then bring the canonical set to **295 features
-(294 WORKS, 1 PARTIAL, 0 MISSING)**; the one PARTIAL row is the 2026-08-29
-join-burst tick budget (its residual recorded in the row); the chunk-pointer
-stability gap was closed 2026-08-30 by the pointer-stable chunk store. The
+rows added or re-tagged since then bring the canonical set to **297 features
+(295 WORKS, 2 PARTIAL, 0 MISSING)**; the PARTIAL rows are the 2026-08-29
+join-burst tick budget (its residual recorded in the row) and the
+perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation
+moved into the counted set; the chunk-pointer stability gap was closed
+2026-08-30 by the pointer-stable chunk store. The
 2026-08-21 "333 features / 44
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty-four feature bullets use ad-hoc status labels (`PARTIAL (waived)`,
-`BLOCKED`, `ROLLED`, `SIZED`, `FIXED`, `PERSISTED`, `RESOLVED`, `PER-CLASS`,
-`DONE`, `N/A (parity)`, `PARTIAL → …`) outside the canonical vocabulary and are
-not counted; the former `reviews/DOC_CONSISTENCY_AUDIT.md` snapshot was removed
-with the `reviews/` directory.
+Forty-one feature bullets use ad-hoc status labels (`PARTIAL (waived)` x35,
+`N/A (parity)` x4, plus one each of `BLOCKED`, `ROLLED`, `SIZED`, `FIXED`,
+`PERSISTED`, `RESOLVED`, `PER-CLASS`, `DONE`) outside the canonical vocabulary
+and are not counted; the former `reviews/DOC_CONSISTENCY_AUDIT.md` snapshot was
+removed with the `reviews/` directory. Counted 2026-09-02 (the previous
+"fifty-four" had drifted from the markers, the same failure mode as the old
+MISSING projection above); a waiver re-evaluation the same day promoted "Perk
+purchase / spend skill points" to `WORKS` and dropped the `(waived)` qualifier
+from "Perk / attribute passive effects", both of which had shipped and kept a
+stale label.
 The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ### V3.2.0 (2026-08-28)
@@ -193,7 +200,7 @@ allowance).
 
 ## 2. Scorecard
 
-295 features scored across nine areas (recounted 2026-08-29 from the
+297 features scored across nine areas (recounted 2026-09-02 from the
 per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
@@ -204,10 +211,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 40 | 0 | 0 | 40 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; starter population fill (2026-08-30) populates fresh worlds toward the cap at boot |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 23 | 0 | 0 | 23 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
+| [Player progression](#10-player-progression) | 24 | 1 | 0 | 25 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
 | [World systems](#11-world-systems) | 45 | 1 | 0 | 46 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 49 | 0 | 0 | 49 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **294** | **1** | **0** | **295** | All but one feature WORKS; the 1 PARTIAL row is the 2026-08-29 join-burst tick budget (residual recorded inline); chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **295** | **2** | **0** | **297** | Two PARTIAL rows: the 2026-08-29 join-burst tick budget (residual recorded inline) and the perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation moved into the counted set (bounded stat coverage, not a blocked dependency). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -2331,9 +2338,24 @@ gamestage, no wandering hordes, and no screamers.
   and gates whether the entity hunts (timid animals never attack). The full
   per-class task graph is still one shared `zombie_tasks` table: the
   wander/look/approach-spot/territorial task *selection* is not class-specific
-  beyond the attack discriminator. Waived as EAI completeness vs wire.
-  *Anchors:* `src/assets/entities.zig:317-341` (resolvedAiAttacks),
-  `src/ecs/systems.zig:731-750`, `src/ecs/systems.zig:1341` zombie_tasks
+  beyond the attack discriminator.
+
+  Re-evaluated 2026-09-02: the old "waived as EAI completeness vs wire"
+  reasoning does not hold. AGENTS rule 29 (wasm-first, ADR 0020) says anything
+  expressible over the plugin boundary ships as a plugin and that "it is core"
+  is not a reason to stay native; a per-class task graph with a ruleset per
+  zombie type is exactly that shape. Some per-class AI data already loads from
+  `entityclasses.xml` into `class_table` (`SightRange`, view angle, explode
+  threshold/delay) with the `Rules` value as a floor (ADR 0021), so the data
+  path exists - what is missing is per-class *task lists* and a plugin-side
+  owner for them. The open question is throughput, not design: the AI pass runs
+  parallel over slots while the plugin host is single-threaded with per-module
+  fuel, so the sense/queue cost per zombie-tick has to be measured against the
+  50 ms budget before committing. Tracked as an ADR-worthy decision rather than
+  a waiver.
+  *Anchors:* `src/assets/entities.zig` (`resolvedAiAttacks`),
+  `src/ecs/systems.zig` (`zombie_tasks` table, ~1550), `src/ecs/world.zig`
+  (`class_table` per-class AI fields), AGENTS rule 29, ADR 0020, ADR 0026
 
 - **Timid animals run the zombie task table** `WORKS` `(2026-08-22)`
   `approach_attack` is now gated by the class's inherited AITask-* list:
@@ -3063,8 +3085,10 @@ and server-to-client XP/level pushes do not exist.
   authority. S2C snapshots ship 2026-08-27: the server-authored
   `NetPackagePlayerStats` body goes to every peer on join/progression changes
   (`join.zig sendPlayerStatsTo`), so peer level display is wire-backed, not
-  client-echoed.
-  *Anchors:* `src/server/game/join.zig:605-660`, `asm.il:833182`
+  client-echoed. Re-checked 2026-09-02: the split is real and deliberate, so
+  the waiver stands on the C2S ingest leg only.
+  *Anchors:* `src/server/c2s/misc.zig` (C2S blob accepted, no sim),
+  `src/server/game/join.zig` (`sendPlayerStatsTo`), `asm.il:833182`
 
 - **Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)** `PARTIAL (waived)`
   Builder exists but push is via authoritative `EntityStatChanged`/`PlayerStats`
@@ -3079,23 +3103,28 @@ and server-to-client XP/level pushes do not exist.
   EffectManager VM, moved to the explicit non-goals list (the sim already
   applies the live effects: armour mitigation + survival buffs).
 
-- **Perk purchase / spend skill points** `PARTIAL (waived)`
-  Skill level changes are intentionally not authoritative (no server-side perk
-  table yet); the client owns spend and the server persists level/XP. Full
-  perk table + `GameEventRequest` wiring is a progression follow-on.
-  SHIPS 2026-08-27: server-authoritative spend via
-  `NetPackageEntitySetSkillLevelServer` (`c2s/misc.zig:331`), validated against
-  the catalog (parent/cost/max gates) with the `on_perk_spend` verdict
-  (ADR 0033) on top.
-  *Anchors:* `src/server/c2s/misc.zig:331`, `src/wire/packages.zig:2216-2235`
+- **Perk purchase / spend skill points** `WORKS` (was `PARTIAL (waived)`;
+  re-evaluated 2026-09-02)
+  Server-authoritative spend via `NetPackageEntitySetSkillLevelServer`,
+  validated against the catalog (parent/cost/max gates) with the
+  `on_perk_spend` verdict (ADR 0033) on top. The original waiver ("client owns
+  spend, no server-side perk table") was superseded when that shipped
+  2026-08-27; the row kept the waived label afterwards.
+  *Anchors:* `src/server/c2s/misc.zig` (`NetPackageEntitySetSkillLevelServer`),
+  `src/server/game/player.zig` (`purchase`), `src/plugin/wasm.zig`
+  (`on_perk_spend` hook), `src/server/game/tests.zig` (spend scenario)
 
-- **Perk / attribute passive effects applied to gameplay** `PARTIAL (waived)`
-  648 `passive_effect` rows not yet wired; armour mitigation is the only live sim
-  effect. Needs full `effect_group` VM - waived until progression runtime exists.
-  SHIPS 2026-08-27 (bounded VM): level-scaled perk passives fold through the
-  passive-effects VM over the tracked stats (armour resist + HealthChangeOT
-  regen), revertibly like buffs.
-  *Anchors:* `src/ecs/inventory.zig:146-157`, `src/assets/progression.zig:547-588`
+- **Perk / attribute passive effects applied to gameplay** `PARTIAL`
+  (re-evaluated 2026-09-02; the `(waived)` qualifier is dropped)
+  The bounded passive-effects VM shipped 2026-08-27: level-scaled perk passives
+  fold over the tracked stats (armour resist + `HealthChangeOT` regen),
+  revertibly like buffs. The original waiver said "waived until a progression
+  runtime exists" - that runtime now exists, so this is an ordinary partial
+  with a named shortfall rather than a waiver: the VM covers the tracked stats,
+  not all 649 `passive_effect` rows. Closing it is a scope question (which
+  stats to track), not a blocked dependency.
+  *Anchors:* `src/assets/progression.zig` (passive rows + curves),
+  `src/ecs/inventory.zig` (`armorMitigation` fold)
 
 - **Crafting skills / magazines / recipe unlock by progression** `PARTIAL (waived)`
   99 `unlock_entry` rows gating recipes behind crafting_skill not yet parsed;
