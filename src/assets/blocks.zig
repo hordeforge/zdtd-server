@@ -623,14 +623,18 @@ pub fn loadFromPath(
             if (own_class != null and own_trader >= 0 and own_mesh != null and
                 own_texture > 0 and own_map_color > 0 and own_drops.len >= max_harvest_drops and
                 own_destroy.len >= max_harvest_drops and own_fall.len >= max_harvest_drops) break;
-            var dup = false;
+            const base = name_idx.get(e) orelse break;
+            // Cycle guard: the chain step is what repeats, not the block the
+            // walk started from. Recording `idx_cur` here made `seen_chain[0]`
+            // always equal it, so the second hop always tripped the dup check
+            // and every Extends chain truncated after one level.
+            var dup = base == idx_cur;
             for (seen_chain[0..chain_n]) |s| {
-                if (s == idx_cur) dup = true;
+                if (s == base) dup = true;
             }
             if (dup) break;
-            seen_chain[chain_n] = idx_cur;
+            seen_chain[chain_n] = base;
             chain_n += 1;
-            const base = name_idx.get(e) orelse break;
             const base_p = &parsed.items[base];
             if (own_class == null) own_class = base_p.class;
             if (own_trader < 0) own_trader = base_p.trader_id;
@@ -901,6 +905,63 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         if (std.mem.eql(u8, name, e[0])) return e[1];
     }
     return null;
+}
+
+test "Extends resolves through a multi-level chain and stops on a cycle" {
+    // Stock chains are deeper than one hop (cntVendingMachineTrader extends
+    // cntVendingMachine extends ...), so a grandchild must inherit from its
+    // grandparent. The cycle guard must key on the chain step: keying it on
+    // the block the walk started from truncated every chain after one level.
+    // Names come from fixtureId's table: an unmapped name resolves to null and
+    // is dropped fail-closed, so the fixture reuses the vending chain blocks.
+    //
+    // Child before parent on purpose. Resolution writes each block's result
+    // back into the parsed list, so when a parent precedes its child the child
+    // only ever needs one hop and a broken cycle guard stays invisible. Listing
+    // the grandchild first forces two hops in a single walk, which is exactly
+    // what a guard keyed on the starting block cuts short.
+    const src =
+        \\<blocks>
+        \\<block name="cntVendingMachine2">
+        \\  <property name="Extends" value="cntVendingMachine2Broken"/>
+        \\</block>
+        \\<block name="cntVendingMachine2Broken">
+        \\  <property name="Extends" value="cntVendingMachine"/>
+        \\</block>
+        \\<block name="cntVendingMachine">
+        \\  <property name="Class" value="VendingMachine"/>
+        \\  <property name="TraderID" value="7"/>
+        \\</block>
+        \\<block name="cntWoodCrateWood01">
+        \\  <property name="Extends" value="doorWoodLargeGate"/>
+        \\</block>
+        \\<block name="doorWoodLargeGate">
+        \\  <property name="Extends" value="cntWoodCrateWood01"/>
+        \\</block>
+        \\<block name="campfire">
+        \\  <property name="Extends" value="campfire"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_extends_chain.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+
+    // One hop: the direct child inherits Class and TraderID.
+    const mid = t.byName("cntVendingMachine2Broken").?;
+    try std.testing.expect(t.isVending(mid.id));
+    try std.testing.expectEqual(@as(i32, 7), t.traderId(mid.id));
+    // Two hops: the grandchild must reach the base through the middle block.
+    const leaf = t.byName("cntVendingMachine2").?;
+    try std.testing.expect(t.isVending(leaf.id));
+    try std.testing.expectEqual(@as(i32, 7), t.traderId(leaf.id));
+    // A two-block cycle and a self-extend both terminate (reaching here proves
+    // it) and inherit nothing.
+    try std.testing.expect(!t.isVending(t.byName("cntWoodCrateWood01").?.id));
+    try std.testing.expect(!t.isVending(t.byName("campfire").?.id));
 }
 
 test "Harvest drop rows parse with Extends inheritance" {
