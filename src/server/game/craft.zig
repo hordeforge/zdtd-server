@@ -329,7 +329,10 @@ pub fn playSoundAt(self: *Game, x: f32, y: f32, z: f32, clip: []const u8, mode: 
         .entity_id = -1,
         .volume_scale = volume,
     };
-    if (clip.len > packages.max_audio_clip_len) return;
+    // clip_len is a u8 and the cap is 256, so the cap itself does not fit:
+    // reject at >= or the @intCast below traps. The only caller today passes a
+    // short literal, but the emit path must not depend on that.
+    if (clip.len >= packages.max_audio_clip_len) return;
     @memcpy(s.clip[0..clip.len], clip);
     s.clip_len = @intCast(clip.len);
     if (packages.buildSoundAtPosition(self.body_buf[0..512], s) catch null) |sb| {

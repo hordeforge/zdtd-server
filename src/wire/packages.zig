@@ -2839,7 +2839,10 @@ pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflo
     };
     var clip_buf: [max_audio_clip_len]u8 = undefined;
     const clip = try r.readString(&clip_buf);
-    if (clip.len > max_audio_clip_len) return error.Overflow;
+    // clip_len is a u8, so the cap itself does not fit: readString accepts a
+    // length equal to the buffer, and >= (not >) is what keeps the cast below
+    // in range. A joined client controls this length.
+    if (clip.len >= max_audio_clip_len) return error.Overflow;
     @memcpy(out.clip[0..clip.len], clip);
     out.clip_len = @intCast(clip.len);
     out.mode = try r.readByte();
@@ -2899,6 +2902,38 @@ test "sound at position parses the stock 5-field body" {
     _ = try br.readI32();
     _ = try br.readI32();
     try std.testing.expectError(error.EndOfStream, br.readF32()); // no 6th field
+}
+
+test "a clip name at the cap fails closed instead of trapping the cast" {
+    // clip_len is u8 while max_audio_clip_len is 256, and readString accepts a
+    // length equal to the buffer, so a clip of exactly 256 bytes reached
+    // @intCast(256) -> u8 and panicked. Any joined client can send this
+    // package, so the cast has to be unreachable, not merely unlikely.
+    var body: [512]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeF32(1);
+    try w.writeF32(2);
+    try w.writeF32(3);
+    const long = [_]u8{'a'} ** max_audio_clip_len;
+    try w.writeString(&long);
+    try w.writeByte(1);
+    try w.writeI32(30);
+    try w.writeI32(42);
+    try std.testing.expectError(error.Overflow, parseSoundAtPosition(w.written()));
+
+    // One byte under the cap still parses, so the rejection is about the cap
+    // itself and not a broken length path.
+    var body2: [512]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &body2 };
+    try w2.writeF32(1);
+    try w2.writeF32(2);
+    try w2.writeF32(3);
+    try w2.writeString(long[0 .. max_audio_clip_len - 1]);
+    try w2.writeByte(1);
+    try w2.writeI32(30);
+    try w2.writeI32(42);
+    const ok = try parseSoundAtPosition(w2.written());
+    try std.testing.expectEqual(@as(usize, max_audio_clip_len - 1), ok.clipSlice().len);
 }
 
 /// Stock `NetPackageParticleEffect` (write IL=20): a `ParticleEffect`
@@ -4238,7 +4273,10 @@ pub const WaypointInvite = struct {
 pub const max_waypoint_str: usize = 256;
 
 fn copyWaypointStr(dst: *[max_waypoint_str]u8, src: []const u8) error{Overflow}!u8 {
-    if (src.len > max_waypoint_str) return error.Overflow;
+    // The returned length is a u8 and the cap is 256, so the cap itself does
+    // not fit: reject at >= (not >) or the @intCast below traps on a
+    // client-controlled 256-byte string.
+    if (src.len >= max_waypoint_str) return error.Overflow;
     @memcpy(dst[0..src.len], src);
     return @intCast(src.len);
 }
@@ -4363,6 +4401,21 @@ test "waypoint invite parses and rebuilds round-trip" {
     try std.testing.expectEqual(@as(i32, 2), try rd.readI32());
     try std.testing.expectEqual(@as(u8, 0), try rd.readByte());
     try std.testing.expectEqual(@as(i32, 42), try rd.readI32());
+}
+
+test "a waypoint icon at the cap fails closed instead of trapping the cast" {
+    // Same shape as the sound clip: the stored length is a u8 while
+    // max_waypoint_str is 256, so a client-sent 256-byte icon reached
+    // @intCast(256) -> u8. It must be rejected, not panic.
+    var src: [1024]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &src };
+    try w.writeI32(1);
+    try w.writeI32(2);
+    try w.writeI32(3);
+    const long = [_]u8{'i'} ** max_waypoint_str;
+    try w.writeString(&long);
+    try w.writeBool(false); // no name
+    try std.testing.expectError(error.Overflow, parseWaypointInvite(w.written()));
 }
 
 /// Stock `NetPackagePartyQuestChange::read` (asm.il): senderEntityID i32 |
