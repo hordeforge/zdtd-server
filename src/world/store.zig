@@ -1283,7 +1283,9 @@ pub const World = struct {
             const plane_cells: usize = @intCast(16 * saved_y * 16);
             const dset: usize = (plane_cells + 7) / 8;
             var required: usize = hdr_len + 256; // heights plane
-            if (data[3] == '3' and has_blocks) required += plane_cells * @sizeOf(u32);
+            // Same rule as loadChunk: the block plane is written for ZCH3 and
+            // ZCH4; only the legacy ZCH2 type-only format lacks it.
+            if (data[3] != '2' and has_blocks) required += plane_cells * @sizeOf(u32);
             if (has_textures) required += plane_cells * @sizeOf(u64);
             if (has_densities) required += plane_cells + dset;
             if (data.len < required) return error.ReadFailed;
@@ -1458,7 +1460,11 @@ pub const World = struct {
                 if (saved_y != c.y_dim) return error.ReadFailed;
             }
             var required: usize = hdr_len + c.heights.len;
-            if (data[3] == '3' and has_blocks) required += c.planeCells() * @sizeOf(u32);
+            // encodeChunk writes the u32 block plane whenever has_blocks is
+            // set, for ZCH3 and ZCH4 alike, so both must be accounted for here
+            // and read back below. ZCH2 is the u16 type-only legacy format
+            // that genuinely has no plane.
+            if (data[3] != '2' and has_blocks) required += c.planeCells() * @sizeOf(u32);
             if (has_textures) required += c.planeCells() * @sizeOf(u64);
             if (has_densities) required += c.planeCells() + c.densSetBytes();
             if (has_damages) required += c.planeCells() * @sizeOf(u16);
@@ -1469,7 +1475,7 @@ pub const World = struct {
             @memcpy(&c.heights, data[hdr_len..][0..c.heights.len]);
             var o: usize = hdr_len + c.heights.len;
             if (has_blocks) {
-                if (data[3] == '3') {
+                if (data[3] != '2') {
                     // Raw alloc only: the memcpy below fully initializes the
                     // plane, so ensureBlocks' terrain generation would be waste.
                     if (c.blocks == null) {
