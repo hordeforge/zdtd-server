@@ -568,6 +568,14 @@ pub const WorkstationStore = struct {
             w.is_burning = buf[o + 17] != 0;
             w.is_player_placed = buf[o + 18] != 0;
             w.burn_time_left = @bitCast(std.mem.readInt(u32, buf[o + 19 ..][0..4], .little));
+            // Group/queue/melt lengths index fixed arrays on the replicate path
+            // (`w.fuel[0..w.fuel_len]` in server/replicate_te.zig), so a length
+            // wider than its array is an out-of-bounds slice. Reject the record
+            // like the wire parser does (stock_te.zig readWsStackArray) rather
+            // than clamping: a short echo would resize the client's grid.
+            if (buf[o + 23] > w.fuel.len or buf[o + 24] > w.input.len or
+                buf[o + 25] > w.tools.len or buf[o + 26] > w.output.len or
+                buf[o + 29] > w.queue.len or buf[o + 30] > w.melt.len) return error.BadRecord;
             w.fuel_len = buf[o + 23];
             w.input_len = buf[o + 24];
             w.tools_len = buf[o + 25];
@@ -621,6 +629,13 @@ pub const WorkstationStore = struct {
             var cn: usize = 0;
             while (cn < max_craft_complete) : (cn += 1) {
                 if (o + 18 + 2 * craft_name_max > buf.len) return error.Truncated;
+                // recipeName()/scrappedName() slice the fixed [craft_name_max]
+                // arrays by these lengths and the result goes straight onto the
+                // wire (stock_te.zig writeString), so an over-cap byte off disk
+                // would ship adjacent struct memory to a client. Reject the
+                // record like the group lengths above.
+                if (buf[o + 16] > craft_name_max or
+                    buf[o + 17 + craft_name_max] > craft_name_max) return error.BadRecord;
                 var cc: CraftComplete = .{
                     .crafter_entity_id = std.mem.readInt(i32, buf[o..][0..4], .little),
                     .item_type = std.mem.readInt(i32, buf[o + 4 ..][0..4], .little),
@@ -903,4 +918,97 @@ test "workstation store save load roundtrip keeps queue, slots and flags" {
     try std.testing.expectEqual(@as(u16, 2), w2.craft_complete[0].item_count);
     try std.testing.expectApproxEqAbs(@as(f32, 3.25), w2.melt[0], 1e-4);
     std.debug.print("PASS workstations-zws: round-trip keeps queue/slots/flags\n", .{});
+}
+
+test "ZWS1 record with a group length past its array is rejected" {
+    var s: WorkstationStore = .{};
+    const w = s.getOrCreate(1, 70, 2).?;
+    w.block_id = 106;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/workstations.zws", .{dir});
+    const good = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(good);
+
+    // A valid buffer loads; the length bytes live at record offset 6+23..6+30.
+    var ok: WorkstationStore = .{};
+    try ok.loadFromSlice(good);
+    try std.testing.expect(ok.get(1, 70, 2) != null);
+
+    // fuel_len, input_len, tools_len, output_len, queue_len, melt_len each
+    // index a fixed array on the replicate path, so an over-cap value must
+    // fail the record instead of producing an out-of-bounds slice.
+    const caps = [_]struct { off: usize, cap: u8 }{
+        .{ .off = 23, .cap = @intCast(w.fuel.len) },
+        .{ .off = 24, .cap = @intCast(w.input.len) },
+        .{ .off = 25, .cap = @intCast(w.tools.len) },
+        .{ .off = 26, .cap = @intCast(w.output.len) },
+        .{ .off = 29, .cap = @intCast(w.queue.len) },
+        .{ .off = 30, .cap = @intCast(w.melt.len) },
+    };
+    const bad = try std.testing.allocator.alloc(u8, good.len);
+    defer std.testing.allocator.free(bad);
+    for (caps) |c| {
+        @memcpy(bad, good);
+        bad[6 + c.off] = c.cap + 1;
+        var dst: WorkstationStore = .{};
+        try std.testing.expectError(error.BadRecord, dst.loadFromSlice(bad));
+    }
+    std.debug.print("PASS workstations-zws: over-cap group lengths rejected\n", .{});
+}
+
+test "ZWS1 craft-complete name lengths past their array are rejected" {
+    // recipeName()/scrappedName() slice [craft_name_max]u8 by a length taken
+    // straight off disk, and the slice is written to the wire. An over-cap
+    // byte would ship adjacent struct memory to a client.
+    var s: WorkstationStore = .{};
+    const w = s.getOrCreate(4, 70, 5).?;
+    w.block_id = 106;
+    var q: QueueItem = .{ .output_type = 70001, .output_count = 1 };
+    w.addCraftComplete(&q, "someRecipeName", 2);
+    try std.testing.expectEqualStrings("someRecipeName", w.craft_complete[0].recipeName());
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/workstations.zws", .{dir});
+    const good = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(good);
+
+    var ok: WorkstationStore = .{};
+    try ok.loadFromSlice(good);
+    try std.testing.expectEqualStrings(
+        "someRecipeName",
+        ok.get(4, 70, 5).?.craft_complete[0].recipeName(),
+    );
+
+    // Find the stored name length by its value (14 = "someRecipeName"), then
+    // push it past the array cap. Locating it by content keeps the test from
+    // hardcoding a record offset that a format change would silently break.
+    const name_len: u8 = 14;
+    var at: ?usize = null;
+    for (good, 0..) |b, i| {
+        if (b != name_len) continue;
+        if (i + 1 + name_len > good.len) continue;
+        if (std.mem.eql(u8, good[i + 1 ..][0..name_len], "someRecipeName")) {
+            at = i;
+            break;
+        }
+    }
+    const idx = at orelse return error.TestUnexpectedResult;
+    const bad = try std.testing.allocator.alloc(u8, good.len);
+    defer std.testing.allocator.free(bad);
+    @memcpy(bad, good);
+    bad[idx] = craft_name_max + 1;
+    var dst: WorkstationStore = .{};
+    try std.testing.expectError(error.BadRecord, dst.loadFromSlice(bad));
+    std.debug.print("PASS workstations-zws: over-cap craft-complete name lengths rejected\n", .{});
 }

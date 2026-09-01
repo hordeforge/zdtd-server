@@ -162,7 +162,9 @@ pub const Store = struct {
         const path = std.fmt.bufPrint(&path_buf, "{s}/sleepers_cleared.zsc", .{world_dir}) catch return;
         const raw = io_fs.readFileAll(allocator, path) catch return;
         defer allocator.free(raw);
-        if (raw.len < 8 or !std.mem.eql(u8, raw[0..5], "ZSCL1")) return;
+        // Header is 9 bytes: 5-byte magic + u32 count. An 8-byte file passed
+        // the old `< 8` check and then sliced raw[5..9] one past the end.
+        if (raw.len < 9 or !std.mem.eql(u8, raw[0..5], "ZSCL1")) return;
         const n = std.mem.readInt(u32, raw[5..9], .little);
         var off: usize = 9;
         var i: u32 = 0;
@@ -720,6 +722,19 @@ test "quest-cleared volumes persist and suppress re-arm" {
     try std.testing.expect(store2.volumes[0].quest_cleared);
     try std.testing.expect(store2.volumes[0].triggered);
     try std.testing.expect(!store2.volumes[1].quest_cleared);
+
+    // A file truncated to exactly the magic + 3 bytes (8 total) must be
+    // ignored, not sliced: the header is 9 bytes and a crash mid-write can
+    // leave a short file behind.
+    var short_path: [512]u8 = undefined;
+    const sp = try std.fmt.bufPrint(&short_path, "{s}/sleepers_cleared.zsc", .{"worlds/zdtd_sc_sleepers_clear"});
+    try io_fs.writeFile(sp, "ZSCL1" ++ [_]u8{ 1, 0, 0 });
+    var vols3 = [_]Volume{
+        .{ .x0 = 0, .y0 = 60, .z0 = 0, .x1 = 30, .y1 = 70, .z1 = 30 },
+    };
+    var store3: Store = .{ .volumes = &vols3 };
+    store3.loadCleared(std.testing.allocator, "worlds/zdtd_sc_sleepers_clear");
+    try std.testing.expect(!store3.volumes[0].quest_cleared);
 }
 
 test "triggered volumes persist and do not re-pop on restart" {
