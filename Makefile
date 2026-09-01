@@ -152,6 +152,7 @@ lint: need-zig lint-webui lint-html
 	bash scripts/lint-architecture.sh
 	bash scripts/lint-cycles.sh
 	bash scripts/lint-wire.sh
+	bash scripts/lint-plugins.sh
 
 fmt: need-zig
 	$(ZIG) fmt build.zig build.zig.zon src

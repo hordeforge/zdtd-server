@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 # Build every core plugin's .wasm from its Zig source (mods/BUILDING.md).
 # bot stays C by design (ADR 0026); example_chat_filter is untouched.
+#
+# Usage: scripts/build-plugins.sh [--dest DIR]   (default: in place)
+# --dest writes every artifact under DIR at the same relative path, so the
+# freshness gate (scripts/lint-plugins.sh) can rebuild and diff without
+# touching the working tree.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ZIG=${ZIG:-zig}
-OUT=/tmp/zdtd_plugin_build
-mkdir -p "$OUT"
+
+dest=""
+if [ "${1:-}" = "--dest" ]; then
+  dest="$2"
+  shift 2
+fi
+
+# Final path for an artifact: in place, or mirrored under --dest.
+out_path() {
+  local rel="$1"
+  if [ -n "$dest" ]; then
+    mkdir -p "$dest/$(dirname "$rel")"
+    printf '%s\n' "$dest/$rel"
+  else
+    printf '%s\n' "$rel"
+  fi
+}
 
 build() {
   local mod="$1"
@@ -16,8 +36,10 @@ build() {
     -Mroot="plugins/$mod/main.zig" \
     --dep plugin_common -Mplugin_root="plugins/$mod/$mod.zig" \
     -Mplugin_common=mods/plugin_common.zig
-  mv "$mod.wasm" "plugins/$mod/$mod.wasm"
-  echo "built plugins/$mod/$mod.wasm"
+  local out
+  out="$(out_path "plugins/$mod/$mod.wasm")"
+  mv "$mod.wasm" "$out"
+  echo "built $out"
 }
 
 for m in core_announce core_killfeed core_damagegate core_pricegate \
@@ -35,8 +57,9 @@ for m in mcp parachute; do
     -Mroot="mods/$m/main.zig" \
     --dep plugin_common -Mplugin_root="mods/$m/$m.zig" \
     -Mplugin_common=mods/plugin_common.zig
-  mv "$m.wasm" "mods/$m/$m.wasm"
-  echo "built mods/$m/$m.wasm"
+  out="$(out_path "mods/$m/$m.wasm")"
+  mv "$m.wasm" "$out"
+  echo "built $out"
 done
 
 echo "done"
@@ -49,7 +72,9 @@ echo "done"
 if command -v clang >/dev/null 2>&1; then
   for c in assets/fixtures/plugin_*.c mods/fps_bot/fps_bot.c mods/example_chat_filter/example_chat_filter.c; do
     [ -f "$c" ] || continue
-    w="${c%.c}.wasm"
+    w="$(out_path "${c%.c}.wasm")"
+    # In place: skip an artifact already newer than its source. Under --dest
+    # the mirror starts empty, so every artifact is built.
     if [ ! -f "$w" ] || [ "$w" -ot "$c" ]; then
       clang --target=wasm32 -nostdlib -O2 -Wl,--no-entry -Wl,--export-all \
         -o "$w" "$c"
