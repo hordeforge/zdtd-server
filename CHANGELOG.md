@@ -152,9 +152,93 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   (stock IsAllowed, console-commands.md IL). The player-console scenario
   covers the matrix: owner (0) allowed a req-5 command, level-5 admin denied
   a req-0 command.
+- Plugin binary freshness gate (`scripts/lint-plugins.sh`, part of
+  `make lint`): every committed `.wasm` is rebuilt into a scratch mirror and
+  byte-compared against what is in the tree, so a plugin source edit that was
+  never rebuilt fails the gate instead of shipping a stale binary.
+  `scripts/build-plugins.sh --dest DIR` produces that mirror without touching
+  the working tree. `mods/BUILDING.md` said "commit both" but nothing enforced
+  it.
+- `lint-architecture.sh` now checks that every `@import` in a package barrel
+  also appears in its `test {}` block, not just that the file is referenced -
+  the exact thing the check's own comment claimed to enforce, since importing
+  a module is not enough to pull its tests into `zig build test`.
+- `zig build test` now also builds `mods/plugin_common.zig` as its own
+  host-target test binary. The shared guest helper (`Buf`, `Config`) backs the
+  12 core plugins and the Zig addons but is outside the server's import graph,
+  so its two tests had never run. Its `Config` tests now also parse the real shipped
+  `plugins/core_*/config.toml` files rather than a synthetic string, which is
+  what catches a quote or trailing-comment regression reaching a guest.
+- `make check` no longer fails on a transient registry blip: `lint-webui.sh`
+  ran `bun add` against the network on every invocation, so a momentary
+  DNS/registry failure failed the gate (surfacing as `make check` exit 2, since
+  a failing sub-make reports 2). It now retries once and then falls back to the
+  already-populated pinned cache; a genuinely cold cache still fails loudly.
+- `mods/parachute/preset.toml` is now bound against the rules schema in the
+  suite. It was the one shipped preset pack no test parsed (the resolver test
+  pins only its path), so a stale `[rules.glide]` key would have surfaced at
+  runtime load rather than in `zig build test`, unlike every `presets/*.toml`
+  pack and the other two mod presets.
 
 ### Fixed
 
+- Remote crash from one C2S packet: `NetPackageSoundAtPosition` with a
+  256-byte clip name reached `@intCast` into a `u8` length and trapped
+  (ReleaseSafe ships with safety on, so this killed a release server). The
+  cap guard used `>` where the stored length cannot hold the cap itself; the
+  identical off-by-one in the waypoint icon/name path
+  (`NetPackageWaypointInvite`) and on the server's own sound emit path
+  (`playSoundAt`, latent: its only caller passes a short literal) is fixed too.
+- `mods/parachute`: the guest kept `announce_text` / `item_tag` as slices into
+  `on_enable`'s stack buffer, so a later tick's deploy announcement read a dead
+  frame (the shipped `config.toml` sets `announce_text`, so this was the
+  default path). Both are now copied into static buffers, matching how every
+  other guest handles config strings. Its hand-rolled config parser (the only
+  one in any guest; the rest use `plugin_common.Config`) also handled neither
+  the quotes nor the trailing comments its own doc comment claimed, so the
+  shipped quoted `announce_text` was broadcast with the quote marks still in
+  it. It now matches `Config.value` exactly, and the plugin test feeds the real
+  `mods/parachute/config.toml` rather than a synthetic string.
+- `serveradmin.xml` path leaked on startup: `main` duped it and `Game` duped
+  its own copy, but only `Game`'s was freed. Reproduced and fixed under the
+  DebugAllocator leak check.
+- Client-reachable memory disclosure: the workstation save loader took
+  `recipe_name_len` / `scrapped_len` verbatim off disk into 64-byte arrays,
+  and `recipeName()`/`scrappedName()` slice by them straight onto the wire, so
+  a corrupt `workstations.zws` shipped adjacent struct memory to clients.
+  Both lengths are now range-checked like every other length in that loader.
+- Modlet XML `removeattribute` hung the server: an unquoted attribute value in
+  an element's opening tag left the attribute scan's cursor parked, looping
+  forever on operator-supplied XML.
+- Save/load desyncs where a skipped record left the read cursor mid-record, so
+  every following record decoded from a shifted offset: traders (`traders.zst`,
+  reachable today because an admin-spawned trader is saved but not respawned by
+  `initWorld`), containers (`containers.zct`, at the 4096 player-chest cap) and
+  vending machines (`vending.zvn`). `saveTraders` had the mirror-image bug: it
+  wrote a header count and could then emit fewer entries.
+- Out-of-bounds writes on save load: the ZPV12 mod-id block indexed the
+  inventory array with an unbounded on-disk `u8` count (the slot write one line
+  above was correctly clamped), and the ZWS1 group/queue/melt lengths were
+  stored unchecked despite indexing fixed arrays on the replicate path.
+- `allies.zal` panicked on a corrupt status byte: the range check ran *after*
+  `@enumFromInt`, which traps on an exhaustive enum, so it could never fire.
+  Same shape fixed for three unguarded `@intCast` of a `peer_slot` that
+  defaults to -1, and for a `sleepers_cleared.zsc` header guard that was one
+  byte short of the field it then sliced.
+- Tall wire profile (`[wire] profile = "tall-512"`) silently lost world edits:
+  `encodeChunk` writes the block plane for ZCH4, but `loadChunk` and
+  `validateChunkBytes` gated reading it on ZCH3, so the plane was written and
+  discarded on every reload and the topsoil tail was then read out of the
+  middle of it.
+- Multi-level `Extends` chains in `blocks.xml` truncated after one hop: the
+  cycle guard recorded the block the walk started from instead of the chain
+  step, so the second hop always tripped the duplicate check. Grandparent
+  `Class`, `TraderID`, textures and merged drop rows were silently lost.
+- `distraction_replan_min` / `distraction_replan_rand` / `flee_distance` were
+  parsed, validated and documented as operator knobs but read by nothing; the
+  distraction task now uses its own RE cadence instead of inheriting the
+  generic chase throttle, and the flee goal distance is separated from the
+  give-up radius (defaults unchanged).
 - 3.2.0 login gate P0: the advertised version was the raw 3.1.0 form, so
   every real V3.2.0 client was kicked with VersionMismatch=4; the advertised
   `Minor` now matches the 3.2.0 display form (live-verified join).
