@@ -137,4 +137,43 @@ test "Config parses key = value lines" {
     try std.testing.expectEqual(@as(i64, 150), c.getInt("price_percent").?);
     try std.testing.expectEqualStrings("trader", c.get("name").?);
     try std.testing.expect(c.get("missing") == null);
+    // A value's trailing comment is not part of the value, and quotes are
+    // stripped even with one present.
+    const src2 = "a = 7   # seven\nb = \"x\"  # quoted\n";
+    @memset(c.bytes[0..c.bytes.len], 0);
+    @memcpy(c.bytes[0..src2.len], src2);
+    c.n = src2.len;
+    try std.testing.expectEqual(@as(i64, 7), c.getInt("a").?);
+    try std.testing.expectEqualStrings("x", c.get("b").?);
+}
+
+test "Config parses the shipped core plugin config files" {
+    // Every core plugin ships a config.toml that the host serves verbatim to
+    // the guest. Parsing a synthetic string proves nothing about those files:
+    // a quoted value the parser failed to unquote would reach the guest with
+    // the quote marks still attached (that bug shipped in mods/parachute,
+    // which hand-rolled its own parser).
+    const cases = [_]struct { path: []const u8, key: []const u8, want: []const u8 }{
+        .{ .path = "plugins/core_announce/config.toml", .key = "blood_moon_rise", .want = "The blood moon rises!" },
+        .{ .path = "plugins/core_craftgate/config.toml", .key = "deny_prefix", .want = "forbidden_" },
+        .{ .path = "plugins/core_perkgate/config.toml", .key = "deny_prefix", .want = "forbidden_" },
+        .{ .path = "plugins/core_questgate/config.toml", .key = "deny_prefix", .want = "forbidden_" },
+        .{ .path = "plugins/core_killfeed/config.toml", .key = "log_level", .want = "debug" },
+        .{ .path = "plugins/core_tradefeed/config.toml", .key = "log_level", .want = "debug" },
+        .{ .path = "plugins/core_pvp/config.toml", .key = "deny", .want = "true" },
+    };
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    for (cases) |t| {
+        var c: Config = .{};
+        c.n = (try std.Io.Dir.cwd().readFile(io, t.path, &c.bytes)).len;
+        try std.testing.expect(c.n > 0);
+        const got = c.get(t.key) orelse return error.TestExpectedEqual;
+        try std.testing.expectEqualStrings(t.want, got);
+    }
+    // Integer values in the shipped files parse as integers, not as text.
+    var pc: Config = .{};
+    pc.n = (try std.Io.Dir.cwd().readFile(io, "plugins/core_pricegate/config.toml", &pc.bytes)).len;
+    try std.testing.expectEqual(@as(i64, 150), pc.getInt("price_percent").?);
 }
