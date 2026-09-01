@@ -351,7 +351,12 @@ pub fn step(self: *Game) !void {
         while (ci < cn) : (ci += 1) {
             const cq = self.sim.completed_quests_ring[ci];
             if (cq.slot >= self.sim.player.len) continue;
-            const peer: usize = @intCast(self.sim.player[cq.slot].peer_slot);
+            // peer_slot is i32 and defaults to -1 (no peer): check the sign
+            // before the cast, since @intCast traps on a negative and the
+            // range check below would never run.
+            const peer_i = self.sim.player[cq.slot].peer_slot;
+            if (peer_i < 0) continue;
+            const peer: usize = @intCast(peer_i);
             if (peer >= self.clients.len) continue;
             const d = self.sim.catalog.byId(cq.def_id) orelse continue;
             const sv = self.plugins.questComplete(self.sim.network_id[cq.slot].id, cq.def_id);

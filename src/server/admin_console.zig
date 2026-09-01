@@ -443,7 +443,10 @@ pub fn consoleTeleport(self: *Game, player: ?ecs.Slot, it: *std.mem.TokenIterato
     const cz = std.math.clamp(z, -max_c, max_c);
     self.sim.transform[ps] = .{ .x = cx, .y = cy, .z = cz, .yaw = 0 };
     if (self.sim.mask[ps].player) {
-        self.resetMoveEnvelopePeer(@intCast(self.sim.player[ps].peer_slot), cx, cy, cz);
+        // peer_slot is i32 and defaults to -1; resetMoveEnvelopePeer bounds the
+        // slot, but only after this cast, and @intCast traps on a negative.
+        const peer_i = self.sim.player[ps].peer_slot;
+        if (peer_i >= 0) self.resetMoveEnvelopePeer(@intCast(peer_i), cx, cy, cz);
     }
     const entity_id = self.sim.netId(ps);
     const body = packages.buildEntityTeleportBody(&self.body_buf, entity_id, cx, cy, cz, 0, 0, 0, true) catch return;
