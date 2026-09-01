@@ -817,7 +817,10 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 .seed = if (slot_stride >= 13) std.mem.readInt(u16, ib[11..13], .little) else 0,
             };
             // ZPV12: mod ids at bytes 13..21 (old saves read as empty).
-            if (slot_stride >= 21) {
+            // Same bound as the slot write above: `inv_n` is a u8 off disk, so
+            // a record claiming more slots than the array holds must keep
+            // consuming bytes (the stride advance above) without writing.
+            if (k < inv.len and slot_stride >= 21) {
                 var mz: usize = 0;
                 while (mz < inv[k].mods.len) : (mz += 1) {
                     const mod_id = std.mem.readInt(u16, ib[13 + mz * 2 ..][0..2], .little);
@@ -1376,7 +1379,20 @@ pub fn saveTraders(self: *Game) !void {
         try B.i32v(self.allocator, &buf, st.wallet);
         try B.i32v(self.allocator, &buf, st.wallet_default);
         const n: u8 = @intCast(@min(st.n, ecs.components.max_stock));
-        try B.byte(self.allocator, &buf, n);
+        // The count byte must equal the number of entries actually written:
+        // the reader walks exactly that many, so writing a header of `n` and
+        // then dropping an unresolvable entry would leave it reading the next
+        // record's bytes as this record's tail. Count the writable ones first.
+        var writable: u8 = 0;
+        {
+            var c: usize = 0;
+            while (c < n) : (c += 1) {
+                const nm = if (self.items.byId(st.entries[c].item)) |d| d.name else "";
+                if (nm.len == 0 or nm.len > 255) continue;
+                writable += 1;
+            }
+        }
+        try B.byte(self.allocator, &buf, writable);
         var e: usize = 0;
         while (e < n) : (e += 1) {
             const item_name = if (self.items.byId(st.entries[e].item)) |d| d.name else "";
@@ -1445,11 +1461,17 @@ pub fn loadTraders(self: *Game) !void {
                 break;
             }
         }
-        const t = ts orelse continue;
-        self.sim.trader_stock[t].reset_interval = reset_interval;
-        self.sim.trader_stock[t].last_restock_day = last_restock_day;
-        self.sim.trader_stock[t].wallet = wallet;
-        self.sim.trader_stock[t].wallet_default = wallet_default;
+        // A trader missing from this world (map changed) is skipped, but its
+        // record still has to be consumed: `o` sits at the first stock entry
+        // here, so returning to the outer loop without walking the entries
+        // would parse the next record from the middle of this one (an item
+        // name length read as a trader name length, and so on).
+        if (ts) |t| {
+            self.sim.trader_stock[t].reset_interval = reset_interval;
+            self.sim.trader_stock[t].last_restock_day = last_restock_day;
+            self.sim.trader_stock[t].wallet = wallet;
+            self.sim.trader_stock[t].wallet_default = wallet_default;
+        }
         var restored: usize = 0;
         var e: usize = 0;
         while (e < n) : (e += 1) {
@@ -1466,9 +1488,12 @@ pub fn loadTraders(self: *Game) !void {
             const sell = std.mem.readInt(u16, data[o + 5 ..][0..2], .little);
             const markup = @as(i8, @bitCast(data[o + 7]));
             o += 8;
+            const t = ts orelse continue; // no live trader: entry consumed, dropped
             const iid = self.items.ecsIdByName(iname);
             if (iid == 0) continue; // unknown item (version drift) -> skipped
-            if (restored >= ecs.components.max_stock) break;
+            // Full: keep consuming the remaining entries so `o` still lands on
+            // the next record boundary.
+            if (restored >= ecs.components.max_stock) continue;
             self.sim.trader_stock[t].entries[restored] = .{
                 .item = iid,
                 .count = count_v,
@@ -1479,7 +1504,7 @@ pub fn loadTraders(self: *Game) !void {
             };
             restored += 1;
         }
-        self.sim.trader_stock[t].n = restored;
+        if (ts) |t| self.sim.trader_stock[t].n = restored;
     }
 }
 

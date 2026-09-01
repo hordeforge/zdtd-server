@@ -219,7 +219,11 @@ pub const ContainerStore = struct {
         var count: u16 = 0;
         for (idxs[0..n_idx]) |ii| {
             const c = &self.items[ii];
-            if (o + 20 + @as(usize, c.slot_count) * 7 + 4 > buf.len) break;
+            // Must cover everything the body below writes: header, slots,
+            // touched_day u32 AND the ZCT2 size_x/size_y pair. save_capacity
+            // budgets the full 404-byte record, so this never trips today, but
+            // a guard that under-counts what it guards is a latent overrun.
+            if (o + 20 + @as(usize, c.slot_count) * 7 + 4 + 2 > buf.len) break;
             std.mem.writeInt(i32, buf[o..][0..4], c.pos.x, .little);
             std.mem.writeInt(i32, buf[o + 4 ..][0..4], c.pos.y, .little);
             std.mem.writeInt(i32, buf[o + 8 ..][0..4], c.pos.z, .little);
@@ -275,34 +279,41 @@ pub const ContainerStore = struct {
             const player = buf[o + 19] != 0;
             o += 20;
             if (o + @as(usize, slot_count) * 7 > len) return error.ReadFailed;
-            const c = self.getOrCreate(pos, slot_count, block_id) orelse {
-                o += @as(usize, slot_count) * 7;
-                continue;
-            };
-            c.touched = touched;
-            c.player_storage = player;
+            // A record can be dropped (table full of player storage), but it
+            // still has to be consumed whole: the slots AND the touched_day +
+            // size tail below. Skipping only the slots would leave the cursor
+            // on the tail and shift every following record.
+            const maybe_c = self.getOrCreate(pos, slot_count, block_id);
+            if (maybe_c) |c| {
+                c.touched = touched;
+                c.player_storage = player;
+            }
             var s: usize = 0;
             while (s < slot_count) : (s += 1) {
-                if (s < max_container_slots) {
-                    c.slots[s] = .{
-                        .item_id = std.mem.readInt(u16, buf[o..][0..2], .little),
-                        .count = std.mem.readInt(u16, buf[o + 2 ..][0..2], .little),
-                        .quality = buf[o + 4],
-                        .meta = std.mem.readInt(u16, buf[o + 5 ..][0..2], .little),
-                    };
+                if (maybe_c) |c| {
+                    if (s < max_container_slots) {
+                        c.slots[s] = .{
+                            .item_id = std.mem.readInt(u16, buf[o..][0..2], .little),
+                            .count = std.mem.readInt(u16, buf[o + 2 ..][0..2], .little),
+                            .quality = buf[o + 4],
+                            .meta = std.mem.readInt(u16, buf[o + 5 ..][0..2], .little),
+                        };
+                    }
                 }
                 o += 7;
             }
             // touched_day appended after the slots in newer saves; older files
             // end at the last slot and load touched_day as 0.
             if (o + 4 <= len) {
-                c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
+                if (maybe_c) |c| c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
                 o += 4;
             }
             // ZCT2: size_x/size_y u8 each follow touched_day.
             if (with_size and o + 2 <= len) {
-                c.size_x = buf[o];
-                c.size_y = buf[o + 1];
+                if (maybe_c) |c| {
+                    c.size_x = buf[o];
+                    c.size_y = buf[o + 1];
+                }
                 o += 2;
             }
         }
@@ -431,6 +442,64 @@ test "container persistence retains every full-capacity container" {
     const last = s2.get(.{ .x = max_containers - 1, .y = 70, .z = 0 }).?;
     try std.testing.expectEqual(@as(u16, max_containers), last.slots[max_container_slots - 1].count);
     io_fs.deleteFile("./containers.zct");
+}
+
+test "a dropped ZCT2 record does not desync the records after it" {
+    // getOrCreate returns null when the table is full of player storage. The
+    // loader has to consume that record whole: its slots AND the touched_day +
+    // size tail. Skipping only the slots left the cursor on the tail bytes, so
+    // every following container parsed garbage.
+    var s: ContainerStore = .{};
+    var i: usize = 0;
+    while (i < max_containers) : (i += 1) {
+        const c = s.getOrCreate(.{ .x = @intCast(i), .y = 0, .z = 0 }, 8, 1).?;
+        c.player_storage = true; // nothing is evictable, so the next insert drops
+    }
+    try std.testing.expect(s.getOrCreate(.{ .x = 77_001, .y = 0, .z = 0 }, 8, 1) == null);
+
+    // Two ZCT2 records: one that will be dropped, then one whose position is
+    // already in the table (so it resolves) carrying a distinctive slot.
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    const a = std.testing.allocator;
+    const W = struct {
+        fn int(al: std.mem.Allocator, b: *std.ArrayList(u8), comptime T: type, v: T) !void {
+            var t: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+            std.mem.writeInt(T, &t, v, .little);
+            try b.appendSlice(al, &t);
+        }
+        /// pos xyz i32 | block i32 | slot_count u16 | touched u8 | player u8 |
+        /// slots | touched_day u32 | size_x u8 | size_y u8
+        fn rec(al: std.mem.Allocator, b: *std.ArrayList(u8), x: i32, item: u16, day: u32) !void {
+            try int(al, b, i32, x);
+            try int(al, b, i32, 0);
+            try int(al, b, i32, 0);
+            try int(al, b, i32, 42);
+            try int(al, b, u16, 1); // one slot
+            try b.append(al, 1); // touched
+            try b.append(al, 1); // player_storage
+            try int(al, b, u16, item);
+            try int(al, b, u16, 3); // count
+            try b.append(al, 1); // quality
+            try int(al, b, u16, 0); // meta
+            try int(al, b, u32, day);
+            try b.append(al, 6); // size_x
+            try b.append(al, 2); // size_y
+        }
+    };
+    try buf.appendSlice(a, "ZCT2");
+    try W.int(a, &buf, u16, 2);
+    try W.rec(a, &buf, 77_002, 111, 9); // no free slot -> dropped
+    try W.rec(a, &buf, 0, 222, 5); // existing pos -> must resolve
+
+    try s.loadFromSlice(buf.items);
+    // The second record was read at the right offset, not shifted by the
+    // dropped record's 6-byte tail.
+    const c = s.get(.{ .x = 0, .y = 0, .z = 0 }).?;
+    try std.testing.expectEqual(@as(u16, 222), c.slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 3), c.slots[0].count);
+    try std.testing.expectEqual(@as(u32, 5), c.touched_day);
+    try std.testing.expectEqual(@as(u8, 6), c.size_x);
 }
 
 test "container store evicts world containers before dropping (cap 4096)" {
