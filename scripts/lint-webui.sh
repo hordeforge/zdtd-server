@@ -75,13 +75,30 @@ if [ ! -f "$cache_dir/anti-slop-src/index.js" ] || \
       sed -i "s|from '\(\..*\)\.ts'|from '\1.js'|g" "$out"
     done < <(find . -name '*.ts' -type f -print0) )
 fi
-( cd "$cache_dir" && bun add --silent \
-    "@rikalabs/oxlint-standards@$oxlint_standards_version" \
-    "oxlint-tsgolint@$oxlint_tsgolint_version" \
-    "@oxlint/plugins@$oxlint_plugins_version" ) >/dev/null 2>&1 || {
-  echo "zdtd: lint-webui: could not install @rikalabs/oxlint-standards@$oxlint_standards_version + oxlint-tsgolint@$oxlint_tsgolint_version + @oxlint/plugins@$oxlint_plugins_version into $cache_dir (offline?)" >&2
-  exit 1
+# `bun add` reaches the network on every run, so a transient DNS/registry blip
+# used to fail the whole gate (a failing sub-make surfaces as `make check`
+# exit 2). Retry briefly, then fall back to the already-installed cache: the
+# versions are pinned above, so a populated node_modules is exactly what the
+# install would produce. Only a cold cache is a hard failure.
+bun_add() {
+  ( cd "$cache_dir" && bun add --silent \
+      "@rikalabs/oxlint-standards@$oxlint_standards_version" \
+      "oxlint-tsgolint@$oxlint_tsgolint_version" \
+      "@oxlint/plugins@$oxlint_plugins_version" ) >/dev/null 2>&1
 }
+if ! bun_add; then
+  sleep 2
+  if ! bun_add; then
+    if [ -d "$cache_dir/node_modules/@rikalabs/oxlint-standards" ] &&
+      [ -d "$cache_dir/node_modules/oxlint-tsgolint" ] &&
+      [ -d "$cache_dir/node_modules/@oxlint/plugins" ]; then
+      echo "zdtd: lint-webui: registry unreachable; using the pinned cache in $cache_dir" >&2
+    else
+      echo "zdtd: lint-webui: could not install @rikalabs/oxlint-standards@$oxlint_standards_version + oxlint-tsgolint@$oxlint_tsgolint_version + @oxlint/plugins@$oxlint_plugins_version into $cache_dir (offline?)" >&2
+      exit 1
+    fi
+  fi
+fi
 cp "$root/.oxlintrc.jsonc" "$cache_dir/oxlintrc.jsonc"
 cd "$cache_dir"
 # tsgolint is not on the user's PATH; oxlint finds it via PATH lookup.
