@@ -1273,6 +1273,69 @@ fn fuzzVendingStore(_: void, smith: *std.testing.Smith) !void {
     }
 }
 
+const zws_corpus = [_][]const u8{
+    "",
+    "ZWS1",
+    // empty store: magic + count 0
+    &([_]u8{ 'Z', 'W', 'S', '1', 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'Z', 'W', 'S', '0', 0, 0 }),
+    // claimed huge count, truncated
+    &([_]u8{ 'Z', 'W', 'S', '1', 0xff, 0xff }),
+    // one record header claiming every group length is 0xff (past its array),
+    // truncated right after: the length bytes must be rejected before use.
+    &([_]u8{ 'Z', 'W', 'S', '1', 1, 0 } ++
+        [_]u8{ 0, 0, 0, 0, 70, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0 } ++
+        [_]u8{ 0xff, 0xff, 0xff, 0xff, 0, 0, 0xff, 0xff }),
+};
+
+test "fuzz workstation store ZWS1 loader" {
+    // Note on reach: a persisted record is ~2.8 KiB, and every seed below is
+    // short or malformed, so a default (non `--fuzz`) run rejects at the
+    // header and never executes the craft-complete assertions in the target.
+    // They are there for real fuzzing runs, which mutate toward valid records;
+    // the unit test in world/workstations.zig is what pins that rejection
+    // deterministically.
+    try std.testing.fuzz({}, fuzzWorkstationStore, .{ .corpus = &zws_corpus });
+}
+
+fn fuzzWorkstationStore(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [8192]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    // Store is large (256 stations); keep off the fuzz stack.
+    const s = try std.testing.allocator.create(workstations.WorkstationStore);
+    defer std.testing.allocator.destroy(s);
+    s.* = .{};
+    s.loadFromSlice(storage[0..len]) catch return;
+    // The replicate path slices these fixed arrays by the stored lengths
+    // (server/replicate_te.zig `w.fuel[0..w.fuel_len]`), so any accepted
+    // record must keep every length inside its array.
+    for (&s.items) |w| {
+        try std.testing.expect(w.fuel_len <= w.fuel.len);
+        try std.testing.expect(w.input_len <= w.input.len);
+        try std.testing.expect(w.tools_len <= w.tools.len);
+        try std.testing.expect(w.output_len <= w.output.len);
+        try std.testing.expect(w.queue_len <= w.queue.len);
+        try std.testing.expect(w.melt_len <= w.melt.len);
+        try std.testing.expect(w.last_input_blob_len <= w.last_input.len);
+        // recipeName()/scrappedName() slice their fixed arrays by these
+        // lengths and the result is written to the wire (stock_te.zig
+        // writeString), so an accepted over-cap length would disclose
+        // adjacent struct memory to a client.
+        try std.testing.expect(w.craft_complete_n <= w.craft_complete.len);
+        for (w.craft_complete[0..w.craft_complete_n]) |cc| {
+            try std.testing.expect(cc.recipe_name_len <= cc.recipe_name.len);
+            try std.testing.expect(cc.scrapped_len <= cc.scrapped.len);
+            try std.testing.expect(cc.recipeName().len <= workstations.craft_name_max);
+            try std.testing.expect(cc.scrappedName().len <= workstations.craft_name_max);
+        }
+        for (w.queue[0..w.queue_len]) |q| {
+            try std.testing.expect(q.recipeBlob().len <= workstations.recipe_blob_max);
+        }
+    }
+}
+
 const png_sig = [_]u8{ 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a };
 // 1x1 RGB white pixel; IDAT is a stored deflate block. Parser skips chunk CRCs.
 const png_ihdr_1x1 = [_]u8{ 0, 0, 0, 13, 'I', 'H', 'D', 'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0, 0, 0, 0 };

@@ -32,6 +32,7 @@ const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
+const persist = @import("persist.zig");
 const util_log = @import("../util/log.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
@@ -5900,6 +5901,11 @@ test "scenario tall wire profile: 512-tall columns, 128-layer wire body, ZCH4 sa
     // invalidating the earlier `ch` pointer. Re-fetch before the save tests.
     const ch2 = try g.world.getOrCreate(pos);
 
+    // Two blocks high in the tall column (above the stock 256 ceiling) so the
+    // reload below proves the u32 block plane survived, not just the heights.
+    try ch2.setBlock(g.world.allocator, 1, 300, 2, 7);
+    try ch2.setBlock(g.world.allocator, 3, 500, 4, 9);
+
     // Save: ZCH4 with the column height in the header; validate + reload into
     // a same-profile chunk round-trips; a stock chunk rejects the record.
     const img = try world_store.World.encodeChunk(ch2, gpa);
@@ -5911,8 +5917,16 @@ test "scenario tall wire profile: 512-tall columns, 128-layer wire body, ZCH4 sa
     try g.world.saveChunk(ch2);
     var other = world_store.Chunk.generateFlat(pos);
     other.y_dim = 512;
+    // loadChunk allocates the block plane into this stack chunk; it is not
+    // owned by the store, so the test frees it.
+    defer other.deinitBlocks();
     try g.world.loadChunk(&other);
     try std.testing.expectEqual(@as(u16, 64), other.heightAt(0, 0));
+    // The block plane, not just the heights: encodeChunk writes it for ZCH4
+    // as well, so loadChunk has to read it back. Gating the read on ZCH3 threw
+    // the plane away and then read the topsoil tail out of the middle of it.
+    try std.testing.expectEqual(@as(u16, 7), other.blockAt(1, 300, 2));
+    try std.testing.expectEqual(@as(u16, 9), other.blockAt(3, 500, 4));
     var stock_chunk = world_store.Chunk.generateFlat(pos);
     try std.testing.expectError(error.ReadFailed, g.world.loadChunk(&stock_chunk));
 
@@ -8048,6 +8062,151 @@ test "scenario trader stock persists across restart (traders.zst)" {
         try std.testing.expectEqual(@as(u32, 7), g.sim.trader_stock[t].last_restock_day);
         std.debug.print("PASS trader-persist: stock/wallet/cadence restored across restart by trader name\n", .{});
     }
+}
+
+test "scenario traders.zst record for an absent trader does not desync the reader" {
+    // A trader saved by a previous map is skipped on load, but its stock
+    // entries still occupy bytes. Skipping the record without consuming them
+    // left the reader mid-record, so every following trader parsed garbage:
+    // either a spurious Truncated (all later traders silently lose their
+    // persisted stock) or one trader's inventory bound onto another.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_traderdesync");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_traderdesync", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var ts: ?ecs.Slot = null;
+    var s: usize = 0;
+    while (s < ecs.max_entities) : (s += 1) {
+        if (g.sim.alive[s] and g.sim.mask[s].trader_stock and
+            std.mem.eql(u8, g.sim.trader_stock[s].name, "Trader Jen"))
+        {
+            ts = @intCast(s);
+            break;
+        }
+    }
+    const t = ts orelse return error.TestUnexpectedResult;
+    const wood = g.items.byName("resourceWood") orelse return error.TestUnexpectedResult;
+
+    // Two records: a trader this world does not have (carrying one stock
+    // entry), then the live one. The live record is only reachable if the
+    // skipped record's entry bytes were consumed.
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const W = struct {
+        fn str(a: std.mem.Allocator, b: *std.ArrayList(u8), v: []const u8) !void {
+            try b.append(a, @intCast(v.len));
+            try b.appendSlice(a, v);
+        }
+        fn int(a: std.mem.Allocator, b: *std.ArrayList(u8), comptime T: type, v: T) !void {
+            var tmp: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+            std.mem.writeInt(T, &tmp, v, .little);
+            try b.appendSlice(a, &tmp);
+        }
+        /// header: reset_interval i32 | last_restock_day u32 | wallet i32 |
+        /// wallet_default i32 | entry count u8
+        fn head(a: std.mem.Allocator, b: *std.ArrayList(u8), wallet: i32, n: u8) !void {
+            try int(a, b, i32, 3);
+            try int(a, b, u32, 7);
+            try int(a, b, i32, wallet);
+            try int(a, b, i32, 4321);
+            try b.append(a, n);
+        }
+        /// entry: name | count u16 | quality u8 | price u16 | sell u16 | markup i8
+        fn entry(a: std.mem.Allocator, b: *std.ArrayList(u8), name: []const u8, count: u16, price: u16) !void {
+            try str(a, b, name);
+            try int(a, b, u16, count);
+            try b.append(a, 1);
+            try int(a, b, u16, price);
+            try int(a, b, u16, 11);
+            try b.append(a, 0);
+        }
+    };
+    try buf.appendSlice(gpa, "ZTR1");
+    try buf.append(gpa, 1); // version
+    try W.int(gpa, &buf, u16, 2); // record count
+    try W.str(gpa, &buf, "Trader From Another Map");
+    try W.head(gpa, &buf, 999, 1);
+    try W.entry(gpa, &buf, wood.name, 5, 100);
+    try W.str(gpa, &buf, "Trader Jen");
+    try W.head(gpa, &buf, 1234, 1);
+    try W.entry(gpa, &buf, wood.name, 37, 222);
+
+    var path_buf: [512]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/traders.zst", .{g.world.world_dir});
+    try io_fs.writeFile(p, buf.items);
+
+    try persist.loadTraders(g);
+
+    // The live trader's record was reached and applied, not the skipped one's.
+    try std.testing.expectEqual(@as(usize, 1), g.sim.trader_stock[t].n);
+    try std.testing.expectEqual(@as(u16, 37), g.sim.trader_stock[t].entries[0].count);
+    try std.testing.expectEqual(@as(u16, 222), g.sim.trader_stock[t].entries[0].price);
+    try std.testing.expectEqual(@as(i32, 1234), g.sim.trader_stock[t].wallet);
+    std.debug.print("PASS trader-desync: a skipped record's entries are consumed\n", .{});
+}
+
+test "scenario ZPV12 record claiming more slots than the array is bounded" {
+    // players.zsv carries inv_n as a u8 (up to 255) while the inventory array
+    // holds max_inv_slots (67). The slot write is bounded, but the ZPV12 mod-id
+    // block indexed the same array unguarded, so an over-count record wrote
+    // past it. A corrupt or hand-edited save must be rejected or clamped,
+    // never allowed to scribble past the array.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_zpv12bound");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_zpv12bound", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const name = c.name[0..c.name_len];
+
+    // ZPV12: magic | n:u32 | name_len:u8 | name | x,y,z:f32 | coins:u32 |
+    // inv_n:u8 | inv_n * 21-byte slots | journal count:u8 | ...
+    const claimed: u8 = 200; // > max_inv_slots (67)
+    const stride: usize = persist.zpvSlotStride(12);
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try buf.appendSlice(gpa, "ZPVC");
+    var n_le: [4]u8 = undefined;
+    std.mem.writeInt(u32, &n_le, 1, .little);
+    try buf.appendSlice(gpa, &n_le);
+    try buf.append(gpa, @intCast(name.len));
+    try buf.appendSlice(gpa, name);
+    try buf.appendNTimes(gpa, 0, 16); // x,y,z,coins
+    try buf.append(gpa, claimed);
+    // Every slot carries a non-zero item and a non-zero mod id, so the mod
+    // block actually writes for each one rather than skipping on zero.
+    var s: usize = 0;
+    while (s < claimed) : (s += 1) {
+        var slot = [_]u8{0} ** 21;
+        std.mem.writeInt(u16, slot[0..2], 7, .little); // item_id
+        std.mem.writeInt(u16, slot[2..4], 1, .little); // count
+        std.mem.writeInt(u16, slot[13..15], 9, .little); // mods[0]
+        try buf.appendSlice(gpa, slot[0..stride]);
+    }
+    try buf.append(gpa, 0); // journal count
+
+    var path_buf: [512]u8 = undefined;
+    const p = try persist.playersPath(g, &path_buf);
+    try io_fs.writeFile(p, buf.items);
+
+    // Must return without writing past the inventory array (a Debug build
+    // traps an out-of-bounds write, so reaching the next line is the check).
+    persist.tryRestorePlayer(g, c);
+    std.debug.print("PASS zpv12-bound: over-count inventory record stays in bounds\n", .{});
 }
 
 test "scenario air drop pushes a supply_drop NavObject marker" {
