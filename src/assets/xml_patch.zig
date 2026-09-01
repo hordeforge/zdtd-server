@@ -311,12 +311,23 @@ fn removeAttributeFrom(allocator: std.mem.Allocator, cur: []const u8, open_at: u
         const key_start = i;
         while (i < w.len and !std.ascii.isWhitespace(w[i]) and w[i] != '=') i += 1;
         const key = w[key_start..i];
+        // A token that is not `key="value"` (the tag name, a bare valueless
+        // attribute, an unquoted value) is skipped. `i` must move past it
+        // first: the cursor only advances at the bottom of the loop, so a
+        // `continue` from here without this would spin forever on operator
+        // XML. An empty key means `i` is parked on punctuation; step over it.
         var eq = i;
         while (eq < w.len and std.ascii.isWhitespace(w[eq])) eq += 1;
-        if (eq >= w.len or w[eq] != '=') continue; // tag name or bare key
+        if (eq >= w.len or w[eq] != '=') {
+            i = if (key.len == 0) i + 1 else eq;
+            continue; // tag name or bare key
+        }
         eq += 1;
         while (eq < w.len and std.ascii.isWhitespace(w[eq])) eq += 1;
-        if (eq >= w.len or (w[eq] != '"' and w[eq] != '\'')) continue;
+        if (eq >= w.len or (w[eq] != '"' and w[eq] != '\'')) {
+            i = eq;
+            continue; // unquoted value
+        }
         const quote = w[eq];
         eq += 1;
         while (eq < w.len and w[eq] != quote) eq += 1;
@@ -869,6 +880,43 @@ test "removeattribute drops one attribute from the element" {
     defer std.testing.allocator.free(out);
     try std.testing.expect(std.mem.find(u8, out, "class=") == null);
     try std.testing.expect(std.mem.find(u8, out, "hardness=\"3\"") != null);
+}
+
+test "removeattribute terminates on an unquoted or bare attribute" {
+    // The attribute scan must always advance: a modlet is operator-supplied
+    // XML, so an unquoted value (hardness=3) or a bare token (disabled) in the
+    // opening tag used to leave the cursor parked and spin forever, hanging the
+    // load. Malformed input must fail or no-op, never hang.
+    const cases = [_][]const u8{
+        // unquoted value after the target attribute
+        \\<blocks>
+        \\<block name="a" class="terrain" hardness=3></block>
+        \\</blocks>
+        ,
+        // bare valueless token in the opening tag
+        \\<blocks>
+        \\<block name="a" class="terrain" disabled></block>
+        \\</blocks>
+        ,
+        // unquoted value before the target attribute
+        \\<blocks>
+        \\<block name="a" hardness=3 class="terrain"></block>
+        \\</blocks>
+        ,
+    };
+    const patch =
+        \\<configs file="blocks.xml">
+        \\  <removeattribute xpath="/blocks/block[@name='a']/@class"/>
+        \\</configs>
+    ;
+    for (cases) |base| {
+        const out = applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{}) catch continue;
+        defer std.testing.allocator.free(out);
+        // Termination is the point, but the scan must still find the target:
+        // a quoted attribute after a malformed neighbour is removed normally.
+        try std.testing.expect(std.mem.find(u8, out, "class=") == null);
+        try std.testing.expect(std.mem.find(u8, out, "name=\"a\"") != null);
+    }
 }
 
 test "csvoperations add and remove on a comma list" {

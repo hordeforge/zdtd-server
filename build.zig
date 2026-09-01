@@ -94,6 +94,19 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
+    // mods/plugin_common.zig is the shared guest helper (Buf, Config) that the
+    // core plugins compile against for wasm32-freestanding. It is not part of
+    // the server's import graph, so its tests would never run under the unit
+    // suite. Build it as its own host-target test binary: the tests touch only
+    // the pure helpers, never the `extern "zdtd"` imports, so it links fine.
+    const guest_common_mod = b.createModule(.{
+        .root_source_file = b.path("mods/plugin_common.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const guest_common_tests = b.addTest(.{ .root_module = guest_common_mod });
+    test_step.dependOn(&b.addRunArtifact(guest_common_tests).step);
+
     const fuzz_mod = b.createModule(.{
         .root_source_file = b.path("src/fuzz.zig"),
         .target = target,

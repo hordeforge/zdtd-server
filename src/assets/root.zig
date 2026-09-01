@@ -48,6 +48,7 @@ test {
     _ = quests;
     _ = blocks;
     _ = items;
+    _ = item_modifiers;
     _ = signs;
     _ = entities;
     _ = recipes;

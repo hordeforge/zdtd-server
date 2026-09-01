@@ -252,9 +252,13 @@ pub const Store = struct {
             const b_plat = readLenStr(data, &pos, 16) orelse return error.ReadFailed;
             const b_id = readLenStr(data, &pos, 64) orelse return error.ReadFailed;
             if (pos >= data.len) return error.ReadFailed;
-            const st: Status = @enumFromInt(data[pos]);
+            // Range-check the raw byte first: Status is an exhaustive enum(u8),
+            // so @enumFromInt on an out-of-range value panics, and a check on
+            // the already-converted value never gets to run.
+            const st_raw = data[pos];
             pos += 1;
-            if (@intFromEnum(st) >= @typeInfo(Status).@"enum".fields.len) return error.ReadFailed;
+            if (st_raw >= @typeInfo(Status).@"enum".fields.len) return error.ReadFailed;
+            const st: Status = @enumFromInt(st_raw);
             self.setStatus(
                 .{ .platform = a_plat, .id = a_id },
                 .{ .platform = b_plat, .id = b_id },
@@ -362,6 +366,37 @@ test "ally store persists across restart (allies.zal)" {
     try io_fs.writeFile(bad_path, "ZAL1\x00\x01\xff");
     var bad: Store = .{};
     try std.testing.expectError(error.ReadFailed, bad.load(dir, std.testing.allocator));
+}
+
+test "an out-of-range status byte fails closed instead of panicking" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
+
+    // One well-formed record (four length-prefixed strings) whose trailing
+    // status byte is 0xff. Status is an exhaustive enum(u8) with four values,
+    // so the byte has to be range-checked before it is turned into one.
+    const rec = [_]u8{ 'Z', 'A', 'L', '1', 1, 0 } ++
+        [_]u8{ 5, 'S', 't', 'e', 'a', 'm' } ++ // a.platform
+        [_]u8{ 2, '1', '2' } ++ // a.id
+        [_]u8{ 5, 'S', 't', 'e', 'a', 'm' } ++ // b.platform
+        [_]u8{ 2, '3', '4' } ++ // b.id
+        [_]u8{0xff}; // status: not a Status value
+    try io_fs.writeFile(path, &rec);
+    var s: Store = .{};
+    try std.testing.expectError(error.ReadFailed, s.load(dir, std.testing.allocator));
+
+    // The same record with a valid status loads, so the fixture itself is good
+    // and the rejection above is about the status byte, not a malformed record.
+    var ok_rec = rec;
+    ok_rec[ok_rec.len - 1] = @intFromEnum(Status.allies);
+    try io_fs.writeFile(path, &ok_rec);
+    var s2: Store = .{};
+    try s2.load(dir, std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), s2.count());
 }
 
 test "invite, accept, remove round-trip from both sides" {

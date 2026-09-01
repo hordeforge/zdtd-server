@@ -2227,10 +2227,13 @@ fn runawayUpdate(w: *World, pos: *const [max_entities]c.Transform, s: Slot, ai: 
         return;
     }
     // Away from the attacker; a body exactly on top of it picks +x arbitrarily
-    // rather than dividing by zero.
+    // rather than dividing by zero. How far to run is its own knob: the
+    // give-up radius above answers "is the fright over", `flee_distance`
+    // answers "how far away is the goal" (equal at the stock defaults).
+    const run_to = w.rules.ai.flee_distance;
     const inv: f32 = if (d2 > 0.0001) 1.0 / @sqrt(d2) else 0;
-    const fx = w.transform[s].x + (if (inv > 0) dx * inv else 1) * flee;
-    const fz = w.transform[s].z + (if (inv > 0) dz * inv else 0) * flee;
+    const fx = w.transform[s].x + (if (inv > 0) dx * inv else 1) * run_to;
+    const fz = w.transform[s].z + (if (inv > 0) dz * inv else 0) * run_to;
     ai.path_goal_x = fx;
     ai.path_goal_z = fz;
     ai.has_path = true;
@@ -2553,6 +2556,16 @@ fn approachDistractionUpdate(w: *World, s: Slot, ai: *c.ZombieAi, cspd: f32, dt:
     ai.path_goal_z = w.transform[bs].z;
     ai.has_path = true;
     chaseAlongPath(w, s, ai, ai.path_goal_x, ai.path_goal_z, cspd * ai.active_scale, dt);
+    // EAIApproachDistraction::updatePath recalculates on its own cadence
+    // (pathRecalculateTicks = 20 + rand(20), asm.il updatePath IL_0019/IL_001C),
+    // not the generic chase throttle. Re-arm the cooldown after the shared
+    // follow step so the next distraction solve waits the task's own interval.
+    if (ai.path_replan_cd <= 0) {
+        const base: f32 = @floatFromInt(@max(0, w.rules.ai.distraction_replan_min));
+        const rand_span: f32 = @floatFromInt(@max(0, w.rules.ai.distraction_replan_rand));
+        const ticks = base + rngFrac(ai, ai.distraction) * rand_span;
+        ai.path_replan_cd = ticks / @as(f32, @floatFromInt(protocol.ticks_per_second));
+    }
 }
 
 fn decrementIfPositive(value: *i32) void {
@@ -2947,8 +2960,13 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
                     const raw: f32 = @min(f.mass_kg * -f.vy * 0.05, 40.0);
                     var dmg: f32 = @floatFromInt(@as(i32, @trunc(raw)));
                     if (kind == .player) {
-                        const mit = inventory.armorMitigation(w, @intCast(w.player[t].peer_slot));
-                        dmg *= 1.0 - mit;
+                        // peer_slot is i32 and defaults to -1 for a player
+                        // entity with no attached peer; @intCast traps on it.
+                        const ps = w.player[t].peer_slot;
+                        if (ps >= 0) {
+                            const mit = inventory.armorMitigation(w, @intCast(ps));
+                            dmg *= 1.0 - mit;
+                        }
                     }
                     if (dmg <= 0) continue;
                     const dr = w.damageFrom(nid, dmg, -1);
@@ -4024,6 +4042,25 @@ test "passive animal flees a feared entity within fleeDistance (RunawayFromEntit
     try std.testing.expect(w.transform[as].x < x0 - 0.1);
 }
 
+test "flee_distance sets how far the runaway goal is placed" {
+    // The knob is an operator rule (GAME_OPTIONS "flee_distance"): raising it
+    // must push the flee goal further from the fear source, independently of
+    // timid_safe_distance, which only decides when the fright ends.
+    var w: World = .{};
+    defer w.deinit();
+    w.rules.ai.flee_distance = 60.0;
+    const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
+    const as = w.slotOfNetId(a).?;
+    w.class_id[as].is_enemy = false;
+    _ = w.spawnZombie(10, 70, 0, 40).?;
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expectEqual(c.TaskId.runaway, w.zombie_ai[as].active_task);
+    // Source at +x, animal at origin: the goal is placed `flee_distance` along
+    // -x, so a 60 m knob must not leave it at the 20 m default.
+    try std.testing.expect(w.zombie_ai[as].path_goal_x < -50.0);
+}
+
 test "passive animal does not flee an entity beyond fleeDistance" {
     var w: World = .{};
     defer w.deinit();
@@ -4136,6 +4173,48 @@ test "approach_distraction walks a decoy across decision re-evals" {
     while (t < 6.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expectEqual(c.TaskId.approach_distraction, w.zombie_ai[zs].active_task);
     try std.testing.expect(w.transform[zs].x > x0);
+}
+
+test "distraction replan cadence follows its own rule, not the chase throttle" {
+    // EAIApproachDistraction::updatePath owns its recalculate interval
+    // (20 + rand(20) ticks); the operator rules distraction_replan_min /
+    // _rand must reach it. A large min must cut solves below what the generic
+    // path_replan_interval_s throttle alone would allow.
+    const cd = struct {
+        /// Run one distraction approach and report the replan cooldown the task
+        /// left armed, in seconds.
+        fn armedFor(min_ticks: i32) !f32 {
+            var w: World = .{};
+            defer w.deinit();
+            w.step_fn = path_mod.openStep;
+            w.step_ctx = null;
+            w.rules.ai.distraction_replan_min = min_ticks;
+            w.rules.ai.distraction_replan_rand = 0; // pin the jitter for the compare
+            const bag = seedDecoy(&w, 40, 0, 10_000);
+            const z = w.spawnZombie(0, 70, 0, 40).?;
+            const zs = w.slotOfNetId(z).?;
+            w.zombie_ai[zs].pending_distraction = bag;
+            w.zombie_ai[zs].pending_distraction_dsq = 1600;
+            w.zombie_ai[zs].active_task = .none;
+            w.zombie_ai[zs].decision_cd = 0;
+            var t: f32 = 0;
+            while (t < 1.0) : (t += 0.05) {
+                w.beginTick();
+                _ = systemZombieAi(&w, 0.05);
+            }
+            try std.testing.expectEqual(c.TaskId.approach_distraction, w.zombie_ai[zs].active_task);
+            return w.zombie_ai[zs].path_replan_cd;
+        }
+    };
+    // The knob is in ticks at 20 TPS, so 300 ticks must arm a cooldown near
+    // 15 s, far past the 0.35 s generic path_replan_interval_s that the task
+    // used to inherit. Anything much shorter means the rule never reached it.
+    const slow = try cd.armedFor(300);
+    try std.testing.expect(slow > 10.0);
+    // A short cadence must stay short: the value tracks the rule, not a constant.
+    const fast = try cd.armedFor(20);
+    try std.testing.expect(fast < 1.5);
+    try std.testing.expect(fast < slow);
 }
 
 test "zombie reaches a non-eat decoy and loses interest (clears the latch)" {

@@ -82,6 +82,18 @@ for dir in src/*/; do
       fi
     done
   done
+  # Importing a module is not enough: `zig build test` only walks a module
+  # reachable from a `test {}` block, so every `pub const x = @import("*.zig")`
+  # in the barrel needs a matching `_ = x;`. Re-exports (`pub const Game =
+  # game.Game`) are not imports and are skipped by the pattern.
+  while read -r name; do
+    [[ -n "$name" ]] || continue
+    if ! grep -Eq "^[[:space:]]*_ = ${name};" "$pkg_root"; then
+      echo "lint-architecture: $pkg_root imports '$name' but its test block omits '_ = $name;' (tests not aggregated)" >&2
+      fail=1
+    fi
+  done < <(grep -oE 'pub const [a-zA-Z0-9_]+ = @import\("[^"]+\.zig"\)' "$pkg_root" |
+    sed -E 's/^pub const ([a-zA-Z0-9_]+) = .*/\1/')
 done
 
 # packages.zig is the stock body facade: every wire/stock_*.zig must be re-exported

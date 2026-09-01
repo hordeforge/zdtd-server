@@ -342,6 +342,25 @@ test "moon_gravity mod preset pins the gravity overlay" {
     try std.testing.expectEqual(@as(f32, -1.62), r.vehicle.gravity);
 }
 
+test "parachute mod preset binds and pins the glide overlay" {
+    // mods/parachute ships its [rules.glide] overlay self-contained. The
+    // resolver test only pins the preset_pack path; nothing bound the file
+    // against the rules schema, so a stale key here would surface at runtime
+    // load instead of in the suite (the gap the other two mod presets close).
+    if (!io_fs.fileExists("mods/parachute/preset.toml")) return error.SkipZigTest;
+    var p = try loadFromPath(std.testing.allocator, "mods/parachute/preset.toml");
+    defer p.deinit();
+    try std.testing.expectEqualStrings("parachute", p.name);
+    try std.testing.expectEqual(@as(?f32, 2.5), p.rules.glide.sink_vy_mps);
+    var r: rules_mod.Rules = .{};
+    rules_mod.mergeOverlay(&r, &p.rules);
+    try std.testing.expectEqual(@as(f32, 2.5), r.glide.sink_vy_mps);
+    // The guest's config.toml and this pack must name the same item: the host
+    // sets the sense wearing_glider bit from the rules value and the guest
+    // only mirrors it (mods/parachute/README.md).
+    try std.testing.expectEqualStrings("parachute", r.glide.item_tag);
+}
+
 test "loadByName rejects bad name" {
     try std.testing.expectError(error.BadPresetName, loadByName(std.testing.allocator, "../x"));
 }

@@ -266,11 +266,11 @@ test, so a retune cannot land silently).
 | `distraction_look_s` | 2.0 | Policy |
 | `distraction_close_sq` | 2.25 | Policy (1.5 m squared) |
 | `distraction_broadcast_ticks` | 20 | Policy (EntityItem.tickDistraction) |
-| `distraction_replan_min` | 20 | Policy |
-| `distraction_replan_rand` | 20 | Policy |
+| `distraction_replan_min` | 20 | Policy (EAIApproachDistraction path recalculate, ticks at 20 TPS) |
+| `distraction_replan_rand` | 20 | Policy (jitter added on top of the min, ticks) |
 | `wander_time_max_s` | 30.0 | Policy (EAIWander 30 s cap) |
 | `wander_arrive` | 0.2 | Policy (wander no-op radius) |
-| `flee_distance` | 20.0 | Policy (EAIRunAway flee distance, m) |
+| `flee_distance` | 20.0 | Policy (EAIRunAway: how far from the fear source the flee goal is placed, m) |
 | `timid_danger_distance` | 20.0 | V3.2.0 EAIRunawayFromEntity detection radius (m): a threat within it becomes the fear source |
 | `timid_safe_distance` | 20.0 | V3.2.0 EAIRunawayFromEntity flee-until radius (m): the fright ends once the source is beyond it |
 | `mount_range_sq` | 64.0 | Policy (vehicle mount 8 m squared) |

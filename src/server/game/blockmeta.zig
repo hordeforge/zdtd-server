@@ -48,6 +48,9 @@ pub fn loadBlockMeta(self: *Game) !void {
         else => return err,
     };
     defer self.allocator.free(data);
+    // Magic check needs 4 bytes in hand: `data.len < 6` short-circuits the
+    // ZBM2 compare, so the ZBM1 arm would slice a 0-3 byte truncated file.
+    if (data.len < 4) return error.ReadFailed;
     if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZBM2")) {
         if (std.mem.eql(u8, data[0..4], "ZBM1")) return; // pre-damage-plane: HP lived here
         return error.ReadFailed;
@@ -101,4 +104,29 @@ test "block metadata buffer holds both stores at capacity" {
     // 6 header + 256 raw records (u64 key + u32 raw). The HP section moved to
     // the chunk damage plane (ZCH3) and is no longer part of this file.
     try std.testing.expectEqual(@as(usize, 3078), block_meta_max_len);
+}
+
+test "a blockmeta.zbm shorter than its magic fails instead of panicking" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var path_buf: [512]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/blockmeta.zbm", .{g.world.world_dir});
+    // 0..3 bytes: too short even for the 4-byte magic the ZBM1 arm compares.
+    for (0..4) |n| {
+        try io_fs.writeFile(p, "ZBM"[0..n]);
+        try std.testing.expectError(error.ReadFailed, loadBlockMeta(g));
+    }
+    std.debug.print("PASS blockmeta-zbm: truncated header rejected\n", .{});
 }

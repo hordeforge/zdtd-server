@@ -2774,3 +2774,95 @@ test "parachute.wasm deploys glide on a falling worn player and clears on landin
     }
     try std.testing.expect(saw_clear);
 }
+
+test "parachute.wasm announce text survives on_enable's stack frame" {
+    // The guest parses config out of a stack buffer in on_enable; keeping the
+    // value as a slice into that buffer meant a later tick's announcement read
+    // a dead frame. The text must still be intact when the deploy fires, which
+    // is several hook calls after on_enable returned.
+    const announce = "rode the silk down";
+    const Cap = struct {
+        var queued: [8][64]u8 = undefined;
+        var queued_len: [8]usize = undefined;
+        var queued_n: usize = 0;
+        var vy: f32 = 0;
+
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, cmd: []const u8) void {
+            if (queued_n >= queued.len) return;
+            const n = @min(cmd.len, queued[queued_n].len);
+            @memcpy(queued[queued_n][0..n], cmd[0..n]);
+            queued_len[queued_n] = n;
+            queued_n += 1;
+        }
+        fn senseFn(_: *HostCtx, out: []u8) usize {
+            if (out.len < 24 + 40) return 0;
+            std.mem.writeInt(u32, out[0..4], 0x3453425a, .little); // 'ZBS4'
+            std.mem.writeInt(u32, out[4..8], 1, .little); // count
+            std.mem.writeInt(u32, out[8..12], 1, .little); // tick
+            std.mem.writeInt(i32, out[12..16], -1, .little); // self
+            std.mem.writeInt(u32, out[16..20], 0, .little); // world_time
+            std.mem.writeInt(u32, out[20..24], 0, .little); // blood_moon
+            const r = out[24..64];
+            @memset(r, 0);
+            std.mem.writeInt(i32, r[0..4], 2000, .little);
+            r[6] = 1; // alive
+            std.mem.writeInt(u32, r[28..32], @bitCast(vy), .little);
+            r[36] = 1; // wearing_glider
+            return 24 + 40;
+        }
+    };
+    Cap.queued_n = 0;
+    Cap.vy = 0;
+
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+    };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"mods/parachute/parachute.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    // Config must be in place before on_enable: that is the call whose stack
+    // frame used to back the stored slice. The value is quoted and carries a
+    // trailing comment, exactly as plugin_common.Config handles it, so the
+    // guest's hand-rolled parser must strip both.
+    host.slots[0].config_bytes = "announce_text = \"" ++ announce ++ "\"  # trailing comment\n";
+    defer host.slots[0].config_bytes = "";
+    host.enable();
+    try std.testing.expectEqual(@as(usize, 1), host.count());
+
+    Cap.vy = -12.0;
+    var t: usize = 0;
+    while (t < 12) : (t += 1) host.onTick();
+
+    var saw_announce = false;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, i| {
+        if (std.mem.eql(u8, c[0..Cap.queued_len[i]], announce)) saw_announce = true;
+    }
+    try std.testing.expect(saw_announce);
+
+    // Now the real shipped config.toml, not a synthetic string: its values are
+    // quoted, and a parser that does not strip the quotes broadcasts them.
+    const shipped = try io_fs.readFileAll(std.testing.allocator, "mods/parachute/config.toml");
+    defer std.testing.allocator.free(shipped);
+    host.slots[0].config_bytes = shipped;
+    _ = host.slots[0].callHook(.on_enable);
+    // Land first: the roster still has this player gliding from the phase
+    // above, and the deploy announcement only fires on the 0 -> 1 edge.
+    Cap.vy = 0.0;
+    host.onTick();
+    Cap.queued_n = 0;
+    Cap.vy = -12.0;
+    t = 0;
+    while (t < 12) : (t += 1) host.onTick();
+    var saw_shipped = false;
+    for (Cap.queued[0..Cap.queued_n], 0..) |*c, i| {
+        if (std.mem.eql(u8, c[0..Cap.queued_len[i]], "deployed their parachute")) saw_shipped = true;
+    }
+    try std.testing.expect(saw_shipped);
+}

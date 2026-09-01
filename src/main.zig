@@ -478,6 +478,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Stock serveradmin.xml sits next to serverconfig.xml (save root); fall
     // back to the config dir or game dir so an operator drop-in applies.
     var serveradmin_path: ?[]const u8 = null;
+    // Game dupes this into its own field and frees only that copy
+    // (game/init_world.zig, game/lifecycle.zig), so this one is ours to free.
+    defer if (serveradmin_path) |p| gpa.free(p);
     if (serverconfig_path) |scp| {
         if (std.fs.path.dirname(scp)) |dir| {
             var p: [std.fs.max_path_bytes]u8 = undefined;
