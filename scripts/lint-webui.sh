@@ -34,7 +34,10 @@ cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zdtd/oxlint-standards"
 ts_dir="$root/src/server/webui/ts"
 
 # 1. Type check (tsc --strict per tsconfig.json).
-bunx -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --noEmit
+# --bun on every bunx call: these packages ship `#!/usr/bin/env node`
+# shebangs and bun honours them by default, so a missing or broken host
+# node breaks the gate. bun is the declared runtime for this repo.
+bunx --bun -p "typescript@$tsc_version" tsc -p "$ts_dir/tsconfig.json" --noEmit
 
 # 2. Lint the sources with oxlint. The @rikalabs plugin, the vendored
 #    dmmulroy/anti-slop plugin source (pinned by ANTI_SLOP_SHA; the project is
@@ -103,7 +106,7 @@ cp "$root/.oxlintrc.jsonc" "$cache_dir/oxlintrc.jsonc"
 cd "$cache_dir"
 # tsgolint is not on the user's PATH; oxlint finds it via PATH lookup.
 PATH="$cache_dir/node_modules/.bin:$PATH" \
-  bunx "oxlint@$oxlint_version" --config oxlintrc.jsonc --deny-warnings "$ts_dir"
+  bunx --bun "oxlint@$oxlint_version" --config oxlintrc.jsonc --deny-warnings "$ts_dir"
 
 # 3. Freshness: regenerate into a temp copy of the pages and diff.
 tmp="$(mktemp -d)"
