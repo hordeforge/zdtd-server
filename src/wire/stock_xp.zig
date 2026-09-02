@@ -96,6 +96,22 @@ pub fn buildPlayerStatsBody(buf: []u8, args: PlayerStatsArgs) ![]u8 {
     try w.writeI32(args.killed_players); // killedPlayers
     try w.writeI32(args.exp_to_next); // experience (stock Setup: ExpToNextLevel)
     try w.writeI32(args.level);
+    // The five accumulator stats below are client-local by design, not gaps.
+    // RE loop.md (EntityPlayerLocal.OnUpdateLive): the *local* player accrues
+    // `currentLife += deltaTime / 60` and tracks `longestLife`/`totalTimePlayed`
+    // in minutes off its own frame delta, and reports them through the
+    // analytics/achievement path - a headless server has no frame delta and
+    // never receives them (the C2S NetPackagePlayerStats blob is accepted and
+    // dropped, since trusting it would let a client author its own stats).
+    // Divergence, recorded rather than papered over: stock's server does carry
+    // real values here, but only by relaying what the owning client sent it
+    // (`EntityNetworkStats::ToEntity` writes them onto the entity, then relays
+    // when IsServer - RE progression.md 441560ff). zdtd drops that C2S blob on
+    // the authority rule (a client must not author its own stats), so it has
+    // nothing truthful to put in these fields and sends 0. Synthesising a
+    // server-side accumulator would invent numbers stock never derived
+    // server-side (rule 3, missing beats fake). Closing this means deciding to
+    // trust the client blob, which is an ADR-level authority change.
     try w.writeU32(0); // totalItemsCrafted
     try w.writeF32(0); // distanceWalked
     try w.writeF32(0); // longestLife

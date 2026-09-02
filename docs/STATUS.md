@@ -10,7 +10,7 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 298 features: **296 `WORKS`,
+owns all C2S domains. `GAP_ANALYSIS.md` scores 299 features: **296 `WORKS`,
 1 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
 54 bullets carry ad-hoc labels and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
@@ -926,7 +926,7 @@ recount from the live markers corrected the scorecard: the running totals had
 drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
 MISSING" was an older inventory projection). Recount: 291 canonical features,
 total **250/41/0**. (Current state, recounted 2026-08-30 from the live
-markers: 298 canonical features, **296 WORKS / 2 PARTIAL / 0 MISSING**; the
+markers: 299 canonical features, **296 WORKS / 3 PARTIAL / 0 MISSING**; the
 chunk-pointer stability gap closed 2026-08-30 by the pointer-stable chunk
 store, and the join-burst tick budget PARTIAL is paced to the 50 ms budget
 in ReleaseFast with its W2b residual recorded in the row.)

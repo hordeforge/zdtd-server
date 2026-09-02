@@ -1,6 +1,6 @@
 # Gap analysis: what a player can and cannot do on Navezgane
 
-> **What this is:** the full 298-feature inventory for the V3.1.0 b14 stock-client play path, with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
+> **What this is:** the full 299-feature inventory for the V3.1.0 b14 stock-client play path, with per-feature WORKS/PARTIAL/MISSING scores grounded in IL and stock XML. STATUS remains the hub for what shipped; WORK_PLAN turns the gaps into tasks.
 
 > **Related:** hub [STATUS.md](STATUS.md) · tasks [WORK_PLAN.md](WORK_PLAN.md) · phases [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · overview [ARCHITECTURE.md](ARCHITECTURE.md) · sources [PROVENANCE.md](PROVENANCE.md) · index [INDEX.md](INDEX.md) · wire [wire/PACKAGES.md](wire/PACKAGES.md)
 
@@ -68,7 +68,7 @@ are unloaded instead of standing frozen in your world forever.
 ### What a player cannot do
 
 *Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
-[scorecard](#2-scorecard): all but two of the 298 features WORK (296 WORKS, 2 PARTIAL, 0 MISSING); the
+[scorecard](#2-scorecard): all but three of the 299 features WORK (296 WORKS, 3 PARTIAL, 0 MISSING); the
 bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -150,8 +150,8 @@ closed: power grid nodes rebuild from the chunk block grid
 Recount 2026-08-22 from the live per-feature markers (the source of truth):
 **291 features** carry a canonical WORKS/PARTIAL/MISSING tag and the scorecard
 rows below are corrected to those counts. Recount 2026-08-29 (this pass):
-rows added or re-tagged since then bring the canonical set to **298 features
-(296 WORKS, 2 PARTIAL, 0 MISSING)**; the PARTIAL rows are the 2026-08-29
+rows added or re-tagged since then bring the canonical set to **299 features
+(296 WORKS, 3 PARTIAL, 0 MISSING)**; the PARTIAL rows are the 2026-08-29
 join-burst tick budget (its residual recorded in the row) and the
 perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation
 moved into the counted set; the chunk-pointer stability gap was closed
@@ -200,7 +200,7 @@ allowance).
 
 ## 2. Scorecard
 
-298 features scored across nine areas (recounted 2026-09-02 from the
+299 features scored across nine areas (recounted 2026-09-02 from the
 per-feature markers, the source of truth; STATUS wins on conflict).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
@@ -211,10 +211,10 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 40 | 0 | 0 | 40 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; starter population fill (2026-08-30) populates fresh worlds toward the cap at boot |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 25 | 1 | 0 | 26 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
+| [Player progression](#10-player-progression) | 25 | 2 | 0 | 27 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
 | [World systems](#11-world-systems) | 45 | 1 | 0 | 46 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 49 | 0 | 0 | 49 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **296** | **2** | **0** | **298** | Two PARTIAL rows: the 2026-08-29 join-burst tick budget (residual recorded inline) and the perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation moved into the counted set (bounded stat coverage, not a blocked dependency). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **296** | **3** | **0** | **299** | Two PARTIAL rows: the 2026-08-29 join-burst tick budget (residual recorded inline) and the perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation moved into the counted set (bounded stat coverage, not a blocked dependency). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3309,11 +3309,25 @@ and server-to-client XP/level pushes do not exist.
   bound and has no player-visible blocker without the full progression runtime.
   *Anchors:* `asm.il:1084044`, `asm.il:1084146`
 
-- **Death / kill counters** `PARTIAL (waived)`
-  PDF/counters write literal zeros; stats UI is waived polish vs auth paths.
-  Real counters would need persistent progression ledger wiring first.
-  *Anchors:* `src/wire/packages.zig:479-483`, `:537-542`,
-  `src/wire/stock_inv.zig:413-417`
+- **Death / kill counters** `PARTIAL` (re-evaluated 2026-09-02; the `(waived)`
+  qualifier is dropped and the row is split)
+  **Kill counters now ship.** `zombie_kills` / `player_kills` are counted on the
+  authoritative death path and ride `NetPackagePlayerStats` as the stock
+  `killedZombies` / `killedPlayers` fields, so the client stats UI renders real
+  numbers. They previously fed only `AddScoreClient` while `PlayerStats`
+  hardcoded 0.
+  **The five accumulator stats stay 0, and that is a recorded divergence rather
+  than a gap:** `totalItemsCrafted`, `distanceWalked`, `longestLife`,
+  `currentLife`, `totalTimePlayed`. RE loop.md has the *local* player accrue
+  `currentLife += deltaTime / 60` off its own frame delta; stock's server only
+  ever relays what the owning client sent (`EntityNetworkStats::ToEntity`, RE
+  progression.md 441560ff). zdtd drops that C2S blob on the authority rule, so
+  it has nothing truthful to put there. Synthesising server-side accumulators
+  would invent numbers stock never derived server-side (rule 3). Closing it
+  means trusting the client blob, i.e. an ADR-level authority change.
+  *Anchors:* `src/wire/stock_xp.zig` (`buildPlayerStatsBody`),
+  `src/server/c2s/misc.zig` (kill counting), `src/server/game/player.zig` +
+  `src/server/game/join.zig` (send sites), RE `progression.md`, `loop.md`
 
 - **players.zsv persistence: name, position, coins, inventory, journal** `WORKS`
   **ZPV3** merge-write (ZPV2 still read and upgraded with `prog=0`) that carries
