@@ -8152,6 +8152,23 @@ test "scenario traders.zst record for an absent trader does not desync the reade
     try std.testing.expectEqual(@as(u16, 222), g.sim.trader_stock[t].entries[0].price);
     try std.testing.expectEqual(@as(i32, 1234), g.sim.trader_stock[t].wallet);
     std.debug.print("PASS trader-desync: a skipped record's entries are consumed\n", .{});
+
+    // The fuzz target walks a parallel copy of this cursor arithmetic
+    // (persist.ztrScanLen) so it can run without a Game. A second
+    // implementation is only useful while it agrees with the real loader, so
+    // pin that here: the same blob the loader just accepted must scan to
+    // exactly its length, and a blob the scanner rejects must not load.
+    try std.testing.expectEqual(buf.items.len, try persist.ztrScanLen(buf.items));
+    // Truncating anywhere inside the blob must fail both. Walking every prefix
+    // catches a scanner that is merely permissive rather than equivalent.
+    var cut: usize = 1;
+    while (cut < buf.items.len) : (cut += 1) {
+        const prefix = buf.items[0..cut];
+        const scan_ok = if (persist.ztrScanLen(prefix)) |_| true else |_| false;
+        try io_fs.writeFile(p, prefix);
+        const load_ok = if (persist.loadTraders(g)) |_| true else |_| false;
+        try std.testing.expectEqual(scan_ok, load_ok);
+    }
 }
 
 test "scenario ZPV12 record claiming more slots than the array is bounded" {

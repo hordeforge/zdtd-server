@@ -1929,3 +1929,52 @@ fn fuzzAllyStore(_: void, smith: *std.testing.Smith) !void {
     // their stored lengths.
     try std.testing.expect(s.count() <= ally.max_pairs);
 }
+
+const ztr_corpus = [_][]const u8{
+    "",
+    "ZTR1",
+    // magic + version + count 0 (empty, valid)
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 0, 0 }),
+    // wrong magic / wrong version
+    &([_]u8{ 'Z', 'T', 'R', '0', 1, 0, 0 }),
+    &([_]u8{ 'Z', 'T', 'R', '1', 9, 0, 0 }),
+    // claimed count with nothing behind it
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 0xff, 0xff }),
+    // one record, name "a", zero stock entries: the minimal well-formed shape
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++
+        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{0}),
+    // one record claiming a stock count past max_stock (must BadRecord, not
+    // walk off the end)
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++
+        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{0xff}),
+    // two records where the first has one entry: the shape that desynced when
+    // a skipped trader failed to consume its entries (fixed 2026-09-01).
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 2, 0 } ++
+        [_]u8{ 1, 'a' } ++ [_]u8{0} ** 16 ++ [_]u8{1} ++
+        [_]u8{ 1, 'x' } ++ [_]u8{0} ** 8 ++
+        [_]u8{ 1, 'b' } ++ [_]u8{0} ** 16 ++ [_]u8{0}),
+    // record header claiming a 0xff-byte trader name with a short body
+    &([_]u8{ 'Z', 'T', 'R', '1', 1, 1, 0 } ++ [_]u8{0xff} ++ [_]u8{'n'} ** 8),
+};
+
+test "fuzz traders.zst record walk" {
+    // Deterministic corpus pass first: smith.slice overwrites the buffer with
+    // fuzzer data, so in a default build the seeds above would never be parsed.
+    for (ztr_corpus) |seed| {
+        const end = persist.ztrScanLen(seed) catch continue;
+        try std.testing.expect(end <= seed.len);
+    }
+    try std.testing.fuzz({}, fuzzTraderSave, .{ .corpus = &ztr_corpus });
+}
+
+fn fuzzTraderSave(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [4096]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    const input = storage[0..len];
+    // An accepted blob must land inside the buffer. A walk that runs past the
+    // end is exactly the desync class: the loader would then read the next
+    // record's bytes as this one's tail.
+    const end = persist.ztrScanLen(input) catch return;
+    try std.testing.expect(end <= input.len);
+}

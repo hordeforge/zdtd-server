@@ -1337,6 +1337,45 @@ pub fn loadClaims(self: *Game) !void {
 /// reset_interval i32, last_restock_day u32, wallet i32, wallet_default i32,
 /// n u8, n x (item_name_len u8 + name, count u16, quality u8, price u16,
 /// sell u16, markup i8).
+///
+/// Walk a traders.zst blob and return the offset one past the last record,
+/// without touching sim state. `loadTraders` does the same walk inline and then
+/// applies each record; keeping a pure copy makes the cursor arithmetic - the
+/// part that desynced when a skipped record failed to consume its entries -
+/// fuzzable without standing up a whole Game.
+///
+/// A record whose trader is absent from the world is still fully consumed, so a
+/// blob that parses here parses identically in the loader.
+pub fn ztrScanLen(data: []const u8) error{ BadMagic, BadVersion, Truncated, BadRecord }!usize {
+    if (data.len < 7 or !std.mem.eql(u8, data[0..4], "ZTR1")) return error.BadMagic;
+    if (data[4] != 1) return error.BadVersion;
+    const count = std.mem.readInt(u16, data[5..7], .little);
+    var o: usize = 7;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        if (o >= data.len) return error.Truncated;
+        const name_len = data[o];
+        o += 1;
+        if (o + name_len > data.len) return error.Truncated;
+        o += name_len;
+        if (o + 17 > data.len) return error.Truncated;
+        const n = data[o + 16];
+        o += 17;
+        if (n > ecs.components.max_stock) return error.BadRecord;
+        var e: usize = 0;
+        while (e < n) : (e += 1) {
+            if (o >= data.len) return error.Truncated;
+            const ilen = data[o];
+            o += 1;
+            if (o + ilen > data.len) return error.Truncated;
+            o += ilen;
+            if (o + 8 > data.len) return error.Truncated;
+            o += 8;
+        }
+    }
+    return o;
+}
+
 pub fn saveTraders(self: *Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/traders.zst", .{self.world.world_dir});
