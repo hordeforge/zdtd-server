@@ -580,6 +580,25 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
 }
 
 /// Spawn connected players to each other (stock EntitySpawn with the player
+/// The stack a player has in hand, for the spawn package's holdingItem field.
+/// Null when the slot is empty: the builder then writes the empty ItemValue
+/// sentinel, which is what stock sends for bare hands. A switch afterwards
+/// rides on NetPackageHoldingItem, but the spawn body is the only thing that
+/// tells a joiner what an already-present player is holding.
+fn playerHoldingStock(self: *Game, slot: ecs.Slot) ?packages.stock_inv.StockSlot {
+    if (!self.sim.mask[slot].inventory) return null;
+    const inv = &self.sim.inventory[slot];
+    if (inv.holding >= ecs.components.inv_toolbelt) return null;
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return null;
+    return .{
+        .type_id = Game.resolveItemType(self, s.item_id),
+        .count = s.count,
+        .quality = s.quality,
+        .meta = s.meta,
+    };
+}
+
 /// class + PlayerSpawnInfo). Without this, multiplayer stock clients never
 /// see each other's bodies: the mob spawn burst and the tick replicate path
 /// both skip players. The joiner receives every other player in its view;
@@ -613,7 +632,7 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
             .on_ground = true,
             .player = .{
                 .entity_name = owner.name[0..owner.name_len],
-                .holding_item = null,
+                .holding_item = playerHoldingStock(self, i),
                 .team_number = 0,
                 .profile = null,
             },
@@ -642,7 +661,7 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
         .on_ground = true,
         .player = .{
             .entity_name = c.name[0..c.name_len],
-            .holding_item = null,
+            .holding_item = playerHoldingStock(self, js),
             .team_number = 0,
             .profile = null,
         },
