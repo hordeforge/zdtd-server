@@ -7,6 +7,7 @@ const game_bot = @import("game/bot.zig");
 const game_player = @import("game/player.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_wasm_host = @import("game/wasm_host.zig");
+const replicate_te = @import("replicate_te.zig");
 const plugin_api = @import("../plugin/api.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
@@ -3477,6 +3478,86 @@ test "scenario pressure plate trigger pulse powers wired load" {
     try std.testing.expect(!g.sim.power.nodes[g.sim.power.indexOfId(load).?].powered);
 
     std.debug.print("PASS trigger: plate pulse then expire load_off\n", .{});
+}
+
+test "scenario powered trigger echo carries every wire the sim holds" {
+    // The sim caps wires globally (electric.max_wires), not per node, so a
+    // trigger can legitimately hold more edges than any fixed echo buffer.
+    // The S2C encoder writes a u8 count and accepts up to 255, so a caller
+    // buffer smaller than that silently drops edges off the wire: the client
+    // is told the node has fewer connections than the server believes.
+    const stock_te = packages.stock_te;
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_trigwires");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_trigwires", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    _ = c;
+
+    const plate_id = g.maxdamage.idByName("pressureplate") orelse return error.SkipZigTest;
+    if (g.power_registry.lookup(plate_id) == null) return error.SkipZigTest;
+
+    // Place the trigger, then wire more neighbours to it than a single-byte
+    // "handful" buffer would hold.
+    const tx: i32 = 200;
+    const ty: i32 = 70;
+    const tz: i32 = 200;
+    try g.world.setBlockWorld(tx, ty, tz, plate_id);
+    const trig = g.sim.power.addNodeAt(.consumer, tx, ty, tz, 1) orelse return error.TestUnexpectedResult;
+    const ti = g.sim.power.indexOfId(trig).?;
+    g.sim.power.nodes[ti].is_trigger = true;
+
+    const wanted: usize = stock_te.max_te_wires + 4;
+    var made: usize = 0;
+    var k: i32 = 0;
+    while (made < wanted) : (k += 1) {
+        const nid = g.sim.power.addNodeAt(.consumer, tx + 2 + k * 2, ty, tz, 1) orelse break;
+        if (!g.sim.power.connect(trig, nid)) break;
+        made += 1;
+    }
+    try std.testing.expectEqual(wanted, made);
+
+    cap.clear();
+    g.sim.power.resolve();
+    try replicate_te.broadcastPoweredTriggerTe(g, tx, ty, tz);
+
+    const te_id = packages.idOf("NetPackageTileEntity") orelse return error.TestUnexpectedResult;
+    const msg = cap.findPkgId(te_id) orelse return error.TestUnexpectedResult;
+    // The wire count sits after the outer TE header; parse rather than index so
+    // this keeps testing the shipped layout instead of a copy of it.
+    const declared = countPoweredTriggerWires(msg) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(made, declared);
+
+    std.debug.print("PASS trigger echo: {d} wires held, {d} on the wire\n", .{ made, declared });
+}
+
+/// Pull the wire count out of a captured NetPackageTileEntity powered-trigger
+/// body. Mirrors the field order in stock_te.buildPoweredTriggerTeBody.
+fn countPoweredTriggerWires(msg: []const u8) ?usize {
+    // Locate the package body inside the captured frame by scanning for the
+    // outer TE header the builder writes; the capture holds a full frame.
+    if (msg.len < 32) return null;
+    var i: usize = 0;
+    while (i + 30 < msg.len) : (i += 1) {
+        // outer: handle u8 | wx i32 | wy i32 | wz i32 | blockId i32 | len i32
+        if (msg[i] != 255) continue;
+        const wx = std.mem.readInt(i32, msg[i + 1 ..][0..4], .little);
+        const wy = std.mem.readInt(i32, msg[i + 5 ..][0..4], .little);
+        const wz = std.mem.readInt(i32, msg[i + 9 ..][0..4], .little);
+        if (wx != 200 or wy != 70 or wz != 200) continue;
+        // payload: lx i32 | ly i32 | lz i32 | const1 i32 | placed u8 | type u8 | wireCount u8
+        const payload = i + 21;
+        if (payload + 19 > msg.len) return null;
+        return msg[payload + 18];
+    }
+    return null;
 }
 
 test "scenario inventory move drop place equip" {

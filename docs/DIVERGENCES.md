@@ -148,6 +148,24 @@ adding a variant would leave the guard rejecting a legal stock ordinal as
 from the enum via `std.enums.fromInt`, with tests asserting that every declared
 variant parses. The accepted range is unchanged.
 
+### Cap symmetry sweep (2026-09-02)
+
+Same question asked of the length and count caps: does the build side agree
+with the parse side, and does each cap match the width of the field that
+carries it. Most do. `stock_inv.zig:1163` (65535) and `stock_te.zig:383` (255)
+guard exactly their prefix widths, and the `@min(len, 255)` in the S2C encoders
+is the field range, not an invented limit.
+
+One real defect came out of it, now fixed: `broadcastPoweredTriggerTe` sized
+its outbound wire list with `max_te_wires` (8), which is the *parse-side* cap on
+wires kept from an inbound body. The sim caps wires globally rather than per
+node, so a trigger holding 12 edges was echoed as 8: the client was told the
+node had fewer connections than the server believed. The outbound path now uses
+`max_te_wires_out` (255, the u8 count field's real range) and the two constants
+are documented as inbound and outbound rather than one being reused for both.
+Beyond 255 edges on a single node the stock count field cannot describe the
+list at all; that residual is a format limit, asserted at the call site.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.
