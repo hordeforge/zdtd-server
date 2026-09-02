@@ -215,7 +215,11 @@ pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
     const tt = props.trigger_type orelse return;
     // Wire list is the child edges zdtd tracks; the parent link is undirected
     // here, so parentPos stays zero rather than inventing a direction.
-    var wires: [stock_te.max_te_wires]stock_te.Vec3i = undefined;
+    // Sized to what the wire's u8 count can carry, not to the parse-side
+    // max_te_wires: the sim caps wires globally rather than per node, so a
+    // trigger can hold more edges than a small buffer would fit, and a short
+    // buffer silently told the client the node had fewer connections.
+    var wires: [stock_te.max_te_wires_out]stock_te.Vec3i = undefined;
     var wire_n: usize = 0;
     var w: usize = 0;
     while (w < self.sim.power.wire_n and wire_n < wires.len) : (w += 1) {
@@ -226,6 +230,11 @@ pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
         wires[wire_n] = .{ .x = on.x, .y = on.y, .z = on.z };
         wire_n += 1;
     }
+    // Past 255 edges on one node the stock u8 count cannot describe the list at
+    // all, so the remainder is dropped by the format, not by this buffer. The
+    // sim's global cap is electric.max_wires; reaching 255 on a single node
+    // needs a deliberately pathological build.
+    std.debug.assert(wire_n <= stock_te.max_te_wires_out);
     // Propagate encode failure: a silent return left power switches/traps
     // looking unpowered on remotes after the sim already flipped the node.
     const body = try stock_te.buildPoweredTriggerTeBody(&self.body_buf, 255, x, y, z, block_id, .{

@@ -967,7 +967,16 @@ pub const trigger_type_switch: u8 = 0;
 pub const trigger_type_timer_relay: u8 = 2;
 pub const trigger_type_motion: u8 = 3;
 pub const trigger_type_trip_wire: u8 = 4;
+/// Wires a parsed C2S trigger keeps. The wire field is a u8 count, so a sender
+/// may declare up to 255; `wire_total` records what it declared and `wire_n`
+/// what was kept. Inbound only: do not size an outbound list with this, or the
+/// echo silently tells the client about fewer connections than the sim holds.
 pub const max_te_wires: usize = 8;
+
+/// Wires an S2C powered-trigger echo can carry. Bounded by the u8 count field,
+/// not by the parse-side buffer. `buildPoweredTriggerTeBody` returns
+/// error.Overflow rather than truncating when a list will not fit its payload.
+pub const max_te_wires_out: usize = 255;
 
 pub const Vec3i = struct { x: i32 = 0, y: i32 = 0, z: i32 = 0 };
 
@@ -1086,7 +1095,10 @@ pub fn buildPoweredTriggerTeBody(
     te_block_id: i32,
     st: PoweredTriggerState,
 ) ![]u8 {
-    var payload: [1024]u8 = undefined;
+    // Sized so the u8 wire count is the real limit: 255 wires * 12 bytes plus
+    // the fixed head and tail. A smaller buffer would make the encoder fail on
+    // lists the count field says are legal.
+    var payload: [max_te_wires_out * 12 + 64]u8 = undefined;
     var pw: binary.Writer = .{ .buf = &payload };
     const lp = localChunkPos(world_x, world_y, world_z);
     try pw.writeI32(lp.x);
