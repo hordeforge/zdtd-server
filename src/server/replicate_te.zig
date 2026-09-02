@@ -334,6 +334,10 @@ pub fn sendVendingTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !
     const v = self.vending.get(.{ .x = x, .y = y, .z = z }) orelse return;
     var entries_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
     const n = vendingEntries(self, v, &entries_buf);
+    // The allowed-user list is part of the stock TE composite; omitting it told
+    // the owner's client the machine had no allowed users after every reopen.
+    var allowed_buf: [vending_mod.max_allowed_users]packages.platform_user.Id = undefined;
+    const allowed = vendingAllowedIds(v, &allowed_buf);
     const body = try stock_te.buildVendingTeBody(
         self.body_buf[0..4096],
         255,
@@ -345,6 +349,7 @@ pub fn sendVendingTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !
             .is_locked = v.is_locked,
             .owner = vendingOwnerId(self, v),
             .password_hash = v.password_hash[0..v.password_len],
+            .allowed = allowed,
             .rental_end_day = v.rental_end_day,
             .trader_id = v.trader_id,
             .entries = entries_buf[0..n],
@@ -364,6 +369,29 @@ pub fn vendingOwnerId(self: *Game, v: *const vending_mod.Vending) ?packages.plat
         .platform = v.owner.platform[0..v.owner.platform_len],
         .id = v.owner.id[0..v.owner.id_len],
     };
+}
+
+/// Fill `out` with the stored allowed-user identities, returning the slice that
+/// is populated. The refs borrow the machine's own storage, so the result must
+/// not outlive `v`.
+fn vendingAllowedIds(
+    v: *const vending_mod.Vending,
+    out: *[vending_mod.max_allowed_users]packages.platform_user.Id,
+) []const packages.platform_user.Id {
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < v.allowed_n and i < v.allowed.len) : (i += 1) {
+        // Borrow the machine's storage: a by-value copy of the UserRef dies at
+        // the end of this iteration and the slices into it would dangle.
+        const a = &v.allowed[i];
+        if (a.platform_len == 0) continue;
+        out[n] = .{
+            .platform = a.platform[0..a.platform_len],
+            .id = a.id[0..a.id_len],
+        };
+        n += 1;
+    }
+    return out[0..n];
 }
 
 /// Stock TileEntityVendingMachine.NotifyListeners (loot-economy.md 6): after a
