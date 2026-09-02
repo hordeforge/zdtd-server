@@ -41,6 +41,8 @@ const store = @import("world/store.zig");
 const vending = @import("world/vending.zig");
 const path_mod = @import("ecs/path.zig");
 const weather = @import("world/weather.zig");
+const ally = @import("server/ally.zig");
+const io_fs = @import("util/io_fs.zig");
 
 const packet_corpus = [_][]const u8{
     "",
@@ -1855,4 +1857,75 @@ fn fuzzWeatherDecode(_: void, smith: *std.testing.Smith) !void {
         // Corrupt input must not half-apply (manager.n stays from initFrom).
         try std.testing.expectEqual(n_before, m.n);
     }
+}
+
+const ally_corpus = [_][]const u8{
+    "",
+    "ZAL1",
+    // magic + count 0 (an empty, valid store)
+    &([_]u8{ 'Z', 'A', 'L', '1', 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'Z', 'A', 'L', '0', 0, 0 }),
+    // exactly the 6-byte header with a claimed record: truncated body
+    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 }),
+    // claimed huge count, nothing behind it
+    &([_]u8{ 'Z', 'A', 'L', '1', 0xff, 0xff }),
+    // one well-formed record whose trailing status byte is out of range: the
+    // Status enum is exhaustive, so this must be rejected before @enumFromInt
+    // (that ordering was a real panic, fixed 2026-09-01).
+    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 } ++
+        [_]u8{ 5, 'S', 't', 'e', 'a', 'm' } ++ [_]u8{ 2, '1', '2' } ++
+        [_]u8{ 5, 'S', 't', 'e', 'a', 'm' } ++ [_]u8{ 2, '3', '4' } ++
+        [_]u8{0xff}),
+    // over-long platform/id length prefixes (readLenStr bounds)
+    &([_]u8{ 'Z', 'A', 'L', '1', 1, 0 } ++ [_]u8{0xff} ++ [_]u8{'x'} ** 8),
+};
+
+test "fuzz allies.zal loader" {
+    // Drive the corpus deterministically first. `smith.slice` fills the buffer
+    // with fuzzer data, so in a default (non `--fuzz`) build the seeds below are
+    // never actually parsed - the same reach limitation noted on the ZWS1
+    // target. Feeding them straight to the loader makes the interesting shapes
+    // (out-of-range status byte, over-long length prefixes, truncated bodies)
+    // part of every `zig build fuzz`, not just a real fuzzing session.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
+    for (ally_corpus) |seed| {
+        try io_fs.writeFile(path, seed);
+        const s = try std.testing.allocator.create(ally.Store);
+        defer std.testing.allocator.destroy(s);
+        s.* = .{};
+        s.load(dir, std.testing.allocator) catch continue;
+        try std.testing.expect(s.count() <= ally.max_pairs);
+    }
+    try std.testing.fuzz({}, fuzzAllyStore, .{ .corpus = &ally_corpus });
+}
+
+fn fuzzAllyStore(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [2048]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+
+    // The loader reads a file, so stage the bytes in a self-cleaning tmp dir
+    // (tests never write into the repo).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/allies.zal", .{dir});
+    try io_fs.writeFile(path, storage[0..len]);
+
+    const s = try std.testing.allocator.create(ally.Store);
+    defer std.testing.allocator.destroy(s);
+    s.* = .{};
+    s.load(dir, std.testing.allocator) catch return;
+    // Any accepted store must stay inside its fixed array: count() walks the
+    // used entries and the admin/webui paths slice the identity buffers by
+    // their stored lengths.
+    try std.testing.expect(s.count() <= ally.max_pairs);
 }
