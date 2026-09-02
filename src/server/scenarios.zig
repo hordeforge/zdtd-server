@@ -10368,8 +10368,32 @@ test "scenario every registered package id survives dispatch with a malformed bo
         if (std.mem.eql(u8, name, "NetPackagePlayerDisconnect") or
             std.mem.eql(u8, name, "NetPackageClientInfo")) continue;
         const before = g.harness.counters.get(.c2s_unhandled);
+        // Empty is the coverage probe (a handler that claims the name returns
+        // without touching the counter). The bodies after it are the
+        // robustness half: a handler that reads a length prefix and then
+        // slices, or casts a field it has not bounds-checked, trips on one of
+        // these rather than on a real truncated packet.
+        //   - all-zero: zero counts and zero-length strings
+        //   - all-0xff: max counts, huge 7-bit string lengths, -1 ids
+        //   - 0x7f run: 7-bit-encoded lengths that continue past the body
+        //   - one byte: a length prefix with nothing behind it
         g.handlePackage(ca, peer, @intCast(id), &.{}) catch continue;
         if (g.harness.counters.get(.c2s_unhandled) == before) handled_n += 1;
+        var zero_body: [64]u8 = .{0} ** 64;
+        var ones_body: [64]u8 = .{0xff} ** 64;
+        var cont_body: [64]u8 = .{0x7f} ** 64;
+        const shapes = [_][]const u8{
+            zero_body[0..1],  ones_body[0..1],
+            zero_body[0..2],  ones_body[0..2],
+            zero_body[0..8],  ones_body[0..8],
+            cont_body[0..8],  zero_body[0..64],
+            ones_body[0..64], cont_body[0..64],
+        };
+        for (shapes) |shape| {
+            // A returned error is fine (reject); a trap, OOB slice or leak is
+            // not, and the test allocator plus safety checks catch those.
+            g.handlePackage(ca, peer, @intCast(id), shape) catch {};
+        }
     }
 
     // Nothing may be silently eaten by the phase gate; that would make the
