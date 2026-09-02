@@ -4,6 +4,7 @@
 const std = @import("std");
 const game_mod = @import("game.zig");
 const game_bot = @import("game/bot.zig");
+const game_player = @import("game/player.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_wasm_host = @import("game/wasm_host.zig");
 const plugin_api = @import("../plugin/api.zig");
@@ -10264,7 +10265,7 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     }
     var cap: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap);
-    try std.testing.expectEqual(@as(u32, 0), ca.killed_zombies);
+    try std.testing.expectEqual(@as(u16, 0), ca.zombie_kills);
 
     // Two authoritative kills through the real C2S damage path.
     var fbuf: [512]u8 = undefined;
@@ -10275,20 +10276,22 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
         try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
         try std.testing.expect(g.sim.health[g.sim.slotOfNetId(zid).?].hp <= 0);
     }
-    try std.testing.expectEqual(@as(u32, 2), ca.killed_zombies);
+    try std.testing.expectEqual(@as(u16, 2), ca.zombie_kills);
 
-    // And the count is what the wire actually carries: rebuild the body the
-    // server sends and read the stock `killed` field back off it.
-    var body: [256]u8 = undefined;
-    const psb = try packages.stock_xp.buildPlayerStatsBody(&body, .{
-        .entity_id = ca.entity_id,
-        .entity_name = ca.name[0..ca.name_len],
-        .level = ca.level,
-        .exp_to_next = 100,
-        .skill_points = @intCast(@min(ca.skill_points, 65535)),
-        .killed_zombies = @intCast(ca.killed_zombies),
-    });
-    var r: binary.Reader = .{ .data = psb };
+    // And the count is what the wire actually carries. Capture the real
+    // NetPackagePlayerStats the server sends (a progression broadcast), not a
+    // body rebuilt here: rebuilding would still pass if the send site dropped
+    // the field.
+    // broadcastPlayerStats skips the owning peer (stock pushes a player's
+    // stats to the *other* clients), so observe it from a second client.
+    var cap_b: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+    cap_b.n = 0; // drop join traffic; keep only the broadcast below
+    game_player.broadcastPlayerStats(g, ca.slot);
+    const ps_id = packages.idOf("NetPackagePlayerStats").?;
+    const sent = cap_b.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
+    var r: binary.Reader = .{ .data = sent };
     _ = try r.readI32(); // entity_id
     try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // killed
     std.debug.print("PASS kill-counter: server-counted kills ride the PlayerStats wire\n", .{});

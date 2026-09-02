@@ -72,7 +72,7 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
         .level = c.level,
         .exp_to_next = exp_to_next,
         .skill_points = @intCast(@min(c.skill_points, 65535)),
-        .killed_zombies = @intCast(@min(c.killed_zombies, std.math.maxInt(i32))),
+        .killed_zombies = c.zombie_kills,
     })) |psb| {
         for (&self.clients) |*cl| {
             if (!cl.joined or cl.peer == null or cl.entity_id == c.entity_id) continue;
