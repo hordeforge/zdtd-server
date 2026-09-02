@@ -10286,7 +10286,6 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     // stats to the *other* clients), so observe it from a second client.
     var cap_b: ln_peer.Capture = .{};
     const cb = try g.attachJoinedClient(&cap_b);
-    _ = cb;
     cap_b.n = 0; // drop join traffic; keep only the broadcast below
     game_player.broadcastPlayerStats(g, ca.slot);
     const ps_id = packages.idOf("NetPackagePlayerStats").?;
@@ -10294,5 +10293,32 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     var r: binary.Reader = .{ .data = sent };
     _ = try r.readI32(); // entity_id
     try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // killed
-    std.debug.print("PASS kill-counter: server-counted kills ride the PlayerStats wire\n", .{});
+
+    // killedPlayers is the same shape: the counter existed and fed
+    // AddScoreClient, but PlayerStats hardcoded 0. PvP damage needs
+    // PlayerKillingMode != 0 (pvp_mode 0 drops player-to-player damage).
+    g.pvp_mode = 3;
+    const victim_nid = cb.entity_id;
+    const pbody = try packages.buildDamageBody(&dmg, victim_nid, 0, 3, 1000, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", pbody));
+    try std.testing.expectEqual(@as(u16, 1), ca.player_kills);
+    cap_b.n = 0;
+    game_player.broadcastPlayerStats(g, ca.slot);
+    const sent2 = cap_b.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
+    // Walk the stock EntityNetworkStats write order (IL=104) to the two kill
+    // counters rather than guessing offsets.
+    var r2: binary.Reader = .{ .data = sent2 };
+    _ = try r2.readI32(); // entity_id
+    try std.testing.expectEqual(@as(i32, 2), try r2.readI32()); // killed
+    _ = try r2.readU16(); // held item: empty ItemStack (count 0)
+    _ = try r2.readByte(); // holdingItemIndex
+    _ = try r2.readI32(); // deathHealth
+    _ = try r2.readByte(); // teamNumber
+    _ = try r2.readI32(); // attachedToEntityId
+    var name_buf: [64]u8 = undefined;
+    _ = try r2.readString(&name_buf); // entity_name
+    _ = try r2.readBool(); // isPlayer
+    try std.testing.expectEqual(@as(i32, 2), try r2.readI32()); // killedZombies
+    try std.testing.expectEqual(@as(i32, 1), try r2.readI32()); // killedPlayers
+    std.debug.print("PASS kill-counter: zombie + PvP kills ride the PlayerStats wire\n", .{});
 }

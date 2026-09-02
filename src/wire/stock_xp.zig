@@ -59,6 +59,9 @@ pub const PlayerStatsArgs = struct {
     exp_to_next: i32,
     skill_points: u16 = 0,
     killed_zombies: i32 = 0,
+    /// PvP kills (stock `EntityNetworkStats.killedPlayers`). Server-counted on
+    /// the authoritative death path, same as `killed_zombies`.
+    killed_players: i32 = 0,
     held_item: ?stock_inv.StockSlot = null,
 };
 
@@ -90,7 +93,7 @@ pub fn buildPlayerStatsBody(buf: []u8, args: PlayerStatsArgs) ![]u8 {
     try w.writeString(args.entity_name);
     try w.writeBool(true); // isPlayer
     try w.writeI32(args.killed_zombies); // killedZombies
-    try w.writeI32(0); // killedPlayers
+    try w.writeI32(args.killed_players); // killedPlayers
     try w.writeI32(args.exp_to_next); // experience (stock Setup: ExpToNextLevel)
     try w.writeI32(args.level);
     try w.writeU32(0); // totalItemsCrafted
