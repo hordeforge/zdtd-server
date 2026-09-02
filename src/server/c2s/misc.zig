@@ -657,6 +657,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
             if (was_zombie) {
+                // EntityNetworkStats killed / killedZombies (stock write
+                // IL=104): the client's stats UI renders this, so it has to be
+                // a real server-side count rather than the 0 the wire used to
+                // carry. Counted on the authoritative kill, never from a
+                // client-reported total.
+                c.killed_zombies +|= 1;
                 // The victim position rides the kill event so ClearSleepers
                 // phases can gate kills to the quest's bound POI.
                 const vs_opt = self.sim.slotOfNetId(d.entity_id);
