@@ -1204,7 +1204,13 @@ pub fn loadEntities(self: *Game) !void {
         const rec_type = r.readByte() catch return error.Truncated;
         switch (rec_type) {
             1 => {
-                const kind: ecs.components.VehicleKind = @enumFromInt(r.readByte() catch return error.Truncated);
+                // VehicleKind is an exhaustive enum(u8), so @enumFromInt panics
+                // on an out-of-range byte: range-check the raw value first or a
+                // corrupt entities.zen takes the server down on load. Same
+                // shape as the allies.zal status byte.
+                const kind_raw = r.readByte() catch return error.Truncated;
+                if (kind_raw >= @typeInfo(ecs.components.VehicleKind).@"enum".fields.len) return error.BadRecord;
+                const kind: ecs.components.VehicleKind = @enumFromInt(kind_raw);
                 const x = r.readF32() catch return error.Truncated;
                 const y = r.readF32() catch return error.Truncated;
                 const z = r.readF32() catch return error.Truncated;

@@ -10424,3 +10424,37 @@ test "scenario every registered package id survives dispatch with a malformed bo
         .{ handled_n, packages.default_mappings.len },
     );
 }
+
+test "scenario entities.zen vehicle kind byte is range-checked before the cast" {
+    // VehicleKind is an exhaustive enum(u8) with five values, and the record
+    // type-1 branch turns a raw disk byte into one. @enumFromInt panics on an
+    // out-of-range value, so a corrupt or hand-edited entities.zen would take
+    // the server down on load rather than failing closed. Same shape as the
+    // allies.zal status byte (fixed 2026-09-01).
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_zentkind");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_zentkind", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // One type-1 (vehicle) record whose kind byte is 0xff: past the enum.
+    var body: [64]u8 = .{0} ** 64;
+    @memcpy(body[0..4], "ZENT");
+    std.mem.writeInt(u16, body[4..6], 1, .little); // one record
+    body[6] = 1; // rec_type: vehicle
+    body[7] = 0xff; // kind: not a VehicleKind
+    // The rest (x/y/z/yaw/fuel f32, seats u8, max_speed f32) stays zero; the
+    // cast happens before any of it is read.
+    var path_buf: [512]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/entities.zen", .{g.world.world_dir});
+    try io_fs.writeFile(p, body[0..26]);
+
+    // Must fail closed, not panic.
+    persist.loadEntities(g) catch {};
+    std.debug.print("PASS zent-kind: out-of-range vehicle kind fails closed\n", .{});
+}
