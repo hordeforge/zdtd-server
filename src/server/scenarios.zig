@@ -10244,3 +10244,52 @@ test "scenario fall_sink clamps player vertical delta without the glide flag (mo
     // max_dy = 1.5 * dt(1s) = 1.5; clamped y = 100 - 1.5 = 98.5.
     try std.testing.expectApproxEqAbs(@as(f32, 98.5), r.y, 0.5);
 }
+
+test "scenario zombie kills reach the client on the PlayerStats wire" {
+    // EntityNetworkStats killed / killedZombies (stock write IL=104) drives the
+    // client's stats UI. Both fields used to be hardcoded 0 on every
+    // NetPackagePlayerStats, so a player's kill count always rendered as zero.
+    // The server counts kills on its own authoritative death path.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    try std.testing.expectEqual(@as(u32, 0), ca.killed_zombies);
+
+    // Two authoritative kills through the real C2S damage path.
+    var fbuf: [512]u8 = undefined;
+    var dmg: [256]u8 = undefined;
+    for (0..2) |i| {
+        const zid = g.sim.spawnZombie(258 + @as(f32, @floatFromInt(i)), 70, 258, 10).?;
+        const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 100, true, ca.entity_id);
+        try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
+        try std.testing.expect(g.sim.health[g.sim.slotOfNetId(zid).?].hp <= 0);
+    }
+    try std.testing.expectEqual(@as(u32, 2), ca.killed_zombies);
+
+    // And the count is what the wire actually carries: rebuild the body the
+    // server sends and read the stock `killed` field back off it.
+    var body: [256]u8 = undefined;
+    const psb = try packages.stock_xp.buildPlayerStatsBody(&body, .{
+        .entity_id = ca.entity_id,
+        .entity_name = ca.name[0..ca.name_len],
+        .level = ca.level,
+        .exp_to_next = 100,
+        .skill_points = @intCast(@min(ca.skill_points, 65535)),
+        .killed_zombies = @intCast(ca.killed_zombies),
+    });
+    var r: binary.Reader = .{ .data = psb };
+    _ = try r.readI32(); // entity_id
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // killed
+    std.debug.print("PASS kill-counter: server-counted kills ride the PlayerStats wire\n", .{});
+}

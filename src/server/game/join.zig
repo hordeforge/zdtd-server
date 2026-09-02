@@ -679,6 +679,7 @@ fn sendPlayerStatsTo(self: *Game, peer: *ln_peer.Peer, owner: *const Client, nid
         .level = owner.level,
         .exp_to_next = exp_to_next,
         .skill_points = @intCast(@min(owner.skill_points, 65535)),
+        .killed_zombies = @intCast(@min(owner.killed_zombies, std.math.maxInt(i32))),
     })) |psb| {
         try self.sendGame(peer, "NetPackagePlayerStats", psb);
     } else |_| {}

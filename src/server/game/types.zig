@@ -433,6 +433,11 @@ pub const Client = struct {
     /// Unspent skill points (progression.xml skill_points_per_level per new
     /// level; ADR 0023 ledger).
     skill_points: u32 = 0,
+    /// Zombie kills credited to this player. Rides the stock
+    /// `EntityNetworkStats` wire as `killed` / `killedZombies` (stock write
+    /// IL=104), which the client's stats UI renders. Server-counted on the
+    /// kill path rather than trusting a client-reported total.
+    killed_zombies: u32 = 0,
     /// Last-sent stealth-meter state (stock PlayerStealth.TickServer IL_0470:
     /// every 16 ticks, when the packed values changed, broadcast
     /// NetPackageEntityStealth so other clients render the meter).

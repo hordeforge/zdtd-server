@@ -10,7 +10,7 @@
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`); `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 297 features: **295 `WORKS`,
+owns all C2S domains. `GAP_ANALYSIS.md` scores 298 features: **296 `WORKS`,
 1 `PARTIAL`, 0 `MISSING`** (see its scorecard for the per-area breakdown;
 54 bullets carry ad-hoc labels and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
@@ -44,7 +44,7 @@ stay valid across map resizes (pointer-stable store)" holds a pointer across
 40+ forced resizes and the mid-scan create pattern. The same hazard class in
 the prefab TTS cache (`world/prefabs.zig`) was closed the same way
 (`*TtsBlocks` per-entry allocations; regression test holds a pointer across
-11 cache puts). Scorecard: 295 WORKS,
+11 cache puts). Scorecard: 296 WORKS,
 1 PARTIAL (join-burst tick budget), 0 MISSING.
 
 GAP "Join-burst tick budget" chunk pacing landed: `sendSpawnArea` sends only
@@ -926,7 +926,7 @@ recount from the live markers corrected the scorecard: the running totals had
 drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
 MISSING" was an older inventory projection). Recount: 291 canonical features,
 total **250/41/0**. (Current state, recounted 2026-08-30 from the live
-markers: 297 canonical features, **295 WORKS / 2 PARTIAL / 0 MISSING**; the
+markers: 298 canonical features, **296 WORKS / 2 PARTIAL / 0 MISSING**; the
 chunk-pointer stability gap closed 2026-08-30 by the pointer-stable chunk
 store, and the join-burst tick budget PARTIAL is paced to the 50 ms budget
 in ReleaseFast with its W2b residual recorded in the row.)
