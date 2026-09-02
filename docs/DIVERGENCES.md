@@ -28,8 +28,19 @@ Reproducing stock here means accepting a documented cheat vector.
 | 1.1 | `NetPackageEntityStatsBuff` applies the client's whole buff blob (`EntityBuffs.Read` IL=76) | Accepted, dropped; the server owns the buff set | A client could grant itself any buff |
 | 1.2 | `NetPackagePlayerStats` relays the owning client's stats blob onto the entity (`EntityNetworkStats::ToEntity`, RE `progression.md` 441560ff) | Accepted, dropped; the server keeps its own XP/level ledger and sends that | A client could author its own level, XP and kill totals |
 | 1.3 | `NetPackagePlayerInventoryForAI` feeds the AIDirector smell/threat model from a client-reported bag (RE `protocol-packages.md`, Process IL=23) | Accepted, dropped; AI reads sim state | A client could steer zombie targeting by declaring an inventory it does not have |
-| 1.4 | `NetPackageEntityVelocity` / `EntitySpeeds` / `EntityPhysics` drive entity motion from the client | Server-authoritative knockback ships; client-driven physics does not | A client could teleport or fling entities |
+| 1.4 | `NetPackageEntityPhysics` (ToServer) mirrors the physics master's reported pos/rot/velocity (`ProcessPackage` IL=87) | Body validated, dropped | zdtd's movement, falling-block and vehicle sims are authoritative, so the report is a redundant echo; accepting it would let a client teleport or fling entities |
 | 1.5 | `NetPackageEntityAddExpServer` / `AddScoreServer` add client-reported XP | Accepted, dropped; XP is server-awarded on the kill/quest path | A client could mint XP |
+
+**Correction 2026-09-02.** Row 1.4 previously also named
+`NetPackageEntityVelocity` and `EntitySpeeds` as client-driven motion zdtd
+refuses. That was wrong in both directions. RE `protocol-packages.md` 5.5.5 has
+`EntityVelocity` sent by `NetEntityDistributionEntry` to tracking players, so it
+is S2C, and zdtd already emits it (scenario "replicate sends EntityVelocity for
+a falling zombie"). `EntitySpeeds` likewise has a builder and a parser. Neither
+was a divergence; listing them overstated the gap. The same RE section says an
+authoritative server "can treat the report as a redundant echo", so the
+remaining `EntityPhysics` drop is what stock's own design anticipates rather
+than a departure from it.
 
 **Known cost of 1.1**, stated rather than hidden: client-local consume buffs
 (`onSelfPrimaryActionEnd` AddBuff, e.g. `buffProcessConsumables` and the disease
@@ -49,6 +60,23 @@ still client-trusting on C2S apply. [ADR 0007](adr/0007-player-inventory-c2s-tru
 accepts this with its consequence written down ("dupes / client-invented stacks
 are possible on the hold path until full authority lands"). The direction of
 travel is toward server authority, not away from it.
+
+The second, found 2026-09-02 while reconciling this page against
+[GAP_ANALYSIS](GAP_ANALYSIS.md): **player saves are keyed by login name alone**
+(`persist.zig` matches `cl.name` against the record name; ADR 0017). Stock keys
+the player data file on `PrimaryId.CombinedString` (asm.il 1884842), a platform
+identity the client cannot choose. On zdtd a client that picks another player's
+name loads that player's save: inventory, level, XP, bedroll. `ServerPassword`
+gates entry to the server, not identity between players already on it, so this
+is live on any open or shared-password world.
+
+This is a security divergence, not the naming inconvenience ADR 0017's
+consequences describe ("two players cannot safely share one login name"). The
+severity was recorded in GAP_ANALYSIS and not here, which is precisely the kind
+of split this page exists to prevent. Closing it needs a save migration to a
+platform-keyed identity (ZPV4-style bump or flagged extension), tracked in
+GAP_ANALYSIS §10; ADR 0017 should be superseded rather than edited when it
+lands.
 
 ## 2. Fields with no truthful server-side value
 
