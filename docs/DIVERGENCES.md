@@ -220,6 +220,20 @@ hair, colors), and `PlayerProfile.Write` has no partial form. Inventing one
 would put fabricated appearance on the wire, so the null flag is the honest
 answer. `team_number` is 0 because zdtd has no team system.
 
+One more from the same pass: `NetPackageEntityAddScoreClient` carries both kill
+counters in one body (RE `protocol-packages.md` 27), and two of its three call
+sites filled only `zombie_kills`, defaulting `player_kills` to 0. A trap or
+explosion kill therefore told the client its PvP count had reset. Both sites now
+pass the counter the server already tracks. The struct field lost its default, so
+the compiler rejects a future site that fills only one, verified to be a compile
+error rather than a convention.
+
+That is the durable lesson from this whole sweep: a defaulted field in a builder
+struct is a silent-omission hazard whenever the server has a truthful value for
+it. Where the value always exists, drop the default and let the compiler enforce
+it; where it genuinely may not (`profile`, container `owner`), keep the default
+and say why here.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.
