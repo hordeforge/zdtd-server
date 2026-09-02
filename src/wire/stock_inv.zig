@@ -1016,6 +1016,11 @@ pub fn buildPersistentPlayerState(
     x: i32,
     y: i32,
     z: i32,
+    /// The player's own land-protection block positions, in the stock
+    /// `lpBlockCount : i32` + `lpBlockCount x Vector3i` shape (RE
+    /// server-lifecycle.md 6.1, PersistentPlayerData.Write IL=205). Empty is
+    /// the correct value for a player with no claims.
+    lp_blocks: []const [3]i32,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(persistent_reason_login);
@@ -1031,7 +1036,13 @@ pub fn buildPersistentPlayerState(
     try w.writeI32(y);
     try w.writeI32(z);
     try w.writeI32(entity_id);
-    try w.writeI32(0); // lpBlocks count
+    // lpBlockCount : i32, then that many Vector3i (RE server-lifecycle.md 6.1).
+    try w.writeI32(@intCast(lp_blocks.len));
+    for (lp_blocks) |b| {
+        try w.writeI32(b[0]);
+        try w.writeI32(b[1]);
+        try w.writeI32(b[2]);
+    }
     try w.writeI32(0); // backpacks count
     // bedroll: y=int.max marks unset
     try w.writeI32(0);
@@ -1046,7 +1057,8 @@ test "persistent player state body layout" {
     var buf: [512]u8 = undefined;
     const primary: platform_user.Id = .{ .platform = "EOS", .id = "0123456789abcdef" };
     const native: platform_user.Id = .{ .platform = "Steam", .id = "76561190000000000" };
-    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449);
+    const lp = [_][3]i32{ .{ 10, 64, -20 }, .{ 300, 70, 512 } };
+    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449, &lp);
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(persistent_reason_login, try r.readByte());
     // PrimaryId PUID
@@ -1074,6 +1086,43 @@ test "persistent player state body layout" {
     try std.testing.expectEqual(@as(i32, 61), try r.readI32());
     try std.testing.expectEqual(@as(i32, 449), try r.readI32());
     try std.testing.expectEqual(@as(i32, 107), try r.readI32()); // entity_id
+    // lpBlockCount : i32, then that many Vector3i (RE server-lifecycle.md 6.1
+    // PersistentPlayerData.Write IL=205). These used to be a hardcoded 0, so a
+    // player's land claims never reached the client overlay.
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // lpBlockCount
+    try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 64), try r.readI32());
+    try std.testing.expectEqual(@as(i32, -20), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 300), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 512), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // backpacks count
+}
+
+test "persistent player state with no claims writes an empty lpBlocks list" {
+    var buf: [512]u8 = undefined;
+    const primary: platform_user.Id = .{ .platform = "EOS", .id = "abc" };
+    const body = try buildPersistentPlayerState(&buf, 7, "solo", primary, primary, 0, 0, 0, &.{});
+    // Walk to the count: the empty list must still write a 0, not vanish.
+    var r: binary.Reader = .{ .data = body };
+    _ = try r.readByte(); // reason
+    var sbuf: [64]u8 = undefined;
+    for (0..2) |_| { // primary + native PUID
+        _ = try r.readByte();
+        _ = try r.readByte();
+        _ = try r.readString(&sbuf);
+        _ = try r.readString(&sbuf);
+    }
+    _ = try r.readByte(); // playGroup
+    _ = try r.readByte(); // AuthoredText present
+    _ = try r.readString(&sbuf); // name
+    _ = try r.readByte(); // author present
+    _ = try r.readByte(); // version
+    _ = try r.readString(&sbuf);
+    _ = try r.readString(&sbuf);
+    _ = try r.readI64(); // lastLogin
+    for (0..4) |_| _ = try r.readI32(); // x, y, z, entity_id
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // lpBlockCount
 }
 
 // --- NetPackageBag: entityId i32 | u16 blob_len | Bag.Write ---

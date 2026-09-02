@@ -129,6 +129,13 @@ pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 }
 
 pub const max_land_claims = game_types.max_land_claims;
+/// How many of a player's land-protection blocks ride the PersistentPlayerState
+/// overlay. The PPD body builds into a 512-byte slice of `body_buf` and each
+/// entry is a Vector3i (12 B), so this bounds the list to what the slice can
+/// hold beside the fixed header, name and tail. A player with more claims keeps
+/// every one of them server-side (enforcement reads `land_claims`, not this
+/// list); only the client-side overlay tail is dropped.
+pub const max_lp_blocks_on_wire: usize = 24;
 pub const max_quest_position_data = @import("game/constants.zig").max_quest_position_data;
 pub const max_player_coord = @import("game/constants.zig").max_player_coord;
 pub const coordInRange = @import("game/constants.zig").coordInRange;
@@ -2390,6 +2397,20 @@ pub const Game = struct {
                 };
                 const primary_id = c.puid_primary.get() orelse fallback;
                 const native_id = c.puid_native.get() orelse primary_id;
+                // lpBlocks: this player's own land-protection blocks (stock
+                // PersistentPlayerData.Write lpBlockCount + Vector3i list, RE
+                // server-lifecycle.md 6.1). owner_entity is re-mapped to the
+                // login entity id by reclaimForName, so match on it. Capped at
+                // the buffer's list budget; a player past it keeps the claims,
+                // only the overlay tail is dropped.
+                var lp_buf: [max_lp_blocks_on_wire][3]i32 = undefined;
+                var lp_n: usize = 0;
+                for (self.land_claims[0..self.land_claims_n]) |*claim| {
+                    if (claim.owner_entity != eid) continue;
+                    if (lp_n >= lp_buf.len) break;
+                    lp_buf[lp_n] = .{ claim.x, claim.y, claim.z };
+                    lp_n += 1;
+                }
                 if (packages.stock_inv.buildPersistentPlayerState(
                     self.body_buf[8704..9216],
                     eid,
@@ -2399,6 +2420,7 @@ pub const Game = struct {
                     sx2,
                     sy2,
                     sz2,
+                    lp_buf[0..lp_n],
                 )) |pps| {
                     try self.broadcast("NetPackagePersistentPlayerState", pps);
                 } else |_| {}

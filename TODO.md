@@ -6,12 +6,12 @@ blobs. Prefer leaving a gap open over shipping a fake.
 | Doc | Role |
 |---|---|
 | [docs/STATUS.md](docs/STATUS.md) | What works now (hub; wins on conflict) |
-| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory · 299 features · **0 MISSING** |
+| [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) | Gap inventory · 300 features · **0 MISSING** |
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) | Phased milestones |
 | [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Handoff-ready tasks |
 | [docs/INDEX.md](docs/INDEX.md) | Full doc map |
 
-**Gates (2026-09-01):** `make check` exit 0 · **1514/1515** tests (1 skipped; 2026-09-01 fresh run) · `lint-architecture: clean` · `lint-plugins: clean` · `make check-clean-build` ok and the same 1514/1515 from a cold `--cache-dir` in both Debug and ReleaseSafe (no stale-object masking) · `make smoke-modlet` and `scripts/smoke-navezgane.sh` pass (loadgen joins the running server on the stock map: 8 join passes, 0 deaths, 0 fails) · live stock-client gate **23/23** (last measured 2026-08-30). GAP **0 MISSING** (299 features: **296 WORKS, 3 PARTIAL** - the join-burst tick budget, paced to the 50 ms budget in ReleaseFast with its W2b residual recorded in the row, and the perk/attribute passive-effects VM moved into the counted set by the 2026-09-02 waiver re-evaluation). Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
+**Gates (2026-09-01):** `make check` exit 0 · **1514/1515** tests (1 skipped; 2026-09-01 fresh run) · `lint-architecture: clean` · `lint-plugins: clean` · `make check-clean-build` ok and the same 1514/1515 from a cold `--cache-dir` in both Debug and ReleaseSafe (no stale-object masking) · `make smoke-modlet` and `scripts/smoke-navezgane.sh` pass (loadgen joins the running server on the stock map: 8 join passes, 0 deaths, 0 fails) · live stock-client gate **23/23** (last measured 2026-08-30). GAP **0 MISSING** (300 features: **297 WORKS, 3 PARTIAL** - the join-burst tick budget, paced to the 50 ms budget in ReleaseFast with its W2b residual recorded in the row, and the perk/attribute passive-effects VM moved into the counted set by the 2026-09-02 waiver re-evaluation). Evidence: [docs/STATUS.md](docs/STATUS.md) + `handoff.md`.
 
 ### Freeze (core playable)
 
@@ -80,7 +80,7 @@ Do not re-open these as gaps; see [docs/STATUS.md](docs/STATUS.md) for detail.
 
 The ranked, handoff-ready list lives in [docs/WORK_PLAN.md](docs/WORK_PLAN.md)
 and the priority band in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) §3
-(STATUS wins on conflict). The scorecard is 296 WORKS / 3 PARTIAL / 0 MISSING;
+(STATUS wins on conflict). The scorecard is 297 WORKS / 3 PARTIAL / 0 MISSING;
 the scored gaps are the perk/attribute passive-effects VM (bounded stat
 coverage) and the join-burst tick budget (W2b async chunk gen, GAP
 item 26) - the spawn-area already streams through
