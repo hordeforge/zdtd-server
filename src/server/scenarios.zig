@@ -10552,6 +10552,24 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     _ = try r2.readBool(); // isPlayer
     try std.testing.expectEqual(@as(i32, 2), try r2.readI32()); // killedZombies
     try std.testing.expectEqual(@as(i32, 1), try r2.readI32()); // killedPlayers
+
+    // NetPackageEntityAddScoreClient carries both counters in one body (RE
+    // protocol-packages.md 27: entityId, zombieKills i16, playerKills i16,
+    // otherTeamNumber i16, conditions i32). A site that fills only
+    // zombie_kills lets the struct default playerKills to 0, so the next
+    // zombie kill contradicts the PvP count this client was already told.
+    const score_id = packages.idOf("NetPackageEntityAddScoreClient") orelse
+        return error.TestUnexpectedResult;
+    cap.n = 0;
+    const z3_nid = g.sim.spawnZombie(280, 70, 280, 101) orelse return error.TestUnexpectedResult;
+    const zbody = try packages.buildDamageBody(&dmg, z3_nid, 0, 3, 1000, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", zbody));
+    const score = cap.findPkgId(score_id) orelse return error.TestUnexpectedResult;
+    var r3: binary.Reader = .{ .data = score };
+    _ = try r3.readI32(); // entity_id
+    _ = try r3.readI16(); // zombieKills
+    try std.testing.expectEqual(@as(i16, 1), try r3.readI16()); // playerKills
+
     std.debug.print("PASS kill-counter: zombie + PvP kills ride the PlayerStats wire\n", .{});
 }
 

@@ -179,8 +179,11 @@ test "player stats body is the stock EntityNetworkStats shape" {
 /// running zombie/player kill counters.
 pub const AddScoreArgs = struct {
     entity_id: i32,
+    /// Both kill counters ride one body (RE protocol-packages.md 27), so
+    /// neither has a default: a caller that fills only one would send a stale
+    /// 0 for the other and contradict what the client was already told.
     zombie_kills: u16,
-    player_kills: u16 = 0,
+    player_kills: u16,
     other_team_number: u16 = 0,
     conditions: i32 = 0,
 };
@@ -197,12 +200,12 @@ pub fn buildAddScoreBody(buf: []u8, args: AddScoreArgs) ![]u8 {
 
 test "add score body is the 14-byte stock shape" {
     var buf: [16]u8 = undefined;
-    const body = try buildAddScoreBody(&buf, .{ .entity_id = 42, .zombie_kills = 7 });
+    const body = try buildAddScoreBody(&buf, .{ .entity_id = 42, .zombie_kills = 7, .player_kills = 3 });
     try std.testing.expectEqual(@as(usize, 14), body.len);
     var r = binary.Reader{ .data = body };
     try std.testing.expectEqual(@as(i32, 42), try r.readI32());
     try std.testing.expectEqual(@as(i16, 7), try r.readI16());
-    try std.testing.expectEqual(@as(i16, 0), try r.readI16());
+    try std.testing.expectEqual(@as(i16, 3), try r.readI16());
     try std.testing.expectEqual(@as(i16, 0), try r.readI16());
     try std.testing.expectEqual(@as(i32, 0), try r.readI32());
 }
