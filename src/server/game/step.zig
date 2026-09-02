@@ -276,9 +276,13 @@ pub fn step(self: *Game) !void {
                 self.killXpAward(osz, trap_xp_scaled, 100, true); // trap kills carry no verdict scale, no party share (V3.2.0 §4.3)
                 if (oc.zombie_kills < std.math.maxInt(u16)) oc.zombie_kills += 1;
                 if (oc.peer) |kpeer| {
+                    // Both counters ride one body (RE protocol-packages.md 27);
+                    // filling only zombie_kills would default playerKills to 0
+                    // and contradict the PvP count this client already has.
                     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
                         .entity_id = oc.entity_id,
                         .zombie_kills = oc.zombie_kills,
+                        .player_kills = oc.player_kills,
                     })) |ab| {
                         self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch {
                             self.harness.counters.inc(.net_send_errors);

@@ -547,7 +547,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 self.killXpAward(c.slot, self.xpGainFor(nid), dmg.kill_scale_pct, false);
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
                 if (c.peer) |kpeer| {
-                    if (packages.stock_xp.buildAddScoreBody(self.body_buf[64..80], .{ .entity_id = c.entity_id, .zombie_kills = c.zombie_kills })) |ab| {
+                    // Both counters ride one body (RE protocol-packages.md 27);
+                    // filling only zombie_kills would send a stale 0 for the
+                    // other and contradict what this client was already told.
+                    if (packages.stock_xp.buildAddScoreBody(self.body_buf[64..80], .{
+                        .entity_id = c.entity_id,
+                        .zombie_kills = c.zombie_kills,
+                        .player_kills = c.player_kills,
+                    })) |ab| {
                         self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch {
                             self.harness.counters.inc(.net_send_errors);
                         };
