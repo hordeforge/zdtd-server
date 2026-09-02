@@ -8,6 +8,7 @@ const game_player = @import("game/player.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_wasm_host = @import("game/wasm_host.zig");
 const replicate_te = @import("replicate_te.zig");
+const game_join = @import("game/join.zig");
 const plugin_api = @import("../plugin/api.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
@@ -3478,6 +3479,115 @@ test "scenario pressure plate trigger pulse powers wired load" {
     try std.testing.expect(!g.sim.power.nodes[g.sim.power.indexOfId(load).?].powered);
 
     std.debug.print("PASS trigger: plate pulse then expire load_off\n", .{});
+}
+
+test "scenario a joiner sees what other players are holding" {
+    // EntityCreationData's player branch carries holdingItem (stock_entity.zig
+    // writes it before teamNumber/entityName). A switch is rebroadcast as
+    // NetPackageHoldingItem, but the spawn package is the only thing that tells
+    // a joiner what an already-present player has in hand. Passing null there
+    // renders every existing player empty-handed until they next switch.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_holdspawn");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_holdspawn", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // A joins and arms itself.
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const wood_id = g.items.ecsIdByName("resourceWood");
+    try std.testing.expect(wood_id != 0);
+    _ = invsys.give(&g.sim, ca.slot, wood_id, 10);
+    const ps_a = g.sim.playerByPeer(ca.slot).?;
+    // Hold whichever toolbelt slot the give landed in.
+    var held_slot: u16 = 0;
+    var si: u16 = 0;
+    while (si < quest_mod_components.inv_toolbelt) : (si += 1) {
+        if (g.sim.inventory[ps_a].slots[si].item_id == wood_id) {
+            held_slot = si;
+            break;
+        }
+    }
+    try std.testing.expect(invsys.setHolding(&g.sim, ca.slot, held_slot));
+
+    // B joins and must be told what A is holding.
+    var cap_b: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap_b);
+    const spawn_id = packages.idOf("NetPackageEntitySpawn") orelse return error.TestUnexpectedResult;
+    const body = cap_b.findPkgIdEntity(spawn_id, ca.entity_id) orelse return error.TestUnexpectedResult;
+    const held = playerSpawnHoldingType(body) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(held != 0);
+
+    // The other direction: an armed joiner's own body goes out to the players
+    // already in the world, so C must not look empty-handed to A either.
+    var cap_c: ln_peer.Capture = .{};
+    cap_a.clear();
+    const cc = try g.attachJoinedClient(&cap_c);
+    const ps_c = g.sim.playerByPeer(cc.slot).?;
+    _ = invsys.give(&g.sim, cc.slot, wood_id, 5);
+    var cs: u16 = 0;
+    while (cs < quest_mod_components.inv_toolbelt) : (cs += 1) {
+        if (g.sim.inventory[ps_c].slots[cs].item_id == wood_id) break;
+    }
+    try std.testing.expect(invsys.setHolding(&g.sim, cc.slot, cs));
+    // The outbound half: a joiner's own body is pushed to the peers already in
+    // the world at the moment it joins. Read it from A's capture, not the
+    // joiner's, so this exercises the second call site rather than the first.
+    // The joiner must already be armed when it joins, since that push happens
+    // once during the join and is not repeated when a later client connects.
+    // C is armed from above; re-running the join broadcast now pushes C's body
+    // to A through the outbound site.
+    cap_a.clear();
+    try game_join.sendPlayerSpawns(
+        g,
+        cc.peer orelse return error.TestUnexpectedResult,
+        cc,
+        @intFromFloat(g.sim.transform[ps_c].x),
+        @intFromFloat(g.sim.transform[ps_c].z),
+    );
+    const d_body = cap_a.findPkgIdEntity(spawn_id, cc.entity_id) orelse
+        return error.TestUnexpectedResult;
+    const d_held = playerSpawnHoldingType(d_body) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(d_held != 0);
+
+    std.debug.print("PASS spawn-holding: joiner told peer holds type {d}\n", .{held});
+}
+
+/// Decode the holdingItem type id out of a NetPackageEntitySpawn player body.
+/// Offsets follow stock_entity.buildEntitySpawnStock: the fixed head, then the
+/// player branch's ItemValue. Returns null when the body is not a player spawn
+/// or carries the empty-ItemValue sentinel.
+fn playerSpawnHoldingType(body: []const u8) ?i32 {
+    var r: binary.Reader = .{ .data = body };
+    _ = r.readI32() catch return null; // entity_id (package head)
+    const file_ver = r.readByte() catch return null;
+    if (file_ver != 36) return null;
+    const cls = r.readI32() catch return null;
+    if (cls != packages.stock_entity.class_player_male and
+        cls != packages.stock_entity.class_player_female) return null;
+    _ = r.readI32() catch return null; // entity id
+    var skip: usize = 0;
+    while (skip < 7) : (skip += 1) _ = r.readF32() catch return null; // lifetime, pos, rot
+    _ = r.readBool() catch return null; // on_ground
+    _ = r.readI32() catch return null; // BodyDamage
+    _ = r.readI32() catch return null;
+    _ = r.readU32() catch return null;
+    _ = r.readBool() catch return null; // no EntityStats
+    _ = r.readI16() catch return null; // deathTime
+    if (r.readBool() catch return null) return null; // a bag would shift the rest
+    _ = r.readI32() catch return null; // home x
+    _ = r.readI32() catch return null;
+    _ = r.readI32() catch return null;
+    _ = r.readI16() catch return null; // homeRange
+    _ = r.readByte() catch return null; // spawnerSource
+    const slot = packages.stock_inv.readItemValue(&r) catch return null;
+    return slot.type_id;
 }
 
 test "scenario powered trigger echo carries every wire the sim holds" {
