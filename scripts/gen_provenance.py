@@ -196,8 +196,13 @@ def build():
     # Defrag map: one cell per scored feature, grouped by category, so the whole
     # 300-feature surface is legible in a single view. Cells carry the category
     # so clicking one jumps to that category's expanded rows.
+    # The map's job is the one no number on the page does: show *where* the
+    # unfinished work sits. Categories carrying PARTIAL/MISSING sort first and
+    # are badged, and those cells are outlined as well as coloured, because a
+    # handful of amber squares among ~300 green ones is invisible on hue alone
+    # (and gone entirely for red/green colour vision deficiency).
     map_blocks = []
-    for name, w, p, m, rows in cats:
+    for name, w, p, m, rows in sorted(cats, key=lambda c: (c[2] + c[3] == 0, c[0])):
         total = w + p + m
         # Cells follow the scorecard counts, not the prose rows: the counts are
         # the documented source of truth and the two can differ (a category's
@@ -205,12 +210,17 @@ def build():
         cells = (["WORKS"] * w) + (["PARTIAL"] * p) + (["MISSING"] * m)
         cell_html = "".join(f'<i class="cell {c}"></i>' for c in cells)
         pct_cat = w * 100 // total if total else 0
+        open_n = p + m
+        badge = (
+            f'<span class="badge">{open_n} open</span>' if open_n else
+            '<span class="badge done">done</span>'
+        )
         map_blocks.append(
-            f'<button class="mapcat" data-name="{esc(name)}" '
+            f'<button class="mapcat{"" if open_n else " clean"}" data-name="{esc(name)}" '
             f'aria-label="{esc(name)}: {w} of {total} features ported, {p} partial, {m} missing">'
-            f'<span class="maphead"><span class="mapname">{esc(name)}</span>'
-            f'<span class="mappct">{pct_cat}%</span></span>'
-            f'<span class="cells">{cell_html}</span></button>'
+            f'<span class="maphead"><span class="mapname">{esc(name)}</span>{badge}</span>'
+            f'<span class="cells">{cell_html}</span>'
+            f'<span class="mapfoot">{pct_cat}% · {total} features</span></button>'
         )
     defrag_map = "\n".join(map_blocks)
 
@@ -256,17 +266,28 @@ td{{font-family:var(--mono);font-variant-numeric:tabular-nums}}.num{{font-family
 .sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
 .pbar{{display:inline-block;width:4.5rem;height:0.55rem;border-radius:3px;background:var(--sunken);vertical-align:middle;overflow:hidden;margin-right:0.4rem}}.pbar::before{{content:"";display:block;height:100%;width:var(--p);background:var(--ok);border-radius:3px}}
 /* Defrag map: the whole scored surface at a glance, one cell per feature. */
-.defrag{{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:0.6rem;margin:0 0 0.8rem}}
-.mapcat{{display:block;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:6px;padding:0.5rem 0.6rem;cursor:pointer;color:inherit;font:inherit}}
+.defrag{{display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;margin:0 0 0.8rem}}
+@media(max-width:60rem){{.defrag{{grid-template-columns:repeat(2,1fr)}}}}
+@media(max-width:36rem){{.defrag{{grid-template-columns:1fr}}}}
+.mapcat{{display:flex;flex-direction:column;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:6px;padding:0.5rem 0.6rem;cursor:pointer;color:inherit;font:inherit}}
 .mapcat:hover,.mapcat:focus-visible{{border-color:var(--edge)}}
 .mapcat.on{{border-color:var(--acc)}}
-.maphead{{display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;margin-bottom:0.35rem}}
+/* Categories with open work keep a warm edge so the eye lands on them first. */
+.mapcat:not(.clean){{border-color:var(--warn)}}
+.maphead{{display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;margin-bottom:0.4rem}}
 .mapname{{font-family:var(--sans);font-size:var(--fs-sm)}}
-.mappct{{font-family:var(--mono);font-size:var(--fs-micro);color:var(--muted);font-variant-numeric:tabular-nums}}
-.cells{{display:flex;flex-wrap:wrap;gap:2px}}
+.badge{{font-family:var(--mono);font-size:var(--fs-micro);color:var(--bg);background:var(--warn);border-radius:999px;padding:0.05rem 0.45rem;white-space:nowrap}}
+.badge.done{{color:var(--muted);background:transparent;border:1px solid var(--line)}}
+.mapfoot{{font-family:var(--mono);font-size:var(--fs-micro);color:var(--muted);font-variant-numeric:tabular-nums;margin-top:0.4rem}}
+.cells{{display:flex;flex-wrap:wrap;gap:2px;align-content:flex-start;flex:1}}
 .cell{{width:0.55rem;height:0.55rem;border-radius:1px;background:var(--ok)}}
-.cell.PARTIAL{{background:var(--warn)}}.cell.MISSING{{background:var(--err)}}
-@media(forced-colors:active){{.cell{{outline:1px solid CanvasText;outline-offset:-1px}}}}
+/* Open work is outlined and lifted, not just a different hue: three amber
+   squares among ~300 green ones vanish on hue alone, and are gone entirely
+   for red/green colour vision deficiency. */
+.cell.PARTIAL,.cell.MISSING{{width:0.8rem;height:0.8rem;border-radius:2px;margin:-0.125rem 0;box-shadow:0 0 0 2px var(--sunken),0 0 0 3px currentColor}}
+.cell.PARTIAL{{background:var(--warn);color:var(--warn)}}
+.cell.MISSING{{background:var(--err);color:var(--err)}}
+@media(forced-colors:active){{.cell{{outline:1px solid CanvasText;outline-offset:-1px}}.cell.PARTIAL,.cell.MISSING{{outline:2px solid Highlight}}}}
 .toolbar{{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin:0 0 0.6rem}}
 .toolbar input[type=search]{{flex:1;min-width:12rem;background:var(--sunken);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:0.4rem 0.6rem;font:inherit}}
 .chips{{display:flex;gap:0.35rem;flex-wrap:wrap}}
