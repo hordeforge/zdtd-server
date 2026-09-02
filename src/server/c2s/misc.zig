@@ -287,6 +287,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         self.dropClientSlot(c.slot, "quit");
         return true;
     }
+    // Accepted and dropped on purpose (phase-gated above, so this is a
+    // deliberate no-op, not an unhandled package). Each is a documented
+    // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
+    // one here.
+    // - NetPackageAudio: client-local sound cue; the server has no audio.
+    // - NetPackagePlayerStats: stock relays the owning client's own stats blob
+    //   (EntityNetworkStats::ToEntity, RE progression.md 441560ff). Applying it
+    //   would let a client author its level/XP/kill totals, so the server keeps
+    //   its own ledger and sends that instead (AGENTS rule 17).
+    // - NetPackageDiscordIdMappings: Discord rich-presence id map, a client
+    //   social feature with no server-side sim effect.
     if (std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
         return true;
     }
@@ -309,6 +320,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    // Second accepted-and-dropped group; see the note above and
+    // docs/DIVERGENCES.md.
+    // - NetPackageBossEvent: client-side boss HUD banner, no sim effect.
+    // - NetPackageEntityStatsBuff: stock applies the client's whole buff blob
+    //   (EntityBuffs.Read IL=76). The server owns the buff set, so accepting it
+    //   would let a client grant itself buffs (AGENTS rule 17). Known cost:
+    //   client-local consume buffs never sync server-side, so the
+    //   dysentery-dependent behaviours miss them - recorded in DIVERGENCES.md.
+    // - NetPackageInventoryKeepOpen: stock's own dedi handler is a thin
+    //   no-op/unused path (RE protocol-packages.md), so dropping it matches.
+    // - NetPackagePlayerInventoryForAI: feeds stock's AIDirector smell/threat
+    //   model from a client-reported bag (RE protocol-packages.md, Process
+    //   IL=23). zdtd's AI reads its own sim state; a client must not be able to
+    //   steer zombie targeting by declaring its inventory.
+    // - NetPackageLobbyRegisterClient: matchmaking-lobby registration, which a
+    //   self-hosted dedicated server does not participate in.
     if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
         return true;
     }
@@ -347,7 +374,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer")) {
-        // No server-side skill sim for these yet; ack silently.
+        // Client-reported XP/score adds are never applied: the server awards XP
+        // itself on the kill and quest paths, so accepting these would let a
+        // client mint XP (AGENTS rule 17; docs/DIVERGENCES.md 1.5). Note this
+        // is a trust decision, not a missing feature - the skill ledger it once
+        // waited on shipped 2026-08-27 and drives the SetSkillLevelServer
+        // handler below. Ack silently.
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntitySetSkillLevelServer")) {

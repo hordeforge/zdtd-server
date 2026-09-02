@@ -64,6 +64,7 @@ What goes over the socket, and how it is proven against the stock client.
 | [wire/WIRE_WORKSTATION.md](wire/WIRE_WORKSTATION.md) | Workstation tile-entity wire |
 | [wire/INVENTORY.md](wire/INVENTORY.md) | Inventory wire |
 | [AUTHORITY.md](AUTHORITY.md) | Join phases, C2S validation, interest, mode |
+| [DIVERGENCES.md](DIVERGENCES.md) | Every deliberate departure from stock behaviour, with its cost |
 | [CLIENT_PLAYTEST.md](CLIENT_PLAYTEST.md) | Stock-client automated play suite (design) |
 | [PARITY_TOOLING.md](PARITY_TOOLING.md) | Version-diff and C2S coverage tooling |
 

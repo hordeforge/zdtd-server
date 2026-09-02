@@ -200,6 +200,10 @@ allowance).
 
 ## 2. Scorecard
 
+A `WORKS` score means the feature is implemented and wire-correct. It does
+not mean zdtd behaves identically to stock: the places where it knowingly
+does not, and why, are in [DIVERGENCES.md](DIVERGENCES.md).
+
 300 features scored across nine areas (recounted 2026-09-02 from the
 per-feature markers, the source of truth; STATUS wins on conflict).
 
