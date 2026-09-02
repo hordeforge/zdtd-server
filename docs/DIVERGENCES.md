@@ -132,6 +132,22 @@ action set. It does not fire every stock verb (vehicles, drones, twitch
 integration), so "zero unhandled" bounds the common play path, not every
 possible client action.
 
+### Enum-cast sweep (2026-09-02)
+
+The save-format audit found a raw disk byte cast onto an exhaustive enum
+(`persist.zig:1207`, `VehicleKind`), so the same question was put to every
+`@enumFromInt` in `src/`. Result, recorded so it is not redone: no live defect.
+Wire parsers all guard the ordinal first; `litenet/packet.zig` keeps `Property`
+non-exhaustive by design; the remaining sites cast comptime field values or a
+sentinel byte the process itself wrote, never external input.
+
+One latent issue was fixed rather than left: the five wire guards used
+hand-synced numeric bounds (`if (et_raw > 3)`). Every bound was correct, but
+adding a variant would leave the guard rejecting a legal stock ordinal as
+`InvalidEvent` while the enum said otherwise. They now derive the valid set
+from the enum via `std.enums.fromInt`, with tests asserting that every declared
+variant parses. The accepted range is unchanged.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.

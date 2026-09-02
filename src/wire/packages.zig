@@ -3054,9 +3054,9 @@ pub fn buildEntityAttach(buf: []u8, attach_type: AttachType, rider_id: i32, vehi
 pub fn parseEntityAttach(body: []const u8) !struct { attach_type: AttachType, rider_id: i32, vehicle_id: i32, slot: i16 } {
     if (body.len < 11) return error.EndOfStream;
     const at_raw = body[0];
-    if (at_raw > 3) return error.InvalidEvent;
+    const at = std.enums.fromInt(AttachType, at_raw) orelse return error.InvalidEvent;
     return .{
-        .attach_type = @enumFromInt(at_raw),
+        .attach_type = at,
         .rider_id = std.mem.readInt(i32, body[1..5], .little),
         .vehicle_id = std.mem.readInt(i32, body[5..9], .little),
         .slot = std.mem.readInt(i16, body[9..11], .little),
@@ -3589,10 +3589,7 @@ pub fn parseNpcQuestList(body: []const u8) !NpcQuestListHead {
     const npc = std.mem.readInt(i32, body[0..4], .little);
     const player = std.mem.readInt(i32, body[4..8], .little);
     const et_raw = body[8];
-    const et: NpcQuestEventType = if (et_raw <= 4)
-        @enumFromInt(et_raw)
-    else
-        return error.InvalidEvent;
+    const et = std.enums.fromInt(NpcQuestEventType, et_raw) orelse return error.InvalidEvent;
     var head: NpcQuestListHead = .{
         .npc_entity_id = npc,
         .player_entity_id = player,
@@ -3642,10 +3639,7 @@ pub const QuestObjectiveUpdate = struct {
 pub fn parseQuestObjectiveUpdate(body: []const u8) !QuestObjectiveUpdate {
     if (body.len < 9) return error.EndOfStream;
     const et_raw = body[8];
-    const et: QuestObjectiveEventType = if (et_raw <= 2)
-        @enumFromInt(et_raw)
-    else
-        return error.InvalidEvent;
+    const et = std.enums.fromInt(QuestObjectiveEventType, et_raw) orelse return error.InvalidEvent;
     var out: QuestObjectiveUpdate = .{
         .sender_entity_id = std.mem.readInt(i32, body[0..4], .little),
         .quest_code = std.mem.readInt(i32, body[4..8], .little),
@@ -3696,7 +3690,9 @@ test "entity attach carries the stock mount and dismount shapes" {
     const wide = try parseEntityAttach(try buildEntityAttach(&buf, .attach_client, 1, 2, 32767));
     try std.testing.expectEqual(@as(i16, 32767), wide.slot);
 
-    for ([_]AttachType{ .attach_server, .attach_client, .detach_server, .detach_client }) |t| {
+    // Derived from the enum, not a hand-listed set: a new variant must be
+    // covered here automatically rather than slipping through untested.
+    for (std.enums.values(AttachType)) |t| {
         const rt = try parseEntityAttach(try buildEntityAttach(&buf, t, -2147483648, 2147483647, -32768));
         try std.testing.expectEqual(t, rt.attach_type);
         try std.testing.expectEqual(@as(i32, -2147483648), rt.rider_id);
@@ -3820,6 +3816,28 @@ test "stock quest objective update layout" {
     try std.testing.expectEqual(@as(i32, 106), u.sender_entity_id);
     try std.testing.expectEqual(QuestObjectiveEventType.block_activated, u.event_type);
     try std.testing.expectEqual(@as(i32, 10), u.block_x);
+}
+
+test "every declared npc quest and objective event variant parses" {
+    // Both parsers derive their bound from the enum via std.enums.fromInt, so
+    // a new variant stays legal on the wire instead of becoming InvalidEvent.
+    for (std.enums.values(NpcQuestEventType)) |ev| {
+        // 14 bytes covers the longest tail (remove_quest adds remove_index).
+        var body: [14]u8 = @splat(0);
+        std.mem.writeInt(i32, body[0..4], 50, .little);
+        std.mem.writeInt(i32, body[4..8], 106, .little);
+        body[8] = @intFromEnum(ev);
+        const head = try parseNpcQuestList(&body);
+        try std.testing.expectEqual(ev, head.event_type);
+    }
+    for (std.enums.values(QuestObjectiveEventType)) |ev| {
+        var body: [21]u8 = @splat(0);
+        std.mem.writeInt(i32, body[0..4], 106, .little);
+        std.mem.writeInt(i32, body[4..8], 1, .little);
+        body[8] = @intFromEnum(ev);
+        const u = try parseQuestObjectiveUpdate(&body);
+        try std.testing.expectEqual(ev, u.event_type);
+    }
 }
 
 /// Trader buy/sell: trader_entity i32, item u16, qty u16, side u8 (0=buy,1=sell).

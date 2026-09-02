@@ -323,8 +323,7 @@ pub fn parseSharedQuestHead(body: []const u8) !SharedQuestHead {
     if (body.len < 5) return error.EndOfStream;
     const by = std.mem.readInt(i32, body[0..4], .little);
     const et_raw = body[4];
-    if (et_raw > 3) return error.InvalidEvent;
-    const et: SharedQuestEvent = @enumFromInt(et_raw);
+    const et = std.enums.fromInt(SharedQuestEvent, et_raw) orelse return error.InvalidEvent;
     var head: SharedQuestHead = .{ .shared_by_entity_id = by, .event = et };
     if (et == .share_quest) {
         if (body.len < 9) return error.EndOfStream;
@@ -436,7 +435,7 @@ pub fn parseQuestEventHead(body: []const u8) !QuestEventHead {
     const py = try r.readF32();
     const pz = try r.readF32();
     const et_raw = try r.readByte();
-    if (et_raw > @intFromEnum(QuestEventType.reset_trader_quests)) return error.InvalidEvent;
+    const et = std.enums.fromInt(QuestEventType, et_raw) orelse return error.InvalidEvent;
     try r.skipString(); // questTags (FastTags.ToString; empty set is "")
     const quest_code = try r.readI32();
     var head: QuestEventHead = .{
@@ -444,7 +443,7 @@ pub fn parseQuestEventHead(body: []const u8) !QuestEventHead {
         .px = px,
         .py = py,
         .pz = pz,
-        .event = @enumFromInt(et_raw),
+        .event = et,
         .quest_code = quest_code,
     };
     try readQuestEventTail(&r, &head);
@@ -518,8 +517,53 @@ test "quest event rejects unknown event and truncation" {
     try std.testing.expectError(error.EndOfStream, parseQuestEventHead(body[0 .. body.len - 1]));
     try std.testing.expectError(error.EndOfStream, parseQuestEventHead(body[0..4]));
     var bad = buf;
-    bad[16] = 17; // eventType byte, one past ResetTraderQuests
+    // eventType byte, one past the highest declared variant. Derived, not a
+    // literal: a new variant must not silently turn this into a legal value.
+    const past_last = std.enums.values(QuestEventType).len;
+    bad[16] = @intCast(past_last);
     try std.testing.expectError(error.InvalidEvent, parseQuestEventHead(bad[0..body.len]));
+}
+
+test "every declared quest event variant parses" {
+    // The eventType guards derive their bound from the enum, so adding a
+    // variant must not make a legal stock ordinal parse as InvalidEvent.
+    // This is the regression the old hand-synced numeric guards invited.
+    // Built by hand, not via buildQuestEvent: that builder refuses the three
+    // list-tail variants the server never originates, which would leave the
+    // ordinals they occupy untested on the parse side.
+    for (std.enums.values(QuestEventType)) |ev| {
+        var buf: [64]u8 = undefined;
+        var w: binary.Writer = .{ .buf = &buf };
+        try w.writeI32(1);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeByte(@intFromEnum(ev));
+        try w.writeString("");
+        try w.writeI32(5);
+        try w.writeU64(0); // widest fixed tail; ignored by variants without one
+        const head = parseQuestEventHead(w.written()) catch |e| switch (e) {
+            // Variants with a list tail need their own payload. The ordinal was
+            // already accepted by the time the tail is read, which is what this
+            // test is about; a rejected ordinal surfaces as InvalidEvent.
+            error.EndOfStream => continue,
+            else => return e,
+        };
+        try std.testing.expectEqual(ev, head.event);
+    }
+}
+
+test "every declared shared quest event variant parses" {
+    for (std.enums.values(SharedQuestEvent)) |ev| {
+        var body: [9]u8 = @splat(0);
+        std.mem.writeInt(i32, body[0..4], 7, .little);
+        body[4] = @intFromEnum(ev);
+        const head = parseSharedQuestHead(&body) catch |e| switch (e) {
+            error.EndOfStream => continue,
+            else => return e,
+        };
+        try std.testing.expectEqual(ev, head.event);
+    }
 }
 
 test "quest event list tails are bounds checked" {
