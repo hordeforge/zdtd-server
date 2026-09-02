@@ -193,6 +193,27 @@ def build():
     any_pct = (total_w + total_p) * 100 // total_rows if total_rows else 0
 
     score_rows = []
+    # Defrag map: one cell per scored feature, grouped by category, so the whole
+    # 300-feature surface is legible in a single view. Cells carry the category
+    # so clicking one jumps to that category's expanded rows.
+    map_blocks = []
+    for name, w, p, m, rows in cats:
+        total = w + p + m
+        # Cells follow the scorecard counts, not the prose rows: the counts are
+        # the documented source of truth and the two can differ (a category's
+        # feature bullets are a subset of its scored total).
+        cells = (["WORKS"] * w) + (["PARTIAL"] * p) + (["MISSING"] * m)
+        cell_html = "".join(f'<i class="cell {c}"></i>' for c in cells)
+        pct_cat = w * 100 // total if total else 0
+        map_blocks.append(
+            f'<button class="mapcat" data-name="{esc(name)}" '
+            f'aria-label="{esc(name)}: {w} of {total} features ported, {p} partial, {m} missing">'
+            f'<span class="maphead"><span class="mapname">{esc(name)}</span>'
+            f'<span class="mappct">{pct_cat}%</span></span>'
+            f'<span class="cells">{cell_html}</span></button>'
+        )
+    defrag_map = "\n".join(map_blocks)
+
     for name, w, p, m, rows in cats:
         total = w + p + m
         pct_cat = w * 100 // total if total else 0
@@ -234,6 +255,18 @@ table{{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}}th,td{{text-a
 td{{font-family:var(--mono);font-variant-numeric:tabular-nums}}.num{{font-family:var(--mono);font-variant-numeric:tabular-nums}}
 .sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
 .pbar{{display:inline-block;width:4.5rem;height:0.55rem;border-radius:3px;background:var(--sunken);vertical-align:middle;overflow:hidden;margin-right:0.4rem}}.pbar::before{{content:"";display:block;height:100%;width:var(--p);background:var(--ok);border-radius:3px}}
+/* Defrag map: the whole scored surface at a glance, one cell per feature. */
+.defrag{{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:0.6rem;margin:0 0 0.8rem}}
+.mapcat{{display:block;width:100%;text-align:left;background:var(--sunken);border:1px solid var(--line);border-radius:6px;padding:0.5rem 0.6rem;cursor:pointer;color:inherit;font:inherit}}
+.mapcat:hover,.mapcat:focus-visible{{border-color:var(--edge)}}
+.mapcat.on{{border-color:var(--acc)}}
+.maphead{{display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;margin-bottom:0.35rem}}
+.mapname{{font-family:var(--sans);font-size:var(--fs-sm)}}
+.mappct{{font-family:var(--mono);font-size:var(--fs-micro);color:var(--muted);font-variant-numeric:tabular-nums}}
+.cells{{display:flex;flex-wrap:wrap;gap:2px}}
+.cell{{width:0.55rem;height:0.55rem;border-radius:1px;background:var(--ok)}}
+.cell.PARTIAL{{background:var(--warn)}}.cell.MISSING{{background:var(--err)}}
+@media(forced-colors:active){{.cell{{outline:1px solid CanvasText;outline-offset:-1px}}}}
 .toolbar{{display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin:0 0 0.6rem}}
 .toolbar input[type=search]{{flex:1;min-width:12rem;background:var(--sunken);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:0.4rem 0.6rem;font:inherit}}
 .chips{{display:flex;gap:0.35rem;flex-wrap:wrap}}
@@ -263,6 +296,9 @@ footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}}
 <section id="scorecard" aria-labelledby="scorecard-heading">
 <h2 id="scorecard-heading">Stock game systems · GAP_ANALYSIS scorecard</h2>
 <p style="margin:0 0 0.5rem;color:var(--muted);font-size:var(--fs-sm)">Overall: <b class="num">{total_w}</b> WORKS / <b class="num">{total_p}</b> PARTIAL / <b class="num">{total_m}</b> MISSING of <b class="num">{total_rows}</b> scored features = <b>{pct}%</b> fully ported, <b>{any_pct}%</b> at least partial (recounted from the live GAP_ANALYSIS markers; GAP_ANALYSIS scorecard wins on conflict).</p>
+<div class="defrag">
+{defrag_map}
+</div>
 <div class="toolbar">
 <label class="sr-only" for="filter">Filter categories and features</label>
 <input id="filter" type="search" placeholder="Filter categories and features… (e.g. sleeper, trader, ZPV, quest)" autocomplete="off">
@@ -356,6 +392,29 @@ footer{{padding:0.75rem 1.25rem;color:var(--muted);font-size:var(--fs-micro)}}
     }});
     cat.addEventListener("keydown", function (e) {{
       if (e.key === "Enter" || e.key === " ") {{ e.preventDefault(); cat.click(); }}
+    }});
+  }});
+
+  // Defrag map: a tile drills into its category. Clearing the text filter
+  // first means a tile always lands on its rows even when a filter is active.
+  Array.prototype.slice.call(document.querySelectorAll(".mapcat")).forEach(function (tile) {{
+    tile.addEventListener("click", function () {{
+      var name = tile.dataset.name;
+      var target = null;
+      cats.forEach(function (cat) {{ if (cat.dataset.name === name) {{ target = cat; }} }});
+      if (!target) {{ return; }}
+      filter.value = "";
+      cats.forEach(function (cat) {{
+        var want = cat === target;
+        cat.classList.toggle("open", want);
+        cat.setAttribute("aria-expanded", want ? "true" : "false");
+      }});
+      Array.prototype.slice.call(document.querySelectorAll(".mapcat")).forEach(function (t) {{
+        t.classList.toggle("on", t === tile);
+      }});
+      apply();
+      target.scrollIntoView({{block: "center"}});
+      target.focus();
     }});
   }});
 
