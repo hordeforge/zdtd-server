@@ -139,6 +139,15 @@ fn writeCompositeStoragePayload(
     return w.written();
 }
 
+/// Stock world time for the start of `day`, matching WorldClock.worldTimeBits:
+/// 1000 units per hour, 24000 per day, day 1 is the epoch. The store keeps the
+/// touch as a day number (the granularity LootRespawnDays needs), so the
+/// hour-of-day part is zero. Day 0 means "never looted" and stays 0.
+fn worldTimeTouchedBits(touched_day: u32) u32 {
+    if (touched_day == 0) return 0;
+    return (touched_day - 1) *| 24000;
+}
+
 fn writeStorageFeature(
     w: *binary.Writer,
     cont: *const containers.Container,
@@ -161,7 +170,7 @@ fn writeStorageFeature(
     try w.writeU16(size_x);
     try w.writeU16(size_y);
     try w.writeBool(cont.touched);
-    try w.writeU32(0); // worldTimeTouched
+    try w.writeU32(worldTimeTouchedBits(cont.touched_day));
     try w.writeBool(cont.player_storage);
 
     const count: i16 = @intCast(@min(n, containers.max_container_slots));
@@ -205,6 +214,11 @@ pub const ParsedTe = struct {
     item_count: usize = 0,
     size_x: u16 = 0,
     size_y: u16 = 0,
+    touched: bool = false,
+    /// Stock `worldTimeTouched`: the world time the container was last looted.
+    /// TEFeatureStorage.UpdateTick derives LootRespawnDays from it, so it is
+    /// state and not a formality.
+    world_time_touched: u32 = 0,
 };
 
 /// Parse NetPackageTileEntity body if stock composite+storage; error if ZTE1 or unknown.
@@ -264,8 +278,8 @@ fn parseStorageFeature(r: *binary.Reader, out: *ParsedTe) binary.ReadError!void 
     if (has_list) try r.skipString();
     out.size_x = try r.readU16();
     out.size_y = try r.readU16();
-    _ = try r.readBool(); // touched
-    _ = try r.readU32(); // worldTime
+    out.touched = try r.readBool();
+    out.world_time_touched = try r.readU32();
     _ = try r.readBool(); // player storage
     const count_i = try r.readI16();
     const count: usize = if (count_i > 0) @intCast(count_i) else 0;
@@ -799,6 +813,44 @@ test "storage te encode decode roundtrip" {
     const parsed2 = try parseStorageTeBody(body2);
     try std.testing.expectEqual(@as(u16, 6), parsed2.size_x);
     try std.testing.expectEqual(@as(u16, 2), parsed2.size_y);
+}
+
+test "storage te carries the touch time the container was looted at" {
+    // TEFeatureStorage.UpdateTick computes LootRespawnDays from
+    // worldTimeTouched (RE loot-economy.md: daysElapsed =
+    // (WorldTimeToTotalHours(now) - WorldTimeToTotalHours(worldTimeTouched))
+    // / 24). Sending a constant 0 for a container the server knows was looted
+    // on day 5 tells the client the loot is ancient.
+    var cont: containers.Container = .{
+        .pos = .{ .x = 4, .y = 70, .z = 4 },
+        .block_id = 500,
+        .slot_count = 4,
+        .touched = true,
+        .touched_day = 5,
+        .player_storage = false,
+    };
+    var buf: [8192]u8 = undefined;
+    const body = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed = try parseStorageTeBody(body);
+    try std.testing.expect(parsed.touched);
+    // Day 5 in stock world-time bits: (day - 1) * 24000, matching
+    // WorldClock.worldTimeBits so both sides agree on the epoch.
+    try std.testing.expectEqual(@as(u32, 4 * 24000), parsed.world_time_touched);
+
+    // An untouched container has no touch time to report.
+    cont.touched = false;
+    cont.touched_day = 0;
+    const body2 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed2 = try parseStorageTeBody(body2);
+    try std.testing.expectEqual(@as(u32, 0), parsed2.world_time_touched);
+
+    // touched_day comes off disk as a u32, so a corrupt or absurd value must
+    // saturate rather than wrap into a plausible-looking recent time.
+    cont.touched = true;
+    cont.touched_day = std.math.maxInt(u32);
+    const body3 = try buildStorageTeBody(&buf, 255, 4, 70, 4, 500, &cont, null, null);
+    const parsed3 = try parseStorageTeBody(body3);
+    try std.testing.expectEqual(std.math.maxInt(u32), parsed3.world_time_touched);
 }
 
 // --- TileEntityVendingMachine (TileEntityType.VendingMachine = 7) ---
