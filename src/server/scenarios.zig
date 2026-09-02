@@ -34,6 +34,7 @@ const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const persist = @import("persist.zig");
+const phase_gate = @import("phase_gate.zig");
 const util_log = @import("../util/log.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
@@ -10321,4 +10322,64 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     try std.testing.expectEqual(@as(i32, 2), try r2.readI32()); // killedZombies
     try std.testing.expectEqual(@as(i32, 1), try r2.readI32()); // killedPlayers
     std.debug.print("PASS kill-counter: zombie + PvP kills ride the PlayerStats wire\n", .{});
+}
+
+test "scenario every registered package id survives dispatch with a malformed body" {
+    // Two properties, both cheap and both real:
+    //
+    // 1. Robustness. Every registered package id is dispatched with an empty
+    //    body. A handler that indexes a short body without checking, or traps
+    //    on a bad cast, fails here rather than when a client sends a truncated
+    //    packet. This is the fuzz-shaped half and is the reason to keep it.
+    // 2. Coverage floor. A large share of the registry is S2C-only (the server
+    //    builds and sends those; a stock client never sends one back), so the
+    //    fallthrough set is big and churns whenever a new S2C package lands.
+    //    Pinning the exact list would be brittle, so assert the floor instead:
+    //    the C2S handlers must keep covering at least as many packages as they
+    //    do today. A dropped handler trips it; adding an S2C package does not.
+    //
+    // docs/DIVERGENCES.md 3b carries the per-package reasoning.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    const peer = ca.peer orelse return error.TestUnexpectedResult;
+    // Phase .playing needs joined AND entered: the gate returns before any
+    // handler runs, so without this the sweep would measure the gate, not the
+    // handlers, and would pass even with every handler deleted.
+    ca.entered = true;
+    const rejects_before = g.harness.counters.get(.phase_rejects);
+
+    var handled_n: usize = 0;
+    for (packages.default_mappings, 0..) |name, id| {
+        // Skip the teardown verbs: they call dropClientSlot, which resets the
+        // client so every later package phase-rejects and the rest of the sweep
+        // becomes vacuous. Both are handled, so skipping costs no coverage.
+        if (std.mem.eql(u8, name, "NetPackagePlayerDisconnect") or
+            std.mem.eql(u8, name, "NetPackageClientInfo")) continue;
+        const before = g.harness.counters.get(.c2s_unhandled);
+        g.handlePackage(ca, peer, @intCast(id), &.{}) catch continue;
+        if (g.harness.counters.get(.c2s_unhandled) == before) handled_n += 1;
+    }
+
+    // Nothing may be silently eaten by the phase gate; that would make the
+    // sweep vacuous (it would measure the gate instead of the handlers).
+    try std.testing.expectEqual(rejects_before, g.harness.counters.get(.phase_rejects));
+    // Measured 2026-09-02: 84 of the 189 swept ids reach a C2S handler (191
+    // registered, less the two teardown verbs skipped above).
+    try std.testing.expect(handled_n >= 84);
+    std.debug.print(
+        "PASS c2s-coverage: {d}/{d} registered packages reach a C2S handler; the rest are S2C-only\n",
+        .{ handled_n, packages.default_mappings.len },
+    );
 }

@@ -118,6 +118,15 @@ and a full `smoke-navezgane` session (2 clients, 8 join passes, walk / jump /
 rejoin) logs **zero**. A package the stock client actually sends us would show
 up there, so the registry gap is inventory, not behaviour.
 
+Corrected 2026-09-02 by an exhaustive in-process sweep (scenario
+"every registered package id survives dispatch with a malformed body"): the
+static grep above undercounted S2C-only packages. Dispatching all 191 ids
+through the real handler chain as a `.playing` client shows **84 reach a C2S
+handler and 105 are S2C-only** - the server builds and sends those, and a stock
+client never sends one back, so having no C2S handler is correct. The 29-package
+figure above was an artefact of comparing against the RE `ProcessPackage` table
+rather than measuring; the per-package reasoning in it still holds.
+
 Caveat, stated rather than glossed: loadgen drives a wide but not exhaustive
 action set. It does not fire every stock verb (vehicles, drones, twitch
 integration), so "zero unhandled" bounds the common play path, not every
