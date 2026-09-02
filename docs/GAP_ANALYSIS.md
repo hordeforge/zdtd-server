@@ -3383,6 +3383,33 @@ and server-to-client XP/level pushes do not exist.
   *Anchors:* `src/assets/progression.zig:87-90` (`loadFromPath`), `:191-197`
   (`tryLoad` / `tryLoadTable`)
 
+### Save-format loader audit (2026-09-02)
+
+Every on-disk loader read end to end, because the session's bug pattern was
+persistence rather than wire: the corrupt-input surface is a save file, and the
+loaders are what turn it into sim state.
+
+Seventeen formats. Nine now carry fuzz targets (`ZCH`, `ZCT2`, `ZVNM`, `ZWS1`,
+`ZPV`, `weather`, plus `ZAL1`, `ZTR1` and the `ZSCL1`/`ZSTG1` pair added this
+session); the ones with real bugs behind them are all in that set.
+
+The remaining four were audited by reading rather than fuzzed, and the reason
+is recorded here so the decision is visible instead of looking like an
+omission:
+
+| Format | Why reading was enough |
+|---|---|
+| `ZENT` (entities) | **Had a real bug, now fixed**: the type-1 record cast a raw disk byte to the exhaustive `VehicleKind`, so a corrupt file panicked on load. Type 2 assigns bounded scalars; type 3's `edges` count is a `u16` but `addPendingWire` caps at `max_wires` and dedupes; every field read is a bounds-checked `Reader` call. |
+| `ZCLC` (claims) | Fixed 49-byte stride pre-checked against the buffer, `name_len` rejected above 32 before the `@memcpy`, loop bounded by `max_land_claims`. |
+| `ZBM2` (block meta) | Total size pre-validated (`rn * 12`), write index clamped to the array, and the loop deliberately walks the full on-disk count so a clamped record cannot desync the tail - with that reasoning already commented at the site. |
+| `ZCL2` (clock) | Fixed offsets, each guarded by an explicit length check before the read; no counts, no variable-length fields, no enum casts. |
+
+The distinguishing property is structural: desync and panic surfaces need a
+count or length taken from disk, or an enum cast. `ZCLC`/`ZBM2`/`ZCL2` have
+neither an enum cast nor an unbounded count, which is why they were the only
+formats to survive the session's bug classes untouched. Adding fuzz targets for
+them would raise the coverage number without testing a mechanism that exists.
+
 ---
 
 ## 11. World systems
