@@ -376,6 +376,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             var v_plat: [packages.platform_user.max_platform_len]u8 = undefined;
             var v_id: [packages.platform_user.max_id_len]u8 = undefined;
             var v_pw: [vending_mod.max_password_hash]u8 = undefined;
+            // parseVendingTeBody indexes this scratch by stock_te.max_vending_allowed
+            // while the store's own cap sizes it. The two are independent
+            // constants in different layers (world must not import wire), so
+            // tie them here rather than letting a bump on one side write past
+            // the end of the other's buffer.
+            comptime std.debug.assert(stock_te.max_vending_allowed == vending_mod.max_allowed_users);
             var v_allowed_plat: [vending_mod.max_allowed_users * packages.platform_user.max_platform_len]u8 = undefined;
             var v_allowed_id: [vending_mod.max_allowed_users * packages.platform_user.max_id_len]u8 = undefined;
             if (stock_te.parseVendingTeBody(body, &v_plat, &v_id, &v_pw, &v_allowed_plat, &v_allowed_id) catch |err| blk: {

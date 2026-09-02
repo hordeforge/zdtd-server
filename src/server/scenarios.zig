@@ -7033,6 +7033,29 @@ test "scenario vending lock/password/allowed editing (owner-gated)" {
     try std.testing.expect(vm.is_locked); // unchanged
     try std.testing.expectEqualStrings("1234", vm.password_hash[0..vm.password_len]);
 
+    // The allowed-user list is part of the stock TE composite (asm.il ~440486
+    // writes `i32 n | n x ToStream(...)`), so the echo has to carry it back or
+    // the owner's own client shows an empty list after a reopen.
+    cap.clear();
+    try replicate_te.sendVendingTe(g, c.peer orelse return error.TestUnexpectedResult, 256, 70, 258);
+    const te_pkg = packages.idOf("NetPackageTileEntity") orelse return error.TestUnexpectedResult;
+    const echo = cap.findPkgId(te_pkg) orelse return error.TestUnexpectedResult;
+    var e_plat: [vending_mod.max_platform_len]u8 = undefined;
+    var e_id: [vending_mod.max_id_len]u8 = undefined;
+    var e_pw: [vending_mod.max_password_hash]u8 = undefined;
+    var e_aplat: [vending_mod.max_allowed_users * packages.platform_user.max_platform_len]u8 = undefined;
+    var e_aid: [vending_mod.max_allowed_users * packages.platform_user.max_id_len]u8 = undefined;
+    const parsed = try packages.stock_te.parseVendingTeBody(
+        echo,
+        &e_plat,
+        &e_id,
+        &e_pw,
+        &e_aplat,
+        &e_aid,
+    );
+    try std.testing.expectEqual(@as(u8, 1), parsed.allowed_n);
+    try std.testing.expectEqualStrings("9002", parsed.allowed[0].id);
+
     std.debug.print("PASS vending-edit: owner lock/password/allowed applied, non-owner denied\n", .{});
 }
 
