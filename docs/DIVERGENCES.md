@@ -85,6 +85,44 @@ so the stock client never sends them to us.
 | `NetPackageLobbyRegisterClient` | Matchmaking lobby; a self-hosted dedi does not join one |
 | `NetPackageInventoryKeepOpen` | Stock's own dedi handler is a thin unused path (RE `protocol-packages.md`) |
 
+## 3b. Registry coverage audit (2026-09-02)
+
+The section-3 list came from the 37-row wire table in GAP_ANALYSIS. That table
+is not the whole registry, so this is the wider check, recorded so the next
+reader does not have to redo it.
+
+`src/wire/packages.zig` registers **191** package names. **105** have a C2S
+handler in `src/server/c2s/`; of the remainder, **55** are never referenced
+anywhere in `src/server/` at all. Cross-referencing those 55 against the stock
+`ProcessPackage` tables in RE `protocol-packages.md` leaves **29** that stock
+does have a server-side handler for.
+
+None of the 29 is a live gap, for one of three reasons:
+
+- **S2C-only in practice.** The biggest one, `NetPackageRangeCheckDamageEntity`
+  (216 B), reads like a missing damage path but is not: RE `combat-damage.md`
+  has `ServerNetSendRangeCheckedDamage` (IL=27) *send* it for area damage
+  (explosions, traps), fanning to tracked players. zdtd emits the stock
+  `NetPackageExplosionClient` on that path instead (`c2s/blocks.zig`), which is
+  the same package stock sends from `Explosion` (RE `protocol-packages.md`
+  6.15). Different package, correct behaviour.
+- **Client-side or editor features** with no headless source: `AnimateBlock`,
+  `AudioPlayInHead`, `DynamicMesh`, `Localization`, `ShowToolbeltMessage`,
+  `PlayerLaserSight`, `ModifyCVar`, `SetProp`, `Debug`, the `Editor*` and
+  `Wall*` volume packages.
+- **Platform/matchmaking**: `DiscordLobbySecret`, `LobbyJoin`,
+  `PlayerTwitchStats`, `NetMetrics`, `EAC` (EAC is off by design).
+
+Empirical backstop: `dispatch.zig` counts and logs every unhandled C2S package,
+and a full `smoke-navezgane` session (2 clients, 8 join passes, walk / jump /
+rejoin) logs **zero**. A package the stock client actually sends us would show
+up there, so the registry gap is inventory, not behaviour.
+
+Caveat, stated rather than glossed: loadgen drives a wide but not exhaustive
+action set. It does not fire every stock verb (vehicles, drones, twitch
+integration), so "zero unhandled" bounds the common play path, not every
+possible client action.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.
