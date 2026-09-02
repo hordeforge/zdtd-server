@@ -42,6 +42,7 @@ const vending = @import("world/vending.zig");
 const path_mod = @import("ecs/path.zig");
 const weather = @import("world/weather.zig");
 const ally = @import("server/ally.zig");
+const sleepers = @import("world/sleepers.zig");
 const io_fs = @import("util/io_fs.zig");
 
 const packet_corpus = [_][]const u8{
@@ -1977,4 +1978,81 @@ fn fuzzTraderSave(_: void, smith: *std.testing.Smith) !void {
     // record's bytes as this one's tail.
     const end = persist.ztrScanLen(input) catch return;
     try std.testing.expect(end <= input.len);
+}
+
+const sleeper_corpus = [_][]const u8{
+    "",
+    "ZSCL1",
+    // exactly 8 bytes: one short of the 9-byte header. The old guard used
+    // `< 8` and then sliced raw[5..9], a bounds panic (fixed 2026-09-01).
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 0, 0, 0 }),
+    // full header, zero records
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 0, 0, 0, 0 }),
+    // wrong magic
+    &([_]u8{ 'X', 'S', 'C', 'L', '1' } ++ [_]u8{ 0, 0, 0, 0 }),
+    // claimed huge count with no records behind it
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 0xff, 0xff, 0xff, 0xff }),
+    // one record short by a byte (23 of the 24 a record needs)
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0} ** 23),
+    // one well-formed record of all-zero floats
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0} ** 24),
+    // one record of 0xff floats: NaN/huge extents through the AABB compare
+    &([_]u8{ 'Z', 'S', 'C', 'L', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0xff} ** 24),
+    // triggered-store magic, same shapes
+    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 0, 0, 0, 0 }),
+    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 0xff, 0xff, 0xff, 0xff }),
+    &([_]u8{ 'Z', 'S', 'T', 'G', '1' } ++ [_]u8{ 1, 0, 0, 0 } ++ [_]u8{0xff} ** 24),
+};
+
+test "fuzz sleepers cleared/triggered loaders" {
+    // Deterministic corpus pass: smith.slice overwrites the buffer, so the
+    // seeds above would otherwise never be parsed in a default build.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    for (sleeper_corpus) |seed| {
+        try sleeperLoadBoth(dir, seed);
+    }
+    try std.testing.fuzz({}, fuzzSleeperStores, .{ .corpus = &sleeper_corpus });
+}
+
+/// Write `bytes` as both sleeper save files and load them into a fresh store.
+/// Both loaders return void (a corrupt file means "keep the fresh state"), so
+/// the property under test is that neither traps, over-reads, or leaves the
+/// volume array inconsistent.
+fn sleeperLoadBoth(dir: []const u8, bytes: []const u8) !void {
+    var vols = [_]sleepers.Volume{
+        .{ .x0 = 0, .y0 = 60, .z0 = 0, .x1 = 30, .y1 = 70, .z1 = 30 },
+        .{ .x0 = 400, .y0 = 60, .z0 = 400, .x1 = 430, .y1 = 70, .z1 = 430 },
+    };
+    var sleeper_store: sleepers.Store = .{ .volumes = &vols };
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+    const cleared = try std.fmt.bufPrint(&path_buf, "{s}/sleepers_cleared.zsc", .{dir});
+    try io_fs.writeFile(cleared, bytes);
+    sleeper_store.loadCleared(std.testing.allocator, dir);
+
+    var path_buf2: [std.fs.max_path_bytes]u8 = undefined;
+    const triggered = try std.fmt.bufPrint(&path_buf2, "{s}/sleepers_triggered.zst", .{dir});
+    try io_fs.writeFile(triggered, bytes);
+    sleeper_store.loadTriggered(std.testing.allocator, dir);
+
+    // A cleared volume is always also triggered (loadCleared latches both), so
+    // a load that set quest_cleared without triggered would be inconsistent
+    // state reaching the sim.
+    for (sleeper_store.volumes) |v| {
+        if (v.quest_cleared) try std.testing.expect(v.triggered);
+    }
+}
+
+fn fuzzSleeperStores(_: void, smith: *std.testing.Smith) !void {
+    @disableInstrumentation();
+    var storage: [1024]u8 = undefined;
+    const len: usize = smith.slice(&storage);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try sleeperLoadBoth(dir, storage[0..len]);
 }
