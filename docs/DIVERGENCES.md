@@ -203,6 +203,23 @@ Remaining constant in that feature, deliberate: `owner` is written as null
 because zdtd containers store no owner ref, so there is nothing truthful to put
 there. Missing beats fake.
 
+### Spawn-package field audit (2026-09-02)
+
+Same question put to the non-TE builders that take a field struct, where a
+caller can omit a field and the default passes silently. `PlayerSpawnInfo` had
+two: both `sendPlayerSpawns` sites passed `holding_item = null` while the server
+tracks the held stack in `inventory[ps].holding`. An item switch is already
+rebroadcast as `NetPackageHoldingItem`, so the effect was bounded but real: a
+joiner saw everyone already present bare-handed until each next switched, and an
+armed joiner looked bare-handed to everyone else. Fixed at both sites, with the
+inbound and outbound halves separately pinned (each assertion verified to fail
+with its own call site reverted).
+
+`profile` stays null: zdtd stores no player appearance data (archetype, race,
+hair, colors), and `PlayerProfile.Write` has no partial form. Inventing one
+would put fabricated appearance on the wire, so the null flag is the honest
+answer. `team_number` is 0 because zdtd has no team system.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.
