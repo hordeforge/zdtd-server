@@ -182,6 +182,27 @@ them to match, so raising one alone would have written past the other's buffer.
 Since `world` must not import `wire`, the equality is asserted at the one place
 both are in scope, verified to be a compile error when they diverge.
 
+### TE composite field audit (2026-09-02)
+
+The vending defect was a *builder* omission, not a parser one, so every
+build/parse pair in `stock_te.zig` was checked the same way: which fields does
+the format carry that the sender fills with a constant. Workstation and light
+pass (the workstation sender populates all eight lists; storage takes the whole
+container struct, so no field can be dropped by a caller).
+
+One more real defect: `writeStorageFeature` hardcoded `worldTimeTouched` to 0.
+The server tracks the touch day authoritatively (`containers.touched_day`, the
+base `maybeRespawnContainer` uses for LootRespawnDays), and the receiving client
+runs `TEFeatureStorage.UpdateTick` over the same field (RE `loot-economy.md`:
+`daysElapsed = (WorldTimeToTotalHours(now) -
+WorldTimeToTotalHours(worldTimeTouched)) / 24`). A constant 0 told every client
+the loot was as old as the world. Now derived with the stock encoding, matching
+`WorldClock.worldTimeBits` so both sides share an epoch.
+
+Remaining constant in that feature, deliberate: `owner` is written as null
+because zdtd containers store no owner ref, so there is nothing truthful to put
+there. Missing beats fake.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.
