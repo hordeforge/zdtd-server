@@ -166,6 +166,22 @@ are documented as inbound and outbound rather than one being reused for both.
 Beyond 255 edges on a single node the stock count field cannot describe the
 list at all; that residual is a format limit, asserted at the call site.
 
+Continuing the sweep turned up a second defect of the same family.
+`sendVendingTe` never passed `.allowed`, which defaults to an empty slice, so
+every vending TE went out declaring zero allowed users. The C2S side stores the
+list (`c2s/inv.zig`) and the save format persists it (`vending.zig`), but the
+owner's client saw it empty on every reopen. The list is part of the stock
+composite (`TileEntityVendingMachine::write`, asm.il ~440486: `i32 n | n x
+ToStream`). Fixed, with the owner-gated vending scenario now parsing the echo
+back and asserting the round trip.
+
+The related cap pair is pinned too: the C2S handler sizes its parse scratch with
+the store's `max_allowed_users` while `parseVendingTeBody` indexes that scratch
+with the wire layer's `max_vending_allowed`. Both are 8 and nothing required
+them to match, so raising one alone would have written past the other's buffer.
+Since `world` must not import `wire`, the equality is asserted at the one place
+both are in scope, verified to be a compile error when they diverge.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.
