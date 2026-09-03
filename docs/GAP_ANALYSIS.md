@@ -4017,20 +4017,34 @@ a finer server encoding.
 ## 12. Net and ops
 
 **Headline.** A player can join and play today over direct IP with a correct
-189-name package map and a working reliable/fragmented LiteNet channel, but the
+191-name package map and a working reliable/fragmented LiteNet channel, but the
 server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
 **49 WORKS · 0 PARTIAL · 0 MISSING**
 
-- **PackageIds name table (189 stock names, exact set)** `WORKS`
-  `default_mappings` holds exactly the 189 concrete `NetPackage` subclasses of
-  V3.1.0 b14. Verified by extracting every class transitively extending NetPackage
-  from asm.il (191) and removing the two abstract ones
-  (`NetPackageEntityTargeted`, `DynamicMeshServerData`), since
-  `FindTypesImplementingBase` defaults `_allowAbstract=false`. Set difference is
-  empty in both directions, including nested types registered by short name.
+- **PackageIds name table (191 stock names, exact set)** `WORKS`
+  `default_mappings` holds 191 entries: every class transitively extending
+  NetPackage in asm.il, less the abstract ones (`NetPackageEntityTargeted`,
+  `DynamicMeshServerData`), since `FindTypesImplementingBase` defaults
+  `_allowAbstract=false`. Set difference is empty in both directions, including
+  nested types registered by short name.
+  **Count corrected 2026-09-04.** This row said "exactly the 189" while the
+  file holds 191, citing V3.1.0 b14 against a V3.2.0 b9 pin. 189 is the live
+  map count captured for V3.0.1 and re-captured for V3.1.0 (RE `protocol.md`
+  §4: `map count: 0xBD = 189`); V3.2.0 b9 was never re-captured live and its
+  census is 195 wire types (RE `inventories/netpackages.md`), so 191 sitting
+  between the two is what a pin between those captures should look like.
+  Re-verified against the RE type table 2026-09-04: no stock wire package is
+  absent from our map, and no name we register is absent from the RE docs. The
+  only stock-table names we do not register are helpers and abstract bases
+  (`NetPackageDirection` [enum], `Entry`, `Info`, `Logger`, `Measure`,
+  `Metrics`, `EntityTargeted`), none of them a wire package. The client uses
+  the server-advertised ids (RE `protocol.md` §4, "Client must use
+  server-advertised ids"), so the count itself is ours to choose; what has to
+  hold is that every name a stock client sends or expects is present, which is
+  what the set difference checks.
   *Anchors:* `src/wire/packages.zig:68-256`, `asm.il:805117-805140`,
   `asm.il:805088-805100`, `asm.il:2133289-2133345`
 
@@ -4929,7 +4943,7 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 | Item | Status | Notes |
 |---|---|---|
 | Challenge `0xCA` + Guid16 echo | HAVE | |
-| `NetPackagePackageIds` map | HAVE | **negotiated** 189-name list (full stock subset) |
+| `NetPackagePackageIds` map | HAVE | **negotiated** 191-name list (full stock wire set; see the PackageIds row in §12) |
 | `NetPackagePlayerLogin` parse | WORKS (2026-08-26 re-audit: the parser walks the full stock body - name + both PlatformUserIdentifierAbs + both auth tokens (skipped) + version + compatibilityVersion + discord id, asm.il 832140; the auth-token skip is the documented EAC-off direct-join model - no platform authorizer chain, same as the Platform auth row) |
 | `PlayerLoginAnswer` | HAVE | simple ok/fail string |
 | `PlayerId` | WORKS (2026-08-26 re-audit: body matches stock write IL=21 exactly - id:i32, teamNumber:i16, full PlayerDataFile.WriteNetwork (quests, unlocked recipes, toolbelt, bag, gameStageBornAtWorldTime sentinel), chunkViewDim:i32; the production join sends the full PDF via buildPlayerIdBodyInvLoaded) |
