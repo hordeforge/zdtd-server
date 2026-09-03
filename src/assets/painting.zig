@@ -6,6 +6,9 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 
+/// Storage cap on parsed paint entries, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock painting.xml
+/// defines **156**, so the headroom here is thinner than the other asset caps.
 pub const max_paints: usize = 256;
 
 pub const Entry = struct {

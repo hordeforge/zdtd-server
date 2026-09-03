@@ -7,6 +7,9 @@ const io_fs = @import("../util/io_fs.zig");
 const unity_hash = @import("unity_hash.zig");
 const components = @import("../ecs/components.zig");
 
+/// Storage cap on parsed entity classes, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock entityclasses.xml
+/// defines **293**, so this holds stock plus a substantial modlet set.
 pub const max_entities_defs: usize = 512;
 
 /// Stock `<property class="Explosion">` blast params (RE entity-ai.md §9.x):
