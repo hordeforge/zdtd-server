@@ -676,6 +676,10 @@ pub fn buildSpawnedBody(buf: []u8, reason: i32, x: i32, y: i32, z: i32, entity_i
     return w.written();
 }
 
+/// NetPackageEntityPosAndRot (RE protocol-packages.md 5.5.1, write IL=76):
+/// `entityId` i32 | pos.x,y,z f32 | `bUseQRotation` bool | rot.x,y,z f32 euler
+/// degrees (the `false` branch) | `onGround` bool. The client applies it with 3
+/// update steps.
 pub fn buildPosAndRotBody(buf: []u8, entity_id: i32, x: f32, y: f32, z: f32, rx: f32, ry: f32, rz: f32, on_ground: bool) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -789,6 +793,11 @@ pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y:
     return .{ .entity_id = entity_id, .x = x, .y = y, .z = z, .on_ground = on_ground };
 }
 
+/// NetPackageEntityRelPosAndRot (RE protocol-packages.md 5.5.4, write IL=30).
+/// Extends the Rotation body (5.5.3), so the full wire order is: `entityId` i32
+/// | `bUseQRotation` bool | rot.x,y,z i16 (EncodeRot, rot*256/360) | dPos.x,y,z
+/// i16 (1/32 block) | `onGround` bool | `updateSteps` i16. The body-inventory
+/// table lists only the five fields after the Rotation base.
 pub fn buildRelPosBody(buf: []u8, entity_id: i32, dx: i16, dy: i16, dz: i16, rx: i16, ry: i16, rz: i16, on_ground: bool, steps: i16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -3414,7 +3423,12 @@ pub fn buildNavObjectAdd(
     return w.written();
 }
 
-/// Minimal ExplosionClient: center xyz + identity quat + expType i16 + power/radius/blockDmg u16 + entityId + changes u16=0.
+/// NetPackageExplosionClient (RE protocol-packages.md 6.15 + write IL=60):
+/// `center` Vector3 | `rotation` Quaternion | `expType` i16 | `blastPower` u16 |
+/// `blastRadius` u16 | `blockDamage` u16 | `entityId` i32 | `changeCount` u16,
+/// then changeCount x BlockChangeInfo. zdtd emits the FX with an empty change
+/// list: block results already ride the authoritative SetBlock path, so
+/// repeating them here would apply them twice on the client.
 pub fn buildExplosionClient(
     buf: []u8,
     cx: f32,
