@@ -1635,9 +1635,13 @@ test "armor resist curves parse from stock items.xml (PDR quality curves)" {
         }
         if (d.phys_resist_n > 0) found += 1;
     }
-    // The XML def table caps at max_items; the armor family (alphabetically
-    // early) carries the bulk of the 134 PDR rows.
-    try std.testing.expect(found >= 50);
+    // Measured against stock V3.2.0 items.xml (2026-09-04): 1413 items, of
+    // which 67 carry a PhysicalDamageResist passive; the parse finds 73 rows
+    // because a def can hold more than one. The old bound was 50 with a note
+    // that max_items might truncate the tail - it cannot: the table runs at
+    // 17% of the cap, so nothing is lost and the bound can be tight enough to
+    // catch a regression instead of tolerating one.
+    try std.testing.expect(found >= 70);
     // DegradationPerUse (base_set) on tools; TargetArmor (perc_add) only on
     // untagged rows (ammo9mmBulletAP, the armor-piercing round).
     var stone_axe = false;
