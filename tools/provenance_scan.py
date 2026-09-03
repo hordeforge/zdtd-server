@@ -311,6 +311,21 @@ def main():
     #    exact shape of gap this project keeps finding. See DIVERGENCES 3b.
     pkg_src = open(os.path.join(ROOT, "src/wire/packages.zig"), encoding="utf-8").read()
     registered = sorted(set(re.findall(r'"(NetPackage\w+)"', pkg_src)))
+    # 7a. The advertised map size is a load-bearing number (the client uses
+    #     server-advertised ids), and the docs quoted a stale 189 against a file
+    #     holding 191 for some time. Keep the two in step.
+    mapping_m = re.search(
+        r"pub const default_mappings = \[_\]\[\]const u8\{(.*?)\n\};", pkg_src, re.S
+    )
+    if mapping_m:
+        n_mapped = len(re.findall(r'"(NetPackage\w+)"', mapping_m.group(1)))
+        gap = open(os.path.join(ROOT, "docs/GAP_ANALYSIS.md"), encoding="utf-8").read()
+        if not re.search(rf"PackageIds name table \({n_mapped} stock names", gap):
+            failures.append(
+                f"default_mappings has {n_mapped} names but the GAP_ANALYSIS "
+                "'PackageIds name table (N stock names, exact set)' row disagrees "
+                "- update the row when the map changes"
+            )
     referenced = set()
     for dirpath, _dirs, names in os.walk(os.path.join(ROOT, "src/server")):
         for n in names:
