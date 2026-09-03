@@ -9,6 +9,7 @@ const packages = @import("../../wire/packages.zig");
 const subbiome_noise = @import("../../world/subbiome_noise.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
 const world_store = @import("../../world/store.zig");
+const biome_layers = @import("../../assets/biome_layers.zig");
 
 pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
     const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
@@ -20,6 +21,11 @@ pub fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.Spe
         const si = subbiome_noise.subBiomeIdx(&g.sub_noise, subs, wx, wz);
         if (si >= 0) set = subs[@intCast(si)].decos;
     }
+    // The load-side cap and the wire-side capacity are independent constants in
+    // layers that cannot import each other. If the wire side were the smaller
+    // of the two, this loop would silently drop deco the loader had accepted.
+    comptime std.debug.assert(packages.stock_deco.max_species >=
+        biome_layers.max_deco_per_biome);
     var out: packages.stock_deco.SpeciesList = .{};
     for (set.slice()) |d| {
         if (out.n >= packages.stock_deco.max_species) break;
