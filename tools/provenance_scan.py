@@ -305,13 +305,13 @@ def main():
 
     # 7b. BUILDER RE CITATIONS (ratchet). AGENTS rule 16: field order, types and
     #     lengths come from the RE, so a body builder should name its source.
-    #     34 of 79 builders in packages.zig still carry no citation (measured
-    #     2026-09-04); that backlog is not a reason to leave the seam open, so
-    #     the count is ratcheted: it may fall, never rise. Citing a builder is
-    #     also what makes an automated field-order diff against
-    #     inventories/netpackage-bodies.md possible, which is how a layout
-    #     regression would be caught rather than reasoned about.
-    MAX_UNCITED_BUILDERS = 34
+    #     29 of 79 builders in packages.zig still carry no citation (measured
+    #     2026-09-04, lowered from 34 the same day); that backlog is not a reason
+    #     to leave the seam open, so the count ratchets: it may fall, never rise.
+    #     Citing a builder is also what makes an automated field-order diff
+    #     against inventories/netpackage-bodies.md possible, which is how a
+    #     layout regression gets caught rather than reasoned about.
+    MAX_UNCITED_BUILDERS = 29
     builder_src = open(
         os.path.join(ROOT, "src/wire/packages.zig"), encoding="utf-8"
     ).read()
