@@ -986,6 +986,10 @@ pub fn buildRemoveBody(buf: []u8, entity_id: i32) ![]u8 {
     return buildRemoveBodyReason(buf, entity_id, .killed);
 }
 
+/// NetPackageEntityRemove (RE protocol-packages.md, write IL=8): the
+/// EntityTargeted base `entityId` i32, then `reason` u8
+/// (EnumRemoveEntityReason). The body-inventory table lists only `reason`,
+/// since it shows fields after the base.
 pub fn buildRemoveBodyReason(buf: []u8, entity_id: i32, reason: RemoveEntityReason) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -2076,6 +2080,13 @@ pub fn buildInventoryBodyStock(buf: []u8, inv: *const components.Inventory) ![]u
     return stock_inv.buildFromEcs(buf, inv);
 }
 
+/// NetPackagePlayerInventory (RE protocol-packages.md 5.4, write IL=107):
+/// `toolbelt` present bool (+ ItemStack[] if set) | `bag` present bool
+/// (+ Bag.Write) | `equipment` present bool (+ Equipment: ItemValue array, one
+/// cosmetic i32 per slot, then the unlockedCosmetics count) | `dragAndDropItem`
+/// present bool (+ ItemStack). The body-inventory table shows the cosmetics
+/// list as a top-level field; the narrative places it inside the equipment
+/// block, which is where stock_inv.writeEquipment puts it.
 pub fn buildInventoryBodyStockResolved(
     buf: []u8,
     inv: *const components.Inventory,
@@ -2192,7 +2203,13 @@ pub fn buildInvDataResponseNotFound(buf: []u8, inventory_key: [16]u8, manager_to
     return w.written();
 }
 
-/// Stock success response with item stacks (hash miss / full sync path).
+/// NetPackageInventoryDataResponse (RE protocol-packages.md, write IL=24 /
+/// Process IL=30): `success` bool | `errorMsg` string | `inventoryKey` Guid |
+/// `ItemStack[]` (i16 count + ItemStack.Write each) | `managerToken` Guid.
+/// The body-inventory table omits the stack array; the narrative row and the
+/// client's UpdateInventory(items, managerToken) both have it, so the array
+/// sits between key and token. This is the hash-miss / full-sync path; the
+/// hash-hit path writes count -1 for a null list (Request Process IL=92 step 3).
 pub fn buildInvDataResponseItems(
     buf: []u8,
     inventory_key: [16]u8,
@@ -3318,6 +3335,8 @@ pub const ClientInfoEntry = struct {
     admin: bool,
 };
 
+/// NetPackageClientInfo (RE inventories/netpackage-bodies.md, write IL=41):
+/// `playerIds` count u16, then per entry entityId i32 | ping i16 | isAdmin bool.
 pub fn buildClientInfoBody(buf: []u8, entries: []const ClientInfoEntry) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeU16(@intCast(entries.len));
