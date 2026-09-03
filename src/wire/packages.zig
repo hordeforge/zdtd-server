@@ -2318,14 +2318,22 @@ fn skipLockTargetIdent(r: *binary.Reader) binary.ReadError!void {
     }
 }
 
-/// Parse LockRequest; on success returns head with slices into `body`.
+/// Cap on the declared lock-target count. Stock's NetPackageLockRequest writes
+/// an i32 count with no documented limit (RE write IL=74), so this bounds the
+/// work one C2S body can demand rather than enforcing a stock rule: the targets
+/// are the tile entities being opened, and a real request names a handful.
+const max_lock_targets_declared: i32 = 32;
+
+/// NetPackageLockRequest (RE write IL=74; the response in buildLockResponseGrant
+/// echoes these fields): `locking` bool | `channel` u16 | target count i32 |
+/// targets | `context` string. On success returns a head with slices into `body`.
 pub fn parseLockRequest(body: []const u8) binary.ReadError!LockRequestHead {
     var r: binary.Reader = .{ .data = body };
     const locking = try r.readBool();
     const channel = try r.readU16();
     const count_pos = r.pos;
     const count = try r.readI32();
-    if (count < 0 or count > 32) return error.EndOfStream;
+    if (count < 0 or count > max_lock_targets_declared) return error.EndOfStream;
     var i: i32 = 0;
     while (i < count) : (i += 1) {
         try skipLockTargetIdent(&r);
