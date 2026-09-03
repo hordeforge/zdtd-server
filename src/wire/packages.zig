@@ -1438,6 +1438,9 @@ pub fn extractChunkKeyZ(key: i64) i32 {
     return shifted >> 8;
 }
 
+/// zdtd height-map payload for tests and loadgen, **not a stock package body**:
+/// cx i32 | cz i32 | ydim i32 | 256 height bytes. The stock chunk body is built
+/// by stock_chunk.buildNetPackageChunkNew; see buildStockChunkEnvelope below.
 pub fn buildChunkPayload(buf: []u8, cx: i32, cz: i32, heights: *const [256]u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(cx);
@@ -2158,7 +2161,11 @@ pub fn parseInvTxRequest(body: []const u8) !struct { op: u8, a: u16, b: u16, qty
     };
 }
 
-/// Response: ok:u8 | dropped_entity:i32 | then optional inventory snap (caller appends).
+/// zdtd's compact transaction response head, the counterpart to
+/// buildInvTxRequest and likewise **not the stock body**: ok u8 |
+/// dropped_entity i32, then an optional inventory snapshot the caller appends.
+/// Stock's NetPackageInventoryTransactionResponse (RE write IL=66) is
+/// inventories bool | i32 | success bool | keys count | Vector3i | bool.
 pub fn buildInvTxResponseHead(buf: []u8, ok: bool, dropped_entity: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(@intFromBool(ok));
@@ -2859,6 +2866,10 @@ pub const StockChat = struct {
     recipient_count: u8 = 0,
 };
 
+/// NetPackageChat (RE inventories/netpackage-bodies.md, write IL=63):
+/// `chatType` u8 | `senderEntityId` i32 | `msg` string | `msgSender` u8
+/// (EMessageSender) | `bbMode` u8 (BbCodeSupportMode) | `recipientEntityIds`
+/// count i32 | count x i32. An empty recipient list means every peer.
 pub fn buildStockChat(buf: []u8, chat_type: u8, sender_entity_id: i32, msg: []const u8, recipients: []const i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(chat_type);
@@ -3430,6 +3441,10 @@ pub const PlayerPositionEntry = struct {
     z: i32,
 };
 
+/// NetPackagePersistentPlayerPositions (RE inventories/netpackage-bodies.md,
+/// write IL=38): `positions` count i32, then per entry the persistent player id
+/// (PlatformUserIdentifier ToStream) and the position (StreamUtils Vector3i =
+/// three i32).
 pub fn buildPersistentPlayerPositionsBody(buf: []u8, entries: []const PlayerPositionEntry) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(@intCast(entries.len));
@@ -3714,8 +3729,9 @@ pub fn parseNpcQuestList(body: []const u8) !NpcQuestListHead {
     return head;
 }
 
-/// S2C FetchList with QuestPacketEntry offers (stock trader UI).
-/// Empty offers: pass `entries` as `&.{}` (npc | player | eventType=0 | tier | count=0).
+/// NetPackageNPCQuestList, S2C FetchList with QuestPacketEntry offers (stock
+/// trader UI): npc i32 | player i32 | eventType u8 | tier i32 | entry count i32
+/// | count x QuestPacketEntry. Empty offers: pass `entries` as `&.{}`.
 pub fn buildNpcQuestListFetch(
     buf: []u8,
     npc_entity_id: i32,
@@ -3984,6 +4000,11 @@ pub fn parseVendingMachineAccess(body: []const u8, plat_buf: []u8, id_buf: []u8)
     return .{ .user = user, .x = x, .y = y, .z = z, .removing = removing };
 }
 
+/// zdtd's own trade request body, **not a stock package**: traderEntity i32 |
+/// item u16 | qty u16 | side u8. Stock has no single "trade" package; a buy or
+/// sell rides the inventory transaction path. This feeds Game.handleTrade
+/// directly and is never framed with a stock package name, so it cannot reach
+/// or come from a client.
 pub fn buildTraderTradeBody(buf: []u8, trader_entity: i32, item: u16, qty: u16, side: u8) ![]u8 {
     if (buf.len < 9) return error.Overflow;
     std.mem.writeInt(i32, buf[0..4], trader_entity, .little);
@@ -4172,6 +4193,12 @@ pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, t
     return .{ .entity_id = eid, .op = op, .throttle = throttle, .steer = steer };
 }
 
+/// zdtd's own vehicle control body, **not a stock layout**: entityId i32 | op u8
+/// | throttle f32 | steer f32, fixed at vehicle_control_len bytes. Stock's
+/// NetPackageVehicleSpawn (RE write IL=24) is entityType i32 | pos Vector3 |
+/// rot Vector3 | ItemValue | entityThatPlaced i32, which is a different shape
+/// and a different purpose. The C2S handler distinguishes them by the exact
+/// 13-byte length, so a real stock body can never be read as this one.
 pub fn buildVehicleControlBody(buf: []u8, entity_id: i32, op: u8, throttle: f32, steer: f32) ![]u8 {
     if (buf.len < 13) return error.Overflow;
     std.mem.writeInt(i32, buf[0..4], entity_id, .little);
@@ -4447,8 +4474,8 @@ pub fn parseWaypointInvite(body: []const u8) (binary.ReadError || error{Overflow
 }
 
 /// Rebuild the relay body. Matches the server adjustments in
-/// WaypointInviteServer: bTracked=false, waypoint.inviterEntityId = inviter
-/// (Setup), package inviterEntityId = inviter.
+/// NetPackageWaypointInvite (RE: WaypointInviteServer Setup). bTracked=false,
+/// waypoint.inviterEntityId = inviter, package inviterEntityId = inviter.
 pub fn buildWaypointInviteBody(buf: []u8, wp: *const WaypointInvite, inviter: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(wp.pos[0]);

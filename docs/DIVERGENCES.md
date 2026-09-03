@@ -196,6 +196,27 @@ against the RE package table; none is a live gap, for these reasons:
   outcome; whether the prime signal adds a wind-up cue is unknown. Same
   posture as `VehicleCount` below: not emitted on a guess.
 
+### Two zdtd-shaped bodies under stock package names (2026-09-04)
+
+Found while citing the body builders against the RE. Both are C2S-inbound only,
+never sent to a client, and both are distinguished from the stock body by shape
+before anything is applied, so a stock client is unaffected. Recorded because a
+non-stock body riding a stock package name is exactly the thing that looks like
+a wire divergence later.
+
+- **`NetPackageVehicleSpawn`** also accepts a zdtd control body (`entityId` i32 |
+  `op` u8 | `throttle` f32 | `steer` f32, fixed 13 bytes) for seat / unseat /
+  drive. Stock's body is `entityType` i32 | pos Vector3 | rot Vector3 |
+  ItemValue | `entityThatPlaced` i32 (write IL=24), a different shape for a
+  different purpose. The handler gates on the exact 13-byte length
+  (`c2s/misc.zig`), so a stock spawn body cannot be read as a control command;
+  it falls through unhandled instead, which is the honest outcome given zdtd
+  does not implement client-requested vehicle spawning.
+- **`NetPackageInventoryTransactionRequest`** accepts a compact form beside the
+  stock `InventoryTransaction.Write` op list. The stock layout is tried first
+  (`parseStockInvTx`), so a real client always takes the stock path; the compact
+  body exists for scenarios driving the same handler.
+
 One of the 55 is not in a waived category and is recorded here rather than
 buried in that list: **`NetPackageVehicleCount`** (body `vehicleCount i32 |
 turretCount i32 | droneCount i32`, RE `netpackage-bodies.md` write IL=16). Stock

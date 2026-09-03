@@ -303,29 +303,38 @@ def main():
     if unledgered:
         failures.append("behavioral constants not in the ledger: " + "; ".join(f"{rel}:{ln} {n}" for rel, ln, n in unledgered[:8]))
 
-    # 7b. BUILDER RE CITATIONS (ratchet). AGENTS rule 16: field order, types and
-    #     lengths come from the RE, so a body builder should name its source.
-    #     8 of 79 builders in packages.zig still carry no citation (measured
-    #     2026-09-04, lowered from 34 in steps); that backlog is not a reason
-    #     to leave the seam open, so the count ratchets: it may fall, never rise.
-    #     Citing a builder is also what makes an automated field-order diff
-    #     against inventories/netpackage-bodies.md possible, which is how a
-    #     layout regression gets caught rather than reasoned about.
-    MAX_UNCITED_BUILDERS = 8
+    # 7b. BUILDER RE CITATIONS. AGENTS rule 16: field order, types and lengths
+    #     come from the RE, so every body builder names its source. This started
+    #     as a ratchet at 34 (2026-09-04) and reached 0 the same day; it is now a
+    #     hard rule, since a new builder that cannot say where its layout comes
+    #     from has not been checked against stock. A builder whose body is
+    #     deliberately zdtd's own says so instead ("not a stock layout"), which
+    #     is the other honest answer. Citing a builder is also what makes an
+    #     automated field-order diff against inventories/netpackage-bodies.md
+    #     possible, which is how a layout regression gets caught rather than
+    #     reasoned about.
+    MAX_UNCITED_BUILDERS = 0
     builder_src = open(
         os.path.join(ROOT, "src/wire/packages.zig"), encoding="utf-8"
     ).read()
     cited_builders = set()
     for m in re.finditer(r"((?:^///[^\n]*\n)+)pub fn (build\w+)\(", builder_src, re.M):
         doc = m.group(1)
-        if "NetPackage" in doc or "asm.il" in doc or "IL=" in doc or "RE " in doc:
+        if (
+            "NetPackage" in doc
+            or "asm.il" in doc
+            or "IL=" in doc
+            or "RE " in doc
+            or "not a stock" in doc
+            or "not the stock" in doc
+        ):
             cited_builders.add(m.group(2))
     all_builders = set(re.findall(r"pub fn (build\w+)\(", builder_src))
     uncited = sorted(all_builders - cited_builders)
     if len(uncited) > MAX_UNCITED_BUILDERS:
         failures.append(
-            f"body builders without an RE citation rose to {len(uncited)} "
-            f"(ratchet {MAX_UNCITED_BUILDERS}): {', '.join(uncited[:6])} - cite the "
+            f"body builders without an RE citation: {len(uncited)} "
+            f"({', '.join(uncited[:6])}) - cite the "
             "RE source in the doc comment (AGENTS rule 16)"
         )
 
