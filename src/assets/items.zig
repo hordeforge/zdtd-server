@@ -7,6 +7,10 @@ const buffs = @import("buffs.zig");
 const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
 
+/// Storage cap on parsed item defs, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock items.xml defines
+/// **1413**, so this runs at 17% and has room to spare, unlike the block cap
+/// next door.
 pub const max_items: usize = 8192;
 
 /// Stock FastTags match between a passive's tag list and a drop row's tag
