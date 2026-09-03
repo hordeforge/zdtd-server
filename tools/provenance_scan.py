@@ -345,6 +345,38 @@ def main():
             "RE source in the doc comment (AGENTS rule 16)"
         )
 
+    # 7c. PARSER RE CITATIONS (ratchet). Same rule as 7b for the read side, and
+    #     the read side is the one that touches untrusted bytes: a parser whose
+    #     field order is wrong desyncs the reader on a body a client really
+    #     sends. 37 of 50 still lack a citation (measured 2026-09-04); the
+    #     builders went 34 -> 0 the same way, so this ratchets down too.
+    MAX_UNCITED_PARSERS = 37
+    uncited_parsers = []
+    for wire_name in sorted(os.listdir(os.path.join(ROOT, "src/wire"))):
+        if not wire_name.endswith(".zig"):
+            continue
+        psrc = open(os.path.join(ROOT, "src/wire", wire_name), encoding="utf-8").read()
+        cited_p = set()
+        for m in re.finditer(r"((?:^///[^\n]*\n)+)pub fn (parse\w+)\(", psrc, re.M):
+            doc = m.group(1)
+            if (
+                "NetPackage" in doc
+                or "asm.il" in doc
+                or "IL=" in doc
+                or "RE " in doc
+                or "not a stock" in doc
+                or "not the stock" in doc
+            ):
+                cited_p.add(m.group(2))
+        all_p = set(re.findall(r"pub fn (parse\w+)\(", psrc))
+        uncited_parsers += [f"{wire_name}:{p}" for p in sorted(all_p - cited_p)]
+    if len(uncited_parsers) > MAX_UNCITED_PARSERS:
+        failures.append(
+            f"body parsers without an RE citation rose to {len(uncited_parsers)} "
+            f"(ratchet {MAX_UNCITED_PARSERS}): {', '.join(uncited_parsers[:6])} - "
+            "cite the RE source in the doc comment (AGENTS rule 16)"
+        )
+
     # 7. PACKAGE EMISSION COVERAGE: every registered stock package name the
     #    server never references must be accounted for in the docs. Registering
     #    a name without a sender is legitimate (the negotiated name-to-id map
