@@ -944,6 +944,15 @@ pub const ParsedVending = struct {
 
 pub const max_vending_allowed: usize = 8;
 
+/// Cap on the declared `allowedUserIds` count when parsing a vending TE.
+/// Stock writes a plain i32 count with no documented limit (RE
+/// tile-entities-power.md, TEFeatureLockable), so this is a zdtd bound on how
+/// much work one C2S body may cost, not a stock rule: entries past
+/// `max_vending_allowed` are read into scratch and dropped, and this stops a
+/// hostile count from making that loop run for billions of iterations. Set well
+/// above any plausible real list so a legitimate client is never rejected.
+pub const max_vending_allowed_declared: i32 = 64;
+
 /// Read the vending TE composite. `plat_buf` / `id_buf` / `pw_buf` are the
 /// caller's scratch for the owner identity, allowed-user identities and the
 /// password string; `allowed` storage lives in the returned struct.
@@ -972,7 +981,7 @@ pub fn parseVendingTeBody(
     }
     out.password = try pr.readString(pw_buf);
     const allowed_count = try pr.readI32();
-    if (allowed_count < 0 or allowed_count > 64) return error.InvalidString;
+    if (allowed_count < 0 or allowed_count > max_vending_allowed_declared) return error.InvalidString;
     var i: i32 = 0;
     while (i < allowed_count) : (i += 1) {
         if (out.allowed_n < max_vending_allowed) {

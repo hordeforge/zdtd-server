@@ -119,6 +119,13 @@ pub const TraderDataReadEntry = struct {
     markup: i8 = 0,
 };
 
+/// Cap on the declared trader-stock entry count. Stock's TraderData::Read takes
+/// a plain i32 with no documented limit (IL 472732), so this bounds the work one
+/// body can demand rather than enforcing a stock rule; entries past the caller's
+/// storage are read and dropped either way. Set far above any real trader
+/// inventory so a legitimate body is never rejected.
+const max_trader_entries_declared: i32 = 4096;
+
 /// TraderData::Read (the mirror of writeTraderDataBody, stock IL 472732):
 /// trader id, last restock world time, FileVersion, primary inventory entries,
 /// tier groups (read + skipped), available money. `entries` is the caller's
@@ -131,7 +138,7 @@ pub fn readTraderDataBody(
     _ = try r.readU64(); // lastInventoryUpdate
     _ = try r.readByte(); // FileVersion
     const count = try r.readI32();
-    if (count < 0 or count > 4096) return error.EndOfStream;
+    if (count < 0 or count > max_trader_entries_declared) return error.EndOfStream;
     var n: usize = 0;
     var i: i32 = 0;
     while (i < count) : (i += 1) {
