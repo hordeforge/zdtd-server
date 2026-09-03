@@ -10,6 +10,9 @@ const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const buffs = @import("buffs.zig");
 
+// zdtd storage bounds, not stock rules; stock has no limit on either. Measured
+// against V3.2.0 `Data/Config` (2026-09-04): progression.xml defines 8
+// attributes and 57 perks, so both caps carry large headroom for modlets.
 pub const max_attrs: usize = 16;
 pub const max_perks: usize = 512;
 pub const max_skills: usize = 64; // crafting skills (stock 23)

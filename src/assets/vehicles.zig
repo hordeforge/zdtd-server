@@ -7,6 +7,9 @@ const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const components = @import("../ecs/components.zig");
 
+/// Storage cap on parsed vehicle defs, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock vehicles.xml
+/// defines **6**, so this leaves ample room for modlets.
 pub const max_vehicles: usize = 32;
 
 pub const Def = struct {

@@ -5,7 +5,14 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
+const util_log = @import("../util/log.zig");
 
+/// Storage cap on parsed recipes, a zdtd bound rather than a stock rule: stock
+/// has no limit. Measured against V3.2.0 `Data/Config` (2026-09-04): stock
+/// recipes.xml defines **630**, so this leaves room for roughly 390 modlet
+/// additions. The parse loop stops at the cap, so overflow drops the tail; it
+/// logs once when that happens rather than silently shipping a short catalog,
+/// because a missing recipe looks like a game bug, not a config limit.
 pub const max_recipes: usize = 1024;
 pub const max_ingredients: usize = 8;
 
@@ -152,6 +159,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
     var i: usize = 0;
     while (i < clean.len and list.items.len < max_recipes) {
         const tag = std.mem.findPos(u8, clean, i, "<recipe") orelse break;
+        if (list.items.len + 1 == max_recipes) {
+            // One line at the boundary: a truncated catalog otherwise presents
+            // as recipes that mysteriously do not exist.
+            util_log.err(
+                "zdtd: recipes.xml hit the {d}-recipe cap; later recipes are dropped\n",
+                .{max_recipes},
+            );
+        }
         const name = xml.attr(clean, tag, "name") orelse {
             i = tag + 7;
             continue;
