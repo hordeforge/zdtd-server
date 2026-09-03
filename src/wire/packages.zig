@@ -296,6 +296,12 @@ pub const VersionInfo = struct {
     }
 };
 
+/// NetPackagePackageIds (RE inventories/netpackage-bodies.md write IL=62,
+/// protocol.md §4): `VersionInformation.Write` | mapping count i32 | count x
+/// name string | `serverUseEAC` bool | `hasHostUserAndToken` bool, then the
+/// host identity pair only when that bool is true. zdtd runs EAC-off with no
+/// host token, so both bools are false and the pair is correctly absent.
+/// Index = package id; the client must use these server-advertised ids.
 pub fn buildPackageIdsBody(buf: []u8, ver: VersionInfo, mappings: []const []const u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try ver.write(&w);
@@ -306,6 +312,13 @@ pub fn buildPackageIdsBody(buf: []u8, ver: VersionInfo, mappings: []const []cons
     return w.written();
 }
 
+/// NetPackagePlayerLoginAnswer (RE inventories/netpackage-bodies.md, write
+/// IL=46): `bAllowed` bool | `data` string | `platformLobbyId`
+/// (PlatformLobbyId.Write) | host identity (ToStream + string) | server
+/// identity (ToStream + string). zdtd writes the lobby and both identity pairs
+/// as null: a headless EAC-off dedi has no platform lobby and no host token, so
+/// a fabricated identity is exactly what rule 3 forbids. A null
+/// PlatformUserIdentifier is one 0 byte, which is the stock null path.
 pub fn buildLoginAnswerBody(buf: []u8, allowed: bool, data: []const u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeBool(allowed);
@@ -365,10 +378,14 @@ pub const PlayerIdOpts = struct {
     game_stage_born_at: u64 = game_stage_born_unset,
 };
 
+/// NetPackagePlayerId with default options (see buildPlayerIdBodyWithOpts for
+/// the RE field order, write IL=21).
 pub fn buildPlayerIdBody(buf: []u8, entity_id: i32, team: i16, chunk_view_dim: i32, sx: i32, sy: i32, sz: i32) ![]u8 {
     return buildPlayerIdBodyWithOpts(buf, entity_id, team, chunk_view_dim, sx, sy, sz, .{});
 }
 
+/// NetPackagePlayerId carrying the join inventory (see buildPlayerIdBodyWithOpts
+/// for the RE field order, write IL=21).
 pub fn buildPlayerIdBodyInv(
     buf: []u8,
     entity_id: i32,
@@ -395,6 +412,10 @@ pub fn buildPlayerIdBodyInv(
 /// down to it (asm.il ~1975949), so the sentinel reads as zero days survived.
 pub const game_stage_born_unset: u64 = std.math.maxInt(u64);
 
+/// NetPackagePlayerId (RE inventories/netpackage-bodies.md, write IL=21):
+/// `id` i32 | `teamNumber` i16 | `playerDataFile` (PlayerDataFile.WriteNetwork)
+/// | `chunkViewDim` i32. The PDF body is written by
+/// writeEmptyPlayerDataFileNetwork.
 pub fn buildPlayerIdBodyWithOpts(
     buf: []u8,
     entity_id: i32,
@@ -413,6 +434,7 @@ pub fn buildPlayerIdBodyWithOpts(
     return w.written();
 }
 
+/// NetPackagePlayerId (RE write IL=21; field order in buildPlayerIdBodyWithOpts).
 /// Like buildPlayerIdBodyInv; b_loaded=false for death-respawn re-bundle (avoids
 /// GameManager.PlayerId CreateEntity+ToPlayer on an already-spawned local player).
 /// `game_stage_born_at` is the server's survival-streak origin in world ticks,
