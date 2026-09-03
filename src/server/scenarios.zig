@@ -1396,7 +1396,12 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
     // Blast FX: stock GameManager.explode sends NetPackageExplosionClient for
     // every explosion (cops included); the observing client must receive it.
     const fxc = peer_cap.findPkgId(packages.idOf("NetPackageExplosionClient").?) orelse return error.TestUnexpectedResult;
-    try std.testing.expect(fxc.len >= 24);
+    // Exactly the stock body (RE protocol-packages.md 6.15, write IL=60):
+    // center Vector3 (12) + rotation Quaternion (16) + expType i16 (2) +
+    // blastPower/blastRadius/blockDamage u16 (6) + entityId i32 (4) +
+    // changeCount u16 (2) = 42. The old ">= 24" would have passed on a body
+    // truncated anywhere past the rotation.
+    try std.testing.expectEqual(@as(usize, 42), fxc.len);
 
     // Cop B: radius 1 (per-entity wins over the rules floor 4): the same stone
     // cell at distance 1.414 is outside the blast and survives.

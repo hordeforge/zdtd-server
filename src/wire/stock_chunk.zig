@@ -1091,7 +1091,11 @@ test "stock chunk surface density mixed band has both values" {
             off += 5;
         }
     }
-    try std.testing.expect(hits >= 200); // ~256 columns
+    // One intensity run per column: a 16x16 chunk has exactly 256, and the
+    // encoder writes every one. Measured 2026-09-04. The bound used to be
+    // ">= 200 // ~256 columns", which would have passed with 56 columns
+    // missing from the biome-intensity plane.
+    try std.testing.expectEqual(@as(usize, 256), hits);
     // Density bytes: both terrain 0x80 and air 127 must appear (mixed surface).
     var has_t = false;
     var has_a = false;
