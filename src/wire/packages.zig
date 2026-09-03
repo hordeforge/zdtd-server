@@ -1159,8 +1159,20 @@ pub const dmg_pain_hit: u32 = 0x100;
 pub const dmg_turn_into_crawler: u32 = 0x200;
 pub const dmg_trap_kill_xp: u32 = 0x400;
 
-/// Minimal DamageEntity body (V3.2.0 layout): enough for entityId + flags +
-/// source + type + strength + fatal path, with the tail fields zeroed.
+/// NetPackageDamageEntity (RE inventories/netpackage-bodies.md, write IL=144).
+/// All 30 fields in stock order: `entityId` i32 | `flags` u32 | `damageSrc` u8 |
+/// `damageTyp` u8 | `strength` u16 | `hitDirection` u8 | `hitBodyPart` i16 |
+/// `movementState` u8 | `attackerEntityId` i32 | dir f32 x3 | `blockPos`
+/// (StreamUtils Vector3i) | `hitTransformName` string | hitTransformPosition
+/// f32 x3 | uvHit f32 x2 | `KillXPScale` f32 | `damageMultiplier` f32 |
+/// `random` f32 | `bonusDamageType` u8 | `StunType` u8 | `StunDuration` f32 |
+/// `ArmorSlot` u8 | `ArmorSlotGroup` u8 | `ArmorDamage` u16 | `attackingItem`
+/// bool, then the ItemValue only when that bool is true.
+///
+/// zdtd fills the head (entity, flags, source, type, strength, attacker) and
+/// writes the descriptive tail as neutral values: hit transform, uv and armour
+/// slots describe a client-side hit report we do not originate, and the false
+/// `attackingItem` flag is the stock null path rather than a truncation.
 pub fn buildDamageBody(buf: []u8, entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, attacker: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -2057,6 +2069,9 @@ pub fn parseInventoryBodyNative(body: []const u8) !struct { holding: u16, open_c
     };
 }
 
+/// NetPackageHoldingItem (RE inventories/netpackage-bodies.md, write IL=16):
+/// `entityId` i32 | `holdingItemStack` (ItemStack.Write) | `holdingItemIndex`
+/// u8. Body written by stock_inv.writeHoldingItem.
 pub fn buildHoldingBodyResolved(
     buf: []u8,
     entity_id: i32,
@@ -2067,7 +2082,15 @@ pub fn buildHoldingBodyResolved(
     return stock_inv.buildHoldingFromEcsResolved(buf, entity_id, inv, resolve, ctx);
 }
 
-/// Transaction request: op:u8 | a:u16 | b:u16 | qty:u16 | entity_id:i32
+/// zdtd's own compact transaction request: op:u8 | a:u16 | b:u16 | qty:u16 |
+/// entity_id:i32. **Not the stock body.** Stock writes
+/// `InventoryTransaction.Write` (RE inventories/netpackage-bodies.md, Write
+/// IL=75): a nested op list (count | count | Key Vector3i | InitialHash i32 |
+/// FinalHash i32 | Ops count | InventoryOperation.Write each). The C2S handler
+/// tries the stock layout first and only falls back to this one
+/// (`c2s/inv.zig`, parseStockInvTx), so a real client is served the stock
+/// shape; this compact form exists for scenarios driving the same handler
+/// without building a full stock transaction. It is never sent to a client.
 pub fn buildInvTxRequest(buf: []u8, op: u8, a: u16, b: u16, qty: u16, entity_id: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(op);
