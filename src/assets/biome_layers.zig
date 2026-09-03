@@ -52,6 +52,14 @@ pub const Stack = struct {
 /// `m_DistantDecoBlocks` list (asm.il 1249700-1249740), and that list is the only
 /// one `DecoManager::decorateChunkRandom` samples (asm.il 1266097-1266179). It is
 /// what keeps grass (prob .85 / .99) out of the deco burst.
+///
+/// Capacity 12 is a zdtd storage bound, not a stock rule: stock's list is
+/// unbounded. Measured against V3.2.0 `Data/Config` (2026-09-04): only **two**
+/// blocks in the whole catalog carry `IsDistantDecoration=true`, and the
+/// richest biome keeps 2 of its 122 `<decoration type="block">` rows after the
+/// filter, so 12 leaves six times the headroom stock data needs. The fill loops
+/// break at the cap rather than overflowing, so a modlet adding more distant
+/// deco loses the tail silently: raise this if that ever happens.
 pub const max_deco_per_biome: usize = 12;
 
 pub const DecoBlock = struct {
