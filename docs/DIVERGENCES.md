@@ -262,6 +262,17 @@ it. Where the value always exists, drop the default and let the compiler enforce
 it; where it genuinely may not (`profile`, container `owner`), keep the default
 and say why here.
 
+**Sweep closed 2026-09-04.** The remaining builder-input structs carrying
+defaulted fields were enumerated and each sender checked against them:
+`LightTeInfo`, `ActionsArgs`, `PartyDataArgs`, `SharedKillArgs`,
+`BuffValueWire`, `SoundAtPosition`, `SetBlockTexture`. All fill every field for
+which a truthful value exists. Two constants are deliberate and RE-backed:
+`SetBlockTexture.player_id = -1` is what a dedicated server writes (IL=41,
+IL_0018-0027), and `PartyDataArgs` has exactly one sender
+(`social.zig:broadcastPartySnapshot`) which passes all seven. Five defects came
+out of this sweep in total; it is now closed, so a future gap of this shape
+needs a new mechanism rather than another pass.
+
 ## 4. Operator surface
 
 Not wire-visible; these are zdtd's own admin console and config.
