@@ -218,7 +218,7 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Player progression](#10-player-progression) | 25 | 2 | 0 | 27 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 49 | 0 | 0 | 49 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **297** | **3** | **0** | **300** | Two PARTIAL rows: the 2026-08-29 join-burst tick budget (residual recorded inline) and the perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation moved into the counted set (bounded stat coverage, not a blocked dependency). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **297** | **3** | **0** | **300** | Three PARTIAL rows, all with a named shortfall rather than a blocked dependency: the perk/attribute passive-effects VM and the death/kill counters (§10, both re-evaluated 2026-09-02 when the `(waived)` qualifier was dropped), and the join-burst tick budget (§11, 2026-08-29, residual recorded inline). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3017,13 +3017,15 @@ unvalidated, and durability, mods and repair do not exist.
 ## 10. Player progression
 
 **Headline.** A player can join, eat, take client-reported damage, die by
-admin/self-report and respawn. Level, XP, survival stats and active buffs now
-survive a restart (players.zsv v3, server-side ledger). Still missing: no perk
-runtime (client-owned spending, no server model), the client's
-`NetPackagePlayerStats` blob is dropped so other players never see your level,
-and server-to-client XP/level pushes do not exist.
+admin/self-report and respawn. Level, XP, survival stats and active buffs
+survive a restart (ZPV12 tail, server-side ledger). Perk spending is
+server-validated (`NetPackageEntitySetSkillLevelServer`, parent/cost/max gates)
+and both server-to-client pushes ship (`NetPackageEntityAddExpClient`,
+`NetPackageEntitySetSkillLevelClient`). The client's `NetPackagePlayerStats`
+blob is still dropped by design, so the server relays its own ledger rather
+than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 
-**23 WORKS · 0 PARTIAL · 0 MISSING**
+**25 WORKS · 2 PARTIAL · 0 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
@@ -3416,9 +3418,12 @@ them would raise the coverage number without testing a mechanism that exists.
 
 **Headline.** A player can walk, dig, build and persist on real Navezgane terrain
 with POIs, day/night and weather; lakes fill from water_info sources, claims
-expire, repair heals and supports collapse, but the world is visually bald (3
-deco objects per join), terrain is stepped rather than smooth, and block-rotation
-persistence and the HUD day counter each have specific, noticeable gaps.
+expire, repair heals and supports collapse. Player-placed rotation and meta ride
+the chunk raw plane and ZCH3 (2026-08-22 re-audit). The "stepped terrain" and
+"DTM sub-block precision" entries in earlier revisions of this headline were
+retired 2026-08-25: stock's surface density is binary and the wire heightmaps
+are `byte[256]`, so the client's smooth surface comes from its meshers, not from
+a finer server encoding.
 
 **45 WORKS · 1 PARTIAL · 0 MISSING**
 
