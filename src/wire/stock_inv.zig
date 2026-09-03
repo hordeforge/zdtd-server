@@ -224,10 +224,14 @@ pub fn writeHoldingItem(w: *binary.Writer, entity_id: i32, held: StockSlot, hold
 /// Optional absolute-type resolver (from ItemTable.stockTypeFor). null → builtin relative.
 pub const TypeResolver = *const fn (ctx: ?*anyopaque, item_id: u16) i32;
 
+/// NetPackagePlayerInventory body (RE protocol-packages.md 5.4, write IL=107);
+/// field order in writePlayerInventory.
 pub fn buildFromEcs(buf: []u8, inv: *const components.Inventory) ![]u8 {
     return buildFromEcsResolved(buf, inv, null, null);
 }
 
+/// NetPackagePlayerInventory body with an absolute-type resolver (RE
+/// protocol-packages.md 5.4, write IL=107).
 pub fn buildFromEcsResolved(
     buf: []u8,
     inv: *const components.Inventory,
@@ -265,10 +269,13 @@ pub fn buildFromEcsResolved(
     return w.written();
 }
 
+/// NetPackageHoldingItem body (RE inventories/netpackage-bodies.md, write
+/// IL=16): entityId | ItemStack | holdingItemIndex; see writeHoldingItem.
 pub fn buildHoldingFromEcs(buf: []u8, entity_id: i32, inv: *const components.Inventory) ![]u8 {
     return buildHoldingFromEcsResolved(buf, entity_id, inv, null, null);
 }
 
+/// NetPackageHoldingItem body with an absolute-type resolver (RE write IL=16).
 pub fn buildHoldingFromEcsResolved(
     buf: []u8,
     entity_id: i32,

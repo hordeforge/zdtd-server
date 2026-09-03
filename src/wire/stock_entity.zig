@@ -711,6 +711,9 @@ pub const SpawnPointEntry = struct {
     active_in_game_mode: i32 = -1,
 };
 
+/// NetPackageWorldSpawnPoints (RE inventories/netpackage-bodies.md, write
+/// IL=8): one `spawnPoints` blob = SpawnPointList.Write (save version byte,
+/// count i32, then per point a SpawnPosition).
 pub fn buildWorldSpawnPointsBody(buf: []u8, points: []const SpawnPointEntry) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeByte(2); // SpawnPointList.CurrentSaveVersion (.cctor ldc.i4.2)

@@ -1136,8 +1136,10 @@ pub fn parsePoweredTriggerTeBody(body: []const u8) binary.ReadError!PoweredTrigg
     return out;
 }
 
-/// Build the authoritative S2C body for a powered trigger, i.e.
-/// TileEntity/StreamModeWrite.ToClient (2).
+/// NetPackageTileEntity carrying a powered trigger, S2C direction
+/// (TileEntity/StreamModeWrite.ToClient = 2). RE: TileEntityPowered write
+/// (asm.il:1322032 for the read side); the payload order is the sequence of
+/// writes below, wrapped in the outer TE header.
 pub fn buildPoweredTriggerTeBody(
     buf: []u8,
     handle: u8,
@@ -1445,6 +1447,9 @@ pub const LightTeInfo = struct {
     shadows: u8 = 1,
 };
 
+/// NetPackageTileEntity carrying a light TE (RE: TileEntityLight write). Outer
+/// TE header, then the payload written below: intensity, range, colour, light
+/// type, angle and shadow flag.
 pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world_z: i32, info: LightTeInfo) ![]u8 {
     var payload: [64]u8 = undefined;
     var pw: binary.Writer = .{ .buf = &payload };

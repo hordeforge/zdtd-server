@@ -56,6 +56,9 @@ pub const ActionsArgs = struct {
     voice_lobby: []const u8 = "",
 };
 
+/// NetPackagePartyActions (RE inventories/netpackage-bodies.md, write IL=25):
+/// `currentOperation` u8 | `invitedByEntityID` i32 | `invitedEntityID` i32 |
+/// `voiceLobbyId` string.
 pub fn buildActionsBody(buf: []u8, args: ActionsArgs) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeByte(args.action);
@@ -103,6 +106,8 @@ pub const SharedKillArgs = struct {
     killer_id: i32,
 };
 
+/// NetPackageSharedPartyKill (RE inventories/netpackage-bodies.md, write
+/// IL=20): `entityTypeID` i32 | `xp` i32 | `entityID` i32 | `killerID` i32.
 pub fn buildSharedKillBody(buf: []u8, args: SharedKillArgs) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeI32(args.entity_type);

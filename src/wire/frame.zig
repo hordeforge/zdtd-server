@@ -34,6 +34,9 @@ pub fn isChallenge(data: []const u8) bool {
     return protocol.challengeEchoValid(data);
 }
 
+/// Connect-challenge echo, **not a stock NetPackage body**: this is the LiteNet
+/// connect-request payload the server echoes back, carried by the transport
+/// rather than by the package registry (RE protocol-frames.md).
 pub fn buildChallenge(out: *[challenge_size]u8, guid: [16]u8) void {
     out.*[0] = challenge_marker;
     @memcpy(out.*[1..17], &guid);
