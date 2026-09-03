@@ -165,6 +165,37 @@ or not we ever emit the package - but the claim that we emit all 105 was
 wrong, and the distinction matters: "no C2S handler needed" and "we send this"
 are different properties, and only the first was measured.
 
+Of those 55, **39 are named somewhere in GAP_ANALYSIS or on this page** (the
+never-sent non-goals list, the waived categories, the accept-and-drop rows).
+The remaining **16 carried no note at all** before 2026-09-04:
+`BlockLimitTracking`, `DecoResetWorldRect`, `DeleteChunkData`,
+`EditorPrefabInstance`, `EncryptionRequest`, `EncryptionSharedKey`,
+`EntityMapMarkerRemove`, `EntityPrimeDetonator`, `EntitySetPartActive`,
+`EventPrefab`, `MinEventFire`, `OwnedEntitySync`, `POIWaypoint`,
+`RegionMetaData`, `TeleportPlayer`, `WallVolumeRemove`. Each was checked
+against the RE package table; none is a live gap, for these reasons:
+
+- **Superseded by the package we do send.** `TeleportPlayer` (client
+  `TeleportToPosition`) is covered by `NetPackageEntityTeleport`, which RE
+  §5.5.2 gives as the encoded-jump path the client snaps to; the admin `tele`
+  verb uses it (`admin_console.zig`). `WallVolumeRemove` pairs with
+  `WallVolume`, already a documented non-goal. `EncryptionRequest` /
+  `EncryptionSharedKey` belong to the encryption residual already waived as
+  non-client-visible.
+- **Needs a subsystem zdtd does not have.** `EditorPrefabInstance` and
+  `EventPrefab` are editor/creative; `RegionMetaData`, `DeleteChunkData` and
+  `DecoResetWorldRect` are chunk-authoring paths; `POIWaypoint` and
+  `EntityMapMarkerRemove` are map-marker upkeep for markers we never set;
+  `BlockLimitTracking` logs a discard server-side even in stock (Process
+  IL=11); `OwnedEntitySync` tracks owned-entity lists (drones/turrets) zdtd
+  does not keep; `EntitySetPartActive` is per-part vehicle damage state.
+- **Effect not recorded in the RE.** `EntityPrimeDetonator` (Process IL=23:
+  `PrimeDetonator()` on `EntityZombieCop`) and `MinEventFire` have no RE entry
+  for what the client-side call actually does. zdtd already sends
+  `NetPackageExplosionClient` for every cop blast, which is the visible
+  outcome; whether the prime signal adds a wind-up cue is unknown. Same
+  posture as `VehicleCount` below: not emitted on a guess.
+
 One of the 55 is not in a waived category and is recorded here rather than
 buried in that list: **`NetPackageVehicleCount`** (body `vehicleCount i32 |
 turretCount i32 | droneCount i32`, RE `netpackage-bodies.md` write IL=16). Stock

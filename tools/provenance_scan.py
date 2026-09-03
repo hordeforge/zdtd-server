@@ -303,13 +303,46 @@ def main():
     if unledgered:
         failures.append("behavioral constants not in the ledger: " + "; ".join(f"{rel}:{ln} {n}" for rel, ln, n in unledgered[:8]))
 
+    # 7. PACKAGE EMISSION COVERAGE: every registered stock package name the
+    #    server never references must be accounted for in the docs. Registering
+    #    a name without a sender is legitimate (the negotiated name-to-id map
+    #    must match stock either way), but it has to be a recorded decision
+    #    rather than an oversight: a wire package we silently never send is the
+    #    exact shape of gap this project keeps finding. See DIVERGENCES 3b.
+    pkg_src = open(os.path.join(ROOT, "src/wire/packages.zig"), encoding="utf-8").read()
+    registered = sorted(set(re.findall(r'"(NetPackage\w+)"', pkg_src)))
+    referenced = set()
+    for dirpath, _dirs, names in os.walk(os.path.join(ROOT, "src/server")):
+        for n in names:
+            if not n.endswith(".zig"):
+                continue
+            text = open(os.path.join(dirpath, n), encoding="utf-8", errors="replace").read()
+            referenced.update(re.findall(r'"(NetPackage\w+)"', text))
+    doc_text = ""
+    for doc in ("docs/GAP_ANALYSIS.md", "docs/DIVERGENCES.md"):
+        doc_text += open(os.path.join(ROOT, doc), encoding="utf-8", errors="replace").read()
+    never_sent = [n for n in registered if n not in referenced]
+    undocumented = []
+    for name in never_sent:
+        short = name[len("NetPackage"):]
+        if name in doc_text or re.search(rf"\b{re.escape(short)}\b", doc_text):
+            continue
+        undocumented.append(name)
+    if undocumented:
+        failures.append(
+            "registered packages the server never sends and no doc mentions "
+            f"({len(undocumented)}): " + ", ".join(undocumented[:8])
+            + " - record the decision in DIVERGENCES 3b or GAP_ANALYSIS"
+        )
+
     if failures:
         for f in failures:
             print("FAIL:", f)
         return 1
     print(
         f"OK: {len(files)} files covered (100%), {len(const_rows)} constants ledgered, "
-        "behavioral constants annotated, audit findings linked"
+        "behavioral constants annotated, audit findings linked, "
+        f"{len(never_sent)} never-sent packages all documented"
     )
     return 0
 
