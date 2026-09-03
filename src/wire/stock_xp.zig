@@ -76,6 +76,19 @@ pub fn writeMinimalProgression(w: *binary.Writer, level: u16, exp_to_next: i32, 
     try w.writeI32(0); // ExpDeficit
 }
 
+/// NetPackagePlayerStats (RE inventories/netpackage-bodies.md, write IL=8): one
+/// `entityNetworkStats` blob. That blob is EntityNetworkStats.write (IL=104,
+/// 22 fields): `killed` i32 | holdingItemStack | holdingItemIndex u8 |
+/// deathHealth i32 | teamNumber u8 | attachedToEntityId i32 | entityName string
+/// | isPlayer bool | killedZombies i32 | killedPlayers i32 | experience i32 |
+/// level i32 | totalItemsCrafted u32 | distanceWalked f32 | longestLife f32 |
+/// currentLife f32 | totalTimePlayed f32 | vehiclePose i32 | isSpectator bool |
+/// hasProgression bool | progressionsData length i16 + bytes.
+///
+/// The five accumulators (crafted, walked, longestLife, currentLife,
+/// timePlayed) are written as 0 deliberately: stock only relays what the owning
+/// client sent, zdtd drops that blob on the authority rule, and synthesising
+/// them server-side would invent numbers stock never derived (DIVERGENCES 2).
 pub fn buildPlayerStatsBody(buf: []u8, args: PlayerStatsArgs) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeI32(args.entity_id);
@@ -188,6 +201,9 @@ pub const AddScoreArgs = struct {
     conditions: i32 = 0,
 };
 
+/// NetPackageEntityAddScoreClient (RE inventories/netpackage-bodies.md, write
+/// IL=27): `entityId` i32 | `zombieKills` i16 | `playerKills` i16 |
+/// `otherTeamNumber` i16 | `conditions` i32.
 pub fn buildAddScoreBody(buf: []u8, args: AddScoreArgs) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeI32(args.entity_id);

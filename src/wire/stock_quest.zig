@@ -126,7 +126,8 @@ pub fn writeQuestPacketEntry(w: *binary.Writer, e: QuestPacketEntry) !void {
     try w.writeF32(e.trader_z);
 }
 
-/// FetchList: npc | player | et=0 | tier | count | entries...
+/// NetPackageNPCQuestList FetchList (RE): npc i32 | player i32 | eventType u8
+/// (0 = fetch) | tier i32 | entry count i32 | count x QuestPacketEntry.
 pub fn buildNpcQuestListFetch(
     buf: []u8,
     npc_entity_id: i32,
@@ -281,7 +282,9 @@ pub const SharedQuestShare = struct {
     shared_with_entity_id: i32 = -1,
 };
 
-/// ShareQuest (event 0) body for S2C / echo.
+/// NetPackageSharedQuest, ShareQuest (event 0) body for S2C / echo. RE
+/// inventories/netpackage-bodies.md write IL=8: one `sharedQuestData` blob,
+/// laid out by the SharedQuestData.write fields written below.
 pub fn buildSharedQuestShare(buf: []u8, q: SharedQuestShare) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(q.shared_by_entity_id);
