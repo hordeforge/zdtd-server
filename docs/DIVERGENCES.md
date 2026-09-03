@@ -150,10 +150,38 @@ Corrected 2026-09-02 by an exhaustive in-process sweep (scenario
 "every registered package id survives dispatch with a malformed body"): the
 static grep above undercounted S2C-only packages. Dispatching all 191 ids
 through the real handler chain as a `.playing` client shows **84 reach a C2S
-handler and 105 are S2C-only** - the server builds and sends those, and a stock
-client never sends one back, so having no C2S handler is correct. The 29-package
-figure above was an artefact of comparing against the RE `ProcessPackage` table
-rather than measuring; the per-package reasoning in it still holds.
+handler and 105 are S2C-only**, so having no C2S handler is correct for those.
+The 29-package figure above was an artefact of comparing against the RE
+`ProcessPackage` table rather than measuring; the per-package reasoning in it
+still holds.
+
+**Corrected again 2026-09-04.** That paragraph used to say the server "builds
+and sends" the S2C-only set. It does not: **55 of the 191 registered names are
+never referenced anywhere in `src/server/`**, so they are registered for id
+mapping only. Most are the categories already listed above (editor, Twitch,
+EAC/encryption, client-side FX, mod API). Registration without a sender is the
+right call for those - the negotiated name-to-id map has to match stock whether
+or not we ever emit the package - but the claim that we emit all 105 was
+wrong, and the distinction matters: "no C2S handler needed" and "we send this"
+are different properties, and only the first was measured.
+
+One of the 55 is not in a waived category and is recorded here rather than
+buried in that list: **`NetPackageVehicleCount`** (body `vehicleCount i32 |
+turretCount i32 | droneCount i32`, RE `netpackage-bodies.md` write IL=16). Stock
+broadcasts it on channel 192 whenever a drone or turret unloads
+(`DroneManager.RemoveTrackedDrone` IL=47, `TurretTracker.RemoveTrackedTurret`
+IL=29), and the client mirrors the three values into its `serverVehicleCount` /
+`serverDroneCount` / `serverTurretCount` statics (`SetServer*Count` IL=7 each).
+zdtd tracks vehicles as ECS entities with their own mask, so the counts are
+derivable; we simply never emit the package.
+
+Not closed here because the RE does not record what the client *does* with those
+mirrored statics: there is no documented `ProcessPackage` consumer, and no entry
+in the coverage or closed-gaps notes. Emitting a packet on a guess about its
+effect would be inventing behaviour. What is needed first is the consumer side
+in `../7dtd-engine-research` (who reads `serverVehicleCount`, and whether an
+unset value changes anything the player sees); if it drives a spawn cap or a UI
+count, this becomes a real gap with a known cost rather than an unsent packet.
 
 Caveat, stated rather than glossed: loadgen drives a wide but not exhaustive
 action set. It does not fire every stock verb (vehicles, drones, twitch
