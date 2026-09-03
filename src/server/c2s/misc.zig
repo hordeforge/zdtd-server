@@ -252,9 +252,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else |_| {
                     // Fall back to ECD head only. Parse-skip is rare; log once per 100
                     // decode rejects so a broken client is visible without per-packet noise.
-                    if (packages.parsePlayerDataEcdHead(body)) |h| {
-                        _ = h; // pos unreliable (origin-relative); ignore
-                    } else |_| {
+                    // Parsed for validation only: the ECD head proves the body
+                    // is a well-formed PlayerData write, and the save itself
+                    // comes from server state.
+                    if (packages.parsePlayerDataEcdHead(body)) |_| {} else |_| {
                         self.harness.counters.inc(.decode_rejects);
                         const n = self.harness.counters.get(.decode_rejects);
                         if (n == 1 or n % 100 == 0) {
@@ -266,9 +267,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                 }
             }
-        } else if (packages.parsePlayerDataEcdHead(body)) |h| {
-            _ = h; // pos unreliable (origin-relative); ignore
-        } else |_| {}
+        } else if (packages.parsePlayerDataEcdHead(body)) |_| {} else |_| {}
         // Defer file write to the periodic save tick (no open/rewrite per packet).
         self.players_dirty = true;
         return true;
