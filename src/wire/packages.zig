@@ -1803,6 +1803,9 @@ test "package ids body" {
     try std.testing.expectEqual(@as(i32, @intCast(default_mappings.len)), try r.readI32());
 }
 
+/// NetPackageWorldTime (RE inventories/netpackage-bodies.md, write IL=8): a
+/// single `worldTime` u64, encoded as WorldClock.worldTimeBits (24000 per day,
+/// 1000 per hour).
 pub fn buildWorldTimeBody(buf: []u8, world_time: u64) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeU64(world_time);
@@ -3048,6 +3051,9 @@ pub const AttachType = enum(u8) {
 /// with vehicleId = -1 / slot = -1 (asm.il:541872, asm.il:406816).
 pub const slot_any: i16 = -1;
 
+/// NetPackageEntityAttach (RE inventories/netpackage-bodies.md, write IL=21):
+/// `attachType` u8 | `riderId` i32 | `vehicleId` i32 | `slot` i16. Slot is an
+/// int32 in memory but conv.i2 on the wire (asm.il:844620).
 pub fn buildEntityAttach(buf: []u8, attach_type: AttachType, rider_id: i32, vehicle_id: i32, slot: i16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(@intFromEnum(attach_type));
@@ -3659,6 +3665,9 @@ pub fn parseQuestObjectiveUpdate(body: []const u8) !QuestObjectiveUpdate {
     return out;
 }
 
+/// NetPackageQuestObjectiveUpdate (RE inventories/netpackage-bodies.md, write
+/// IL=21): `senderEntityID` i32 | `questCode` i32 | `eventType` u8 |
+/// `blockPos` (StreamUtils Vector3i = three i32).
 pub fn buildQuestObjectiveUpdate(buf: []u8, u: QuestObjectiveUpdate) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(u.sender_entity_id);
@@ -3955,6 +3964,10 @@ pub fn parsePickupBlockBody(body: []const u8, plat_buf: []u8, id_buf: []u8, sent
     return p;
 }
 
+/// NetPackagePickupBlock (RE inventories/netpackage-bodies.md, write IL=22):
+/// `blockPos` (StreamUtils Vector3i) | `rawData` u32 | `playerId` i32 |
+/// `persistentPlayerId` (PlatformUserIdentifier ToStream; null = one 0 byte,
+/// which is what a dedi with no platform identity writes).
 pub fn buildPickupBlockBody(buf: []u8, x: i32, y: i32, z: i32, raw: u32, player_id: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(x);
@@ -4006,6 +4019,9 @@ pub fn parseSetBlockTexture(body: []const u8) !SetBlockTexture {
     };
 }
 
+/// NetPackageSetBlockTexture (RE inventories/netpackage-bodies.md, write
+/// IL=24): `blockPos` (StreamUtils Vector3i = three i32) | `blockFace` u8 |
+/// `idx` u8 | `playerIdThatChanged` i32 | `channel` u8.
 pub fn buildSetBlockTextureBody(buf: []u8, t: SetBlockTexture) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(t.x);
