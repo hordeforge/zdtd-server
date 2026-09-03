@@ -882,10 +882,20 @@ pub fn parseEntitySpeedsBody(body: []const u8) !struct { entity_id: i32, movemen
     };
 }
 
-/// Head of PlayerDataFile.WriteNetwork / ECD.write(networkWrite=false) for SavePlayerData C2S.
-/// Returns entity id + world position from the embedded EntityCreationData.
-pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32 } {
-    // FileVersion:u8 | entityClass:i32 | id:i32 | lifetime:f32 | pos:f32*3 | ...
+/// Head of PlayerDataFile.WriteNetwork / ECD.write(networkWrite=false) for the
+/// SavePlayerData C2S body: `FileVersion` u8 | `entityClass` i32 | `id` i32 |
+/// `lifetime` f32 | pos f32 x3 (RE EntityCreationData.write, protocol-packages
+/// 5.1).
+///
+/// Returns the entity id only. The position used to come back too, and both
+/// call sites discarded it with "pos unreliable (origin-relative); ignore" -
+/// the client writes it relative to its own origin, so it is not a world
+/// coordinate the server can use. Handing back three unchecked f32 that nobody
+/// consumes is the same shape as the nearEntityId guess removed the same day:
+/// a value the server cannot act on should not leave the parser. The pos bytes
+/// are still consumed so the version/length validation this function exists for
+/// stays exact.
+pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32 } {
     if (body.len < 1 + 4 + 4 + 4 + 12) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const ver = try r.readByte();
@@ -893,10 +903,10 @@ pub fn parsePlayerDataEcdHead(body: []const u8) !struct { entity_id: i32, x: f32
     _ = try r.readI32(); // entityClass
     const entity_id = try r.readI32();
     _ = try r.readF32(); // lifetime
-    const x = try r.readF32();
-    const y = try r.readF32();
-    const z = try r.readF32();
-    return .{ .entity_id = entity_id, .x = x, .y = y, .z = z };
+    _ = try r.readF32(); // pos.x, origin-relative
+    _ = try r.readF32(); // pos.y
+    _ = try r.readF32(); // pos.z
+    return .{ .entity_id = entity_id };
 }
 
 test "entity speeds body roundtrip" {
@@ -913,11 +923,20 @@ test "player data ecd head from empty pdf write" {
     var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
     try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true, game_stage_born_unset);
-    const h = try parsePlayerDataEcdHead(w.written());
+    const body = w.written();
+    const h = try parsePlayerDataEcdHead(body);
     try std.testing.expectEqual(@as(i32, 106), h.entity_id);
-    try std.testing.expectApproxEqAbs(@as(f32, -273), h.x, 0.01);
-    try std.testing.expectApproxEqAbs(@as(f32, 61), h.y, 0.01);
-    try std.testing.expectApproxEqAbs(@as(f32, 449), h.z, 0.01);
+    // The parser no longer returns the position (origin-relative, unusable
+    // server-side), but the bytes must still sit where the ECD head puts them,
+    // or the length validation above would be checking the wrong layout:
+    // FileVersion u8 | entityClass i32 | id i32 | lifetime f32 | pos f32 x3.
+    const pos_off = 1 + 4 + 4 + 4;
+    const px: f32 = @bitCast(std.mem.readInt(u32, body[pos_off..][0..4], .little));
+    const py: f32 = @bitCast(std.mem.readInt(u32, body[pos_off + 4 ..][0..4], .little));
+    const pz: f32 = @bitCast(std.mem.readInt(u32, body[pos_off + 8 ..][0..4], .little));
+    try std.testing.expectApproxEqAbs(@as(f32, -273), px, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 61), py, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 449), pz, 0.01);
 }
 
 test "player id PDF bag is CarryCapacity empties" {
