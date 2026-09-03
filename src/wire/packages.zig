@@ -1506,18 +1506,41 @@ fn parseChunkPayload(body: []const u8) !ChunkParsed {
     return .{ .cx = cx, .cz = cz, .heights = heights };
 }
 
-/// NetPackageRequestToSpawnPlayer: chunkViewDim:i16 | PlayerProfile | nearEntityId:i32
-/// Profile is opaque; we only need view dim when present.
-pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32, near_entity_id: i32 } {
+/// NetPackageRequestToSpawnPlayer (RE inventories/netpackage-bodies.md write
+/// IL=17, protocol.md §5): `chunkViewDim` i16 | `playerProfile`
+/// (PlayerProfile.Write) | `nearEntityId` i32.
+///
+/// Only `chunkViewDim` is read. The profile is the client's display copy and
+/// the server owns the real one, so parsing it would buy nothing; `nearEntityId`
+/// sits behind that variable-length blob and is unused server-side. It used to
+/// be grabbed from the last four bytes without parsing the profile, which is a
+/// guess rather than a read: on a short body those four bytes overlap
+/// chunkViewDim itself. Reading a field we do not use, from an offset we did
+/// not derive, is strictly worse than not reading it.
+pub fn parseRequestToSpawnPlayer(body: []const u8) !struct { chunk_view_dim: i32 } {
     if (body.len < 2) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
-    const dim = try r.readI16();
-    // Skip profile best-effort: if remaining has at least 4 bytes at end for nearEntityId
-    var near: i32 = -1;
-    if (body.len >= 6) {
-        near = std.mem.readInt(i32, body[body.len - 4 ..][0..4], .little);
-    }
-    return .{ .chunk_view_dim = dim, .near_entity_id = near };
+    return .{ .chunk_view_dim = try r.readI16() };
+}
+
+test "RequestToSpawnPlayer reads only the leading chunkViewDim" {
+    // A bare two-byte body is legal: everything after chunkViewDim is the
+    // client's profile blob plus a field the server does not use.
+    var two: [2]u8 = undefined;
+    std.mem.writeInt(i16, &two, 4, .little);
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(&two)).chunk_view_dim);
+
+    // A trailing blob must not change what is read. The old code took the last
+    // four bytes as nearEntityId, so a body this shape used to reinterpret its
+    // own header bytes; asserting the dim is stable pins that it no longer
+    // depends on the body's length.
+    var long: [24]u8 = @splat(0xAB);
+    std.mem.writeInt(i16, long[0..2], 4, .little);
+    try std.testing.expectEqual(@as(i32, 4), (try parseRequestToSpawnPlayer(&long)).chunk_view_dim);
+
+    // Shorter than the one field it does read is an error, not a zero.
+    var one: [1]u8 = .{0};
+    try std.testing.expectError(error.EndOfStream, parseRequestToSpawnPlayer(&one));
 }
 
 /// Stock NetPackageSetBlock body (derived V3.0.1, live against V3.1.0 b14):
