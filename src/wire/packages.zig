@@ -1553,13 +1553,16 @@ pub fn withBlockMeta(raw: u32, meta: u8) u32 {
     return (raw & 0xfc3fffff) | (@as(u32, meta & 15) << 22);
 }
 
-/// Build one-change stock SetBlock (null platform user; peers accept S2C without id check).
+/// NetPackageSetBlock, one change (RE write IL=37; field order in
+/// buildSetBlockBodyRaw). Null platform user; peers accept S2C without id check.
 /// Id-only: rotation and meta bits are zero, so this is safe for fresh placement
 /// and wrong for echoing a mutated block. Those callers want buildSetBlockBodyRaw.
 pub fn buildSetBlockBody(buf: []u8, x: i32, y: i32, z: i32, block_id: u16) ![]u8 {
     return buildSetBlockBodyRaw(buf, x, y, z, @as(u32, block_id), 0, 0, 0);
 }
 
+/// NetPackageSetBlock carrying block damage (RE write IL=37; the damage u16 is
+/// part of BlockValue.Write, see buildSetBlockBodyRaw).
 pub fn buildSetBlockBodyDamage(
     buf: []u8,
     x: i32,
@@ -1577,6 +1580,15 @@ pub fn buildSetBlockBodyDamage(
 /// echo a mutated block must use this, not the id-only form: rotation and meta
 /// live above the low 16 bits (asm.il:141018 BlockValue::Write), so rebuilding
 /// rawData from the id alone snaps switches back off and doors back shut.
+/// NetPackageSetBlock (RE protocol-packages.md 6.9 + write IL=37):
+/// `persistentPlayerId` (ToStream; null = one 0 byte) | `blockChanges` count
+/// i16 | count x BlockChangeInfo.Write | `localPlayerThatChanged` i32.
+///
+/// BlockChangeInfo.Write is BlockValueRef | `changedByEntityId` i32 | flags u8,
+/// then the payloads the flags select. We set bChangeBlockValue only, so what
+/// follows is BlockValue.Write = `rawData` u32 + `damage` u16 (Write IL=10).
+/// The damage u16 belongs to BlockValue, not to the bChangeDamage flag: that
+/// flag only tells the receiver to apply the damage that already rides here.
 pub fn buildSetBlockBodyRaw(
     buf: []u8,
     x: i32,
@@ -2262,13 +2274,17 @@ pub fn parseLockRequest(body: []const u8) binary.ReadError!LockRequestHead {
     };
 }
 
-/// Build LockResponse that grants the lock by echoing request targets/context.
-/// Layout: locking | success | error | isForceUnlocked | channel | targets | context
+/// NetPackageLockResponse granting the lock (RE inventories/netpackage-bodies.md,
+/// write IL=74): `locking` bool | `success` bool | `errorMsg` string |
+/// `isForceUnlocked` bool | `channel` u16 | `targets` | `context` string. The
+/// targets and context are echoed verbatim from the request, which is what
+/// keeps the client's pending lock correlated.
 pub fn buildLockResponseGrant(buf: []u8, req: LockRequestHead) ![]u8 {
     return buildLockResponse(buf, req, true, "");
 }
 
-/// Deny lock (held by another peer / channel busy).
+/// NetPackageLockResponse denying the lock, held by another peer or a busy
+/// channel (RE write IL=74; field order in buildLockResponseGrant).
 pub fn buildLockResponseDeny(buf: []u8, req: LockRequestHead, err_msg: []const u8) ![]u8 {
     return buildLockResponse(buf, req, false, err_msg);
 }
@@ -2323,18 +2339,20 @@ pub fn buildLockResponseTrader(buf: []u8, req: LockRequestHead, td: stock_entity
 }
 
 /// Unlock response (locking=false path on client ProcessPackage).
+/// NetPackageLockResponse for an unlock (RE write IL=74; field order in
+/// buildLockResponseGrant). locking=false with an empty target list.
 pub fn buildLockResponseUnlock(buf: []u8, success: bool) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeBool(false); // locking
     try w.writeBool(success);
     try w.writeString("");
     try w.writeBool(false); // isForceUnlocked
-    // remaining fields read by client only on locking=true path for UnlockResponse
-    // but write still emits channel/targets/context for stream completeness when locking=false
-    // UnlockResponse only uses success/error/force: client stops early. Still write minimal tail.
-    try w.writeU16(0);
-    try w.writeI32(0); // no targets
-    try w.writeString("");
+    // The tail is written even though an unlock carries nothing in it: stock's
+    // write emits all nine fields unconditionally (write IL=74), so omitting
+    // them would desync the reader's BinaryReader rather than save bytes.
+    try w.writeU16(0); // channel
+    try w.writeI32(0); // targets: empty list
+    try w.writeString(""); // context
     return w.written();
 }
 
