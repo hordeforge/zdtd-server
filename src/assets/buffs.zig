@@ -7,6 +7,9 @@ const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const components = @import("../ecs/components.zig");
 
+/// Storage cap on parsed buff defs, a zdtd bound rather than a stock rule.
+/// Measured against V3.2.0 `Data/Config` (2026-09-04): stock buffs.xml defines
+/// **483**, so this runs at 24%.
 pub const max_buffs: usize = 2048;
 pub const max_passives_per_buff: usize = 16;
 pub const max_passives_total: usize = 8192;

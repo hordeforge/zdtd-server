@@ -8,6 +8,17 @@ const io_fs = @import("../util/io_fs.zig");
 const util_log = @import("../util/log.zig");
 const assignids = @import("assignids_comptime.zig");
 
+/// Storage cap on parsed block defs, a zdtd bound rather than a stock rule:
+/// stock assigns ids dynamically and the wire id space is 16 bits
+/// (`wire/stock_nameid.max_blocks` = 0x10000). Measured against V3.2.0
+/// `Data/Config` (2026-09-04): stock blocks.xml defines **6643**, so this sits
+/// at 81% and leaves roughly 1550 slots for modlets, the tightest cap in the
+/// loader set.
+///
+/// Overflow matters more here than for the other catalogs: a truncated block
+/// table means names missing from the negotiated AssignIds map, and the client
+/// resolves block ids through that map, so the loss is wire-visible. The parse
+/// logs once at the cap rather than shipping a short table in silence.
 pub const max_blocks: usize = 8192;
 
 /// Max `<drop>` rows a block may resolve (own + Extends-inherited; the
@@ -398,6 +409,13 @@ pub fn loadFromPath(
     var i: usize = 0;
     while (i < clean.len and parsed.items.len < max_blocks) {
         const bi = std.mem.findPos(u8, clean, i, "<block ") orelse break;
+        if (parsed.items.len + 1 == max_blocks) {
+            util_log.err(
+                "zdtd: blocks.xml hit the {d}-block cap; later blocks are dropped " ++
+                    "and will be missing from the AssignIds map\n",
+                .{max_blocks},
+            );
+        }
         const name = xml.attr(clean, bi, "name") orelse {
             i = bi + 7;
             continue;

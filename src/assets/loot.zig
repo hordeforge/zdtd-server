@@ -5,6 +5,9 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 
+// zdtd storage bounds, not stock rules; stock caps neither. Measured against
+// V3.2.0 `Data/Config` (2026-09-04): loot.xml defines 1015 lootgroups (50% of
+// the cap) and 339 lootcontainers (66%). Both parse loops stop at the cap.
 pub const max_groups: usize = 2048;
 pub const max_containers: usize = 512;
 /// Widest stock group (perkBooks has 133 entries); the cap must not truncate.
