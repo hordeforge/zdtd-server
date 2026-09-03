@@ -3518,7 +3518,7 @@ test "scenario a joiner sees what other players are holding" {
 
     // B joins and must be told what A is holding.
     var cap_b: ln_peer.Capture = .{};
-    _ = try g.attachJoinedClient(&cap_b);
+    const cb = try g.attachJoinedClient(&cap_b);
     const spawn_id = packages.idOf("NetPackageEntitySpawn") orelse return error.TestUnexpectedResult;
     const body = cap_b.findPkgIdEntity(spawn_id, ca.entity_id) orelse return error.TestUnexpectedResult;
     const held = playerSpawnHoldingType(body) orelse return error.TestUnexpectedResult;
@@ -3555,6 +3555,21 @@ test "scenario a joiner sees what other players are holding" {
         return error.TestUnexpectedResult;
     const d_held = playerSpawnHoldingType(d_body) orelse return error.TestUnexpectedResult;
     try std.testing.expect(d_held != 0);
+
+    // Player spawns are a first-join-only bundle: sendJoinBundle gates
+    // sendPlayerSpawns on `first_join = !c.entered`, so a respawn does not
+    // re-describe the other players. That is deliberate (the client already
+    // holds those entities from its first join) and is pinned here because the
+    // obvious assumption is the opposite: the holding_item fix lives in
+    // sendPlayerSpawns, so if a change ever started re-sending these on
+    // respawn, this is where the new path would have to be re-checked.
+    cap_b.clear();
+    var spawn_req: [2]u8 = undefined;
+    std.mem.writeInt(i16, spawn_req[0..2], 4, .little);
+    var rfb: [64]u8 = undefined;
+    try g.injectFramed(cb, try packages.framed(&rfb, "NetPackageRequestToSpawnPlayer", &spawn_req));
+    try std.testing.expect(cap_b.n > 0); // the respawn bundle did go out
+    try std.testing.expect(cap_b.findPkgId(spawn_id) == null);
 
     std.debug.print("PASS spawn-holding: joiner told peer holds type {d}\n", .{held});
 }
