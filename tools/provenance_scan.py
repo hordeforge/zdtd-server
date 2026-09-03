@@ -303,6 +303,32 @@ def main():
     if unledgered:
         failures.append("behavioral constants not in the ledger: " + "; ".join(f"{rel}:{ln} {n}" for rel, ln, n in unledgered[:8]))
 
+    # 7b. BUILDER RE CITATIONS (ratchet). AGENTS rule 16: field order, types and
+    #     lengths come from the RE, so a body builder should name its source.
+    #     34 of 79 builders in packages.zig still carry no citation (measured
+    #     2026-09-04); that backlog is not a reason to leave the seam open, so
+    #     the count is ratcheted: it may fall, never rise. Citing a builder is
+    #     also what makes an automated field-order diff against
+    #     inventories/netpackage-bodies.md possible, which is how a layout
+    #     regression would be caught rather than reasoned about.
+    MAX_UNCITED_BUILDERS = 34
+    builder_src = open(
+        os.path.join(ROOT, "src/wire/packages.zig"), encoding="utf-8"
+    ).read()
+    cited_builders = set()
+    for m in re.finditer(r"((?:^///[^\n]*\n)+)pub fn (build\w+)\(", builder_src, re.M):
+        doc = m.group(1)
+        if "NetPackage" in doc or "asm.il" in doc or "IL=" in doc or "RE " in doc:
+            cited_builders.add(m.group(2))
+    all_builders = set(re.findall(r"pub fn (build\w+)\(", builder_src))
+    uncited = sorted(all_builders - cited_builders)
+    if len(uncited) > MAX_UNCITED_BUILDERS:
+        failures.append(
+            f"body builders without an RE citation rose to {len(uncited)} "
+            f"(ratchet {MAX_UNCITED_BUILDERS}): {', '.join(uncited[:6])} - cite the "
+            "RE source in the doc comment (AGENTS rule 16)"
+        )
+
     # 7. PACKAGE EMISSION COVERAGE: every registered stock package name the
     #    server never references must be accounted for in the docs. Registering
     #    a name without a sender is legitimate (the negotiated name-to-id map

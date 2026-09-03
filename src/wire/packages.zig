@@ -815,6 +815,9 @@ pub const cF_is_alert: u16 = components.flag_is_alert;
 /// gates (hear muffle + sleeper detect).
 pub const cF_crouching: u16 = components.flag_crouching;
 
+/// NetPackageEntityAliveFlags (RE inventories/netpackage-bodies.md, write
+/// IL=8): the EntityTargeted base entityId, then `flags` u16. Bit meanings in
+/// protocol-packages.md 5.5.6.
 pub fn buildAliveFlagsBody(buf: []u8, entity_id: i32, flags: u16) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
@@ -2575,6 +2578,9 @@ pub fn parseCollectBody(body: []const u8) !i32 {
     return std.mem.readInt(i32, body[0..4], .little);
 }
 
+/// NetPackageEntityCollect (RE inventories/netpackage-bodies.md, write IL=12):
+/// `entityId` i32 then `playerId` i32. The dedi rebroadcasts with flags 192
+/// after ValidEntityIdForSender (protocol-packages.md, Process IL=51).
 pub fn buildEntityCollectBody(buf: []u8, entity_id: i32, player_id: i32) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
