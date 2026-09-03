@@ -2882,6 +2882,9 @@ pub fn buildStockChat(buf: []u8, chat_type: u8, sender_entity_id: i32, msg: []co
     return w.written();
 }
 
+/// NetPackageChat, read side (RE write IL=63; same field order as
+/// buildStockChat): `chatType` u8 | `senderEntityId` i32 | `msg` string |
+/// `msgSender` u8 | `bbMode` u8 | recipient count i32 | count x i32.
 pub fn parseStockChat(body: []const u8) !StockChat {
     if (body.len < 6) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -3060,6 +3063,9 @@ pub const ParticleEffectInvoke = struct {
     world_spawn: bool,
 };
 
+/// NetPackageParticleEffect (RE inventories/netpackage-bodies.md, write IL=20):
+/// `pe` (ParticleEffect.Write: id, pos, rot, colour, sound names, volume, …) |
+/// `entityThatCausedIt` i32 | `forceCreation` bool | `worldSpawn` bool.
 pub fn parseParticleEffectInvoke(body: []const u8) (binary.ReadError || error{Overflow})!ParticleEffectInvoke {
     var r: binary.Reader = .{ .data = body };
     _ = try r.readI32(); // ParticleId
@@ -4162,6 +4168,9 @@ pub const VehicleDataSync = struct {
     data: []const u8,
 };
 
+/// NetPackageVehicleDataSync (RE inventories/netpackage-bodies.md, write
+/// IL=27): `senderId` i32 | `vehicleId` i32 | `syncFlags` u16 | `entityData`
+/// length u16 + bytes.
 pub fn parseVehicleDataSync(body: []const u8) !VehicleDataSync {
     if (body.len < 12) return error.EndOfStream;
     const data_len = std.mem.readInt(u16, body[10..12], .little);
@@ -4331,6 +4340,12 @@ pub const PlayerLogin = struct {
 
 /// Parse a full login body. `name_buf` receives the raw (unsanitized) name; the
 /// caller still owns sanitizing it before it reaches any operator surface.
+/// NetPackagePlayerLogin (RE inventories/netpackage-bodies.md, write IL=52):
+/// `playerName` string | native identity (ToStream + auth-token string) |
+/// crossplatform identity (ToStream + auth-token string) | `version` string |
+/// `compVersion` string | `discordUserId` u64. The two auth tokens are skipped:
+/// zdtd runs EAC-off and validates nothing platform-side, so reading them would
+/// only be theatre.
 pub fn parsePlayerLogin(body: []const u8, name_buf: []u8) binary.ReadError!PlayerLogin {
     var r: binary.Reader = .{ .data = body };
     var out: PlayerLogin = .{ .name = try r.readString(name_buf) };
