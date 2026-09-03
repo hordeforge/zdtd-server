@@ -10666,8 +10666,13 @@ test "scenario every registered package id survives dispatch with a malformed bo
     // Measured 2026-09-02: 84 of the 189 swept ids reach a C2S handler (191
     // registered, less the two teardown verbs skipped above).
     try std.testing.expect(handled_n >= 84);
+    // "Reaches no C2S handler" and "the server sends it" are different
+    // properties, and only the first is measured here: 55 registered names are
+    // never referenced in src/server/ at all, registered for id mapping and
+    // never emitted (DIVERGENCES 3b). Do not call the remainder "S2C-only" in
+    // this message - that wording is what let the two get conflated.
     std.debug.print(
-        "PASS c2s-coverage: {d}/{d} registered packages reach a C2S handler; the rest are S2C-only\n",
+        "PASS c2s-coverage: {d}/{d} registered packages reach a C2S handler\n",
         .{ handled_n, packages.default_mappings.len },
     );
 }
