@@ -4693,7 +4693,7 @@ test "scenario teleport Y-clamp suppresses the raw claim on peers" {
     var cap_mover: ln_peer.Capture = .{};
     var cap_obs: ln_peer.Capture = .{};
     const m = try g.attachJoinedClient(&cap_mover);
-    _ = try g.attachJoinedClient(&cap_obs);
+    const obs = try g.attachJoinedClient(&cap_obs);
     try std.testing.expect(m.entity_id > 0);
     const idx = g.sim.slotOfNetId(m.entity_id) orelse return error.MissingEntity;
     const sx = g.sim.transform[idx].x;
@@ -4735,7 +4735,33 @@ test "scenario teleport Y-clamp suppresses the raw claim on peers" {
     }
     try std.testing.expect(!found);
 
+    // Ownership: the cases above all teleport the sender's own entity, which
+    // exercises the speed envelope but never the id check in front of it. A
+    // client claiming another entity must be rejected outright - otherwise one
+    // player could move another around the map.
+    const obs_idx = g.sim.slotOfNetId(obs.entity_id) orelse return error.TestUnexpectedResult;
+    const before = g.sim.transform[obs_idx];
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    var spoof_buf: [64]u8 = undefined;
+    const spoof_tp = try packages.buildEntityTeleportBody(
+        &spoof_buf,
+        obs.entity_id, // not m's entity
+        before.x + 500,
+        before.y,
+        before.z + 500,
+        0,
+        0,
+        0,
+        true,
+    );
+    try g.injectFramed(m, try packages.framed(&frame_buf, "NetPackageEntityTeleport", spoof_tp));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    const after = g.sim.transform[obs_idx];
+    try std.testing.expectEqual(before.x, after.x);
+    try std.testing.expectEqual(before.z, after.z);
+
     std.debug.print("PASS scenario: Y-clamped C2S teleport suppressed on the observer peer\n", .{});
+    std.debug.print("PASS teleport-ownership: a peer cannot teleport another entity\n", .{});
 }
 
 test "scenario join enter bundle arrives in full on the capture peer" {
