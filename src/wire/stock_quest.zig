@@ -321,7 +321,17 @@ pub const SharedQuestHead = struct {
     }
 };
 
-/// Parse C2S SharedQuest head (enough for server accept/remove).
+/// Read side of NetPackageSharedQuest, whose body is one SharedQuestData (RE
+/// inventories/netpackage-bodies.md, write IL=63): `sharedByEntityID` i32 |
+/// `questEvent` u8 | `questCode` i32 | `questID` string | `poiName` string |
+/// `position`, `size`, `returnPos` (three Vector3 = 36 bytes) | `questGiverID`
+/// i32 | `sharedWithEntityID` i32. The three trailing fields the RE table lists
+/// after that are the conditional branch of the same write, not a fixed tail.
+///
+/// Only the fields the server acts on come back: the POI name and the three
+/// vectors are skipped by width, since the shared quest is resolved from
+/// `questID` against the server's own catalog rather than from the client's
+/// description of it.
 pub fn parseSharedQuestHead(body: []const u8) !SharedQuestHead {
     if (body.len < 5) return error.EndOfStream;
     const by = std.mem.readInt(i32, body[0..4], .little);

@@ -345,14 +345,15 @@ def main():
             "RE source in the doc comment (AGENTS rule 16)"
         )
 
-    # 7c. PARSER RE CITATIONS (ratchet). Same rule as 7b for the read side, and
-    #     the read side is the one that touches untrusted bytes: a parser whose
-    #     field order is wrong desyncs the reader on a body a client really
-    #     sends. Started at 37 of 50 (2026-09-04) and is down to 21; the
-    #     builders went 34 -> 0 the same way, so this ratchets down too. The 16
-    #     closed first were the ones with a cited builder twin, where the layout
-    #     claim already existed and only the read side was silent about it.
-    MAX_UNCITED_PARSERS = 21
+    # 7c. PARSER RE CITATIONS. Same rule as 7b for the read side, and the read
+    #     side is the one that touches untrusted bytes: a parser whose field
+    #     order is wrong desyncs the reader on a body a client really sends.
+    #     Went 37 -> 0 on 2026-09-04 and is now a hard rule, like the builders.
+    #     Citing them is not bookkeeping: writing the citation for
+    #     parseCollectBody found that the field naming the collector was never
+    #     read, and the sweep of the parsers with no builder twin found the
+    #     EntityRadius scale error and the TraderData length overlap.
+    MAX_UNCITED_PARSERS = 0
     uncited_parsers = []
     for wire_name in sorted(os.listdir(os.path.join(ROOT, "src/wire"))):
         if not wire_name.endswith(".zig"):
@@ -374,9 +375,9 @@ def main():
         uncited_parsers += [f"{wire_name}:{p}" for p in sorted(all_p - cited_p)]
     if len(uncited_parsers) > MAX_UNCITED_PARSERS:
         failures.append(
-            f"body parsers without an RE citation rose to {len(uncited_parsers)} "
-            f"(ratchet {MAX_UNCITED_PARSERS}): {', '.join(uncited_parsers[:6])} - "
-            "cite the RE source in the doc comment (AGENTS rule 16)"
+            f"body parsers without an RE citation: {len(uncited_parsers)} "
+            f"({', '.join(uncited_parsers[:6])}) - cite the "
+            "RE source in the doc comment (AGENTS rule 16)"
         )
 
     # 7. PACKAGE EMISSION COVERAGE: every registered stock package name the

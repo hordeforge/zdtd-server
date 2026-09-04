@@ -2490,6 +2490,35 @@ test "scenario quest accept kill complete and trader buy" {
         try std.testing.expectEqual(coins_before, coins_after); // no-op => free
     }
 
+    // A stock NetPackageTraderData ToServer body for a tile entity with no
+    // trader data attached is 1 + 12 + 1 = 14 bytes. Its byte 8 is the high
+    // byte of te_y, which is 0 for any real coordinate, so a `>= 9` length
+    // test routed it into the trade arm and decoded two te_y bytes as a
+    // quantity. Only an exactly-9-byte body is a zdtd trade.
+    // The two arms are told apart by what only the trader-open arm does:
+    // questOnTraderOpen advances a trader_interact objective. Asserting that
+    // stock and coins do not move would pass either way, because the
+    // misrouted body decodes qty 0 and systems.trade returns immediately on
+    // that - a test that cannot fail is not a test.
+    {
+        _ = systems.questAccept(&g.sim, c.slot, 3); // visit_the_trader
+        systems.questTickGoto(&g.sim, c.slot, v.tx, v.ty, v.tz); // phase 1
+        try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
+        var te_body: [14]u8 = @splat(0);
+        te_body[0] = 0; // isEntity = false -> tile entity position follows
+        std.mem.writeInt(i32, te_body[1..5], 100, .little); // te_x
+        std.mem.writeInt(i32, te_body[5..9], 70, .little); // te_y (byte 8 = 0)
+        std.mem.writeInt(i32, te_body[9..13], 100, .little); // te_z
+        te_body[13] = 0; // hasTraderData = false
+        var tfb: [64]u8 = undefined;
+        try g.injectFramed(c, try packages.framed(&tfb, "NetPackageTraderData", &te_body));
+        // Routed as trader-open: the interact objective completes the quest.
+        // Routed as a trade (the bug), questOnTraderOpen never runs and the
+        // quest stays active.
+        try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
+    }
+    std.debug.print("PASS traderdata: 14-byte stock TE body is not decoded as a trade\n", .{});
+
     const px = if (g.sim.slotOfNetId(c.entity_id)) |pi| g.sim.transform[pi].x else 256;
     const pz = if (g.sim.slotOfNetId(c.entity_id)) |pi| g.sim.transform[pi].z else 256;
     const z2 = g.sim.spawnZombie(px + 5, 70, pz, 40).?;

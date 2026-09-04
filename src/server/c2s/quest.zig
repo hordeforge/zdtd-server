@@ -372,7 +372,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
         }
-        if (body.len >= 9 and (body[8] == 0 or body[8] == 1)) {
+        // Exactly 9, not >= 9: a stock ToServer body with isEntity=false and
+        // hasTraderData=false is 14 bytes, and its body[8] is the high byte of
+        // te_y, which is 0 for any real world coordinate. With >= 9 that body
+        // fell through to the trade arm and was decoded as a trade whose qty
+        // came from two te_y bytes.
+        if (body.len == 9 and (body[8] == 0 or body[8] == 1)) {
             try self.handleTrade(c, body);
             return true;
         }
