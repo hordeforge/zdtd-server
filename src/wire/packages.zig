@@ -959,6 +959,67 @@ test "player data ecd head from empty pdf write" {
     try std.testing.expectApproxEqAbs(@as(f32, 449), pz, 0.01);
 }
 
+test "player id body wraps the PDF with entityId, team and chunkViewDim" {
+    // NetPackagePlayerId (RE write IL=21) is entityId i32 | team i16 |
+    // PlayerDataFile.WriteNetwork | chunkViewDim i32. The join path builds it
+    // (game.zig) and no wire test covered the frame around the PDF, only the
+    // ECD head inside it, so the three outer fields and this body's own copy
+    // of the ECD position run had nothing reading them back.
+    var buf: [8192]u8 = undefined;
+    const body = try buildPlayerIdBodyInvLoaded(
+        &buf,
+        106, // entity id
+        7, // team: distinct from every neighbouring constant
+        5, // chunkViewDim
+        -273,
+        61,
+        449,
+        &.{},
+        &.{},
+        &.{},
+        &.{},
+        true,
+        game_stage_born_unset,
+    );
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i16, 7), std.mem.readInt(i16, body[4..6], .little));
+    // chunkViewDim closes the body.
+    try std.testing.expectEqual(@as(i32, 5), std.mem.readInt(i32, body[body.len - 4 ..][0..4], .little));
+
+    // The PDF's ECD head starts at byte 6: FileVersion u8 | entityClass i32 |
+    // id i32 | lifetime f32 | pos f32 x3.
+    const ecd = 6;
+    try std.testing.expectEqual(@as(u8, 36), body[ecd]);
+    try std.testing.expectEqual(stock_entity.class_player_male, std.mem.readInt(i32, body[ecd + 1 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[ecd + 5 ..][0..4], .little));
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(std.math.floatMax(f32), f32At(body, ecd + 9)); // lifetime
+    try std.testing.expectApproxEqAbs(@as(f32, -273), f32At(body, ecd + 13), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 61), f32At(body, ecd + 17), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 449), f32At(body, ecd + 21), 0.01);
+
+    // Then rot f32 x3 | onGround bool | BodyDamage (cBinaryVersion 4, type 0,
+    // flags 0) | hasStats bool | deathTime i16 | hasBag bool | homePosition
+    // i32 x3 | homeRange i16 | spawnerSource u8. None of that was read back,
+    // so the version 4 could swap with the zero beside it and homePosition's
+    // three words could rotate.
+    const after_rot = ecd + 25 + 12; // past pos, rot
+    try std.testing.expectEqual(@as(u8, 1), body[after_rot]); // onGround
+    const bd = after_rot + 1;
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, body[bd..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[bd + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(u32, 0), std.mem.readInt(u32, body[bd + 8 ..][0..4], .little));
+    const home = bd + 12 + 1 + 2 + 1; // past hasStats, deathTime, hasBag
+    try std.testing.expectEqual(@as(i32, -273), std.mem.readInt(i32, body[home..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 61), std.mem.readInt(i32, body[home + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 449), std.mem.readInt(i32, body[home + 8 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i16, -1), std.mem.readInt(i16, body[home + 12 ..][0..2], .little));
+}
+
 test "player id PDF bag is CarryCapacity empties" {
     var buf: [8192]u8 = undefined;
     // Non-empty starter-like stacks in bag[0..3]; rest must pad empty.
