@@ -3397,7 +3397,20 @@ session); the ones with real bugs behind them are all in that set.
 
 The remaining four were audited by reading rather than fuzzed, and the reason
 is recorded here so the decision is visible instead of looking like an
-omission:
+omission.
+
+**Re-checked 2026-09-04.** The structural reason is sharper than "reading was
+enough": these four loaders read the file themselves rather than taking a
+`[]const u8`, so there is nothing to hand a fuzzer without restructuring them.
+That is a property of the call shape, not a judgement about risk, and it means
+the count handling in each needs a targeted test instead. Two now have one.
+`ZBM2` covers a declared count the file cannot back, one record short of it, and
+the exact count parsing into the store; `ZENT` covers the same short-table cases
+plus a zero count (a legal empty file) alongside its out-of-range `VehicleKind`
+byte. Both were verified to fail when the guard they pin is loosened. `ZCL2` has
+no counts to get wrong, and `ZCLC`'s stride check is exercised by the claims
+scenarios. Note the two use different strategies: `ZBM2` validates the whole
+table size up front, `ZENT` relies on every field read returning `Truncated`:
 
 | Format | Why reading was enough |
 |---|---|

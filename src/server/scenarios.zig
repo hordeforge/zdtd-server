@@ -10713,5 +10713,31 @@ test "scenario entities.zen vehicle kind byte is range-checked before the cast" 
 
     // Must fail closed, not panic.
     persist.loadEntities(g) catch {};
-    std.debug.print("PASS zent-kind: out-of-range vehicle kind fails closed\n", .{});
+
+    // The record count is a u16 read off disk and the loop trusts it, relying
+    // on every field read returning Truncated instead of a pre-checked total
+    // size (unlike ZBM2, which validates the whole table up front). Pin that:
+    // a count the file cannot back has to stop at the first short read.
+    var claims_more: [6]u8 = undefined;
+    @memcpy(claims_more[0..4], "ZENT");
+    std.mem.writeInt(u16, claims_more[4..6], 400, .little); // claims 400 records, carries none
+    try io_fs.writeFile(p, &claims_more);
+    try std.testing.expectError(error.Truncated, persist.loadEntities(g));
+
+    // A record cut mid-field is the same path one step further in.
+    var cut: [6 + 4]u8 = @splat(0);
+    @memcpy(cut[0..4], "ZENT");
+    std.mem.writeInt(u16, cut[4..6], 1, .little);
+    cut[6] = 1; // rec_type vehicle, then the kind byte and f32s are missing
+    try io_fs.writeFile(p, &cut);
+    try std.testing.expectError(error.Truncated, persist.loadEntities(g));
+
+    // A count of zero is a legal empty file, not an error.
+    var empty: [6]u8 = undefined;
+    @memcpy(empty[0..4], "ZENT");
+    std.mem.writeInt(u16, empty[4..6], 0, .little);
+    try io_fs.writeFile(p, &empty);
+    try persist.loadEntities(g);
+
+    std.debug.print("PASS zent-kind: bad kind, short record table and empty file all fail closed\n", .{});
 }
