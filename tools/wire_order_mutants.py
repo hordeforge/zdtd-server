@@ -68,6 +68,11 @@ WRITE_RE = re.compile(r"^(\s*)try w\.(write\w+)\(([^;]*)\);\s*(//.*)?$")
 # a file is a real finding, not a reason to refuse.
 PROBE_PAIRS = 8
 
+# Survivors of the filtered pass each cost a full unfiltered run to confirm.
+# Past this many, the filter set is not covering the file and the run has
+# silently become slower than no filter at all.
+MAX_UNFILTERED_RECHECKS = 5
+
 
 def mutants_for(path):
     """Yield (line_index, description) for each swappable adjacent pair."""
@@ -232,6 +237,7 @@ def main():
     total = 0
     survived = []
     false_survivors = []
+    recheck_count = 0
     for path in targets:
         lines, muts = mutants_for(path)
         rel = os.path.relpath(path, ROOT)
@@ -255,9 +261,23 @@ def main():
                 passed = run_suite(args.test_filter)
                 # A survivor under filters may just mean the filters missed the
                 # covering test, so confirm it against the whole suite before
-                # reporting. Only survivors pay that cost, and there should be
-                # few: the filtered pass already killed everything else.
+                # reporting. That re-check costs a full 4-minute run, so a file
+                # whose filters cover it badly turns a 90x speedup back into
+                # the slow path one survivor at a time: stock_quest.zig ran
+                # past an hour this way. Bail out and say the filters are
+                # wrong rather than grinding on.
                 if passed and args.test_filter:
+                    recheck_count += 1
+                    if recheck_count > MAX_UNFILTERED_RECHECKS:
+                        print(
+                            f"\naborting: {recheck_count} mutants survived the "
+                            "filtered suite and each needs a full re-check. The "
+                            "filter set covers this file too thinly to audit it "
+                            "cheaply - widen --test-filter, or drop it and take "
+                            "the slow run.",
+                            file=sys.stderr,
+                        )
+                        return 2
                     passed = run_suite(None)
                     if not passed:
                         false_survivors.append(f"{rel}:{idx + 1}: {desc}")
@@ -265,7 +285,9 @@ def main():
                 shutil.copyfile(backup, path)
                 os.unlink(backup)
             mark = "SURVIVED" if passed else "killed"
-            print(f"[{mark}] {rel}:{idx + 1}: {desc}", flush=True)
+            # Progress on every mutant, not only survivors: a run with nothing
+            # to report otherwise looks hung for the better part of an hour.
+            print(f"[{mark}] ({total}/{len(muts)}) {rel}:{idx + 1}: {desc}", flush=True)
             if passed:
                 survived.append(f"{rel}:{idx + 1}: {desc}")
 
