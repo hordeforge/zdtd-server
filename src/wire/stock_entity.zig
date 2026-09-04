@@ -415,6 +415,26 @@ test "stock zombie spawn body non-empty" {
     try std.testing.expectEqual(@as(u8, 36), body[4]);
     try std.testing.expectEqual(class_zombie_default, std.mem.readInt(i32, body[5..9], .little));
     try std.testing.expectEqual(class_zombie_boe, class_zombie_default);
+
+    // ECD continues: id i32 | lifetime f32 | pos x,y,z | rot pitch,yaw,roll |
+    // onGround. Nothing read past the class, so every pair in that run of
+    // eight floats could swap unnoticed - and this is the body a client reads
+    // to place the entity, so a swap there spawns it somewhere else. lifetime
+    // is floatMax and the two unused rotation axes are 0, which the position
+    // and yaw values are chosen to differ from.
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(i32, 200), std.mem.readInt(i32, body[9..13], .little));
+    try std.testing.expectEqual(std.math.floatMax(f32), f32At(body, 13)); // lifetime
+    try std.testing.expectEqual(@as(f32, -273), f32At(body, 17)); // x
+    try std.testing.expectEqual(@as(f32, 61), f32At(body, 21)); // y
+    try std.testing.expectEqual(@as(f32, 449), f32At(body, 25)); // z
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 29)); // rot pitch
+    try std.testing.expectEqual(@as(f32, 90), f32At(body, 33)); // rot yaw
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 37)); // rot roll
 }
 
 test "stock loot spawn embeds ECD bag" {
