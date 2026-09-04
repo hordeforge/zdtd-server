@@ -2743,6 +2743,29 @@ test "lock request grant response layout" {
     const resp = try buildLockResponseGrant(&resp_buf, head);
     try std.testing.expectEqual(@as(u8, 1), resp[0]); // locking
     try std.testing.expectEqual(@as(u8, 1), resp[1]); // success
+
+    // Only those two bytes were checked. The rest is locking | success |
+    // errorMsg | isForceUnlocked | channel | targets | context, and the deny
+    // path had no test at all - it differs from grant only in the success bit
+    // and the message, which is exactly the pair a swap would hide.
+    var r: binary.Reader = .{ .data = resp };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqual(true, try r.readBool()); // locking
+    try std.testing.expectEqual(true, try r.readBool()); // success
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // errorMsg
+    try std.testing.expectEqual(false, try r.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // channel
+    // targets_blob is echoed verbatim: count 1 then the one target entry.
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32());
+
+    var deny_buf: [128]u8 = undefined;
+    const deny = try buildLockResponseDeny(&deny_buf, head, "busy");
+    var dr: binary.Reader = .{ .data = deny };
+    try std.testing.expectEqual(true, try dr.readBool()); // locking echoed
+    try std.testing.expectEqual(false, try dr.readBool()); // success cleared
+    try std.testing.expectEqualStrings("busy", try dr.readString(&s_buf));
+    try std.testing.expectEqual(false, try dr.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 0), try dr.readU16()); // channel
 }
 
 test "inventory data request stock layout and not-found response" {
@@ -3089,6 +3112,21 @@ pub fn buildEntityCollectBody(buf: []u8, entity_id: i32, player_id: i32) ![]u8 {
     try w.writeI32(entity_id);
     try w.writeI32(player_id);
     return w.written();
+}
+
+test "entity collect body is bag then collector, and the parser agrees" {
+    // Two i32 whose order decides which entity is collected and which player
+    // is credited. The C2S handler rejects a collect whose playerId is not the
+    // sender (ValidEntityIdForSender, Process IL=51), so a swap here would
+    // reject every honest collect and accept nothing else.
+    var buf: [8]u8 = undefined;
+    const body = try buildEntityCollectBody(&buf, 4242, 106);
+    try std.testing.expectEqual(@as(usize, 8), body.len);
+    try std.testing.expectEqual(@as(i32, 4242), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[4..8], .little));
+    const p = try parseCollectBody(body);
+    try std.testing.expectEqual(@as(i32, 4242), p.entity_id);
+    try std.testing.expectEqual(@as(i32, 106), p.player_id);
 }
 
 /// GameUtils/EKickReason (asm.il:1913681-1913720). Only the values zdtd emits:
