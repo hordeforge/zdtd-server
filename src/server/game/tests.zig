@@ -2318,8 +2318,19 @@ test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
     blocks[8 + 8 * 16 + 70 * 256] = gen_id;
     blocks[10 + 8 * 16 + 70 * 256] = cons_id;
     g.scanChunkPower(ch, 0, 0);
-    try std.testing.expect(g.sim.power.indexOfPosition(8, 70, 8) != null);
-    try std.testing.expect(g.sim.power.indexOfPosition(10, 70, 8) != null);
+    // Presence alone is a weak check: a rebuild that registered every power
+    // block as the same node kind, or dropped the watts, would still put a
+    // node at both cells. Assert what the scan is actually for - the class and
+    // rating each block id resolves to through the registry.
+    const gi = g.sim.power.indexOfPosition(8, 70, 8) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(ecs.electric.NodeKind.generator, g.sim.power.nodes[gi].kind);
+    try std.testing.expectApproxEqAbs(@as(f32, 1000), g.sim.power.nodes[gi].watts, 0.01);
+
+    const ci = g.sim.power.indexOfPosition(10, 70, 8) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(ecs.electric.NodeKind.battery, g.sim.power.nodes[ci].kind);
+
+    // A cell with no power block must not gain a node.
+    try std.testing.expect(g.sim.power.indexOfPosition(9, 70, 8) == null);
 }
 
 test "trader POIs spawn their NPC classes on a stock map" {
