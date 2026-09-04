@@ -715,6 +715,43 @@ test "scenario replicate sends TurretSync on target change" {
         }
     }
     try std.testing.expect(found);
+
+    // A stock NetPackageTurretSpawn is entityType i32 | pos Vector3 (3 x f32) |
+    // rot Vector3 | ItemValue | entityThatPlaced i32 (RE
+    // inventories/netpackage-bodies.md, write IL=24). Read as zdtd's compact
+    // three-i32 form, the float bit patterns decode to coordinates in the
+    // billions and the reach gate drops the placement, so a real client's
+    // turret silently never appeared.
+    {
+        const before = g.sim.countKind(.turret);
+        const p = g.sim.transform[ps];
+        const tx = p.x + 1;
+        const ty = p.y;
+        const tz = p.z + 1;
+        var sb: [64]u8 = @splat(0);
+        var w: binary.Writer = .{ .buf = &sb };
+        try w.writeI32(1); // entityType
+        try w.writeF32(tx); // pos
+        try w.writeF32(ty);
+        try w.writeF32(tz);
+        try w.writeF32(0); // rot
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeByte(0); // ItemValue.None
+        try w.writeI32(c.entity_id); // entityThatPlaced
+        var sfb: [128]u8 = undefined;
+        try g.injectFramed(c, try packages.framed(&sfb, "NetPackageTurretSpawn", w.written()));
+        try std.testing.expectEqual(before + 1, g.sim.countKind(.turret));
+        // Placed where the client asked, not at a bit-pattern coordinate.
+        var placed = false;
+        for (g.sim.kind_groups.slice(.turret)) |slot| {
+            if (!g.sim.alive[slot]) continue;
+            const tt = g.sim.transform[slot];
+            if (@abs(tt.x - tx) < 1.5 and @abs(tt.z - tz) < 1.5) placed = true;
+        }
+        try std.testing.expect(placed);
+    }
+    std.debug.print("PASS turretspawn: stock float body places at the requested position\n", .{});
 }
 
 test "scenario backpack marker broadcasts on drop and clears on collect" {

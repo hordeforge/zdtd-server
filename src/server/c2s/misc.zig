@@ -964,9 +964,29 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     }
     if (std.mem.eql(u8, name, "NetPackageTurretSpawn")) {
         if (body.len < 12) return true;
-        const x = std.mem.readInt(i32, body[0..4], .little);
-        const y = std.mem.readInt(i32, body[4..8], .little);
-        const z = std.mem.readInt(i32, body[8..12], .little);
+        // Stock's body is `entityType` i32 | pos Vector3 (3 x f32) | rot
+        // Vector3 | ItemValue | `entityThatPlaced` i32 (RE
+        // inventories/netpackage-bodies.md, write IL=24). zdtd also accepts a
+        // compact 12-byte form of three i32 world coordinates for loadgen and
+        // the scenarios. Reading the stock body as that compact form decoded
+        // the float bit patterns as coordinates in the billions, which the
+        // reach gate then rejected: a real client's turret never got placed.
+        const stock = body.len >= 16;
+        const x, const y, const z = if (stock) blk: {
+            const fx: f32 = @bitCast(std.mem.readInt(u32, body[4..8], .little));
+            const fy: f32 = @bitCast(std.mem.readInt(u32, body[8..12], .little));
+            const fz: f32 = @bitCast(std.mem.readInt(u32, body[12..16], .little));
+            if (!std.math.isFinite(fx) or !std.math.isFinite(fy) or !std.math.isFinite(fz)) return true;
+            break :blk .{
+                std.math.lossyCast(i32, @floor(fx)),
+                std.math.lossyCast(i32, @floor(fy)),
+                std.math.lossyCast(i32, @floor(fz)),
+            };
+        } else .{
+            std.mem.readInt(i32, body[0..4], .little),
+            std.mem.readInt(i32, body[4..8], .little),
+            std.mem.readInt(i32, body[8..12], .little),
+        };
         // Same rate gate as SetBlock: a spam loop must not plant turrets
         // faster than the bucket refills and drain the entity table.
         if (!self.takeBlockToken(c)) {

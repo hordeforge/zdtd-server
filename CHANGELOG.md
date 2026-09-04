@@ -182,6 +182,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackageTurretSpawn` from a real client never placed a turret. The handler
+  read zdtd's compact three-i32 body unconditionally, so the stock body's float
+  position (`entityType` i32 | pos Vector3, RE write IL=24) decoded as
+  coordinates in the billions and the reach gate dropped the placement. A body
+  of 16 bytes or more is now read as the stock float layout.
 - `NetPackageEntityRelPosAndRot` read its movement delta at a fixed byte 11,
   which is only correct when `bUseQRotation` is clear. The Rotation base this
   package extends carries 3 x i16 euler in that case but a 4 x f32 quaternion

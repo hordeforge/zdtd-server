@@ -204,13 +204,17 @@ against the RE package table; none is a live gap, for these reasons:
   outcome; whether the prime signal adds a wind-up cue is unknown. Same
   posture as `VehicleCount` below: not emitted on a guess.
 
-### Two zdtd-shaped bodies under stock package names (2026-09-04)
+### Three zdtd-shaped bodies under stock package names (2026-09-04)
 
-Found while citing the body builders against the RE. Both are C2S-inbound only,
-never sent to a client, and both are distinguished from the stock body by shape
-before anything is applied, so a stock client is unaffected. Recorded because a
-non-stock body riding a stock package name is exactly the thing that looks like
-a wire divergence later.
+Found while citing the body builders and parsers against the RE. All are
+C2S-inbound only, never sent to a client, and each is distinguished from the
+stock body by shape before anything is applied. Recorded because a non-stock
+body riding a stock package name is exactly the thing that looks like a wire
+divergence later.
+
+The third one below was not distinguished at all until it was written down
+here, which is the argument for keeping this list: the compact form was read
+unconditionally and a stock client's turret placement was silently dropped.
 
 - **`NetPackageVehicleSpawn`** also accepts a zdtd control body (`entityId` i32 |
   `op` u8 | `throttle` f32 | `steer` f32, fixed 13 bytes) for seat / unseat /
@@ -224,6 +228,16 @@ a wire divergence later.
   stock `InventoryTransaction.Write` op list. The stock layout is tried first
   (`parseStockInvTx`), so a real client always takes the stock path; the compact
   body exists for scenarios driving the same handler.
+- **`NetPackageTurretSpawn`** accepts a compact 12-byte form of three i32 world
+  coordinates beside the stock `entityType` i32 | pos Vector3 (3 x f32) | rot
+  Vector3 | ItemValue | `entityThatPlaced` i32 (write IL=24). Until 2026-09-04
+  the compact form was read unconditionally: a stock body's float bit patterns
+  decoded as coordinates in the billions, the reach gate rejected them, and the
+  client's turret never appeared. The handler now reads the stock float
+  position for any body of 16 bytes or more; only loadgen and the scenarios
+  send the shorter form. The rotation, `ItemValue` and `entityThatPlaced` tail
+  is still not applied: zdtd turrets carry no rotation or source item, and the
+  placer is taken from the sender rather than the body.
 
 One of the 55 is not in a waived category and is recorded here rather than
 buried in that list: **`NetPackageVehicleCount`** (body `vehicleCount i32 |
