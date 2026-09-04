@@ -90,15 +90,19 @@ pub fn build(b: *std.Build) void {
     // times: tools/wire_order_mutants.py rebuilds the suite once per mutant,
     // and running all of it per mutant makes a full audit take a day.
     // `make check` never passes this, so the gate always runs everything.
-    const test_filter = b.option(
-        []const u8,
+    // Repeatable: no single substring covers every test touching one wire
+    // file (stock_te.zig alone needs "te ", "trigger", "workstation" and
+    // more), and a filter that misses the covering test makes the mutant look
+    // like a test gap it is not.
+    const test_filters = b.option(
+        []const []const u8,
         "test-filter",
-        "Run only tests whose name contains this substring (audit tooling; not used by make check)",
-    );
+        "Run only tests whose name contains this substring; repeatable (audit tooling; not used by make check)",
+    ) orelse &.{};
     const unit_tests = b.addTest(.{
         .root_module = test_mod,
         .use_llvm = true,
-        .filters = if (test_filter) |f| &.{f} else &.{},
+        .filters = test_filters,
     });
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");

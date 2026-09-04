@@ -92,19 +92,19 @@ def mutants_for(path):
     return lines, out
 
 
-def run_suite(test_filter=None):
+def run_suite(test_filters=None):
     """True when the test suite passes.
 
-    With a filter the run is ~90x faster (2.6 s against 4 min), which is the
-    difference between auditing a file and auditing the tree. The filter is a
-    loaded gun: `zig build test` exits 0 when a filter matches nothing, so a
-    typo would report every mutant as killed by a suite that ran no tests.
-    Callers must prove the filter selects something first - see
-    filter_is_live().
+    With filters the run is ~90x faster (2.6 s against 4 min), which is the
+    difference between auditing a file and auditing the tree. Filters are a
+    loaded gun: `zig build test` exits 0 when nothing matches, so a typo would
+    report every mutant as killed by a suite that ran no tests, and a filter
+    that misses the one covering test turns a healthy pair into a false
+    survivor. Callers must prove the set is live first - see filter_is_live().
     """
     cmd = ["zig", "build", "test"]
-    if test_filter:
-        cmd.append(f"-Dtest-filter={test_filter}")
+    for f in test_filters or ():
+        cmd.append(f"-Dtest-filter={f}")
     r = subprocess.run(
         cmd,
         cwd=ROOT,
@@ -114,8 +114,8 @@ def run_suite(test_filter=None):
     return r.returncode == 0
 
 
-def filter_is_live(test_filter, path, lines, mutants):
-    """True when `test_filter` selects a test that the file under audit can fail.
+def filter_is_live(test_filters, path, lines, mutants):
+    """True when `test_filters` select a test that the file under audit can fail.
 
     A filter matching nothing exits 0, and so would every mutant after it, so
     the report would read "all killed" from a suite that ran no tests. Proving
@@ -124,8 +124,13 @@ def filter_is_live(test_filter, path, lines, mutants):
     An appended `@compileError` does not work: Zig never evaluates it in code
     nothing references, and the filtered build exits 0 with the file broken.
     The probe here is the tool's own mutation applied to the first candidate
-    pair. If the filtered suite cannot notice a swapped field there, it cannot
-    judge any other pair in the file either.
+    pairs.
+
+    This is a floor, not a guarantee. It proves the filters reach the file
+    somewhere; it cannot prove they reach every builder in it. A filter set
+    covering half a file yields false survivors in the other half - which is
+    why every survivor is re-checked against the unfiltered suite before it is
+    reported.
     """
     if not mutants:
         return False
@@ -140,7 +145,7 @@ def filter_is_live(test_filter, path, lines, mutants):
             probe[idx], probe[idx + 1] = probe[idx + 1], probe[idx]
             with open(path, "w", encoding="utf-8") as fh:
                 fh.writelines(probe)
-            if not run_suite(test_filter):
+            if not run_suite(test_filters):
                 return True
         return False
     finally:
@@ -168,10 +173,16 @@ def main():
     ap.add_argument("--list", action="store_true", help="list mutants, run nothing")
     ap.add_argument(
         "--test-filter",
+        action="append",
+        default=[],
+        metavar="SUBSTRING",
         help=(
-            "run only tests whose name contains this substring (~90x faster). "
-            "Requires --file: the filter has to match tests covering the file "
-            "under audit, and it is probed for liveness before any mutant runs"
+            "run only tests whose name contains this substring (~90x faster); "
+            "repeat for more. Requires --file. No single substring covers every "
+            "test touching one wire file - stock_te.zig needs 'te ', 'trigger' "
+            "and 'workstation' - and a missing one turns a healthy pair into a "
+            "false survivor, so the set is probed for liveness before any "
+            "mutant runs"
         ),
     )
     args = ap.parse_args()
@@ -220,6 +231,7 @@ def main():
 
     total = 0
     survived = []
+    false_survivors = []
     for path in targets:
         lines, muts = mutants_for(path)
         rel = os.path.relpath(path, ROOT)
@@ -241,6 +253,14 @@ def main():
                 with open(path, "w", encoding="utf-8") as fh:
                     fh.writelines(swapped)
                 passed = run_suite(args.test_filter)
+                # A survivor under filters may just mean the filters missed the
+                # covering test, so confirm it against the whole suite before
+                # reporting. Only survivors pay that cost, and there should be
+                # few: the filtered pass already killed everything else.
+                if passed and args.test_filter:
+                    passed = run_suite(None)
+                    if not passed:
+                        false_survivors.append(f"{rel}:{idx + 1}: {desc}")
             finally:
                 shutil.copyfile(backup, path)
                 os.unlink(backup)
@@ -254,6 +274,16 @@ def main():
         return 0
 
     print(f"\n{total} mutants, {len(survived)} survived")
+    if false_survivors:
+        # Killed by the full suite but not by the filtered one: the filters do
+        # not cover this builder. Worth printing, because it says the filter
+        # set is too narrow for the file, not that the code is fine.
+        print(
+            f"\n{len(false_survivors)} killed only by the unfiltered suite "
+            "(widen --test-filter to cover these):"
+        )
+        for s in false_survivors:
+            print("  " + s)
     if survived:
         print("\nNo test distinguishes these positions:")
         for s in survived:
