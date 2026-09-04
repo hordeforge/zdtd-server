@@ -103,6 +103,26 @@ for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
     signal.signal(_sig, _on_signal)
 
 
+def literal_value(arg):
+    """The integer a literal write argument encodes, or None if not a literal.
+
+    `false`/`0` and `true`/`1` are the same byte on the wire, so a pair like
+    `writeBool(false)` beside `writeByte(0)` can never be told apart by any
+    test - reporting it as a survivor sends a reader looking for a missing
+    assertion that cannot exist. Anything referencing a variable returns None,
+    since its value is not knowable here.
+    """
+    s = arg.strip()
+    if s == "false":
+        return 0
+    if s == "true":
+        return 1
+    try:
+        return int(s, 0)
+    except ValueError:
+        return None
+
+
 def mutants_for(path):
     """Yield (line_index, description) for each swappable adjacent pair.
 
@@ -139,8 +159,13 @@ def mutants_for(path):
         # Same width only: a differing width is caught by any length check.
         if WIDTH[a.group(2)] != WIDTH[b.group(2)]:
             continue
-        # Identical argument text means the swap is a no-op on the bytes.
-        # Those pairs are unobservable by construction, not a test gap.
+        # A swap that cannot change the bytes is unobservable by construction,
+        # not a test gap. Identical argument text is the obvious case; the one
+        # that kept showing up as a false survivor is two *different* literals
+        # that encode the same bytes, e.g. `writeBool(false)` beside
+        # `writeByte(0)`, or two constants that are simply equal.
+        if literal_value(a.group(3)) is not None and literal_value(a.group(3)) == literal_value(b.group(3)):
+            continue
         if a.group(3).strip() == b.group(3).strip():
             continue
         out.append((i, f"{a.group(2)}({a.group(3).strip()}) <-> {b.group(2)}({b.group(3).strip()})"))

@@ -518,6 +518,31 @@ def main():
             + " - either revert the value or move the field out of that section"
         )
 
+    # 7f. AUDIT-TOOL SELF-CHECK. wire_order_mutants.py decides which swapped
+    #     pairs are worth reporting, and its literal filter is the part that
+    #     can go wrong silently: too loose and it drops real findings, too
+    #     tight and it floods the report with pairs no test could ever
+    #     distinguish. `make check` only byte-compiles tools/*.py, so pin the
+    #     behaviour here where it actually runs.
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    try:
+        from wire_order_mutants import literal_value
+    except ImportError as e:
+        failures.append(f"cannot import the mutation audit's literal filter: {e}")
+    else:
+        cases = [
+            ("false", 0), ("true", 1), ("0", 0), ("-5", -5), ("0x10", 16),
+            # Not literals: their value is unknowable here, so they must stay
+            # reportable rather than be dropped as indistinguishable.
+            ("v.game_difficulty", None), ('""', None), ("dens[0]", None),
+        ]
+        for arg, want in cases:
+            got = literal_value(arg)
+            if got != want:
+                failures.append(
+                    f"wire_order_mutants.literal_value({arg!r}) is {got!r}, want {want!r}"
+                )
+
     if failures:
         for f in failures:
             print("FAIL:", f)
