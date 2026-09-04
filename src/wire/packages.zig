@@ -2994,6 +2994,14 @@ test "GameStats body is i16 len + full persistent blob" {
         .is_spawn_enemies = false,
         .player_killing_mode = 2,
         .drop_on_death = 3,
+        // Same collision a few slots on: DropOnQuit is a literal 0 while
+        // enemy_difficulty defaults to 0, and the difficulty / blood-moon /
+        // daylight values have to differ from each other as well.
+        .game_difficulty = 4,
+        .blood_moon_enemy_count = 9,
+        .enemy_difficulty = 5,
+        .day_light_length = 19,
+        .land_claim_count = 6,
     });
     var dr: binary.Reader = .{ .data = d[2..] };
     dr.pos = r.pos; // same head width, already asserted field by field above
@@ -3022,6 +3030,13 @@ test "GameStats body is i16 len + full persistent blob" {
     try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 24: ScoreZombieKillMultiplier
     try std.testing.expectEqual(@as(i32, -5), try dr.readI32()); // 25: ScoreDiedMultiplier
     try std.testing.expectEqual(@as(i32, 3), try dr.readI32()); // 26: DropOnDeath
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 27: DropOnQuit
+    try std.testing.expectEqual(@as(i32, 4), try dr.readI32()); // 28: GameDifficulty
+    try std.testing.expectEqual(@as(i32, 9), try dr.readI32()); // 29: BloodMoonEnemyCount
+    try std.testing.expectEqual(true, try dr.readBool()); // 30: EnemySpawnMode
+    try std.testing.expectEqual(@as(i32, 5), try dr.readI32()); // 31: EnemyDifficulty
+    try std.testing.expectEqual(@as(i32, 19), try dr.readI32()); // 32: DayLightLength
+    try std.testing.expectEqual(@as(i32, 6), try dr.readI32()); // 33: LandClaimCount
 }
 
 test "lock response for a trader carries the context and trader data" {
