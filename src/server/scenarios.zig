@@ -38,6 +38,7 @@ const ally_mod = @import("ally.zig");
 const persist = @import("persist.zig");
 const phase_gate = @import("phase_gate.zig");
 const util_log = @import("../util/log.zig");
+const clock = @import("../util/clock.zig");
 const containers_mod = @import("../world/containers.zig");
 const vending_mod = @import("../world/vending.zig");
 const assets_traders = @import("../assets/traders.zig");
@@ -8136,6 +8137,27 @@ test "scenario chat routes by recipient list and preserves the channel" {
     try std.testing.expect(cap_a.findPkgId(chat_id) != null);
     try std.testing.expect(cap_b.findPkgId(chat_id) != null);
     try std.testing.expect(cap_c.findPkgId(chat_id) == null); // no self-echo
+
+    // Unlike the verbatim relays, chat is parsed and rebuilt, and the rebuild
+    // substitutes the sender's own entity id for whatever the client claimed.
+    // That is what stops one player putting words in another's mouth, and it
+    // was untested: every case above sent its own id, so a server that echoed
+    // the claimed sender would have passed all of them.
+    cap_b.clear();
+    cap_c.clear();
+    // acceptChatRate gates every chat kind per client, so let A's gap expire
+    // before it speaks again; the virtual clock makes that exact.
+    clock.advanceNs(2 * std.time.ns_per_s);
+    // Sent by A, claiming C's entity id.
+    const spoofed = try packages.buildStockChat(&body, 0, cc.entity_id, "not from me", &.{});
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageChat", spoofed));
+    const relayed = cap_b.findPkgId(chat_id) orelse return error.TestUnexpectedResult;
+    const rch = try packages.parseStockChat(relayed);
+    try std.testing.expectEqual(ca.entity_id, rch.sender); // A, not the claimed C
+    try std.testing.expect(rch.sender != cc.entity_id);
+    try std.testing.expectEqualStrings("not from me", rch.msg);
+
+    std.debug.print("PASS chat-sender: the relayed sender is the sending peer, not the claimed one\n", .{});
 }
 
 test "scenario party shared quest: accept shares to the party, disconnect removes" {
