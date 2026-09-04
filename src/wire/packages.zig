@@ -4146,6 +4146,26 @@ pub fn buildNavObjectAdd(
     return w.written();
 }
 
+test "nav object add body layout" {
+    // No test covered this builder. Two strings, then a Vector3 whose three
+    // words nothing read back, then a run of flags around a packed colour.
+    var buf: [128]u8 = undefined;
+    const body = try buildNavObjectAdd(&buf, "quest", "Trader Jen", 11, 12, 13, 106);
+    var r: binary.Reader = .{ .data = body };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("quest", try r.readString(&s_buf));
+    try std.testing.expectEqualStrings("Trader Jen", try r.readString(&s_buf));
+    try std.testing.expectEqual(@as(f32, 11), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 12), try r.readF32());
+    try std.testing.expectEqual(@as(f32, 13), try r.readF32());
+    try std.testing.expectEqual(true, try r.readBool()); // isAdd
+    try std.testing.expectEqual(false, try r.readBool()); // useOverrideColor
+    try std.testing.expectEqual(@as(u32, 0xffffffff), try r.readU32()); // colour
+    try std.testing.expectEqual(false, try r.readBool()); // usingLocalizationId
+    try std.testing.expectEqual(@as(i32, 106), try r.readI32());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
 /// NetPackageExplosionClient (RE protocol-packages.md 6.15 + write IL=60):
 /// `center` Vector3 | `rotation` Quaternion | `expType` i16 | `blastPower` u16 |
 /// `blastRadius` u16 | `blockDamage` u16 | `entityId` i32 | `changeCount` u16,
@@ -4179,6 +4199,33 @@ pub fn buildExplosionClient(
     try w.writeI32(entity_id);
     try w.writeU16(0); // explosionChanges count
     return w.written();
+}
+
+test "explosion client body layout" {
+    // No test covered this builder. It is pos Vector3 | identity quaternion |
+    // type i16 | blastPower u16 | blastRadius u16 | blockDamage u16 |
+    // entityId i32 | changes count u16, and the three u16 in a row are the
+    // part a swap moves without changing the length.
+    var buf: [64]u8 = undefined;
+    const body = try buildExplosionClient(&buf, 11, 12, 13, 3, 21, 22, 23, 106);
+    try std.testing.expectEqual(@as(usize, 12 + 16 + 2 + 6 + 4 + 2), body.len);
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 11), f32At(body, 0));
+    try std.testing.expectEqual(@as(f32, 12), f32At(body, 4));
+    try std.testing.expectEqual(@as(f32, 13), f32At(body, 8));
+    // Identity quaternion: three zeros then w = 1.
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 12));
+    try std.testing.expectEqual(@as(f32, 1), f32At(body, 24));
+    try std.testing.expectEqual(@as(i16, 3), std.mem.readInt(i16, body[28..30], .little));
+    try std.testing.expectEqual(@as(u16, 21), std.mem.readInt(u16, body[30..32], .little)); // blastPower
+    try std.testing.expectEqual(@as(u16, 22), std.mem.readInt(u16, body[32..34], .little)); // blastRadius
+    try std.testing.expectEqual(@as(u16, 23), std.mem.readInt(u16, body[34..36], .little)); // blockDamage
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[36..40], .little));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, body[40..42], .little));
 }
 
 /// C2S ExplosionInitiate head (protocol-frames §12).
