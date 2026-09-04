@@ -669,11 +669,20 @@ test "stock quest journal one in-progress" {
         .{}, // Exp: index only
         .{ .has_item_stack = true, .item = .{ .type_id = 0, .count = 0 } }, // Item: empty stack ok
     };
+    // Distinct values per field. The defaults leave quest_version at 1 next to
+    // quest_file_version 8, and shared_owner_id and quest_giver_id both at -1,
+    // so a swap between neighbours emitted identical bytes and no test could
+    // see it.
     const q = StockQuestWrite{
         .id = "quest_whiteRiverCitizen1",
+        .quest_version = 3,
+        .shared_owner_id = 41,
+        .quest_giver_id = 42,
+        .tracked = true,
+        .current_phase = 2,
         .quest_code = 1,
         .objective_count = 2,
-        .first_objective_value = 0,
+        .first_objective_value = 6,
         .rewards = rewards[0..],
     };
     try writeQuestJournal(&w, &[_]StockQuestWrite{q});
@@ -686,6 +695,26 @@ test "stock quest journal one in-progress" {
     const outer = std.mem.readInt(u16, out[5..7], .little);
     try std.testing.expect(outer > 10);
     try std.testing.expectEqual(@as(usize, 5 + outer + 1), out.len);
+
+    // Quest.Write body after the outer marker: the id string, then the header
+    // bytes. Nothing read these back, so five adjacent pairs among them could
+    // swap unnoticed (the mutation audit reported exactly that run).
+    var qr: binary.Reader = .{ .data = out[7..] };
+    var id_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("quest_whiteRiverCitizen1", try qr.readString(&id_buf));
+    try std.testing.expectEqual(@as(u8, 3), try qr.readByte()); // quest_version
+    try std.testing.expectEqual(quest_file_version, try qr.readByte()); // file version
+    try std.testing.expectEqual(@intFromEnum(QuestState.in_progress), try qr.readByte());
+    try std.testing.expectEqual(@as(i32, 41), try qr.readI32()); // sharedOwnerID
+    try std.testing.expectEqual(@as(i32, 42), try qr.readI32()); // questGiverID
+    // InProgress tail: tracked bool, currentPhase byte, questCode i32.
+    try std.testing.expectEqual(true, try qr.readBool());
+    try std.testing.expectEqual(@as(u8, 2), try qr.readByte());
+    try std.testing.expectEqual(@as(i32, 1), try qr.readI32());
+    // Objectives: u16 size marker, then FileVersion + CurrentValue per entry.
+    _ = try qr.readU16();
+    try std.testing.expectEqual(objective_file_version, try qr.readByte());
+    try std.testing.expectEqual(@as(u8, 6), try qr.readByte()); // first_objective_value
 }
 
 test "position data entries cost 13 bytes each" {
