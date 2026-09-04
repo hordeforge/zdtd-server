@@ -3593,8 +3593,10 @@ test "sound at position parses the stock 5-field body" {
     // i32 | entityId i32. volumeScale is Setup-only and never on the wire.
     var body: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &body };
+    // pos[1] is 64.75, not 0: with a zero there a swap with either neighbour
+    // emitted bytes the assertions could not tell apart.
     try w.writeF32(100.5);
-    try w.writeF32(0);
+    try w.writeF32(64.75);
     try w.writeF32(-50.25);
     try w.writeString("Sounds/explosions/boom");
     try w.writeByte(1); // Linear
@@ -3612,7 +3614,21 @@ test "sound at position parses the stock 5-field body" {
     // A trailing volumeScale byte is not part of the wire: the parser stops
     // after entityId and the builder emits exactly 5 fields (a stock client
     // reader would desync on a 6-field body).
-    const built = try buildSoundAtPosition(&body, .{ .pos = .{ 100.5, 0, -50.25 }, .mode = 1, .distance = 30, .entity_id = 42 });
+    // Separate buffer: `body` is the parsed input and `s` slices into it, so
+    // building into it would overwrite the very values being written.
+    var out_buf: [128]u8 = undefined;
+    const built = try buildSoundAtPosition(&out_buf, s);
+    // Values, not just the field count: this block only checked that the body
+    // ends after five fields, so a reordering inside the builder would hide
+    // behind a parser that moved with it. pos[1] also had to stop being 0.
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 100.5), f32At(built, 0));
+    try std.testing.expectEqual(@as(f32, 64.75), f32At(built, 4));
+    try std.testing.expectEqual(@as(f32, -50.25), f32At(built, 8));
     var br: binary.Reader = .{ .data = built };
     _ = try br.readF32();
     _ = try br.readF32();
@@ -3904,9 +3920,11 @@ test "world areas stock wire" {
             .pos_x = 10,
             .pos_y = 61,
             .pos_z = 20,
+            // size_x and size_z were both 60, which made that swap emit
+            // identical bytes; the audit reported it as a survivor.
             .size_x = 60,
             .size_y = 28,
-            .size_z = 60,
+            .size_z = 62,
             .pad_x = -2,
             .pad_y = 0,
             .pad_z = -2,
@@ -3920,8 +3938,14 @@ test "world areas stock wire" {
     try std.testing.expectEqual(@as(usize, 1 + 2 + 34), body.len);
     try std.testing.expectEqual(@as(u8, 1), body[0]); // cVersion
     try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[1..3], .little));
+    // Whole position and size triples: only pos_x and size_x were read, so
+    // pos_y/pos_z and size_y/size_z could swap unnoticed.
     try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, body[3..7], .little));
+    try std.testing.expectEqual(@as(i32, 61), std.mem.readInt(i32, body[7..11], .little));
+    try std.testing.expectEqual(@as(i32, 20), std.mem.readInt(i32, body[11..15], .little));
     try std.testing.expectEqual(@as(i16, 60), std.mem.readInt(i16, body[15..17], .little));
+    try std.testing.expectEqual(@as(i16, 28), std.mem.readInt(i16, body[17..19], .little));
+    try std.testing.expectEqual(@as(i16, 62), std.mem.readInt(i16, body[19..21], .little));
     try std.testing.expectEqual(@as(i8, -2), @as(i8, @bitCast(body[21]))); // pad_x
     try std.testing.expectEqual(@as(u8, 2), body[24]); // teleport count
     try std.testing.expectEqual(@as(i8, 7), @as(i8, @bitCast(body[25]))); // vol0 start_x
