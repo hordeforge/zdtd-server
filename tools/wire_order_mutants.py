@@ -34,6 +34,15 @@ mid-run, shows some *other* mutant in place. That reads as a real ordering bug
 and it is not one. Always diff a survivor against `git show HEAD:<file>` before
 believing it; a genuine finding is a gap in the *tests*, and the code at HEAD is
 usually correct.
+
+**Use this to check a fix, not a hand-rolled script.** After adding assertions
+that should kill a pair, the obvious move is a throwaway loop that swaps the
+lines, runs the suite and swaps them back. Mine left a swap behind in
+`buildSoundAtPosition` when an assertion tripped mid-loop, and only `make
+check` noticed. A narrow range does the same job with the restore guarded:
+
+    python3 tools/wire_order_mutants.py --file src/wire/packages.zig \\
+      --lines 3581:3582 --test-filter "sound at position"
 """
 import argparse
 import atexit
