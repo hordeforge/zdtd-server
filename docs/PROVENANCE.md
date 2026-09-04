@@ -80,7 +80,7 @@ rest are unaudited, not known-good:
 | `stock_quest.zig` | 30 | partial: pairs 1-20 measured over three passes, each closing a gap and letting the next run reach further. Four real gaps found and closed, all the same shape - a positional run of floats or header bytes with nothing reading it back. Pairs 21-30 are unmeasured; the tool aborts at 6 survivors needing a 4-minute re-check each |
 | `stock_inv.zig` | 15 | clean, re-run after closing 7 survivors (`ItemValue.Write` flags/ammo/cosmetics run, the nested mod value, `Bag.Write`'s three trailing bools, the bedroll marker, drop-container y/z) |
 | `packages.zig` | 155 | not run |
-| `stock_entity.zig` | 28 | 8 survivors found and closed over two passes (the ECD lifetime/pos/rot run, homePosition, the falling-tree direction vector). One survivor stays, documented at the code site: `spawnByAllowShare` and `headState` are both a zero byte, so no test can pin their order. Not re-run since the second pass |
+| `stock_entity.zig` | 28 | clean, re-run: 8 survivors found and closed over two passes (the ECD lifetime/pos/rot run, homePosition, the falling-tree direction vector). The one remaining survivor is documented at the code site: `spawnByAllowShare` and `headState` are both a zero byte, so no test can pin their order |
 
 Mutant counts are after the test-block filter added 2026-09-04: writes inside
 `test` blocks build fixture bytes for the test itself, so swapping two of them
