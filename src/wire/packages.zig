@@ -650,11 +650,36 @@ test "player id body layout: header fields and non-empty pdf" {
     try std.testing.expectEqual(@as(f32, -273), try r.readF32());
     try std.testing.expectEqual(@as(f32, 61), try r.readF32());
     try std.testing.expectEqual(@as(f32, 449), try r.readF32());
+
+    // Anchor on the coordinate triple itself: -273 | 61 | 449 as i32 is a
+    // distinct bit pattern from the same numbers written as f32 in the ECD
+    // head above. Finding it proves the three words are adjacent and in order,
+    // which is what a swap would break; the fields after it follow at a fixed
+    // offset. This must run before body2 reuses `buf` underneath `body`.
+    var want: [12]u8 = undefined;
+    std.mem.writeInt(i32, want[0..4], -273, .little);
+    std.mem.writeInt(i32, want[4..8], 61, .little);
+    std.mem.writeInt(i32, want[8..12], 449, .little);
+    // The triple appears twice: homePosition in the ECD, then
+    // lastSpawnPosition in the PDF. Both are worth pinning, so take each.
+    const home_at = std.mem.find(u8, body, &want) orelse return error.HomePosNotFound;
+    const lsp = home_at + 12 +
+        (std.mem.find(u8, body[home_at + 12 ..], &want) orelse return error.LastSpawnPosNotFound);
+    try std.testing.expectEqual(@as(f32, 0), @as(f32, @bitCast(std.mem.readInt(u32, body[lsp + 12 ..][0..4], .little))));
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, body[lsp + 16 ..][0..4], .little)); // pdf id
+
     const body2 = try buildPlayerIdBody(&buf, 999, 3, 8, 0, 70, 0);
     try std.testing.expectEqual(@as(i32, 999), std.mem.readInt(i32, body2[0..4], .little));
     try std.testing.expectEqual(@as(i16, 3), std.mem.readInt(i16, body2[4..6], .little));
     try std.testing.expectEqual(@as(i32, 8), std.mem.readInt(i32, body2[body2.len - 4 ..][0..4], .little));
     try std.testing.expectEqual(body.len, body2.len);
+
+    // lastSpawnPosition sits deep in the PDF, past a bag whose length depends
+    // on CarryCapacity, so anchor on the bytes rather than count offsets:
+    // `selectedSpawnPointKey` is the only i64 zero in the body and is followed
+    // by a fixed run (bool true, i16 0, bool bLoaded) before the position.
+    // Nothing read this triple back, and a swap would tell a joining client
+    // its last spawn was somewhere it never stood.
 }
 
 test "gameStageBornAtWorldTime rides the same offset as the -1 sentinel" {
@@ -696,6 +721,28 @@ pub fn buildSpawnedBody(buf: []u8, reason: i32, x: i32, y: i32, z: i32, entity_i
     try w.writeI32(z);
     try w.writeI32(entity_id);
     return w.written();
+}
+
+test "spawned-in-world body is reason, position and entity id in that order" {
+    // Five i32 in a row with nothing reading them back: the join path has four
+    // call sites (game.zig, c2s/join.zig) and no wire test covered any of
+    // them, so a swapped pair here would tell the client it spawned at a
+    // coordinate built from the reason code.
+    var buf: [32]u8 = undefined;
+    const body = try buildSpawnedBody(
+        &buf,
+        @intFromEnum(RespawnType.enter_multiplayer),
+        -273,
+        61,
+        449,
+        106,
+    );
+    try std.testing.expectEqual(@as(usize, 20), body.len);
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i32, -273), std.mem.readInt(i32, body[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 61), std.mem.readInt(i32, body[8..12], .little));
+    try std.testing.expectEqual(@as(i32, 449), std.mem.readInt(i32, body[12..16], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[16..20], .little));
 }
 
 /// NetPackageEntityPosAndRot (RE protocol-packages.md 5.5.1, write IL=76):
