@@ -1104,6 +1104,16 @@ test "persistent player state body layout" {
     try std.testing.expectEqual(@as(i32, 70), try r.readI32());
     try std.testing.expectEqual(@as(i32, 512), try r.readI32());
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // backpacks count
+    // Bedroll Vector3i, then the two trailing counts. Nothing read these, so
+    // the y = int.max "unset" marker could swap with either zero beside it and
+    // the body still parsed - which would put a real coordinate where the
+    // marker belongs and hand the player a bedroll at the world edge.
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // bedroll x
+    try std.testing.expectEqual(std.math.maxInt(i32), try r.readI32()); // y: unset
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // bedroll z
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // questPositions
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // vending
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }
 
 test "persistent player state with no claims writes an empty lpBlocks list" {
@@ -1560,7 +1570,11 @@ test "drop items container encode decode" {
     const body = try writeDropItemsContainer(&buf, 10, "EntityLootContainer", 1.5, 70, -2.5, items[0..]);
     const p = try readDropItemsContainer(body);
     try std.testing.expectEqual(@as(i32, 10), p.dropped_by);
+    // All three coordinates, not just x: y and z had no assertion, so they
+    // could swap and the round-trip still passed.
     try std.testing.expectEqual(@as(f32, 1.5), p.x);
+    try std.testing.expectEqual(@as(f32, 70), p.y);
+    try std.testing.expectEqual(@as(f32, -2.5), p.z);
     try std.testing.expectEqual(@as(usize, 2), p.item_count);
     try std.testing.expectEqual(@as(u16, 5), p.items[0].count);
 }

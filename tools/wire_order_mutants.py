@@ -75,11 +75,32 @@ MAX_UNFILTERED_RECHECKS = 5
 
 
 def mutants_for(path):
-    """Yield (line_index, description) for each swappable adjacent pair."""
+    """Yield (line_index, description) for each swappable adjacent pair.
+
+    Writes inside `test` blocks are skipped. Those lines build fixture bytes
+    for a test to read back, so swapping two of them changes what the test
+    feeds itself, not what the server emits: they survive by construction and
+    the report fills with noise that hides the real findings. stock_inv.zig
+    alone has a dozen.
+    """
     with open(path, encoding="utf-8") as fh:
         lines = fh.readlines()
+    # Zig test blocks are top-level, so a line starting exactly at column 0
+    # ends the previous block: `test "..." {` opens, `}` at column 0 closes.
+    in_test = [False] * len(lines)
+    inside = False
+    for i, ln in enumerate(lines):
+        if ln.startswith("test "):
+            inside = True
+        elif inside and ln.startswith("}"):
+            inside = False
+            in_test[i] = True
+            continue
+        in_test[i] = inside
     out = []
     for i in range(len(lines) - 1):
+        if in_test[i] or in_test[i + 1]:
+            continue
         a = WRITE_RE.match(lines[i])
         b = WRITE_RE.match(lines[i + 1])
         if not a or not b:
