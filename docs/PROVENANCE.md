@@ -77,10 +77,15 @@ rest are unaudited, not known-good:
 | `stock_buff.zig` | 7 | clean |
 | `stock_chunk.zig` | 4 | 1 survivor, documented at the code site (an all-air layer writes a `false` bool then `stock_air` = 0, so both bytes are 0 and no chunk can tell them apart; `ChunkBlockLayer.Read` holds the order) |
 | `stock_sign.zig` | 4 | not measurable: no filter selects a test that fails when the file is mutated |
-| `stock_quest.zig` | 33 | partial: pairs 1-20 measured over three passes, each closing a gap and letting the next run reach further. Four real gaps found and closed, all the same shape - a positional run of floats or header bytes with nothing reading it back. Pairs 21-33 are unmeasured; the tool aborts at 6 survivors needing a 4-minute re-check each |
-| `stock_inv.zig` | 30 | 5 survivors found and closed (`ItemValue.Write` flags/ammo/cosmetics run, the nested mod value, `Bag.Write`'s three trailing bools). Not re-run since, so the file is *fixed*, not *verified clean* |
-| `packages.zig` | 222 | not run |
+| `stock_quest.zig` | 30 | partial: pairs 1-20 measured over three passes, each closing a gap and letting the next run reach further. Four real gaps found and closed, all the same shape - a positional run of floats or header bytes with nothing reading it back. Pairs 21-30 are unmeasured; the tool aborts at 6 survivors needing a 4-minute re-check each |
+| `stock_inv.zig` | 15 | clean, re-run after closing 7 survivors (`ItemValue.Write` flags/ammo/cosmetics run, the nested mod value, `Bag.Write`'s three trailing bools, the bedroll marker, drop-container y/z) |
+| `packages.zig` | 155 | not run |
 | `stock_entity.zig` | 28 | not run |
+
+Mutant counts are after the test-block filter added 2026-09-04: writes inside
+`test` blocks build fixture bytes for the test itself, so swapping two of them
+survives by construction. That was a third of the tree (356 pairs down to 270)
+and it was hiding real findings behind noise.
 
 Coverage targets, all enforced by the scan:
 - **File coverage: 201/201 (100%).** Every row below carries a bucket and a
