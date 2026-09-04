@@ -118,9 +118,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.ownership_rejects);
             return true;
         }
-        const dx = std.mem.readInt(i16, body[11..13], .little);
-        const dy = std.mem.readInt(i16, body[13..15], .little);
-        const dz = std.mem.readInt(i16, body[15..17], .little);
+        // The Rotation base this package extends is variable width: byte 4 is
+        // bUseQRotation, and it selects 3 x i16 euler (6 bytes) or a 4 x f32
+        // quaternion (16 bytes) before dPos begins (RE protocol-packages.md
+        // 5.5.3 / 5.5.4). Reading dPos at a fixed offset 11 decodes quaternion
+        // bytes as a movement delta whenever a client sets the flag.
+        const use_q = body[4] != 0;
+        const dpos_off: usize = if (use_q) 21 else 11;
+        if (body.len < dpos_off + 6 + 1 + 2) {
+            self.harness.counters.inc(.decode_rejects);
+            return true;
+        }
+        const dx = std.mem.readInt(i16, body[dpos_off..][0..2], .little);
+        const dy = std.mem.readInt(i16, body[dpos_off + 2 ..][0..2], .little);
+        const dz = std.mem.readInt(i16, body[dpos_off + 4 ..][0..2], .little);
         if (self.sim.slotOfNetId(eid)) |idx| {
             // RelPos delta scale (RE protocol-packages.md 5.5.4): dPos is the
             // client's movement delta encoded in 1/32-block i16 units.

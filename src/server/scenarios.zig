@@ -351,6 +351,37 @@ test "scenario relpos motion: dirty relay without heartbeat (ecs-soa F1)" {
         try std.testing.expectEqual(ca.entity_id, parsed.entity_id);
     }
     try std.testing.expect(cap_a.findPkgIdEntity(pos_id, ca.entity_id) == null);
+
+    // bUseQRotation shifts dPos: the Rotation base this package extends is
+    // 3 x i16 euler when the flag is clear and a 4 x f32 quaternion when it is
+    // set (RE protocol-packages.md 5.5.3), so dPos starts at byte 21 rather
+    // than 11. Reading it at the fixed offset decoded quaternion bytes as a
+    // movement delta.
+    {
+        // Let the speed envelope refill: the euler move above already spent
+        // this tick's budget, and a second 1-block step in the same tick is
+        // rejected for speed, which would mask what this case is testing.
+        var settle: u32 = 0;
+        while (settle < 20) : (settle += 1) try g.step();
+        const idx = g.sim.slotOfNetId(ca.entity_id).?;
+        const before_x = g.sim.transform[idx].x;
+        var q: [40]u8 = @splat(0);
+        std.mem.writeInt(i32, q[0..4], ca.entity_id, .little);
+        q[4] = 1; // bUseQRotation
+        // Identity quaternion: x=y=z=0, w=1. Its w bytes sit at 17..21, which
+        // is exactly where the old fixed offset looked for dy/dz.
+        std.mem.writeInt(u32, q[17..21], @bitCast(@as(f32, 1.0)), .little);
+        std.mem.writeInt(i16, q[21..23], 32, .little); // dx = 32 * 0.03125 = 1.0
+        std.mem.writeInt(i16, q[23..25], 0, .little); // dy
+        std.mem.writeInt(i16, q[25..27], 0, .little); // dz
+        q[27] = 1; // onGround
+        std.mem.writeInt(i16, q[28..30], 1, .little); // updateSteps
+        var qfb: [128]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&qfb, "NetPackageEntityRelPosAndRot", q[0..30]));
+        // dx = +1 block. With the fixed offset the delta came from the
+        // quaternion's w bytes instead and moved the player somewhere else.
+        try std.testing.expectApproxEqAbs(before_x + 1.0, g.sim.transform[idx].x, 0.01);
+    }
     std.debug.print("PASS relpos-motion: B received PosAndRot relay for A after RelPos inject\n", .{});
 }
 

@@ -182,6 +182,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackageEntityRelPosAndRot` read its movement delta at a fixed byte 11,
+  which is only correct when `bUseQRotation` is clear. The Rotation base this
+  package extends carries 3 x i16 euler in that case but a 4 x f32 quaternion
+  when the flag is set (RE `protocol-packages.md` 5.5.3), putting `dPos` at byte
+  21. A client setting the flag had quaternion bytes decoded as its movement.
 - `NetPackageEntityCollect` read only the first of its two i32 fields, so the
   `playerId` naming the collector was never checked. Stock gates the collect on
   `ValidEntityIdForSender(playerId)` (ProcessPackage IL=51); without it a client
