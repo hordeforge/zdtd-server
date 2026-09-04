@@ -235,14 +235,20 @@ pub fn writeQuestJournal(w: *binary.Writer, quests: []const StockQuestWrite) !vo
 
 test "npc quest list fetch with one entry" {
     var buf: [256]u8 = undefined;
+    // Distinct values throughout: the entry is positional, and six f32 in a
+    // row is exactly where a swapped pair hides. size_* used to be left at 0,
+    // which made every swap among loc_z, size_x, size_y and size_z invisible.
     const entries = [_]QuestPacketEntry{.{
         .quest_id = "tier1_clear",
         .loc_x = 10,
         .loc_y = 70,
         .loc_z = 20,
+        .size_x = 31,
+        .size_y = 32,
+        .size_z = 33,
         .poi_name = "test_poi",
         .trader_x = 1,
-        .trader_y = 70,
+        .trader_y = 71,
         .trader_z = 2,
     }};
     const body = try buildNpcQuestListFetch(&buf, 50, 106, 1, entries[0..]);
@@ -253,6 +259,26 @@ test "npc quest list fetch with one entry" {
     try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[13..17], .little));
     // quest id string 7bit-len
     try std.testing.expectEqual(@as(u8, 11), body[17]); // "tier1_clear".len
+
+    // The entry continues with loc x/y/z then size x/y/z as f32, and nothing
+    // read them back: a swap anywhere in that run rode out silently.
+    const loc = 18 + "tier1_clear".len;
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 10), f32At(body, loc));
+    try std.testing.expectEqual(@as(f32, 70), f32At(body, loc + 4));
+    try std.testing.expectEqual(@as(f32, 20), f32At(body, loc + 8));
+    try std.testing.expectEqual(@as(f32, 31), f32At(body, loc + 12));
+    try std.testing.expectEqual(@as(f32, 32), f32At(body, loc + 16));
+    try std.testing.expectEqual(@as(f32, 33), f32At(body, loc + 20));
+    // poiName string, then the trader position triple.
+    const trader = loc + 24 + 1 + "test_poi".len;
+    try std.testing.expectEqual(@as(f32, 1), f32At(body, trader));
+    try std.testing.expectEqual(@as(f32, 71), f32At(body, trader + 4));
+    try std.testing.expectEqual(@as(f32, 2), f32At(body, trader + 8));
 }
 
 // --- NetPackageSharedQuest (party share / force-add journal on client) ---

@@ -56,11 +56,31 @@ cannot see a reordering:
 
 ```bash
 python3 tools/wire_order_mutants.py --list                 # count the pairs
-python3 tools/wire_order_mutants.py --file src/wire/stock_xp.zig
+python3 tools/wire_order_mutants.py --file src/wire/stock_party.zig \
+  --test-filter party --test-filter "shared kill"
 ```
 
 It swaps each adjacent pair of same-width writes and reports the ones no test
-distinguishes. Run it when a positional builder gains fields.
+distinguishes. Run it when a positional builder gains fields. `--test-filter`
+is repeatable and cuts a mutant from 4 min to 2.6 s; the tool probes the set
+first and refuses to run when it selects nothing, and re-checks each survivor
+against the unfiltered suite so a too-narrow filter cannot invent one.
+
+**Audit state (2026-09-04).** Only files listed clean have been measured; the
+rest are unaudited, not known-good:
+
+| File | Mutants | Result |
+|---|---:|---|
+| `stock_xp.zig` | 7 | clean |
+| `stock_te.zig` | 13 | clean |
+| `stock_party.zig` | 6 | clean |
+| `stock_buff.zig` | 7 | clean |
+| `stock_chunk.zig` | 4 | 1 survivor, documented at the code site (an all-air layer writes a `false` bool then `stock_air` = 0, so both bytes are 0 and no chunk can tell them apart; `ChunkBlockLayer.Read` holds the order) |
+| `stock_sign.zig` | 4 | not measurable: no filter selects a test that fails when the file is mutated |
+| `stock_quest.zig` | 33 | partial: the first 6 pairs found one real gap (the `QuestPacketEntry` position and size triples had no read-back), now closed. The rest is unmeasured - the filter set covers the file too thinly, so the tool aborted rather than re-check every survivor at 4 min each |
+| `packages.zig` | 222 | not run |
+| `stock_inv.zig` | 30 | not run |
+| `stock_entity.zig` | 28 | not run |
 
 Coverage targets, all enforced by the scan:
 - **File coverage: 201/201 (100%).** Every row below carries a bucket and a
