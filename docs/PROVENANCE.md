@@ -49,6 +49,19 @@ Regenerate the file map and re-check coverage:
 python3 tools/provenance_scan.py      # file coverage + ledger well-formedness gate
 ```
 
+Audit the positional builders (not in `make check`: one `zig build test` per
+mutant, hours for a full run). A stock body carries no field names, so field
+order is the contract, and a test that asserts only a length or a version int
+cannot see a reordering:
+
+```bash
+python3 tools/wire_order_mutants.py --list                 # count the pairs
+python3 tools/wire_order_mutants.py --file src/wire/stock_xp.zig
+```
+
+It swaps each adjacent pair of same-width writes and reports the ones no test
+distinguishes. Run it when a positional builder gains fields.
+
 Coverage targets, all enforced by the scan:
 - **File coverage: 201/201 (100%).** Every row below carries a bucket and a
   source; a file without a row, or a row without a bucket/source, fails.
