@@ -77,7 +77,7 @@ rest are unaudited, not known-good:
 | `stock_buff.zig` | 7 | clean |
 | `stock_chunk.zig` | 4 | 1 survivor, documented at the code site (an all-air layer writes a `false` bool then `stock_air` = 0, so both bytes are 0 and no chunk can tell them apart; `ChunkBlockLayer.Read` holds the order) |
 | `stock_sign.zig` | 4 | not measurable: no filter selects a test that fails when the file is mutated |
-| `stock_quest.zig` | 33 | partial: the first 6 pairs found one real gap (the `QuestPacketEntry` position and size triples had no read-back), now closed. The rest is unmeasured - the filter set covers the file too thinly, so the tool aborted rather than re-check every survivor at 4 min each |
+| `stock_quest.zig` | 33 | partial: pairs 1-20 measured over three passes, each closing a gap and letting the next run reach further. Four real gaps found and closed, all the same shape - a positional run of floats or header bytes with nothing reading it back. Pairs 21-33 are unmeasured; the tool aborts at 6 survivors needing a 4-minute re-check each |
 | `packages.zig` | 222 | not run |
 | `stock_inv.zig` | 30 | not run |
 | `stock_entity.zig` | 28 | not run |

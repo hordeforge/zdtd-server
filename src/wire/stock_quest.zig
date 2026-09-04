@@ -635,10 +635,23 @@ test "quest event list tails are bounds checked" {
 
 test "shared quest share layout" {
     var buf: [256]u8 = undefined;
+    // The nine position floats used to be left at their 0 default, so any
+    // swap among them emitted identical bytes. Distinct values make the run
+    // of pos / size / return triples observable.
     const body = try buildSharedQuestShare(&buf, .{
         .shared_by_entity_id = 106,
         .quest_code = 7,
         .quest_id = "tier1_clear",
+        .poi_name = "poi",
+        .pos_x = 11,
+        .pos_y = 12,
+        .pos_z = 13,
+        .size_x = 21,
+        .size_y = 22,
+        .size_z = 23,
+        .return_x = 31,
+        .return_y = 32,
+        .return_z = 33,
         .shared_with_entity_id = 106,
     });
     try std.testing.expect(body.len > 20);
@@ -648,6 +661,16 @@ test "shared quest share layout" {
     try std.testing.expectEqual(@as(i32, 7), head.quest_code);
     try std.testing.expectEqualStrings("tier1_clear", head.questId());
     try std.testing.expectEqual(@as(i32, 106), head.shared_with_entity_id);
+
+    // parseSharedQuestHead skips the three triples by width, so read them
+    // here: sharedBy i32 | event u8 | questCode i32 | questID | poiName, then
+    // pos, size and return as Vector3 each.
+    var r: binary.Reader = .{ .data = body[9..] }; // past sharedBy, event, code
+    var s_buf: [64]u8 = undefined;
+    _ = try r.readString(&s_buf); // questID
+    _ = try r.readString(&s_buf); // poiName
+    const want = [_]f32{ 11, 12, 13, 21, 22, 23, 31, 32, 33 };
+    for (want) |v| try std.testing.expectEqual(v, try r.readF32());
 }
 
 test "shared quest rejects truncated share body" {
@@ -745,6 +768,19 @@ test "position data entries cost 13 bytes each" {
     const out = w_poi.written();
     const tail_after_rally: usize = 2 + 4 + 1 + 4;
     try std.testing.expectEqual(@as(u8, 1), out[out.len - tail_after_rally - 1]);
+
+    // Each entry is a kind byte plus a Vector3, and only the total size was
+    // asserted: x, y and z could rotate among themselves and 13 bytes still
+    // held. The entries sit directly before rallyActivated and its tail.
+    const entries_len = 3 * 13;
+    const first = out.len - tail_after_rally - 1 - entries_len;
+    var pr: binary.Reader = .{ .data = out[first..] };
+    for (pos) |want| {
+        try std.testing.expectEqual(want.kind, try pr.readByte());
+        try std.testing.expectEqual(want.x, try pr.readF32());
+        try std.testing.expectEqual(want.y, try pr.readF32());
+        try std.testing.expectEqual(want.z, try pr.readF32());
+    }
 }
 
 test "treasure chest objective write is 8 bytes not base" {
