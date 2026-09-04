@@ -3925,9 +3925,11 @@ test "world areas stock wire" {
             .size_x = 60,
             .size_y = 28,
             .size_z = 62,
+            // pad_x and pad_z were both -2, which made that swap emit
+            // identical bytes.
             .pad_x = -2,
             .pad_y = 0,
-            .pad_z = -2,
+            .pad_z = -3,
             .teleports = &.{
                 .{ .start_x = 7, .start_y = 1, .start_z = 2, .size_x = 52, .size_y = 12, .size_z = 5 },
                 .{ .start_x = 2, .start_y = 1, .start_z = 7, .size_x = 57, .size_y = 28, .size_z = 41 },
@@ -3946,10 +3948,26 @@ test "world areas stock wire" {
     try std.testing.expectEqual(@as(i16, 60), std.mem.readInt(i16, body[15..17], .little));
     try std.testing.expectEqual(@as(i16, 28), std.mem.readInt(i16, body[17..19], .little));
     try std.testing.expectEqual(@as(i16, 62), std.mem.readInt(i16, body[19..21], .little));
+    // The padding triple and both teleport triples, not just their first
+    // component: pad_y/pad_z, start_y/start_z and size_y/size_z each had
+    // nothing reading them back and could swap unnoticed.
     try std.testing.expectEqual(@as(i8, -2), @as(i8, @bitCast(body[21]))); // pad_x
+    try std.testing.expectEqual(@as(i8, 0), @as(i8, @bitCast(body[22]))); // pad_y
+    try std.testing.expectEqual(@as(i8, -3), @as(i8, @bitCast(body[23]))); // pad_z
     try std.testing.expectEqual(@as(u8, 2), body[24]); // teleport count
     try std.testing.expectEqual(@as(i8, 7), @as(i8, @bitCast(body[25]))); // vol0 start_x
+    try std.testing.expectEqual(@as(i8, 1), @as(i8, @bitCast(body[26]))); // vol0 start_y
+    try std.testing.expectEqual(@as(i8, 2), @as(i8, @bitCast(body[27]))); // vol0 start_z
     try std.testing.expectEqual(@as(u8, 52), body[28]); // vol0 size_x
+    try std.testing.expectEqual(@as(u8, 12), body[29]); // vol0 size_y
+    try std.testing.expectEqual(@as(u8, 5), body[30]); // vol0 size_z
+    // Second volume follows immediately, six bytes on.
+    try std.testing.expectEqual(@as(i8, 2), @as(i8, @bitCast(body[31]))); // vol1 start_x
+    try std.testing.expectEqual(@as(i8, 1), @as(i8, @bitCast(body[32])));
+    try std.testing.expectEqual(@as(i8, 7), @as(i8, @bitCast(body[33])));
+    try std.testing.expectEqual(@as(u8, 57), body[34]); // vol1 size_x
+    try std.testing.expectEqual(@as(u8, 28), body[35]);
+    try std.testing.expectEqual(@as(u8, 41), body[36]);
 }
 
 /// NetPackageEntityVelocity (write IL=23): entityId i32, bAdd bool, motion
