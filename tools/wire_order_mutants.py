@@ -227,6 +227,17 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="stop after N mutants")
     ap.add_argument("--list", action="store_true", help="list mutants, run nothing")
     ap.add_argument(
+        "--lines",
+        metavar="FIRST:LAST",
+        help=(
+            "only mutate pairs whose first line falls in this 1-based inclusive "
+            "range. packages.zig cannot be filtered as a whole - its 86 tests "
+            "share no small set of name substrings, so a filter wide enough to "
+            "cover the file selects nearly the whole suite - so it is audited "
+            "one builder section at a time with the filters that cover it"
+        ),
+    )
+    ap.add_argument(
         "--test-filter",
         action="append",
         default=[],
@@ -241,6 +252,20 @@ def main():
         ),
     )
     args = ap.parse_args()
+
+    line_range = None
+    if args.lines:
+        m = re.fullmatch(r"(\d+):(\d+)", args.lines)
+        if not m:
+            print(f"--lines wants FIRST:LAST, got {args.lines!r}", file=sys.stderr)
+            return 2
+        line_range = (int(m.group(1)), int(m.group(2)))
+        if line_range[0] > line_range[1]:
+            print(f"--lines range is empty: {args.lines}", file=sys.stderr)
+            return 2
+        if not args.file:
+            print("--lines requires --file", file=sys.stderr)
+            return 2
 
     if args.test_filter and not args.file:
         print("--test-filter requires --file", file=sys.stderr)
@@ -274,6 +299,13 @@ def main():
     # reads "all killed" from a suite that tested nothing.
     if args.test_filter and not args.list:
         probe_lines, probe_muts = mutants_for(targets[0])
+        # Probe inside the range being audited: a filter set that covers some
+        # other section of the file would otherwise pass the liveness check and
+        # then report every pair in this section as a survivor.
+        if line_range:
+            probe_muts = [
+                (i, d) for i, d in probe_muts if line_range[0] <= i + 1 <= line_range[1]
+            ]
         if not filter_is_live(args.test_filter, targets[0], probe_lines, probe_muts):
             print(
                 f"refusing to run: --test-filter {args.test_filter!r} selects no "
@@ -290,6 +322,9 @@ def main():
     recheck_count = 0
     for path in targets:
         lines, muts = mutants_for(path)
+        if line_range:
+            first, last = line_range
+            muts = [(i, d) for i, d in muts if first <= i + 1 <= last]
         rel = os.path.relpath(path, ROOT)
         if args.list:
             for idx, desc in muts:
