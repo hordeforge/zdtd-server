@@ -187,6 +187,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `ValidEntityIdForSender(playerId)` (ProcessPackage IL=51); without it a client
   could collect a loot bag in another player's name. The parser now returns both
   fields and the handler rejects a mismatched claim.
+- Explosions barely touched entities. `ExplosionData.EntityRadius` is a raw i16
+  in blocks, but the parser divided it by 20 like `BlockRadius`, turning the
+  stock value 6 into 0.3, which the caller then clamped up to its 1 m floor.
+  Block damage was unaffected, so a blast cratered terrain while leaving zombies
+  a metre away untouched.
+- A stock `NetPackageTraderData` body for a tile entity with no trader data
+  attached (14 bytes) was decoded as a zdtd trade: the arm tested `body.len >= 9`
+  and the byte it disambiguated on is the high byte of `te_y`, zero for any real
+  coordinate. The trade decoded a quantity from two position bytes and the
+  trader-open path (quest interact objectives) never ran. The arm now requires
+  exactly the 9 bytes the zdtd trade body has.
 - Remote crash from one C2S packet: `NetPackageSoundAtPosition` with a
   256-byte clip name reached `@intCast` into a `u8` length and trapped
   (ReleaseSafe ships with safety on, so this killed a release server). The

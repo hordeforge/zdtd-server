@@ -1276,8 +1276,12 @@ pub fn buildDamageBody(buf: []u8, entity_id: i32, source: u8, dtype: u8, strengt
     return w.written();
 }
 
-/// Parse the V3.2.0 DamageEntity head (the C2S damage path consumes the
-/// packed flags + strength; the tail beyond the head is not validated here).
+/// Read side of the V3.2.0 NetPackageDamageEntity head: `entityId` i32 |
+/// packed flags u32 | `source` u8 | `damageType` u8 | `strength` u16 |
+/// `hitDirection` u8 | `hitBodyPart` i16, matching the builder above (the ten
+/// 3.1.0 booleans folded into one flag word in 3.2.0; docs/wire/PACKAGES.md).
+/// The tail past the head is not decoded: the server recomputes damage from
+/// its own weapon and armor state, so those fields are not values it acts on.
 pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, trap_kill_xp: bool } {
     if (body.len < 4 + 4 + 1 + 1 + 2 + 1 + 2 + 1) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -2196,6 +2200,9 @@ pub fn buildIdMappingBody(buf: []u8, name: []const u8, data: []const u8) ![]u8 {
     return w.written();
 }
 
+/// zdtd's compact inventory head, **not a stock layout**: holding u16 |
+/// open_container i32 | count u16. The stock NetPackagePlayerInventory body is
+/// decoded by stock_inv; this form serves loadgen and the scenarios.
 pub fn parseInventoryBodyNative(body: []const u8) !struct { holding: u16, open_container: i32, count: u16 } {
     var r: binary.Reader = .{ .data = body };
     return .{
@@ -2268,7 +2275,11 @@ pub fn buildInvTxResponseHead(buf: []u8, ok: bool, dropped_entity: i32) ![]u8 {
     return w.written();
 }
 
-/// Legacy container data request: entity_id i32 (loadgen / older path).
+/// Legacy container data request: entity_id i32. **Not the stock body**, which
+/// is `KeyHashPair` + `managerToken` Guid (RE inventories/netpackage-bodies.md
+/// NetPackageInventoryDataRequest, write IL=12) and is decoded by
+/// parseInvDataRequestStock. The C2S handler tries the stock form first
+/// (c2s/inv.zig), so this serves loadgen and the older zdtd path only.
 pub fn parseInvDataRequest(body: []const u8) !i32 {
     if (body.len < 4) return error.EndOfStream;
     return std.mem.readInt(i32, body[0..4], .little);
@@ -2281,6 +2292,12 @@ pub const InvDataRequestStock = struct {
     manager_token: [16]u8,
 };
 
+/// Read side of the stock NetPackageInventoryDataRequest (RE
+/// inventories/netpackage-bodies.md, write IL=12): `keyHash`
+/// (KeyHashPair.Write, itself Guid `Key` + i32 `Hash`, Write IL=9) |
+/// `managerToken` Guid. Both Guids are carried opaquely: the server matches the
+/// key and echoes the token back on the response, so their internal layout is
+/// never interpreted here.
 pub fn parseInvDataRequestStock(body: []const u8) !InvDataRequestStock {
     // 16 + 4 + 16 = 36
     if (body.len < 36) return error.EndOfStream;
@@ -3621,6 +3638,11 @@ test "PersistentPlayerPositions body is count + id stream + Vector3i per entry" 
     try std.testing.expectEqual(@as(i32, 0), try r.readI32());
 }
 
+/// Read side of NetPackageLandClaimRepair (docs/wire/PACKAGES.md, extracted
+/// read `ReadInt64;ReadInt64;ReadInt64;ReadBoolean;`): the block position
+/// arrives as three i64, then `beginRepair` bool. Each coordinate is narrowed
+/// to i32 and a value that does not fit is an error, since no world position
+/// needs the wider type and a forged one would wrap into a valid-looking block.
 pub fn parseLandClaimRepair(body: []const u8) !struct { x: i32, y: i32, z: i32, begin_repair: bool } {
     if (body.len < 25) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -3705,12 +3727,24 @@ pub const ExplosionInitiate = struct {
     /// Best-effort radius from nested blob (default 3).
     radius: f32 = 3,
     block_damage: u16 = 50,
-    /// ExplosionData.entityRadius * 0.05 (default 3).
+    /// ExplosionData.EntityRadius, a raw i16 in blocks (default 3).
     entity_radius: f32 = 3,
     /// ExplosionData.entityDamage (default 0 -> falls back to block_damage).
     entity_damage: f32 = 0,
 };
 
+/// Read side of NetPackageExplosionInitiate (RE protocol-packages.md,
+/// inventories/netpackage-bodies.md write IL=55): `worldPos` Vector3 |
+/// `blockPos` Vector3i | `rotation` Quaternion | `explosionBlobLen` u16 + blob
+/// | `entityId` i32 | `delay` f32 | `bRemoveBlockAtExplPosition` bool | item
+/// present bool + ItemValue.
+///
+/// The two trailing fields are not read. `bRemoveBlockAtExplPosition` clears
+/// the center block in stock (GameManager.ExplosionServer IL=50), which
+/// c2s/blocks.zig does anyway, and the optional ItemValue feeds passives
+/// 19/20/21 (block damage, entity damage, radius) that zdtd does not apply to
+/// a client-supplied blast. Both sit at the end of the body, so skipping them
+/// cannot desync the reader.
 pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
     var r: binary.Reader = .{ .data = body };
     var out: ExplosionInitiate = .{};
@@ -3740,8 +3774,14 @@ pub fn parseExplosionInitiate(body: []const u8) !ExplosionInitiate {
         _ = br.readI16() catch 0; // duration deci-seconds
         const radius_raw = br.readI16() catch 0;
         if (radius_raw > 0) out.radius = @as(f32, @floatFromInt(radius_raw)) * 0.05;
+        // EntityRadius is a raw i16 in blocks: the RE table notes a scale
+        // factor on Duration (x10) and BlockRadius (x20) and leaves this row
+        // blank (protocol-packages.md ExplosionData, Read IL=82). Dividing it
+        // by 20 as well turned the stock value 6 into 0.3, which the caller
+        // then clamped up to its 1 m floor, so a stock explosion barely
+        // reached any entity while its block damage worked normally.
         if (br.readI16()) |er| {
-            if (er > 0) out.entity_radius = @as(f32, @floatFromInt(er)) * 0.05;
+            if (er > 0) out.entity_radius = @floatFromInt(er);
         } else |_| {}
         _ = br.readI16() catch 0; // blastPower
         if (br.readF32()) |bd| {
@@ -3813,8 +3853,11 @@ test "explosion initiate parses ExplosionData blob positionally" {
     try std.testing.expectEqual(@as(i32, 107), p.entity_id);
 }
 
-/// zdtd-native quest accept/progress (not stock client wire).
-/// def_id u16, op u8 (0=list,1=accept,2=abandon). Kept for unit/loadgen fixtures.
+/// zdtd-native quest accept/progress, **not a stock client wire body**:
+/// def_id u16, op u8 (0=list, 1=accept, 2=abandon). Kept for unit and loadgen
+/// fixtures. The stock quest C2S shapes are NetPackageNPCQuestList
+/// (parseNpcQuestList) and NetPackageQuestObjectiveUpdate, both tried before
+/// this one in c2s/quest.zig.
 pub fn parseQuestOp(body: []const u8) !struct { def_id: u16, op: u8 } {
     if (body.len < 3) return error.EndOfStream;
     return .{
@@ -3842,7 +3885,15 @@ pub const NpcQuestListHead = struct {
     remove_index: u8 = 0,
 };
 
-/// Parse stock C2S NPCQuestList head (npc, player, eventType + optional tier).
+/// Read side of NetPackageNPCQuestList (RE protocol-packages.md, Process
+/// IL=180): `npcEntityID` i32 | `playerEntityID` i32 | `eventType` u8, then a
+/// type-dependent tail. Only the head and `tierLevel` are decoded here; the
+/// FetchList entry list, POI vectors and the RemoveQuest index beyond
+/// `remove_index` are tails the server never needs to read back, since it is
+/// the side that produces them.
+///
+/// An `eventType` outside the five stock values is rejected: stock switches on
+/// it, so a sixth selects no tail and nothing sensible to answer.
 pub fn parseNpcQuestList(body: []const u8) !NpcQuestListHead {
     if (body.len < 9) return error.EndOfStream;
     const npc = std.mem.readInt(i32, body[0..4], .little);
@@ -4113,7 +4164,12 @@ test "every declared npc quest and objective event variant parses" {
     }
 }
 
-/// Trader buy/sell: trader_entity i32, item u16, qty u16, side u8 (0=buy,1=sell).
+/// Trader buy/sell, **not a stock package body**: trader_entity i32 | item u16
+/// | qty u16 | side u8 (0=buy, 1=sell), exactly 9 bytes. Stock has no
+/// NetPackageTraderTrade; a real client's trade shows up as its post-trade
+/// TraderData copy (parseTraderDataToServer). This body rides under the
+/// NetPackageTraderData name for loadgen and the sim, and c2s/quest.zig picks
+/// the arm on an exact length of 9 so a stock body cannot land here.
 pub fn parseTraderTrade(body: []const u8) !struct { trader_entity: i32, item: u16, qty: u16, side: u8 } {
     if (body.len < 9) return error.EndOfStream;
     return .{
@@ -4136,6 +4192,11 @@ pub const VendingMachineAccess = struct {
     removing: bool,
 };
 
+/// Read side of NetPackagePlayerVendingMachine (RE protocol-packages.md
+/// residual table, write IL=28): `userId` (PlatformUserIdentifier) | x,y,z i32
+/// | `removing` bool. An empty identity is an error rather than a null user:
+/// the whole package exists to add or remove that user from a machine's
+/// allowed list, so there is nothing to apply without one.
 pub fn parseVendingMachineAccess(body: []const u8, plat_buf: []u8, id_buf: []u8) !VendingMachineAccess {
     var r: binary.Reader = .{ .data = body };
     const user = (try platform_user.read(&r, plat_buf, id_buf)) orelse return error.EndOfStream;
@@ -4177,6 +4238,12 @@ pub const TraderDataToServer = struct {
     trader_data: []const u8 = &.{},
 };
 
+/// Read side of the stock NetPackageTraderData ToServer header documented
+/// above (asm.il 843046; RE protocol-packages.md, Process IL=50). The
+/// discriminant picks the length: an entity target is 1 + 4 + 1 bytes, a tile
+/// entity 1 + 12 + 1, and the TraderData::Write body follows only when
+/// `hasTraderData` is set. That body is returned as an unparsed slice; the
+/// caller decides what of it, if anything, it trusts.
 pub fn parseTraderDataToServer(body: []const u8) !TraderDataToServer {
     if (body.len < 6) return error.EndOfStream;
     const is_entity = body[0] != 0;
@@ -4278,6 +4345,10 @@ pub const SetBlockTexture = struct {
     channel: u8 = 0,
 };
 
+/// Read side of NetPackageSetBlockTexture (RE
+/// inventories/netpackage-bodies.md, write IL=24): `blockPos` (StreamUtils
+/// Vector3i) | `blockFace` u8 | `idx` u8 | `playerIdThatChanged` i32 |
+/// `channel` u8, which is the 19-byte minimum checked here.
 pub fn parseSetBlockTexture(body: []const u8) !SetBlockTexture {
     if (body.len < 19) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -4337,7 +4408,14 @@ pub fn parseVehicleDataSync(body: []const u8) !VehicleDataSync {
 /// never be confused with a stock body carrying the same package name.
 pub const vehicle_control_len: usize = 13;
 
-/// Vehicle control: entity_id i32, op u8 (0=enter,1=exit,2=drive), throttle f32, steer f32
+/// Vehicle control, **not a stock layout**: entity_id i32 | op u8 (0=enter,
+/// 1=exit, 2=drive) | throttle f32 | steer f32, exactly `vehicle_control_len`
+/// bytes. Stock has no C2S package of this shape; its vehicle placement rides
+/// NetPackageVehicleSpawn (entityType i32 | pos | rot | ItemValue |
+/// entityThatPlaced i32, RE inventories/netpackage-bodies.md). The dispatch in
+/// c2s/misc.zig gates on the exact 13-byte length, so a stock body cannot be
+/// decoded here; it falls through unhandled, since zdtd does not implement
+/// client-requested vehicle spawning (docs/DIVERGENCES.md).
 pub fn parseVehicleControl(body: []const u8) !struct { entity_id: i32, op: u8, throttle: f32, steer: f32 } {
     if (body.len < 5) return error.EndOfStream;
     const eid = std.mem.readInt(i32, body[0..4], .little);
@@ -4540,6 +4618,11 @@ pub fn buildAllyRequestBody(
     return w.written();
 }
 
+/// Read side of NetPackageAllyRequest (RE inventories/netpackage-bodies.md,
+/// write IL=18): `source` | `target` (both PlatformUserIdentifier ToStream) |
+/// `addAlly` bool. docs/wire/PACKAGES.md shows only `ReadBoolean;` for this
+/// package because the two identity reads go through a static FromStream that
+/// the extractor does not follow; the note at the top of that file covers it.
 pub fn parseAllyRequest(body: []const u8) binary.ReadError!AllyRequest {
     var r: binary.Reader = .{ .data = body };
     var plat_buf: [platform_user.max_platform_len]u8 = undefined;
@@ -4609,6 +4692,16 @@ fn copyWaypointStr(dst: *[max_waypoint_str]u8, src: []const u8) error{Overflow}!
     return @intCast(src.len);
 }
 
+/// Read side of NetPackageWaypoint (RE protocol-packages.md 5.7, write/read
+/// IL=17, Waypoint version 7 with every version gate open): `pos` Vector3i |
+/// `icon` string | `name` AuthoredText (present bool, then text + identity) |
+/// `bTracked` | `hiddenOnCompass` | `ownerId` identity |
+/// `lastKnownPositionEntityId` i32 | `bIsAutoWaypoint` | `bUsingLocalizationId`
+/// | `inviterEntityId` i32 | `hiddenOnMap` | `lastKnownPositionEntityType` i32,
+/// then `inviteMode` u8 and a second `inviterEntityId` i32 outside the Waypoint.
+///
+/// Both client-controlled strings go through copyWaypointStr, which rejects a
+/// length that would not fit its u8 counter.
 pub fn parseWaypointInvite(body: []const u8) (binary.ReadError || error{Overflow})!WaypointInvite {
     var r: binary.Reader = .{ .data = body };
     var out: WaypointInvite = .{ .pos = .{ 0, 0, 0 } };
@@ -4757,6 +4850,9 @@ pub const PartyQuestChange = struct {
     quest_code: i32,
 };
 
+/// Read side of NetPackagePartyQuestChange (RE
+/// inventories/netpackage-bodies.md, write IL=20): `senderEntityID` i32 |
+/// `objectiveIndex` u8 | `isComplete` bool | `questCode` i32.
 pub fn parsePartyQuestChange(body: []const u8) binary.ReadError!PartyQuestChange {
     var r: binary.Reader = .{ .data = body };
     return .{
@@ -4945,9 +5041,14 @@ pub const StockInvTx = struct {
     entry_n: u8 = 0,
 };
 
-/// Parse a stock InventoryTransaction.Write body. Returns error.EndOfStream on
-/// truncation and error.InvalidArgument when the layout is not stock-shaped
-/// (callers fall back to the native body).
+/// Read side of the stock NetPackageInventoryTransactionRequest body, one
+/// InventoryTransaction.Write (RE inventories/netpackage-bodies.md, Write
+/// IL=75): a nested op list of count | count | `Key` Vector3i | `InitialHash`
+/// i32 | `FinalHash` i32 | ops count | InventoryOperation.Write each.
+///
+/// Returns error.EndOfStream on truncation and error.InvalidArgument when the
+/// layout is not stock-shaped, which is how c2s/inv.zig knows to fall back to
+/// the compact zdtd body (parseInvTxRequest).
 pub fn parseStockInvTx(body: []const u8) !StockInvTx {
     var r: binary.Reader = .{ .data = body };
     var out: StockInvTx = .{};
@@ -5187,6 +5288,11 @@ pub const RagdollInvoke = struct {
     flags: u8,
 };
 
+/// Read side of NetPackageEntityRagdoll, whose layout and conditional tails are
+/// documented on RagdollInvoke above (RE protocol-packages.md, write IL=59).
+/// Only `entityId` and `flags` are returned; the flagged tails are consumed so
+/// a truncated body still errors, but the server relays the bytes verbatim
+/// rather than acting on the force vectors.
 pub fn parseRagdollInvoke(body: []const u8) binary.ReadError!RagdollInvoke {
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
@@ -5227,4 +5333,48 @@ test "ragdoll invoke parses the stock body" {
     const r = try parseRagdollInvoke(w.written());
     try std.testing.expectEqual(@as(i32, 77), r.entity_id);
     try std.testing.expectEqual(@as(u8, 0x07), r.flags);
+}
+
+test "explosion blob decodes radii at their stock scales" {
+    // ExplosionData (RE protocol-packages.md, Read IL=82): Duration is stored
+    // x10 and BlockRadius x20, EntityRadius and BlastPower are raw. The stock
+    // cop/feral explosion is radius_blocks 5, radius_entities 6, so a blob
+    // carrying 100 and 6 must decode to 5.0 and 6.0 blocks.
+    var body: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeF32(10); // worldPos
+    try w.writeF32(70);
+    try w.writeF32(10);
+    try w.writeI32(10); // blockPos
+    try w.writeI32(70);
+    try w.writeI32(10);
+    try w.writeF32(0); // rotation quaternion
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(1);
+
+    var blob: [64]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &blob };
+    try bw.writeI16(3); // particleIndex
+    try bw.writeI16(25); // duration, x10 -> 2.5 s
+    try bw.writeI16(100); // blockRadius, x20 -> 5 blocks
+    try bw.writeI16(6); // entityRadius, raw -> 6 blocks
+    try bw.writeI16(1); // blastPower
+    try bw.writeF32(120); // blockDamage
+    try bw.writeF32(45); // entityDamage
+    const blob_bytes = bw.written();
+
+    try w.writeU16(@intCast(blob_bytes.len));
+    try w.writeBytes(blob_bytes);
+    try w.writeI32(42); // entityId
+    try w.writeF32(0); // delay
+
+    const ex = try parseExplosionInitiate(w.written());
+    try std.testing.expectEqual(@as(i32, 42), ex.entity_id);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), ex.radius, 0.001);
+    // The bug this pins: entity_radius was divided by 20 as well, so the stock
+    // value 6 arrived as 0.3 and the caller's 1 m floor swallowed it.
+    try std.testing.expectApproxEqAbs(@as(f32, 6), ex.entity_radius, 0.001);
+    try std.testing.expectEqual(@as(u16, 120), ex.block_damage);
+    try std.testing.expectApproxEqAbs(@as(f32, 45), ex.entity_damage, 0.001);
 }

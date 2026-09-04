@@ -95,7 +95,9 @@ fn parsePackageStream(payload: []const u8, count: u16, out: []Package) usize {
     return n;
 }
 
-/// Parse channel-prefixed game message into packages.
+/// Parse a channel-prefixed game message into packages. This is the channel
+/// envelope, **not a NetPackage body**: channel u8 | payloadSize i32 |
+/// compressed u8 | encrypted u8 | count u16, then the packages themselves.
 /// Supports stock uncompressed and deflate-compressed (Noemax) envelopes.
 /// Encrypted payloads are still rejected.
 /// Not reentrant for compressed envelopes: nested calls that need inflate
