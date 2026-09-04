@@ -424,6 +424,44 @@ def main():
             + " - record the decision in DIVERGENCES 3b or GAP_ANALYSIS"
         )
 
+    # 7d. ACCEPT-AND-DROP COVERAGE: the mirror of 7. A C2S handler that matches
+    #     a stock package, mutates nothing and returns is a deliberate refusal
+    #     to reproduce stock behaviour, and that is a divergence whether or not
+    #     the refusal is right. Two of these (AddVelocity, DropItemsContainer)
+    #     sat undocumented until 2026-09-04, both with the reasoning present at
+    #     the code site but absent from the page a reader checks. Require the
+    #     package name to appear in the docs.
+    drop_undocumented = []
+    c2s_dir = os.path.join(ROOT, "src/server/c2s")
+    for fname in sorted(os.listdir(c2s_dir)):
+        if not fname.endswith(".zig"):
+            continue
+        text = open(os.path.join(c2s_dir, fname), encoding="utf-8", errors="replace").read()
+        for m in re.finditer(
+            r'if \(std\.mem\.eql\(u8, name, "(NetPackage\w+)"\)\)(.*?)'
+            r'(?=\n    if \(std\.mem\.eql|\Z)',
+            text,
+            re.S,
+        ):
+            pkg, body = m.group(1), m.group(2)
+            mutates = re.search(
+                r"self\.(?:sim|world|containers|vending|quests|allies|ban_list|admin)\."
+                r"|broadcast|sendGame|relayBody|send\w+\(",
+                body,
+            )
+            if mutates:
+                continue
+            short = pkg[len("NetPackage"):]
+            if pkg in doc_text or re.search(rf"\b{re.escape(short)}\b", doc_text):
+                continue
+            drop_undocumented.append(f"{fname}:{pkg}")
+    if drop_undocumented:
+        failures.append(
+            "C2S handlers that accept a stock package and drop it, with no doc "
+            f"row ({len(drop_undocumented)}): " + ", ".join(drop_undocumented[:8])
+            + " - add the stock behaviour and the reason to DIVERGENCES 1"
+        )
+
     if failures:
         for f in failures:
             print("FAIL:", f)

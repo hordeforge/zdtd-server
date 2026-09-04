@@ -140,7 +140,12 @@ None of the 29 is a live gap, for one of three reasons:
 - **Client-side or editor features** with no headless source: `AnimateBlock`,
   `AudioPlayInHead`, `DynamicMesh`, `Localization`, `ShowToolbeltMessage`,
   `PlayerLaserSight`, `ModifyCVar`, `SetProp`, `Debug`, the `Editor*` and
-  `Wall*` volume packages.
+  `Wall*` volume packages. Spelled out where a handler exists rather than only
+  a registry entry: **`NetPackageEditorAddVolumeFromClient`** is accepted and
+  dropped. Stock's world editor pushes authored volumes from a creative-mode
+  client; zdtd loads volumes from the prefab data instead and has no editor
+  session, so there is no server-side model for a client-authored volume to
+  land in.
 - **Platform/matchmaking**: `DiscordLobbySecret`, `LobbyJoin`,
   `PlayerTwitchStats`, `NetMetrics`, `EAC` (EAC is off by design).
 
