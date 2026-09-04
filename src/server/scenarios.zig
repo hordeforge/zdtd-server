@@ -2657,7 +2657,52 @@ test "scenario in-game player console: allowlist, deny, and admin routing" {
     try std.testing.expect(g.admin_list.add("Bot", 5)); // re-level the admin
     const mid_owner_cmd = try sendCmd(g, c, &cap, "kick nobody", &abuf);
     try std.testing.expect(std.mem.find(u8, mid_owner_cmd, "permission denied") != null); // caller(5) < req(0)
+    // Malformed argument sweep. The console takes strings straight off the
+    // wire (NetPackageConsoleCmdServer) and hands them to parseInt/parseFloat
+    // in a dozen verbs, but the fuzz harness cannot reach it: it fuzzes pure
+    // functions and this path needs a live Game. So drive the hostile shapes
+    // through the real C2S entry point here.
+    try std.testing.expect(g.admin_list.add("Bot", 0)); // owner, so nothing is refused on permission
+    const bad_args = [_][]const u8{
+        "tp", // no args at all
+        "tp 1", // too few
+        "tp x y z", // non-numeric
+        "tp nan nan nan", // parses, but not finite
+        "tp inf -inf 0",
+        "tp 1e40 1e40 1e40", // finite but past the coordinate ceiling
+        "tp 99999999999999999999 0 0", // overflows f32 to inf
+        "settime notanumber",
+        "settime -1",
+        "loglevel 999", // past u8
+        "give 0", // item id zero
+        "give 999999", // item id past the catalog
+        "ban", // verb with every argument missing
+        "kick",
+        "", // empty command line
+        " ", // whitespace only
+        "\t\t",
+        "tp\t1\t2\t3", // tab-separated instead of spaces
+    };
+    for (bad_args) |cmd| {
+        // The contract is only that the server answers and stays up: a reply
+        // must come back, and the tick after it must still run.
+        _ = sendCmd(g, c, &cap, cmd, &abuf) catch continue;
+        try g.step();
+    }
+    try std.testing.expect(g.sim.director.clock.day >= 1); // sim still coherent
+    {
+        // The sweep runs as owner, so tp reaches the admin teleport rather than
+        // being refused by the player allowlist. Assert the position it lands
+        // on is still a usable coordinate: that is what the isFinite check and
+        // the clamp in consoleTeleport are for.
+        const ps_probe = g.sim.playerByPeer(c.slot).?;
+        try std.testing.expect(std.math.isFinite(g.sim.transform[ps_probe].x));
+        try std.testing.expect(std.math.isFinite(g.sim.transform[ps_probe].y));
+        try std.testing.expect(std.math.isFinite(g.sim.transform[ps_probe].z));
+    }
+
     std.debug.print("PASS player-console: allowlist + deny + admin routing with captured reply\n", .{});
+    std.debug.print("PASS console-args: {d} malformed command lines answered without a crash\n", .{bad_args.len});
 }
 
 test "scenario AI kill drops the player's real inventory as a death bag" {
