@@ -2986,6 +2986,14 @@ test "GameStats body is i16 len + full persistent blob" {
     const d = try buildGameStatsBodyValues(&distinct, .{
         .show_friend_player_on_map = true,
         .time_of_day_inc_per_sec = 37,
+        // These three default to the same values as the hardcoded constants
+        // written beside them: is_spawn_enemies is true next to a literal
+        // true, and player_killing_mode / drop_on_death sit among the literal
+        // 1 score multipliers. That made the whole slot run unobservable, so
+        // pick values differing from both neighbours.
+        .is_spawn_enemies = false,
+        .player_killing_mode = 2,
+        .drop_on_death = 3,
     });
     var dr: binary.Reader = .{ .data = d[2..] };
     dr.pos = r.pos; // same head width, already asserted field by field above
@@ -3004,6 +3012,16 @@ test "GameStats body is i16 len + full persistent blob" {
     try std.testing.expectEqual(false, try dr.readBool()); // 18: IsFlyingEnabled
     try std.testing.expectEqual(true, try dr.readBool()); // 19: IsPlayerDamageEnabled
     try std.testing.expectEqual(true, try dr.readBool()); // 20: IsPlayerCollisionEnabled
+    // Slots 21..26 mix caller values with hardcoded score multipliers, which
+    // is where the defaults collided: with is_spawn_enemies false and the two
+    // i32 distinct from the literal 1 / -5 beside them, each position is now
+    // observable.
+    try std.testing.expectEqual(false, try dr.readBool()); // 21: IsSpawnEnemies
+    try std.testing.expectEqual(@as(i32, 2), try dr.readI32()); // 22: PlayerKillingMode
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 23: ScorePlayerKillMultiplier
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 24: ScoreZombieKillMultiplier
+    try std.testing.expectEqual(@as(i32, -5), try dr.readI32()); // 25: ScoreDiedMultiplier
+    try std.testing.expectEqual(@as(i32, 3), try dr.readI32()); // 26: DropOnDeath
 }
 
 test "lock response for a trader carries the context and trader data" {
