@@ -10562,11 +10562,53 @@ test "scenario animation data relays to the other players" {
     try bw.writeF32(0.5); // value
     var fb: [64]u8 = undefined;
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAnimationData", bw.written()));
-    // B received the relayed body for A.
+    // B received the relayed body for A. The server treats the param list as
+    // opaque and forwards it verbatim, which is exactly why the bytes need
+    // checking rather than counting: a relay that truncated or reordered the
+    // tail would still produce a package with the right id and entity.
     if (packages.idOf("NetPackageEntityAnimationData")) |an_id| {
-        try std.testing.expect(cap_b.findPkgIdEntity(an_id, ca.entity_id) != null);
+        const got = cap_b.findPkgIdEntity(an_id, ca.entity_id) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqual(bw.written().len, got.len);
+        try std.testing.expectEqualSlices(u8, bw.written(), got);
     }
+    // PlayerEquipment is the same verbatim-relay shape and had no scenario at
+    // all. Two properties matter and neither was covered: the body reaches the
+    // other player unchanged, and a client cannot relay equipment for someone
+    // else's entity (the handler gates on eid == c.entity_id).
+    if (packages.idOf("NetPackagePlayerEquipment")) |eq_id| {
+        // Equipment body (stock_inv.applyEquipmentBody): entityId, then a
+        // marker selecting the slot count, one present-bool per slot, one
+        // cosmetic i32 per slot, and an unlocked-cosmetics count.
+        var eq: [64]u8 = undefined;
+        var ew = binary.Writer{ .buf = &eq };
+        try ew.writeI32(ca.entity_id);
+        try ew.writeByte(0); // marker <= 2 -> 5 equipment slots
+        for (0..5) |_| try ew.writeBool(false); // no item in any slot
+        for (0..5) |_| try ew.writeI32(0); // cosmetic ids
+        try ew.writeI32(0); // unlocked cosmetics count
+        cap_b.clear();
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerEquipment", ew.written()));
+        const got_eq = cap_b.findPkgIdEntity(eq_id, ca.entity_id) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqualSlices(u8, ew.written(), got_eq);
+
+        // Spoofed: A claims B's entity id. The relay must drop it, or one
+        // client could rewrite another's visible gear.
+        cap_b.clear();
+        var spoof: [64]u8 = undefined;
+        var sw = binary.Writer{ .buf = &spoof };
+        try sw.writeI32(ca.entity_id + 1000); // not A's entity
+        try sw.writeByte(0);
+        for (0..5) |_| try sw.writeBool(false);
+        for (0..5) |_| try sw.writeI32(0);
+        try sw.writeI32(0);
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerEquipment", sw.written()));
+        try std.testing.expect(cap_b.findPkgId(eq_id) == null);
+    }
+
     std.debug.print("PASS animation-relay: client anim params reach the other players\n", .{});
+    std.debug.print("PASS equipment-relay: verbatim body relayed, spoofed entity dropped\n", .{});
 }
 
 test "scenario fall_sink clamps player vertical delta without the glide flag (moon_gravity)" {
