@@ -1545,6 +1545,37 @@ test "POI metadata response: 512 dense records fit the response buffer" {
     const body = try buildPoiMetadataResponse(&buf, &records);
     try std.testing.expect(body.len > 65536); // the old slice could not hold it
     try std.testing.expect(body.len < buf.len);
+
+    // Size alone says nothing about field order, and the record above cannot
+    // say it either: y, z and rotation all sit at 0. Build one record with a
+    // distinct value everywhere and read it back - the client keys map markers
+    // and quest offers off these, so a rotated triple misplaces a POI.
+    const one = [_]PoiMetadata{.{
+        .x = 11,
+        .y = 12,
+        .z = 13,
+        .size_x = 21,
+        .size_y = 22,
+        .size_z = 23,
+        .rotation = 2,
+        .tier = 5,
+        .trader_area = true,
+        .prefab_name = "p",
+        .tags = "t",
+        .quest_tags = "q",
+    }};
+    var one_buf: [512]u8 = undefined;
+    const b = try buildPoiMetadataResponse(&one_buf, &one);
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, b[0..4], .little)); // count
+    try std.testing.expectEqual(@as(i32, 11), std.mem.readInt(i32, b[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 12), std.mem.readInt(i32, b[8..12], .little));
+    try std.testing.expectEqual(@as(i32, 13), std.mem.readInt(i32, b[12..16], .little));
+    try std.testing.expectEqual(@as(i32, 21), std.mem.readInt(i32, b[16..20], .little));
+    try std.testing.expectEqual(@as(i32, 22), std.mem.readInt(i32, b[20..24], .little));
+    try std.testing.expectEqual(@as(i32, 23), std.mem.readInt(i32, b[24..28], .little));
+    try std.testing.expectEqual(@as(u8, 2), b[28]); // rotation
+    try std.testing.expectEqual(@as(u8, 5), b[29]); // tier
+    try std.testing.expectEqual(@as(u8, 1), b[30]); // traderArea
 }
 
 /// NetPackageConfirmSpawnEntity body (V3.2.0, changelog-3.2.0 §3.3):
@@ -4667,10 +4698,23 @@ test "chunk body layout size and fields" {
     try std.testing.expectEqual(@as(i32, 1), p.cx);
     try std.testing.expectEqual(@as(i32, -2), p.cz);
     try std.testing.expectEqual(@as(u8, 70), p.heights[5 + 5 * 16]);
+    // The envelope's three i16 are cx, cy, cz. The parser reads cx and cz by
+    // offset, so it would agree with the writer even if both moved together;
+    // read the raw words instead. Layout: overwrite bool | cx | cy | cz | len.
+    try std.testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, body[1..3], .little));
+    try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, body[3..5], .little)); // cy
+    try std.testing.expectEqual(@as(i16, -2), std.mem.readInt(i16, body[5..7], .little));
+    try std.testing.expectEqual(@as(i32, chunk_body_size), std.mem.readInt(i32, body[7..11], .little));
+
     // bare payload still parses
     const bare = try buildChunkPayload(buf[0..chunk_body_size], 3, 4, &heights);
     const p2 = try parseChunkBody(bare);
     try std.testing.expectEqual(@as(i32, 3), p2.cx);
+    try std.testing.expectEqual(@as(i32, 4), p2.cz);
+    // Payload head is cx | cz | ydim as i32, ydim distinct from both coords.
+    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, bare[0..4], .little));
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, bare[4..8], .little));
+    try std.testing.expectEqual(@as(i32, 256), std.mem.readInt(i32, bare[8..12], .little));
 }
 
 test "console cmd parse + client reply roundtrip" {
