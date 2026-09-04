@@ -3002,6 +3002,19 @@ test "GameStats body is i16 len + full persistent blob" {
         .enemy_difficulty = 5,
         .day_light_length = 19,
         .land_claim_count = 6,
+        // The remaining caller-supplied collisions, found by walking the whole
+        // write list against the fixture rather than one audit run at a time:
+        // the two land-claim durability modifiers both default to 32, the
+        // block-damage / XP / loot values all default to 100, and blood_moon_day
+        // defaults to 0 next to the literal-0 OptionsPOICulling.
+        .land_claim_online_dur = 31,
+        .land_claim_offline_dur = 33,
+        .blood_moon_day = 21,
+        .block_damage_player = 101,
+        .xp_multiplier = 102,
+        .block_damage_ai = 103,
+        .block_damage_ai_bm = 104,
+        .loot_abundance = 105,
     });
     var dr: binary.Reader = .{ .data = d[2..] };
     dr.pos = r.pos; // same head width, already asserted field by field above
@@ -3037,6 +3050,56 @@ test "GameStats body is i16 len + full persistent blob" {
     try std.testing.expectEqual(@as(i32, 5), try dr.readI32()); // 31: EnemyDifficulty
     try std.testing.expectEqual(@as(i32, 19), try dr.readI32()); // 32: DayLightLength
     try std.testing.expectEqual(@as(i32, 6), try dr.readI32()); // 33: LandClaimCount
+
+    // The rest of the blob, to the end. Reading only the head left 35 slots
+    // whose position nothing checked, and the blob is the one body where a
+    // single misplaced field shifts every value after it.
+    try std.testing.expectEqual(@as(i32, 41), try dr.readI32()); // 34: LandClaimSize
+    try std.testing.expectEqual(@as(i32, 30), try dr.readI32()); // 35: LandClaimDeadZone
+    try std.testing.expectEqual(@as(i32, 3), try dr.readI32()); // 36: LandClaimExpiryTime
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 37: LandClaimDecayMode
+    try std.testing.expectEqual(@as(i32, 31), try dr.readI32()); // 38: LandClaimOnlineDur
+    try std.testing.expectEqual(@as(i32, 33), try dr.readI32()); // 39: LandClaimOfflineDur
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 40: LandClaimOfflineDelay
+    try std.testing.expectEqual(@as(i32, 45), try dr.readI32()); // 41: BedrollExpiryTime
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 42: AirDropFrequency
+    try std.testing.expectEqual(true, try dr.readBool()); // 43: AirDropMarker
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 44: PartySharedKillRange
+    try std.testing.expectEqual(false, try dr.readBool()); // 45: AutoParty
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 46: OptionsPOICulling
+    try std.testing.expectEqual(@as(i32, 21), try dr.readI32()); // 47: BloodMoonDay
+    try std.testing.expectEqual(@as(i32, 101), try dr.readI32()); // 48: BlockDamagePlayer
+    try std.testing.expectEqual(@as(i32, 102), try dr.readI32()); // 49: XPMultiplier
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 50: BloodMoonWarning
+    try std.testing.expectEqual(true, try dr.readBool()); // 51: TwitchBloodMoonAllowed
+    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 52: DeathPenalty
+    try std.testing.expectEqual(@as(i32, 4), try dr.readI32()); // 53: QuestProgressionDailyLimit
+    try std.testing.expectEqual(true, try dr.readBool()); // 54: BiomeProgression
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 55: StormFreq
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 56: CameraRestrictionMode
+    try std.testing.expectEqual(@as(i32, 60), try dr.readI32()); // 57: JarRefund
+    var gs_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try dr.readString(&gs_buf)); // 58: SandboxPreset
+    try std.testing.expectEqualStrings("", try dr.readString(&gs_buf)); // 59: SandboxCode
+    try std.testing.expectEqual(@as(i32, 60), try dr.readI32()); // 60: DayNightLength
+    try std.testing.expectEqual(@as(i32, 103), try dr.readI32()); // 61: BlockDamageAI
+    try std.testing.expectEqual(@as(i32, 104), try dr.readI32()); // 62: BlockDamageAIBM
+    try std.testing.expectEqual(@as(i32, 105), try dr.readI32()); // 63: LootAbundance
+    try std.testing.expectEqual(@as(i32, 7), try dr.readI32()); // 64: LootRespawnDays
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 65: GlobalGSModifier
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 66: BiomeGSModifier
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 67: GlobalLSModifier
+    try std.testing.expectEqual(@as(i32, 100), try dr.readI32()); // 68: BiomeLSModifier
+    // Nothing left: the blob ends exactly here.
+    try std.testing.expectEqual(@as(usize, 0), dr.remaining());
+
+    // Ten adjacent pairs remain indistinguishable because both sides are the
+    // same hardcoded constant, not because the fixture is weak: the empty
+    // strings at 8/9 and 58/59, the false runs at 13/14 and 16..18, the true
+    // pair at 19/20, the two score multipliers at 23/24, and the four 100s at
+    // 65..68. No caller input can separate those; initPropertyDecl holds the
+    // order, and the swap-mutation audit reports them as survivors by
+    // construction.
 }
 
 test "lock response for a trader carries the context and trader data" {
