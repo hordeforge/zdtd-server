@@ -541,6 +541,12 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
         var lower: [cells_per_layer]u8 = undefined;
         var upper: [cells_per_layer * 3]u8 = undefined;
         if (uniform) {
+            // These two bytes are indistinguishable for an all-air layer,
+            // where `first` is stock_air = 0 and both are 0. No test can pin
+            // their order from a normal chunk, and the swap-mutation audit
+            // reports the pair as a survivor for that reason. The order is
+            // held by ChunkBlockLayer.Read (presence bool, then the shared
+            // value), not by a test.
             try w.writeBool(false); // no lower array → same value
             try w.writeByte(@truncate(first));
             if (need_upper) {
@@ -870,9 +876,13 @@ test "stock chunk encodes non-empty terrain" {
     try std.testing.expectEqual(@as(u8, 0), body[0]); // not overwrite
     const plen = std.mem.readInt(i32, body[1..5], .little);
     try std.testing.expectEqual(@as(i32, @intCast(body.len - 5)), plen);
-    // payload starts with cx,cy,cz
-    const cx = std.mem.readInt(i32, body[5..9], .little);
-    try std.testing.expectEqual(@as(i32, -18), cx);
+    // Payload starts with cx, cy, cz. All three are read here, with distinct
+    // values, because only cx was asserted before: cy and cz could swap and
+    // nothing noticed, which is the one defect a positional header is prone
+    // to. cy is 0 for a surface chunk (chunk Y band), cz is the caller's.
+    try std.testing.expectEqual(@as(i32, -18), std.mem.readInt(i32, body[5..9], .little));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[9..13], .little));
+    try std.testing.expectEqual(@as(i32, 28), std.mem.readInt(i32, body[13..17], .little));
 }
 
 test "stock chunk empty sky is smaller" {
@@ -1070,6 +1080,43 @@ test "stock chunk surface density mixed band has both values" {
     });
     // All-same density path = 64*(1+1)=128 density bytes; mixed surface adds ~1024.
     try std.testing.expect(body.len > 1000);
+
+    // A uniform density layer is a presence marker of 1 followed by the shared
+    // value, and only the payload length was ever asserted: swapping those two
+    // bytes went unnoticed. Drive the channel directly rather than scanning the
+    // body for the pair - other channels emit the same two bytes for their own
+    // reasons, so a scan finds a hit either way and proves nothing.
+    {
+        var chan_buf: [4096]u8 = undefined;
+        var cw: binary.Writer = .{ .buf = &chan_buf };
+        // heights 60 puts terrain in the lower layers, so walk the channel and
+        // check the uniform ones: layer 16 and up are entirely above the
+        // surface, hence uniform air.
+        try writeDensityChannel(&cw, .{ .cx = 0, .cz = 0, .heights = &heights });
+        const chan = cw.written();
+        var off: usize = 0;
+        var layer: usize = 0;
+        var air_layers: usize = 0;
+        while (layer < 64) : (layer += 1) {
+            const presence = chan[off];
+            off += 1;
+            if (presence == 1) {
+                // Uniform: one shared value follows. Above the surface that
+                // value is air, and it differs from the marker, so a swap of
+                // the two moves 127 into the presence slot.
+                if (layer >= 16) {
+                    try std.testing.expectEqual(density_air, chan[off]);
+                    air_layers += 1;
+                }
+                off += 1;
+            } else {
+                try std.testing.expectEqual(@as(u8, 0), presence);
+                off += cells_per_layer;
+            }
+        }
+        try std.testing.expectEqual(off, chan.len);
+        try std.testing.expect(air_layers >= 48);
+    }
     // BiomeIntensity interleaved: first column biomeId0=3, intensity0and1=0x0F
     // Find intensities after maps is brittle; spot-check encodeNetworkChunk maps instead.
     var raw: [131072]u8 = undefined;
