@@ -46,9 +46,17 @@ pub fn writeBuffValue(w: *binary.Writer, v: BuffValueWire) !void {
     try w.writeI32(v.instigator_z);
 }
 
-/// EntityBuffs::Write (asm.il 737940): u8 Version, u16 count, values,
-/// u16 cvar count, (string, f32) pairs. We hold no cvars (the client runs the
-/// triggered_effect graph locally), so the cvar section is always empty.
+/// EntityBuffs::Write (`il/full-v3.2.0/_global/EntityBuffs.il.txt`, IL=135):
+/// u8 Version | u16 ActiveBuffs count | BuffValue.Write each | u16 cvar count |
+/// (string, f32) pairs.
+///
+/// The cvar section is empty here because zdtd holds no cvars: the client runs
+/// the triggered_effect graph locally. That is a smaller set than stock's even
+/// when cvars exist, and deliberately so: stock filters the dictionary before
+/// writing, skipping any name whose first character is `.` (IL_0088 compares
+/// against char 46) and, on a netSync write, any name whose value equals its
+/// `CVarsLastNetSync` entry. An empty section is a legal outcome of that same
+/// filter, not a shape stock never emits.
 pub fn writeEntityBuffs(buf: []u8, values: []const BuffValueWire) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(entity_buffs_version);
