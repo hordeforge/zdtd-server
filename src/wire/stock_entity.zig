@@ -375,6 +375,9 @@ pub fn buildEntitySpawnStock(buf: []u8, opts: SpawnOpts) ![]u8 {
     try w.writeBool(opts.is_sleeper);
     try w.writeI32(-1); // spawnById
     try w.writeString(""); // spawnByName
+    // These two are one byte each and both zero, so no test can pin their
+    // order: the swap-mutation audit reports the pair as a survivor by
+    // construction. EntityCreationData.write holds the order, not a test.
     try w.writeBool(false); // spawnByAllowShare
     try w.writeByte(0); // headState
     try w.writeF32(1); // overrideSize
@@ -577,14 +580,33 @@ test "stock falling-tree spawn emits blockPos + fallTreeDir" {
         .x = 3,
         .y = 65,
         .z = 4,
-        .falling_tree = .{ .block_x = 10, .block_y = 20, .block_z = 30, .dir_x = 1 },
+        // dir_y and dir_z used to sit at their 0 default, which left them
+        // interchangeable with each other on the wire.
+        .falling_tree = .{ .block_x = 10, .block_y = 20, .block_z = 30, .dir_x = 1, .dir_y = 2, .dir_z = 3 },
     });
     try std.testing.expectEqual(class_falling_tree, std.mem.readInt(i32, body[5..9], .little));
     // fallingTree branch starts right after spawnerSource at 73: Vector3i then Vector3
     try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, body[73..77], .little));
     try std.testing.expectEqual(@as(i32, 20), std.mem.readInt(i32, body[77..81], .little));
     try std.testing.expectEqual(@as(i32, 30), std.mem.readInt(i32, body[81..85], .little));
-    try std.testing.expectEqual(@as(f32, 1), @as(f32, @bitCast(std.mem.readInt(u32, body[85..89], .little))));
+    const dirAt = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 1), dirAt(body, 85));
+    try std.testing.expectEqual(@as(f32, 2), dirAt(body, 89));
+    try std.testing.expectEqual(@as(f32, 3), dirAt(body, 93));
+
+    // homePosition is the spawn x/y/z lossily cast to i32, and nothing read it
+    // back, so its three words could rotate among themselves. It sits just
+    // before homeRange (i16) and spawnerSource (u8), which end at the branch
+    // offset 73 the assertions above are anchored on: 73 - 1 - 2 - 12 = 58.
+    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, body[58..62], .little));
+    try std.testing.expectEqual(@as(i32, 65), std.mem.readInt(i32, body[62..66], .little));
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, body[66..70], .little));
+    try std.testing.expectEqual(@as(i16, -1), std.mem.readInt(i16, body[70..72], .little)); // homeRange
+    try std.testing.expectEqual(@as(u8, 0), body[72]); // spawnerSource Dynamic
 }
 
 test "class branches that need payload fail loudly instead of emitting a short body" {
