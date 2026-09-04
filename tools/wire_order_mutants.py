@@ -36,9 +36,11 @@ believing it; a genuine finding is a gap in the *tests*, and the code at HEAD is
 usually correct.
 """
 import argparse
+import atexit
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -72,6 +74,33 @@ PROBE_PAIRS = 8
 # Past this many, the filter set is not covering the file and the run has
 # silently become slower than no filter at all.
 MAX_UNFILTERED_RECHECKS = 5
+
+# The file currently mutated, as (path, backup), so a signal can put it back.
+_pending = []
+
+
+def _restore_pending():
+    for path, backup in _pending:
+        try:
+            shutil.copyfile(backup, path)
+            os.unlink(backup)
+        except OSError:
+            pass  # best effort: a partial restore still beats none
+    _pending.clear()
+
+
+def _on_signal(signum, _frame):
+    _restore_pending()
+    print(
+        f"\ninterrupted (signal {signum}); the mutated file has been restored",
+        file=sys.stderr,
+    )
+    sys.exit(130)
+
+
+atexit.register(_restore_pending)
+for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(_sig, _on_signal)
 
 
 def mutants_for(path):
@@ -274,6 +303,11 @@ def main():
             total += 1
             backup = tempfile.mktemp(suffix=".zig")
             shutil.copyfile(path, backup)
+            # A `finally` only covers exceptions. SIGTERM or SIGINT - a timeout
+            # killing the run, or Ctrl-C - skips it and leaves the mutated file
+            # behind, looking exactly like an ordinary edit. That happened
+            # three times before this guard existed.
+            _pending.append((path, backup))
             try:
                 swapped = list(lines)
                 swapped[idx], swapped[idx + 1] = swapped[idx + 1], swapped[idx]
@@ -303,8 +337,9 @@ def main():
                     if not passed:
                         false_survivors.append(f"{rel}:{idx + 1}: {desc}")
             finally:
-                shutil.copyfile(backup, path)
-                os.unlink(backup)
+                # The signal handler may already have restored and removed the
+                # backup on its way out; do not fail the unwind over that.
+                _restore_pending()
             mark = "SURVIVED" if passed else "killed"
             # Progress on every mutant, not only survivors: a run with nothing
             # to report otherwise looks hung for the better part of an hour.
