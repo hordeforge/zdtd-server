@@ -3403,16 +3403,26 @@ omission.
 enough": these four loaders read the file themselves rather than taking a
 `[]const u8`, so there is nothing to hand a fuzzer without restructuring them.
 That is a property of the call shape, not a judgement about risk, and it means
-the count handling in each needs a targeted test instead. Two now have one.
-`ZBM2` covers a declared count the file cannot back, one record short of it, and
-the exact count parsing into the store; `ZENT` covers the same short-table cases
-plus a zero count (a legal empty file) alongside its out-of-range `VehicleKind`
-byte. Both were verified to fail when the guard they pin is loosened. `ZCL2` has
-no counts to get wrong, and `ZCLC`'s stride check is exercised by the claims
-scenarios. Note the two use different strategies: `ZBM2` validates the whole
-table size up front, `ZENT` relies on every field read returning `Truncated`:
+the count and format handling in each needs a targeted test instead. All four
+now have one, each verified to fail when the guard it pins is loosened:
 
-| Format | Why reading was enough |
+- `ZBM2`: a declared count the file cannot back, one record short of it, and the
+  exact count parsing into the store.
+- `ZENT`: the same short-table cases, a zero count (a legal empty file), and its
+  out-of-range `VehicleKind` byte.
+- `ZCLC`: a record the file cannot back, a `name_len` past the 32-byte array
+  (the `@memcpy` would read past the record without that check), and one byte
+  short of the 49-byte stride.
+- `ZCL2`: a file shorter than the `ZCL1` head, and a `ZCL1` file written at full
+  `ZCL2` length with a junk tail, since the loader has to gate the blood-moon
+  fields on the magic rather than on the byte count.
+
+The three record formats guard differently, so a reader who assumes one shape
+while looking at another will misjudge what is pinned: `ZBM2` validates the whole
+table size up front, `ZENT` relies on every field read returning `Truncated`, and
+`ZCLC` pre-checks its fixed stride per record:
+
+| Format | What the loader guards, and how |
 |---|---|
 | `ZENT` (entities) | **Had a real bug, now fixed**: the type-1 record cast a raw disk byte to the exhaustive `VehicleKind`, so a corrupt file panicked on load. Type 2 assigns bounded scalars; type 3's `edges` count is a `u16` but `addPendingWire` caps at `max_wires` and dedupes; every field read is a bounds-checked `Reader` call. |
 | `ZCLC` (claims) | Fixed 49-byte stride pre-checked against the buffer, `name_len` rejected above 32 before the `@memcpy`, loop bounded by `max_land_claims`. |

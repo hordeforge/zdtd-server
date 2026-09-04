@@ -10775,5 +10775,19 @@ test "scenario entities.zen vehicle kind byte is range-checked before the cast" 
     try io_fs.writeFile(p, &empty);
     try persist.loadEntities(g);
 
-    std.debug.print("PASS zent-kind: bad kind, short record table and empty file all fail closed\n", .{});
+    // Type-3 records carry a u16 edge count with no cap of its own: the loop
+    // trusts it and leans on each field read returning Truncated, while
+    // addPendingWire caps what actually lands. A file claiming 65535 edges and
+    // carrying none is the hostile shape, and it has to stop at the first short
+    // read rather than walking the whole declared count.
+    var wires: [6 + 3]u8 = @splat(0);
+    @memcpy(wires[0..4], "ZENT");
+    std.mem.writeInt(u16, wires[4..6], 1, .little); // one record
+    wires[6] = 3; // rec_type: power wire edges
+    std.mem.writeInt(u16, wires[7..9], 65535, .little); // claims 65535 edges, carries none
+    try io_fs.writeFile(p, &wires);
+    try std.testing.expectError(error.Truncated, persist.loadEntities(g));
+    try std.testing.expectEqual(@as(usize, 0), g.sim.power.pending_wire_n);
+
+    std.debug.print("PASS zent-kind: bad kind, short tables, empty file and a 65535-edge claim all fail closed\n", .{});
 }
