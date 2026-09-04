@@ -265,6 +265,29 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseInvDataRequestStock(input) catch null;
     _ = packages.parseChunkRemoveBody(input) catch null;
     _ = packages.parseCollectBody(input) catch null;
+    // Remaining C2S-reachable parsers. Every one of these is fed straight from
+    // a client packet, so each belongs here; they were the tail left out when
+    // the list was written.
+    _ = packages.parseParticleEffectInvoke(input) catch null;
+    _ = packages.parseItemReload(input) catch null;
+    _ = packages.parseSetBlockTexture(input) catch null;
+    _ = packages.parseWaypointInvite(input) catch null;
+    _ = packages.parseStockInvTx(input) catch null;
+    _ = packages.parseRagdollInvoke(input) catch null;
+    {
+        var plat_buf: [packages.platform_user.max_platform_len]u8 = undefined;
+        var id_buf: [packages.platform_user.max_id_len]u8 = undefined;
+        var sent: ?packages.platform_user.Id = null;
+        _ = packages.parsePickupBlockBody(input, &plat_buf, &id_buf, &sent) catch null;
+    }
+    {
+        // parseBagSlots writes into the caller's array; the returned count must
+        // never exceed it, same invariant as parseBagBody below.
+        var slots: [8]stock_inv.StockSlot = undefined;
+        if (stock_inv.parseBagSlots(input, &slots)) |n| {
+            try std.testing.expect(n <= slots.len);
+        } else |_| {}
+    }
     // The standalone bag body (NetPackageBag) and the positional-audio relay
     // parser are remote surfaces; assert the parsed bag count never exceeds
     // the caller's slot array.
