@@ -30,6 +30,7 @@ Reproducing stock here means accepting a documented cheat vector.
 | 1.3 | `NetPackagePlayerInventoryForAI` feeds the AIDirector smell/threat model from a client-reported bag (RE `protocol-packages.md`, Process IL=23) | Accepted, dropped; AI reads sim state | A client could steer zombie targeting by declaring an inventory it does not have |
 | 1.4 | `NetPackageEntityPhysics` (ToServer) mirrors the physics master's reported pos/rot/velocity (`ProcessPackage` IL=87) | Body validated, dropped | zdtd's movement, falling-block and vehicle sims are authoritative, so the report is a redundant echo; accepting it would let a client teleport or fling entities |
 | 1.5 | `NetPackageEntityAddExpServer` / `AddScoreServer` add client-reported XP | Accepted, dropped; XP is server-awarded on the kill/quest path | A client could mint XP |
+| 1.6 | `NetPackageEntityAddVelocity` adds the reported vector to the entity's motion and sets AirBorne (`Entity.AddVelocity` IL=10, Process IL=11) | Ownership-checked, then dropped: the handler only marks the entity dirty so the next replicate carries the server's own position | Same reason as 1.4. Accepting it would let a client launch any entity it owns, and the server already applies knockback itself on the damage path |
 
 **Correction 2026-09-02.** Row 1.4 previously also named
 `NetPackageEntityVelocity` and `EntitySpeeds` as client-driven motion zdtd
