@@ -2491,12 +2491,17 @@ pub fn buildLockResponseUnlock(buf: []u8, success: bool) ![]u8 {
     try w.writeBool(success);
     try w.writeString("");
     try w.writeBool(false); // isForceUnlocked
-    // The tail is written even though an unlock carries nothing in it: stock's
-    // write emits all nine fields unconditionally (write IL=74), so omitting
-    // them would desync the reader's BinaryReader rather than save bytes.
+    // The tail is written even though an unlock carries nothing in it:
+    // omitting it would desync the reader's BinaryReader rather than save
+    // bytes. The RE body table lists nine fields, but the last two (target
+    // `FullName`, `ILockContext.Write`) sit behind the same two null guards as
+    // LockRequest (protocol-packages.md residual table): the per-target info
+    // is written only for a non-null target list, and the context payload only
+    // for a non-null context. An empty list and an empty context type name are
+    // therefore the complete stock encoding of "nothing locked".
     try w.writeU16(0); // channel
     try w.writeI32(0); // targets: empty list
-    try w.writeString(""); // context
+    try w.writeString(""); // context type name (empty = null context)
     return w.written();
 }
 
@@ -2599,6 +2604,17 @@ pub const GameStatsValues = struct {
 /// Write emits only bPersistent PropertyDecls in engine propertyList order with
 /// no name/id prefix (RE sandbox-options §6.1, GameStats.il Write IL=60).
 /// Empty payload (len=0) remains valid. Full blob uses stock defaults + overrides.
+///
+/// **propertyList order is not EnumGameStats order.** `initPropertyDecl`
+/// (IL=702, `il/full-v3.2.0/_global/GameStats.il.txt`) fills 78 slots with
+/// literal enum ids that are out of order in several places: slot 4/5 carry
+/// FragLimit (enum 6/7) and slot 6/7 carry DayLimit (enum 4/5), slot 14 carries
+/// IsSpawnNearOtherPlayer (enum 25) ahead of TimeOfDayIncPerSec (enum 11), and
+/// nine slots are non-persistent and skipped entirely (EnemyCount and
+/// AnimalCount among them). Since the blob carries no field names, the writes
+/// below follow slot order; the enum index table in
+/// inventories/gamestats-gameprefs.md documents the enum, not this order, and
+/// reordering these lines to match it would shift every later field.
 pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // Reserve i16 length; fill after payload.
@@ -2678,8 +2694,8 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeI32(v.loot_respawn_days); // LootRespawnDays
     try w.writeI32(100); // GlobalGSModifier
     try w.writeI32(100); // BiomeGSModifier
-    try w.writeI32(100); // GlobalLMModifier
-    try w.writeI32(100); // BiomeLMModifier
+    try w.writeI32(100); // GlobalLSModifier
+    try w.writeI32(100); // BiomeLSModifier
 
     const payload_len: i32 = @intCast(w.pos - payload_start);
     if (payload_len > std.math.maxInt(i16)) return error.Overflow;
@@ -2701,6 +2717,44 @@ test "GameStats body is i16 len + full persistent blob" {
     try std.testing.expect(plen > 100);
     const defaults = try buildGameStatsBodyValues(buf[256..], .{});
     try std.testing.expect(defaults.len > 100);
+
+    // The blob carries no field names, so position is the only thing that
+    // identifies a value. A length assertion alone cannot see a reordering,
+    // which is exactly the defect this layout is prone to: pin the head
+    // against the propertyList slot order in initPropertyDecl (IL=702).
+    var r: binary.Reader = .{ .data = body[2..] };
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // 0: GameState Running
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 1: GameModeId
+    try std.testing.expectEqual(false, try r.readBool()); // 2: TimeLimitActive
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 3: TimeLimitThisRound
+    // Slots 4..7 are Frag before Day (enum 6,7,4,5), not enum order.
+    try std.testing.expectEqual(false, try r.readBool()); // 4: FragLimitActive
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 5: FragLimitThisRound
+    try std.testing.expectEqual(false, try r.readBool()); // 6: DayLimitActive
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 7: DayLimitThisRound
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // 8: ShowWindow
+    try std.testing.expectEqualStrings("", try r.readString(&s_buf)); // 9: LoadScene
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // 10: CurrentRoundIx
+
+    // Slots 0..10 are all constant zeros and empty strings, so swapping two
+    // same-typed neighbours there produces identical bytes and proves nothing.
+    // Slots 11..15 are where the caller's values land, and they are the only
+    // part of the head a reordering can actually be caught in: give each a
+    // distinct value and read them back in slot order. Slot 14 is
+    // IsSpawnNearOtherPlayer (enum 25), ahead of TimeOfDayIncPerSec (enum 11).
+    var distinct: [512]u8 = undefined;
+    const d = try buildGameStatsBodyValues(&distinct, .{
+        .show_friend_player_on_map = true,
+        .time_of_day_inc_per_sec = 37,
+    });
+    var dr: binary.Reader = .{ .data = d[2..] };
+    dr.pos = r.pos; // same head width, already asserted field by field above
+    try std.testing.expectEqual(false, try dr.readBool()); // 11: ShowAllPlayersOnMap
+    try std.testing.expectEqual(true, try dr.readBool()); // 12: ShowFriendPlayerOnMap
+    try std.testing.expectEqual(false, try dr.readBool()); // 13: ShowSpawnWindow
+    try std.testing.expectEqual(false, try dr.readBool()); // 14: IsSpawnNearOtherPlayer
+    try std.testing.expectEqual(@as(i32, 37), try dr.readI32()); // 15: TimeOfDayIncPerSec
 }
 
 /// One biome weather snapshot (WeatherPackage on wire).
