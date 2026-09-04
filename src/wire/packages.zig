@@ -793,6 +793,16 @@ fn readWorldI32(r: *binary.Reader) binary.ReadError!i32 {
     return v;
 }
 
+/// Read side of NetPackageEntityPosAndRot (RE protocol-packages.md 5.5.1, write
+/// IL=76): `entityId` i32 | pos.x,y,z f32 | `bUseQRotation` bool | then either
+/// euler f32 x3 or a quaternion f32 x4, mutually exclusive | `onGround` bool.
+/// NetPackageEntityTeleport has no own write and rides this exact body (5.5.2),
+/// so both C2S handlers share this parser.
+///
+/// Rotation is consumed but not returned: the server keeps the yaw it already
+/// has for the entity, and a rotation from the wire is not a value it acts on.
+/// Position goes through readWorldF32 so a coordinate outside the world bound
+/// is an error here, not a teleport the sim has to undo.
 pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool } {
     if (body.len < 30) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -856,6 +866,11 @@ pub fn buildAliveFlagsBody(buf: []u8, entity_id: i32, flags: u16) ![]u8 {
     return w.written();
 }
 
+/// Read side of NetPackageEntityAliveFlags (RE protocol-packages.md 5.5.6,
+/// write IL=8): `entityId` i32 | `flags` u16, the order buildAliveFlagsBody
+/// writes. Unknown bits are kept rather than masked off: the bit meanings are
+/// canonical in ecs/components.zig and the caller decides which it acts on, so
+/// dropping a bit here would hide a client the RE table does not yet cover.
 pub fn parseAliveFlagsBody(body: []const u8) !struct { entity_id: i32, flags: u16 } {
     var r: binary.Reader = .{ .data = body };
     return .{ .entity_id = try r.readI32(), .flags = try r.readU16() };
@@ -871,6 +886,11 @@ pub fn buildEntitySpeedsBody(buf: []u8, entity_id: i32, movement_state: u8, spee
     return w.written();
 }
 
+/// Read side of NetPackageEntitySpeeds (RE protocol-packages.md residual table,
+/// write IL=17, Process IL=37): `entityId` i32 | `movementState` u8 |
+/// `speedForward` f32 | `speedStrafe` f32, the order buildEntitySpeedsBody
+/// writes. Both speeds go through readFiniteF32, so a NaN or infinity from the
+/// wire is an error instead of a value that poisons every later comparison.
 pub fn parseEntitySpeedsBody(body: []const u8) !struct { entity_id: i32, movement_state: u8, speed_forward: f32, speed_strafe: f32 } {
     if (body.len < 13) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -1492,6 +1512,15 @@ pub const ChunkParsed = struct {
     heights: []const u8,
 };
 
+/// Read side of buildChunkBody: the stock NetPackageChunk envelope
+/// (`overwrite` bool | cx,cy,cz i16 | `len` i32 | payload) wrapped around
+/// zdtd's height-plane payload, which is **not a stock chunk body**. The real
+/// client stream is built by stock_chunk.buildNetPackageChunkNew and read by
+/// the client, never by this function; this decodes what the tests and loadgen
+/// write.
+///
+/// A body that does not start with a 0/1 discriminant is taken as a bare
+/// payload, so both forms round-trip through one entry point.
 pub fn parseChunkBody(body: []const u8) !ChunkParsed {
     // Stock envelope?
     if (body.len >= chunk_stock_envelope_overhead + chunk_body_size and (body[0] == 0 or body[0] == 1)) {
@@ -1676,7 +1705,11 @@ pub const BlockChange = struct {
     has_value: bool = false,
 };
 
-/// Parse first stock BlockChangeInfo (or legacy simplified x/y/z/u16 for old fixtures).
+/// First change of a NetPackageSetBlock body, for the callers that only ever
+/// act on one (RE blocks.md, BlockChangeInfo.Read IL=76). Full layout and the
+/// legacy fixture form are in parseSetBlockChanges; this is a projection of it,
+/// not a second decoder. A change without both a position and a value is an
+/// error here because there is nothing to return.
 pub fn parseSetBlockBody(body: []const u8) !struct { x: i32, y: i32, z: i32, block_id: u16 } {
     var one: [1]BlockChange = undefined;
     const n = try parseSetBlockChanges(body, one[0..]);
@@ -1684,7 +1717,20 @@ pub fn parseSetBlockBody(body: []const u8) !struct { x: i32, y: i32, z: i32, blo
     return .{ .x = one[0].x, .y = one[0].y, .z = one[0].z, .block_id = one[0].block_id };
 }
 
-/// Parse all BlockChangeInfo entries with world positions + block values.
+/// Read side of NetPackageSetBlock (RE blocks.md, BlockChangeInfo.Write IL=89 /
+/// Read IL=76): `persistentPlayerId` (PlatformUserIdentifier) | `count` i16 |
+/// then per change a `BlockValueRef` (discriminant byte, 1 = Block followed by
+/// Vector3i) | `changedByEntityId` i32 | flags byte | the flagged payloads in
+/// flag order (BlockValue.Write = `rawData` u32 + `damage` u16, `sbyte`
+/// density, TextureFullArray). bForceDensity and bUpdateLight are flags with no
+/// payload.
+///
+/// An unknown flag bit is an error, not a skip: the bit selects a payload this
+/// reader cannot size, so continuing would decode every later change in the
+/// batch from a desynced offset as a bogus world edit. Changes lacking a
+/// position or a value are dropped from the output rather than returned half
+/// filled. A 14-byte body is the legacy zdtd fixture form (x/y/z i32 + id u16),
+/// kept because unit fixtures still write it.
 pub fn parseSetBlockChanges(body: []const u8, out: []BlockChange) !usize {
     // Legacy intermediate: 14 bytes.
     if (body.len == 14) {
@@ -2191,6 +2237,13 @@ pub fn buildInvTxRequest(buf: []u8, op: u8, a: u16, b: u16, qty: u16, entity_id:
     return w.written();
 }
 
+/// Read side of buildInvTxRequest and likewise **not the stock body**: op u8 |
+/// a u16 | b u16 | qty u16 | entityId i32. The stock layout is
+/// InventoryTransaction.Write (RE inventories/netpackage-bodies.md, Write
+/// IL=75), decoded by parseStockInvTx. The C2S handler tries the stock form
+/// first and only falls back here (c2s/inv.zig), so a real client never
+/// reaches this parser; it exists for the zdtd tools and fixtures that write
+/// the compact form.
 pub fn parseInvTxRequest(body: []const u8) !struct { op: u8, a: u16, b: u16, qty: u16, entity_id: i32 } {
     if (body.len < 11) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
@@ -2715,16 +2768,30 @@ pub fn buildChunkRemoveBody(buf: []u8, cx: i32, cz: i32) ![]u8 {
     return w.written();
 }
 
+/// Read side of NetPackageChunkRemove: one `chunkKey` i64, the key
+/// buildChunkRemoveBody writes. The coordinates come back out through the same
+/// WorldChunkCache.MakeChunkKey packing, so any i64 decodes to some chunk and
+/// the range check belongs at the caller, not here.
 pub fn parseChunkRemoveBody(body: []const u8) !struct { cx: i32, cz: i32 } {
     if (body.len < 8) return error.EndOfStream;
     const key = std.mem.readInt(i64, body[0..8], .little);
     return .{ .cx = extractChunkKeyX(key), .cz = extractChunkKeyZ(key) };
 }
 
-/// Collect loot: entity_id i32 (bag). Optional playerId i32 on stock wire.
-pub fn parseCollectBody(body: []const u8) !i32 {
-    if (body.len < 4) return error.EndOfStream;
-    return std.mem.readInt(i32, body[0..4], .little);
+/// Read side of NetPackageEntityCollect (RE inventories/netpackage-bodies.md,
+/// write IL=12): `entityId` i32 | `playerId` i32, the order
+/// buildEntityCollectBody writes.
+///
+/// Both fields come back because stock uses the second one: Process IL=51 runs
+/// ValidEntityIdForSender(playerId) before collecting, so a parser that
+/// returned only the bag id would leave the handler with nothing to check the
+/// claim against.
+pub fn parseCollectBody(body: []const u8) !struct { entity_id: i32, player_id: i32 } {
+    if (body.len < 8) return error.EndOfStream;
+    return .{
+        .entity_id = std.mem.readInt(i32, body[0..4], .little),
+        .player_id = std.mem.readInt(i32, body[4..8], .little),
+    };
 }
 
 /// NetPackageEntityCollect (RE inventories/netpackage-bodies.md, write IL=12):
@@ -2993,6 +3060,13 @@ pub const SoundAtPosition = struct {
 /// Audio clip names are short asset paths; anything longer fails closed.
 pub const max_audio_clip_len: usize = 256;
 
+/// Read side of NetPackageSoundAtPosition (RE write IL=25): pos Vector3 | clip
+/// string | `mode` u8 | `distance` i32 | `entityId` i32, the order
+/// buildSoundAtPosition writes and where stock's write also stops.
+///
+/// `volume_scale` therefore never comes off the wire; it stays at its default
+/// and only the local relay path sets it. The clip string is the one
+/// client-controlled length in the body, so it is capped rather than trusted.
 pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflow})!SoundAtPosition {
     if (body.len < 22) return error.EndOfStream; // 12 pos + 1 clip-len + 1 mode + 4 + 4
     var r: binary.Reader = .{ .data = body };
@@ -3219,6 +3293,12 @@ pub fn buildEntityAttach(buf: []u8, attach_type: AttachType, rider_id: i32, vehi
     return w.written();
 }
 
+/// Read side of NetPackageEntityAttach (RE inventories/netpackage-bodies.md,
+/// write IL=21): `attachType` u8 | `riderId` i32 | `vehicleId` i32 | `slot`
+/// i16, the order buildEntityAttach writes. An `attachType` outside the four
+/// stock values is rejected rather than clamped: stock switches on it, so a
+/// fifth value has no defined meaning and guessing one would attach or detach
+/// on a byte the client never meant as either.
 pub fn parseEntityAttach(body: []const u8) !struct { attach_type: AttachType, rider_id: i32, vehicle_id: i32, slot: i16 } {
     if (body.len < 11) return error.EndOfStream;
     const at_raw = body[0];
@@ -3816,6 +3896,16 @@ pub const QuestObjectiveUpdate = struct {
     block_z: i32 = 0,
 };
 
+/// Read side of NetPackageQuestObjectiveUpdate (RE
+/// inventories/netpackage-bodies.md, write IL=21): `senderEntityID` i32 |
+/// `questCode` i32 | `eventType` u8 | `blockPos` (StreamUtils Vector3i), the
+/// order buildQuestObjectiveUpdate writes.
+///
+/// The trailing block position is optional here while stock always writes it:
+/// a 9-byte body leaves the position zero rather than erroring, which is what
+/// keeps the zdtd-native {def_id u16, op u8} fixtures in c2s/quest.zig
+/// parseable. An `eventType` outside the three stock values is rejected, since
+/// stock switches on it and a fourth has no objective to advance.
 pub fn parseQuestObjectiveUpdate(body: []const u8) !QuestObjectiveUpdate {
     if (body.len < 9) return error.EndOfStream;
     const et_raw = body[8];
@@ -4123,6 +4213,16 @@ pub const PickupBlock = struct {
     player_id: i32 = 0,
 };
 
+/// Read side of NetPackagePickupBlock (RE inventories/netpackage-bodies.md,
+/// read asm.il 20 / write IL=22): `blockPos` (StreamUtils Vector3i) | `rawData`
+/// u32 | `playerId` i32 | `persistentPlayerId` (PlatformUserIdentifier, null =
+/// one 0 byte). Same order buildPickupBlockBody writes.
+///
+/// The platform identity is handed back through `sent` rather than dropped
+/// because the C2S handler needs it: stock runs both ValidEntityIdForSender on
+/// `playerId` and ValidUserIdForSender on the identity, and a parser that
+/// consumed the identity silently would leave the second check with nothing to
+/// compare (c2s/blocks.zig).
 pub fn parsePickupBlockBody(body: []const u8, plat_buf: []u8, id_buf: []u8, sent: *?platform_user.Id) !PickupBlock {
     if (body.len < 16) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };

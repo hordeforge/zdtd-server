@@ -56,7 +56,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityCollect")) {
-        const bag = packages.parseCollectBody(body) catch return true;
+        const col = packages.parseCollectBody(body) catch return true;
+        const bag = col.entity_id;
+        // ValidEntityIdForSender(playerId): stock discards a collect whose
+        // claimed collector is not the sender (NetPackageEntityCollect
+        // ProcessPackage IL=51), so one client cannot collect a bag in another
+        // player's name.
+        if (col.player_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
         // Transfer contents into server inv, then destroy. Wire order matches
         // stock: Collect (client OnCollect) then EntityRemove(Despawned).
         if (self.sim.slotOfNetId(bag)) |bs| {

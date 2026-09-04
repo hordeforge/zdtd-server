@@ -582,9 +582,15 @@ fn readCraftComplete(r: *binary.Reader) binary.ReadError!CraftComplete {
     return out;
 }
 
-/// Parse a workstation TE write (network mode) in full. The whole payload must be
-/// consumed: a stock peer always writes exactly this layout, and stopping short
-/// is how a missing trailing field goes unnoticed until a real client throws.
+/// Read side of a NetPackageTileEntity workstation body, the layout
+/// buildWorkstationTeBody writes (outer header and composite payload are in the
+/// file header above).
+///
+/// The whole payload must be consumed: a stock peer always writes exactly this
+/// layout, and stopping short is how a missing trailing field goes unnoticed
+/// until a real client throws. A payload version other than
+/// `workstation_te_version` is an error rather than a best-effort decode, since
+/// the field list after it is version specific.
 pub fn parseWorkstationTeBody(body: []const u8) binary.ReadError!ParsedWorkstation {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedWorkstation = .{};
@@ -953,9 +959,15 @@ pub const max_vending_allowed: usize = 8;
 /// above any plausible real list so a legitimate client is never rejected.
 pub const max_vending_allowed_declared: i32 = 64;
 
-/// Read the vending TE composite. `plat_buf` / `id_buf` / `pw_buf` are the
-/// caller's scratch for the owner identity, allowed-user identities and the
-/// password string; `allowed` storage lives in the returned struct.
+/// Read side of a NetPackageTileEntity vending body, the layout
+/// buildVendingTeBody writes (outer header and composite payload are in the
+/// file header above).
+///
+/// `plat_buf` / `id_buf` / `pw_buf` are the caller's scratch for the owner
+/// identity, allowed-user identities and the password string; `allowed` storage
+/// lives in the returned struct. The declared allowed-user count is capped at
+/// `max_vending_allowed_declared` before anything is read against it, so a
+/// client-declared count cannot drive an unbounded read.
 pub fn parseVendingTeBody(
     body: []const u8,
     plat_buf: []u8,
