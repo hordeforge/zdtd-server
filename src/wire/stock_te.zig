@@ -804,6 +804,17 @@ test "storage te encode decode roundtrip" {
 
     var buf: [8192]u8 = undefined;
     const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+
+    // The payload opens with chunkPos through StreamUtils.Write(Vector3i),
+    // which emits x, y, z (`il/full-v3.2.0/_global/StreamUtils.il.txt` IL=13).
+    // parseStorageTeBody skips those three, so nothing else here would notice
+    // them coming out reordered - the swap-mutation audit found exactly that
+    // gap. World (10, 70, -3) is local x 10, y 70 (full world y), z 13.
+    const payload_start: usize = 1 + 12 + 4 + 4; // handle | worldPos | blockId | payLen
+    try std.testing.expectEqual(@as(i32, 10), std.mem.readInt(i32, body[payload_start..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 70), std.mem.readInt(i32, body[payload_start + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 13), std.mem.readInt(i32, body[payload_start + 8 ..][0..4], .little));
+
     const parsed = try parseStorageTeBody(body);
     try std.testing.expectEqual(@as(i32, 10), parsed.world_x);
     try std.testing.expectEqual(@as(i32, 500), parsed.block_id);
