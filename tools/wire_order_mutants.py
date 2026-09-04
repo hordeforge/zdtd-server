@@ -63,6 +63,11 @@ WIDTH = {
 }
 WRITE_RE = re.compile(r"^(\s*)try w\.(write\w+)\(([^;]*)\);\s*(//.*)?$")
 
+# How many pairs filter_is_live() may try before declaring a filter useless.
+# One kill proves the filter reaches the file; a run of survivors at the top of
+# a file is a real finding, not a reason to refuse.
+PROBE_PAIRS = 8
+
 
 def mutants_for(path):
     """Yield (line_index, description) for each swappable adjacent pair."""
@@ -87,15 +92,60 @@ def mutants_for(path):
     return lines, out
 
 
-def run_suite():
-    """True when the test suite passes."""
+def run_suite(test_filter=None):
+    """True when the test suite passes.
+
+    With a filter the run is ~90x faster (2.6 s against 4 min), which is the
+    difference between auditing a file and auditing the tree. The filter is a
+    loaded gun: `zig build test` exits 0 when a filter matches nothing, so a
+    typo would report every mutant as killed by a suite that ran no tests.
+    Callers must prove the filter selects something first - see
+    filter_is_live().
+    """
+    cmd = ["zig", "build", "test"]
+    if test_filter:
+        cmd.append(f"-Dtest-filter={test_filter}")
     r = subprocess.run(
-        ["zig", "build", "test"],
+        cmd,
         cwd=ROOT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     return r.returncode == 0
+
+
+def filter_is_live(test_filter, path, lines, mutants):
+    """True when `test_filter` selects a test that the file under audit can fail.
+
+    A filter matching nothing exits 0, and so would every mutant after it, so
+    the report would read "all killed" from a suite that ran no tests. Proving
+    otherwise needs a probe that the filtered tests actually execute.
+
+    An appended `@compileError` does not work: Zig never evaluates it in code
+    nothing references, and the filtered build exits 0 with the file broken.
+    The probe here is the tool's own mutation applied to the first candidate
+    pair. If the filtered suite cannot notice a swapped field there, it cannot
+    judge any other pair in the file either.
+    """
+    if not mutants:
+        return False
+    with open(path, encoding="utf-8") as fh:
+        original = fh.read()
+    # Try several pairs, not just the first: a leading pair may be a genuine
+    # test gap, and refusing to run on that would hide the very finding the
+    # audit exists for. One kill anywhere proves the filter reaches this file.
+    try:
+        for idx, _desc in mutants[:PROBE_PAIRS]:
+            probe = list(lines)
+            probe[idx], probe[idx + 1] = probe[idx + 1], probe[idx]
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.writelines(probe)
+            if not run_suite(test_filter):
+                return True
+        return False
+    finally:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(original)
 
 
 def wire_tree_dirty():
@@ -116,7 +166,19 @@ def main():
     ap.add_argument("--file", help="single file under src/wire (default: all)")
     ap.add_argument("--limit", type=int, default=0, help="stop after N mutants")
     ap.add_argument("--list", action="store_true", help="list mutants, run nothing")
+    ap.add_argument(
+        "--test-filter",
+        help=(
+            "run only tests whose name contains this substring (~90x faster). "
+            "Requires --file: the filter has to match tests covering the file "
+            "under audit, and it is probed for liveness before any mutant runs"
+        ),
+    )
     args = ap.parse_args()
+
+    if args.test_filter and not args.file:
+        print("--test-filter requires --file", file=sys.stderr)
+        return 2
 
     # Refuse to mutate a dirty tree: an interrupted earlier run leaves one swap
     # behind, and it would be indistinguishable from a real edit. Listing is
@@ -141,6 +203,21 @@ def main():
             os.path.join(WIRE, n) for n in sorted(os.listdir(WIRE)) if n.endswith(".zig")
         ]
 
+    # Prove the filter can fail before trusting any result from it. Without
+    # this a mistyped filter selects nothing, every run exits 0, and the report
+    # reads "all killed" from a suite that tested nothing.
+    if args.test_filter and not args.list:
+        probe_lines, probe_muts = mutants_for(targets[0])
+        if not filter_is_live(args.test_filter, targets[0], probe_lines, probe_muts):
+            print(
+                f"refusing to run: --test-filter {args.test_filter!r} selects no "
+                f"test that fails for any of the first {PROBE_PAIRS} swapped pairs "
+                f"in {os.path.relpath(targets[0], ROOT)}, so every mutant would be "
+                "reported killed by a suite that never exercised the file",
+                file=sys.stderr,
+            )
+            return 2
+
     total = 0
     survived = []
     for path in targets:
@@ -163,7 +240,7 @@ def main():
                 swapped[idx], swapped[idx + 1] = swapped[idx + 1], swapped[idx]
                 with open(path, "w", encoding="utf-8") as fh:
                     fh.writelines(swapped)
-                passed = run_suite()
+                passed = run_suite(args.test_filter)
             finally:
                 shutil.copyfile(backup, path)
                 os.unlink(backup)

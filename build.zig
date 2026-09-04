@@ -86,9 +86,19 @@ pub fn build(b: *std.Build) void {
     });
     wireApmOptions(test_mod, build_opts, tracy_cpp);
     test_mod.addImport("zwasm", zwasm_dep.module("zwasm"));
+    // Substring filter over test names, for tools that re-run one test many
+    // times: tools/wire_order_mutants.py rebuilds the suite once per mutant,
+    // and running all of it per mutant makes a full audit take a day.
+    // `make check` never passes this, so the gate always runs everything.
+    const test_filter = b.option(
+        []const u8,
+        "test-filter",
+        "Run only tests whose name contains this substring (audit tooling; not used by make check)",
+    );
     const unit_tests = b.addTest(.{
         .root_module = test_mod,
         .use_llvm = true,
+        .filters = if (test_filter) |f| &.{f} else &.{},
     });
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
