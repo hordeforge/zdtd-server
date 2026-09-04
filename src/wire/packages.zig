@@ -1430,6 +1430,16 @@ test "DamageEntity V3.2.0 golden layout: packed flags + KillXPScale at fixed off
     try std.testing.expectEqual(@as(u8, 3), body[9]); // dtype
     try std.testing.expectEqual(@as(u16, 100), std.mem.readInt(u16, body[10..12], .little));
     try std.testing.expectEqual(@as(i32, 0x55667788), std.mem.readInt(i32, body[16..20], .little));
+    // The direction vector at 20 is (0, -1, 0): two zeros around a -1, so the
+    // -1 is the only observable word and its position is what a swap moves.
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 20));
+    try std.testing.expectEqual(@as(f32, -1), f32At(body, 24)); // dirV y
+    try std.testing.expectEqual(@as(f32, 0), f32At(body, 28));
     // KillXPScale (V3.2.0 addition) sits at 65; damageMultiplier at 69.
     const kxs: f32 = @bitCast(std.mem.readInt(u32, body[65..69], .little));
     try std.testing.expectEqual(@as(f32, 1.0), kxs);
