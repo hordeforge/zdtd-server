@@ -93,7 +93,9 @@ pub const PlayerProfile = struct {
     mustache_name: []const u8 = "",
     chops_name: []const u8 = "",
     beard_name: []const u8 = "",
-    eye_color: []const u8 = "",
+    /// Stock's null substitute for this one field is "Blue01", not the empty
+    /// string every other name falls back to (PlayerProfile.Write IL_00AC).
+    eye_color: []const u8 = "Blue01",
 };
 
 /// Stock PlayerProfile v5 (RE: protocol.md §5 profile body).
@@ -241,6 +243,16 @@ pub const FallingBlockInfo = struct { block: FallingBlock };
 /// length, which this API enforces by construction.
 pub const FallingBlocksInfo = struct { blocks: []const FallingBlock };
 
+/// PlayerProfile.Write (`il/full-v3.2.0/_global/PlayerProfile.il.txt`, IL=69):
+/// version i32 (literal 5) | `archetype` string | `isMale` bool | `raceName`
+/// string | `variantNumber` (an i32 field written as a byte) | `hairName` |
+/// `hairColor` | `mustacheName` | `chopsName` | `beardName` | `eyeColor`.
+///
+/// Stock substitutes a literal for a null string on the last six: empty for
+/// five of them and **"Blue01"** for `eyeColor` (IL_00AC). Zig has no null
+/// string, so an empty slice here is written as empty rather than substituted;
+/// the one caller that sends a profile sets `eye_color` explicitly
+/// (packages.zig), so the stock default is not silently dropped.
 pub fn writePlayerProfile(w: *binary.Writer, p: PlayerProfile) !void {
     try w.writeI32(player_profile_version);
     try w.writeString(p.archetype);
@@ -482,7 +494,21 @@ test "stock player spawn emits player branch (holdingItem, team, names, profile)
             .entity_name = "Bob",
             .skin_texture = "",
             .team_number = 3,
-            .profile = .{ .archetype = "arch", .is_male = true, .race_name = "race", .variant_number = 2 },
+            // Every string distinct: the profile carries no field names, so
+            // four empty strings in a row would let a reordering emit
+            // identical bytes and pass.
+            .profile = .{
+                .archetype = "arch",
+                .is_male = true,
+                .race_name = "race",
+                .variant_number = 2,
+                .hair_name = "hair",
+                .hair_color = "haircol",
+                .mustache_name = "must",
+                .chops_name = "chops",
+                .beard_name = "beard",
+                .eye_color = "Green02",
+            },
         },
     });
     try std.testing.expectEqual(class_player_male, std.mem.readInt(i32, body[5..9], .little));
@@ -497,6 +523,30 @@ test "stock player spawn emits player branch (holdingItem, team, names, profile)
     try std.testing.expectEqual(@as(u8, 1), body[80]); // playerProfile present
     // PlayerProfile.Write: i32 version = 5
     try std.testing.expectEqual(@as(i32, player_profile_version), std.mem.readInt(i32, body[81..85], .little));
+
+    // The profile is ten positional fields with no names on the wire, so read
+    // them back in order against PlayerProfile.Write (IL=69). Each test value
+    // is distinct, which a length or version assertion alone could not tell
+    // apart from a reordering.
+    var pr: binary.Reader = .{ .data = body[85..] };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("arch", try pr.readString(&s_buf)); // archetype
+    try std.testing.expectEqual(true, try pr.readBool()); // isMale
+    try std.testing.expectEqualStrings("race", try pr.readString(&s_buf)); // raceName
+    try std.testing.expectEqual(@as(u8, 2), try pr.readByte()); // variantNumber
+    try std.testing.expectEqualStrings("hair", try pr.readString(&s_buf)); // hairName
+    try std.testing.expectEqualStrings("haircol", try pr.readString(&s_buf)); // hairColor
+    try std.testing.expectEqualStrings("must", try pr.readString(&s_buf)); // mustacheName
+    try std.testing.expectEqualStrings("chops", try pr.readString(&s_buf)); // chopsName
+    try std.testing.expectEqualStrings("beard", try pr.readString(&s_buf)); // beardName
+    try std.testing.expectEqualStrings("Green02", try pr.readString(&s_buf)); // eyeColor
+
+    // The struct default for eyeColor is stock's null substitute "Blue01"
+    // (PlayerProfile.Write IL_00AC), not the empty string the other five names
+    // fall back to.
+    const default_profile: PlayerProfile = .{};
+    try std.testing.expectEqualStrings("Blue01", default_profile.eye_color);
+    try std.testing.expectEqualStrings("", default_profile.beard_name);
 }
 
 test "stock falling-tree spawn emits blockPos + fallTreeDir" {
