@@ -1399,12 +1399,18 @@ test "item value v9 minimal shape" {
     var buf: [64]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
     // absolute type items_start_here + 8 (stoneAxe builtin)
+    // flags and ammo_index carry distinct non-zero values: both defaulted to
+    // 0 here, which made the CosmeticMods length byte, flags and ammo_index
+    // three interchangeable zeros on the wire, so a swap among them emitted
+    // identical bytes and the assertions below could not tell them apart.
     try writeItemValue(&w, .{
         .type_id = items_start_here + 8,
         .count = 1,
         .quality = 1,
         .meta = 0,
         .seed = 42,
+        .flags = 3,
+        .ammo_index = 2,
     });
     const b = w.written();
     try std.testing.expectEqual(@as(u8, 9), b[0]); // save version
@@ -1414,9 +1420,9 @@ test "item value v9 minimal shape" {
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, b[8..10], .little));
     try std.testing.expectEqual(@as(u8, 0), b[12]); // metadata count
     try std.testing.expectEqual(@as(u8, 0), b[13]); // mods
-    try std.testing.expectEqual(@as(u8, 0), b[14]); // cosmetics
-    try std.testing.expectEqual(@as(u8, 0), b[15]); // activated
-    try std.testing.expectEqual(@as(u8, 0), b[16]); // ammo
+    try std.testing.expectEqual(@as(u8, 0), b[14]); // cosmetics length
+    try std.testing.expectEqual(@as(u8, 3), b[15]); // Flags (V3.2.0 bitfield)
+    try std.testing.expectEqual(@as(u8, 2), b[16]); // SelectedAmmoIndex
     try std.testing.expectEqual(@as(u16, 42), std.mem.readInt(u16, b[17..19], .little));
     try std.testing.expectEqual(@as(u8, 0), b[19]); // texture default
 }
@@ -1533,6 +1539,16 @@ test "bag package roundtrip player bag slots" {
     try std.testing.expectEqual(@as(u16, 7), inv2.slots[10].item_id);
     try std.testing.expectEqual(@as(u16, 15), inv2.slots[10].count);
     try std.testing.expectEqual(@as(u16, 3), inv2.slots[11].item_id);
+
+    // Bag.Write closes with three bools: no LockedSlots, touched, no
+    // PreferenceTracker. Only the slots were read back, so a swap among those
+    // three went unnoticed - and the outer two are both false, which is why
+    // the middle one has to be true here to be observable at all. Layout:
+    // entityId i32 | blobLen u16 | version u8 | count u16 | N x ItemStack.
+    const tail = body[body.len - 3 ..];
+    try std.testing.expectEqual(@as(u8, 0), tail[0]); // LockedSlots absent
+    try std.testing.expectEqual(@as(u8, 1), tail[1]); // touched
+    try std.testing.expectEqual(@as(u8, 0), tail[2]); // PreferenceTracker absent
 }
 
 test "drop items container encode decode" {
@@ -1604,6 +1620,19 @@ test "item mods round-trip through the wire ItemValue" {
     try std.testing.expectEqual(@as(u16, 10), out.mods[0]);
     try std.testing.expectEqual(@as(u16, 20), out.mods[1]);
     try std.testing.expectEqual(@as(u16, 5), out.quality);
+
+    // The nested mod ItemValue writes fixed quality 1 then meta 0. The
+    // round-trip above recovers the mod ids but never those two, so swapping
+    // them was invisible. Find the first mod's body: outer version u8 | flags
+    // u8 | type u16 | useTimes f32 | quality u16 | meta u16 | metaCount u8 |
+    // Modifications.Length u8 | present bool, then the nested value starts.
+    const body = w.written();
+    const nested = 1 + 1 + 2 + 4 + 2 + 2 + 1 + 1 + 1;
+    try std.testing.expectEqual(@as(u8, 9), body[nested]); // nested version
+    try std.testing.expectEqual(@as(u8, 1), body[nested + 1]); // item flag
+    try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, body[nested + 2 ..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, body[nested + 8 ..][0..2], .little)); // quality
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, body[nested + 10 ..][0..2], .little)); // meta
 }
 
 test "item mods survive the ECS conversion both ways" {
