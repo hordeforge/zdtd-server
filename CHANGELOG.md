@@ -182,6 +182,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackageEntityCollect` read only the first of its two i32 fields, so the
+  `playerId` naming the collector was never checked. Stock gates the collect on
+  `ValidEntityIdForSender(playerId)` (ProcessPackage IL=51); without it a client
+  could collect a loot bag in another player's name. The parser now returns both
+  fields and the handler rejects a mismatched claim.
 - Remote crash from one C2S packet: `NetPackageSoundAtPosition` with a
   256-byte clip name reached `@intCast` into a `u8` length and trapped
   (ReleaseSafe ships with safety on, so this killed a release server). The

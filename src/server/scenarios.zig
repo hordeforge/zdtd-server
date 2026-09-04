@@ -9654,6 +9654,58 @@ test "scenario on_loot_roll verdict halves loot (real core_lootgate)" {
     std.debug.print("PASS lootgate: roll {d} -> {d} stacks at 50%\n", .{ n0, got });
 }
 
+test "scenario collect rejects a bag claimed in another player's name" {
+    // NetPackageEntityCollect carries entityId AND playerId; stock runs
+    // ValidEntityIdForSender(playerId) before collecting (ProcessPackage
+    // IL=51). Without that check a client could name any player as the
+    // collector, so the bag has to survive a spoofed claim and be collectable
+    // by an honest one.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[ca.slot].entered = true;
+    g.clients[cb.slot].entered = true;
+
+    // Put both players on the bag so reach never decides the outcome.
+    const pa = g.sim.playerByPeer(ca.slot).?;
+    const pb = g.sim.playerByPeer(cb.slot).?;
+    const t = g.sim.transform[pa];
+    g.sim.setPos(cb.entity_id, t.x, t.y, t.z, 0);
+    const bag = g.sim.spawnLootBag(t.x, t.y, t.z, 1, 1).?;
+    _ = pb;
+
+    var frame_buf: [256]u8 = undefined;
+    var body: [16]u8 = undefined;
+
+    // A claims the bag in B's name: rejected, bag untouched.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    const spoof = try packages.buildEntityCollectBody(&body, bag, cb.entity_id);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageEntityCollect", spoof));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(g.sim.slotOfNetId(bag) != null);
+
+    // The same bag, claimed by its actual collector: collected and destroyed.
+    const honest = try packages.buildEntityCollectBody(&body, bag, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageEntityCollect", honest));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(g.sim.slotOfNetId(bag) == null);
+    std.debug.print("PASS collect: spoofed playerId rejected, honest claim collects\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

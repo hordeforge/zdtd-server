@@ -80,7 +80,7 @@ is available.
 | `NetPackageInventoryTransactionResponse` | S→C | zdtd head: ok u8, dropped_entity i32 + stock inventory body |
 | `NetPackageInventoryDataRequest` | C→S | entity_id i32 (open container) |
 | `NetPackageInventoryDataResponse` | S→C | stock inventory body for container entity |
-| `NetPackageEntityCollect` | C→S | bag entity_id i32 (open+take+vacuum) |
+| `NetPackageEntityCollect` | **both** | bag entity_id i32 + collector playerId i32 (open+take+vacuum). C2S is gated on `ValidEntityIdForSender(playerId)`. |
 
 ### Stock ItemValue (v9, minimal)
 

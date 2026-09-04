@@ -348,9 +348,11 @@ def main():
     # 7c. PARSER RE CITATIONS (ratchet). Same rule as 7b for the read side, and
     #     the read side is the one that touches untrusted bytes: a parser whose
     #     field order is wrong desyncs the reader on a body a client really
-    #     sends. 37 of 50 still lack a citation (measured 2026-09-04); the
-    #     builders went 34 -> 0 the same way, so this ratchets down too.
-    MAX_UNCITED_PARSERS = 37
+    #     sends. Started at 37 of 50 (2026-09-04) and is down to 21; the
+    #     builders went 34 -> 0 the same way, so this ratchets down too. The 16
+    #     closed first were the ones with a cited builder twin, where the layout
+    #     claim already existed and only the read side was silent about it.
+    MAX_UNCITED_PARSERS = 21
     uncited_parsers = []
     for wire_name in sorted(os.listdir(os.path.join(ROOT, "src/wire"))):
         if not wire_name.endswith(".zig"):
