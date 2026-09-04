@@ -655,11 +655,16 @@ fn testWorkstationBody(buf: []u8) ![]u8 {
     try stock_inv.writeItemStack(&bw, .{ .type_id = stock_inv.items_start_here + 4, .count = 6 });
 
     var queue = [_]QueueItem{.{}} ** workstations.stock_queue_len;
+    // Distinct values per field: the queue item is positional, so a field
+    // sharing a value with its neighbour makes a swap between them invisible.
+    // quality left at 0 hid it behind the RepairItem-null bool, and
+    // one_item_craft_time matching craft_time_left hid it behind that.
     queue[queue.len - 1] = .{
         .multiplier = 3,
         .is_crafting = true,
         .craft_time_left = 1.5,
-        .one_item_craft_time = 1.5,
+        .quality = 4,
+        .one_item_craft_time = 2.25,
         .starting_entity_id = 171,
         .output_type = stock_inv.items_start_here + 9,
         .output_count = 2,
@@ -721,6 +726,10 @@ test "workstation queue slot keeps its recipe and identity fields" {
     try std.testing.expectEqual(@as(i16, 3), active.multiplier);
     try std.testing.expect(active.is_crafting);
     try std.testing.expectEqual(@as(i32, 171), active.starting_entity_id);
+    // These two sat unasserted, and their fixture values matched a neighbour,
+    // so a swap on either side of them emitted identical bytes.
+    try std.testing.expectEqual(@as(u8, 4), active.quality);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.25), active.one_item_craft_time, 0.01);
     try std.testing.expectEqual(stock_inv.items_start_here + 9, active.output_type);
     try std.testing.expectEqual(@as(i32, 2), active.output_count);
     try std.testing.expectEqual(@as(i32, 5), active.craft_exp_gain);
@@ -1321,6 +1330,16 @@ test "powered trigger S2C body carries IsPowered and the type tail" {
     try std.testing.expectEqual(@as(u8, 255), body[0]);
     const pay_len = std.mem.readInt(i32, body[17..21], .little);
     try std.testing.expectEqual(@as(usize, @intCast(pay_len)), body.len - 21);
+
+    // Each wire is a Vector3i written x, y, z. Nothing read these back, so a
+    // swapped component rode out silently; the fixture uses 1, 2, 3 so the
+    // three positions cannot be confused. Payload: chunkPos (12) + the
+    // TileEntityPowered constant i32 (4) + isPlayerPlaced (1) + powerItemType
+    // (1) + wire count (1) = 19 bytes before the first wire.
+    const first_wire = 21 + 19;
+    try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, body[first_wire..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, body[first_wire + 4 ..][0..4], .little));
+    try std.testing.expectEqual(@as(i32, 3), std.mem.readInt(i32, body[first_wire + 8 ..][0..4], .little));
     // ToClient adds IsPowered before pitch/yaw and drops ResetTrigger, so it is
     // one byte longer than the same trigger going the other way.
     var c2s_buf: [512]u8 = undefined;
