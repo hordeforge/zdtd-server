@@ -9409,7 +9409,15 @@ test "scenario sound relay fans out to peers, excluding the sender" {
     cap_b.clear();
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageSoundAtPosition", body));
     const snd_id = packages.idOf("NetPackageSoundAtPosition").?;
-    try std.testing.expect(cap_b.findPkgId(snd_id) != null); // peer hears it
+    // Presence alone would pass on a relay that forwarded a different sound or
+    // dropped the clip name. This is a verbatim relay, so decode it: the client
+    // picks the audio asset by clip name and places it by position, so a
+    // mangled body is an audibly wrong result, not a silent one.
+    const heard_body = cap_b.findPkgId(snd_id) orelse return error.TestUnexpectedResult;
+    const heard = try packages.parseSoundAtPosition(heard_body);
+    try std.testing.expectEqualStrings("test", heard.clipSlice());
+    try std.testing.expectEqual(ca.entity_id, heard.entity_id);
+    try std.testing.expectEqual(@as(i32, 20), heard.distance);
     try std.testing.expect(cap_a.findPkgId(snd_id) == null); // owner already heard it locally
 
     // A spoofed owner (another player's entity id) is dropped, not relayed.
