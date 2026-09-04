@@ -465,6 +465,59 @@ def main():
             + " - add the stock behaviour and the reason to DIVERGENCES 1"
         )
 
+    # 7e. NO-TRUTHFUL-VALUE FIELDS: DIVERGENCES 2 names the wire fields zdtd
+    #     sends as 0 because it drops the client blob stock relays, and says
+    #     synthesising them would invent numbers stock never derived
+    #     server-side. That promise lives only in prose: nothing stopped a
+    #     later change from writing an accumulator into one of those fields and
+    #     leaving the page claiming otherwise. Read the field names out of the
+    #     doc and require each one to still be written as a literal 0.
+    #
+    #     The doc is the source of the list, so removing a field there is the
+    #     way to stop asserting it - which is correct, because that removal is
+    #     exactly the edit a reviewer should see.
+    div_path = os.path.join(ROOT, "docs", "DIVERGENCES.md")
+    zero_field_violations = []
+    if os.path.isfile(div_path):
+        div_text = open(div_path, encoding="utf-8", errors="replace").read()
+        sec = re.search(
+            r"^## 2\. Fields with no truthful server-side value(.*?)^## ",
+            div_text,
+            re.S | re.M,
+        )
+        if sec:
+            body_text = sec.group(1)
+            # The section ends with an explicit carve-out ("Not in this group:
+            # killedZombies and killedPlayers ... do ride the wire"). Those are
+            # named to say the opposite, so reading the whole section for field
+            # names would assert exactly what it denies.
+            carve = re.search(r"^Not in this group:(.*)$", body_text, re.S | re.M)
+            excluded = set(re.findall(r"`(\w+)`", carve.group(1))) if carve else set()
+            if carve:
+                body_text = body_text[: carve.start()]
+            claimed = set(re.findall(r"`(\w+)`", body_text)) - excluded
+            # Only names that are actually written somewhere in src/wire.
+            xp_path = os.path.join(ROOT, "src/wire/stock_xp.zig")
+            xp_text = open(xp_path, encoding="utf-8", errors="replace").read()
+            for field in sorted(claimed):
+                # The write line carries the field name as a trailing comment.
+                m = re.search(
+                    rf"^\s*try w\.write\w+\(([^;]*)\);\s*//\s*{re.escape(field)}\b",
+                    xp_text,
+                    re.M,
+                )
+                if not m:
+                    continue  # not a stock_xp field (e.g. killedZombies prose)
+                if m.group(1).strip() != "0":
+                    zero_field_violations.append(f"{field} = {m.group(1).strip()}")
+    if zero_field_violations:
+        failures.append(
+            "DIVERGENCES 2 says these fields are sent as 0 for lack of a "
+            f"truthful value, but they are not ({len(zero_field_violations)}): "
+            + ", ".join(zero_field_violations)
+            + " - either revert the value or move the field out of that section"
+        )
+
     if failures:
         for f in failures:
             print("FAIL:", f)

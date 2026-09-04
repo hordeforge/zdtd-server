@@ -21,13 +21,19 @@ Not part of `make check`: a full run is one `zig build test` per mutant and
 takes hours. It is a periodic audit tool, run when a positional builder gains
 fields.
 
-**Run it alone.** It edits files in src/wire/ in place and restores each one
-before moving on, so a `zig build`, `make check`, or editor save running at the
-same time either compiles a mutated tree or races the restore. Interrupting it
-mid-mutant also leaves one swap behind: check `git diff src/wire/` afterwards.
-A refusal to start while the tree is dirty is deliberate for the same reason -
-a pre-existing edit would otherwise be indistinguishable from a leftover
-mutation.
+**Run it alone, and never read the source while it runs.** It edits files in
+src/wire/ in place and restores each one before moving on, so a `zig build`,
+`make check`, or editor save at the same time either compiles a mutated tree or
+races the restore. Interrupting it mid-mutant leaves one swap behind: check
+`git diff src/wire/` afterwards. It refuses to start on a dirty tree for the
+same reason - a pre-existing edit is indistinguishable from a leftover mutation.
+
+The subtler trap is reading the code while it runs. A `[SURVIVED]` line names a
+pair by file and line, and the obvious next step is to open that file - which,
+mid-run, shows some *other* mutant in place. That reads as a real ordering bug
+and it is not one. Always diff a survivor against `git show HEAD:<file>` before
+believing it; a genuine finding is a gap in the *tests*, and the code at HEAD is
+usually correct.
 """
 import argparse
 import os
