@@ -10607,8 +10607,49 @@ test "scenario animation data relays to the other players" {
         try std.testing.expect(cap_b.findPkgId(eq_id) == null);
     }
 
+    // EntityRagdoll: the last two verbatim relays had no scenario either. The
+    // body is entityId | flags, with each flag bit selecting an optional tail
+    // block; flags 0 is the minimal legal shape.
+    if (packages.idOf("NetPackageEntityRagdoll")) |rag_id| {
+        var rag: [16]u8 = undefined;
+        var rw = binary.Writer{ .buf = &rag };
+        try rw.writeI32(ca.entity_id);
+        try rw.writeByte(0); // no duration/mode/state tails
+        cap_b.clear();
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityRagdoll", rw.written()));
+        const got_rag = cap_b.findPkgIdEntity(rag_id, ca.entity_id) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqualSlices(u8, rw.written(), got_rag);
+    }
+
+    // ParticleEffect: ParticleId | pos f32x3 | rot f32x4 | colour bytes x4 |
+    // two sound-name strings | volume f32 | entityThatCausedIt | two bools.
+    // The relay excludes the causing entity, so A must not receive its own.
+    if (packages.idOf("NetPackageParticleEffect")) |pe_id| {
+        var pe: [96]u8 = undefined;
+        var pw = binary.Writer{ .buf = &pe };
+        try pw.writeI32(42); // ParticleId
+        for (0..3) |_| try pw.writeF32(10.0); // pos
+        for (0..4) |_| try pw.writeF32(0); // rot
+        for (0..4) |_| try pw.writeByte(255); // colour
+        try pw.writeString(""); // soundName
+        try pw.writeString(""); // additionalHitSoundName
+        try pw.writeF32(1.0); // volumeScale
+        try pw.writeI32(ca.entity_id); // entityThatCausedIt
+        try pw.writeBool(false); // forceCreation
+        try pw.writeBool(true); // worldSpawn
+        cap_a.clear();
+        cap_b.clear();
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageParticleEffect", pw.written()));
+        const got_pe = cap_b.findPkgId(pe_id) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqualSlices(u8, pw.written(), got_pe);
+        // The causing entity already played the effect locally.
+        try std.testing.expect(cap_a.findPkgId(pe_id) == null);
+    }
+
     std.debug.print("PASS animation-relay: client anim params reach the other players\n", .{});
     std.debug.print("PASS equipment-relay: verbatim body relayed, spoofed entity dropped\n", .{});
+    std.debug.print("PASS fx-relay: ragdoll and particle bodies relayed verbatim, causer excluded\n", .{});
 }
 
 test "scenario fall_sink clamps player vertical delta without the glide flag (moon_gravity)" {
