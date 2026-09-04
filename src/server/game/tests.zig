@@ -1455,6 +1455,52 @@ test "world clock persists across a restart (BM calendar survives)" {
         try std.testing.expectEqual(@as(u32, 5), g.sim.director.clock.day);
         try std.testing.expectApproxEqAbs(@as(f32, 12.5), g.sim.director.clock.hours, 0.001);
     }
+
+    // The round trip covers the write side. restoreClock also has to survive a
+    // corrupt or older file without taking the server down, and none of those
+    // paths had a test: it keeps whatever the fresh roll produced instead.
+    {
+        var path_buf: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path_buf, "{s}/clock.zcl", .{dir});
+
+        // Shorter than the 12-byte ZCL1 head: rejected, clock left untouched.
+        try io_fs.writeFile(p, "ZCL2\x00\x00");
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        // A fresh world starts at day 1; the truncated file must not have
+        // moved it, and must not have panicked getting there.
+        try std.testing.expectEqual(@as(u32, 1), g.sim.director.clock.day);
+    }
+
+    {
+        // A ZCL1 file restores the world time only. Written at full ZCL2 length
+        // with a nonzero tail on purpose: the loader must gate the blood-moon
+        // fields on the magic, not on the byte count, or it reads a ZCL1 tail
+        // that was never a schedule. bm_freq 0 is what a fresh clock has, so a
+        // magic-blind read would show up as 0xEEEEEEEE here.
+        var path_buf: [512]u8 = undefined;
+        const p = try std.fmt.bufPrint(&path_buf, "{s}/clock.zcl", .{dir});
+        var zcl1: [28]u8 = @splat(0xEE);
+        @memcpy(zcl1[0..4], "ZCL1");
+        // Day 3 = (3 - 1) * 24000 world-time units.
+        std.mem.writeInt(u64, zcl1[4..12], 2 * 24000, .little);
+        try io_fs.writeFile(p, &zcl1);
+        const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+            .enable_sample_plugin = false,
+        });
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try std.testing.expectEqual(@as(u32, 3), g.sim.director.clock.day);
+        // The 0xEE tail must not have been read as a blood-moon schedule.
+        try std.testing.expect(g.sim.director.clock.bm_freq != 0xEEEEEEEE);
+    }
 }
 
 test "setgamepref applies runtime GameStats prefs and broadcasts" {
