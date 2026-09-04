@@ -7436,6 +7436,42 @@ test "scenario land claims persist across restart and re-map on login" {
         try std.testing.expectEqual(wood, try g2.world.blockWorld(claim_x + 1, 70, claim_z));
         std.debug.print("PASS claims-persist: keystone claim survived restart and re-mapped on login\n", .{});
     }
+
+    // The round trip above only proves the happy path. loadClaims guards its
+    // 49-byte stride per record and rejects a name_len past the fixed array,
+    // and neither guard had a test: a corrupt claims.zlc is exactly the input
+    // those exist for.
+    {
+        const g3 = try game_mod.Game.create(gpa, dir, 0);
+        defer {
+            g3.deinit();
+            gpa.destroy(g3);
+        }
+        // Declares one record but carries no bytes for it.
+        var short: [6]u8 = undefined;
+        @memcpy(short[0..4], "ZCLC");
+        std.mem.writeInt(u16, short[4..6], 1, .little);
+        try io_fs.writeFile(cp, &short);
+        try std.testing.expectError(error.Truncated, persist.loadClaims(g3));
+
+        // Full stride present, but name_len exceeds the 32-byte name array:
+        // the @memcpy would read past the record without the check.
+        var bad_name: [6 + 49]u8 = @splat(0);
+        @memcpy(bad_name[0..4], "ZCLC");
+        std.mem.writeInt(u16, bad_name[4..6], 1, .little);
+        bad_name[6 + 12] = 33; // name_len, one past the array
+        try io_fs.writeFile(cp, &bad_name);
+        try std.testing.expectError(error.BadRecord, persist.loadClaims(g3));
+
+        // One byte short of the stride is the off-by-one the `>` bound covers.
+        var stride_short: [6 + 48]u8 = @splat(0);
+        @memcpy(stride_short[0..4], "ZCLC");
+        std.mem.writeInt(u16, stride_short[4..6], 1, .little);
+        try io_fs.writeFile(cp, &stride_short);
+        try std.testing.expectError(error.Truncated, persist.loadClaims(g3));
+
+        std.debug.print("PASS claims-persist: short stride and oversized name_len fail closed\n", .{});
+    }
 }
 
 test "scenario container loot respawns after LootRespawnDays" {
