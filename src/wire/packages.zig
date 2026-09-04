@@ -2346,10 +2346,44 @@ test "entity stealth body packs the stock data bits" {
 
 test "entity stat changed body size" {
     var buf: [32]u8 = undefined;
-    const body = try buildEntityStatChangedBody(&buf, 106, -1, .health, 100, 100, 0);
+    // value and max were both 100 and maxModifier 0, so the three trailing
+    // floats were two duplicates and a zero: a swap among them emitted the
+    // same bytes. Distinct values make the run observable.
+    const body = try buildEntityStatChangedBody(&buf, 106, -1, .health, 75, 100, 25);
     try std.testing.expectEqual(@as(usize, 4 + 4 + 1 + 4 + 4 + 4), body.len);
     try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[0..4], .little));
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, body[4..8], .little)); // instigator
     try std.testing.expectEqual(@as(u8, 0), body[8]); // Health
+    const f32At = struct {
+        fn get(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.get;
+    try std.testing.expectEqual(@as(f32, 75), f32At(body, 9)); // value
+    try std.testing.expectEqual(@as(f32, 100), f32At(body, 13)); // max
+    try std.testing.expectEqual(@as(f32, 25), f32At(body, 17)); // maxModifier
+}
+
+test "inventory transaction request body is the compact zdtd order" {
+    // buildInvTxRequest had no test at all. It is not the stock layout (that
+    // is parseStockInvTx), but it rides the stock package name for loadgen and
+    // the scenarios, so its field order still has to hold: op u8 | a u16 |
+    // b u16 | qty u16 | entityId i32.
+    var buf: [16]u8 = undefined;
+    const body = try buildInvTxRequest(&buf, 2, 11, 22, 33, 106);
+    try std.testing.expectEqual(@as(usize, 11), body.len);
+    try std.testing.expectEqual(@as(u8, 2), body[0]);
+    try std.testing.expectEqual(@as(u16, 11), std.mem.readInt(u16, body[1..3], .little));
+    try std.testing.expectEqual(@as(u16, 22), std.mem.readInt(u16, body[3..5], .little));
+    try std.testing.expectEqual(@as(u16, 33), std.mem.readInt(u16, body[5..7], .little));
+    try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[7..11], .little));
+    // The parser must agree field for field, not just on the length.
+    const p = try parseInvTxRequest(body);
+    try std.testing.expectEqual(@as(u8, 2), p.op);
+    try std.testing.expectEqual(@as(u16, 11), p.a);
+    try std.testing.expectEqual(@as(u16, 22), p.b);
+    try std.testing.expectEqual(@as(u16, 33), p.qty);
+    try std.testing.expectEqual(@as(i32, 106), p.entity_id);
 }
 
 /// Stock-compatible player inventory body (NetPackagePlayerInventory.write fields).
