@@ -128,5 +128,34 @@ test "a blockmeta.zbm shorter than its magic fails instead of panicking" {
         try io_fs.writeFile(p, "ZBM"[0..n]);
         try std.testing.expectError(error.ReadFailed, loadBlockMeta(g));
     }
-    std.debug.print("PASS blockmeta-zbm: truncated header rejected\n", .{});
+    // A declared record count the file cannot back must be rejected before the
+    // loop runs, or the reads walk past the buffer. That bound is what makes
+    // the "loop over the raw count, not the clamped one" comment above safe.
+    var empty_table: [6]u8 = undefined;
+    @memcpy(empty_table[0..4], "ZBM2");
+    std.mem.writeInt(u16, empty_table[4..6], 8, .little); // claims 8, carries 0
+    try io_fs.writeFile(p, &empty_table);
+    try std.testing.expectError(error.ReadFailed, loadBlockMeta(g));
+
+    // One record short of the declared count: the off-by-one a `>=` bound
+    // would let through.
+    var one_short: [6 + 12]u8 = @splat(0);
+    @memcpy(one_short[0..4], "ZBM2");
+    std.mem.writeInt(u16, one_short[4..6], 2, .little); // claims 2, carries 1
+    try io_fs.writeFile(p, &one_short);
+    try std.testing.expectError(error.ReadFailed, loadBlockMeta(g));
+
+    // The exact count parses and lands in the store.
+    var ok: [6 + 12]u8 = @splat(0);
+    @memcpy(ok[0..4], "ZBM2");
+    std.mem.writeInt(u16, ok[4..6], 1, .little);
+    std.mem.writeInt(u64, ok[6..14], 0x1122334455667788, .little);
+    std.mem.writeInt(u32, ok[14..18], 0xAABBCCDD, .little);
+    try io_fs.writeFile(p, &ok);
+    try loadBlockMeta(g);
+    try std.testing.expectEqual(@as(usize, 1), g.block_raw_n);
+    try std.testing.expectEqual(@as(u64, 0x1122334455667788), g.block_raw_key[0]);
+    try std.testing.expectEqual(@as(u32, 0xAABBCCDD), g.block_raw[0]);
+
+    std.debug.print("PASS blockmeta-zbm: truncated header and short record table rejected\n", .{});
 }
