@@ -8537,9 +8537,25 @@ test "scenario ZPV12 record claiming more slots than the array is bounded" {
     const p = try persist.playersPath(g, &path_buf);
     try io_fs.writeFile(p, buf.items);
 
-    // Must return without writing past the inventory array (a Debug build
-    // traps an out-of-bounds write, so reaching the next line is the check).
+    // Must return without writing past the inventory array. A Debug build traps
+    // an out-of-bounds write, so surviving the call is part of the check - but
+    // "did not crash" is weak on its own: it would also pass if the loader
+    // silently restored nothing. Assert the observable outcome too, so the test
+    // fails on a regression that clamps by giving up rather than by bounding.
     persist.tryRestorePlayer(g, c);
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.mask[ps].inventory);
+    const capacity = g.sim.inventory[ps].slots.len;
+    try std.testing.expect(claimed > capacity); // the file really did over-claim
+    // Every record in the file carries item_id 7, so a loader that clamped by
+    // bounding filled the whole array; one that clamped by bailing out left it
+    // empty. Counting the restored slots tells those apart, which the bare
+    // "it did not crash" check could not.
+    var filled: usize = 0;
+    for (g.sim.inventory[ps].slots) |slot| {
+        if (slot.item_id == 7) filled += 1;
+    }
+    try std.testing.expectEqual(capacity, filled);
     std.debug.print("PASS zpv12-bound: over-count inventory record stays in bounds\n", .{});
 }
 
