@@ -2073,15 +2073,23 @@ test "block meta accessors match BlockValue get_meta/set_meta" {
     try std.testing.expectEqual(rot & ~@as(u32, 15 << 22), withBlockMeta(rot, 0));
 }
 
-test "NetPackageChunk package id is 12" {
-    // Loadgen / stock maps use this id for terrain; join must deliver it.
-    try std.testing.expectEqual(@as(u16, 12), idOf("NetPackageChunk").?);
+test "NetPackageChunk resolves to an id and frames at that id" {
+    // The id itself is not a contract: ids are negotiated through
+    // NetPackagePackageIds, so the client uses whatever index this table
+    // advertises. What must hold is that the name resolves and that `framed`
+    // stamps the same id `idOf` returns - a mismatch there would send terrain
+    // under a header the client resolves to some other package.
+    const chunk_id = idOf("NetPackageChunk") orelse return error.TestUnexpectedResult;
     var heights: [256]u8 = .{70} ** 256;
     var body_buf: [512]u8 = undefined;
     const body = try buildChunkBody(&body_buf, -18, 28, &heights);
     try std.testing.expectEqual(@as(usize, chunk_stock_envelope_overhead + chunk_body_size), body.len);
     var frame_buf: [512]u8 = undefined;
     const fr = try framed(&frame_buf, "NetPackageChunk", body);
+    // framePackage: channel 1 | payloadSize i32 | compressed 1 | encrypted 1 |
+    // count u16 | contentLen i32, then the package id.
+    const pkg_id_off: usize = 1 + 4 + 1 + 1 + 2 + 4;
+    try std.testing.expectEqual(chunk_id, std.mem.readInt(u16, fr[pkg_id_off..][0..2], .little));
     // LiteNet channeled total must fit pending_bytes (1200).
     try std.testing.expect(fr.len + 4 < 1200);
 }
