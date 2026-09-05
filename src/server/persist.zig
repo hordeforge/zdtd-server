@@ -135,6 +135,19 @@ fn emitZpv10Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []
     }
 }
 
+/// Widen a v10/v11 (13-byte) slot block to the v12 21-byte shape: each slot
+/// appends four zero mod ids (carried records predate mod persistence).
+fn emitZpv12Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize) !void {
+    try out.append(allocator, old[inv_n_pos]); // inv_n byte
+    var p = inv_n_pos + 1;
+    var k: usize = 0;
+    while (k < inv_n) : (k += 1) {
+        try out.appendSlice(allocator, old[p .. p + 13]);
+        try out.appendNTimes(allocator, 0, 8); // 4 x u16 mod ids
+        p += 13;
+    }
+}
+
 /// Position of a v3+ record's progression-tail prog byte (journal end).
 /// v2 records have no tail; returns the record end.
 fn tailStartOf(old: []const u8, rec_start: usize, nl: usize, version: u8) error{CorruptPlayersFile}!usize {
@@ -408,11 +421,26 @@ pub fn savePlayers(self: *Game) !void {
                 break;
             }
             if (rewritten) continue;
-            if (old_version >= 10) {
-                // v10 records are v11-shaped except the skill tail: carry
-                // verbatim, then emit the empty tail (predates purchases).
-                // v11 is the current shape - carried byte-for-byte.
+            if (old_version >= 12) {
+                // Current shape: carried byte-for-byte.
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                written += 1;
+                continue;
+            }
+            if (old_version >= 10) {
+                // v10/v11 differ from v12 only in the slot stride (13 vs 21:
+                // v12 appends four mod ids) and, for v10, the missing skill
+                // tail. The header is rewritten to ZPVC either way, so a
+                // verbatim carry would leave 13-byte slots in a file the
+                // reader walks with a 21-byte stride - every later field in
+                // the record reads from the wrong offset and the next load
+                // fails as CorruptPlayersFile. Widen the slots instead.
+                const inv_pos: usize = rec_start + 1 + nl + 16;
+                const inv_n: usize = old_recs[inv_pos];
+                const slots_end = inv_pos + 1 + inv_n * 13;
+                try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
+                try emitZpv12Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (old_version == 10 and had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 written += 1;
                 continue;
