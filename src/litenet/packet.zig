@@ -36,8 +36,14 @@ pub const max_single_user: usize = max_packet_size - channeled_header_size;
 /// Max user bytes per fragment part.
 pub const max_fragment_user: usize = max_packet_size - fragmented_header_total;
 pub const fragment_flag: u8 = 0x80;
-pub const connect_request_header: usize = 18;
-pub const connect_accept_size: usize = 15;
+/// ConnectRequest fixed part, before the variable-length target address:
+/// property 1 + protocolId i32 + connectionTime i64 + peerId i32 + addrSize u8.
+/// Unlike the framing constants above, network.md does not pin this one, so it
+/// is derived from the field layout `parseConnectRequest` reads.
+pub const connect_request_header: usize = 1 + 4 + 8 + 4 + 1;
+/// ConnectAccept, fixed size: property 1 + connectTime i64 + connectNum u8 +
+/// isReused u8 + localPeerId i32. Same provenance as above.
+pub const connect_accept_size: usize = 1 + 8 + 1 + 1 + 4;
 pub const max_sequence: u16 = 32768;
 pub const window_size: usize = 64;
 
