@@ -108,22 +108,6 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
-### Untested: the blood-moon music tick edge
-
-`game/step.zig` sends `NetPackageBloodmoonMusic` on the rising/falling edge of
-`playerBloodMoonMusic` per client, on the world-time cadence. The join replay
-in `game.zig` is covered (scenario "blood-moon music is per-party"), the edge
-itself is not: a mutation that stops it firing survives the suite.
-
-Writing that test needs the real director path, because `bloodmoon_active` and
-`bm_parties` are both recomputed every tick (clock schedule, then live players
-plus `is_horde` zombie count), so direct field writes are overwritten before
-the music block reads them. Five setups were tried; pinning
-`clock.next_bm = clock.day` with `hours = 23.0` and a horde-flagged zombie next
-to the player was the closest and still did not flip it inside the stepped
-window. The gap is the test, not the behaviour: the send site is three lines
-and the eligibility half is covered.
-
 ### Perk and attribute progression (ADR 0023)
 
 **SHIPPED 2026-08-26/29** (all of T24-T28 below). `progression.xml`'s catalog
