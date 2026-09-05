@@ -154,6 +154,14 @@ pub const DeflateFramer = struct {
     comp: flate.Compress,
 
     /// Window the deflate matcher needs; callers own the storage.
+    ///
+    /// This is 64 KiB while stock's `DeflateOutputStream` is constructed with
+    /// 32768 (`NetConnectionSteam.il.txt` IL_00E1), which looks like a wire
+    /// divergence and is not: `flate.max_window_len` is `history_len * 2`
+    /// because the buffer holds lookahead as well as history, and
+    /// `Compress.drain` preserves exactly `flate.history_len` = 32768 across a
+    /// rebase. The back-reference distance a client must resolve is therefore
+    /// the same 32 KiB stock emits; only zdtd's buffer is larger.
     pub const window_len: usize = flate.max_window_len;
 
     pub fn begin(
@@ -294,6 +302,42 @@ test "DeflateFramer keeps a body far larger than the frame buffer" {
     i = 0;
     while (i < body_len) : (i += 1) {
         try std.testing.expectEqual(bodyByte(i), pkgs[0].body[i]);
+    }
+}
+
+test "deflate back-references stay inside the stock 32 KiB history" {
+    // Stock builds its DeflateOutputStream with a 32768 window
+    // (`NetConnectionSteam.il.txt` IL_00E1), so a match reaching further back
+    // would be a distance the client cannot resolve. zdtd's window buffer is
+    // twice that, which is a buffer-size difference and not a wire one:
+    // `flate.max_window_len` is `history_len * 2` to hold lookahead beside
+    // history. Pin the number that actually bounds the emitted distances.
+    try std.testing.expectEqual(@as(usize, 32768), flate.history_len);
+    try std.testing.expectEqual(flate.history_len * 2, DeflateFramer.window_len);
+
+    // A body whose only long match is further back than 32 KiB: identical
+    // marker runs at 0 and at 48 KiB, noise between. It has to round-trip
+    // whatever the matcher decides, which is the property that matters.
+    var window: [DeflateFramer.window_len]u8 = undefined;
+    const gap: usize = 48 * 1024;
+    const body_len: usize = gap + 4096;
+    var out: [128 * 1024]u8 = undefined;
+    var fr: DeflateFramer = undefined;
+    try fr.begin(&out, &window, 0, 77, body_len);
+    var i: usize = 0;
+    while (i < body_len) : (i += 1) {
+        const b: u8 = if (i < 4096 or i >= gap) 0xAB else bodyByte(i);
+        try fr.writer().writeByte(b);
+    }
+    const framed = try fr.finish();
+
+    var pkgs: [2]Package = undefined;
+    try std.testing.expectEqual(@as(usize, 1), parseChannelPayload(framed, &pkgs));
+    try std.testing.expectEqual(body_len, pkgs[0].body.len);
+    i = 0;
+    while (i < body_len) : (i += 1) {
+        const want: u8 = if (i < 4096 or i >= gap) 0xAB else bodyByte(i);
+        try std.testing.expectEqual(want, pkgs[0].body[i]);
     }
 }
 
