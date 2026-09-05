@@ -10047,6 +10047,18 @@ test "scenario a player can damage a bot and the bot records the attacker" {
     const dmg3 = try packages.buildDamageBody(&body, 999999, 0, 0, 50, false, c.entity_id);
     try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg3));
     try std.testing.expectEqual(@as(usize, 2), g.bots.ev_n);
+
+    // An id the server does know, but for a bot outside interest range: the
+    // claim is a client assertion, so distance is what separates a real hit
+    // from a forged one. An unknown id (above) never reaches the range gate,
+    // so only a live, far-away bot exercises it.
+    const far = g.bots.spawn(g, ap.x + g.interest_range * 4, 70, ap.z, 100).?;
+    const far_slot = g.bots.find(far).?;
+    const dmg4 = try packages.buildDamageBody(&body, far, 0, 0, 50, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg4));
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.bots.bots[far_slot].hp, 0.01);
+    try std.testing.expectEqual(@as(usize, 2), g.bots.ev_n);
+    std.debug.print("PASS bot-damage: an out-of-range bot target is rejected\n", .{});
 }
 
 test "scenario wasmQuery cover: none on open ground, found behind a wall" {
