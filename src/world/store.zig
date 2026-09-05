@@ -1471,6 +1471,11 @@ pub const World = struct {
             // Validate the complete record before mutating the resident chunk.
             // A torn save must regenerate, never leave a half-loaded plane that
             // suppresses terrain materialization.
+            //
+            // `validateChunkBytes` computes the same requirement, but it is not
+            // on this path: `loadChunk` reads the file and validates here, and
+            // the standalone validator only runs from the fuzzer and one
+            // scenario. This check is the one that actually guards a load.
             if (data.len < required) return error.ReadFailed;
             @memcpy(&c.heights, data[hdr_len..][0..c.heights.len]);
             var o: usize = hdr_len + c.heights.len;
@@ -2019,8 +2024,23 @@ test "torn or misplaced chunk save cannot partially replace generated state" {
     try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
     try std.testing.expectEqual(@as(u16, sea_level), direct.heightAt(0, 0));
 
-    @memcpy(torn[0..4], "NOPE");
+    // A record whose header is coherent but whose declared block plane is
+    // absent must fail inside loadChunk, before anything is copied into the
+    // resident chunk. The cases above reach loadChunk with no plane declared,
+    // so the length check there was never the one that rejected them; the
+    // standalone validateChunkBytes is not on this path at all.
+    @memcpy(torn[0..4], "ZCH3");
     std.mem.writeInt(i32, torn[4..8], 0, .little);
+    torn[12] = 1; // block plane declared, 262144 bytes short
+    try io_fs.writeFile(path, &torn);
+    var short = Chunk.generateFlat(.{ .x = 0, .z = 0 });
+    const before = short.heightAt(0, 0);
+    try std.testing.expectError(error.ReadFailed, w.loadChunk(&short));
+    try std.testing.expectEqual(before, short.heightAt(0, 0)); // untouched
+    try std.testing.expect(short.blocks == null);
+
+    @memcpy(torn[0..4], "NOPE");
+    torn[12] = 0;
     try io_fs.writeFile(path, &torn);
     try std.testing.expectError(error.ReadFailed, w.loadChunk(&direct));
 }
