@@ -766,6 +766,7 @@ test "trader ECD emits hasTraderData + TraderData::Write" {
     try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // entityData length
     try std.testing.expectEqual(true, try r.readBool()); // hasTraderData
     // TraderData::Write
+    const trader_data_start = r.pos;
     try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // trader id
     try std.testing.expectEqual(@as(u64, 0), try r.readU64()); // lastInventoryUpdate
     try std.testing.expectEqual(@as(u8, 2), try r.readByte()); // FileVersion
@@ -792,6 +793,20 @@ test "trader ECD emits hasTraderData + TraderData::Write" {
     try std.testing.expectEqual(false, try r.readBool()); // isDancing
     try std.testing.expectEqual(@as(f32, 0), try r.readF32()); // stressAmount (v36 tail)
     try std.testing.expect(r.pos == body.len);
+
+    // The same bytes back through the reader. The walk above proves only the
+    // builder; nothing exercised readTraderDataBody, so swapping its TraderID
+    // with lastInventoryUpdate left the whole suite green while the parser
+    // disagreed with `TraderData::Write` (IL=15: Write(Int32) TraderID,
+    // Write(UInt64) lastInventoryUpdate, Write(Byte) FileVersion).
+    var tr: binary.Reader = .{ .data = body, .pos = trader_data_start };
+    var read_entries: [4]TraderDataReadEntry = undefined;
+    const td = try readTraderDataBody(&tr, read_entries[0..]);
+    try std.testing.expectEqual(@as(i32, 42), td.trader_id);
+    try std.testing.expectEqual(@as(i32, 5000), td.money);
+    try std.testing.expectEqual(@as(usize, 2), td.n);
+    try std.testing.expectEqual(entries[0].item.type_id, read_entries[0].item.type_id);
+    try std.testing.expectEqual(entries[1].markup, read_entries[1].markup);
 }
 
 /// NetPackageWorldSpawnPoints body: SpawnPointList (RE
