@@ -644,7 +644,11 @@ test "deco plant/tree runtime block ids" {
     try std.testing.expectEqual(@as(u32, 24651), tree_winter_evergreen);
 }
 
-/// WorldChunkCache.MakeChunkKey(x, z). Canonical definition; packages.makeChunkKey aliases this.
+/// WorldChunkCache.MakeChunkKey(x, z); packages.makeChunkKey aliases this.
+/// Empirical, not IL-cited: the method is called from the dumps but its body
+/// is in none of them, so this shift/mask is what a stock client accepts on
+/// Chunk / ChunkRemove / DecoResetWorldChunk rather than a read layout.
+/// docs/wire/WIRE_CHUNK.md "ChunkRemove" records what that evidence is worth.
 pub fn makeChunkKey(cx: i32, cz: i32) i64 {
     const x = @as(i64, cx) & 0xFFFFFF;
     const z = @as(i64, cz) & 0xFFFFFF;

@@ -10594,6 +10594,57 @@ test "scenario a quest entity spawn summons one entity for the sender only" {
     std.debug.print("PASS quest-summon: one entity per packet, sender-only, quest-gated\n", .{});
 }
 
+test "scenario walking away does not reset the decorations we sent" {
+    // Stock only broadcasts DecoResetWorldChunk from region-file chunk
+    // deletion and the C2S reset handler (asm.il 1186504 / 807955), never on a
+    // view unload. With join-time deco objects live, sending it on unload runs
+    // RestoreGeneratedDecos over our trees every time a player walks away, and
+    // the deco window is single-shot so they can never be resent. The guard
+    // that keeps it off the unload path had no test.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expect(g.deco_trees); // the guard's precondition
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(c.streamed_n > 0);
+
+    // Walk far enough that the streamed set is replaced wholesale.
+    const reset_id = packages.idOf("NetPackageDecoResetWorldChunk") orelse
+        return error.TestUnexpectedResult;
+    const remove_id = packages.idOf("NetPackageChunkRemove") orelse
+        return error.TestUnexpectedResult;
+    cap.clear();
+    g.sim.transform[ps].x += 2000;
+    g.sim.transform[ps].z += 2000;
+    try g.streamChunksForClient(c);
+
+    // Chunks were dropped, so the unload path ran; no deco reset rode with it.
+    var saw_remove = false;
+    var saw_reset = false;
+    for (cap.slots[0..cap.n]) |s| {
+        var pkgs: [16]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == remove_id) saw_remove = true;
+            if (p.id == reset_id) saw_reset = true;
+        }
+    }
+    try std.testing.expect(saw_remove);
+    try std.testing.expect(!saw_reset);
+    std.debug.print("PASS deco-unload: ChunkRemove sent, DecoReset withheld\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
