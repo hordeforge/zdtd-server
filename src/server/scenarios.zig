@@ -8654,6 +8654,37 @@ test "scenario traders.zst record for an absent trader does not desync the reade
     try std.testing.expectEqual(@as(i32, 1234), g.sim.trader_stock[t].wallet);
     std.debug.print("PASS trader-desync: a skipped record's entries are consumed\n", .{});
 
+    // Same cursor rule one level down: an entry naming an item this build no
+    // longer resolves (XML drift) is dropped, but its bytes still have to be
+    // consumed. Abandoning the entry loop there would leave the reader on this
+    // entry's tail, so the next record parses from the middle of it.
+    {
+        var b2: std.ArrayList(u8) = .empty;
+        defer b2.deinit(gpa);
+        try b2.appendSlice(gpa, "ZTR1");
+        try b2.append(gpa, 1);
+        try W.int(gpa, &b2, u16, 2); // two records
+        try W.str(gpa, &b2, "Trader Jen");
+        try W.head(gpa, &b2, 4321, 2); // two entries
+        try W.entry(gpa, &b2, "itemThatNoLongerExists", 9, 999);
+        try W.entry(gpa, &b2, wood.name, 12, 345);
+        try W.str(gpa, &b2, "Trader Bob");
+        try W.head(gpa, &b2, 777, 1);
+        try W.entry(gpa, &b2, wood.name, 3, 30);
+        try io_fs.writeFile(p, b2.items);
+        try persist.loadTraders(g);
+        // The unknown entry is gone, the known one after it survived with its
+        // own values, and the record ended where the header said it would.
+        try std.testing.expectEqual(@as(usize, 1), g.sim.trader_stock[t].n);
+        try std.testing.expectEqual(@as(u16, 12), g.sim.trader_stock[t].entries[0].count);
+        try std.testing.expectEqual(@as(u16, 345), g.sim.trader_stock[t].entries[0].price);
+        try std.testing.expectEqual(@as(i32, 4321), g.sim.trader_stock[t].wallet);
+        // The second record still parsed: the scanner agrees on the length.
+        try std.testing.expectEqual(b2.items.len, try persist.ztrScanLen(b2.items));
+    }
+    try io_fs.writeFile(p, buf.items);
+    try persist.loadTraders(g);
+
     // The fuzz target walks a parallel copy of this cursor arithmetic
     // (persist.ztrScanLen) so it can run without a Game. A second
     // implementation is only useful while it agrees with the real loader, so
