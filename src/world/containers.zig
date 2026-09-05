@@ -310,6 +310,12 @@ pub const ContainerStore = struct {
             // two or more, the bytes after the first record are the next
             // record's position, so they were consumed as its touched_day and
             // every later record shifted out of alignment and was lost.
+            //
+            // The same shape was checked elsewhere and is sound there: the
+            // player-save tails in `server/persist.zig` gate on the record's
+            // version and only use the length as a guard, and where that guard
+            // can fail the remaining bytes are too few for another record to
+            // follow. A new format version here must keep the version test.
             if (with_size and o + 4 <= len) {
                 if (maybe_c) |c| c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
                 o += 4;
