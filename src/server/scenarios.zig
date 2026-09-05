@@ -11746,6 +11746,54 @@ test "scenario a recycled slot does not inherit the previous look-at target" {
     std.debug.print("PASS look-at: a reused slot still sends its first look\n", .{});
 }
 
+test "scenario a reload naming no live entity is not relayed" {
+    // ItemReload is a pure relay: the server rebroadcasts the body to every
+    // peer but the sender so they play the animation (RE ItemReloadServer
+    // IL=32). The only thing between that and free bandwidth amplification is
+    // the id check, since the body is one i32 a client picks.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const reload_id = packages.idOf("NetPackageItemReload") orelse
+        return error.TestUnexpectedResult;
+
+    var body: [8]u8 = undefined;
+    var fb: [128]u8 = undefined;
+
+    // A real entity id relays to the other peer.
+    std.mem.writeInt(i32, body[0..4], ca.entity_id, .little);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemReload", body[0..4]));
+    try std.testing.expect(cap_b.findPkgId(reload_id) != null);
+
+    // An id no entity holds is dropped, so it cannot be sprayed as a relay.
+    std.mem.writeInt(i32, body[0..4], 999_999, .little);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemReload", body[0..4]));
+    try std.testing.expect(cap_b.findPkgId(reload_id) == null);
+
+    // Zero is the same case and is spelled out separately: it is the value a
+    // default-constructed body carries.
+    std.mem.writeInt(i32, body[0..4], 0, .little);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemReload", body[0..4]));
+    try std.testing.expect(cap_b.findPkgId(reload_id) == null);
+    std.debug.print("PASS reload-relay: live id relays, unknown and zero ids do not\n", .{});
+}
+
 test "scenario animation data relays to the other players" {
     // Stock NetPackageEntityAnimationData (client-originated: the local
     // AvatarController broadcasts the avatar anim params; ProcessPackage
