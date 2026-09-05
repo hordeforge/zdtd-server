@@ -10516,6 +10516,84 @@ test "scenario entity flag and speed reports must name the sender's own entity" 
     std.debug.print("PASS self-report: own flags and speeds applied, spoofed entity ids refused\n", .{});
 }
 
+test "scenario a quest entity spawn summons one entity for the sender only" {
+    // Body (RE protocol-packages.md 6.17, read IL_0002-001F): entityType i32 |
+    // gamestageGroup string | entityIDQuestHolder i32. The last field is the
+    // quest holder's entity id; it used to be read as a count, so one packet
+    // summoned that many zombies with the client picking the number. Stock
+    // ProcessPackage (IL=37) spawns exactly one per package.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    const buildSpawn = struct {
+        fn call(buf: []u8, entity_type: i32, group: []const u8, holder: i32) ![]u8 {
+            var w: binary.Writer = .{ .buf = buf };
+            try w.writeI32(entity_type);
+            try w.writeString(group);
+            try w.writeI32(holder);
+            return w.written();
+        }
+    }.call;
+
+    const countZombies = struct {
+        fn call(gg: *game_mod.Game) usize {
+            var n: usize = 0;
+            for (0..ecs.max_entities) |s| {
+                if (gg.sim.alive[s] and gg.sim.kind[s] == .zombie) n += 1;
+            }
+            return n;
+        }
+    }.call;
+
+    var body: [96]u8 = undefined;
+    var fb: [256]u8 = undefined;
+
+    // A joining client already holds the starter quest, so the quest gate is
+    // open here. Close it first to prove the gate exists at all: with the
+    // journal cleared the packet is refused.
+    const psa = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+    const saved_journal = g.sim.journal[psa];
+    g.sim.journal[psa] = .{};
+    try std.testing.expect(!g.sim.journal[psa].anyActive());
+    const before_no_quest = countZombies(g);
+    const rejects_before = g.harness.counters.get(.c2s_rejects);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageQuestEntitySpawn", try buildSpawn(&body, -1, "group", ca.entity_id)));
+    try std.testing.expectEqual(before_no_quest, countZombies(g));
+    try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rejects_before);
+
+    // With the quest back, one packet summons exactly one entity. The holder
+    // field carries an entity id, which the old reading would have turned into
+    // that many spawns (capped at quest_summon_per_request).
+    g.sim.journal[psa] = saved_journal;
+    try std.testing.expect(g.sim.journal[psa].anyActive());
+    const before_one = countZombies(g);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageQuestEntitySpawn", try buildSpawn(&body, -1, "group", ca.entity_id)));
+    try std.testing.expectEqual(before_one + 1, countZombies(g));
+    try std.testing.expect(g.sim.rules.c2s.quest_summon_per_request > 1);
+
+    // Naming another player as the holder is refused.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    const before_spoof = countZombies(g);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageQuestEntitySpawn", try buildSpawn(&body, -1, "group", cb.entity_id)));
+    try std.testing.expectEqual(before_spoof, countZombies(g));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    std.debug.print("PASS quest-summon: one entity per packet, sender-only, quest-gated\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

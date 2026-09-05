@@ -482,11 +482,25 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
+        // Stock body (RE protocol-packages.md 6.17; read IL at
+        // il/netpackages-v3.2.0/NetPackageQuestEntitySpawn_il.txt IL_0002-001F):
+        // entityType i32 | gamestageGroup string | entityIDQuestHolder i32.
+        // The third field is the quest holder's entity id, not a count. It was
+        // read as one, so a single packet summoned that many zombies (capped
+        // at quest_summon_per_request) with the client choosing the number.
+        // Stock ProcessPackage (IL=37) calls SpawnQuestEntity exactly once.
         var r: wire_binary.Reader = .{ .data = body };
-        _ = r.readI32() catch return true; // player entity id
+        _ = r.readI32() catch return true; // entityType (-1 = resolve from group)
         var gname: [64]u8 = undefined;
-        _ = r.readString(&gname) catch return true;
-        const cnt = r.readI32() catch 1;
+        _ = r.readString(&gname) catch return true; // gamestageGroup
+        const holder_id = r.readI32() catch return true;
+        // The holder is the player whose quest summons. A packet naming another
+        // player would spawn at the sender on someone else's quest, so require
+        // the sender's own entity.
+        if (holder_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].journal or !self.sim.journal[ps].anyActive()) {
             self.harness.counters.inc(.c2s_rejects);
@@ -495,14 +509,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const t = self.sim.transform[ps];
         const zdef = self.entities.defaultZombie();
         const zclass = self.entityClassOf(zdef);
-        var k: i32 = 0;
-        const summon_cap: i32 = @intCast(self.sim.rules.c2s.quest_summon_per_request);
-        while (k < cnt and k < summon_cap) : (k += 1) {
-            const ang = @as(f32, @floatFromInt(k)) * 1.4;
-            // Stop at the entity cap instead of spinning on null spawns.
-            // A35: spawn the full resolved class so the quest summons carry stats.
-            if (self.sim.spawnZombieDef(t.x + @cos(ang) * 6, t.y, t.z + @sin(ang) * 6, zdef.max_hp, zclass) == null) break;
-        }
+        // A35: spawn the full resolved class so the quest summon carries stats.
+        _ = self.sim.spawnZombieDef(t.x + 6, t.y, t.z, zdef.max_hp, zclass);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageRequestToSpawnEntity")) {
