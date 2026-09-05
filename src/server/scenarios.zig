@@ -11953,6 +11953,71 @@ test "scenario a vending allow-list with a hole ships no empty identity" {
     std.debug.print("PASS vending-allow: empty allow entry and empty stock row both compacted\n", .{});
 }
 
+test "scenario a vending fill skips items this build cannot resolve" {
+    // fillVendingStore rolls trader refs by name and drops a row twice: when
+    // the item table has no such name, and when the resolved id has no stock
+    // type. Storing one anyway puts type_id 0 in the array, and the wire
+    // compaction then drops it again, so the machine ships fewer rows than
+    // stock_n claims and every later index shifts.
+    //
+    // The group needs count="all": spawnItemsFromGroup is otherwise
+    // prob-weighted (SpawnLootItemsFromList, asm.il 863343) and one run rolls
+    // one ref, which leaves the guards unreached and the test green for the
+    // wrong reason. count="all" takes the spawnAllRefs branch instead.
+    const tsrc =
+        \\<traders>
+        \\  <trader_item_group name="traderAlways" count="all">
+        \\    <item name="resourceWood" count="3"/>
+        \\    <item name="itemThatDoesNotExistAnywhere" count="2"/>
+        \\  </trader_item_group>
+        \\  <trader_info id="1"/>
+        \\</traders>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tdir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var tpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tpath = try std.fmt.bufPrint(&tpath_buf, "{s}/traders_fill.xml", .{tdir});
+    try io_fs.writeFile(tpath, tsrc);
+    const tt = try assets_traders.loadFromPath(std.testing.allocator, tpath);
+
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_vendfill");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_vendfill", 0, .{});
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    g.traders.deinit();
+    g.traders = tt;
+
+    // Pin the premise: the good name resolves, the bad one does not. Without
+    // this the test passes when both fail to resolve and nothing is stored.
+    try std.testing.expect(g.ecsIdFromItemName("resourceWood") != 0);
+    try std.testing.expectEqual(@as(u16, 0), g.ecsIdFromItemName("itemThatDoesNotExistAnywhere"));
+
+    const v = g.vending.getOrCreate(.{ .x = 400, .y = 70, .z = 400 }, 1, 1) orelse
+        return error.TestUnexpectedResult;
+    replicate_te.fillVendingStore(g, v);
+
+    // Both refs roll (traderAlways refs are individual, so rollAllRefs calls
+    // spawnItem for each), one is unresolvable, so only the resolvable row
+    // lands. The two guards are redundant with each other here: ecsIdFromItemName
+    // and resolveItemType both reject this name, so removing one alone leaves
+    // the test green. Removing both stores the empty row and fails it, which is
+    // the property that matters: no unresolvable row reaches the store.
+    try std.testing.expect(v.stock_n > 0);
+    var si: usize = 0;
+    while (si < v.stock_n) : (si += 1) {
+        try std.testing.expect(v.stock[si].type_id != 0);
+    }
+    std.debug.print("PASS vending-fill: {d} resolvable rows stored, unresolvable dropped\n", .{v.stock_n});
+}
+
 test "scenario animation data relays to the other players" {
     // Stock NetPackageEntityAnimationData (client-originated: the local
     // AvatarController broadcasts the avatar anim params; ProcessPackage
