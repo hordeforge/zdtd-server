@@ -406,6 +406,48 @@ test "vending store round-trips through the ZVNM1 save format" {
     try std.testing.expectEqual(@as(i32, 10), b2.trader_id);
 }
 
+test "a forged password length on disk is rejected, not stored" {
+    // password_len is a u8 off disk but password_hash is 64 bytes, and
+    // replicate_te slices `password_hash[0..password_len]` when it puts a
+    // vending machine on the wire. A value above the buffer would be an
+    // out-of-bounds slice driven by a save file. Nothing covered the guard:
+    // removing it left the suite green.
+    var st: VendingStore = .{};
+    const v = st.getOrCreate(.{ .x = 1, .y = 2, .z = 3 }, 100, 4).?;
+    v.password_len = 4;
+    @memcpy(v.password_hash[0..4], "h4sh");
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try st.save(dir);
+
+    var path: [std.fs.max_path_bytes]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path, "{s}/vending.zvn", .{dir});
+    const raw = try io_fs.readFileAll(std.testing.allocator, p);
+    defer std.testing.allocator.free(raw);
+
+    // The record's password length byte: header (6) + fixed head (25) + two
+    // stock rows are absent here (stock_n = 0), then the lock byte, the owner
+    // ref (82) and the length itself.
+    const pw_len_at: usize = 6 + 25 + 1 + 82;
+    try std.testing.expectEqual(@as(u8, 4), raw[pw_len_at]);
+
+    const forged = try std.testing.allocator.dupe(u8, raw);
+    defer std.testing.allocator.free(forged);
+    forged[pw_len_at] = max_password_hash + 1;
+
+    var st2: VendingStore = .{};
+    try std.testing.expectError(error.ReadFailed, st2.loadFromSlice(forged));
+
+    // The untouched buffer still loads, so the rejection is the length and not
+    // the offset being wrong.
+    var st3: VendingStore = .{};
+    try st3.loadFromSlice(raw);
+    try std.testing.expectEqual(@as(u8, 4), st3.get(.{ .x = 1, .y = 2, .z = 3 }).?.password_len);
+}
+
 test "a dropped ZVNM record does not desync the records after it" {
     // getOrCreate returns null once the table holds max_vending machines. The
     // loader must consume that record whole: the stock rows AND the lock,
