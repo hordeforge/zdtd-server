@@ -10248,6 +10248,83 @@ test "scenario a bag write beyond reach is rejected" {
     std.debug.print("PASS bag-reach: near bag written, far bag rejected\n", .{});
 }
 
+test "scenario wrench pickup applies to the world and honours reach and claims" {
+    // PickupBlock had no scenario, only the wire-layout tests in packages.zig,
+    // and the handler broadcast the replacement without writing it: the block
+    // vanished for clients but stayed on the server, so it came back on the
+    // next chunk load and kept blocking placement in the meantime. Stock
+    // replicates the pickup rather than simulating it client-side (RE
+    // blocks.md "Server authority"). The two trust gates the handler adds on
+    // top (reach, land claim) were untested for the same reason.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const psa = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+    const ep = g.sim.transform[psa];
+
+    // Body: x, y, z (i32), rawData u32, playerId i32, null identity byte.
+    const buildPickup = struct {
+        fn call(buf: []u8, x: i32, y: i32, z: i32, raw: u32, player_id: i32) ![]u8 {
+            var w: binary.Writer = .{ .buf = buf };
+            try w.writeI32(x);
+            try w.writeI32(y);
+            try w.writeI32(z);
+            try w.writeU32(raw);
+            try w.writeI32(player_id);
+            try w.writeByte(0); // null platform identity
+            return w.written();
+        }
+    }.call;
+
+    const stone = world_store.block_stone;
+    var pb: [64]u8 = undefined;
+    var fb: [512]u8 = undefined;
+
+    // In reach, unclaimed: the block is gone from the world, not just echoed.
+    const nx: i32 = @intFromFloat(ep.x + 3);
+    const nz: i32 = @intFromFloat(ep.z + 3);
+    try g.setBlock(nx, 70, nz, stone);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePickupBlock", try buildPickup(&pb, nx, 70, nz, stone, ca.entity_id)));
+    try std.testing.expectEqual(@as(u32, 0), try g.world.blockWorld(nx, 70, nz));
+
+    // Beyond reach: the block survives and the counter says why.
+    const fx: i32 = @intFromFloat(ep.x + g.max_edit_range * 4);
+    try g.setBlock(fx, 70, nz, stone);
+    const bounds_before = g.harness.counters.get(.bounds_rejects);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePickupBlock", try buildPickup(&pb, fx, 70, nz, stone, ca.entity_id)));
+    try std.testing.expectEqual(stone, try g.world.blockWorld(fx, 70, nz));
+    try std.testing.expect(g.harness.counters.get(.bounds_rejects) > bounds_before);
+
+    // Inside another player's claim, in reach: still refused.
+    const kid = g.maxdamage.idByName("keystoneBlock") orelse return error.TestUnexpectedResult;
+    const cx: i32 = @intFromFloat(ep.x + 6);
+    const cz: i32 = @intFromFloat(ep.z + 6);
+    var sb: [64]u8 = undefined;
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, cx, 70, cz, kid)));
+    const claim = g.claimCovering(cx, cz) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(cb.entity_id, claim.owner_entity);
+
+    try g.setBlock(cx + 1, 70, cz, stone);
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePickupBlock", try buildPickup(&pb, cx + 1, 70, cz, stone, ca.entity_id)));
+    try std.testing.expectEqual(stone, try g.world.blockWorld(cx + 1, 70, cz));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    std.debug.print("PASS pickup: world write applied, reach and claim both refuse\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

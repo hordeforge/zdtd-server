@@ -367,9 +367,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.blocks.pickupSource(cur_id)) |src_name| {
             repl_raw = self.maxdamage.idByName(src_name) orelse 0;
         }
-        // 3) Broadcast the replacement to observers (stock SetBlocksRPC
-        //    carries a BlockChangeInfo; the SetBlock S2C body is the same
-        //    shape the client Reads for every server block change).
+        // 3) Apply it to the world, then broadcast (stock SetBlocksRPC carries
+        //    a BlockChangeInfo; the SetBlock S2C body is the same shape the
+        //    client Reads for every server block change). The write has to
+        //    happen here: stock replicates the pickup rather than simulating
+        //    it client-side (RE blocks.md "Server authority"), so a broadcast
+        //    without a world write leaves the block standing on the server.
+        //    The picked block is gone for the client until the next chunk
+        //    load puts it back, and it still blocks placement and pathing.
+        try self.world.setBlockRawWorld(pk.x, pk.y, pk.z, repl_raw);
+        self.clearBlockHp(pk.x, pk.y, pk.z);
+        if (repl_raw == 0) {
+            self.noteBlockRemoved(pk.x, pk.y, pk.z, cur_id);
+            self.removeClaimAt(pk.x, pk.y, pk.z);
+        }
         if (packages.buildSetBlockBodyRaw(self.body_buf[0..96], pk.x, pk.y, pk.z, repl_raw, 0, editor_ent, editor_ent)) |sb| {
             try self.broadcastNear("NetPackageSetBlock", sb, ep.x, ep.z, self.interest_range);
         } else |_| {}
