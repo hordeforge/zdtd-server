@@ -182,6 +182,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- GSI values now use stock's separator encoding, so a server or level name
+  containing `:` or `;` reaches the client intact. `GameServerInfo::SetValue`
+  (IL=70) stores values with `:` replaced by `^` and `;` by `*`, and
+  `GetValue` (IL=16) reverses both; zdtd replaced `;` with `_` and passed `:`
+  through, so such a name arrived mangled and a `:` could split a value into a
+  key the client did not expect.
 - `NetPackagePOIMetadataResponse` went out on LiteNet channel 1 instead of 0.
   Its 3.1.0 predecessor `NetPackagePOIAround` overrides `get_Channel` to 1, but
   the 3.2.0 replacement declares no override and inherits `NetPackage`'s 0; the

@@ -39,14 +39,28 @@ pub const ServerInfo = struct {
     play_group: []const u8 = "",
 };
 
-/// Strip CR/LF/`;` so operator-supplied names cannot inject extra GSI key lines.
+/// Encode a GSI value the way stock does, so the client decodes it back to the
+/// operator's text instead of to something else.
+///
+/// `GameServerInfo::SetValue` (IL=70, IL_0012-001F) replaces `:` with `^` and
+/// `;` with `*` before storing, and `GetValue` (IL=16, IL_0017-0022) reverses
+/// both on the way out. The two characters are the GSI key/value and record
+/// separators, so this is stock's escaping, not a sanitiser: a server named
+/// `A:B` reaches the client as `A:B` only if it went out as `A^B`. zdtd used
+/// to map `;` to `_` and leave `:` alone, which both mangled the name and let
+/// a `:` split a value into a bogus key.
+///
+/// CR/LF have no stock encoding (a value never contains them) but would break
+/// the line framing here, so they are still neutralised.
 fn gsiSafe(s: []const u8, scratch: []u8) []const u8 {
     const n = @min(s.len, scratch.len);
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const c = s[i];
         scratch[i] = switch (c) {
-            '\r', '\n', ';' => '_',
+            ':' => '^',
+            ';' => '*',
+            '\r', '\n' => '_',
             else => c,
         };
     }
@@ -221,6 +235,13 @@ test "info text advertises password and sanitizes GSI fields" {
     try std.testing.expect(std.mem.find(u8, inj, "\r\nInjected:") == null);
     try std.testing.expect(std.mem.find(u8, inj, "LevelName:evil") != null);
     try std.testing.expect(std.mem.find(u8, inj, "Port:27015;") != null);
+
+    // The separators are encoded the way stock does it, not replaced with a
+    // filler: `GameServerInfo::SetValue` maps `:` to `^` and `;` to `*`
+    // (IL=70), and `GetValue` maps them back (IL=16), so this is what makes a
+    // name with a colon survive the round trip instead of arriving mangled.
+    const enc = try buildInfoText(&buf, .{ .level_name = "A:B;C" });
+    try std.testing.expect(std.mem.find(u8, enc, "LevelName:A^B*C;") != null);
 }
 
 test "info text clamps player counts" {
@@ -309,8 +330,11 @@ test "info text emits the operator browser fields when set (GameInfoString 3/4/1
         .language = "English",
         .play_group = "Default",
     });
-    try std.testing.expect(std.mem.find(u8, t, "ServerDescription:A test server_ with a semicolon;") != null);
-    try std.testing.expect(std.mem.find(u8, t, "ServerWebsiteURL:https://example.com;") != null);
+    // Both separators are encoded, so the client decodes the operator's text
+    // back verbatim: the `;` rides as `*`, and the URL's `:` as `^`
+    // (GameServerInfo::SetValue IL=70, GetValue IL=16).
+    try std.testing.expect(std.mem.find(u8, t, "ServerDescription:A test server* with a semicolon;") != null);
+    try std.testing.expect(std.mem.find(u8, t, "ServerWebsiteURL:https^//example.com;") != null);
     try std.testing.expect(std.mem.find(u8, t, "Region:EU;") != null);
     try std.testing.expect(std.mem.find(u8, t, "Language:English;") != null);
     try std.testing.expect(std.mem.find(u8, t, "PlayGroup:Default;") != null);
