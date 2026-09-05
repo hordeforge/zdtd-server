@@ -5387,6 +5387,52 @@ test "scenario guard policy: quarantine denies only the abused surface" {
     std.debug.print("PASS guard policy quarantine: damage bit only, damage C2S denied\n", .{});
 }
 
+test "scenario an enforced guard kick tells the client why" {
+    // The enforced rung arms a delayed drop. Stock's own kick paths always
+    // send NetPackagePlayerDenied first, because a peer dropped without one
+    // sees a bare timeout and cannot tell a ban from a network fault. zdtd
+    // sends the same package with a custom reason string; only the delayed
+    // drop itself was covered, not the notification.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_guard_kick");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_guard_kick", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // Climb to the enforcing rung: the default ladder is log-only.
+    g.guard.enforce = true;
+    g.guard.dry_run = false;
+
+    const denied_id = packages.idOf("NetPackagePlayerDenied") orelse
+        return error.TestUnexpectedResult;
+    cap.clear();
+    try tripTwoStrongSignals(g, c);
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.guard_kicks));
+    try std.testing.expect(c.guard.kick_at_tick != 0);
+
+    // The denial rode out, and its body is the stock KickPlayerData shape:
+    // reason i32 | apiResponse i32 | banUntil i64 | custom reason string.
+    const body = cap.findPkgId(denied_id) orelse return error.TestUnexpectedResult;
+    var r: binary.Reader = .{ .data = body };
+    const reason = try r.readI32();
+    try std.testing.expectEqual(@intFromEnum(packages.KickReason.mod_decision), reason);
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // apiResponse
+    try std.testing.expectEqual(@as(i64, 0), try r.readI64()); // banUntil
+    var reason_buf: [128]u8 = undefined;
+    const custom = try r.readString(&reason_buf);
+    // The custom string is what an operator actually reads, since the numeric
+    // reason's client-facing label is unverified (see KickReason in packages.zig).
+    try std.testing.expect(custom.len > 0);
+    std.debug.print("PASS guard kick: PlayerDenied sent, reason={d} custom=\"{s}\"\n", .{ reason, custom });
+}
+
 test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock geometry" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_ws");

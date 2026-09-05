@@ -3384,7 +3384,16 @@ test "entity collect body is bag then collector, and the parser agrees" {
 /// an operator `kick` and a server-side guard-policy decision. zdtd has no EAC
 /// integration, so the Eac* reasons are never sent.
 pub const KickReason = enum(i32) {
+    /// EKickReason.ManualKick (10), RE `protocol-packages.md` "EKickReason";
+    /// stock also uses it for a platform-blocked enter.
     manual_kick = 0x0A,
+    /// 16. **Name and client-facing string unverified.** The RE records 35
+    /// values and names ten of them; 16 is in range but is not one of the
+    /// named ones, and no retained dump carries the full enum, so what a
+    /// stock client renders for it is unknown. Only the guard-policy kick
+    /// (`game/guard.zig`) sends it, and that call fills the custom reason
+    /// string, which is what an operator actually reads. Re-derive the label
+    /// from a fresh enum dump before relying on it.
     mod_decision = 0x10,
     /// EKickReason.VersionMismatch (asm.il GameUtils_EKickReason): the
     /// client's compatibilityVersion differs from LongStringNoBuild.
