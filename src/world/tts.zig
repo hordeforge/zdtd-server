@@ -700,3 +700,48 @@ test "paintDecoration carries authored damage to the set callback" {
     try std.testing.expectEqual(@as(i32, 50), cap.hits[2].wy);
     try std.testing.expectEqual(@as(i32, 21), cap.hits[2].wz);
 }
+
+test "a tile entity position outside the prefab is dropped, not cast" {
+    // Persistency stores the tile entity's chunk-local position as three i32,
+    // but TeEntry keeps it as i16. A prefab claiming a position outside the
+    // prefab bounds (here past i16 range entirely) must fall back to the zero
+    // origin; casting it straight over panics on an authored or corrupt .tts.
+    var buf: [200]u8 = undefined;
+    var pos: usize = 0;
+    @memcpy(buf[0..4], "tts\x00");
+    pos = 4;
+    std.mem.writeInt(u32, buf[pos..][0..4], 19, .little);
+    pos += 4;
+    std.mem.writeInt(i16, buf[pos..][0..2], 1, .little);
+    std.mem.writeInt(i16, buf[pos + 2 ..][0..2], 1, .little);
+    std.mem.writeInt(i16, buf[pos + 4 ..][0..2], 1, .little);
+    pos += 6;
+    const count: usize = 1;
+    @memset(buf[pos .. pos + count * 4], 0); // blocks: air
+    pos += count * 4;
+    @memset(buf[pos .. pos + count], 0); // density
+    pos += count;
+    @memset(buf[pos .. pos + count * 2], 0); // damage
+    pos += count * 2;
+    std.mem.writeInt(i32, buf[pos..][0..4], 0, .little); // texture bitstream: empty
+    pos += 4;
+    // Tile entity section: i16 count, then (i16 payloadLen | u8 type | payload).
+    std.mem.writeInt(i16, buf[pos..][0..2], 1, .little);
+    pos += 2;
+    std.mem.writeInt(i16, buf[pos..][0..2], 14, .little);
+    pos += 2;
+    buf[pos] = 0;
+    pos += 1;
+    std.mem.writeInt(u16, buf[pos..][0..2], 1, .little); // TileEntity.read version
+    std.mem.writeInt(i32, buf[pos + 2 ..][0..4], 100000, .little); // x past i16
+    std.mem.writeInt(i32, buf[pos + 6 ..][0..4], 0, .little);
+    std.mem.writeInt(i32, buf[pos + 10 ..][0..4], 0, .little);
+    pos += 14;
+
+    var t = try parseBlocks(std.testing.allocator, buf[0..pos]);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(usize, 1), t.tile_entities.len);
+    try std.testing.expectEqual(@as(i16, 0), t.tile_entities[0].lx);
+    try std.testing.expectEqual(@as(i16, 0), t.tile_entities[0].ly);
+    try std.testing.expectEqual(@as(i16, 0), t.tile_entities[0].lz);
+}
