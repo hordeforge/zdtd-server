@@ -719,6 +719,38 @@ fn relSeq(a: i32) i32 {
     return r;
 }
 
+test "relSeq wraps the 32768 sequence space symmetrically" {
+    // Six window decisions ride on this - in-flight count, ack base, both
+    // remote-window comparisons - and none of them tested it: widening the
+    // half-space boundary from `>=` to `>` left the whole suite green.
+    const max: i32 = @intCast(packet.max_sequence);
+    const half: i32 = max / 2;
+
+    try std.testing.expectEqual(@as(i32, 0), relSeq(0));
+    try std.testing.expectEqual(@as(i32, 1), relSeq(1));
+    try std.testing.expectEqual(@as(i32, -1), relSeq(-1));
+
+    // The boundary: exactly `half` ahead is the far edge and must read as
+    // `-half`, not `+half`. Getting it wrong flips the direction of every
+    // wrap comparison for that one distance.
+    try std.testing.expectEqual(-half, relSeq(half));
+    try std.testing.expectEqual(half - 1, relSeq(half - 1));
+
+    // Wrapping across the top keeps the short distance: 5 past the wrap is
+    // +5 from just before it, not -32763.
+    try std.testing.expectEqual(@as(i32, 5), relSeq(5 - max));
+    try std.testing.expectEqual(@as(i32, -5), relSeq(max - 5));
+    try std.testing.expectEqual(@as(i32, 0), relSeq(max));
+
+    // Every result stays in [-half, half), which is what makes the window
+    // comparisons total.
+    var i: i32 = -max;
+    while (i <= max) : (i += 97) {
+        const r = relSeq(i);
+        try std.testing.expect(r >= -half and r < half);
+    }
+}
+
 test "processAck advances local window when bits set" {
     // Drive real Peer.handlePacket ack path (not a reimplementation).
     var peer: Peer = .{};
