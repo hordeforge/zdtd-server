@@ -108,6 +108,23 @@ Infrastructure and authority surface already in tree (do not re-open as gaps):
 
 ## Open now (read this first)
 
+### Untested: the vending fill resolve guards
+
+`replicate_te.fillVendingStore` drops a rolled row twice: `iid == 0` (the item
+table does not carry the trader ref's name) and `type_id == 0` (no stock type
+for the resolved id). Both survive a mutation run, so neither is covered.
+
+They matter because the wire compaction downstream hides the damage: a stored
+`type_id 0` row is dropped again when the TE is sent, so the machine would ship
+fewer items than `stock_n` claims and every later index shifts.
+
+Writing the test needs a roll that actually reaches both refs. A fixture
+`traders.xml` with a two-item `traderAlways` group does not: `spawnItemsFromGroup`
+is prob-weighted (`SpawnLootItemsFromList`, asm.il 863343), so one run rolled
+one row and the guards never ran, leaving a green test that proved nothing. A
+usable test needs either a group shape that forces both refs (`count_all`, or
+per-ref prob 1) or a direct call below the roll.
+
 ### Untested: the blood-moon music tick edge
 
 `game/step.zig` sends `NetPackageBloodmoonMusic` on the rising/falling edge of
