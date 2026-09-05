@@ -432,6 +432,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (packages.buildEntityTeleportBody(&self.body_buf, c.entity_id, @as(f32, @floatFromInt(bed_surf.x)), @as(f32, @floatFromInt(bed_surf.y)) + 0.08, @as(f32, @floatFromInt(bed_surf.z)), 0, 0, 0, true)) |tb| {
                     try self.sendGame(peer, "NetPackageEntityTeleport", tb);
                 } else |_| {}
+                // Redundant with the replicate pass by content (respawnPlayer
+                // marks hp dirty, so game/replicate_health.zig sends the same
+                // EntityStatChanged on the next tick), but not by timing: this
+                // one rides the respawn burst so the client's health bar is
+                // right the moment it regains control rather than up to a
+                // replicate interval later. Removing it alone keeps the
+                // hp-replication scenario green, which is why it reads as
+                // untested.
                 if (packages.buildEntityStatChangedBody(self.body_buf[512..640], c.entity_id, -1, .health, 100, 100, 0)) |hb| {
                     try self.sendGame(peer, "NetPackageEntityStatChanged", hb);
                 } else |_| {}
