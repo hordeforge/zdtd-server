@@ -74,6 +74,30 @@ WIDTH = {
 }
 WRITE_RE = re.compile(r"^(\s*)try w\.(write\w+)\(([^;]*)\);\s*(//.*)?$")
 
+# The decode side has the same blind spot and the same cost when it is wrong.
+# A parser that reads a body in the wrong order puts each value in the wrong
+# field, which is a wire break exactly like a mis-ordered builder, and a test
+# that only checks one field or a total length cannot see it. The decoders are
+# written as struct literals (`.field = try r.readI32(),`), so the swap is the
+# same transformation: exchange two adjacent same-width reads.
+#
+# Read width is fixed by the method name, as on the write side. `readString`
+# and `readBytes` are excluded for the same reason `writeString` is: their
+# width is data-dependent, so a swap shifts everything after it and any length
+# assertion catches it.
+READ_WIDTH = {
+    "readByte": 1,
+    "readBool": 1,
+    "readU16": 2,
+    "readI16": 2,
+    "readU32": 4,
+    "readI32": 4,
+    "readF32": 4,
+    "readI64": 8,
+    "readU64": 8,
+}
+READ_RE = re.compile(r"^(\s*)\.(\w+) = try \w+\.(read\w+)\(\),\s*(//.*)?$")
+
 # How many pairs filter_is_live() may try before declaring a filter useless.
 # One kill proves the filter reaches the file; a run of survivors at the top of
 # a file is a real finding, not a reason to refuse.
@@ -178,6 +202,30 @@ def mutants_for(path):
         if a.group(3).strip() == b.group(3).strip():
             continue
         out.append((i, f"{a.group(2)}({a.group(3).strip()}) <-> {b.group(2)}({b.group(3).strip()})"))
+
+    # Decode side. Zig evaluates struct-literal fields in source order, so
+    # swapping two adjacent same-width reads swaps which value lands in which
+    # field while the bytes consumed stay identical - the exact defect a
+    # single-field assertion cannot see.
+    for i in range(len(lines) - 1):
+        if in_test[i] or in_test[i + 1]:
+            continue
+        a = READ_RE.match(lines[i])
+        b = READ_RE.match(lines[i + 1])
+        if not a or not b:
+            continue
+        if a.group(3) not in READ_WIDTH or b.group(3) not in READ_WIDTH:
+            continue
+        if READ_WIDTH[a.group(3)] != READ_WIDTH[b.group(3)]:
+            continue
+        # Unlike the write side there is no literal-value escape: two reads
+        # always consume distinct bytes, so every same-width pair is a real
+        # candidate. A survivor here means no test reads both fields back.
+        out.append((
+            i,
+            f".{a.group(2)} = {a.group(3)}() <-> .{b.group(2)} = {b.group(3)}()",
+        ))
+    out.sort(key=lambda m: m[0])
     return lines, out
 
 
