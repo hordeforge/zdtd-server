@@ -36,6 +36,15 @@ Reproducing stock here means accepting a documented cheat vector.
 
 | 1.9 | `NetPackageCloseAllWindows` carries a `_playerIdToClose` the receiving client uses to close its own modal windows | Accepted, dropped | Stock never handles it server-side: it is `ToClient` (`get_PackageDirection` IL=2 returns 2) and its `ProcessPackage` returns immediately when `ConnectionManager.IsServer`. zdtd relayed it to every other peer until 2026-09-04, which let any client close every other player's open UI |
 
+**Gated since 2026-09-04.** `provenance_scan` 7i reads
+`get_PackageDirection` out of the 3.2.0 IL for every advertised package and
+fails when a C2S handler claims a `ToClient` name that no row here mentions.
+The phase gate cannot catch these on its own: it passes everything once a peer
+reaches `.playing`. Row 1.9 is the case that motivated it, and the check was
+verified against exactly that shape - with the old relaying handler restored,
+7i fires where the accept-and-drop check (7d) stays silent, because a handler
+that forwards the package is not dropping it.
+
 **Correction 2026-09-02.** Row 1.4 previously also named
 `NetPackageEntityVelocity` and `EntitySpeeds` as client-driven motion zdtd
 refuses. That was wrong in both directions. RE `protocol-packages.md` 5.5.5 has
