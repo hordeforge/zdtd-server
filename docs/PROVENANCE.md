@@ -83,8 +83,17 @@ reached through a wrapper the tests do call; tracing the remaining ones to
 their caller left `buildIdMappingBody`, whose only caller is
 `sendItemIdMapping` on the join path. Swapping its name string with the length
 i32 left the whole suite green, so it had no coverage at all. HEAD was correct
-(`NetPackageIdMapping::read` IL=13) and now has a test. Redo that count when
-`src/wire/` gains builders.
+(`NetPackageIdMapping::read` IL=13) and now has a test.
+
+The same count on the read side (`pub fn parse*` / `read*`) found 12 of 60
+with no direct call, and tracing those to their callers left two.
+`readTraderDataBody` had no coverage: swapping its `TraderID` with
+`lastInventoryUpdate` left the suite green against `TraderData::Write` (IL=15).
+HEAD was right and the trader ECD test now reads the body back through the
+parser. `parseInventoryBodyNative` had no caller but the fuzzer - no builder
+emitted that shape and no handler read it - so it was deleted. Redo both
+counts when `src/wire/` gains builders or parsers; a name with no direct call
+is not a finding on its own, only a pointer at the caller to check.
 
 **Audit state (2026-09-04).** Every file in `src/wire/` that has swappable
 pairs has now been measured, encode and decode; the three remaining survivors
