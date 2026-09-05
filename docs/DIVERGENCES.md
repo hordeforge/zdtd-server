@@ -36,6 +36,20 @@ Reproducing stock here means accepting a documented cheat vector.
 
 | 1.9 | `NetPackageCloseAllWindows` carries a `_playerIdToClose` the receiving client uses to close its own modal windows | Accepted, dropped | Stock never handles it server-side: it is `ToClient` (`get_PackageDirection` IL=2 returns 2) and its `ProcessPackage` returns immediately when `ConnectionManager.IsServer`. zdtd relayed it to every other peer until 2026-09-04, which let any client close every other player's open UI |
 
+**`AllowedBeforeAuth` checked, no divergence (2026-09-04).** Stock's third
+per-package property gates *sending*, not receiving: `ClientInfo::SendPackage`
+(IL=28) drops a package with a "not logged in yet" warning unless
+`get_AllowedBeforeAuth` or `ClientInfo.loginDone` is set. Ten of the advertised
+packages override it to true, and the eight zdtd does not handle are the
+encryption and EAC handshake it deliberately omits (EAC-off); the two it does,
+`PlayerLogin` and `AuthConfirmation`, are exactly its own `connecting_allow`
+list. On the send side every fan-out path (`broadcastExcept`, `broadcastNear`,
+and `broadcast` which delegates) skips a client whose `joined` is false, which
+is the same gate under a different name. The six names in `joined_allow`
+inherit `AllowedBeforeAuth = false`, which is correct: that phase is reached
+only after a login is accepted. Nothing to change, recorded so the sweep is
+not repeated.
+
 **Gated since 2026-09-04.** `provenance_scan` 7i reads
 `get_PackageDirection` out of the 3.2.0 IL for every advertised package and
 fails when a C2S handler claims a `ToClient` name that no row here mentions.

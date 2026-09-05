@@ -454,3 +454,28 @@ pub fn unbanIp(self: *Game, ip: u32) void {
         i += 1;
     }
 }
+
+test "the unreliable set is exactly the stock ReliableDelivery overrides" {
+    // `NetPackage::get_ReliableDelivery` returns 1 and five packages override
+    // it to 0 (`get_ReliableDelivery() IL=2` -> ldc.i4.0). Nothing pinned the
+    // list: dropping a name from it left the whole suite green while that
+    // package moved onto the 64-slot reliable window stock keeps it off.
+    const unreliable = [_][]const u8{
+        "NetPackageEntityPosAndRot",
+        "NetPackageEntityRelPosAndRot",
+        "NetPackageEntityRotation",
+        "NetPackageEntitySpeeds",
+        "NetPackageEntityStatsBuff",
+    };
+    for (unreliable) |n| try std.testing.expect(isUnreliablePackage(n));
+
+    // And nothing else: walking the advertised table is what catches a name
+    // added here without an IL override behind it.
+    for (packages.default_mappings) |n| {
+        var expected = false;
+        for (unreliable) |u| {
+            if (std.mem.eql(u8, n, u)) expected = true;
+        }
+        try std.testing.expectEqual(expected, isUnreliablePackage(n));
+    }
+}
