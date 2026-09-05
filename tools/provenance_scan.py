@@ -625,6 +625,63 @@ def main():
             "builder or list it in provenance_scan 7h with the reason"
         )
 
+    # 7i. INBOUND HANDLERS FOR ToClient-ONLY PACKAGES. Stock declares a
+    #     direction per package (`get_PackageDirection`, NetPackageDirection:
+    #     0 Both, 1 ToServer, 2 ToClient). The phase gate lets everything
+    #     through once a peer reaches .playing, so a handler claiming a
+    #     ToClient name accepts a package stock never processes server-side.
+    #     NetPackageCloseAllWindows was relayed to every other peer that way,
+    #     letting any client close another player's UI. Accepting one and
+    #     dropping it is a legitimate choice; doing it silently is not, so
+    #     require the name to appear in DIVERGENCES with its reasoning.
+    #     Skipped when the research repo is absent, like check 5.
+    il_dir = pathlib.Path(
+        ROOT, "..", "7dtd-engine-research", "il", "full-v3.2.0", "_global"
+    )
+    if il_dir.is_dir():
+        pkgs_src = pathlib.Path(ROOT, "src/wire/packages.zig").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        table = re.search(
+            r"pub const default_mappings = \[_\]\[\]const u8\{(.*?)\n\};", pkgs_src, re.S
+        )
+        advertised = re.findall(r'"(NetPackage\w+)"', table.group(1)) if table else []
+        to_client = set()
+        for name in advertised:
+            il = il_dir / f"{name}.il.txt"
+            if not il.is_file():
+                continue
+            body = re.search(
+                r"get_PackageDirection\(\) IL=\d+\n(.*?)\nIL_\d+: ret",
+                il.read_text(encoding="utf-8", errors="replace"),
+                re.S,
+            )
+            if not body:
+                continue  # no override: inherits NetPackage's Both
+            val = re.search(r"ldc\.i4(?:\.s)?[. ](\d+)", body.group(1))
+            if val and int(val.group(1)) == 2:
+                to_client.add(name)
+        # Only an `eql` comparison means the handler treats the name as
+        # inbound; a sendGame call naming it is the opposite direction.
+        inbound = set()
+        for path in sorted(pathlib.Path(ROOT, "src/server/c2s").glob("*.zig")):
+            for m in re.finditer(
+                r'std\.mem\.eql\(u8, (?:name|pkg_name), "(NetPackage\w+)"\)',
+                path.read_text(encoding="utf-8", errors="replace"),
+            ):
+                inbound.add(m.group(1))
+        undocumented_inbound = sorted(
+            n for n in inbound & to_client if n not in doc_text
+        )
+        if undocumented_inbound:
+            failures.append(
+                "C2S handlers claiming a stock ToClient-only package, with no "
+                f"doc row ({len(undocumented_inbound)}): "
+                + ", ".join(undocumented_inbound[:8])
+                + " - stock never processes these server-side; record the "
+                "accept-and-drop in DIVERGENCES 1 or stop claiming the name"
+            )
+
     if failures:
         for f in failures:
             print("FAIL:", f)
