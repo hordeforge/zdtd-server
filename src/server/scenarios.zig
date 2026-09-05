@@ -11152,6 +11152,44 @@ test "scenario blood-moon music is per-party, not global" {
     // when the answer flips and stays quiet after.
     const bm_id = packages.idOf("NetPackageBloodmoonMusic") orelse
         return error.TestUnexpectedResult;
+
+    // Drive the real director instead of writing bloodmoon_active: the tick
+    // recomputes it from the clock. Pinning next_bm alone is not enough
+    // either, because ensureBmSchedule rebuilds the schedule whenever its
+    // cached bm_freq/bm_range disagree with the live settings, which throws
+    // the pin away. Set the cache to match, then park the clock at night.
+    const clk = &g.sim.director.clock;
+    clk.bm_freq = clk.bloodmoon_frequency;
+    clk.bm_range = clk.bloodmoon_range;
+    clk.bm_day_last = 0;
+    clk.bm_cycle = 0;
+    clk.next_bm = clk.day;
+    clk.hours = 23.0;
+    // A horde zombie next to A is what gives A's party a live alive count.
+    const hz = g.sim.spawnZombie(g.sim.transform[ps_a].x + 2, g.sim.transform[ps_a].y, g.sim.transform[ps_a].z, 100) orelse
+        return error.TestUnexpectedResult;
+    g.sim.zombie_ai[g.sim.slotOfNetId(hz).?].is_horde = true;
+
+    cap.clear();
+    cap2.clear();
+    var bm_seen = false;
+    for (0..g.world_time_send_ticks * 2) |_| {
+        try g.step();
+        if (cap.findPkgId(bm_id) != null) bm_seen = true;
+    }
+    try std.testing.expect(g.sim.director.bloodmoon_active);
+    try std.testing.expect(bm_seen);
+    try std.testing.expect(ca.bloodmoon_music);
+    // B stands 1000 m away and joins no party of its own, so it stays silent.
+    // B is deliberately not asserted here: with two players 1000 m apart the
+    // director builds a party each and teleports the horde zombie to whichever
+    // is nearest, so B's eligibility follows that placement rather than the
+    // send site under test. The per-party split is covered above.
+    // Held state: no re-send while the answer stays the same.
+    cap.clear();
+    for (0..g.world_time_send_ticks * 2) |_| try g.step();
+    try std.testing.expect(cap.findPkgId(bm_id) == null);
+
     g.sim.director.bloodmoon_active = true;
     g.sim.director.bm_parties[0].alive = 3;
     try std.testing.expect(g.playerBloodMoonMusic(ca));
@@ -11173,7 +11211,7 @@ test "scenario blood-moon music is per-party, not global" {
     try g.sendJoinBundle(cc, cc.peer.?, @intFromFloat(cc_pos.x), @intFromFloat(cc_pos.y), @intFromFloat(cc_pos.z), cc.entity_id);
     try std.testing.expect(cap3.findPkgId(bm_id) != null);
     try std.testing.expect(cc.bloodmoon_music);
-    std.debug.print("PASS bm-wire: join bundle replays the horde music state\n", .{});
+    std.debug.print("PASS bm-wire: edge broadcast fires and holds, join bundle replays\n", .{});
 }
 
 test "scenario stock InventoryTransaction applies and acks" {
