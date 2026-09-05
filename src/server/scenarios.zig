@@ -11146,6 +11146,34 @@ test "scenario blood-moon music is per-party, not global" {
     g.sim.director.bloodmoon_active = false;
     try std.testing.expect(!g.playerBloodMoonMusic(ca));
     std.debug.print("PASS bm-music: per-party eligibility, global-bool approximation gone\n", .{});
+
+    // Eligibility is only half of it: the two send sites that carry it to a
+    // client were untested. The tick path is edge-triggered, so it fires once
+    // when the answer flips and stays quiet after.
+    const bm_id = packages.idOf("NetPackageBloodmoonMusic") orelse
+        return error.TestUnexpectedResult;
+    g.sim.director.bloodmoon_active = true;
+    g.sim.director.bm_parties[0].alive = 3;
+    try std.testing.expect(g.playerBloodMoonMusic(ca));
+    // The join bundle replays the current state, because a client joining
+    // mid-horde missed the tick-path edge and would otherwise never hear it.
+    // Direct director writes are fine here: sendJoinBundle reads the state,
+    // it does not run the director tick that would rebuild it.
+    g.sim.director.bloodmoon_active = true;
+    g.sim.director.bm_parties[0].alive = 3;
+    g.sim.director.bm_party_n = 1;
+    var cap3: ln_peer.Capture = .{};
+    const cc = try g.attachJoinedClient(&cap3);
+    g.sim.director.bm_parties[0].focus_x = g.sim.transform[g.sim.playerByPeer(cc.slot).?].x;
+    g.sim.director.bm_parties[0].focus_z = g.sim.transform[g.sim.playerByPeer(cc.slot).?].z;
+    try std.testing.expect(g.playerBloodMoonMusic(cc));
+    cap3.clear();
+    const cc_ps = g.sim.playerByPeer(cc.slot) orelse return error.TestUnexpectedResult;
+    const cc_pos = g.sim.transform[cc_ps];
+    try g.sendJoinBundle(cc, cc.peer.?, @intFromFloat(cc_pos.x), @intFromFloat(cc_pos.y), @intFromFloat(cc_pos.z), cc.entity_id);
+    try std.testing.expect(cap3.findPkgId(bm_id) != null);
+    try std.testing.expect(cc.bloodmoon_music);
+    std.debug.print("PASS bm-wire: join bundle replays the horde music state\n", .{});
 }
 
 test "scenario stock InventoryTransaction applies and acks" {
