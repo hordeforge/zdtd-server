@@ -626,6 +626,12 @@ pub const WorkstationStore = struct {
                 if (rl > 0) @memcpy(q.recipe[0..rl], buf[o .. o + rl]);
                 o += rl;
             }
+            // Every other field of the record is assigned, so a second record
+            // for the same position overwrites the first. This list appends,
+            // and `getOrCreate` hands back the slot the earlier record filled,
+            // so without the reset a duplicate position walks the counter past
+            // the fixed array and panics mid-load.
+            w.craft_complete_n = 0;
             var cn: usize = 0;
             while (cn < max_craft_complete) : (cn += 1) {
                 if (o + 18 + 2 * craft_name_max > buf.len) return error.Truncated;
@@ -1011,4 +1017,47 @@ test "ZWS1 craft-complete name lengths past their array are rejected" {
     var dst: WorkstationStore = .{};
     try std.testing.expectError(error.BadRecord, dst.loadFromSlice(bad));
     std.debug.print("PASS workstations-zws: over-cap craft-complete name lengths rejected\n", .{});
+}
+
+test "a duplicate position in workstations.zws overwrites instead of overflowing" {
+    // Records are keyed by position and `getOrCreate` returns the existing slot
+    // for one already loaded, so a file carrying the same position twice (a
+    // hand-edited or half-written save) replays into the same workstation. The
+    // craft-complete list is the only field that appends rather than assigns,
+    // so it is the one that can run past its fixed array.
+    var s: WorkstationStore = .{};
+    const w = s.getOrCreate(1, 70, 2).?;
+    w.block_id = 106;
+    w.setCraftComplete(&[_]CraftComplete{
+        .{ .crafter_entity_id = 7, .item_type = 5, .item_count = 1 },
+        .{ .crafter_entity_id = 8, .item_type = 6, .item_count = 1 },
+        .{ .crafter_entity_id = 9, .item_type = 7, .item_count = 1 },
+        .{ .crafter_entity_id = 10, .item_type = 8, .item_count = 1 },
+    });
+    try std.testing.expectEqual(@as(u8, max_craft_complete), w.craft_complete_n);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try s.save(dir, std.testing.allocator);
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/workstations.zws", .{dir});
+    const good = try io_fs.readFileAll(std.testing.allocator, path);
+    defer std.testing.allocator.free(good);
+
+    const rec = good[6..];
+    const dup = try std.testing.allocator.alloc(u8, 6 + rec.len * 2);
+    defer std.testing.allocator.free(dup);
+    @memcpy(dup[0..6], good[0..6]);
+    std.mem.writeInt(u16, dup[4..6], 2, .little);
+    @memcpy(dup[6..][0..rec.len], rec);
+    @memcpy(dup[6 + rec.len ..][0..rec.len], rec);
+
+    var dst: WorkstationStore = .{};
+    try dst.loadFromSlice(dup);
+    const got = dst.get(1, 70, 2).?;
+    try std.testing.expectEqual(@as(u8, max_craft_complete), got.craft_complete_n);
+    try std.testing.expectEqual(@as(i32, 7), got.craft_complete[0].crafter_entity_id);
+    try std.testing.expectEqual(@as(i32, 10), got.craft_complete[3].crafter_entity_id);
 }
