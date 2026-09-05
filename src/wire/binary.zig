@@ -197,6 +197,33 @@ test "string roundtrip" {
     try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }
 
+test "7bit int encodes the byte-width boundaries like BinaryWriter" {
+    // The `>=` in the encoder loop is what makes 0x80 spill into a second
+    // byte, and nothing pinned it: changing it to `>` writes a 128-byte
+    // string's length as a single 0x80, which a .NET reader takes as a
+    // continuation byte and then reads the payload from the wrong offset.
+    // Every string of 128 bytes or more rides on this - server names, chat,
+    // quest ids. Expected encodings are BinaryWriter.Write7BitEncodedInt.
+    const cases = [_]struct { u32, []const u8 }{
+        .{ 0, &.{0x00} },
+        .{ 0x7F, &.{0x7F} }, // last single byte
+        .{ 0x80, &.{ 0x80, 0x01 } }, // first two-byte value
+        .{ 0x3FFF, &.{ 0xFF, 0x7F } }, // last two-byte value
+        .{ 0x4000, &.{ 0x80, 0x80, 0x01 } }, // first three-byte value
+        .{ 0xFFFFFFFF, &.{ 0xFF, 0xFF, 0xFF, 0xFF, 0x0F } }, // five bytes, the .NET max
+    };
+    for (cases) |c| {
+        var buf: [8]u8 = undefined;
+        var w: Writer = .{ .buf = &buf };
+        try w.write7BitEncodedInt(c[0]);
+        try std.testing.expectEqualSlices(u8, c[1], w.written());
+
+        var r: Reader = .{ .data = w.written() };
+        try std.testing.expectEqual(c[0], try read7BitEncodedInt(&r));
+        try std.testing.expectEqual(@as(usize, 0), r.remaining());
+    }
+}
+
 test "7bit int rejects overlong encoding without overflowing shift" {
     var r: Reader = .{ .data = &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F } };
     try std.testing.expectError(error.Overflow, read7BitEncodedInt(&r));
