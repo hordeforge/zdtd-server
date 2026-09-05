@@ -242,6 +242,21 @@ through. The rebroadcast is therefore inert traffic rather than a behaviour
 difference a player can see - kept, and recorded here, until the trigger sim
 lands and the broadcast can go.
 
+The same sweep found `NetPackageBag`, also ToServer, echoed to other peers
+after a vehicle-basket write (`c2s/inv.zig`). Stock's only sender is
+`Entity::OnBagModified` (`Entity.il.txt` IL=15), which returns without sending
+when `ConnectionManager.IsServer`, so a stock dedi never emits this package
+either. The echo is how zdtd replicates a shared vehicle basket to the players
+watching it; stock reaches the same end through its own entity replication.
+Kept deliberately: dropping it would leave a passenger's basket view stale.
+`NetPackageTraderData` is the third ToServer name zdtd sends, and it is the
+same shape: `TraderData::SetModified` (`TraderData.il.txt` IL=11) returns
+immediately when `ConnectionManager.IsServer` and only a client sends it
+upward, so a stock dedi never emits it either. zdtd sends the trader's stock
+on the join path because a joining client would otherwise see an empty
+trader until it opened one; stock fills that from the client's own
+`TraderData` copy. Kept for the same reason as the basket echo.
+
 **Distinguish by shape, and prove the lengths cannot meet.** A length only
 discriminates when no stock body can reach it, and a stock body's length is
 rarely fixed: it carries a `PlatformUserIdentifier` whose two strings vary with
