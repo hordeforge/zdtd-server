@@ -306,6 +306,40 @@ on the join path because a joining client would otherwise see an empty
 trader until it opened one; stock fills that from the client's own
 `TraderData` copy. Kept for the same reason as the basket echo.
 
+**`NetPackageLandClaimRepair` is rebroadcast where stock repairs.** Found
+2026-09-06 while auditing handlers with no scenario coverage. Stock's
+`ProcessPackage` (**IL=33**, RE `protocol-packages.md` and
+`server-lifecycle.md` section 6) resolves `TEFeatureAreaRepair` at the block
+position and, on `beginRepair`, calls `RepairAll(world, blockPos,
+sender.entityId)` server-side; ending repair clears `IsRepairing` for the
+owner. It emits nothing.
+
+zdtd has no `TEFeatureAreaRepair`, so `c2s/quest.zig` parses the body, rate
+gates it, and broadcasts it to every peer. Two departures, neither of them
+what a player asked for:
+
+- **The repair does not happen.** A land-claim area repair block is inert;
+  damaged blocks inside the claim stay damaged. This is a missing feature, not
+  a trust decision, and it is the reason the package cannot simply be dropped
+  yet: dropping it would be equally wrong and would remove the only trace that
+  the client asked.
+- **The broadcast is not stock traffic.** Unlike the `BlockTrigger` case above,
+  where the receiving client's handler falls through, a client receiving this
+  package runs the same `ProcessPackage`. Read against
+  `il/netpackages-v3.2.0/NetPackageLandClaimRepair_il.txt`: `IL_0022` tests
+  `ConnectionManager::get_IsServer` and jumps to the `ret` at `IL_0060` when
+  false, so a client cannot start a repair. The end-repair branch it can reach
+  compares the TE owner against `InternalLocalUserIdentifier`
+  (`IL_0043-0057`), so it only clears `IsRepairing` on the receiver's own
+  claim. Bounded, but inert by luck rather than by design: a player repairing
+  their own claim elsewhere in the world has it cleared by someone else's
+  packet.
+
+Closing it needs the area-repair tile entity: resolve the TE, run the repair
+server-side, replicate the resulting block changes through the normal
+`SetBlock` path, and drop the broadcast. Until then the package is parsed for
+its bounds only.
+
 **Distinguish by shape, and prove the lengths cannot meet.** A length only
 discriminates when no stock body can reach it, and a stock body's length is
 rarely fixed: it carries a `PlatformUserIdentifier` whose two strings vary with

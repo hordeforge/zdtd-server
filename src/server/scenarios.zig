@@ -10419,6 +10419,49 @@ test "scenario block paint lands in the world and honours its gates" {
     std.debug.print("PASS paint: world write applied, entity/channel/face gates refuse\n", .{});
 }
 
+test "scenario a client-reported XP add mints nothing" {
+    // Stock applies this one: NetPackageEntityAddExpServer.ProcessPackage
+    // (IL=31) reaches Progression::AddLevelExp with whatever the client sent
+    // (RE il/netpackages-v3.2.0/NetPackageEntityAddExpServer_il.txt IL_0043).
+    // zdtd refuses it on purpose (DIVERGENCES 1.5, AGENTS rule 17): XP is
+    // awarded server-side on the kill and quest paths, so honouring the
+    // package would let a client mint levels. The refusal had no test, which
+    // is what makes it a regression risk rather than a decision.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const xp_before = c.xp;
+    const level_before = c.level;
+    var body: [32]u8 = undefined;
+    var fb: [256]u8 = undefined;
+    const claim = try packages.stock_xp.buildAddExpClientBody(&body, .{
+        .entity_id = c.entity_id,
+        .xp = 1_000_000,
+        .xp_type = packages.stock_xp.xp_type_kill,
+    });
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntityAddExpServer", claim));
+    try std.testing.expectEqual(xp_before, c.xp);
+    try std.testing.expectEqual(level_before, c.level);
+
+    // The server's own award path still works, so the refusal above is the
+    // trust gate and not a dead XP system.
+    g.awardXp(c.slot, 100);
+    try std.testing.expect(c.xp > xp_before);
+    std.debug.print("PASS xp-trust: client-reported XP refused, server award applies\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
