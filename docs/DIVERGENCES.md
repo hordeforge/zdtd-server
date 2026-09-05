@@ -265,11 +265,12 @@ against the RE package table; none is a live gap, for these reasons:
   outcome; whether the prime signal adds a wind-up cue is unknown. Same
   posture as `VehicleCount` below: not emitted on a guess.
 
-### Three zdtd-shaped bodies under stock package names (2026-09-04)
+### Four zdtd-shaped bodies under stock package names (2026-09-04, extended 2026-09-06)
 
-Found while citing the body builders and parsers against the RE. All are
-C2S-inbound only, never sent to a client, and each is distinguished from the
-stock body by shape before anything is applied. Recorded because a non-stock
+Found while citing the body builders and parsers against the RE, and extended
+by the parser audit two days later. All are C2S-inbound only, never sent to a
+client, and each is distinguished from the stock body by shape before anything
+is applied. Recorded because a non-stock
 body riding a stock package name is exactly the thing that looks like a wire
 divergence later.
 
@@ -340,6 +341,27 @@ Closing it needs the area-repair tile entity: resolve the TE, run the repair
 server-side, replicate the resulting block changes through the normal
 `SetBlock` path, and drop the broadcast. Until then the package is parsed for
 its bounds only.
+
+**A fourth zdtd-shaped body: vehicle control under `NetPackageVehicleSpawn`.**
+Found 2026-09-06 auditing the parsers with no golden test. zdtd sends and reads
+its own 13-byte body (`entityId i32 | op u8 | throttle f32 | steer f32`,
+`buildVehicleControlBody` / `parseVehicleControl`) under the stock package
+name, because stock has no C2S drive-input package at all: seat state rides
+`NetPackageEntityAttach` and motion rides the physics/position packages that
+zdtd refuses (1.4).
+
+The length gate holds. Stock's `NetPackageVehicleSpawn::read`
+(`il/netpackages-v3.2.0/NetPackageVehicleSpawn_il.txt` IL_0002-0020) is
+`entityType i32`, two `StreamUtils.ReadVector3` (12 bytes each), an
+`ItemValue`, then `entityThatPlaced i32` - at least 32 bytes before the item
+value, so a stock body can never be 13 and can never be read as a control
+body. `c2s/misc.zig` requires the exact length before parsing.
+
+Recorded for the same reason as the three above: a non-stock body riding a
+stock package name is what looks like a wire divergence later. It is C2S
+inbound only. If a spawn path ever needs the real `VehicleSpawn` shape, the
+length gate is what keeps the two apart, so it has to stay exact rather than a
+minimum.
 
 **Distinguish by shape, and prove the lengths cannot meet.** A length only
 discriminates when no stock body can reach it, and a stock body's length is
