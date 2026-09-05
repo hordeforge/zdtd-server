@@ -224,6 +224,38 @@ test "7bit int encodes the byte-width boundaries like BinaryWriter" {
     }
 }
 
+test "strings count UTF-8 bytes, not characters, across the width boundary" {
+    // BinaryWriter.Write(string) prefixes the UTF-8 *byte* count. Counting
+    // characters instead would under-read every non-ASCII string by the number
+    // of continuation bytes and shift every field after it. Nothing exercised
+    // a multi-byte string, so the distinction was untested.
+    var buf: [256]u8 = undefined;
+    var w: Writer = .{ .buf = &buf };
+    const utf8 = "Schöner Server"; // 14 characters, 15 bytes
+    try std.testing.expectEqual(@as(usize, 15), utf8.len);
+    try w.writeString(utf8);
+    try std.testing.expectEqual(@as(u8, 15), w.written()[0]); // one length byte
+
+    var r: Reader = .{ .data = w.written() };
+    var out: [64]u8 = undefined;
+    try std.testing.expectEqualStrings(utf8, try r.readString(&out));
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+
+    // A string whose byte length is exactly the two-byte boundary: the prefix
+    // has to spill, and the payload has to start right after both bytes.
+    const long: [128]u8 = @splat('x');
+    var w2: Writer = .{ .buf = &buf };
+    try w2.writeString(&long);
+    const framed = w2.written();
+    try std.testing.expectEqual(@as(usize, 2 + long.len), framed.len);
+    try std.testing.expectEqualSlices(u8, &.{ 0x80, 0x01 }, framed[0..2]);
+
+    var r2: Reader = .{ .data = framed };
+    var out2: [128]u8 = undefined; // distinct from `buf`: readString memcpys
+    try std.testing.expectEqualStrings(&long, try r2.readString(&out2));
+    try std.testing.expectEqual(@as(usize, 0), r2.remaining());
+}
+
 test "7bit int rejects overlong encoding without overflowing shift" {
     var r: Reader = .{ .data = &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F } };
     try std.testing.expectError(error.Overflow, read7BitEncodedInt(&r));
