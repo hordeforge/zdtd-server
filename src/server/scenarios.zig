@@ -3534,6 +3534,38 @@ test "scenario vehicle enter drive and turret kills with power" {
     try g.step();
     try std.testing.expect(g.sim.vehicle[vslot].speed > 0);
 
+    // The control body is zdtd's own shape under a stock package name
+    // (DIVERGENCES "Four zdtd-shaped bodies"), told apart only by its exact
+    // 13-byte length. Stock's NetPackageVehicleSpawn is entityType i32 + two
+    // Vector3 + ItemValue + entityThatPlaced i32, so it is far longer; a
+    // length gate that accepted "at least 13" would read a real spawn body's
+    // position floats as throttle and steer.
+    // A stock-length body: entityType, pos, rot, then a tail. Nothing in it
+    // may reach the control path. Speed coasts down exponentially rather than
+    // reaching zero, so compare against the coasting baseline instead of 0.
+    // Build it byte-exact so the prefix would decode as a *drive* command if
+    // the length gate let it through: byte 4 (pos.x's high byte) is op 2, and
+    // bytes 5..13 are a large throttle. A body whose bytes happen to decode as
+    // op 0 would pass this test without exercising the gate at all.
+    var stock_body: [64]u8 = undefined;
+    var sw: binary.Writer = .{ .buf = &stock_body };
+    try sw.writeI32(ve); // entityType, deliberately the live vehicle id
+    try sw.writeByte(2); // offset 4: read as op -> 2 = drive
+    try sw.writeF32(1.0); // offsets 5..9: read as throttle
+    try sw.writeF32(0.0); // offsets 9..13: read as steer
+    try sw.writeF32(0);
+    try sw.writeF32(0);
+    try sw.writeF32(0); // the rest of pos/rot
+    try sw.writeF32(0);
+    try sw.writeI32(0); // stand-in for the ItemValue + entityThatPlaced tail
+    try std.testing.expect(sw.written().len > packages.vehicle_control_len);
+    const before_stock = g.sim.vehicle[vslot].speed;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageVehicleSpawn", sw.written()));
+    try g.step();
+    // Read as a control body, the pos floats would arrive as throttle 1.0 and
+    // push the speed up; coasting can only lower it.
+    try std.testing.expect(g.sim.vehicle[vslot].speed <= before_stock);
+
     var te: i32 = -1;
     var tx: f32 = 0;
     var ty: f32 = 70;
