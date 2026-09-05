@@ -50,6 +50,25 @@ inherit `AllowedBeforeAuth = false`, which is correct: that phase is reached
 only after a login is accepted. Nothing to change, recorded so the sweep is
 not repeated.
 
+**`FlushQueue` is moot here (2026-09-04).** The last `NetPackage` property
+that could carry a wire contract turns on a send queue zdtd does not have.
+Stock's `ClientInfo::SendPackage` calls `INetConnection::AddToSendQueue` and
+then `FlushSendQueue` only when `get_FlushQueue` is true (IL=28, IL_002E-004E);
+eight packages override the base false, all of them handshake or bulk-metadata
+sends that must not wait behind a batch. zdtd's `Peer.sendReliable` writes the
+datagram straight to the socket, so every package is effectively flushed on
+send and the property has nothing to select. It becomes relevant only if a
+send queue is ever introduced - at which point these eight names are the set
+that must bypass it. With this, all eight `NetPackage` properties are
+accounted for. Channel, Compress, PackageDirection and ReliableDelivery are
+pinned by tests against the IL. `PackageId` is not a per-package constant at
+all - `NetPackage::get_PackageId` (IL=4) looks the runtime type up in
+`NetPackageManager`, which is the negotiated table zdtd advertises as
+`default_mappings`; its invariants (no duplicate name, and `framed` stamping
+the id `idOf` returns) are covered by a compile-time check and a test.
+AllowedBeforeAuth and FlushQueue are recorded here as no-ops, and `Sender` is
+server-set state rather than a wire field.
+
 **Gated since 2026-09-04.** `provenance_scan` 7i reads
 `get_PackageDirection` out of the 3.2.0 IL for every advertised package and
 fails when a C2S handler claims a `ToClient` name that no row here mentions.
