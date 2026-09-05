@@ -66,9 +66,21 @@ is repeatable and cuts a mutant from 4 min to 2.6 s; the tool probes the set
 first and refuses to run when it selects nothing, and re-checks each survivor
 against the unfiltered suite so a too-narrow filter cannot invent one.
 
+It mutates the decode side the same way (2026-09-04): the parsers are struct
+literals (`.field = try r.readI32(),`), Zig evaluates them in source order, and
+a parser that reads a body in the wrong order is a wire break exactly like a
+mis-ordered builder. The first decode run paid for itself - the `setblock`
+filter was refused as not-live, which turned out to be correct: no test read
+the parsed coordinates back, and behind that gap sat a length-keyed legacy
+branch that decoded an empty change list from an identified client as a block
+edit (fixed, see the CHANGELOG).
+
 **Audit state (2026-09-04).** Every file in `src/wire/` that has swappable
-pairs has now been measured; the three remaining survivors are unobservable by
-construction and documented at their code sites:
+pairs has now been measured, encode and decode; the three remaining survivors
+are unobservable by construction and documented at their code sites. Mutant
+counts below are the encode pass; the decode pass added 18 pairs (13 in
+`packages.zig`, 3 in `stock_party.zig`, 2 in `stock_buff.zig`) and all of them
+are killed after the `setblock` fix:
 
 | File | Mutants | Result |
 |---|---:|---|

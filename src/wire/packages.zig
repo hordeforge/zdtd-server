@@ -1882,23 +1882,14 @@ pub fn parseSetBlockBody(body: []const u8) !struct { x: i32, y: i32, z: i32, blo
 /// reader cannot size, so continuing would decode every later change in the
 /// batch from a desynced offset as a bogus world edit. Changes lacking a
 /// position or a value are dropped from the output rather than returned half
-/// filled. A 14-byte body is the legacy zdtd fixture form (x/y/z i32 + id u16),
-/// kept because unit fixtures still write it.
+/// filled.
+///
+/// There is no length-keyed shortcut here. A 14-byte legacy branch used to sit
+/// at the top, and 14 is a length a stock body reaches on its own: identity
+/// plus a zero count is `6 + platform.len + id.len`, so any pair summing to 8
+/// (`"Steam"` with a 3-character id) hits it, and an empty change list decoded
+/// as a block edit with x/y/z read out of the account name.
 pub fn parseSetBlockChanges(body: []const u8, out: []BlockChange) !usize {
-    // Legacy intermediate: 14 bytes.
-    if (body.len == 14) {
-        if (out.len == 0) return 0;
-        var r: binary.Reader = .{ .data = body };
-        out[0] = .{
-            .x = try r.readI32(),
-            .y = try r.readI32(),
-            .z = try r.readI32(),
-            .block_id = try r.readU16(),
-            .has_pos = true,
-            .has_value = true,
-        };
-        return 1;
-    }
     var r: binary.Reader = .{ .data = body };
     try platform_user.skip(&r);
     const n_i = try r.readI16();
@@ -1981,6 +1972,12 @@ test "setblock stock body roundtrip" {
     var one: [1]BlockChange = undefined;
     const n = try parseSetBlockChanges(dmg_body, one[0..]);
     try std.testing.expectEqual(@as(usize, 1), n);
+    // The change position is the point of the package and nothing read it
+    // back: the parser could have swapped two of the three coordinates and
+    // every assertion here would still have passed.
+    try std.testing.expectEqual(@as(i32, 1), one[0].x);
+    try std.testing.expectEqual(@as(i32, 2), one[0].y);
+    try std.testing.expectEqual(@as(i32, 3), one[0].z);
     try std.testing.expectEqual(@as(u16, 20304), one[0].block_id);
     try std.testing.expectEqual(@as(u16, 7), one[0].damage);
     try std.testing.expectEqual(@as(u16, 13), p.block_id);
@@ -2030,6 +2027,24 @@ test "setblock raw body preserves the meta nibble" {
     const plain = try buildSetBlockBodyDamage(&buf, 1, 2, 3, 19200, 11, 106, 106);
     try std.testing.expectEqual(@as(usize, 1), try parseSetBlockChanges(plain, one[0..]));
     try std.testing.expectEqual(@as(u8, 0), blockMeta(one[0].raw));
+}
+
+test "an empty change list from an identified client is not a block edit" {
+    // A stock body is `identity | count i16 | changes`, and an identity plus a
+    // zero count is 6 + platform.len + id.len bytes. Any pair summing to 8 -
+    // "Steam" with a 3-character id, say - lands on exactly 14, which a
+    // length-keyed legacy branch would decode as x/y/z/id read straight out of
+    // the identity bytes: a block edit the client never asked for, at a
+    // position taken from its account name.
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try platform_user.write(&w, .{ .platform = "Steam", .id = "abc" });
+    try w.writeI16(0); // no changes
+    const body = w.written();
+    try std.testing.expectEqual(@as(usize, 14), body.len);
+
+    var one: [1]BlockChange = undefined;
+    try std.testing.expectEqual(@as(usize, 0), try parseSetBlockChanges(body, one[0..]));
 }
 
 test "block meta accessors match BlockValue get_meta/set_meta" {
