@@ -11193,6 +11193,52 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     std.debug.print("PASS kill-counter: zombie + PvP kills ride the PlayerStats wire\n", .{});
 }
 
+test "scenario pvp_mode 0 drops a player-to-player damage claim" {
+    // Stock PlayerKillingMode 0 ("no killing") is a server policy the client
+    // cannot opt out of: a DamageEntity naming another player is dropped
+    // before it can touch health. The kill-counter scenario above only ever
+    // runs with pvp_mode 3, so the deny half needs its own world (the damage
+    // path is rate-limited per client, so it cannot share one).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    g.pvp_mode = 0;
+    const vslot = g.sim.slotOfNetId(cb.entity_id) orelse return error.TestUnexpectedResult;
+    const hp_before = g.sim.health[vslot].hp;
+    try std.testing.expect(hp_before > 0);
+
+    var dmg: [256]u8 = undefined;
+    var fbuf: [512]u8 = undefined;
+    // `fatal` is set, so a gate that let this through would leave the victim
+    // present at zero health rather than merely wounded.
+    const denied = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 1000, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", denied));
+    try std.testing.expectApproxEqAbs(hp_before, g.sim.health[vslot].hp, 0.01);
+    try std.testing.expectEqual(@as(u16, 0), ca.player_kills);
+
+    // Same claim with PvP enabled lands, so the rejection above is the mode
+    // gate and not some unrelated reason the packet never arrived.
+    g.pvp_mode = 3;
+    const allowed = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 1000, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", allowed));
+    try std.testing.expect(g.sim.health[vslot].hp < hp_before);
+    std.debug.print("PASS pvp-gate: pvp_mode 0 denies, pvp_mode 3 allows\n", .{});
+}
+
 test "scenario every registered package id survives dispatch with a malformed body" {
     // Two properties, both cheap and both real:
     //
