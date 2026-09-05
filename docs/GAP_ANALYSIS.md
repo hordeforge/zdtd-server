@@ -68,7 +68,7 @@ are unloaded instead of standing frozen in your world forever.
 ### What a player cannot do
 
 *Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
-[scorecard](#2-scorecard): all but three of the 300 features WORK (297 WORKS, 3 PARTIAL, 0 MISSING); the
+[scorecard](#2-scorecard): all but three of the 299 features WORK (296 WORKS, 3 PARTIAL, 0 MISSING); the
 bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -149,9 +149,11 @@ closed: power grid nodes rebuild from the chunk block grid
 (`scanChunkPower`) and prefab `.tts` water planes paint.
 Recount 2026-08-22 from the live per-feature markers (the source of truth):
 **291 features** carry a canonical WORKS/PARTIAL/MISSING tag and the scorecard
-rows below are corrected to those counts. Recount 2026-08-29 (this pass):
-rows added or re-tagged since then bring the canonical set to **300 features
-(297 WORKS, 3 PARTIAL, 0 MISSING)**; the PARTIAL rows are the 2026-08-29
+rows below are corrected to those counts. Recount 2026-09-04 (this pass, by
+counting the `- **name** \`TAG\`` bullets in sections 4-12): the canonical set
+is **299 features (296 WORKS, 3 PARTIAL, 0 MISSING)**. The previous pass wrote
+297/300 and two area headers (World systems 45, Net and ops 49) that the
+markers did not support; all three are corrected here. The PARTIAL rows are the 2026-08-29
 join-burst tick budget (its residual recorded in the row) and the
 perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation
 moved into the counted set; the chunk-pointer stability gap was closed
@@ -160,12 +162,13 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Forty-one feature bullets use ad-hoc status labels (`PARTIAL (waived)` x35,
-`N/A (parity)` x4, plus one each of `BLOCKED`, `ROLLED`, `SIZED`, `FIXED`,
-`PERSISTED`, `RESOLVED`, `PER-CLASS`, `DONE`) outside the canonical vocabulary
-and are not counted; the former `reviews/DOC_CONSISTENCY_AUDIT.md` snapshot was
-removed with the `reviews/` directory. Counted 2026-09-02 (the previous
-"fifty-four" had drifted from the markers, the same failure mode as the old
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x37 across
+its four qualifier spellings, `N/A (parity)` x3, `DONE` x2, plus one each of
+`ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
+one-off prose tags) outside the canonical vocabulary and are not counted; the
+former `reviews/DOC_CONSISTENCY_AUDIT.md` snapshot was removed with the
+`reviews/` directory. Counted 2026-09-04 (both "fifty-four" and the later
+"forty-one" had drifted from the markers, the same failure mode as the old
 MISSING projection above); a waiver re-evaluation the same day promoted "Perk
 purchase / spend skill points" to `WORKS` and dropped the `(waived)` qualifier
 from "Perk / attribute passive effects", both of which had shipped and kept a
@@ -204,8 +207,9 @@ A `WORKS` score means the feature is implemented and wire-correct. It does
 not mean zdtd behaves identically to stock: the places where it knowingly
 does not, and why, are in [DIVERGENCES.md](DIVERGENCES.md).
 
-300 features scored across nine areas (recounted 2026-09-02 from the
-per-feature markers, the source of truth; STATUS wins on conflict).
+299 features scored across nine areas (recounted 2026-09-04 from the
+per-feature markers, which are the source of truth for the counts; STATUS
+wins on conflict about what shipped, not about the arithmetic).
 
 | Area | WORKS | PARTIAL | MISSING | Total | Bottom line |
 |---|---:|---:|---:|---:|---|
@@ -217,8 +221,8 @@ per-feature markers, the source of truth; STATUS wins on conflict).
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
 | [Player progression](#10-player-progression) | 25 | 2 | 0 | 27 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
-| [Net and ops](#12-net-and-ops) | 49 | 0 | 0 | 49 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **297** | **3** | **0** | **300** | Three PARTIAL rows, all with a named shortfall rather than a blocked dependency: the perk/attribute passive-effects VM and the death/kill counters (§10, both re-evaluated 2026-09-02 when the `(waived)` qualifier was dropped), and the join-burst tick budget (§11, 2026-08-29, residual recorded inline). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
+| **Total** | **296** | **3** | **0** | **299** | Three PARTIAL rows, all with a named shortfall rather than a blocked dependency: the perk/attribute passive-effects VM and the death/kill counters (§10, both re-evaluated 2026-09-02 when the `(waived)` qualifier was dropped), and the join-burst tick budget (§11, 2026-08-29, residual recorded inline). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3448,7 +3452,7 @@ retired 2026-08-25: stock's surface density is binary and the wire heightmaps
 are `byte[256]`, so the client's smooth surface comes from its meshers, not from
 a finer server encoding.
 
-**45 WORKS · 1 PARTIAL · 0 MISSING**
+**46 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **Chunk store (16x256x16, u32 rawData plane, lazy channels, ZCH3 disk)** `WORKS`
   Full 65536-cell u32 plane per chunk with lazy texture and density side planes;
@@ -4045,7 +4049,7 @@ server is invisible to every server browser, drops the block id mapping on every
 single join, silently ignores 32 packages the stock client actually sends, and
 persists so little that a restart visibly damages a built base.
 
-**49 WORKS · 0 PARTIAL · 0 MISSING**
+**48 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **PackageIds name table (191 stock names, exact set)** `WORKS`
   `default_mappings` holds 191 entries: every class transitively extending
