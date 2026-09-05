@@ -1887,8 +1887,10 @@ pub fn parseSetBlockBody(body: []const u8) !struct { x: i32, y: i32, z: i32, blo
 /// There is no length-keyed shortcut here. A 14-byte legacy branch used to sit
 /// at the top, and 14 is a length a stock body reaches on its own: identity
 /// plus a zero count is `6 + platform.len + id.len`, so any pair summing to 8
-/// (`"Steam"` with a 3-character id) hits it, and an empty change list decoded
-/// as a block edit with x/y/z read out of the account name.
+/// (`"Steam"` with a 3-character id) hit it, and an empty change list came back
+/// as one change with x/y/z read out of the identity bytes. The caller's reach
+/// check happened to reject those coordinates; that is not a defence a parser
+/// should lean on.
 pub fn parseSetBlockChanges(body: []const u8, out: []BlockChange) !usize {
     var r: binary.Reader = .{ .data = body };
     try platform_user.skip(&r);

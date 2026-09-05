@@ -182,13 +182,16 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
-- `NetPackageSetBlock` with an empty change list could apply a block edit the
+- `NetPackageSetBlock` with an empty change list decoded as a block change the
   client never sent. `parseSetBlockChanges` keyed a legacy 14-byte layout off
   the body length, and 14 is a length a stock body reaches on its own: an
   identity plus a zero count is `6 + platform.len + id.len`, so any pair
-  summing to 8 (`"Steam"` with a 3-character id) matched, and x/y/z/id decoded
-  straight out of the account name. The legacy branch is removed; no builder
-  had emitted that form since the stock encoder landed.
+  summing to 8 (`"Steam"` with a 3-character id) matched, and x/y/z/id came out
+  of the identity bytes. The reach check rejected the result every time (the
+  leading identity bytes put the decoded `x` near 1.4 billion), so the cost was
+  a bogus rejection and a bounds counter rather than a world edit. The legacy
+  branch is removed; no builder had emitted that form since the stock encoder
+  landed.
 - `NetPackageTurretSpawn` from a real client never placed a turret. The handler
   read zdtd's compact three-i32 body unconditionally, so the stock body's float
   position (`entityType` i32 | pos Vector3, RE write IL=24) decoded as
