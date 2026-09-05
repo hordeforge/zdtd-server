@@ -182,6 +182,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- A legacy ZCT1 container save with more than one record lost every container
+  after the first. ZCT2 appends `touched_day` plus the grid size after a
+  record's slots; the loader decided whether to read that tail from the bytes
+  remaining rather than from the file's magic, so in a multi-record ZCT1 file
+  it consumed the next record's position as the previous one's `touched_day`
+  and every following record shifted out of alignment. The tail is now keyed
+  on the magic. A single-record fixture cannot see this, which is why no test
+  did.
 - Every pre-ZPV12 player save carrying inventory was corrupted on the first
   save after upgrade, not just v10/v11: each migration branch widened slots
   only to its own era's width (7 to 13, or 11 to 13) while the header became

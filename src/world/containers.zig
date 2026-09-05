@@ -302,9 +302,15 @@ pub const ContainerStore = struct {
                 }
                 o += 7;
             }
-            // touched_day appended after the slots in newer saves; older files
-            // end at the last slot and load touched_day as 0.
-            if (o + 4 <= len) {
+            // touched_day appended after the slots in ZCT2; a ZCT1 record ends
+            // at the last slot and loads touched_day as 0.
+            //
+            // The magic decides this, not the remaining length. Keying it on
+            // `o + 4 <= len` only worked for a single-record ZCT1 file: with
+            // two or more, the bytes after the first record are the next
+            // record's position, so they were consumed as its touched_day and
+            // every later record shifted out of alignment and was lost.
+            if (with_size and o + 4 <= len) {
                 if (maybe_c) |c| c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
                 o += 4;
             }
@@ -392,6 +398,56 @@ test "container store ZCT2 persists the observed grid size" {
     const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
     try std.testing.expectEqual(@as(u8, 6), c2.size_x);
     try std.testing.expectEqual(@as(u8, 2), c2.size_y);
+}
+
+test "a legacy ZCT1 file loads without the touched_day and size tail" {
+    // ZCT1 records end after the slots; ZCT2 appends touched_day u32 plus
+    // size_x/size_y. Nothing loaded a ZCT1 buffer, so reading one as ZCT2 -
+    // six bytes past the record taken as its tail - left the suite green while
+    // every later record shifted.
+    // Two records, so the first one's missing tail is followed by real bytes:
+    // with a single record the length guard hides the difference.
+    var buf: [6 + 2 * (20 + 2 * 7)]u8 = @splat(0);
+    @memcpy(buf[0..4], "ZCT1");
+    std.mem.writeInt(u16, buf[4..6], 2, .little); // two records
+    std.mem.writeInt(i32, buf[6..10], 5, .little); // x
+    std.mem.writeInt(i32, buf[10..14], 70, .little); // y
+    std.mem.writeInt(i32, buf[14..18], 6, .little); // z
+    std.mem.writeInt(i32, buf[18..22], 42, .little); // block_id
+    std.mem.writeInt(u16, buf[22..24], 2, .little); // slot_count
+    buf[24] = 1; // touched
+    buf[25] = 0; // player_storage
+    // Two 7-byte slots: item u16 | count u16 | quality u8 | meta u16.
+    std.mem.writeInt(u16, buf[26..28], 7, .little);
+    std.mem.writeInt(u16, buf[28..30], 3, .little);
+    buf[30] = 4;
+    std.mem.writeInt(u16, buf[31..33], 5, .little);
+
+    // Second record at a distinct position; reading a 6-byte tail for the
+    // first would consume its header and lose it.
+    const r2 = 6 + 20 + 2 * 7;
+    std.mem.writeInt(i32, buf[r2 .. r2 + 4][0..4], 9, .little); // x
+    std.mem.writeInt(i32, buf[r2 + 4 .. r2 + 8][0..4], 71, .little); // y
+    std.mem.writeInt(i32, buf[r2 + 8 .. r2 + 12][0..4], 10, .little); // z
+    std.mem.writeInt(i32, buf[r2 + 12 .. r2 + 16][0..4], 43, .little); // block_id
+    std.mem.writeInt(u16, buf[r2 + 16 .. r2 + 18][0..2], 2, .little); // slot_count
+
+    var s: ContainerStore = .{};
+    try s.loadFromSlice(&buf);
+    const c = s.get(.{ .x = 5, .y = 70, .z = 6 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 42), c.block_id);
+    try std.testing.expectEqual(@as(u16, 2), c.slot_count);
+    try std.testing.expect(c.touched);
+    try std.testing.expectEqual(@as(u16, 7), c.slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 3), c.slots[0].count);
+    // The grid is absent in v1 and loads as 0; the wire writer synthesizes it.
+    try std.testing.expectEqual(@as(u8, 0), c.size_x);
+    try std.testing.expectEqual(@as(u8, 0), c.size_y);
+
+    // The record after it is still found: a misread tail would have eaten its
+    // header and shifted everything that follows.
+    const c2 = s.get(.{ .x = 9, .y = 71, .z = 10 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 43), c2.block_id);
 }
 
 test "container save order is pos-sorted not slot-order" {
