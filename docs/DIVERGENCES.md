@@ -216,6 +216,26 @@ The third one below was not distinguished at all until it was written down
 here, which is the argument for keeping this list: the compact form was read
 unconditionally and a stock client's turret placement was silently dropped.
 
+**Distinguish by shape, and prove the lengths cannot meet.** A length only
+discriminates when no stock body can reach it, and a stock body's length is
+rarely fixed: it carries a `PlatformUserIdentifier` whose two strings vary with
+the account. `parseSetBlockChanges` keyed a legacy layout off `body.len == 14`,
+and 14 is reachable, because identity plus a zero count is
+`6 + platform.len + id.len`: a player on `"Steam"` with a 3-character id sent an
+empty change list and had it decoded as one block change with x/y/z read out of
+the identity bytes. What it actually cost was a false edit attempt, not a world
+edit: the first two identity bytes are the present bool and the version, both
+1, so the decoded `x` is always around 1.4 billion and `withinEditReach` in
+`c2s/blocks.zig` rejected every one of them. The bug was a parser inventing a
+change the client never sent, one reach check away from applying it. Removed
+2026-09-04.
+
+The three below were re-checked against this rule and all hold with room to
+spare: VehicleSpawn gates on exactly 13 against a stock minimum of 32, Turret
+splits at 16 against a stock minimum of 28, and the TraderData trade arm takes
+exactly 9 where a stock ToServer body is 6 or 14. Any new length gate needs the
+same arithmetic written beside it.
+
 - **`NetPackageVehicleSpawn`** also accepts a zdtd control body (`entityId` i32 |
   `op` u8 | `throttle` f32 | `steer` f32, fixed 13 bytes) for seat / unseat /
   drive. Stock's body is `entityType` i32 | pos Vector3 | rot Vector3 |

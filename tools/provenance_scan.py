@@ -543,6 +543,44 @@ def main():
                     f"wire_order_mutants.literal_value({arg!r}) is {got!r}, want {want!r}"
                 )
 
+    # 7g. LENGTH GATES ON A TRUST BOUNDARY. A handler that picks between two
+    #     body layouts by length is safe only when no stock body can reach the
+    #     gate value, and a stock body's length is rarely fixed: it carries a
+    #     PlatformUserIdentifier whose two strings vary with the account.
+    #     parseSetBlockChanges keyed a legacy layout off `body.len == 14`, and a
+    #     player on "Steam" with a 3-character id hit it exactly: an empty
+    #     change list decoded as one change with x/y/z read out of the identity
+    #     bytes. Only the reach check downstream kept that from being a world
+    #     edit. The arithmetic that rules a collision out is what a reviewer
+    #     needs and what nobody writes down, so require a comment near every
+    #     length gate.
+    length_gate_re = re.compile(r"\b(?:body|data|payload)\.len\s*(?:==|>=)\s*(\w+)")
+    undocumented_gates = []
+    for rel in ("src/server/c2s", "src/wire"):
+        for dirpath, _dirs, names in os.walk(os.path.join(ROOT, rel)):
+            for n in sorted(names):
+                if not n.endswith(".zig"):
+                    continue
+                path = os.path.join(dirpath, n)
+                lines = open(path, encoding="utf-8", errors="replace").readlines()
+                in_test = False
+                for i, line in enumerate(lines):
+                    if line.startswith("test "):
+                        in_test = True
+                    elif in_test and line.startswith("}"):
+                        in_test = False
+                    if in_test or not length_gate_re.search(line):
+                        continue
+                    if "//" not in "".join(lines[max(0, i - 12):i + 3]):
+                        undocumented_gates.append(f"{os.path.relpath(path, ROOT)}:{i + 1}")
+    if undocumented_gates:
+        failures.append(
+            "length gates on a C2S/wire body with no nearby comment "
+            f"({len(undocumented_gates)}): " + ", ".join(undocumented_gates[:8])
+            + " - state which stock lengths are reachable and why they miss "
+            "this gate (DIVERGENCES 3, 'prove the lengths cannot meet')"
+        )
+
     if failures:
         for f in failures:
             print("FAIL:", f)
