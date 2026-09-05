@@ -177,7 +177,7 @@ The live task list is [WORK_PLAN.md](WORK_PLAN.md).
 
 ### V3.2.0 (2026-08-28)
 
-Wire pinned to **V3.2.0 b9** (research `docs/changelog-3.2.0.md`): the packed
+Wire pinned to **V3.2.0 b10** (research `docs/changelog-3.2.0.md`): the packed
 `DamageEntity` flags + `KillXPScale` parse (breaking), the POI metadata
 Request/Response packages replacing `POIAround`, the `ConfirmSpawnEntity`
 builder + the `EntityCreationData` requestedBy/requestKey tail note,
@@ -4062,7 +4062,9 @@ persists so little that a restart visibly damages a built base.
   map count captured for V3.0.1 and re-captured for V3.1.0 (RE `protocol.md`
   §4: `map count: 0xBD = 189`); V3.2.0 b9 was never re-captured live and its
   census is 195 wire types (RE `inventories/netpackages.md`), so 191 sitting
-  between the two is what a pin between those captures should look like.
+  between the two is what a pin between those captures should look like. The
+  b10 retarget does not move this: RE `changelog-3.2.0.md` §8 records the
+  NetPackage census unchanged at 195 across b9 → b10.
   Re-verified against the RE type table 2026-09-04: no stock wire package is
   absent from our map, and no name we register is absent from the RE docs. The
   only stock-table names we do not register are helpers and abstract bases

@@ -5,6 +5,20 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Wire pin retargeted to stock **V3.2.0 b10** (`src/version.zig`,
+  `VersionInfo` in `src/wire/packages.zig`): `Constants.cVersionBuild` 9 → 10,
+  so the GSI `ServerVersion` four-field string is now `V.3.20.10` and the
+  `PackageIds` body carries build 10. The login gate compares
+  `VersionInformation.LongStringNoBuild` (`V 3.2.0`), which the build number
+  does not enter, so a b9 client still joins. b10 changed no wire surface:
+  research `docs/changelog-3.2.0.md` §8 records an unchanged census (4426
+  types / 44277 methods / 195 NetPackage / `gmUpdate` IL=631 /
+  `WorldState.SaveLoad` IL=926), byte-identical XML pins, and a managed-code
+  delta confined to the client-side EOS Title Storage cancel path
+  (`Platform.EOS.RemoteFileStorage`), which the dedicated server never runs.
+
 ### Added
 
 - Stock client wire V3.2.0 b9 (Mono, EAC off): packed `NetPackageDamageEntity`
