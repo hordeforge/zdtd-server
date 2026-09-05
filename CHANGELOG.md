@@ -5,6 +5,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Wrench pickup now removes the block on the server. `NetPackagePickupBlock`
+  broadcast the replacement `NetPackageSetBlock` but never wrote it, so the
+  block disappeared for clients while still standing in the world: it came
+  back on the next chunk load and kept blocking placement and pathing in the
+  meantime. Stock replicates the pickup rather than simulating it client-side
+  (RE `blocks.md` "Server authority").
+
 ## [0.3.0] - 2026-09-06
 
 ### Removed
