@@ -95,6 +95,18 @@ emitted that shape and no handler read it - so it was deleted. Redo both
 counts when `src/wire/` gains builders or parsers; a name with no direct call
 is not a finding on its own, only a pointer at the caller to check.
 
+Both counts share a blind spot: they name functions *defined* in `src/wire/`,
+and the mutant tool only walks that directory, so wire bytes written anywhere
+else are invisible to both. `rg -l 'binary.Writer' src/ | rg -v '^src/wire/'`
+finds them - six files, of which `persist.zig` writes to disk and
+`harness.zig`/`tests.zig`/`scenarios.zig` are test code. The two on live wire
+paths were mutated by hand: the SharedQuest remove body in `session_drop.zig`
+is caught by a party scenario, but the empty `NetPackageHoldingItem` in
+`game/join.zig` was not - a swapped entityId/count left the suite green on a
+body every client receives at join. It now goes through `writeHoldingItem`
+(AGENTS rule 14), which puts it back inside the audits. Re-run that `rg` when
+a new send path appears.
+
 **Audit state (2026-09-04).** Every file in `src/wire/` that has swappable
 pairs has now been measured, encode and decode; the three remaining survivors
 are unobservable by construction and documented at their code sites. Mutant

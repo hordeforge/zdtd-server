@@ -1462,6 +1462,20 @@ test "holding item body layout" {
     try std.testing.expectEqual(@as(i32, 42), std.mem.readInt(i32, body[0..4], .little));
     try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, body[4..6], .little));
     try std.testing.expectEqual(@as(u8, 0), body[body.len - 1]); // holding index
+
+    // The empty-stack form the join path sends before the inventory lands. It
+    // was open-coded in game/join.zig, out of reach of the wire audits, and a
+    // swapped entityId/count there went unnoticed by the whole suite. Layout
+    // is `NetPackageHoldingItem::write` (IL=16): Write(Int32) entityId,
+    // ItemStack::Write (count u16, no ItemValue when zero), Write(Byte) index.
+    var eb: [16]u8 = undefined;
+    var ew: binary.Writer = .{ .buf = &eb };
+    try writeHoldingItem(&ew, 42, .{}, 3);
+    const empty = ew.written();
+    try std.testing.expectEqual(@as(usize, 7), empty.len);
+    try std.testing.expectEqual(@as(i32, 42), std.mem.readInt(i32, empty[0..4], .little));
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, empty[4..6], .little));
+    try std.testing.expectEqual(@as(u8, 3), empty[6]);
 }
 
 /// Test reverse mapper: stock type 65536+id → id (matches typeFromBuiltinId).

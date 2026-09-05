@@ -796,15 +796,16 @@ pub fn sendHoldingOnlyEx(self: *Game, peer: *ln_peer.Peer, c: *Client, full_stac
             self,
         );
     } else {
-        // Empty ItemStack: entityId + u16 count=0 + holding index.
-        var w: wire_binary.Writer = .{ .buf = self.body_buf[6144..6160] };
-        try w.writeI32(c.entity_id);
-        try w.writeU16(0);
+        // Same body with an empty ItemStack. Built through the one encoder
+        // rather than open-coded here: a second hand-rolled copy of a stock
+        // layout is outside the reach of the wire audits, and this one had a
+        // swappable pair no test could see.
         const idx: u8 = if (self.sim.inventory[ps].holding < ecs.components.inv_toolbelt)
             @intCast(self.sim.inventory[ps].holding)
         else
             0;
-        try w.writeByte(idx);
+        var w: wire_binary.Writer = .{ .buf = self.body_buf[6144..6160] };
+        try packages.stock_inv.writeHoldingItem(&w, c.entity_id, .{}, idx);
         hb = w.written();
     }
     try self.sendGame(peer, "NetPackageHoldingItem", hb);
