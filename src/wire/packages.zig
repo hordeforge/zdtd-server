@@ -2424,7 +2424,10 @@ pub fn buildInventoryBodyStockResolved(
     return stock_inv.buildFromEcsResolved(buf, inv, resolve, ctx);
 }
 
-/// NetPackageIdMapping body: name string + i32 len + bytes.
+/// NetPackageIdMapping body: name string + i32 len + bytes, matching
+/// `NetPackageIdMapping::write` (IL=18: `Write(String)`, `Write(Int32)`,
+/// `Write(Byte[])`) and its read (IL=13: `ReadString`, `ReadInt32`,
+/// `ReadBytes`).
 pub fn buildIdMappingBody(buf: []u8, name: []const u8, data: []const u8) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeString(name);
@@ -5951,6 +5954,21 @@ test "ragdoll invoke parses the stock body" {
     const r = try parseRagdollInvoke(w.written());
     try std.testing.expectEqual(@as(i32, 77), r.entity_id);
     try std.testing.expectEqual(@as(u8, 0x07), r.flags);
+}
+
+test "id mapping body is name, then length, then bytes" {
+    // The join path builds this for the item NameIdMapping and nothing read it
+    // back: swapping the name string with the i32 length left the whole suite
+    // green while the body no longer matched `NetPackageIdMapping::read`
+    // (IL=13: ReadString, ReadInt32, ReadBytes).
+    var buf: [64]u8 = undefined;
+    const body = try buildIdMappingBody(&buf, "items", &.{ 7, 8, 9 });
+
+    var r: binary.Reader = .{ .data = body };
+    var name_buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("items", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(i32, 3), try r.readI32());
+    try std.testing.expectEqualSlices(u8, &.{ 7, 8, 9 }, body[r.pos..]);
 }
 
 test "explosion blob decodes radii at their stock scales" {
