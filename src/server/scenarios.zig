@@ -505,11 +505,17 @@ test "scenario damage wire: fatal DamageEntity broadcasts EntityRemove" {
     var dmg_body: [256]u8 = undefined;
     var frame_buf: [512]u8 = undefined;
 
-    // A forged target id outside the attacker's interest range must not mutate it.
+    // A forged target id outside the attacker's interest range must not mutate
+    // it. Surviving the packet is not enough to show the range gate ran: the
+    // claim carries `fatal`, so a gate that let it through would leave the
+    // zombie present but at zero HP. Assert the health is untouched.
     const far_zid = g.sim.spawnZombie(10_000, 70, 10_000, 50).?;
+    const far_slot = g.sim.slotOfNetId(far_zid) orelse return error.TestUnexpectedResult;
+    const far_hp_before = g.sim.health[far_slot].hp;
     const far_body = try packages.buildDamageBody(&dmg_body, far_zid, 0, 3, 100, true, ca.entity_id);
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageDamageEntity", far_body));
     try std.testing.expect(g.sim.slotOfNetId(far_zid) != null);
+    try std.testing.expectApproxEqAbs(far_hp_before, g.sim.health[far_slot].hp, 0.01);
 
     const zid = g.sim.spawnZombie(260, 70, 260, 50).?;
     try std.testing.expect(g.sim.slotOfNetId(zid) != null);
