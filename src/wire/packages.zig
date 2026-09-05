@@ -2436,6 +2436,30 @@ pub fn buildIdMappingBody(buf: []u8, name: []const u8, data: []const u8) ![]u8 {
     return w.written();
 }
 
+/// One `(stock type id, name)` row of a NameIdMapping payload, in
+/// `NameIdMapping::SaveToWriter` order (IL=72: per entry `Write(Int32)` the id
+/// then `Write(String)` the name).
+pub const IdMappingEntry = struct { id: i32, name: []const u8 };
+
+/// NameIdMapping payload: version i32 (1) | count i32 | per entry id i32 +
+/// name string. The count is written after the rows because stock backfills it
+/// the same way (`SaveToWriter` seeks back to the reserved slot, IL=72).
+/// Returns the payload for `buildIdMappingBody` to wrap.
+pub fn buildNameIdMappingPayload(buf: []u8, entries: []const IdMappingEntry) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(1); // version
+    const count_pos = w.pos;
+    try w.writeI32(0);
+    var n: i32 = 0;
+    for (entries) |e| {
+        try w.writeI32(e.id);
+        try w.writeString(e.name);
+        n += 1;
+    }
+    std.mem.writeInt(i32, buf[count_pos..][0..4], n, .little);
+    return w.written();
+}
+
 /// NetPackageHoldingItem (RE inventories/netpackage-bodies.md, write IL=16):
 /// `entityId` i32 | `holdingItemStack` (ItemStack.Write) | `holdingItemIndex`
 /// u8. Body written by stock_inv.writeHoldingItem.
@@ -5957,6 +5981,34 @@ test "id mapping body is name, then length, then bytes" {
     try std.testing.expectEqualStrings("items", try r.readString(&name_buf));
     try std.testing.expectEqual(@as(i32, 3), try r.readI32());
     try std.testing.expectEqualSlices(u8, &.{ 7, 8, 9 }, body[r.pos..]);
+}
+
+test "name id mapping payload is version, count, then id before name" {
+    // The join path built this inline in game/join.zig, where neither the
+    // mutant tool nor the coverage counts reach: swapping the id with the name
+    // left the whole suite green while the payload stopped matching
+    // `NameIdMapping::SaveToWriter` (IL=72: per entry Write(Int32) the id then
+    // Write(String) the name).
+    var buf: [128]u8 = undefined;
+    const payload = try buildNameIdMappingPayload(&buf, &.{
+        .{ .id = 65543, .name = "meleeToolStoneAxe" },
+        .{ .id = 65545, .name = "gunHandgunT1Pistol" },
+    });
+
+    var r: binary.Reader = .{ .data = payload };
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // version
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // backfilled count
+    var name_buf: [32]u8 = undefined;
+    try std.testing.expectEqual(@as(i32, 65543), try r.readI32());
+    try std.testing.expectEqualStrings("meleeToolStoneAxe", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(i32, 65545), try r.readI32());
+    try std.testing.expectEqualStrings("gunHandgunT1Pistol", try r.readString(&name_buf));
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+
+    // An empty map still carries a well-formed header.
+    const none = try buildNameIdMappingPayload(&buf, &.{});
+    try std.testing.expectEqual(@as(usize, 8), none.len);
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, none[4..8], .little));
 }
 
 test "explosion blob decodes radii at their stock scales" {

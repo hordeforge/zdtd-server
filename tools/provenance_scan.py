@@ -16,6 +16,7 @@ Usage: python3 tools/provenance_scan.py
 Exit 0 when file coverage is 100% and every ledger row is well-formed.
 """
 import os
+import pathlib
 import re
 import sys
 
@@ -579,6 +580,49 @@ def main():
             f"({len(undocumented_gates)}): " + ", ".join(undocumented_gates[:8])
             + " - state which stock lengths are reachable and why they miss "
             "this gate (DIVERGENCES 3, 'prove the lengths cannot meet')"
+        )
+
+    # 7h. WIRE WRITERS OUTSIDE src/wire/. Both audit tools are scoped to
+    #     src/wire/: wire_order_mutants.py only walks that directory, and the
+    #     builder/parser coverage counts only name functions defined there. A
+    #     stock body assembled anywhere else is invisible to both, which is how
+    #     the empty NetPackageHoldingItem in game/join.zig carried a swappable
+    #     entityId/count pair that no test could see - on the join path, sent
+    #     to every client. Pin the known set: a new writer outside src/wire/
+    #     must either move into a builder (AGENTS rule 14, one stock shape one
+    #     builder) or be added here with the reason it cannot.
+    allowed_wire_writers = {
+        # Writes to disk, not to the wire.
+        "src/server/persist.zig",
+        # Test-only bodies: fixtures the tests feed themselves.
+        "src/server/scenarios.zig",
+        "src/server/game/tests.zig",
+        "src/server/game/harness.zig",
+        # Holds a Writer only to carry a buffer into writeHoldingItem; the
+        # bytes are the builder's. Its two hand-rolled bodies are gone: the
+        # empty HoldingItem now goes through writeHoldingItem and the
+        # NameIdMapping payload through buildNameIdMappingPayload, both after
+        # a hand mutation showed the suite could not see a swapped pair there.
+        "src/server/game/join.zig",
+        # The SharedQuest remove body on disconnect. Still open-coded, but a
+        # party scenario catches a swapped pair (mutation-checked 2026-09-04),
+        # and it is not a shape any builder already emits.
+        "src/server/game/session_drop.zig",
+    }
+    writer_re = re.compile(r"\b(?:wire_)?binary\.Writer\b")
+    unexpected_writers = []
+    for path in sorted(pathlib.Path(ROOT, "src").rglob("*.zig")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith("src/wire/") or rel in allowed_wire_writers:
+            continue
+        if writer_re.search(path.read_text(encoding="utf-8", errors="replace")):
+            unexpected_writers.append(rel)
+    if unexpected_writers:
+        failures.append(
+            "wire writers outside src/wire/, unlisted "
+            f"({len(unexpected_writers)}): " + ", ".join(unexpected_writers[:8])
+            + " - the wire audits do not reach these; move the body into a "
+            "builder or list it in provenance_scan 7h with the reason"
         )
 
     if failures:
