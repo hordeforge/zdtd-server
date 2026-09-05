@@ -92,6 +92,47 @@ fn questStayAtPoi(g: *game_mod.Game, c: *game_mod.Client) void {
     }
 }
 
+test "scenario a wrong challenge echo does not authenticate the peer" {
+    // The challenge is the whole pre-auth boundary: 17 raw bytes, marker 0xCA
+    // then a 16-byte GUID the client echoes back (RE protocol.md §2). Nothing
+    // tested the GUID comparison - deleting it, so any 0xCA packet of the
+    // right length authenticated, left the suite green.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    const peer = &g.net.peers[0];
+    peer.* = .{ .alive = true, .local_id = 1, .authenticated = false };
+    try g.onConnected(peer);
+    const c = g.clientFor(peer) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!c.authed_challenge);
+
+    // Right shape, wrong GUID: every byte flipped from the one issued.
+    var wrong: [17]u8 = undefined;
+    wire_frame.buildChallenge(&wrong, c.challenge);
+    for (wrong[1..]) |*b| b.* = ~b.*;
+    try g.onData(peer, &wrong);
+    try std.testing.expect(!c.authed_challenge);
+    try std.testing.expect(!peer.authenticated);
+
+    // The real echo still works, so the rejection is the GUID, not the shape.
+    var right: [17]u8 = undefined;
+    wire_frame.buildChallenge(&right, c.challenge);
+    try g.onData(peer, &right);
+    try std.testing.expect(c.authed_challenge);
+    try std.testing.expect(peer.authenticated);
+}
+
 test "scenario pre-login world package is rejected by production dispatch" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
