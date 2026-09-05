@@ -8,6 +8,11 @@ const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 /// LiteNetLib protocol id 13 (game Managed LiteNetLib V3.1.0; Cecil-verified
 /// NetConstants.ProtocolId, pinned in ../../7dtd-engine-research/docs/network.md).
 pub const protocol_id: i32 = 13;
+/// LiteNetLib `NetConstants.HeaderSize`: the property/connection byte every
+/// datagram opens with, so every later field is read at this offset. Named
+/// because it was the one Cecil-verified framing constant still written as a
+/// bare `1` across the reader and writer.
+pub const header_size: usize = 1;
 pub const channeled_header_size: usize = 4;
 /// FragmentId:u16 + FragmentPart:u16 + FragmentsTotal:u16 (after channeled header).
 pub const fragment_header_size: usize = 6;
@@ -90,7 +95,7 @@ pub const reject_rate_limit = [_]u8{ 1, 0 };
 pub fn parseConnectRequest(raw: []const u8) ?ConnectRequest {
     if (raw.len < connect_request_header) return null;
     if (propertyOf(raw[0]) != .connect_request) return null;
-    const pid = std.mem.readInt(i32, raw[1..][0..4], .little);
+    const pid = std.mem.readInt(i32, raw[header_size..][0..4], .little);
     if (pid != protocol_id) return null;
     const connection_time = std.mem.readInt(i64, raw[5..][0..8], .little);
     const peer_id = std.mem.readInt(i32, raw[13..][0..4], .little);
@@ -144,7 +149,7 @@ pub fn connectKeyMatches(data: []const u8, server_password: []const u8) bool {
 pub fn writeConnectAccept(buf: []u8, connect_time: i64, connect_num: u8, local_peer_id: i32) ![]u8 {
     if (buf.len < connect_accept_size) return error.Overflow;
     buf[0] = makeByte0(.connect_accept, connect_num);
-    std.mem.writeInt(i64, buf[1..][0..8], connect_time, .little);
+    std.mem.writeInt(i64, buf[header_size..][0..8], connect_time, .little);
     buf[9] = connect_num;
     buf[10] = 0; // not reused
     std.mem.writeInt(i32, buf[11..][0..4], local_peer_id, .little);
@@ -156,7 +161,7 @@ pub fn writeDisconnect(buf: []u8, connect_time: i64, connect_num: u8, extra: []c
     const total = disconnect_header_size + extra.len;
     if (buf.len < total) return error.Overflow;
     buf[0] = makeByte0(.disconnect, connect_num);
-    std.mem.writeInt(i64, buf[1..][0..8], connect_time, .little);
+    std.mem.writeInt(i64, buf[header_size..][0..8], connect_time, .little);
     if (extra.len > 0) @memcpy(buf[disconnect_header_size..][0..extra.len], extra);
     return buf[0..total];
 }
@@ -165,7 +170,7 @@ pub fn writeChanneled(buf: []u8, seq: u16, channel_id: u8, conn_num: u8, user: [
     const total = channeled_header_size + user.len;
     if (buf.len < total) return error.Overflow;
     buf[0] = makeByte0(.channeled, conn_num);
-    std.mem.writeInt(u16, buf[1..][0..2], seq, .little);
+    std.mem.writeInt(u16, buf[header_size..][0..2], seq, .little);
     buf[3] = channel_id;
     @memcpy(buf[4..][0..user.len], user);
     return buf[0..total];
@@ -185,7 +190,7 @@ pub fn writeChanneledFragment(
     const total = fragmented_header_total + user_part.len;
     if (buf.len < total) return error.Overflow;
     buf[0] = makeByte0(.channeled, conn_num) | fragment_flag;
-    std.mem.writeInt(u16, buf[1..][0..2], seq, .little);
+    std.mem.writeInt(u16, buf[header_size..][0..2], seq, .little);
     buf[3] = channel_id;
     std.mem.writeInt(u16, buf[4..][0..2], frag_id, .little);
     std.mem.writeInt(u16, buf[6..][0..2], frag_part, .little);
@@ -212,7 +217,7 @@ pub fn parseChanneled(raw: []const u8) ?ChanneledInfo {
     if (raw.len < channeled_header_size) return null;
     // Merged (0x0c) is a different framing: [prop][u16 len][subpacket]*: not channeled.
     if (propertyOf(raw[0]) != .channeled) return null;
-    const seq = std.mem.readInt(u16, raw[1..][0..2], .little);
+    const seq = std.mem.readInt(u16, raw[header_size..][0..2], .little);
     const channel_id = raw[3];
     if (isFragmented(raw[0])) {
         if (raw.len < fragmented_header_total) return null;
@@ -241,7 +246,7 @@ pub fn writeAck(buf: []u8, channel_id: u8, conn_num: u8, window_start: u16, bits
     const total = channeled_header_size + bitmap_bytes;
     if (buf.len < total) return error.Overflow;
     buf[0] = makeByte0(.ack, conn_num);
-    std.mem.writeInt(u16, buf[1..][0..2], window_start, .little);
+    std.mem.writeInt(u16, buf[header_size..][0..2], window_start, .little);
     buf[3] = channel_id;
     @memset(buf[channeled_header_size..][0..bitmap_bytes], 0);
     const n = @min(bits.len, bitmap_bytes);
@@ -254,6 +259,28 @@ pub fn channeledUserData(raw: []const u8) ?struct { seq: u16, channel_id: u8, us
     // Non-fragment path only (fragments need reassembly at Peer).
     if (info.fragmented) return null;
     return .{ .seq = info.seq, .channel_id = info.channel_id, .user = info.user };
+}
+
+test "framing constants match the Cecil-verified LiteNetLib values" {
+    // network.md pins these off the game's Managed LiteNetLib.dll. They are
+    // the offsets every reader and writer in this file is built on, and
+    // nothing tied them to the reference: only `protocol_id` carried a
+    // citation, and `header_size` was not even a named constant until it was
+    // extracted from ten bare `1`s.
+    try std.testing.expectEqual(@as(i32, 13), protocol_id);
+    try std.testing.expectEqual(@as(usize, 1), header_size);
+    try std.testing.expectEqual(@as(usize, 4), channeled_header_size);
+    try std.testing.expectEqual(@as(usize, 6), fragment_header_size);
+    try std.testing.expectEqual(@as(usize, 10), fragmented_header_total);
+    try std.testing.expectEqual(@as(u16, 32768), max_sequence);
+    try std.testing.expectEqual(@as(usize, 64), window_size);
+
+    // The derived sizes have to stay consistent with them, which is what
+    // makes a wrong header size show up as a truncated body rather than a
+    // constant nobody reads.
+    try std.testing.expectEqual(channeled_header_size + fragment_header_size, fragmented_header_total);
+    try std.testing.expectEqual(max_packet_size - channeled_header_size, max_single_user);
+    try std.testing.expectEqual(max_packet_size - fragmented_header_total, max_fragment_user);
 }
 
 test "connect accept encodes every stock field" {
