@@ -1614,6 +1614,30 @@ test "C2S apply keeps bag slots past the old 32-slot subset" {
     try std.testing.expectEqual(@as(usize, 12), components.inv_equip_count);
 }
 
+test "a bag count wider than the ECS bag does not spill into other slots" {
+    // The apply path's bag loop runs to the client's declared u16 count, not
+    // to the ECS bag width: the index guard inside the loop is what keeps bag
+    // index 45 and beyond from writing into equipment. Nothing pinned that,
+    // and the loop reads a stack per iteration, so a forged count is bounded
+    // by the body running out rather than by a cap.
+    var buf: [8192]u8 = undefined;
+    var inv: components.Inventory = .{};
+    inv.slots[components.inv_equip_start] = .{ .item_id = 99, .count = 1, .quality = 1 };
+    const body = try buildFromEcs(&buf, &inv);
+
+    // Widen the bag count the builder wrote, past the ECS bag width.
+    const want: u16 = @intCast(components.inv_bag_count);
+    const at = std.mem.indexOf(u8, body, &std.mem.toBytes(want)) orelse
+        return error.TestUnexpectedResult;
+    std.mem.writeInt(u16, body[at..][0..2], want + 32, .little);
+
+    var applied: components.Inventory = .{};
+    // Running out mid-stack and applying are both acceptable outcomes; what
+    // must hold is that bag indices never reach the equipment slots.
+    applyPlayerInventoryBody(body, &applied, null, null) catch {};
+    try std.testing.expectEqual(@as(u16, 0), applied.slots[components.inv_equip_start].item_id);
+}
+
 test "item mods round-trip through the wire ItemValue" {
     // Stock ItemValue.Write (IL=323) carries the Modifications array; zdtd
     // now captures the mod ids on read and emits them on write, so a modded

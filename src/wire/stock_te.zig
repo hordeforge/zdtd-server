@@ -841,6 +841,32 @@ test "storage te encode decode roundtrip" {
     try std.testing.expectEqual(@as(u16, 2), parsed2.size_y);
 }
 
+test "a storage slot count reaching past its feature is rejected" {
+    // The stack loop is bounded by the payload, not by the feature length the
+    // body itself declared, so a forged count reads through the end of its own
+    // feature and into whatever follows. It still fails closed: the reader runs
+    // out (`EndOfStream`) before the post-loop overrun check is reached, and a
+    // body that disagrees with itself is refused whole rather than yielding a
+    // truncated container. Only the slots the container can hold are kept, so
+    // the extra iterations cost reads, not memory.
+    var cont: containers.Container = .{
+        .pos = .{ .x = 10, .y = 70, .z = -3 },
+        .block_id = 500,
+        .slot_count = 4,
+    };
+    var buf: [8192]u8 = undefined;
+    const body = try buildStorageTeBody(&buf, 255, 10, 70, -3, 500, &cont, null, null);
+
+    // handle 1 | worldPos 12 | blockId 4 | payLen 4 = 21, then chunkPos 12 |
+    // outer marker 4 | blockId 4 | ownerTag 1 | moduleCount 1 | hash 4 |
+    // feature marker 4 = 30, then the feature's hasList 1 | size_x 2 |
+    // size_y 2 | touched 1 | worldTimeTouched 4 | playerStorage 1 = 11.
+    const count_off: usize = 21 + 30 + 11;
+    try std.testing.expectEqual(@as(i16, 4), std.mem.readInt(i16, body[count_off..][0..2], .little));
+    std.mem.writeInt(i16, body[count_off..][0..2], 1000, .little);
+    try std.testing.expectError(error.EndOfStream, parseStorageTeBody(body));
+}
+
 test "storage te carries the touch time the container was looted at" {
     // TEFeatureStorage.UpdateTick computes LootRespawnDays from
     // worldTimeTouched (RE loot-economy.md: daysElapsed =

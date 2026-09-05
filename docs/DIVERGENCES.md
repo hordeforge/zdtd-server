@@ -236,6 +236,17 @@ splits at 16 against a stock minimum of 28, and the TraderData trade arm takes
 exactly 9 where a stock ToServer body is 6 or 14. Any new length gate needs the
 same arithmetic written beside it.
 
+**Counts read off the wire drive loops, and two of them have no cap.** The
+storage TE slot count (i16) and the inventory bag count (u16) are read from the
+client and looped on directly; both are bounded only by the body running out
+mid-stack. Neither is a tick-budget problem (an iteration is 2 bytes at
+minimum, so the i16 maximum costs under a millisecond of the 50 ms tick, and
+the transport's 512 KB inflate cap is the ceiling on the body), and both fail
+closed rather than truncating. What they rely on is the index guard inside the
+loop: without it the bag loop writes past the ECS bag into the equipment slots.
+Both behaviours are now pinned by tests (`stock_te.zig`, `stock_inv.zig`), and
+the guard was verified by removing it and watching the test panic.
+
 - **`NetPackageVehicleSpawn`** also accepts a zdtd control body (`entityId` i32 |
   `op` u8 | `throttle` f32 | `steer` f32, fixed 13 bytes) for seat / unseat /
   drive. Stock's body is `entityType` i32 | pos Vector3 | rot Vector3 |
