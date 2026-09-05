@@ -11620,6 +11620,45 @@ test "scenario stirred sleeper broadcasts NetPackageSleeperPassiveChange" {
     std.debug.print("PASS sleeper-stir: dark in-volume player broadcasts PassiveChange\n", .{});
 }
 
+test "scenario a woken sleeper broadcasts NetPackageSleeperWakeup" {
+    // The other half of EntityAlive.SetSleeperActive (IL=26): a sleeper that
+    // actually wakes gets NetPackageSleeperWakeup, not the groan package. RE
+    // protocol-packages.md pins it as an unreliable broadcast with
+    // toEntityId -1, so every peer sees it, not just those in interest range.
+    // Only the stir half had a scenario, so nothing checked that a woken
+    // sleeper is announced at all.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    g.sim.director.clock.hours = 12; // daylight: the wake light gate passes
+    const z = g.sim.spawnSleeperDef(0, 70, 0, .{ .name = "sl", .hash = 1, .kind = .zombie, .sight_range = 30.0 }, 0).?;
+    const zs = g.sim.slotOfNetId(z).?;
+    g.sim.sleeper[zs].volume_r = 20;
+    _ = g.sim.spawnPlayer(4, 70, 0, 0);
+    try g.step();
+    try std.testing.expect(g.sim.sleeper[zs].awake);
+
+    const wake_id = packages.idOf("NetPackageSleeperWakeup") orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(cap.findPkgIdEntity(wake_id, g.sim.network_id[zs].id) != null);
+    // A woken sleeper takes the wake branch, not the groan branch.
+    if (packages.idOf("NetPackageSleeperPassiveChange")) |pc_id| {
+        try std.testing.expect(cap.findPkgIdEntity(pc_id, g.sim.network_id[zs].id) == null);
+    }
+    std.debug.print("PASS sleeper-wake: woken sleeper broadcasts Wakeup, not PassiveChange\n", .{});
+}
+
 test "scenario animation data relays to the other players" {
     // Stock NetPackageEntityAnimationData (client-originated: the local
     // AvatarController broadcasts the avatar anim params; ProcessPackage
