@@ -265,7 +265,7 @@ against the RE package table; none is a live gap, for these reasons:
   outcome; whether the prime signal adds a wind-up cue is unknown. Same
   posture as `VehicleCount` below: not emitted on a guess.
 
-### Four zdtd-shaped bodies under stock package names (2026-09-04, extended 2026-09-06)
+### Six zdtd-shaped bodies under stock package names (2026-09-04, extended 2026-09-06)
 
 Found while citing the body builders and parsers against the RE, and extended
 by the parser audit two days later. All are C2S-inbound only, never sent to a
@@ -362,6 +362,26 @@ stock package name is what looks like a wire divergence later. It is C2S
 inbound only. If a spawn path ever needs the real `VehicleSpawn` shape, the
 length gate is what keeps the two apart, so it has to stay exact rather than a
 minimum.
+
+**Two more, found in the same audit: trade and quest-op.** Both are C2S
+inbound only and both are already length-gated; they are listed so the set is
+complete, not because either is newly at risk.
+
+`parseTraderTrade` is a 9-byte `trader_entity i32 | item u16 | qty u16 | side
+u8` under `NetPackageTraderData`. Stock has no trade package at all: a real
+client's purchase shows up as its post-trade `TraderData` copy, which
+`parseTraderDataToServer` handles under the same package name. `c2s/quest.zig`
+keys the trade arm on **exactly** 9 bytes, and the comment there records why:
+a stock ToServer body with `isEntity=false` and `hasTraderData=false` is 14
+bytes whose `body[8]` is the high byte of `te_y`, zero for any real
+coordinate, so a `>= 9` gate decoded it as a trade whose quantity came from
+two coordinate bytes.
+
+`parseQuestOp` is a 3-byte `def_id u16 | op u8` under
+`NetPackageQuestObjectiveUpdate`, for unit and loadgen fixtures. It sits in
+the `else` arm of `parseQuestObjectiveUpdate` in `c2s/quest.zig`, so a body
+the stock parser accepts never reaches it; this one only sees what that parser
+rejected.
 
 **Distinguish by shape, and prove the lengths cannot meet.** A length only
 discriminates when no stock body can reach it, and a stock body's length is
