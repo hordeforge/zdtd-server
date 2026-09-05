@@ -5,6 +5,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-06
+
 ### Removed
 
 - C2S game payloads that fail the channel-envelope parse are now dropped, with
