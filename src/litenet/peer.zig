@@ -845,6 +845,40 @@ fn fuzzPeerState(_: void, smith: *std.testing.Smith) !void {
     try std.testing.expect(peer.local_window_start <= outstanding);
 }
 
+test "sendReliable splits a large message into fragments that reassemble" {
+    // The reassembly tests feed hand-built fragments, so the send-side split
+    // never runs in them: dropping the round-up in `total_parts`, which loses
+    // the tail of every message that is not an exact multiple of the part
+    // size, left the whole suite green. Drive the real splitter and put its
+    // datagrams back through the parser.
+    var sender: Peer = .{};
+    sender.alive = true;
+    // A null socket makes sendTo a no-op, so the datagrams stay in `pending`
+    // where the test can read them; no real I/O is involved.
+    var sock: udp.Socket = .{};
+
+    // Deliberately not a multiple of the part size: the last fragment is the
+    // one a missing round-up drops.
+    var msg: [3000]u8 = undefined;
+    for (&msg, 0..) |*b, i| b.* = @truncate(i *% 31 +% 7);
+    try sender.sendReliable(&sock, &msg);
+
+    var receiver: Peer = .{};
+    receiver.alive = true;
+    var delivered: ?[]const u8 = null;
+    var parts: usize = 0;
+    for (&sender.pending) |*p| {
+        if (!p.used) continue;
+        const info = packet.parseChanneled(p.data[0..p.len]) orelse continue;
+        if (!info.fragmented) continue;
+        parts += 1;
+        if (receiver.takeFragment(info)) |full| delivered = full;
+    }
+    try std.testing.expect(parts > 1); // it really did fragment
+    try std.testing.expect(delivered != null);
+    if (delivered) |d| try std.testing.expectEqualSlices(u8, &msg, d);
+}
+
 test "two interleaved fragmented messages reassemble independently" {
     // Regression for the single-assembly bug: a second fragmented C2S message
     // (Bag plus PlayerInventory during a loot transfer) used to clear the
