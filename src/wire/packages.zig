@@ -4695,8 +4695,13 @@ test "stock quest objective update layout" {
     try std.testing.expectEqual(@as(usize, 21), body.len);
     const u = try parseQuestObjectiveUpdate(body);
     try std.testing.expectEqual(@as(i32, 106), u.sender_entity_id);
+    try std.testing.expectEqual(@as(i32, 1), u.quest_code);
     try std.testing.expectEqual(QuestObjectiveEventType.block_activated, u.event_type);
+    // Whole block position: y and z were unread, so a swap would advance the
+    // objective against a different block than the one the client activated.
     try std.testing.expectEqual(@as(i32, 10), u.block_x);
+    try std.testing.expectEqual(@as(i32, 70), u.block_y);
+    try std.testing.expectEqual(@as(i32, 20), u.block_z);
 }
 
 test "every declared npc quest and objective event variant parses" {
@@ -5340,10 +5345,13 @@ test "waypoint invite parses and rebuilds round-trip" {
     try w.writeString("my marker");
     try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000000" });
     try w.writeBool(true); // bTracked
-    try w.writeBool(false); // hiddenOnCompass
+    // hiddenOnCompass true, and isAuto / usingLocId differ: all three were
+    // false, which matched the literal false the builder writes beside them
+    // and made those swaps emit identical bytes.
+    try w.writeBool(true); // hiddenOnCompass
     try platform_user.write(&w, .{ .platform = "Steam", .id = "76561198000000001" });
     try w.writeI32(-1);
-    try w.writeBool(false); // isAuto
+    try w.writeBool(true); // isAuto
     try w.writeBool(false); // usingLocId
     try w.writeI32(7); // waypoint inviterEntityId
     try w.writeBool(true); // hiddenOnMap
@@ -5361,7 +5369,12 @@ test "waypoint invite parses and rebuilds round-trip" {
     try std.testing.expectEqualStrings("Steam", author.platform);
     try std.testing.expectEqualStrings("76561198000000000", author.id);
     try std.testing.expect(wp.b_tracked);
-    try std.testing.expect(!wp.hidden_on_compass);
+    try std.testing.expect(wp.hidden_on_compass);
+    // isAuto and usingLocId were both unread and both false, matching the
+    // literal false the builder writes nearby; distinct values plus these two
+    // assertions make that run observable.
+    try std.testing.expect(wp.is_auto);
+    try std.testing.expect(!wp.using_loc_id);
     try std.testing.expectEqual(@as(i32, 2), wp.last_known_entity_type);
     try std.testing.expectEqual(@as(u8, 0), wp.invite_mode);
     try std.testing.expectEqual(@as(i32, 7), wp.inviter_entity_id);
@@ -5381,12 +5394,12 @@ test "waypoint invite parses and rebuilds round-trip" {
     var ri: [platform_user.max_id_len]u8 = undefined;
     const ra: platform_user.Id = (try platform_user.read(&rd, &rp, &ri)).?;
     try std.testing.expectEqualStrings("76561198000000000", ra.id);
-    try std.testing.expect(!try rd.readBool()); // bTracked cleared
-    try std.testing.expect(!try rd.readBool()); // hiddenOnCompass
+    try std.testing.expect(!try rd.readBool()); // bTracked cleared on relay
+    try std.testing.expect(try rd.readBool()); // hiddenOnCompass echoed
     try std.testing.expect((try platform_user.read(&rd, &rp, &ri)) != null);
     try std.testing.expectEqual(@as(i32, -1), try rd.readI32());
-    try std.testing.expect(!try rd.readBool());
-    try std.testing.expect(!try rd.readBool());
+    try std.testing.expect(try rd.readBool()); // isAuto echoed
+    try std.testing.expect(!try rd.readBool()); // usingLocId echoed
     try std.testing.expectEqual(@as(i32, 42), try rd.readI32());
     try std.testing.expect(try rd.readBool());
     try std.testing.expectEqual(@as(i32, 2), try rd.readI32());
@@ -5798,7 +5811,11 @@ test "buildPickupBlockBody echoes the S2C pickup with a null identity" {
     var sent2: ?platform_user.Id = null;
     const p = try parsePickupBlockBody(out, &plat, &id, &sent2);
     try std.testing.expect(sent2 == null);
+    // Whole position: y and z had nothing reading them back, so a swap in the
+    // triple would pick up a different block than the client asked for.
     try std.testing.expectEqual(@as(i32, 7), p.x);
+    try std.testing.expectEqual(@as(i32, 8), p.y);
+    try std.testing.expectEqual(@as(i32, 9), p.z);
     try std.testing.expectEqual(@as(u32, 0x1234), p.raw);
     try std.testing.expectEqual(@as(i32, 42), p.player_id);
 }
@@ -5814,7 +5831,11 @@ test "parseSetBlockTexture reads the stock paint body" {
     try w.writeI32(-1); // dedi rebroadcast playerIdThatChanged
     try w.writeByte(0); // channel
     const t = try parseSetBlockTexture(w.written());
+    // Whole position: only x was read back, so y and z could swap unnoticed
+    // and paint would land on a different block.
     try std.testing.expectEqual(@as(i32, 5), t.x);
+    try std.testing.expectEqual(@as(i32, 60), t.y);
+    try std.testing.expectEqual(@as(i32, -8), t.z);
     try std.testing.expectEqual(@as(u8, 3), t.face);
     try std.testing.expectEqual(@as(u8, 17), t.idx);
     try std.testing.expectEqual(@as(i32, -1), t.player_id);
@@ -5826,6 +5847,16 @@ test "parseSetBlockTexture reads the stock paint body" {
     const t2 = try parseSetBlockTexture(built);
     try std.testing.expectEqual(@as(i32, -8), t2.z);
     try std.testing.expectEqual(@as(u8, 17), t2.idx);
+    // Raw bytes, not only the round-trip: build and parse can move a field
+    // together and still agree with each other, which is what the swap audit
+    // reported here after the parse-side assertions were added.
+    try std.testing.expectEqual(@as(i32, 5), std.mem.readInt(i32, built[0..4], .little));
+    try std.testing.expectEqual(@as(i32, 60), std.mem.readInt(i32, built[4..8], .little));
+    try std.testing.expectEqual(@as(i32, -8), std.mem.readInt(i32, built[8..12], .little));
+    try std.testing.expectEqual(@as(u8, 3), built[12]); // face
+    try std.testing.expectEqual(@as(u8, 17), built[13]); // idx
+    try std.testing.expectEqual(@as(i32, -1), std.mem.readInt(i32, built[14..18], .little));
+    try std.testing.expectEqual(@as(u8, 0), built[18]); // channel
     // Truncated at every boundary is EndOfStream.
     var cut: usize = 0;
     while (cut < 19) : (cut += 1) {
