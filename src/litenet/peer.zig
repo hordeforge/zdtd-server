@@ -262,6 +262,13 @@ pub const Peer = struct {
         try self.sendRaw(sock, buf[0 .. 1 + user.len]);
     }
 
+    /// Writes the datagram immediately; there is no send queue between the
+    /// caller and the socket. Stock queues instead (`ClientInfo::SendPackage`
+    /// -> `AddToSendQueue`, then `FlushSendQueue` only when the package's
+    /// `get_FlushQueue` is true), so eight packages there override the base
+    /// false to skip the batch. Here every package is flushed on send, which
+    /// makes that property moot - see DIVERGENCES 1. Introducing a queue means
+    /// reinstating those eight as bypasses.
     pub fn sendReliable(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
         if (self.capture) |cap| {
             // Record full user message for scenarios, then exercise real send path.
