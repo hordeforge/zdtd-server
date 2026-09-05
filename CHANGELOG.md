@@ -7,6 +7,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackageQuestEntitySpawn` now summons one entity per packet, for the
+  sender only. The body's third field is `entityIDQuestHolder` (RE
+  `protocol-packages.md` 6.17, read IL_0002-001F), but it was read as a spawn
+  count, so a single packet summoned that many zombies (bounded only by
+  `quest_summon_per_request`) with the client choosing the number. Stock
+  `ProcessPackage` (IL=37) calls `SpawnQuestEntity` exactly once. The holder is
+  now also checked against the sender's own entity.
 - Wrench pickup now removes the block on the server. `NetPackagePickupBlock`
   broadcast the replacement `NetPackageSetBlock` but never wrote it, so the
   block disappeared for clients while still standing in the world: it came
