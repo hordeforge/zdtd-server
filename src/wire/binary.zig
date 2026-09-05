@@ -313,6 +313,31 @@ test "f32 is a little-endian bit pattern, sign preserved" {
     try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }
 
+test "signed ints ride the wire as little-endian two's complement" {
+    // The existing `le ints` case does catch a byte swap, through its 0xABCD.
+    // What it cannot see is a value-dependent fault: -1 is all-ones and 0xABCD
+    // is positive, so a writer that mishandles only the signed minimum - the
+    // one value where negating to a magnitude overflows - passes it. Clamping
+    // just minInt was checked against both tests: this one fails, `le ints`
+    // stays green.
+    var buf: [32]u8 = undefined;
+    var w: Writer = .{ .buf = &buf };
+    try w.writeI32(std.math.minInt(i32));
+    try std.testing.expectEqualSlices(u8, &.{ 0x00, 0x00, 0x00, 0x80 }, w.written()[0..4]);
+    try w.writeI32(std.math.maxInt(i32));
+    try std.testing.expectEqualSlices(u8, &.{ 0xFF, 0xFF, 0xFF, 0x7F }, w.written()[4..8]);
+    try w.writeI16(std.math.minInt(i16));
+    try std.testing.expectEqualSlices(u8, &.{ 0x00, 0x80 }, w.written()[8..10]);
+    try w.writeI64(std.math.minInt(i64));
+
+    var r: Reader = .{ .data = w.written() };
+    try std.testing.expectEqual(std.math.minInt(i32), try r.readI32());
+    try std.testing.expectEqual(std.math.maxInt(i32), try r.readI32());
+    try std.testing.expectEqual(std.math.minInt(i16), try r.readI16());
+    try std.testing.expectEqual(std.math.minInt(i64), try r.readI64());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
 test "le ints" {
     var buf: [16]u8 = undefined;
     var w: Writer = .{ .buf = &buf };
