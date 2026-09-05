@@ -10482,6 +10482,44 @@ test "scenario stock InventoryTransaction applies and acks" {
     }
     try std.testing.expect(got_ack);
     std.debug.print("PASS stock-invtx: SetAll applied + minimal ack\n", .{});
+
+    // The decoder accepts a SetAll array up to stock_tx_setall_cap (128), but
+    // the inventory holds max_inv_slots (67). A count between the two decodes
+    // fine and then indexes past the destination array, so the handler has to
+    // reject it rather than copy what fits. Empty stacks keep the body small:
+    // ItemStack.Write is a bare u16 count when the count is zero.
+    const over_n: i16 = @intCast(quest_mod_components.max_inv_slots + 1);
+    try std.testing.expect(over_n <= @as(i16, @intCast(packages.stock_tx_setall_cap)));
+    var big: [512]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &big };
+    try bw.writeI32(1);
+    for (0..16) |i| try bw.writeByte(@intCast(i));
+    try bw.writeI32(1);
+    try bw.writeI32(2);
+    try bw.writeI32(1); // opCount
+    try bw.writeI16(2); // SetAll
+    try bw.writeI16(over_n);
+    for (0..@intCast(over_n)) |_| try bw.writeU16(0); // empty ItemStack
+    // Put something back in the slot so a wrongly-applied SetAll is visible.
+    g.sim.inventory[ps].slots[wood_slot] = .{ .item_id = 1, .count = 1 };
+    var fb2: [640]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb2, "NetPackageInventoryTransactionRequest", bw.written()));
+    // Rejected: the slot the client tried to clear is untouched, so nothing
+    // was applied before the bound was hit.
+    try std.testing.expectEqual(@as(u16, 1), g.sim.inventory[ps].slots[wood_slot].item_id);
+    // No ack either. Stock `TransactionRequestServer` (IL=46, RE items.md
+    // "Server TransactionRequestServer") sends the minimal ack only on the
+    // success path; a failed Apply logs and force-unlocks instead. An ack
+    // here would tell the client a rejected transaction went through.
+    for (cap.slots[0..cap.n]) |s| {
+        var pkgs2: [8]wire_frame.Package = undefined;
+        const pn2 = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs2);
+        for (pkgs2[0..pn2]) |p| {
+            try std.testing.expect(p.id != ack_id);
+        }
+    }
+    std.debug.print("PASS stock-invtx: an over-cap SetAll is rejected, not clamped\n", .{});
 }
 
 // ---------------------------------------------------------------------------
