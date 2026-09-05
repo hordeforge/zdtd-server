@@ -11794,6 +11794,71 @@ test "scenario a reload naming no live entity is not relayed" {
     std.debug.print("PASS reload-relay: live id relays, unknown and zero ids do not\n", .{});
 }
 
+test "scenario light tile entities ride the chunk stream" {
+    // sendContainersInChunk walks every TE store for the chunk being streamed
+    // and sends each one. The light store was the only branch with no test, so
+    // a client streaming a POI would silently get unlit lamps: the light TE is
+    // what carries intensity, range and colour, and it is only ever sent here.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const te_id = packages.idOf("NetPackageTileEntity") orelse
+        return error.TestUnexpectedResult;
+
+    // A light inside chunk (16, 16), and one far outside it.
+    const inside = g.light_te.getOrCreate(.{ .x = 16 * 16 + 3, .y = 70, .z = 16 * 16 + 4 }) orelse
+        return error.TestUnexpectedResult;
+    inside.intensity = 2.5;
+    inside.range = 7.0;
+    const outside = g.light_te.getOrCreate(.{ .x = 40 * 16, .y = 70, .z = 40 * 16 }) orelse
+        return error.TestUnexpectedResult;
+    outside.intensity = 1.0;
+
+    // Other TE kinds ride the same package id, so match on the light's own
+    // world position in the outer TE header (handle u8, then x/y/z i32).
+    const sawLightAt = struct {
+        fn call(cp: *ln_peer.Capture, id: u16, x: i32, y: i32, z: i32) bool {
+            for (cp.slots[0..cp.n]) |sl| {
+                var pkgs: [16]wire_frame.Package = undefined;
+                const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+                for (pkgs[0..pn]) |pk| {
+                    if (pk.id != id or pk.body.len < 13) continue;
+                    var r: binary.Reader = .{ .data = pk.body };
+                    _ = r.readByte() catch continue;
+                    const bx = r.readI32() catch continue;
+                    const by = r.readI32() catch continue;
+                    const bz = r.readI32() catch continue;
+                    if (bx == x and by == y and bz == z) return true;
+                }
+            }
+            return false;
+        }
+    }.call;
+
+    cap.clear();
+    try g.sendContainersInChunk(c.peer.?, 16, 16);
+    try std.testing.expect(sawLightAt(&cap, te_id, inside.x, inside.y, inside.z));
+
+    // A chunk with no light in it does not carry this one, so the branch is
+    // position gated rather than sending the whole store to everyone.
+    cap.clear();
+    try g.sendContainersInChunk(c.peer.?, 20, 20);
+    try std.testing.expect(!sawLightAt(&cap, te_id, inside.x, inside.y, inside.z));
+    try std.testing.expect(!sawLightAt(&cap, te_id, outside.x, outside.y, outside.z));
+    std.debug.print("PASS light-te: in-chunk light streamed, out-of-chunk light withheld\n", .{});
+}
+
 test "scenario animation data relays to the other players" {
     // Stock NetPackageEntityAnimationData (client-originated: the local
     // AvatarController broadcasts the avatar anim params; ProcessPackage
