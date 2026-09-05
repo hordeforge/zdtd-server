@@ -150,6 +150,21 @@ fn emitZpv12Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []
 
 /// Position of a v3+ record's progression-tail prog byte (journal end).
 /// v2 records have no tail; returns the record end.
+///
+/// UNRESOLVED (2026-09-05): the slot stride here is a hard 7, but this is
+/// called for v6, v7 and v8, and `zpvSlotStride` says v7+ slots are 11 bytes
+/// (they gained `use_times`). For v7/v8 with a non-empty inventory the two
+/// disagree by 4 bytes per slot, and the same hard 7 appears in the v7 and v8
+/// carry branches (`slots_end`) and in the journal walk below.
+///
+/// It is not clear which is right, and the tests cannot decide it: the v7
+/// fixture carries one slot and passes with the stride at 7, at 11, and with
+/// this function switched to `zpvSlotStride(version)` - checked all three. So
+/// either the hard 7 is correct and `zpvSlotStride`'s v7 entry is wrong, or
+/// the carries are consistently off and no test reaches the difference.
+/// Resolving it needs a fixture whose post-slot fields are non-zero, so a
+/// 4-byte misread changes an observable value. Left alone rather than
+/// changed on a guess: this path rewrites player saves.
 fn tailStartOf(old: []const u8, rec_start: usize, nl: usize, version: u8) error{CorruptPlayersFile}!usize {
     const inv_pos = rec_start + 1 + nl + 16;
     const inv_n: usize = old[inv_pos];
