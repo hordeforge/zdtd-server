@@ -128,7 +128,14 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
                 @memcpy(tmp[1..][0..stable.len], stable);
                 const n2 = wire_frame.parseChannelPayload(tmp[0 .. stable.len + 1], &alt);
                 if (n2 > 0) {
-                    std.debug.print("zdtd: alt-parse got {d} pkgs id0={d}\n", .{ n2, alt[0].id });
+                    // Sampled on the same counter as the unparsed-payload log
+                    // above: this branch is reached by the same sprayable
+                    // input, so an unsampled print here reinstates the
+                    // per-packet blocking stderr write that sampling exists
+                    // to prevent.
+                    if (malformed == 1 or malformed % 100 == 0) {
+                        std.debug.print("zdtd: alt-parse got {d} pkgs id0={d}\n", .{ n2, alt[0].id });
+                    }
                     var j: usize = 0;
                     while (j < n2) : (j += 1) {
                         try self.handlePackage(c, peer, alt[j].id, alt[j].body);
