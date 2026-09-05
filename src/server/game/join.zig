@@ -753,24 +753,20 @@ pub fn sendItemIdMapping(self: *Game, peer: *ln_peer.Peer) !void {
     // Compact NameIdMapping: only ECS builtins that resolved to stock types (fits 8 KiB body).
     // Full items.xml map is ~30–50 KiB uncompressed; stock client already has matching AssignIds
     // from the same Config when game-dir is shared.
-    var map_buf: [2048]u8 = undefined;
-    var w: wire_binary.Writer = .{ .buf = &map_buf };
-    try w.writeI32(1);
-    const count_pos = w.pos;
-    try w.writeI32(0);
-    var n: i32 = 0;
+    var rows: [12]packages.IdMappingEntry = undefined;
+    var n: usize = 0;
     var id: u16 = 1;
     while (id <= 12) : (id += 1) {
         const st = self.items.stockTypeFor(id);
         if (st == 0) continue;
         const name = assets_items.builtinStockName(id) orelse continue;
-        try w.writeI32(st);
-        try w.writeString(name);
+        rows[n] = .{ .id = st, .name = name };
         n += 1;
     }
-    std.mem.writeInt(i32, map_buf[count_pos..][0..4], n, .little);
     if (n == 0) return;
-    const body = packages.buildIdMappingBody(&self.body_buf, "items", w.written()) catch return;
+    var map_buf: [2048]u8 = undefined;
+    const payload = try packages.buildNameIdMappingPayload(&map_buf, rows[0..n]);
+    const body = packages.buildIdMappingBody(&self.body_buf, "items", payload) catch return;
     try self.sendGameCritical(peer, "NetPackageIdMapping", body);
 }
 
