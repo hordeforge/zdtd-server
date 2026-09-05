@@ -268,6 +268,20 @@ pub const default_mappings = [_][]const u8{
 };
 
 const id_map = blk: {
+    // A repeated name is a silent wire fault, not a typo: the index in
+    // default_mappings *is* the negotiated package id, StaticStringMap keeps
+    // only one of the two entries, and every id after the duplicate shifts by
+    // one. The server would then advertise ids it never dispatches on. Reject
+    // it where it costs nothing to notice. The pairwise scan is n^2 over 191
+    // names, so it needs a branch budget; it runs once at compile time.
+    @setEvalBranchQuota(default_mappings.len * default_mappings.len * 4);
+    for (default_mappings, 0..) |a, i| {
+        for (default_mappings[i + 1 ..]) |b| {
+            if (std.mem.eql(u8, a, b)) {
+                @compileError("duplicate package name in default_mappings: " ++ a);
+            }
+        }
+    }
     var kvs: [default_mappings.len]struct { []const u8, u16 } = undefined;
     for (default_mappings, 0..) |m, i| kvs[i] = .{ m, @intCast(i) };
     break :blk std.StaticStringMap(u16).initComptime(kvs);
