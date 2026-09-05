@@ -2436,18 +2436,6 @@ pub fn buildIdMappingBody(buf: []u8, name: []const u8, data: []const u8) ![]u8 {
     return w.written();
 }
 
-/// zdtd's compact inventory head, **not a stock layout**: holding u16 |
-/// open_container i32 | count u16. The stock NetPackagePlayerInventory body is
-/// decoded by stock_inv; this form serves loadgen and the scenarios.
-pub fn parseInventoryBodyNative(body: []const u8) !struct { holding: u16, open_container: i32, count: u16 } {
-    var r: binary.Reader = .{ .data = body };
-    return .{
-        .holding = try r.readU16(),
-        .open_container = try r.readI32(),
-        .count = try r.readU16(),
-    };
-}
-
 /// NetPackageHoldingItem (RE inventories/netpackage-bodies.md, write IL=16):
 /// `entityId` i32 | `holdingItemStack` (ItemStack.Write) | `holdingItemIndex`
 /// u8. Body written by stock_inv.writeHoldingItem.

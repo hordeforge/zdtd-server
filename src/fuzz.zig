@@ -260,7 +260,6 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     _ = packages.parseDamageHead(input) catch null;
     _ = packages.parseChunkBody(input) catch null;
     _ = packages.parseRequestToSpawnPlayer(input) catch null;
-    _ = packages.parseInventoryBodyNative(input) catch null;
     _ = packages.parseInvTxRequest(input) catch null;
     _ = packages.parseInvDataRequest(input) catch null;
     _ = packages.parseInvDataRequestStock(input) catch null;
