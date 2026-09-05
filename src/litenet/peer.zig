@@ -258,7 +258,7 @@ pub const Peer = struct {
         // Unreliable header: property byte 0 + user
         if (user.len + 1 > buf.len) return error.Overflow;
         buf[0] = @intFromEnum(packet.Property.unreliable);
-        @memcpy(buf[1..][0..user.len], user);
+        @memcpy(buf[packet.header_size..][0..user.len], user);
         try self.sendRaw(sock, buf[0 .. 1 + user.len]);
     }
 
@@ -660,7 +660,7 @@ pub const Peer = struct {
         // Stock ReliableChannel.ProcessAck: Size must match header + (windowSize-1)/8+2.
         // Accept ≥ header; loadgen/stock both send full 13-byte acks.
         if (raw.len < packet.channeled_header_size + 1) return;
-        const ack_seq = std.mem.readInt(u16, raw[1..][0..2], .little);
+        const ack_seq = std.mem.readInt(u16, raw[packet.header_size..][0..2], .little);
         if (ack_seq >= packet.max_sequence) return;
         // Stock: RelativeSequenceNumber(localWindowStart, ackSeq) = local - ack ∈ [0, window).
         const rel_base = relSeq(@as(i32, self.local_window_start) - @as(i32, ack_seq));
@@ -699,7 +699,7 @@ pub const Peer = struct {
         const total = packet.channeled_header_size + ack_bitmap_bytes;
         if (buf.len < total) return error.Overflow;
         buf[0] = packet.makeByte0(.ack, self.conn_num);
-        std.mem.writeInt(u16, buf[1..][0..2], self.remote_window_start, .little);
+        std.mem.writeInt(u16, buf[packet.header_size..][0..2], self.remote_window_start, .little);
         buf[3] = 2; // ReliableOrdered channel id
         // Expand window-size bits into ack_bitmap_bytes (extra trailing zeros ok)
         @memset(buf[packet.channeled_header_size..][0..ack_bitmap_bytes], 0);
