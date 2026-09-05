@@ -644,9 +644,12 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     o += 4;
     std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
     o += 4;
-    buf[o] = 3; // name_len "Bot"
+    // Deliberately NOT "Bot", the harness client's name: a matching record is
+    // rewritten from live state, which is what made this fixture exercise the
+    // rewrite path instead of the v7 carry it is named for.
+    buf[o] = 3; // name_len "Ana"
     o += 1;
-    @memcpy(buf[o..][0..3], "Bot");
+    @memcpy(buf[o..][0..3], "Ana");
     o += 3;
     @memset(buf[o..][0..16], 0); // xyz + coins
     o += 16;
@@ -662,7 +665,12 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     o += 1;
     std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // meta
     o += 2;
-    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 10.0)), .little); // use_times
+    // 3.14159 rather than a round number on purpose: its little-endian bytes
+    // are D0 0F 49 40, none of them zero. A carry that walks the slot with the
+    // pre-v7 7-byte stride reads `jn` out of this field and gets 208 instead
+    // of 0, which the journal walk then rejects. With 10.0 (00 00 20 41) the
+    // misread lands on a zero byte and the whole disagreement stays invisible.
+    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 3.14159)), .little); // use_times
     o += 4;
     buf[o] = 0; // jn
     o += 1;
@@ -700,27 +708,21 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
         try std.testing.expectEqualStrings("ZPVC", data[0..4]);
     }
     {
-        const g = try Game.create(std.testing.allocator, world_dir, 0);
-        defer {
-            g.deinit();
-            std.testing.allocator.destroy(g);
-        }
-        var capture: ln_peer.Capture = .{};
-        const cl = try g.attachJoinedClient(&capture);
-        const ps = g.sim.playerByPeer(cl.slot).?;
-        var found = false;
-        for (g.sim.inventory[ps].slots) |s| {
-            if (s.item_id == 7 and s.count == 3 and s.quality == 4 and s.meta == 5) found = true;
-        }
-        try std.testing.expect(found);
-        try std.testing.expectEqual(@as(u16, 5), cl.level);
-        // The v7 use_times rides through (10.0).
-        var ut: f32 = 0;
-        for (g.sim.inventory[ps].slots) |s| {
-            if (s.item_id == 7) ut = s.use_times;
-        }
-        try std.testing.expectEqual(@as(f32, 10.0), ut);
-        std.debug.print("PASS zpv7->zpv9: inventory + tail carried with hp/born inserted\n", .{});
+        // The carried record is not the harness client's, so verify it in the
+        // file: the slot must have widened to the v12 stride with its four
+        // fields intact, and the record must still walk cleanly.
+        const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+        defer std.testing.allocator.free(data);
+        const persist = @import("../persist.zig");
+        const slot_at = 8 + 1 + 3 + 16 + 1;
+        try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, data[slot_at..][0..2], .little));
+        try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, data[slot_at + 2 ..][0..2], .little));
+        try std.testing.expectEqual(@as(u8, 4), data[slot_at + 4]);
+        try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[slot_at + 5 ..][0..2], .little));
+        try std.testing.expectEqual(@as(f32, 3.14159), @as(f32, @bitCast(std.mem.readInt(u32, data[slot_at + 7 ..][0..4], .little))));
+        // Walking the record with the v12 stride must land inside the file.
+        _ = try persist.zpvRecordLen(data, 8, 12);
+        std.debug.print("PASS zpv7->zpv12: carried slot widened to the current stride\n", .{});
     }
 }
 

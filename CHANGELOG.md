@@ -182,6 +182,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Every pre-ZPV12 player save carrying inventory was corrupted on the first
+  save after upgrade, not just v10/v11: each migration branch widened slots
+  only to its own era's width (7 to 13, or 11 to 13) while the header became
+  `ZPVC`, so the reader walked them with the v12 21-byte stride. All branches
+  now widen to the current width through one helper. A second fault in the
+  same path: `tailStartOf` assumed a 7-byte slot but runs for v6 through v8,
+  and v7 widened slots to 11 when they gained `use_times`, so a v7/v8 record
+  with inventory was walked 4 bytes short per slot.
 - A pre-ZPV12 player save carrying inventory was corrupted on the first save
   after upgrade. The save path rewrites the header to `ZPVC` (v12) but carried
   v10/v11 records byte-for-byte, leaving 13-byte inventory slots in a file the
