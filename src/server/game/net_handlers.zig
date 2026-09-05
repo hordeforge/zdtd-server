@@ -73,7 +73,14 @@ pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!vo
                 try dispatchGamePayload(self, c, peer, saved);
             }
         } else if (wire_frame.isChallenge(payload)) {
-            std.debug.print("zdtd: challenge mismatch local_id={d} payload_len={d}\n", .{ peer.local_id, payload.len });
+            // Unauthenticated peers reach this on every wrong challenge, so
+            // the log is sampled like the payload logs: an unsampled print is
+            // one blocking stderr write per packet on the tick thread.
+            self.harness.counters.inc(.join_fail);
+            const fails = self.harness.counters.get(.join_fail);
+            if (fails == 1 or fails % 100 == 0) {
+                std.debug.print("zdtd: challenge mismatch local_id={d} payload_len={d} n={d}\n", .{ peer.local_id, payload.len, fails });
+            }
         } else if (payload.len > 0 and payload.len <= c.preauth_buf.len) {
             @memcpy(c.preauth_buf[0..payload.len], payload);
             c.preauth_len = payload.len;
@@ -120,23 +127,13 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
                 std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
             }
         }
-        if (stable.len >= 10) {
-            var alt: [16]wire_frame.Package = undefined;
-            var tmp: [8192]u8 = undefined;
-            if (stable.len + 1 <= tmp.len) {
-                tmp[0] = 0;
-                @memcpy(tmp[1..][0..stable.len], stable);
-                const n2 = wire_frame.parseChannelPayload(tmp[0 .. stable.len + 1], &alt);
-                if (n2 > 0) {
-                    std.debug.print("zdtd: alt-parse got {d} pkgs id0={d}\n", .{ n2, alt[0].id });
-                    var j: usize = 0;
-                    while (j < n2) : (j += 1) {
-                        try self.handlePackage(c, peer, alt[j].id, alt[j].body);
-                    }
-                    return;
-                }
-            }
-        }
+        // An unparseable payload stops here. A retry that prepends a zero
+        // channel byte and re-parses used to live below: it accepted payloads
+        // stock rejects (every stock game envelope carries the channel byte,
+        // GAP_ANALYSIS "Game envelope channel byte") and handed the packages it
+        // invented straight to handlePackage. A 10-byte body is enough to reach
+        // it, so it widened the C2S trust boundary on unauthenticated input to
+        // cover a framing bug that never turned out to exist.
     }
     var i: usize = 0;
     while (i < n) : (i += 1) {
