@@ -70,6 +70,10 @@ pub fn skip(r: *binary.Reader) binary.ReadError!void {
 
 pub fn write(w: *binary.Writer, v: ?Id) error{Overflow}!void {
     const u = v orelse return w.writeByte(0);
+    // Both bytes are 1, so no test can pin their order and the wire-order
+    // mutant for this pair is unobservable by construction. The order is
+    // `PlatformUserIdentifierAbs.ToStream` (asm.il 30507): present, then
+    // version. Should either value ever change, the pair becomes testable.
     try w.writeByte(1); // present bool
     try w.writeByte(user_identifier_version);
     try w.writeString(u.platform);

@@ -66,8 +66,9 @@ is repeatable and cuts a mutant from 4 min to 2.6 s; the tool probes the set
 first and refuses to run when it selects nothing, and re-checks each survivor
 against the unfiltered suite so a too-narrow filter cannot invent one.
 
-**Audit state (2026-09-04).** Only files listed clean have been measured; the
-rest are unaudited, not known-good:
+**Audit state (2026-09-04).** Every file in `src/wire/` that has swappable
+pairs has now been measured; the three remaining survivors are unobservable by
+construction and documented at their code sites:
 
 | File | Mutants | Result |
 |---|---:|---|
@@ -76,11 +77,13 @@ rest are unaudited, not known-good:
 | `stock_party.zig` | 6 | clean |
 | `stock_buff.zig` | 7 | clean |
 | `stock_chunk.zig` | 4 | 1 survivor, documented at the code site (an all-air layer writes a `false` bool then `stock_air` = 0, so both bytes are 0 and no chunk can tell them apart; `ChunkBlockLayer.Read` holds the order) |
-| `stock_sign.zig` | 4 | not measurable: no filter selects a test that fails when the file is mutated |
-| `stock_quest.zig` | 30 | partial: pairs 1-20 measured over three passes, each closing a gap and letting the next run reach further. Four real gaps found and closed, all the same shape - a positional run of floats or header bytes with nothing reading it back. Pairs 21-30 are unmeasured; the tool aborts at 6 survivors needing a 4-minute re-check each |
+| `stock_sign.zig` | 4 | clean, after the batch test was given distinct counter values and made to read the SignData body back |
+| `stock_quest.zig` | 30 | clean, re-run over the whole file after closing 4 survivors. Every gap had the same shape - a positional run of floats or header bytes with nothing reading it back |
 | `stock_inv.zig` | 15 | clean, re-run after closing 7 survivors (`ItemValue.Write` flags/ammo/cosmetics run, the nested mod value, `Bag.Write`'s three trailing bools, the bedroll marker, drop-container y/z) |
 | `packages.zig` | 155 | verified end to end by `--lines` section (no small filter set covers the whole file): 480-2500, 2501-3400, 3401-4200 and 4201-end all reach 0 survivors. Around 30 real gaps closed along the way, every one a positional run with nothing reading it back or a fixture whose values matched their neighbours |
 | `stock_entity.zig` | 28 | clean, re-run: 8 survivors found and closed over two passes (the ECD lifetime/pos/rot run, homePosition, the falling-tree direction vector). The one remaining survivor is documented at the code site: `spawnByAllowShare` and `headState` are both a zero byte, so no test can pin their order |
+| `stock_deco.zig` | 1 | clean |
+| `platform_user.zig` | 1 | 1 survivor, documented at the code site: the present bool and `user_identifier_version` are both the byte 1, so no test can pin their order; `PlatformUserIdentifierAbs.ToStream` holds it |
 
 Mutant counts are after the test-block filter added 2026-09-04: writes inside
 `test` blocks build fixture bytes for the test itself, so swapping two of them
