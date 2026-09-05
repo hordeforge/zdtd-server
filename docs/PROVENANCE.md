@@ -113,6 +113,18 @@ set and fails on any `binary.Writer` outside `src/wire/` not listed with its
 reason, so the next one is a build failure rather than a survivor found by
 hand three audits later.
 
+The read side has the same shape - a handler calling `std.mem.readInt` on a
+body decodes a stock layout where no audit reaches - and it came out clean
+(2026-09-04). Every multi-field direct read was mutated by hand and a scenario
+caught each one: the `NetPackageEntityRelPosAndRot` dPos offset with its
+euler/quaternion branch (`c2s/move.zig`), `NetPackageMapPosition`'s map middle
+(`c2s/misc.zig`), and the stock `NetPackageTurretSpawn` float position. The
+remaining direct reads take a leading `entityId` only, which has no ordering
+to get wrong, and `game/net_handlers.zig` reads only to print diagnostics.
+No 7h-style gate for these: unlike a writer, a bare `readInt` is not a
+reliable marker of a decoded layout, and a check that fired on every bounds
+read would be noise.
+
 **Audit state (2026-09-04).** Every file in `src/wire/` that has swappable
 pairs has now been measured, encode and decode; the three remaining survivors
 are unobservable by construction and documented at their code sites. Mutant
