@@ -11659,6 +11659,65 @@ test "scenario a woken sleeper broadcasts NetPackageSleeperWakeup" {
     std.debug.print("PASS sleeper-wake: woken sleeper broadcasts Wakeup, not PassiveChange\n", .{});
 }
 
+test "scenario a recycled slot does not inherit the previous look-at target" {
+    // EntityLookAt is deduped per slot against the last target sent, so a
+    // zombie that keeps staring at the same place stops re-sending. The cache
+    // is indexed by slot, and slots are reused: without the generation reset
+    // the new occupant inherits the dead one's last target and its first look
+    // is swallowed whenever the two happen to match, leaving the client with
+    // a zombie facing the wrong way for as long as it holds that target.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    const pp = g.sim.transform[ps];
+    const look_id = packages.idOf("NetPackageEntityLookAt") orelse
+        return error.TestUnexpectedResult;
+
+    // First zombie: alert on the player, so it sends one look.
+    const z1 = g.sim.spawnZombie(pp.x + 3, pp.y, pp.z, 100) orelse
+        return error.TestUnexpectedResult;
+    const s1 = g.sim.slotOfNetId(z1) orelse return error.TestUnexpectedResult;
+    g.sim.zombie_ai[s1].alert = true;
+    g.sim.zombie_ai[s1].target_id = c.entity_id;
+    cap.clear();
+    g.tickEntityLookAt();
+    try std.testing.expect(cap.findPkgIdEntity(look_id, z1) != null);
+    // Second tick, same target: deduped, nothing re-sent.
+    cap.clear();
+    g.tickEntityLookAt();
+    try std.testing.expect(cap.findPkgIdEntity(look_id, z1) == null);
+
+    // Recycle the slot onto a new zombie with the same target. The cached
+    // entry still holds the player's position, so only the generation reset
+    // keeps this first look from being deduped away.
+    g.sim.destroy(s1);
+    // A freed slot is held back until the next tick begins (allocSlot skips
+    // freed_this_tick), so start one: that is what makes the reuse happen.
+    g.sim.beginTick();
+    const z2 = g.sim.spawnZombie(pp.x + 3, pp.y, pp.z, 100) orelse
+        return error.TestUnexpectedResult;
+    const s2 = g.sim.slotOfNetId(z2) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(s1, s2); // same slot, new generation
+    g.sim.zombie_ai[s2].alert = true;
+    g.sim.zombie_ai[s2].target_id = c.entity_id;
+    cap.clear();
+    g.tickEntityLookAt();
+    try std.testing.expect(cap.findPkgIdEntity(look_id, z2) != null);
+    std.debug.print("PASS look-at: a reused slot still sends its first look\n", .{});
+}
+
 test "scenario animation data relays to the other players" {
     // Stock NetPackageEntityAnimationData (client-originated: the local
     // AvatarController broadcasts the avatar anim params; ProcessPackage
