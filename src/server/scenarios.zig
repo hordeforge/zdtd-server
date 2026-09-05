@@ -10462,6 +10462,60 @@ test "scenario a client-reported XP add mints nothing" {
     std.debug.print("PASS xp-trust: client-reported XP refused, server award applies\n", .{});
 }
 
+test "scenario entity flag and speed reports must name the sender's own entity" {
+    // AliveFlags and EntitySpeeds are client self-reports: the flags word
+    // drives the AI stealth gates (crouch muffles hearing and shrinks sleeper
+    // detection), and the movement state drives the stamina drain. Both carry
+    // the entity id they describe, so without the sender check one player sets
+    // another player's crouch and sprint state, and both packets are then
+    // relayed to every peer as if the owner had sent them.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const psb = g.sim.slotOfNetId(cb.entity_id) orelse return error.TestUnexpectedResult;
+
+    var body: [32]u8 = undefined;
+    var fb: [256]u8 = undefined;
+
+    // A reports its own crouch: applied.
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, ca.entity_id, packages.cF_crouching)));
+    const psa = g.sim.slotOfNetId(ca.entity_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.player[psa].crouching);
+
+    // A reports B as crouching: refused, B's state untouched.
+    try std.testing.expect(!g.sim.player[psb].crouching);
+    var own_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAliveFlags", try packages.buildAliveFlagsBody(&body, cb.entity_id, packages.cF_crouching)));
+    try std.testing.expect(!g.sim.player[psb].crouching);
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+
+    // Same rule for the speed report, which latches onto the Client, not the
+    // sim slot: a spoofed one would set another player's sprint drain.
+    const sprint_state: u8 = 3;
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntitySpeeds", try packages.buildEntitySpeedsBody(&body, ca.entity_id, sprint_state, 6.0, 0)));
+    try std.testing.expect(ca.sprint_speed > 0);
+
+    const b_sprint_before = cb.sprint_speed;
+    own_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntitySpeeds", try packages.buildEntitySpeedsBody(&body, cb.entity_id, sprint_state, 6.0, 0)));
+    try std.testing.expectEqual(b_sprint_before, cb.sprint_speed);
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    std.debug.print("PASS self-report: own flags and speeds applied, spoofed entity ids refused\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
