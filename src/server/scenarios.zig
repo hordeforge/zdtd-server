@@ -4268,6 +4268,82 @@ test "scenario craft invtx + explosion dig + lock deny" {
     std.debug.print("PASS craft+explosion+lock: wood ok, dig air, lock held by A\n", .{});
 }
 
+test "scenario a locked tile entity stays locked on a different channel" {
+    // Channels are per-purpose (loot, trade, ...), so the same container can be
+    // asked for on two of them. The per-channel holder check above cannot see
+    // that: it only compares who holds *this* channel. Without the position
+    // sweep, a second player picks a free channel and gets the same chest.
+    // The lock deny in the scenario above sends no targets, so pos_key is 0
+    // and the sweep is skipped there; a real block target is what reaches it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    // Lock request naming one block target (type 0 = block: x, y, z).
+    const buildReq = struct {
+        fn call(buf: []u8, channel: u16, x: i32, y: i32, z: i32) ![]u8 {
+            var w: binary.Writer = .{ .buf = buf };
+            try w.writeBool(true); // locking
+            try w.writeU16(channel);
+            try w.writeI32(1); // one target
+            try w.writeByte(1); // present
+            try w.writeByte(0); // block target
+            try w.writeI32(x);
+            try w.writeI32(y);
+            try w.writeI32(z);
+            try w.writeString(""); // context
+            return w.written();
+        }
+    }.call;
+
+    const lock_id = packages.idOf("NetPackageLockResponse") orelse return error.TestUnexpectedResult;
+    var rb: [64]u8 = undefined;
+    var fb: [256]u8 = undefined;
+
+    // A takes the chest on channel 0.
+    cap_a.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 0, 300, 70, 300)));
+    try std.testing.expectEqual(@as(i32, @intCast(ca.slot)), g.lock_channel[0]);
+    {
+        const body = cap_a.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+        var r: binary.Reader = .{ .data = body };
+        _ = try r.readBool(); // locking
+        try std.testing.expectEqual(true, try r.readBool()); // success
+    }
+
+    // B asks for the same chest on channel 1: a free channel, someone else's
+    // chest. The response must be a denial and the channel must stay unheld.
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 1, 300, 70, 300)));
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[1]);
+    {
+        const body = cap_b.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+        var r: binary.Reader = .{ .data = body };
+        _ = try r.readBool(); // locking
+        try std.testing.expectEqual(false, try r.readBool()); // success
+    }
+
+    // A different chest on that same channel 1 is fine, so the denial above is
+    // the position sweep and not the channel being unusable.
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 1, 320, 70, 320)));
+    try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[1]);
+    std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed\n", .{});
+}
+
 test "scenario gas can refuel generator via InvTx place" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_refuel");
