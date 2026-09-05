@@ -105,70 +105,45 @@ pub fn zpvSlotStride(version: u8) usize {
     return if (version >= 7) 11 else 7;
 }
 
-/// Convert a legacy 7-byte inventory slot block to the v7 11-byte shape:
-/// each slot keeps (item, count, quality, meta) and appends a zero
-/// `use_times` (f32) - carried old records have no known durability.
-fn emitZpv7Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize) !void {
-    // Legacy 7-byte slots widen straight to the current 13-byte shape: six
-    // zero bytes (use_times f32 + seed u16) - carried records have no known
-    // durability or seed.
+/// Widen a slot block of `src_stride` bytes to the current v12 21-byte shape,
+/// zero-filling whatever the older record lacked (use_times, seed, mod ids).
+/// Carried records have no known value for those fields.
+fn emitZpv12SlotsFrom(
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    old: []const u8,
+    inv_n_pos: usize,
+    inv_n: usize,
+    src_stride: usize,
+) !void {
+    const dst_stride = zpvSlotStride(12);
+    std.debug.assert(src_stride <= dst_stride);
     try out.append(allocator, old[inv_n_pos]); // inv_n byte
     var p = inv_n_pos + 1;
     var k: usize = 0;
     while (k < inv_n) : (k += 1) {
-        try out.appendSlice(allocator, old[p .. p + 7]);
-        try out.appendNTimes(allocator, 0, 6);
-        p += 7;
+        try out.appendSlice(allocator, old[p .. p + src_stride]);
+        try out.appendNTimes(allocator, 0, dst_stride - src_stride);
+        p += src_stride;
     }
 }
 
-/// Widen a v7-9 (11-byte) slot block to the v10 13-byte shape: each slot
-/// appends a zero `seed` (carried records predate seed persistence).
-fn emitZpv10Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize, stride: usize) !void {
-    try out.append(allocator, old[inv_n_pos]); // inv_n byte
-    var p = inv_n_pos + 1;
-    var k: usize = 0;
-    while (k < inv_n) : (k += 1) {
-        try out.appendSlice(allocator, old[p .. p + stride]);
-        try out.appendNTimes(allocator, 0, 2);
-        p += stride;
-    }
-}
-
-/// Widen a v10/v11 (13-byte) slot block to the v12 21-byte shape: each slot
-/// appends four zero mod ids (carried records predate mod persistence).
+/// Widen a v10/v11 (13-byte) slot block to the v12 21-byte shape.
 fn emitZpv12Slots(out: *std.ArrayList(u8), allocator: std.mem.Allocator, old: []const u8, inv_n_pos: usize, inv_n: usize) !void {
-    try out.append(allocator, old[inv_n_pos]); // inv_n byte
-    var p = inv_n_pos + 1;
-    var k: usize = 0;
-    while (k < inv_n) : (k += 1) {
-        try out.appendSlice(allocator, old[p .. p + 13]);
-        try out.appendNTimes(allocator, 0, 8); // 4 x u16 mod ids
-        p += 13;
-    }
+    return emitZpv12SlotsFrom(out, allocator, old, inv_n_pos, inv_n, 13);
 }
 
 /// Position of a v3+ record's progression-tail prog byte (journal end).
 /// v2 records have no tail; returns the record end.
 ///
-/// UNRESOLVED (2026-09-05): the slot stride here is a hard 7, but this is
-/// called for v6, v7 and v8, and `zpvSlotStride` says v7+ slots are 11 bytes
-/// (they gained `use_times`). For v7/v8 with a non-empty inventory the two
-/// disagree by 4 bytes per slot, and the same hard 7 appears in the v7 and v8
-/// carry branches (`slots_end`) and in the journal walk below.
-///
-/// It is not clear which is right, and the tests cannot decide it: the v7
-/// fixture carries one slot and passes with the stride at 7, at 11, and with
-/// this function switched to `zpvSlotStride(version)` - checked all three. So
-/// either the hard 7 is correct and `zpvSlotStride`'s v7 entry is wrong, or
-/// the carries are consistently off and no test reaches the difference.
-/// Resolving it needs a fixture whose post-slot fields are non-zero, so a
-/// 4-byte misread changes an observable value. Left alone rather than
-/// changed on a guess: this path rewrites player saves.
+/// The slot stride is `zpvSlotStride(version)`, not a fixed width: this is
+/// called for v6, v7 and v8, and v7 widened slots from 7 to 11 bytes when they
+/// gained `use_times`. It used to hard-code 7, which walked a v7/v8 record 4
+/// bytes short per slot.
 fn tailStartOf(old: []const u8, rec_start: usize, nl: usize, version: u8) error{CorruptPlayersFile}!usize {
     const inv_pos = rec_start + 1 + nl + 16;
     const inv_n: usize = old[inv_pos];
-    const jn_pos = inv_pos + 1 + inv_n * 7;
+    const jn_pos = inv_pos + 1 + inv_n * zpvSlotStride(version);
     const jn: usize = old[jn_pos];
     return journalSectionEnd(old, jn_pos + 1, jn, version);
 }
@@ -466,7 +441,7 @@ pub fn savePlayers(self: *Game) !void {
                 const inv_n: usize = old_recs[inv_pos];
                 const slots_end = inv_pos + 1 + inv_n * 11;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 written += 1;
@@ -480,7 +455,7 @@ pub fn savePlayers(self: *Game) !void {
                 const inv_n: usize = old_recs[inv_pos];
                 const slots_end = inv_pos + 1 + inv_n * 11;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv10Slots(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 8);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
@@ -494,10 +469,10 @@ pub fn savePlayers(self: *Game) !void {
                 // tail.
                 const inv_pos: usize = rec_start + 1 + nl + 16;
                 const inv_n: usize = old_recs[inv_pos];
-                const slots_end = inv_pos + 1 + inv_n * 7;
+                const slots_end = inv_pos + 1 + inv_n * 11;
                 const tail_start = tailStartOf(old_recs, rec_start, nl, 7) catch return error.CorruptPlayersFile;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 7);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
@@ -512,7 +487,7 @@ pub fn savePlayers(self: *Game) !void {
                 const slots_end = inv_pos + 1 + inv_n * 7;
                 const tail_start = tailStartOf(old_recs, rec_start, nl, 6) catch return error.CorruptPlayersFile;
                 try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-                try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+                try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 7);
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 6);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
@@ -536,7 +511,7 @@ pub fn savePlayers(self: *Game) !void {
             jp += 1 + inv_n * 7;
             const jn: usize = old_recs[jp];
             try out.appendSlice(self.allocator, old_recs[rec_start..inv_pos]);
-            try emitZpv7Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
+            try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 7);
             try out.appendSlice(self.allocator, old_recs[jp .. jp + 1]); // jn byte
             var qp: usize = jp + 1;
             {
