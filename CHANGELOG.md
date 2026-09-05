@@ -5,6 +5,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Removed
+
+- C2S game payloads that fail the channel-envelope parse are now dropped, with
+  no second attempt. `dispatchGamePayload` used to retry an unparseable payload
+  by prepending a zero channel byte and re-parsing; whatever packages that
+  produced went to `handlePackage` as if the peer had sent them. Every stock
+  game envelope carries the channel byte (GAP_ANALYSIS "Game envelope channel
+  byte"), so the retry only ever accepted payloads stock rejects, and a 10-byte
+  body reaches it. It was a framing-bug workaround from early RE, untested and
+  unreferenced, widening the C2S trust boundary on unauthenticated input.
+
 ### Changed
 
 - Wire pin retargeted to stock **V3.2.0 b10** (`src/version.zig`,

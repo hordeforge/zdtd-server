@@ -120,30 +120,13 @@ pub fn dispatchGamePayload(self: *Game, c: *Client, peer: *ln_peer.Peer, payload
                 std.debug.print("zdtd: unparsed game payload len={d} head={s}\n", .{ stable.len, hex[0..hi] });
             }
         }
-        if (stable.len >= 10) {
-            var alt: [16]wire_frame.Package = undefined;
-            var tmp: [8192]u8 = undefined;
-            if (stable.len + 1 <= tmp.len) {
-                tmp[0] = 0;
-                @memcpy(tmp[1..][0..stable.len], stable);
-                const n2 = wire_frame.parseChannelPayload(tmp[0 .. stable.len + 1], &alt);
-                if (n2 > 0) {
-                    // Sampled on the same counter as the unparsed-payload log
-                    // above: this branch is reached by the same sprayable
-                    // input, so an unsampled print here reinstates the
-                    // per-packet blocking stderr write that sampling exists
-                    // to prevent.
-                    if (malformed == 1 or malformed % 100 == 0) {
-                        std.debug.print("zdtd: alt-parse got {d} pkgs id0={d}\n", .{ n2, alt[0].id });
-                    }
-                    var j: usize = 0;
-                    while (j < n2) : (j += 1) {
-                        try self.handlePackage(c, peer, alt[j].id, alt[j].body);
-                    }
-                    return;
-                }
-            }
-        }
+        // An unparseable payload stops here. A retry that prepends a zero
+        // channel byte and re-parses used to live below: it accepted payloads
+        // stock rejects (every stock game envelope carries the channel byte,
+        // GAP_ANALYSIS "Game envelope channel byte") and handed the packages it
+        // invented straight to handlePackage. A 10-byte body is enough to reach
+        // it, so it widened the C2S trust boundary on unauthenticated input to
+        // cover a framing bug that never turned out to exist.
     }
     var i: usize = 0;
     while (i < n) : (i += 1) {
