@@ -283,6 +283,41 @@ test "framing constants match the Cecil-verified LiteNetLib values" {
     try std.testing.expectEqual(max_packet_size - fragmented_header_total, max_fragment_user);
 }
 
+test "PacketProperty ordinals match the Cecil-verified enum" {
+    // The ordinal is the first byte of every datagram, so it decides which
+    // reader runs. network.md pins the whole enum off the game's Managed
+    // LiteNetLib.dll and nothing checked it: swapping mtu_check with mtu_ok,
+    // which answers a discovery probe with the wrong property and stalls MTU
+    // negotiation, left the suite green.
+    const cases = [_]struct { Property, u8 }{
+        .{ .unreliable, 0 },
+        .{ .channeled, 1 },
+        .{ .ack, 2 },
+        .{ .ping, 3 },
+        .{ .pong, 4 },
+        .{ .connect_request, 5 },
+        .{ .connect_accept, 6 },
+        .{ .disconnect, 7 },
+        .{ .unconnected_message, 8 },
+        .{ .mtu_check, 9 },
+        .{ .mtu_ok, 10 },
+        .{ .broadcast, 11 },
+        .{ .merged, 12 },
+        .{ .shutdown_ok, 13 },
+        .{ .peer_not_found, 14 },
+        .{ .invalid_protocol, 15 },
+        .{ .nat_message, 16 },
+        .{ .empty, 17 },
+    };
+    for (cases) |c| {
+        try std.testing.expectEqual(c[1], @intFromEnum(c[0]));
+        // The decode path has to agree, including with the connection-number
+        // bits that ride the high end of the same byte.
+        try std.testing.expectEqual(c[0], propertyOf(c[1]));
+        try std.testing.expectEqual(c[0], propertyOf(makeByte0(c[0], 3)));
+    }
+}
+
 test "connect accept encodes every stock field" {
     var buf: [32]u8 = undefined;
     const a = try writeConnectAccept(&buf, 12345, 2, 17);
