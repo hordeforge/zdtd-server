@@ -227,6 +227,36 @@ The third one below was not distinguished at all until it was written down
 here, which is the argument for keeping this list: the compact form was read
 unconditionally and a stock client's turret placement was silently dropped.
 
+**`NetPackageBlockTrigger` is rebroadcast where stock consumes it.** Stock
+declares it ToServer (`get_PackageDirection` IL=2 returns 1) and handles it
+entirely on the server: `ProcessPackage` resolves `NetPackage.Sender` to the
+sending player and calls `Block::HandleTrigger`, whose server branch ends in
+`TriggerManager::TriggerBlocks` (`Block.il.txt` IL=41, IL_0025-007C) without
+emitting a package. A stock dedi never forwards it.
+
+zdtd has no trigger-volume sim, so `c2s/blocks.zig` rate-gates the package and
+broadcasts it to peers in interest range instead. The receiving clients do not
+act on it: their `ProcessPackage` reads `Sender.bAttachedToEntity`, and
+`Sender` is a `ClientInfo` the server sets, so on a client the branch falls
+through. The rebroadcast is therefore inert traffic rather than a behaviour
+difference a player can see - kept, and recorded here, until the trigger sim
+lands and the broadcast can go.
+
+The same sweep found `NetPackageBag`, also ToServer, echoed to other peers
+after a vehicle-basket write (`c2s/inv.zig`). Stock's only sender is
+`Entity::OnBagModified` (`Entity.il.txt` IL=15), which returns without sending
+when `ConnectionManager.IsServer`, so a stock dedi never emits this package
+either. The echo is how zdtd replicates a shared vehicle basket to the players
+watching it; stock reaches the same end through its own entity replication.
+Kept deliberately: dropping it would leave a passenger's basket view stale.
+`NetPackageTraderData` is the third ToServer name zdtd sends, and it is the
+same shape: `TraderData::SetModified` (`TraderData.il.txt` IL=11) returns
+immediately when `ConnectionManager.IsServer` and only a client sends it
+upward, so a stock dedi never emits it either. zdtd sends the trader's stock
+on the join path because a joining client would otherwise see an empty
+trader until it opened one; stock fills that from the client's own
+`TraderData` copy. Kept for the same reason as the basket echo.
+
 **Distinguish by shape, and prove the lengths cannot meet.** A length only
 discriminates when no stock body can reach it, and a stock body's length is
 rarely fixed: it carries a `PlatformUserIdentifier` whose two strings vary with

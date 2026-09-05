@@ -23,6 +23,14 @@ const max_claimed_explosion_radius: f32 = 6.0;
 
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageBlockTrigger")) {
+        // Divergence (DIVERGENCES 3): stock consumes this package server-side
+        // (`ProcessPackage` -> `Block::HandleTrigger` -> `TriggerManager::
+        // TriggerBlocks`, Block.il.txt IL=41) and forwards nothing. zdtd has
+        // no trigger-volume sim and rebroadcasts instead; receiving clients
+        // ignore it, because their ProcessPackage reads
+        // `Sender.bAttachedToEntity` and `Sender` is only set server-side.
+        // Drop the broadcast once the trigger sim lands.
+        //
         // Same rate gate as SetBlock: unthrottled would let a spam loop fan
         // this broadcast out to every nearby peer for free (bandwidth DoS).
         if (!self.takeBlockToken(c)) {
