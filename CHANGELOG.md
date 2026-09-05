@@ -182,6 +182,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- A pre-ZPV12 player save carrying inventory was corrupted on the first save
+  after upgrade. The save path rewrites the header to `ZPVC` (v12) but carried
+  v10/v11 records byte-for-byte, leaving 13-byte inventory slots in a file the
+  reader walks with the v12 21-byte stride: every field after the slots read
+  from the wrong offset and the next load failed with `CorruptPlayersFile`,
+  losing the player's inventory, progression and bedroll. Carried records now
+  widen each slot with four zero mod ids, the same way the v7 and v9 carries
+  already widened theirs.
 - GSI values now use stock's separator encoding, so a server or level name
   containing `:` or `;` reaches the client intact. `GameServerInfo::SetValue`
   (IL=70) stores values with `:` replaced by `^` and `;` by `*`, and

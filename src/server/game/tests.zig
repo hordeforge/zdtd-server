@@ -488,6 +488,71 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5), game_mod.zpvRecordLen(data, 8, 12));
 }
 
+test "players zpv10 inventory slots widen to the ZPV12 stride" {
+    // The v10 fixture above carries no inventory, so the slot stride never
+    // enters its record walk - moving the v10 boundary in zpvSlotStride left
+    // the whole suite green. A v10 slot is 13 bytes (item, count, quality,
+    // meta, use_times, seed); v12 adds four mod ids, so a carried record grows
+    // by exactly that difference and keeps the slot's values.
+    const persist = @import("../persist.zig");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var buf: [256]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[0..4], "ZPVA"); // v10
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little);
+    o += 4;
+    const name = "slotter";
+    buf[o] = @intCast(name.len);
+    o += 1;
+    @memcpy(buf[o..][0..name.len], name);
+    o += name.len;
+    @memset(buf[o..][0..16], 0); // x,y,z,coins
+    o += 16;
+    buf[o] = 1; // inv_n: one slot
+    o += 1;
+    // v10 slot: item u16 | count u16 | quality u8 | meta u16 | use_times f32 | seed u16
+    @memset(buf[o..][0..persist.zpvSlotStride(10)], 0);
+    std.mem.writeInt(u16, buf[o..][0..2], 42, .little);
+    std.mem.writeInt(u16, buf[o + 2 ..][0..2], 7, .little);
+    buf[o + 4] = 3;
+    std.mem.writeInt(u16, buf[o + 11 ..][0..2], 99, .little); // seed
+    o += persist.zpvSlotStride(10);
+    buf[o] = 0; // jn
+    o += 1;
+    // prog 0 ends the record: bed_present and the skill tail both live inside
+    // the prog==1 branch, so appending them here would be extra bytes.
+    buf[o] = 0;
+    o += 1;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        try g.savePlayers();
+    }
+
+    const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqual(@as(u8, 'C'), data[3]); // carried to v12
+    const want = 1 + name.len + 16 + 1 + persist.zpvSlotStride(12) + 1 + 1;
+    try std.testing.expectEqual(want, game_mod.zpvRecordLen(data, 8, 12));
+    // The slot's leading fields survived the widening at their own offsets.
+    const slot_at = 8 + 1 + name.len + 16 + 1;
+    try std.testing.expectEqual(@as(u16, 42), std.mem.readInt(u16, data[slot_at..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, data[slot_at + 2 ..][0..2], .little));
+}
+
 test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     // Hand-built ZPV8 file with a tail (prog, level, xp, stats, hp). The save
     // must insert born_world_time=0 (the pre-ZPV9 days-alive behavior) so the
