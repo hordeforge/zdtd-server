@@ -182,6 +182,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackagePOIMetadataResponse` went out on LiteNet channel 1 instead of 0.
+  Its 3.1.0 predecessor `NetPackagePOIAround` overrides `get_Channel` to 1, but
+  the 3.2.0 replacement declares no override and inherits `NetPackage`'s 0; the
+  channel was carried across when the package was swapped. Stock overrides the
+  channel for exactly four packages (`NetPackageChunk`, `ChunkRemove`,
+  `DynamicMesh`, `MapChunks`), and a test now pins the whole table rather than
+  a sample.
 - `NetPackageSetBlock` with an empty change list decoded as a block change the
   client never sent. `parseSetBlockChanges` keyed a legacy 14-byte layout off
   the body length, and 14 is a length a stock body reaches on its own: an

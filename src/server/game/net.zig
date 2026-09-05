@@ -80,7 +80,11 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     // IdMapping, MapChunks, POIMetadataResponse, SignDataResponse (the
     // 3.2.0 set swaps POIAround for POIMetadataResponse, changelog-3.2.0
     // §3.5). The five zdtd emits today are deflated here (the rest are not
-    // yet sent - S2C coverage row).
+    // yet sent - S2C coverage row). Re-checked against the 3.2.0 IL
+    // 2026-09-04, after the sibling channel list turned out to carry a
+    // POIAround override its replacement does not have: all five names below
+    // do declare `get_Compress() IL=2` returning ldc.i4.1, so this list is
+    // right where `packages.channelFor` was wrong.
     // IdMapping/ConfigFile deflating cuts the join cost (one flat-world join
     // was 6.4 MB out) and relieves the reliable window.
     if (std.mem.eql(u8, pkg_name, "NetPackageChunk") or

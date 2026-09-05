@@ -1958,21 +1958,57 @@ fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     return ch;
 }
 
-/// Stock `NetPackage.get_Channel` override set (asm.il 808632-808638, 826004,
-/// 833771): bulk world data rides envelope channel 1 so it does not sit in the
-/// same queue as control traffic. Everything else is channel 0.
+/// Stock `NetPackage.get_Channel` override set: bulk world data rides envelope
+/// channel 1 so it does not sit in the same queue as control traffic.
+/// `NetPackage::get_Channel` returns 0 (IL=2) and exactly four packages
+/// override it to 1, each `get_Channel() IL=2` returning `ldc.i4.1`:
+/// NetPackageChunk, NetPackageChunkRemove, NetPackageDynamicMesh and
+/// NetPackageMapChunks.
+///
+/// `NetPackagePOIMetadataResponse` is deliberately absent. Its 3.1.0
+/// predecessor `NetPackagePOIAround` did override to 1
+/// (`il/full-v3.1.0/_global/NetPackagePOIAround.il.txt`), but the 3.2.0
+/// replacement declares no `get_Channel` at all
+/// (`il/full-v3.2.0/_global/NetPackagePOIMetadataResponse.il.txt`, base
+/// NetPackage, no intermediate class), so it inherits channel 0. zdtd carried
+/// the old channel across the package swap until 2026-09-04.
 pub fn channelFor(name: []const u8) u8 {
     if (std.mem.eql(u8, name, "NetPackageChunk") or
         std.mem.eql(u8, name, "NetPackageChunkRemove") or
         std.mem.eql(u8, name, "NetPackageDynamicMesh") or
-        std.mem.eql(u8, name, "NetPackageMapChunks") or
-        std.mem.eql(u8, name, "NetPackagePOIMetadataResponse")) return 1;
+        std.mem.eql(u8, name, "NetPackageMapChunks")) return 1;
     return 0;
 }
 
 pub fn framed(buf: []u8, name: []const u8, body: []const u8) ![]u8 {
     const id = idOf(name) orelse return error.UnknownPackage;
     return frame.framePackage(buf, channelFor(name), id, body);
+}
+
+test "only the four stock get_Channel overrides ride channel 1" {
+    // Nothing tested this: dropping every override to 0 left the suite green.
+    // The set is the packages whose `get_Channel() IL=2` returns ldc.i4.1;
+    // `NetPackage::get_Channel` returns 0 for everything else.
+    const on_one = [_][]const u8{
+        "NetPackageChunk",
+        "NetPackageChunkRemove",
+        "NetPackageDynamicMesh",
+        "NetPackageMapChunks",
+    };
+    for (on_one) |n| try std.testing.expectEqual(@as(u8, 1), channelFor(n));
+
+    // Every other advertised package inherits 0. Checking the whole table
+    // rather than a sample is what catches a name added to the override set
+    // without an IL override behind it - which is how POIMetadataResponse got
+    // there, inherited from its removed 3.1.0 predecessor POIAround.
+    for (default_mappings) |n| {
+        var overridden = false;
+        for (on_one) |o| {
+            if (std.mem.eql(u8, n, o)) overridden = true;
+        }
+        if (overridden) continue;
+        try std.testing.expectEqual(@as(u8, 0), channelFor(n));
+    }
 }
 
 test "setblock stock body roundtrip" {
