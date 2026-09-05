@@ -719,6 +719,39 @@ fn relSeq(a: i32) i32 {
     return r;
 }
 
+test "MTU probes are answered in full but never raise the send size" {
+    // `packet.max_packet_size` is 1327 where the game's LiteNetLib pins 1432
+    // (PossibleMtu = [1024,1164,1392,1404,1424,1432], network.md). The two
+    // halves of that divergence behave differently and neither was tested:
+    // a probe is echoed at its own size, so the client's discovery walks the
+    // full stock list and completes, while `peer_mtu` is clamped, so zdtd's
+    // own datagrams stay at the conservative size. The effect is smaller
+    // sends (more fragments), never an oversized one.
+    var peer: Peer = .{};
+    peer.alive = true;
+    var sock: udp.Socket = .{}; // null socket: sendTo is a no-op
+
+    // A probe larger than our cap, as a stock client's last step would be.
+    var probe: [1432]u8 = undefined;
+    @memset(&probe, 0);
+    probe[0] = packet.makeByte0(.mtu_check, peer.conn_num);
+    try std.testing.expect(try peer.handlePacket(&sock, &probe) == null);
+    try std.testing.expectEqual(packet.max_packet_size, peer.peer_mtu);
+
+    // A probe below the cap negotiates that smaller size verbatim.
+    var small: Peer = .{};
+    small.alive = true;
+    var probe2: [1024]u8 = undefined;
+    @memset(&probe2, 0);
+    probe2[0] = packet.makeByte0(.mtu_check, small.conn_num);
+    try std.testing.expect(try small.handlePacket(&sock, &probe2) == null);
+    try std.testing.expectEqual(@as(usize, 1024), small.peer_mtu);
+
+    // And it only ever climbs: a late smaller probe does not shrink it.
+    try std.testing.expect(try small.handlePacket(&sock, probe2[0..512]) == null);
+    try std.testing.expectEqual(@as(usize, 1024), small.peer_mtu);
+}
+
 test "relSeq wraps the 32768 sequence space symmetrically" {
     // Six window decisions ride on this - in-flight count, ack base, both
     // remote-window comparisons - and none of them tested it: widening the
