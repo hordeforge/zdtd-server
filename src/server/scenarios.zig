@@ -8567,6 +8567,64 @@ test "scenario trader stock persists across restart (traders.zst)" {
     }
 }
 
+test "scenario a trader entry with an unresolvable item does not shift the saved record" {
+    // An entry whose item id this build cannot name is dropped on save rather
+    // than written as a stub. The record's entry-count byte therefore has to
+    // be the number actually written, not `n`: the reader walks exactly that
+    // many entries, so a header counting the dropped one would send it into
+    // the next record's bytes for this record's tail.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_tradersavecount");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_tradersavecount", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var ts: ?ecs.Slot = null;
+    var s: usize = 0;
+    while (s < ecs.max_entities) : (s += 1) {
+        if (g.sim.alive[s] and g.sim.mask[s].trader_stock and
+            std.mem.eql(u8, g.sim.trader_stock[s].name, "Trader Jen"))
+        {
+            ts = @intCast(s);
+            break;
+        }
+    }
+    const t = ts orelse return error.TestUnexpectedResult;
+    const wood = g.items.byName("resourceWood") orelse return error.TestUnexpectedResult;
+    // Middle entry carries an id no item table entry claims, so `byId` misses
+    // and the writer drops it. The two around it must still come back.
+    const unresolvable: u16 = 60000;
+    try std.testing.expect(g.items.byId(unresolvable) == null);
+    g.sim.trader_stock[t].entries[0] = .{ .item = wood.id, .count = 11, .price = 101 };
+    g.sim.trader_stock[t].entries[1] = .{ .item = unresolvable, .count = 22, .price = 202 };
+    g.sim.trader_stock[t].entries[2] = .{ .item = wood.id, .count = 33, .price = 303 };
+    g.sim.trader_stock[t].n = 3;
+    g.sim.trader_stock[t].wallet = 5150;
+    try g.saveTraders();
+
+    // The blob must scan to exactly its length: a count byte of 3 over two
+    // written entries makes the reader run off this record's end.
+    var path_buf: [512]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/traders.zst", .{g.world.world_dir});
+    const blob = try io_fs.readFileAll(gpa, p);
+    defer gpa.free(blob);
+    try std.testing.expectEqual(blob.len, try persist.ztrScanLen(blob));
+
+    g.sim.trader_stock[t].n = 0;
+    g.sim.trader_stock[t].wallet = 0;
+    try persist.loadTraders(g);
+    try std.testing.expectEqual(@as(usize, 2), g.sim.trader_stock[t].n);
+    try std.testing.expectEqual(@as(u16, 11), g.sim.trader_stock[t].entries[0].count);
+    try std.testing.expectEqual(@as(u16, 33), g.sim.trader_stock[t].entries[1].count);
+    try std.testing.expectEqual(@as(i32, 5150), g.sim.trader_stock[t].wallet);
+    std.debug.print("PASS trader-savecount: a dropped entry is not counted in the record header\n", .{});
+}
+
 test "scenario traders.zst record for an absent trader does not desync the reader" {
     // A trader saved by a previous map is skipped on load, but its stock
     // entries still occupy bytes. Skipping the record without consuming them
