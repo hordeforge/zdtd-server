@@ -10190,6 +10190,64 @@ test "scenario collect rejects a bag claimed in another player's name" {
     std.debug.print("PASS collect: spoofed playerId rejected, honest claim collects\n", .{});
 }
 
+test "scenario a bag write beyond reach is rejected" {
+    // NetPackageBag can address any entity with an inventory, not just the
+    // sender's own. For a non-player target (loot bag, death bag) the write is
+    // allowed, so distance is the only thing left between a legitimate looting
+    // and rewriting a bag on the far side of the map by id.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    const pp = g.sim.transform[ps];
+
+    var bag_body: [8192]u8 = undefined;
+    var fb: [9000]u8 = undefined;
+    // A non-player target goes through applyBagPackage with player_bag_only
+    // false: the bag array maps onto slots from 0, and the builder compacts
+    // (it skips empty source slots), so a bag that already holds one item
+    // receives the added stack at index 1.
+    const bag_slot: usize = 1;
+
+    // A bag within reach takes the write.
+    const near = g.sim.spawnLootBag(pp.x + 2, pp.y, pp.z, 1, 1) orelse return error.TestUnexpectedResult;
+    const near_s = g.sim.slotOfNetId(near) orelse return error.TestUnexpectedResult;
+    {
+        var inv = g.sim.inventory[near_s];
+        inv.slots[3] = .{ .item_id = 7, .count = 5, .quality = 1 };
+        const bb = try packages.stock_inv.buildBagPackage(&bag_body, near, &inv, null, null, false);
+        try g.injectFramed(c, try packages.framed(&fb, "NetPackageBag", bb));
+        try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[near_s].slots[bag_slot].item_id);
+    }
+
+    // The same write to a bag well beyond max_edit_range is dropped.
+    const far = g.sim.spawnLootBag(pp.x + g.max_edit_range * 4, pp.y, pp.z, 1, 1) orelse
+        return error.TestUnexpectedResult;
+    const far_s = g.sim.slotOfNetId(far) orelse return error.TestUnexpectedResult;
+    const before_id = g.sim.inventory[far_s].slots[bag_slot].item_id;
+    const bounds_before = g.harness.counters.get(.bounds_rejects);
+    {
+        var inv = g.sim.inventory[far_s];
+        inv.slots[3] = .{ .item_id = 7, .count = 64, .quality = 1 };
+        const bb = try packages.stock_inv.buildBagPackage(&bag_body, far, &inv, null, null, false);
+        try g.injectFramed(c, try packages.framed(&fb, "NetPackageBag", bb));
+    }
+    try std.testing.expectEqual(before_id, g.sim.inventory[far_s].slots[bag_slot].item_id);
+    try std.testing.expect(g.harness.counters.get(.bounds_rejects) > bounds_before);
+    std.debug.print("PASS bag-reach: near bag written, far bag rejected\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
