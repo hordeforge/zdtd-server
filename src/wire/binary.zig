@@ -287,6 +287,32 @@ test "string readers reject truncation and preserve cursor at payload" {
     try std.testing.expectError(error.EndOfStream, skip_truncated.skipString());
 }
 
+test "f32 is a little-endian bit pattern, sign preserved" {
+    // BinaryWriter.Write(float) emits the IEEE-754 bits little-endian, so the
+    // wire form is a bit pattern rather than a numeric value: -0.0 must not
+    // collapse to 0.0. The existing float tests only round-trip ordinary
+    // values, and a roundtrip agrees with itself whatever the byte order is,
+    // so pin one known pattern outright.
+    var buf: [32]u8 = undefined;
+    var w: Writer = .{ .buf = &buf };
+    try w.writeF32(1.0);
+    // IEEE-754 1.0 is 0x3F800000, little-endian on the wire.
+    try std.testing.expectEqualSlices(u8, &.{ 0x00, 0x00, 0x80, 0x3F }, w.written()[0..4]);
+
+    try w.writeF32(-0.0);
+    try w.writeF32(std.math.inf(f32));
+    try w.writeF32(-std.math.inf(f32));
+
+    var r: Reader = .{ .data = w.written() };
+    try std.testing.expectEqual(@as(f32, 1.0), try r.readF32());
+    // -0.0 == 0.0 compares true, so check the sign bit the wire carried.
+    const neg_zero = try r.readF32();
+    try std.testing.expectEqual(@as(u32, 0x80000000), @as(u32, @bitCast(neg_zero)));
+    try std.testing.expectEqual(std.math.inf(f32), try r.readF32());
+    try std.testing.expectEqual(-std.math.inf(f32), try r.readF32());
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
 test "le ints" {
     var buf: [16]u8 = undefined;
     var w: Writer = .{ .buf = &buf };
