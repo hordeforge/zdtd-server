@@ -11937,7 +11937,20 @@ test "scenario a vending allow-list with a hole ships no empty identity" {
     // Two real entries, not the three the store declares: the empty one is
     // dropped rather than shipped as a zero-length identity.
     try std.testing.expectEqual(@as(?i32, 2), found_count);
-    std.debug.print("PASS vending-allow: the empty entry is compacted out of the wire list\n", .{});
+
+    // Same shape one field over: the stock rows compact on type_id 0, so a
+    // machine whose middle slot was sold out ships two rows, not three with
+    // an item the client cannot resolve.
+    v.stock_n = 3;
+    v.stock[0] = .{ .type_id = packages.stock_inv.items_start_here + 1, .count = 2, .quality = 1 };
+    v.stock[1] = .{}; // sold out
+    v.stock[2] = .{ .type_id = packages.stock_inv.items_start_here + 2, .count = 5, .quality = 1 };
+    var entries_buf: [vending_mod.max_vending_stock]packages.TraderStockEntry = undefined;
+    const n_entries = replicate_te.vendingEntries(g, v, &entries_buf);
+    try std.testing.expectEqual(@as(usize, 2), n_entries);
+    try std.testing.expectEqual(packages.stock_inv.items_start_here + 1, entries_buf[0].item.type_id);
+    try std.testing.expectEqual(packages.stock_inv.items_start_here + 2, entries_buf[1].item.type_id);
+    std.debug.print("PASS vending-allow: empty allow entry and empty stock row both compacted\n", .{});
 }
 
 test "scenario animation data relays to the other players" {
