@@ -75,6 +75,17 @@ the parsed coordinates back, and behind that gap sat a length-keyed legacy
 branch that decoded an empty change list from an identified client as a block
 edit (fixed, see the CHANGELOG).
 
+The mutant tool only reaches builders some test executes, so the complementary
+question is which builders no test runs at all. Counting the `pub fn build*` /
+`write*` in `src/wire/` and checking each name against the text inside every
+Zig `test` block found 24 of 128 with no direct call (2026-09-04). Most are
+reached through a wrapper the tests do call; tracing the remaining ones to
+their caller left `buildIdMappingBody`, whose only caller is
+`sendItemIdMapping` on the join path. Swapping its name string with the length
+i32 left the whole suite green, so it had no coverage at all. HEAD was correct
+(`NetPackageIdMapping::read` IL=13) and now has a test. Redo that count when
+`src/wire/` gains builders.
+
 **Audit state (2026-09-04).** Every file in `src/wire/` that has swappable
 pairs has now been measured, encode and decode; the three remaining survivors
 are unobservable by construction and documented at their code sites. Mutant
