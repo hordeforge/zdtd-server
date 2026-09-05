@@ -101,11 +101,17 @@ else are invisible to both. `rg -l 'binary.Writer' src/ | rg -v '^src/wire/'`
 finds them - six files, of which `persist.zig` writes to disk and
 `harness.zig`/`tests.zig`/`scenarios.zig` are test code. The two on live wire
 paths were mutated by hand: the SharedQuest remove body in `session_drop.zig`
-is caught by a party scenario, but the empty `NetPackageHoldingItem` in
-`game/join.zig` was not - a swapped entityId/count left the suite green on a
-body every client receives at join. It now goes through `writeHoldingItem`
-(AGENTS rule 14), which puts it back inside the audits. Re-run that `rg` when
-a new send path appears.
+is caught by a party scenario, but neither body in `game/join.zig` was. A
+swapped entityId/count in the empty `NetPackageHoldingItem`, and a swapped
+id/name in the NameIdMapping payload, each left the suite green on bytes every
+client receives at join. Both now go through builders (`writeHoldingItem`,
+`buildNameIdMappingPayload`, AGENTS rule 14), which puts them back inside the
+audits and gave each one a test.
+
+That `rg` is no longer a manual step: `provenance_scan` 7h holds the allowed
+set and fails on any `binary.Writer` outside `src/wire/` not listed with its
+reason, so the next one is a build failure rather than a survivor found by
+hand three audits later.
 
 **Audit state (2026-09-04).** Every file in `src/wire/` that has swappable
 pairs has now been measured, encode and decode; the three remaining survivors
