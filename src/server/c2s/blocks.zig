@@ -575,11 +575,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageCloseAllWindows")) {
-        if (!self.takeInvToken(c)) {
-            self.harness.counters.inc(.c2s_throttle);
-            return true;
-        }
-        try self.broadcastExcept("NetPackageCloseAllWindows", body, c.slot);
+        // Stock declares this ToClient (`get_PackageDirection` IL=2 returns 2,
+        // NetPackageDirection.ToClient) and its ProcessPackage returns
+        // immediately when `ConnectionManager.IsServer`: the body is a
+        // `_playerIdToClose` the receiving client uses to close its own modal
+        // windows. A dedicated server neither receives nor forwards it.
+        //
+        // zdtd used to relay it to every other peer, which let any client
+        // close every other player's open UI. Accept and drop instead: the
+        // package is legal to arrive (a client may send it) but has no
+        // server-side effect, exactly as stock has none.
+        self.harness.counters.inc(.ownership_rejects);
         return true;
     }
     return false;

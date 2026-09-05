@@ -34,6 +34,8 @@ Reproducing stock here means accepting a documented cheat vector.
 | 1.7 | `NetPackageDropItemsContainer` creates a loot container from the client's item list (`DropContentInLootContainerServer`, Process IL=19) | Accepted, dropped | The bag is server-owned: `spawnDeathBag` builds it from the victim's real inventory on the authoritative death path. Accepting a client list is item duplication by construction |
 | 1.8 | `NetPackageQuestGotoPoint` / `NetPackageQuestTreasurePoint` report objective progress the client evaluated (read IL=43 / IL=54) | Accepted, dropped | The RE says outright that a server completing goto objectives by proximity "can treat the report as a redundant echo" (`protocol-packages.md` 5.13), and zdtd does exactly that: the radius check runs per tick in `ecs/systems.zig` against the quest target |
 
+| 1.9 | `NetPackageCloseAllWindows` carries a `_playerIdToClose` the receiving client uses to close its own modal windows | Accepted, dropped | Stock never handles it server-side: it is `ToClient` (`get_PackageDirection` IL=2 returns 2) and its `ProcessPackage` returns immediately when `ConnectionManager.IsServer`. zdtd relayed it to every other peer until 2026-09-04, which let any client close every other player's open UI |
+
 **Correction 2026-09-02.** Row 1.4 previously also named
 `NetPackageEntityVelocity` and `EntitySpeeds` as client-driven motion zdtd
 refuses. That was wrong in both directions. RE `protocol-packages.md` 5.5.5 has
