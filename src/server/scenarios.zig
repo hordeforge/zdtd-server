@@ -4710,6 +4710,35 @@ test "scenario stock InvTx rejects unresolvable item stacks (T18)" {
     try std.testing.expectEqual(@as(u16, wood), g.sim.inventory[ps].slots[3].item_id);
     try std.testing.expectEqual(@as(u16, 10), g.sim.inventory[ps].slots[3].count);
     std.debug.print("PASS stock-tx-reject: c2s_rejects {d}->{d} slot3 intact\n", .{ rejects_before, g.harness.counters.get(.c2s_rejects) });
+
+    // The op index is a raw i32 off the wire while the slot array holds
+    // max_inv_slots, so an index past the end (or negative) has to fail the
+    // transaction before it is used to write. Same body shape with a
+    // resolvable item, so the index is the only thing wrong with it.
+    const good_type = packages.stock_inv.items_start_here + @as(i32, wood);
+    // Pin that the stack itself is fine: with an unresolvable type the T18
+    // reject above fires first and the index bound never runs, which makes a
+    // green test prove nothing.
+    try std.testing.expectEqual(wood, g.items.ecsIdFromStockType(good_type));
+    for ([_]i32{ @intCast(quest_mod_components.max_inv_slots), -1 }) |bad_index| {
+        var ob: [256]u8 = undefined;
+        var ow: binary.Writer = .{ .buf = &ob };
+        try ow.writeI32(1);
+        for (0..16) |i| try ow.writeByte(@intCast(i));
+        try ow.writeI32(0);
+        try ow.writeI32(0);
+        try ow.writeI32(1); // opCount
+        try ow.writeI16(0); // SetAbsolute
+        try packages.stock_inv.writeItemStack(&ow, .{ .type_id = packages.stock_inv.items_start_here + @as(i32, wood), .count = 1 });
+        try ow.writeI32(bad_index);
+        var ofb: [300]u8 = undefined;
+        try g.injectFramed(c, try packages.framed(&ofb, "NetPackageInventoryTransactionRequest", ow.written()));
+        // Slot 3 still carries what the earlier reject left there: nothing was
+        // applied, and no write landed anywhere the index could have reached.
+        try std.testing.expectEqual(@as(u16, wood), g.sim.inventory[ps].slots[3].item_id);
+        try std.testing.expectEqual(@as(u16, 10), g.sim.inventory[ps].slots[3].count);
+    }
+    std.debug.print("PASS stock-tx-reject: an out-of-range op index is rejected\n", .{});
 }
 
 test "scenario whitelist gate fails closed on an un-keyable identity (admin audit)" {
