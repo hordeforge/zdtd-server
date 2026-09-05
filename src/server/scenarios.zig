@@ -11859,6 +11859,87 @@ test "scenario light tile entities ride the chunk stream" {
     std.debug.print("PASS light-te: in-chunk light streamed, out-of-chunk light withheld\n", .{});
 }
 
+test "scenario a vending allow-list with a hole ships no empty identity" {
+    // The vending TE writes allowed.len then one PlatformUserIdentifier per
+    // entry. allowed_n is a stored count and the array behind it can carry an
+    // empty UserRef in the middle: readUserRef accepts platform_len 0, so a
+    // save written before an entry was cleared restores exactly that shape.
+    // The send path compacts, which is what keeps a zero-length identity off
+    // the wire; without it the client reads a count it cannot satisfy.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const te_id = packages.idOf("NetPackageTileEntity") orelse
+        return error.TestUnexpectedResult;
+
+    const vx: i32 = 300;
+    const vz: i32 = 300;
+    const v = g.vending.getOrCreate(.{ .x = vx, .y = 70, .z = vz }, 1, 0) orelse
+        return error.TestUnexpectedResult;
+    // Three declared entries with the middle one empty.
+    v.allowed_n = 3;
+    v.allowed[0].platform_len = 5;
+    @memcpy(v.allowed[0].platform[0..5], "Steam");
+    v.allowed[0].id_len = 4;
+    @memcpy(v.allowed[0].id[0..4], "1001");
+    v.allowed[1] = .{}; // the hole
+    v.allowed[2].platform_len = 5;
+    @memcpy(v.allowed[2].platform[0..5], "Steam");
+    v.allowed[2].id_len = 4;
+    @memcpy(v.allowed[2].id[0..4], "1003");
+
+    cap.clear();
+    try replicate_te.sendVendingTe(g, c.peer.?, vx, 70, vz);
+
+    // Walk the vending TE body to the allow-list count. Outer header is
+    // handle u8 + x/y/z i32 + block id i32 + payload len i32.
+    var found_count: ?i32 = null;
+    for (cap.slots[0..cap.n]) |sl| {
+        var pkgs: [16]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        for (pkgs[0..pn]) |pk| {
+            if (pk.id != te_id or pk.body.len < 21) continue;
+            var r: binary.Reader = .{ .data = pk.body };
+            _ = r.readByte() catch continue;
+            const bx = r.readI32() catch continue;
+            _ = r.readI32() catch continue;
+            const bz = r.readI32() catch continue;
+            if (bx != vx or bz != vz) continue;
+            _ = r.readI32() catch continue; // te block id
+            _ = r.readI32() catch continue; // payload len
+            // Vending payload (stock_te.buildVendingTeBody): local x/y/z i32,
+            // version i32, locked bool, owner identity, password hash as a
+            // length-prefixed string, then the allow-list count.
+            _ = r.readI32() catch continue;
+            _ = r.readI32() catch continue;
+            _ = r.readI32() catch continue;
+            _ = r.readI32() catch continue; // version
+            _ = r.readBool() catch continue;
+            var pbuf: [128]u8 = undefined;
+            var ibuf: [128]u8 = undefined;
+            _ = packages.platform_user.read(&r, &pbuf, &ibuf) catch continue;
+            var hbuf: [256]u8 = undefined;
+            _ = r.readString(&hbuf) catch continue;
+            found_count = r.readI32() catch continue;
+        }
+    }
+    // Two real entries, not the three the store declares: the empty one is
+    // dropped rather than shipped as a zero-length identity.
+    try std.testing.expectEqual(@as(?i32, 2), found_count);
+    std.debug.print("PASS vending-allow: the empty entry is compacted out of the wire list\n", .{});
+}
+
 test "scenario animation data relays to the other players" {
     // Stock NetPackageEntityAnimationData (client-originated: the local
     // AvatarController broadcasts the avatar anim params; ProcessPackage
