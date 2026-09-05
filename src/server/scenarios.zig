@@ -7719,6 +7719,54 @@ test "scenario land claims persist across restart and re-map on login" {
     }
 }
 
+test "scenario a land claim blocks a non-owner's SetBlock" {
+    // The persist scenario above only exercises the allow half (the owner
+    // edits inside their own claim). The deny half is the point of the claim:
+    // a second player's SetBlock inside someone else's claim is dropped, and
+    // the same edit one block outside it goes through, so the rejection is
+    // the claim and not the reach or bounds gate.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const owner = try g.attachJoinedClient(&cap_a);
+    const other = try g.attachJoinedClient(&cap_b);
+
+    const cx: i32 = 250;
+    const cz: i32 = 250;
+    const kid = g.maxdamage.idByName("keystoneBlock") orelse return error.TestUnexpectedResult;
+    var sb: [64]u8 = undefined;
+    var fb: [8192]u8 = undefined;
+    const place = try packages.buildSetBlockBody(&sb, cx, 70, cz, kid);
+    try g.injectFramed(owner, try packages.framed(&fb, "NetPackageSetBlock", place));
+    try std.testing.expectEqual(kid, try g.world.blockWorld(cx, 70, cz));
+    const claim = g.claimCovering(cx, cz) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(owner.entity_id, claim.owner_entity);
+
+    // Inside the claim, from the other player: denied, the block stays air.
+    const stone = world_store.block_stone;
+    const inside = try packages.buildSetBlockBody(&sb, cx + 1, 70, cz, stone);
+    try g.injectFramed(other, try packages.framed(&fb, "NetPackageSetBlock", inside));
+    try std.testing.expectEqual(@as(u32, 0), try g.world.blockWorld(cx + 1, 70, cz));
+
+    // The owner's own edit inside the claim still lands.
+    const owner_edit = try packages.buildSetBlockBody(&sb, cx + 1, 70, cz, stone);
+    try g.injectFramed(owner, try packages.framed(&fb, "NetPackageSetBlock", owner_edit));
+    try std.testing.expectEqual(stone, try g.world.blockWorld(cx + 1, 70, cz));
+    std.debug.print("PASS claim-gate: non-owner denied inside the claim, owner allowed\n", .{});
+}
+
 test "scenario container loot respawns after LootRespawnDays" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_lootrespawn");
@@ -11191,6 +11239,52 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     try std.testing.expectEqual(@as(i16, 1), try r3.readI16()); // playerKills
 
     std.debug.print("PASS kill-counter: zombie + PvP kills ride the PlayerStats wire\n", .{});
+}
+
+test "scenario pvp_mode 0 drops a player-to-player damage claim" {
+    // Stock PlayerKillingMode 0 ("no killing") is a server policy the client
+    // cannot opt out of: a DamageEntity naming another player is dropped
+    // before it can touch health. The kill-counter scenario above only ever
+    // runs with pvp_mode 3, so the deny half needs its own world (the damage
+    // path is rate-limited per client, so it cannot share one).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    g.pvp_mode = 0;
+    const vslot = g.sim.slotOfNetId(cb.entity_id) orelse return error.TestUnexpectedResult;
+    const hp_before = g.sim.health[vslot].hp;
+    try std.testing.expect(hp_before > 0);
+
+    var dmg: [256]u8 = undefined;
+    var fbuf: [512]u8 = undefined;
+    // `fatal` is set, so a gate that let this through would leave the victim
+    // present at zero health rather than merely wounded.
+    const denied = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 1000, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", denied));
+    try std.testing.expectApproxEqAbs(hp_before, g.sim.health[vslot].hp, 0.01);
+    try std.testing.expectEqual(@as(u16, 0), ca.player_kills);
+
+    // Same claim with PvP enabled lands, so the rejection above is the mode
+    // gate and not some unrelated reason the packet never arrived.
+    g.pvp_mode = 3;
+    const allowed = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 1000, true, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", allowed));
+    try std.testing.expect(g.sim.health[vslot].hp < hp_before);
+    std.debug.print("PASS pvp-gate: pvp_mode 0 denies, pvp_mode 3 allows\n", .{});
 }
 
 test "scenario every registered package id survives dispatch with a malformed body" {
