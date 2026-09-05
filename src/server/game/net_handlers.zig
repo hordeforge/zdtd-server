@@ -73,7 +73,14 @@ pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!vo
                 try dispatchGamePayload(self, c, peer, saved);
             }
         } else if (wire_frame.isChallenge(payload)) {
-            std.debug.print("zdtd: challenge mismatch local_id={d} payload_len={d}\n", .{ peer.local_id, payload.len });
+            // Unauthenticated peers reach this on every wrong challenge, so
+            // the log is sampled like the payload logs: an unsampled print is
+            // one blocking stderr write per packet on the tick thread.
+            self.harness.counters.inc(.join_fail);
+            const fails = self.harness.counters.get(.join_fail);
+            if (fails == 1 or fails % 100 == 0) {
+                std.debug.print("zdtd: challenge mismatch local_id={d} payload_len={d} n={d}\n", .{ peer.local_id, payload.len, fails });
+            }
         } else if (payload.len > 0 and payload.len <= c.preauth_buf.len) {
             @memcpy(c.preauth_buf[0..payload.len], payload);
             c.preauth_len = payload.len;
