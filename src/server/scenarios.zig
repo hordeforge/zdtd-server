@@ -4344,6 +4344,50 @@ test "scenario a locked tile entity stays locked on a different channel" {
     std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed\n", .{});
 }
 
+test "scenario SetBlock beyond edit reach is rejected" {
+    // SetBlock carries its own coordinates, so nothing about the packet ties
+    // the edit to where the player is standing except this check. Without it a
+    // client rewrites terrain anywhere in the world, including chunks it was
+    // never streamed. The reach is max_edit_range (96) from the editor.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    const ep = g.sim.transform[ps];
+
+    const stone = world_store.block_stone;
+    var sb: [64]u8 = undefined;
+    var fb: [8192]u8 = undefined;
+
+    // Just inside the reach: allowed, so the far edit below is rejected for
+    // distance and not for some unrelated reason.
+    const near_x: i32 = @intFromFloat(ep.x + g.max_edit_range - 4);
+    const near_z: i32 = @intFromFloat(ep.z);
+    const near = try packages.buildSetBlockBody(&sb, near_x, 70, near_z, stone);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", near));
+    try std.testing.expectEqual(stone, try g.world.blockWorld(near_x, 70, near_z));
+
+    // Well beyond it: dropped, and the counter says why.
+    const far_x: i32 = @intFromFloat(ep.x + g.max_edit_range * 4);
+    const before = g.harness.counters.get(.bounds_rejects);
+    const far = try packages.buildSetBlockBody(&sb, far_x, 70, near_z, stone);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", far));
+    try std.testing.expectEqual(@as(u32, 0), try g.world.blockWorld(far_x, 70, near_z));
+    try std.testing.expect(g.harness.counters.get(.bounds_rejects) > before);
+    std.debug.print("PASS edit-reach: near edit applied, far edit rejected\n", .{});
+}
+
 test "scenario gas can refuel generator via InvTx place" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_refuel");
