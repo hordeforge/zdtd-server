@@ -4388,6 +4388,60 @@ test "scenario SetBlock beyond edit reach is rejected" {
     std.debug.print("PASS edit-reach: near edit applied, far edit rejected\n", .{});
 }
 
+test "scenario NetPackageBag naming another player is refused" {
+    // NetPackageBag carries the entity id whose inventory it describes, so
+    // nothing but this ownership check stops a peer from addressing someone
+    // else's player entity and rewriting their slots. Stock treats a player's
+    // own bag as client-authored (ADR 0007); that trust does not extend to
+    // writing a *different* player's inventory.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const psa = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+    const psb = g.sim.playerByPeer(cb.slot) orelse return error.TestUnexpectedResult;
+
+    var bag_body: [8192]u8 = undefined;
+    var fb: [9000]u8 = undefined;
+
+    // A writes its own bag: allowed, so the refusal below is the ownership
+    // check and not a malformed body or an unreachable handler.
+    {
+        var mine = g.sim.inventory[psa];
+        mine.slots[10] = .{ .item_id = 7, .count = 4, .quality = 1 };
+        const bb = try packages.stock_inv.buildBagPackage(&bag_body, ca.entity_id, &mine, null, null, true);
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageBag", bb));
+        try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[psa].slots[10].item_id);
+    }
+
+    // A addresses B's entity: refused, B's slot untouched, counter moves.
+    const before_id = g.sim.inventory[psb].slots[10].item_id;
+    const before_n = g.sim.inventory[psb].slots[10].count;
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    {
+        var theirs = g.sim.inventory[psb];
+        theirs.slots[10] = .{ .item_id = 7, .count = 64, .quality = 1 };
+        const bb = try packages.stock_inv.buildBagPackage(&bag_body, cb.entity_id, &theirs, null, null, true);
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageBag", bb));
+    }
+    try std.testing.expectEqual(before_id, g.sim.inventory[psb].slots[10].item_id);
+    try std.testing.expectEqual(before_n, g.sim.inventory[psb].slots[10].count);
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    std.debug.print("PASS bag-ownership: own bag applied, another player's refused\n", .{});
+}
+
 test "scenario gas can refuel generator via InvTx place" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_refuel");
