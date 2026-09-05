@@ -152,7 +152,8 @@ const package_corpus = [_][]const u8{
     &.{ 0, 0, 0 },
     &.{ 1, 0xff, 0xff, 0xff, 0xff },
     &.{ 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-    // legacy set-block 14-byte form
+    // 14-byte set-block body: the length a removed legacy branch keyed on, and
+    // one a stock identity plus a zero count reaches on its own
     &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 },
     // stock set-block: no user | count=1 | pos ref | entity | flags | raw | dmg | local
     &.{ 0, 1, 0, 1, 10, 0, 0, 0, 61, 0, 0, 0, 0x90, 1, 0, 0, 106, 0, 0, 0, 1, 13, 0, 0, 0, 0, 0, 106, 0, 0, 0 },
