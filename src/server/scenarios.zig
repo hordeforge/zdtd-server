@@ -10325,6 +10325,100 @@ test "scenario wrench pickup applies to the world and honours reach and claims" 
     std.debug.print("PASS pickup: world write applied, reach and claim both refuse\n", .{});
 }
 
+test "scenario block paint lands in the world and honours its gates" {
+    // SetBlockTexture stores the face texture in the chunk's textureFull and
+    // rebroadcasts to everyone but the painter. Only the world write makes the
+    // paint outlive the packet: without it the painter sees its own local
+    // paint, observers see the rebroadcast, and the next chunk load hands
+    // everyone the unpainted block back. The handler's gates (channel, face,
+    // sender entity, reach, claim) had no scenario either.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
+    const ep = g.sim.transform[ps];
+
+    const px: i32 = @intFromFloat(ep.x + 3);
+    const pz: i32 = @intFromFloat(ep.z + 3);
+    try g.setBlock(px, 70, pz, world_store.block_stone);
+
+    const readTex = struct {
+        fn call(gg: *game_mod.Game, x: i32, y: i32, z: i32) !u64 {
+            const wt = world_store.World.worldToChunk(x, z);
+            const ch = try gg.world.getOrCreate(wt.pos);
+            return ch.texAt(wt.lx, y, wt.lz);
+        }
+    }.call;
+
+    var tb: [64]u8 = undefined;
+    var fb: [256]u8 = undefined;
+    const paint_idx: u8 = 7;
+    const face: u8 = 2;
+
+    // The paint lands in the chunk, in the requested face's byte.
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlockTexture", try packages.buildSetBlockTextureBody(&tb, .{
+        .x = px,
+        .y = 70,
+        .z = pz,
+        .face = face,
+        .idx = paint_idx,
+        .player_id = c.entity_id,
+        .channel = 0,
+    })));
+    const after = try readTex(g, px, 70, pz);
+    try std.testing.expectEqual(paint_idx, @as(u8, @truncate(after >> (face * 8))));
+
+    // A paint claiming another entity is refused, and the stored texture stays.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlockTexture", try packages.buildSetBlockTextureBody(&tb, .{
+        .x = px,
+        .y = 70,
+        .z = pz,
+        .face = face,
+        .idx = paint_idx + 1,
+        .player_id = c.entity_id + 1000,
+        .channel = 0,
+    })));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expectEqual(after, try readTex(g, px, 70, pz));
+
+    // Chunk textures are a one-element array, so channel != 0 fails closed;
+    // face > 5 is not a cube face. Both are bounds rejects, not silent drops.
+    const bounds_before = g.harness.counters.get(.bounds_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlockTexture", try packages.buildSetBlockTextureBody(&tb, .{
+        .x = px,
+        .y = 70,
+        .z = pz,
+        .face = face,
+        .idx = paint_idx + 1,
+        .player_id = c.entity_id,
+        .channel = 1,
+    })));
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlockTexture", try packages.buildSetBlockTextureBody(&tb, .{
+        .x = px,
+        .y = 70,
+        .z = pz,
+        .face = 6,
+        .idx = paint_idx + 1,
+        .player_id = c.entity_id,
+        .channel = 0,
+    })));
+    try std.testing.expectEqual(bounds_before + 2, g.harness.counters.get(.bounds_rejects));
+    try std.testing.expectEqual(after, try readTex(g, px, 70, pz));
+    std.debug.print("PASS paint: world write applied, entity/channel/face gates refuse\n", .{});
+}
+
 test "scenario bots are grounded to terrain height on spawn and move" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
