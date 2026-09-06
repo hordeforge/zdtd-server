@@ -4274,13 +4274,19 @@ persists so little that a restart visibly damages a built base.
   `src/server/game/replicate.zig:266` (TurretSync)
 
 - **Game envelope channel byte** `WORKS` `(2026-08-21)`
-  Stock `get_Channel` returns 1 for NetPackageChunk, ChunkRemove, DynamicMesh,
-  MapChunks and POIAround (bulk world data rides a second envelope stream so it
-  does not sit in the same queue as control traffic); every other package is
-  channel 0. `packages.framed` and the deflate path now pick the channel by
-  package name (`packages.channelFor`), so Chunk/ChunkRemove envelopes leave on
-  channel 1 exactly like stock; 3.2.0 swaps POIAround for POIMetadataResponse
-  in the same channel-1 slot (`channelFor`, `packages.zig:1570`).
+  Stock `get_Channel` returns 1 for five packages on V3.2.0: NetPackageChunk,
+  ChunkRemove, DynamicMesh, MapChunks and WorldFolder (bulk world data rides a
+  second envelope stream so it does not sit in the same queue as control
+  traffic); every other package is channel 0. `packages.framed` and the deflate
+  path pick the channel by package name (`packages.channelFor`), so
+  Chunk/ChunkRemove envelopes leave on channel 1 exactly like stock.
+  **Corrected 2026-09-06 (twice).** This row used to claim 3.2.0 "swaps
+  POIAround for POIMetadataResponse in the same channel-1 slot"; it does not.
+  POIAround overrode `get_Channel`, its 3.2.0 replacement declares none and so
+  inherits 0 (`channelFor`'s doc comment cites both IL dumps). Separately,
+  WorldFolder was absent from the override set and its unit test asserted
+  "four", pinning the omission; zdtd never emits WorldFolder, so nothing was
+  mis-sent.
   *Anchors:* `src/wire/packages.zig` `channelFor`/`framed`,
   `src/server/game/send_extra.zig` `sendCompressed`, `asm.il:808632-808638`,
   `asm.il:826004`, `asm.il:833771`
