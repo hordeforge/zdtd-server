@@ -29,6 +29,33 @@ pub fn replicatePlayerHealth(self: *Game) void {
                 // inventory range as a bag at the death position.
                 if (!oc.has_backpack) self.spawnDeathBag(i);
                 if (oc.peer) |op| {
+                    // Stock EntityPlayer.HandleClientDeath (IL=71) switches on
+                    // GameStats DeathPenalty and runs the matching
+                    // game_on_death_* sequence; the AddXPDeficit client action
+                    // reaches the dead player's client as a
+                    // ClientSequenceAction (12) response, which earns the
+                    // deficit locally (AddXPDeficit IL=65, passive 0x61
+                    // default 0.1 clamped by 0x60 default 0.5). Only the two
+                    // sequences carrying AddXPDeficit send one:
+                    // game_on_death_default (DeathPenalty 1, gameevents.xml:67)
+                    // and game_on_death_injured (DeathPenalty 2,
+                    // gameevents.xml:78); AddXPDeficit is action index 0 in
+                    // both, and root action keys are `Name:index`
+                    // (SetActionKeyData), so the keys below are exact.
+                    // Without this the client's local death flow is the only
+                    // earn path; stock also drives it from the server side.
+                    const seq: ?struct { name: []const u8, key: []const u8 } = switch (self.death_penalty) {
+                        1 => .{ .name = "game_on_death_default", .key = "game_on_death_default:0" },
+                        2 => .{ .name = "game_on_death_injured", .key = "game_on_death_injured:0" },
+                        else => null,
+                    };
+                    if (seq) |sq| {
+                        if (packages.buildGameEventSequenceAction(self.body_buf[200..456], sq.name, oc.entity_id, sq.key)) |sdb| {
+                            self.sendGame(op, "NetPackageGameEventResponse", sdb) catch {
+                                self.harness.counters.inc(.net_send_errors);
+                            };
+                        } else |_| {}
+                    }
                     const wsp = self.world.primarySpawn();
                     var entries: [2]packages.SpawnPointEntry = undefined;
                     var en: usize = 0;
