@@ -43,6 +43,24 @@ pub fn isUnreliablePackage(pkg_name: []const u8) bool {
     return false;
 }
 
+/// Stock `get_Compress() == true` (RE network.md: 8 packages, all IL=2). Only
+/// the five zdtd actually emits are listed; the other three
+/// (DynamicClientArrive, DynamicMesh, MapChunks) are never sent, tracked in
+/// GAP_ANALYSIS "S2C compression".
+pub fn isCompressedPackage(pkg_name: []const u8) bool {
+    const names = [_][]const u8{
+        "NetPackageChunk",
+        "NetPackageSignDataResponse",
+        "NetPackageIdMapping",
+        "NetPackageConfigFile",
+        "NetPackagePOIMetadataResponse",
+    };
+    for (names) |n| {
+        if (std.mem.eql(u8, pkg_name, n)) return true;
+    }
+    return false;
+}
+
 pub fn isDroppablePackage(pkg_name: []const u8) bool {
     const names = [_][]const u8{
         "NetPackageChunk",
@@ -87,12 +105,7 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     // right where `packages.channelFor` was wrong.
     // IdMapping/ConfigFile deflating cuts the join cost (one flat-world join
     // was 6.4 MB out) and relieves the reliable window.
-    if (std.mem.eql(u8, pkg_name, "NetPackageChunk") or
-        std.mem.eql(u8, pkg_name, "NetPackageSignDataResponse") or
-        std.mem.eql(u8, pkg_name, "NetPackageIdMapping") or
-        std.mem.eql(u8, pkg_name, "NetPackageConfigFile") or
-        std.mem.eql(u8, pkg_name, "NetPackagePOIMetadataResponse"))
-    {
+    if (isCompressedPackage(pkg_name)) {
         if (try @import("send_extra.zig").sendCompressed(self, peer, pkg_name, body, budget_ns, critical)) return;
     }
     const framed = packages.framed(&self.send_buf, pkg_name, body) catch |err| {
@@ -477,5 +490,39 @@ test "the unreliable set is exactly the stock ReliableDelivery overrides" {
             if (std.mem.eql(u8, n, u)) expected = true;
         }
         try std.testing.expectEqual(expected, isUnreliablePackage(n));
+    }
+}
+
+test "the compressed set is exactly the stock get_Compress overrides we emit" {
+    // Stock deflates 8 packages (RE network.md "Compression via get_Compress()
+    // == true", all IL=2). Three of them zdtd never sends, so the send path
+    // lists five. Nothing walked the advertised table against that list, which
+    // is the check that caught the channel set carrying a stale POIAround
+    // override: a name added here without an IL override behind it would
+    // deflate a body a stock client reads uncompressed.
+    const compressed = [_][]const u8{
+        "NetPackageChunk",
+        "NetPackageSignDataResponse",
+        "NetPackageIdMapping",
+        "NetPackageConfigFile",
+        "NetPackagePOIMetadataResponse",
+    };
+    for (compressed) |n| try std.testing.expect(isCompressedPackage(n));
+
+    // The three stock-compressed names zdtd does not emit stay out: adding one
+    // here without a send site would claim coverage the server does not have.
+    const not_emitted = [_][]const u8{
+        "NetPackageDynamicClientArrive",
+        "NetPackageDynamicMesh",
+        "NetPackageMapChunks",
+    };
+    for (not_emitted) |n| try std.testing.expect(!isCompressedPackage(n));
+
+    for (packages.default_mappings) |n| {
+        var expected = false;
+        for (compressed) |c| {
+            if (std.mem.eql(u8, n, c)) expected = true;
+        }
+        try std.testing.expectEqual(expected, isCompressedPackage(n));
     }
 }
