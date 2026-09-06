@@ -4099,13 +4099,16 @@ persists so little that a restart visibly damages a built base.
   a typo.
   *Anchors:* `asm.il:805288-805310`, `asm.il:1921872`
 
-- **C2S handler coverage** `WORKS` `(2026-08-22 re-audit)`
-  86 package names have a handler in `Game.handlePackage` (PlayerDisconnect,
-  SharedPartyKill, PartyQuestChange, PlayerVendingMachine, GameEventResponse,
-  EntityStatChanged, Waypoint, GameMessage, SoundAtPosition,
-  EntityAwardKillServer, ParticleEffect, EntityStealth, QuestGotoPoint,
-  QuestTreasurePoint, EntityPhysics and EntityRagdoll have handlers
-  since the last count; the Waypoint
+- **C2S handler coverage** `WORKS` `(2026-09-06 re-audit)`
+  89 package names have a handler in the `src/server/c2s/*` chain
+  (PlayerDisconnect, PartyQuestChange, PlayerVendingMachine, Waypoint,
+  GameMessage, SoundAtPosition, EntityAwardKillServer, ParticleEffect,
+  EntityStealth, QuestGotoPoint, QuestTreasurePoint, EntityPhysics and
+  EntityRagdoll have handlers since the last count. Corrected 2026-09-06: the
+  2026-08-22 wording also listed SharedPartyKill, GameEventResponse and
+  EntityStatChanged, which had never had a C2S arm - only S2C senders sharing
+  the name. All three now do, as validated accept-and-drops with DIVERGENCES
+  rows 1.15 to 1.17; the count moved 86 to 89. The Waypoint
   relay parses the full Waypoint v7 body and fans the invite to the
   inviter's allies or all players per
   GameManager.WaypointInviteServer, the GameMessage relay re-broadcasts
@@ -4129,7 +4132,8 @@ persists so little that a restart visibly damages a built base.
   EntityRagdoll impulse relays to the other clients - the owner already
   ragdolled locally (SendPacketToTrackedPlayersAndTrackedEntity)).
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
-  yields 98 names the stock client actually sends; 16 have no handler,
+  yields 98 names the stock client actually sends (independently reproduced
+  2026-09-06 over the v3.2.0 dump, same 98); 16 have no handler,
   categorized by scope (protocol-packages.md 5.14): mod API surface
   (ModifyCVar, SetProp, SimpleRPC, Debug), EAC/encryption waivers (EAC,
   EncryptionPublicKey, KeyExchangeComplete), creative/editor

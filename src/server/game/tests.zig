@@ -3905,3 +3905,73 @@ test "breaking a container spills its pre-filled contents" {
     }
     try std.testing.expect(found);
 }
+
+test "the three client-sent reports the server must not apply are handled and dropped" {
+    // Recovered 2026-09-06 by scanning the v3.2.0 IL for every NetPackage type
+    // that reaches ConnectionManager::SendToServer: 98 names, three of which
+    // had no C2S arm at all while GAP_ANALYSIS claimed they did. Each one is a
+    // report of state zdtd owns, so the handler must consume it (no unhandled
+    // count) and change nothing (DIVERGENCES 1.15 to 1.17).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+
+    g.sim.health[ps].hp = 42;
+    g.clients[ca.slot].xp = 555;
+    const unhandled_before = g.harness.counters.get(.c2s_unhandled);
+    var frame_buf: [128]u8 = undefined;
+
+    // 1.15 EntityStatChanged: the stock 21-byte body claiming full health for
+    // the sender's own entity. Applying it would be a self-heal.
+    var stat_body: [21]u8 = undefined;
+    const stat = try packages.buildEntityStatChangedBody(
+        &stat_body,
+        ca.entity_id,
+        -1,
+        .health,
+        100,
+        100,
+        0,
+    );
+    try std.testing.expectEqual(@as(usize, 21), stat.len);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageEntityStatChanged", stat));
+    try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].hp);
+
+    // 1.17 SharedPartyKill: a forwarded party kill worth 100000 xp. Applying it
+    // would mint xp for a kill the server never saw.
+    var kill_body: [16]u8 = undefined;
+    const kill = try packages.stock_party.buildSharedKillBody(&kill_body, .{
+        .entity_type = 1,
+        .xp = 100000,
+        .entity_id = 900,
+        .killer_id = ca.entity_id,
+    });
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSharedPartyKill", kill));
+    try std.testing.expectEqual(@as(u64, 555), g.clients[ca.slot].xp);
+
+    // 1.16 GameEventResponse: responseType 11 is the one arm a stock client
+    // sends (BlockGameEvent block damage). zdtd keeps no event-sequence state.
+    var ev_body: [8]u8 = undefined;
+    @memset(&ev_body, 0);
+    ev_body[0] = 11;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageGameEventResponse", &ev_body));
+
+    // All three reached a handler: none of them raised the unhandled counter.
+    try std.testing.expectEqual(unhandled_before, g.harness.counters.get(.c2s_unhandled));
+
+    // Truncated bodies are rejected as malformed, not trusted or trapped on.
+    const malformed_before = g.harness.counters.get(.c2s_malformed);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageEntityStatChanged", stat[0..20]));
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageSharedPartyKill", kill[0..15]));
+    try std.testing.expect(g.harness.counters.get(.c2s_malformed) >= malformed_before + 2);
+    try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].hp);
+}

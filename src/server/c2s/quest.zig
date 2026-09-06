@@ -210,6 +210,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageSharedPartyKill")) {
+        // Stock body (read IL=17): entityTypeID i32 | xp i32 | entityID i32 |
+        // killerID i32. A client reaches SendToServer only through
+        // GameManager.SharedKillServer's !IsServer branch (IL=162), so the
+        // package is a forward of a kill the sender's client already scored.
+        // zdtd computes the party split server-side in killXpAward
+        // (Party.GetPartyXP over GameStats[54] party_shared_kill_range) and
+        // fans the result out itself, so accepting the report would award
+        // the same kill twice. Validate the body and drop.
+        _ = packages.stock_party.readSharedKillBody(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackageAddRemoveBuff")) {
         // Rate gate: an accepted add relays the buff to every peer
         // (relayBuff broadcastExcept); unthrottled a spam loop fans the
