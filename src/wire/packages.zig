@@ -1404,7 +1404,7 @@ pub fn buildDamageBody(buf: []u8, entity_id: i32, source: u8, dtype: u8, strengt
 /// 3.1.0 booleans folded into one flag word in 3.2.0; docs/wire/PACKAGES.md).
 /// The tail past the head is not decoded: the server recomputes damage from
 /// its own weapon and armor state, so those fields are not values it acts on.
-pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, trap_kill_xp: bool } {
+pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, dtype: u8, strength: u16, fatal: bool, trap_kill_xp: bool, body_part: i16 } {
     if (body.len < 4 + 4 + 1 + 1 + 2 + 1 + 2 + 1) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
@@ -1413,7 +1413,7 @@ pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, d
     const dtype = try r.readByte();
     const strength = try r.readU16();
     _ = try r.readByte(); // hitDirection
-    _ = try r.readI16(); // hitBodyPart
+    const body_part = try r.readI16(); // hitBodyPart (EnumBodyPartHit)
     _ = try r.readByte(); // movementState
     return .{
         .entity_id = entity_id,
@@ -1422,6 +1422,7 @@ pub fn parseDamageHead(body: []const u8) !struct { entity_id: i32, source: u8, d
         .strength = strength,
         .fatal = (flags & dmg_fatal) != 0,
         .trap_kill_xp = (flags & dmg_trap_kill_xp) != 0,
+        .body_part = body_part,
     };
 }
 

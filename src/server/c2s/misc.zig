@@ -690,6 +690,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // turns it into the victim's attack target. The actor is already
         // validated above, so use its net id rather than the claimed field.
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
+        // Dismember roll (RE CheckDismember IL=125): the claimed body part
+        // feeds the region/leg gates; the weapon chance comes off the
+        // actor's held item, 0 when it carries no DismemberChance passive.
+        // The roll sets crawler/cripple state on the victim and its outcome
+        // bits ride the S2C damage body below.
+        var dismember_bits: u8 = 0;
+        if (self.sim.slotOfNetId(d.entity_id)) |vs| {
+            if (self.sim.mask[vs].health) {
+                const held_id = if (self.sim.mask[actor_slot].inventory)
+                    self.sim.inventory[actor_slot].slots[self.sim.inventory[actor_slot].holding].item_id
+                else
+                    0;
+                const weapon_chance = if (self.items.byId(held_id)) |idef| idef.dismember_chance else 0;
+                dismember_bits = self.sim.rollDismember(vs, d.body_part, amount, self.sim.health[vs].max_hp, weapon_chance);
+            }
+        }
         // Item durability (GAP "Item durability"): the held tool wears with
         // each landed hit (stock ItemValue.UseTimes; the client shows the
         // durability bar). Zero keeps a broken, repairable stack.
@@ -748,6 +764,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const vt = self.sim.transform[vslot];
                 const applied: u16 = @intCast(@min(@as(u32, @intFromFloat(@max(0, amount))), 65535));
                 if (packages.buildDamageBody(self.body_buf[288..544], d.entity_id, d.source, d.dtype, applied, dmg.killed, self.sim.network_id[actor_slot].id)) |db| {
+                    // The roll's outcome rides the stock flag bits
+                    // (Setup IL=235: CrippleLegs -> 0x2, Dismember -> 0x8,
+                    // TurnIntoCrawler -> 0x200). Flags sit at bytes 4..8 of
+                    // the pinned body layout (entityId 0..4 first).
+                    if (dismember_bits != 0) {
+                        var fl = std.mem.readInt(u32, db[4..8], .little);
+                        if (dismember_bits & 1 != 0) fl |= packages.dmg_dismember;
+                        if (dismember_bits & 2 != 0) fl |= packages.dmg_turn_into_crawler;
+                        if (dismember_bits & 4 != 0) fl |= packages.dmg_cripple_legs;
+                        std.mem.writeInt(u32, self.body_buf[288 + 4 ..][0..4], fl, .little);
+                    }
                     self.broadcastNear("NetPackageDamageEntity", db, vt.x, vt.z, self.interest_range) catch {};
                 } else |_| {}
             }

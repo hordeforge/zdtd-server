@@ -154,6 +154,17 @@ pub const ClassId = struct {
     /// entityclasses ExperienceGain kill XP; 0 = fall back to class_table[id]
     /// then the caller's flat floor.
     xp_gain: f32 = 0,
+    /// Dismember tuning (RE EntityAlive.CheckDismember IL=125 /
+    /// GetDismemberChance IL=128), resolved per entity at spawn like the
+    /// speeds above. The EntityClass cctor default for the three multipliers
+    /// is 1, so the roll reads max(stored, implicit-1-when-class-known);
+    /// 0 with no class data = fall back to class_table[id] then 1. The leg
+    /// pair has no cctor fallback: 0 is the true stock default there too.
+    dismember_head: f32 = 0,
+    dismember_arms: f32 = 0,
+    dismember_legs: f32 = 0,
+    leg_cripple_scale: f32 = 0,
+    leg_crawler_threshold: f32 = 0,
 };
 
 pub const AiState = enum(u8) {
@@ -309,6 +320,15 @@ pub const ZombieAi = struct {
     kb_time: f32 = 0,
     kb_dx: f32 = 0,
     kb_dz: f32 = 0,
+    /// Crippled legs (RE DamageResponse.CrippleLegs): set by the dismember
+    /// roll on a leg hit past the scaled chance. Stock slows the walk through
+    /// the leg-damage path; until the movement side lands this is recorded
+    /// state the S2C damage flags report.
+    crippled: bool = false,
+    /// Turned crawler (RE DamageResponse.TurnIntoCrawler / ShouldBeCrawler):
+    /// a leg hit past the crawler threshold converts the zombie. Same
+    /// recording-state posture as crippled until movement follows.
+    crawler: bool = false,
     /// EntityAlive.pendingDistraction: the nearest dropped EntityItem that
     /// broadcast itself into this entity's 25 m (distractionRadius) window
     /// (EntityItem.tickDistraction). Net id of the loot-bag entity, -1 = none.
@@ -336,6 +356,25 @@ pub const ZombieAi = struct {
         return self.path_wp[self.path_wp_i];
     }
 };
+
+/// Stock EnumBodyPartHit leg masks (EnumBodyPartHitExtensions IL=6 each):
+/// IsLeg = part & 816, IsLeftLeg = & 272, IsRightLeg = & 544. Values:
+/// None 0, Torso 1, Head 2, arms 4/8/64/128, legs 16/32/256/512. File scope
+/// (not in wire) so the sim reads them without importing wire.
+pub const bodypart_leg_mask: i16 = 816;
+pub const bodypart_left_leg_mask: i16 = 272;
+pub const bodypart_right_leg_mask: i16 = 544;
+
+/// Body-part regions for the dismember roll (EnumBodyPartHitExtensions
+/// ToPrimary: Head -> head multiplier, arms -> arms, legs -> legs).
+pub const BodyRegion = enum { head, arms, legs, other };
+
+pub fn bodyPartRegion(part: i16) BodyRegion {
+    if (part == 2) return .head;
+    if ((part & bodypart_leg_mask) != 0) return .legs;
+    if (part == 4 or part == 8 or part == 64 or part == 128) return .arms;
+    return .other;
+}
 
 /// Per-bot skill parameters, ported from the Q3 / Doom 3 / 7dtd-fps-bots skill model
 /// (BotCharacter, BotAimAtEnemy, BotCheckAttack). The guest Wasm brain reads
