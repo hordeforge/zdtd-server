@@ -3955,12 +3955,18 @@ a finer server encoding.
   `src/assets/maxdamage.zig:75-76,208-210` (UpgradeBlock table),
   `asm.il:96718-96762`, `asm.il:657572`
 
-- **Block downgrade on destroy (Stage2Health)** `PARTIAL (waived)`
-  Stock `DamageBlock` can downgrade via `Stage2Health`; zdtd always clears to air.
-  Visible on the small set of multi-stage blocks only. Wire is correct (chunk +
-  SetBlock echo) and full block-state downgrade needs `blocks.xml` `DowngradeBlock`
-  wiring across the whole pipeline - waived as stage-fidelity, not parity blocker.
-  *Anchors:* `src/server/game.zig`, `asm.il`
+- **Block downgrade on destroy (Stage2Health)** `WORKS` (was `PARTIAL (waived)`;
+  closed - the waiver predates the implementation)
+  `downgradeBreakRaw` resolves `blocks.xml` `DowngradeBlock` through Extends
+  and swaps rotation/meta-preserving raw on destroy instead of clearing to
+  air (stock `Block.OnBlockDamaged` IL_021D paths; base
+  `OnBlockDestroyedBy` returns Downgrade). Applied on all four destroy paths
+  (player dig, zombie chew, explosion, Demolition tick) with SetBlock echo;
+  wire damage display caps at the Stage2Health threshold. Scenario covers the
+  swap and the no-downgrade fallthrough.
+  *Anchors:* `src/server/game/world.zig` (`downgradeBreakRaw`),
+  `src/server/c2s/blocks.zig`, `src/server/game/tick.zig`,
+  `src/assets/maxdamage.zig` (`downgradeTarget`)
 
 - **Zombie block damage** `WORKS` (2026-08-25):
   chase/attack zombies chew the front-column solid cell (feet-to-head probe,
