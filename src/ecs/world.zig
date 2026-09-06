@@ -1346,6 +1346,8 @@ pub const World = struct {
     /// `weapon_chance` is the attacker's held-item DismemberChance passive
     /// (144); `attacker_bonus` is the attacker's DismemberSelfChance (143)
     /// perk/buff fold (the region multiplier is the base it adds onto).
+    /// `fatal` is the claimed fatal flag; killing blows (fatal or
+    /// strength >= current hp) get stock's pre-scale, glancing hits roll raw.
     /// The roll is a deterministic per-hit draw seeded from the victim net
     /// id and hp, the same policy as rollLootDrop below.
     pub fn rollDismember(
@@ -1356,6 +1358,7 @@ pub const World = struct {
         max_hp: f32,
         weapon_chance: f32,
         attacker_bonus: f32,
+        fatal: bool,
     ) u8 {
         if (!self.mask[victim].zombie_ai or !self.mask[victim].health) return 0;
         const ai = &self.zombie_ai[victim];
@@ -1384,16 +1387,28 @@ pub const World = struct {
         var out: u8 = 0;
         // GetDismemberChance: weapon >= 100 skips the roll at flat 100, else
         // weapon * damagePer * (region multiplier + attacker DismemberSelfChance
-        // (143) perk/buff bonuses). The passive call takes the multiplier as
-        // its base and adds contributions on top (the debug log prints weapon,
-        // damagePer, multiplier and result as separate factors), so with no
-        // perks the base IS the multiplier, not zero.
-        // (Corrected 2026-09-06: the first version multiplied the whole term
-        // by a 0 attacker bonus, which zeroed every roll. Stock's twitch
-        // buffs set 143 to 0 explicitly because the unbuffed value is the
-        // multiplier, not zero.)
-        const chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * damage_per * (mult + attacker_bonus);
-        if (chance > 0 and draw <= @min(chance, 100) / 100) {
+        // (143) perk/buff bonuses), compared DIRECTLY against the 0..1 draw
+        // (bgt.un skips past when rand > chance - no /100 anywhere). The
+        // passive call takes the multiplier as its base and adds contributions
+        // on top, so with no perks the base IS the multiplier, not zero.
+        // damagePer is always 1.0 here: ProcessDamageResponse tucks
+        // `ldc.r4 1` into the call (the real fraction is recomputed inside
+        // the leg branch only). A machete (weapon 1) on a mult-1 region is
+        // therefore chance 1.0 - stock really does dismember nearly every
+        // such hit. (Corrected twice 2026-09-06: first the whole term was
+        // zeroed by a 0 bonus, then it was divided by 100 and shrunk to a 1%
+        // lottery. Both misread the same three IL lines.)
+        var chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * 1.0 * (mult + attacker_bonus);
+        // ProcessDamageResponse pre-scale on killing blows (fatal or strength
+        // >= current hp): head hits at fraction >= 0.2 get
+        // max(chance*0.5, 0.3), everything else max(chance*0.5, 0.5) - a floor
+        // under killing-blow dismember, not a nerf of the headline rate.
+        // Glancing (non-killing, non-fatal) hits roll the raw chance.
+        const killing = fatal or amount >= self.health[victim].hp;
+        if (killing and chance < 100) {
+            chance = World.dismemberPrescale(chance, body_part, damage_per);
+        }
+        if (chance > 0 and draw <= chance) {
             out |= 1;
             if (leg_path) {
                 ai.crawler = true;
@@ -1432,6 +1447,17 @@ pub const World = struct {
             out |= 4;
         }
         return out;
+    }
+
+    /// ProcessDamageResponse killing-blow pre-scale (IL_0118-0171): head hits
+    /// (bit 2) at damage fraction >= 0.2 get max(chance*0.5, 0.3), everything
+    /// else max(chance*0.5, 0.5). Pure so the floor table is unit-testable.
+    pub fn dismemberPrescale(chance: f32, body_part: i16, damage_per: f32) f32 {
+        const is_head = (body_part & 2) != 0;
+        if (is_head and damage_per >= 0.2) {
+            return @max(chance * 0.5, 0.3);
+        }
+        return @max(chance * 0.5, 0.5);
     }
 
     pub fn rollLootDrop(self: *const World, net_id: i32, drop_prob: f32) bool {
@@ -2416,7 +2442,7 @@ test "rollDismember sets the wire bits stock sets" {
     w.class_id[s].dismember_legs = 1;
 
     // Flat-100 weapon on a head hit: dismember, no leg path.
-    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s, 2, 10, 100, 100, 0));
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s, 2, 10, 100, 100, 0, false));
     try std.testing.expect(!w.zombie_ai[s].crawler);
 
     // Leg hit at 0.2 fraction past the 0.175 threshold: crawler.
@@ -2425,7 +2451,7 @@ test "rollDismember sets the wire bits stock sets" {
     w.class_id[s2].leg_crawler_threshold = 0.175;
     w.class_id[s2].leg_cripple_scale = 0;
     w.class_id[s2].dismember_legs = 1;
-    const bits = w.rollDismember(s2, 256, 20, 100, 0, 0);
+    const bits = w.rollDismember(s2, 256, 20, 100, 0, 0, false);
     try std.testing.expect(bits & 2 != 0);
     try std.testing.expect(w.zombie_ai[s2].crawler);
 
@@ -2436,7 +2462,7 @@ test "rollDismember sets the wire bits stock sets" {
     w.class_id[s3].leg_crawler_threshold = 0.9;
     w.class_id[s3].leg_cripple_scale = 2;
     w.class_id[s3].dismember_legs = 1;
-    const b3 = w.rollDismember(s3, 256, 20, 100, 0, 0);
+    const b3 = w.rollDismember(s3, 256, 20, 100, 0, 0, false);
     // Either crippled or not (draw-dependent), but never crawler, and the
     // bit agrees with the state.
     try std.testing.expect(b3 & 2 == 0);
@@ -2446,13 +2472,25 @@ test "rollDismember sets the wire bits stock sets" {
     // Non-leg, no-threshold, zero weapon: nothing.
     const z4 = w.spawnZombie(30, 70, 0, 100).?;
     const s4 = w.slotOfNetId(z4).?;
-    try std.testing.expectEqual(@as(u8, 0), w.rollDismember(s4, 1, 10, 100, 0, 0));
+    try std.testing.expectEqual(@as(u8, 0), w.rollDismember(s4, 1, 10, 100, 0, 0, false));
 
-    // The product term decides: weapon 1 with a 200x overkill fraction gives
-    // chance 200, clamped to 100, so every draw dismembers. Zero the
-    // multiplier term and this fails - the flat-100 arm above cannot cover it.
+    // The product term decides with damagePer pinned at 1.0: weapon 1 on a
+    // mult-1 head is chance 1.0, so every draw dismembers. Glancing (50 <
+    // 100 hp, non-fatal) so the killing-blow prescale stays out of it. Zero
+    // the multiplier term and this fails - the flat-100 arm above cannot
+    // cover it.
     const z5 = w.spawnZombie(40, 70, 0, 100).?;
     const s5 = w.slotOfNetId(z5).?;
     w.class_id[s5].dismember_head = 1;
-    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s5, 2, 200, 1, 1, 0));
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s5, 2, 50, 100, 1, 0, false));
+}
+
+test "dismemberPrescale matches the stock killing-blow floor table" {
+    // ProcessDamageResponse IL_0118-0171: head bit + fraction >= 0.2 gets
+    // max(c*0.5, 0.3), everything else max(c*0.5, 0.5).
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), World.dismemberPrescale(1.0, 2, 0.5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), World.dismemberPrescale(0.1, 2, 0.5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), World.dismemberPrescale(0.1, 1, 0.5), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), World.dismemberPrescale(0.4, 2, 0.1), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), World.dismemberPrescale(5.0, 2, 0.9), 0.0001);
 }
