@@ -512,6 +512,15 @@ pub const World = struct {
     /// no plugins, today's behaviour exactly.
     trade_price_verdict_ctx: ?*anyopaque = null,
     trade_price_verdict_fn: ?*const fn (?*anyopaque, i32, u16, u32) i32 = null,
+    /// Barter perk scales (RE XUiM_Trader GetBuyPrice IL=240 / GetSellPrice
+    /// IL=217): (ctx, client slot) -> multiplier. Buy pays
+    /// `unit - unit * BarteringBuying(148)`; sell gains
+    /// `unit + unit * BarteringSelling(149)`. Game wires these to the perk
+    /// fold; unset = no perks, today's behaviour exactly.
+    barter_buy_ctx: ?*anyopaque = null,
+    barter_buy_fn: ?*const fn (?*anyopaque, usize) f32 = null,
+    barter_sell_ctx: ?*anyopaque = null,
+    barter_sell_fn: ?*const fn (?*anyopaque, usize) f32 = null,
     /// Optional host-side bot snap for the zombie AI (ADR 0026). Bots are NOT
     /// ECS entities, so the AI asks the Game through this hook instead of a
     /// slot: `exact >= 0` resolves that one net id (any range - revenge);

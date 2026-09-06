@@ -1265,14 +1265,23 @@ parsed, and quest offering is unwired.
   `src/ecs/systems.zig:1201` (trade), `:1288` (traderRestock),
   `src/server/game/trader_wire.zig`, `asm.il:861697`
 
-- **Haggling / barter perks** `PARTIAL (waived)`
-  `perkBetterBarter` / `perkDaringAdventurer` Bartering/TraderStage perks
-  (5..25%, +10..50) exist in `progression.xml`; trading math is stock-correct
-  via `traders.xml` markups. 2026-08-27: the progression runtime + passive VM
-  landed, but the barter passives are still not wired into `GetSellPrice` (the
-  sell path reads econ × EconomicSellScale × markup × qmod only). Still waived
-  as shop-overlay balance, not wire parity.
-  *Anchors:* `Data/Config/progression.xml:3064-3065`, `:3084`, `src/server/game/trader.zig:180-206`
+- **Haggling / barter perks** `WORKS` (was `PARTIAL (waived)`; closed
+  2026-09-06)
+  `perkBetterBarter` BarteringBuying/BarteringSelling rows (5..25% per level)
+  fold through the same named-passive fold as the dismember bonus
+  (`Game.namedPassiveFold`: perk curves at purchased level + active buffs at
+  level 1) into ECS `barter_buy_fn` / `barter_sell_fn` hooks the Game wires
+  next to the other item hooks. `trade()` applies them per transaction: buys
+  pay `unit - unit * buying` ceiled like stock's final CeilToInt, sells gain
+  `unit + unit * selling` (f32 arithmetic matches stock bit-for-bit - 20 at
+  1.1x gains 23 via 0.1f32, RE GetSellPrice IL=217). Stock skips the sell
+  bonus when the trader overrides the markdown; zdtd has no override surface
+  so it always applies (noted inline). Daring Adventurer's TraderStage /
+  SecretStash / quest-bonus rows stay with the tier/shop-overlay gap, not
+  this one.
+  *Anchors:* `Data/Config/progression.xml:3064-3065`, `:3084`,
+  `src/server/game/player.zig` (`namedPassiveFold`, `barterBuyScale`,
+  `barterSellScale`), `src/ecs/systems.zig` (`trade` buy/sell arms)
 
 - **Trader tiers / TierItemGroups / traderstage_templates** `N/A (parity)`
   The engine tier machinery exists but stock V3.1.0 data never exercises it:

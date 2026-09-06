@@ -1380,6 +1380,20 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                 unit = @intCast(@max(1, @min(scaled, std.math.maxInt(u32))));
             }
         }
+        // Barter perk (RE GetBuyPrice IL=240): the buyer pays
+        // `unit - unit * BarteringBuying(148)`, ceiled like stock's final
+        // CeilToInt. Applied after the verdict so plugins see the pre-barter
+        // price (verdict is zdtd-native; stock applies barter inside
+        // GetBuyPrice itself). Floor at 1: stock's ceil of a positive
+        // fraction never reaches 0.
+        if (w.barter_buy_fn) |bf| {
+            const scale = bf(w.barter_buy_ctx, player_peer);
+            if (scale < 1) {
+                const disc_f: f64 = @as(f64, @floatFromInt(unit)) * @as(f64, 1 - scale);
+                const kept: f64 = @max(0, @as(f64, @floatFromInt(unit)) - disc_f);
+                unit = @intCast(@max(1, @as(u64, @intFromFloat(@ceil(kept)))));
+            }
+        }
         // Widen before the multiply: a verdict-scaled unit can sit at u32 max,
         // so unit * qty in u32 wraps (free purchase) or traps on the check.
         const cost_wide: u64 = @as(u64, unit) * @as(u64, qty);
@@ -1456,6 +1470,20 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             unit = 1;
         } else {
             unit = @trunc(@min(scaled, @as(f64, std.math.maxInt(u32))));
+        }
+        // Barter perk (RE GetSellPrice IL=217): the seller gains
+        // `unit + unit * BarteringSelling(149)`. Stock skips it when the
+        // trader overrides the markdown; zdtd has no override surface, so it
+        // always applies - noted in the GAP row.
+        if (w.barter_sell_fn) |bf| {
+            const scale = bf(w.barter_sell_ctx, player_peer);
+            if (scale > 1) {
+                const bonus_f: f64 = @as(f64, @floatFromInt(unit)) * @as(f64, scale - 1);
+                const raised: f64 = @as(f64, @floatFromInt(unit)) + bonus_f;
+                if (std.math.isFinite(raised)) {
+                    unit = @intCast(@max(1, @min(@as(u64, @intFromFloat(@ceil(raised))), std.math.maxInt(u32))));
+                }
+            }
         }
         if (unit == 0) return false;
         // Same widening as the buy cost above.
@@ -5418,6 +5446,46 @@ test "trade leaves entry markup alone; restock resets" {
     // A restock rebuilds fresh entries: markup back to neutral.
     traderRestock(&w);
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
+}
+
+test "trade applies barter hook scales to buy cost and sell gain" {
+    // Hooked scales stand in for a perked buyer/seller: 0.9x buy, 1.1x sell.
+    // Entry price is edited to 20 so the discount is visible above the
+    // unit-1 floor: ceil(20*0.9)=18 buys, ceil(20*1.1)=22 sells.
+    const S = struct {
+        fn buy(_: ?*anyopaque, _: usize) f32 {
+            return 0.9;
+        }
+        fn sell(_: ?*anyopaque, _: usize) f32 {
+            return 1.1;
+        }
+    };
+    var w: World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    const trader_id = w.spawnTrader("Trader", 1, 70, 1, 0, 500).?;
+    const ps = w.playerByPeer(0).?;
+    const ts = w.slotOfNetId(trader_id).?;
+    const item = w.trader_stock[ts].entries[0].item;
+    w.trader_stock[ts].entries[0].price = 20;
+    w.trader_stock[ts].entries[0].sell = 20;
+    w.wallet[ps].coins = 1000;
+    // Unhooked (null hooks): full price. Buy 20, wallet 1000 -> 980.
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
+    try std.testing.expectEqual(@as(u32, 980), w.wallet[ps].coins);
+    // Hooked buy: 18, wallet 980 -> 962.
+    w.barter_buy_fn = &S.buy;
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
+    try std.testing.expectEqual(@as(u32, 962), w.wallet[ps].coins);
+    // Hooked sell: gain 23, not 22 - f32 arithmetic like stock's: 0.1f32 is
+    // 0.10000000149, so 20 + 20*0.1f32 = 22.00000003 and CeilToInt gives 23.
+    // Stock computes the same way (GetSellPrice IL=217), so the +1 rides
+    // along rather than being rounded away.
+    w.inventory[ps].slots[0] = .{ .item_id = item, .count = 5, .quality = 1 };
+    w.barter_sell_fn = &S.sell;
+    const before = w.wallet[ps].coins;
+    try std.testing.expect(trade(&w, 0, trader_id, item, 1, 1, 6));
+    try std.testing.expectEqual(before + 23, w.wallet[ps].coins);
 }
 
 test "traderRestock honors per-trader reset_interval (never vs every N days)" {
