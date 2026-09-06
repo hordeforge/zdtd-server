@@ -70,6 +70,32 @@ pub fn sendSeatedRiders(self: *Game, peer: *ln_peer.Peer) !void {
     }
 }
 
+/// Ship one player their parked vehicles for the map
+/// (`VehicleManager.UpdateVehicleWaypointsForPlayer` IL=69): the (id, pos)
+/// pairs of every vehicle whose owner_slot is this client's slot, as
+/// `NetPackageEntityWaypointList` with listType Vehicle (0). Stock sends on
+/// channel 192 to the remote owner; unowned vehicles are nobody's waypoints.
+pub fn sendVehicleWaypoints(self: *Game, peer: *ln_peer.Peer, slot: usize) !void {
+    var entries: [64]packages.WaypointEntry = undefined;
+    var n: usize = 0;
+    for (ecs.groupSlice(&self.sim, .vehicle)) |i| {
+        if (!self.sim.mask[i].vehicle or !self.sim.mask[i].network_id) continue;
+        if (!self.sim.mask[i].transform) continue;
+        if (self.sim.vehicle[i].owner_slot != @as(i16, @intCast(slot))) continue;
+        if (n >= entries.len) break;
+        entries[n] = .{
+            .entity_id = self.sim.network_id[i].id,
+            .x = self.sim.transform[i].x,
+            .y = self.sim.transform[i].y,
+            .z = self.sim.transform[i].z,
+        };
+        n += 1;
+    }
+    if (n == 0) return;
+    const body = packages.buildEntityWaypointListBody(self.body_buf[0..4096], 0, entries[0..n]) catch return;
+    try self.sendGame(peer, "NetPackageEntityWaypointList", body);
+}
+
 pub fn broadcastVehiclePositions(self: *Game) !void {
     // Do not flood pre-enter stock clients (World still null / reader dies on short bodies).
     if (!weather_mod.anyEnteredClient(self)) return;

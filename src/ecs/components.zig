@@ -476,6 +476,12 @@ pub const Vehicle = struct {
     /// A packed fixed array, like the player inventory; empty slots hold id 0.
     basket: [max_basket_slots]InvSlot = [_]InvSlot{.{}} ** max_basket_slots,
     basket_n: u8 = 0,
+    /// Owning client slot (stock Entity.belongsPlayerId, resolved from the
+    /// placing player's platform id via Vehicle.OwnerId); -1 = unowned
+    /// (worldgen/admin spawns). The owner sees their parked vehicles on the
+    /// map through NetPackageEntityWaypointList
+    /// (VehicleManager.UpdateVehicleWaypointsForPlayer).
+    owner_slot: i16 = -1,
 
     pub fn driverNetId(self: *const Vehicle) i32 {
         return self.seats[driver_seat];
