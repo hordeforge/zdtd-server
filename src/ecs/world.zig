@@ -1719,10 +1719,12 @@ pub const World = struct {
                 // Stock EntityAlive timeStayAfterDeath default = 5 s (RE
                 // entity-ai.md; the XML values 30/300 flow via class_id.time_stay
                 // when the class declares the property). 5 s fallback, not 300/30.
-                const dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
+                // Horde kills gib 3x faster (SpawnZombie cuts the dwell /= 3).
+                var dwell: f32 = if (self.mask[s].class_id and self.class_id[s].time_stay > 0)
                     self.class_id[s].time_stay
                 else
                     5.0;
+                if (self.mask[s].zombie_ai and self.zombie_ai[s].is_horde) dwell /= 3.0;
                 self.health[s].corpse_seconds = dwell;
                 // The corpse does not act: stop its AI and any chase.
                 if (self.mask[s].zombie_ai) {

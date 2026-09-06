@@ -3412,11 +3412,15 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
             // Corpse dwell like player kills: the body stays at hp 0 for
             // TimeStayAfterDeath; the tick sweep destroys it later. Fallback
             // is the stock EntityAlive default 5 s (RE entity-ai.md); the XML
-            // values 30/300 flow via class_id.time_stay when declared.
-            const dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
+            // values 30/300 flow via class_id.time_stay when declared. Horde
+            // kills gib 3x faster: stock cuts `timeStayAfterDeath /= 3` on
+            // horde spawns (`AIDirectorBloodMoonParty.SpawnZombie`), so the
+            // night's corpses clear instead of piling up.
+            var dwell: f32 = if (w.mask[i].class_id and w.class_id[i].time_stay > 0)
                 w.class_id[i].time_stay
             else
                 5.0;
+            if (w.mask[i].zombie_ai and w.zombie_ai[i].is_horde) dwell /= 3.0;
             w.health[i].hp = 0;
             w.health[i].corpse_seconds = dwell;
             if (w.mask[i].zombie_ai) {
@@ -3445,6 +3449,12 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
 
 /// Remove idle/wandering zombies far from every player. Returns removed ids
 /// (caller broadcasts EntityRemove with Despawned reason).
+/// Horde zombies never despawn here: stock tags them `bIsChunkObserver` so
+/// they keep their own chunk loaded (`AIDirectorBloodMoonParty.SpawnZombie`,
+/// `AIWanderingHordeSpawner`), and the recount/teleport pass owns their
+/// lifecycle instead (dawn clears the marks, empty parties destroy the
+/// stragglers). zdtd has no chunk-observer refcount, but the lifecycle half
+/// is the same: skip `is_horde` and let the horde passes decide.
 pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
     const despawn_dist_sq = w.rules.ai.despawn_dist_sq;
     if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
@@ -3462,6 +3472,8 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
         // Sleepers stay (POI volumes re-trigger on approach otherwise).
         if (w.mask[i].sleeper) continue;
         if (w.mask[i].zombie_ai and w.zombie_ai[i].alert) continue;
+        // Horde members stay however far they roam (see fn doc).
+        if (w.mask[i].zombie_ai and w.zombie_ai[i].is_horde) continue;
         var near = false;
         for (snaps[0..pn]) |p| {
             const dx = p.x - w.transform[i].x;
@@ -4146,6 +4158,10 @@ test "far animals despawn like zombies; near animals stay" {
     const alert = w.spawnAnimal(400, 70, 2, 30, 0, "").?;
     const as = w.slotOfNetId(alert).?;
     w.zombie_ai[as].alert = true; // alerted mobs stay (like zombies)
+    // Horde members stay however far they roam: stock pins them with
+    // bIsChunkObserver and the recount/teleport pass owns their lifecycle.
+    const hz = w.spawnZombie(400, 70, 4, 40).?;
+    w.zombie_ai[w.slotOfNetId(hz).?].is_horde = true;
     var ids: [8]i32 = undefined;
     const n = systemDespawnFar(&w, &ids);
     try std.testing.expectEqual(@as(usize, 1), n);
@@ -4153,6 +4169,30 @@ test "far animals despawn like zombies; near animals stay" {
     try std.testing.expectEqual(@as(?u16, null), w.slotOfNetId(far));
     try std.testing.expect(w.slotOfNetId(near) != null);
     try std.testing.expect(w.slotOfNetId(alert) != null);
+    try std.testing.expect(w.slotOfNetId(hz) != null);
+}
+
+test "horde kills gib 3x faster than ordinary kills" {
+    // Stock SpawnZombie cuts timeStayAfterDeath /= 3 on horde spawns
+    // (AIDirectorBloodMoonParty + AIWanderingHordeSpawner): the night's
+    // corpses clear instead of piling up. Both kill paths (player damage in
+    // world.zig, turret accumulator in systems.zig) divide the dwell.
+    var w: World = .{};
+    defer w.deinit();
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.class_id[ps].time_stay = 30;
+    const hz = w.spawnZombie(10, 70, 0, 40).?;
+    const hs = w.slotOfNetId(hz).?;
+    w.class_id[hs].time_stay = 30;
+    w.zombie_ai[hs].is_horde = true;
+    const z = w.spawnZombie(20, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].time_stay = 30;
+    _ = w.damageFrom(w.network_id[hs].id, 1000, w.network_id[ps].id);
+    _ = w.damageFrom(w.network_id[zs].id, 1000, w.network_id[ps].id);
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), w.health[hs].corpse_seconds, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 30.0), w.health[zs].corpse_seconds, 0.001);
 }
 
 /// Stock decoy distraction state (items.xml resourceRockDecoy): tags

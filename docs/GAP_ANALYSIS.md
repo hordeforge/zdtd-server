@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x24 open
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x23 open
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -1718,11 +1718,22 @@ encoding is one day high.
   (`pushBloodMoonBonus`), `src/server/game/step.zig` (nightly push +
   wandering refresh), test `horde bonus loot scales every Nth spawn`
 
-- **Blood-moon corpse decay / chunk pinning** `PARTIAL (waived)`
-  Stock horde `bIsChunkObserver` / 3x gib cleanup is noted but not wired: the
-  chunk pin needs stock dedi layout RE and `IsBloodMoon` is not on the wire
-  either. Horde itself is parity-path, pinning is retention polish - waived.
-  *Anchors:* `asm.il:412595`, `asm.il:413978`
+- **Blood-moon corpse decay / chunk pinning** `WORKS` (was `PARTIAL (waived)`;
+  closed 2026-09-06)
+  Stock horde spawns set `bIsChunkObserver` (so horde zombies keep their own
+  chunk loaded) and cut `timeStayAfterDeath /= 3` (so the night's corpses gib
+  faster instead of piling up). zdtd wires both halves at the sim level:
+  `systemDespawnFar` skips `is_horde` zombies however far they roam (the
+  recount/teleport pass owns their lifecycle instead: dawn clears the marks,
+  emptied parties destroy the stragglers), and both kill paths (player damage
+  in `world.zig`, turret accumulator in `systems.zig`) divide the corpse dwell
+  by 3 for horde kills. Conscious simplification, recorded here: zdtd has no
+  chunk-observer refcount (chunks evict by residency, not by observer pins),
+  so the "pin" half is lifecycle-only - a horde zombie is never reaped by
+  distance, which is the observable behaviour the pin produces.
+  *Anchors:* `src/ecs/systems.zig` (`systemDespawnFar` horde skip, turret
+  dwell /3), `src/ecs/world.zig` (kill dwell /3), tests `far animals despawn`
+  (horde arm), `horde kills gib 3x faster`
 
 - **Blood-moon schedule persistence across restart** `WORKS`
   The world clock (day + hours, stock worldTime encoding) is saved to
