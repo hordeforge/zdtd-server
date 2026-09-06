@@ -122,6 +122,12 @@ pub const default_storm_frequency: i32 = 100;
 /// still reclaiming dead slots.
 pub const default_peer_stale_ms: u64 = 10000;
 
+/// Auth-state age cap (stock `MaxDurationInAuthState` = 10 s, network.md:810):
+/// a peer that never echoes the challenge is reaped this long after the
+/// challenge went out, even if it keeps the socket warm with junk. Separate
+/// from the RX-silence reap, which skips pre-first-packet peers.
+pub const default_auth_state_ms: u64 = 10000;
+
 /// Join rate-limit gap per IP (zdtd.toml [authority] join_rate_limit_ms).
 /// Stock paces connection attempts at ~500 ms/IP (asm.il ConnectionManager
 /// flood gate); loopback is exempt so bots/tests share 127.0.0.1.
@@ -492,6 +498,10 @@ pub const Client = struct {
     pending_area_ring: i32 = 0,
     pending_area_idx: u32 = 0,
     challenge: [16]u8 = .{0} ** 16,
+    /// Monotonic ns when the challenge went out (stock auth-state StartTime).
+    /// The auth-age sweep reaps peers that never echo past
+    /// `MaxDurationInAuthState` (10 s); 0 = no challenge outstanding.
+    challenge_ns: u64 = 0,
     slot: usize = 0,
     view_radius: i32 = default_view_radius,
     name: [32]u8 = .{0} ** 32,

@@ -423,6 +423,9 @@ pub fn clientFor(self: *Game, peer: *ln_peer.Peer) ?*Client {
             var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
             defer threaded.deinit();
             threaded.io().random(&c.challenge);
+            // Auth-state StartTime: the sweep reaps peers that never echo
+            // past MaxDurationInAuthState (10 s).
+            c.challenge_ns = clock.monoNs();
             return c;
         }
     }

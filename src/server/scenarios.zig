@@ -134,6 +134,51 @@ test "scenario a wrong challenge echo does not authenticate the peer" {
     try std.testing.expect(peer.authenticated);
 }
 
+test "scenario a peer that never echoes is reaped past the auth age" {
+    // Stock MaxDurationInAuthState (10 s): the auth sweep reaps by challenge
+    // age, not RX silence. A peer that keeps the socket warm with junk but
+    // never echoes must still be reaped; an authenticated peer of the same
+    // age must survive (its challenge_ns cleared on echo).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, world_dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    const peer = &g.net.peers[0];
+    peer.* = .{ .alive = true, .local_id = 1, .authenticated = false };
+    try g.onConnected(peer);
+    const c = g.clientFor(peer) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!c.authed_challenge);
+    try std.testing.expect(c.challenge_ns != 0);
+
+    // Fresh challenge: the sweep leaves it alone even with no RX yet.
+    const reaped_before = g.harness.counters.get(.stale_peers_reaped);
+    g.reapStalePeers();
+    try std.testing.expectEqual(reaped_before, g.harness.counters.get(.stale_peers_reaped));
+    try std.testing.expect(peer.alive);
+
+    // Age the challenge past the cap while keeping RX warm: reaped anyway.
+    // The virtual clock makes the age exact (wall time would also do, but a
+    // slow CI box must not flake the boundary).
+    clock.enableVirtual(1_000_000_000);
+    c.challenge_ns = 0; // issued at virtual t=0
+    peer.last_recv_ns = clock.monoNs(); // RX warm right now
+    clock.advanceNs((game_mod.default_auth_state_ms *| 1_000_000) + 1);
+    g.reapStalePeers();
+    clock.disableVirtual();
+    try std.testing.expectEqual(reaped_before + 1, g.harness.counters.get(.stale_peers_reaped));
+    try std.testing.expect(!peer.alive);
+}
+
 test "scenario pre-login world package is rejected by production dispatch" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

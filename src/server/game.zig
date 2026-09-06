@@ -189,6 +189,7 @@ pub const default_trader_restock_cap = game_types.default_trader_restock_cap;
 pub const default_trader_restock_refill = game_types.default_trader_restock_refill;
 pub const default_storm_frequency = game_types.default_storm_frequency;
 pub const default_peer_stale_ms = game_types.default_peer_stale_ms;
+pub const default_auth_state_ms = game_types.default_auth_state_ms;
 pub const default_lock_stale_ns = game_types.default_lock_stale_ns;
 pub const default_join_rate_limit_ms = game_types.default_join_rate_limit_ms;
 pub const default_craft_max_times = game_types.default_craft_max_times;
@@ -1028,7 +1029,12 @@ pub const Game = struct {
         };
         if (opts.map_dir) |md| {
             try self.world.loadStockMap(md);
-            self.world_name = "stock";
+            // WorldInfo.levelName controls the stock client's local raw-world
+            // lookup. Keep the selected stock map name (Navezgane/Pregen…)
+            // instead of the old generic "stock", which made worldInfoCo
+            // request a WorldFolder transfer and then look for a non-existent
+            // `World (src: LocalSave, DeviceLocal)` DTM after receipt.
+            if (opts.world_name) |name| self.world_name = name else self.world_name = "stock";
         } else if (opts.worldgen_seed) |seed| {
             self.world.enableProc(seed);
             self.world_name = "proc";

@@ -524,6 +524,10 @@ pub fn reapStaleLocks(self: *Game) void {
 pub fn reapStalePeers(self: *Game) void {
     const now = clock.monoNs();
     const stale_ns: u64 = self.peer_stale_ms *| 1_000_000;
+    // Stock MaxDurationInAuthState (10 s): the auth sweep runs off the
+    // challenge issue time, not RX silence, so a peer that keeps the socket
+    // warm with junk but never echoes is still reaped.
+    const auth_ns: u64 = game_mod.default_auth_state_ms *| 1_000_000;
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!p.alive) {
@@ -543,6 +547,26 @@ pub fn reapStalePeers(self: *Game) void {
             continue;
         }
         if (p.last_recv_ns == 0) continue;
+        // Auth-state age (stock MaxDurationInAuthState): a peer that never
+        // echoed the challenge is reaped past the age cap even when it keeps
+        // receiving (RX silence alone never fires: last_recv_ns updates on
+        // every datagram, including junk). Authenticated peers have
+        // challenge_ns == 0 and skip this arm.
+        if (c.challenge_ns != 0 and now -% c.challenge_ns > auth_ns) {
+            self.harness.counters.inc(.stale_peers_reaped);
+            std.debug.print(
+                "zdtd: peer reaped in-auth local_id={d} slot={d} age_ms={d}\n",
+                .{ p.local_id, c.slot, (now -% c.challenge_ns) / 1_000_000 },
+            );
+            p.alive = false;
+            p.authenticated = false;
+            for (&p.pending) |*slot| slot.used = false;
+            p.local_window_start = p.local_seq;
+            self.clearLocksForPeer(c.slot);
+            c.* = .{};
+            self.refreshInfoPlayers();
+            continue;
+        }
         if (now -% p.last_recv_ns > stale_ns) {
             self.harness.counters.inc(.stale_peers_reaped);
             std.debug.print(

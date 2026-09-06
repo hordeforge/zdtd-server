@@ -287,6 +287,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         std.debug.print("zdtd: AuthConfirmation body={d}\n", .{body.len});
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackageWorldFolder")) {
+        // Stock ProcessPackage (IL=93) on the server branch calls
+        // StartSendingPacketsToClient. zdtd's flat/default worlds ship no
+        // world files (WorldInfo hashCount=0), but worldInfoCo still waits on
+        // WorldReceivedAndUncompressed after RequestWorld, so answer with one
+        // empty last-part that clears the wait (uncompressWorld count=0).
+        const part = try packages.buildEmptyWorldFolderTransfer(&self.body_buf);
+        try self.sendGameCritical(peer, "NetPackageWorldFolder", part);
+        std.debug.print("zdtd: WorldFolder empty transfer local_id={d} body={d}\n", .{ peer.local_id, part.len });
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerSpawnedInWorld")) {
         // The client echoes this after it finishes spawning locally (stock
         // GameManager.RequestToSpawn -> SendToServer, direction 0 both ways).

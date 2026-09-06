@@ -2314,6 +2314,42 @@ pub fn buildWorldInfoBody(buf: []u8, name: []const u8, w: i32, h: i32, sx: i32, 
     return wr.written();
 }
 
+/// One `NetPackageWorldFolder` part (write IL=30): seqNr:i32, totalParts:i32,
+/// dataLen:i32 (-1 when null), then data bytes. Channel 1. The client's
+/// ProcessPackage appends each part to ReceiveStream and, on the last
+/// (seqNr == totalParts - 1), runs uncompressWorld.
+pub fn buildWorldFolderPartBody(buf: []u8, seq: i32, total: i32, data: []const u8) ![]u8 {
+    var wr: binary.Writer = .{ .buf = buf };
+    try wr.writeI32(seq);
+    try wr.writeI32(total);
+    try wr.writeI32(@intCast(data.len));
+    try wr.writeBytes(data);
+    return wr.written();
+}
+
+/// Empty world-folder transfer: one part carrying a zlib-deflated
+/// `fileCount:i32 = 0` blob. Stock's prepareWorldFolderData streams real
+/// world files; zdtd's flat/default worlds have nothing to ship (WorldInfo
+/// already advertised hashCount=0), but worldInfoCo still calls RequestWorld
+/// when no local world matches, and that coroutine waits on
+/// WorldReceivedAndUncompressed. An empty last-part clears the wait the same
+/// way a zero-file zip would (uncompressWorld: count=0 loop, write completed
+/// marker, set the flag).
+pub fn buildEmptyWorldFolderTransfer(buf: []u8) ![]u8 {
+    const flate = std.compress.flate;
+    var plain: [4]u8 = undefined;
+    std.mem.writeInt(i32, &plain, 0, .little);
+    var window: [flate.max_window_len]u8 = undefined;
+    var out_scratch: [64]u8 = undefined;
+    var sink: std.Io.Writer = .fixed(&out_scratch);
+    // Stock DeflateOutputStream (prepareWorldFolderData) is zlib-wrapped;
+    // the client DeflateInputStream expects the same container.
+    var comp = flate.Compress.init(&sink, &window, .zlib, .default) catch return error.Overflow;
+    comp.writer.writeAll(&plain) catch return error.Overflow;
+    comp.finish() catch return error.Overflow;
+    return buildWorldFolderPartBody(buf, 0, 1, out_scratch[0..sink.end]);
+}
+
 /// Stock NetPackageChunkClusterInfo body (NetPackageChunkClusterInfo.write
 /// IL=36): name:string, cMinPos:2xi32, cMaxPos:2xi32, bInfinite:bool,
 /// pos:Vector3 (3xf32). Server fills from `Setup(ChunkCluster)`: name =
@@ -2363,6 +2399,20 @@ test "world info body layout ends with hashCount0 and worldDataSize" {
     const tail = body[body.len - 12 ..];
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tail[0..4], .little));
     try std.testing.expectEqual(@as(i64, 0), std.mem.readInt(i64, tail[4..12], .little));
+}
+
+test "empty world folder transfer is one last part with zlib payload" {
+    var buf: [128]u8 = undefined;
+    const body = try buildEmptyWorldFolderTransfer(&buf);
+    var rd: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(@as(i32, 0), try rd.readI32()); // seqNr
+    try std.testing.expectEqual(@as(i32, 1), try rd.readI32()); // totalParts (last = seq 0)
+    const len = try rd.readI32();
+    try std.testing.expect(len > 0);
+    try std.testing.expectEqual(@as(usize, @intCast(len)), body.len - rd.pos);
+    // zlib header: CMF=0x78
+    try std.testing.expectEqual(@as(u8, 0x78), body[rd.pos]);
+    try std.testing.expectEqual(@as(u8, 1), channelFor("NetPackageWorldFolder"));
 }
 
 test "sign data empty last batch is bool true + len0" {

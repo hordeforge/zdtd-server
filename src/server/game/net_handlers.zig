@@ -49,6 +49,7 @@ pub fn onData(self: *Game, peer: *ln_peer.Peer, payload: []const u8) anyerror!vo
     if (!c.authed_challenge) {
         if (wire_frame.isChallenge(payload) and constantTimeEql(payload[1..17], &c.challenge)) {
             c.authed_challenge = true;
+            c.challenge_ns = 0; // authenticated: the auth-age sweep no longer applies
             peer.authenticated = true;
             const body = try packages.buildPackageIdsBody(&self.body_buf, .{}, &packages.default_mappings);
             try self.sendGame(peer, "NetPackagePackageIds", body);

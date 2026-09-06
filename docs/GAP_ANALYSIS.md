@@ -4251,13 +4251,7 @@ persists so little that a restart visibly damages a built base.
   four remain unhandled; the difference is that the reason is now the real
   one. EAC/encryption waivers (`EAC`,
   `EncryptionPublicKey`, `KeyExchangeComplete`), creative/editor
-  (`EditorUpdateVolume`), the world-folder download (`WorldFolder`: the C2S
-  package is a client asking for the server's world files, and stock's
-  ProcessPackage IL=93 answers `StartSendingPacketsToClient` on the IsServer
-  branch. Filed under "creative/editor" until 2026-09-06, which it is not.
-  zdtd expects the operator to ship the world with the client or use a
-  pregenerated map, so it neither serves nor requests one; the channel-1
-  routing for the name is pinned regardless), Twitch integration
+  (`EditorUpdateVolume`), Twitch integration
   (`PlayerTwitchStats`, `TwitchAccess`, `TwitchVoteScheduling`), headless mesh
   (DynamicMesh: verified 2026-09-06, the category is right. ProcessPackage
   IL=24 returns immediately unless `DynamicMeshManager.CONTENT_ENABLED`, and
@@ -4419,9 +4413,17 @@ persists so little that a restart visibly damages a built base.
   POIAround overrode `get_Channel`, its 3.2.0 replacement declares none and so
   inherits 0 (`channelFor`'s doc comment cites both IL dumps). Separately,
   WorldFolder was absent from the override set and its unit test asserted
-  "four", pinning the omission; zdtd never emits WorldFolder, so nothing was
-  mis-sent.
-  *Anchors:* `src/wire/packages.zig` `channelFor`/`framed`,
+  "four", pinning the omission. It now also handles the joined-phase C2S
+  request: a zero-file world gets the stock channel-1 one-part zlib transfer
+  (`seq=0,total=1`), which clears worldInfoCo's `RequestWorld` wait. Verified
+  2026-09-07 with the Safehouse stock client: server logged the empty transfer;
+  client logged `World received`, then loaded Navezgane from GameData and
+  created/found its own player entity. WorldInfo retains the requested stock
+  map name instead of the old generic `stock`, so client map discovery chooses
+  `GameData/Navezgane` rather than a blank LocalSave cache.
+  *Anchors:* `src/wire/packages.zig` `channelFor`/`framed`/
+  `buildEmptyWorldFolderTransfer`, `src/server/c2s/join.zig`,
+  `src/server/game.zig`, Safehouse client log 2026-09-07,
   `src/server/game/send_extra.zig` `sendCompressed`, `asm.il:808632-808638`,
   `asm.il:826004`, `asm.il:833771`
 
