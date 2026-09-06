@@ -347,12 +347,16 @@ against the RE package table; none is a live gap, for these reasons:
   `BlockLimitTracking` logs a discard server-side even in stock (Process
   IL=11); `OwnedEntitySync` tracks owned-entity lists (drones/turrets) zdtd
   does not keep; `EntitySetPartActive` is per-part vehicle damage state.
-- **Effect not recorded in the RE.** `EntityPrimeDetonator` (Process IL=23:
-  `PrimeDetonator()` on `EntityZombieCop`) and `MinEventFire` have no RE entry
-  for what the client-side call actually does. zdtd already sends
-  `NetPackageExplosionClient` for every cop blast, which is the visible
-  outcome; whether the prime signal adds a wind-up cue is unknown. Same
-  posture as `VehicleCount` below: not emitted on a guess.
+- **Client-local effect, read out of the IL 2026-09-06.** `EntityPrimeDetonator`
+  is settled: `EntityZombieCop.PrimeDetonator` (IL=23) sets the `Detonator`
+  component's `PulseRateScale`, turns its light red and starts the countdown
+  animation. Purely the wind-up visual, no sim state, and zdtd already sends
+  `NetPackageExplosionClient` for the blast itself. Not a gap.
+  `MinEventFire` is a different shape: `Explosion` sends it with
+  `MinEventTypes 19` when a remote entity dies to a blast (IL_0683), which
+  fires the victim's client-side buff/perk event chain. zdtd has no MinEvent
+  system at all, so this is one package of a whole absent subsystem rather
+  than an unsent packet - closing it means the event model, not a builder.
 
 ### Six zdtd-shaped bodies under stock package names (2026-09-04, extended 2026-09-06)
 
