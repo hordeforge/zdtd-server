@@ -4164,7 +4164,11 @@ persists so little that a restart visibly damages a built base.
   so a stock client shows a mate's laser dot. zdtd has no laser-sight state on
   the player row, so the visual is missing for other players; the sender still
   sees its own, which is client-local), headless mesh
-  (DynamicMesh), and the junk-drone packages (DroneDataSync,
+  (DynamicMesh: verified 2026-09-06, the category is right. ProcessPackage
+  IL=24 returns immediately unless `DynamicMeshManager.CONTENT_ENABLED`, and
+  only then calls `DynamicMeshServer.ClientReadyForNextMesh` on the IsServer
+  branch, so a server without the dynamic-mesh content has nothing to answer),
+  and the junk-drone packages (DroneDataSync,
   DroneParticleEffect). The drone pair was labelled "deferred cosmetic/depth"
   until 2026-09-06; the IL does not support that either. `DroneDataSync`
   (ProcessPackage IL=106) resolves the `EntityDrone` and syncs its stored
