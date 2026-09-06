@@ -4151,10 +4151,22 @@ persists so little that a restart visibly damages a built base.
   four remain unhandled; the difference is that the reason is now the real
   one. EAC/encryption waivers (EAC,
   EncryptionPublicKey, KeyExchangeComplete), creative/editor
-  (EditorUpdateVolume, WorldFolder), Twitch integration (PlayerTwitchStats,
+  (EditorUpdateVolume), the world-folder download (WorldFolder: the C2S
+  package is a client asking for the server's world files, and stock's
+  ProcessPackage IL=93 answers `StartSendingPacketsToClient` on the IsServer
+  branch. Filed under "creative/editor" until 2026-09-06, which it is not.
+  zdtd expects the operator to ship the world with the client or use a
+  pregenerated map, so it neither serves nor requests one; the channel-1
+  routing for the name is pinned regardless), Twitch integration (PlayerTwitchStats,
   TwitchAccess, TwitchVoteScheduling, PlayerLaserSight), headless mesh
-  (DynamicMesh), deferred cosmetic/depth (DroneDataSync,
-  DroneParticleEffect junk-drone state).
+  (DynamicMesh), and the junk-drone packages (DroneDataSync,
+  DroneParticleEffect). The drone pair was labelled "deferred cosmetic/depth"
+  until 2026-09-06; the IL does not support that either. `DroneDataSync`
+  (ProcessPackage IL=106) resolves the `EntityDrone` and syncs its stored
+  state, and `DroneParticleEffect` (IL=78) fans the effect from the server on
+  the `!IsRemote` branch. Neither is cosmetic-only. The reason zdtd does not
+  handle them is simpler and larger: there is no `EntityDrone` in the sim at
+  all, so the whole junk-drone subsystem is absent rather than deferred.
   Re-audited 2026-08-22: ragdolls **do** relay - the owner's client forces
   its local ragdoll and the server re-broadcasts the verbatim body to the
   entity's other tracked players (stock SendPacketToTrackedPlayersAndTracked
