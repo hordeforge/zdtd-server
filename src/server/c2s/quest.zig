@@ -27,14 +27,40 @@ const quest_giver_fallback_y: f32 = 70;
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageLandClaimRepair")) {
-        // Same rate gate as SetBlock: unthrottled would let a spam loop fan
-        // this broadcast out to every connected peer for free (bandwidth DoS).
+        // Stock ProcessPackage (IL=33): resolve the TE at the block position
+        // and, on beginRepair, run RepairAll server-side; ending repair clears
+        // IsRepairing for the owner. It emits nothing, so neither do we: the
+        // old broadcast fanned a stock-silent package to every peer.
         if (!self.takeBlockToken(c)) {
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        _ = packages.parseLandClaimRepair(body) catch return true;
-        try self.broadcast("NetPackageLandClaimRepair", body);
+        const req = packages.parseLandClaimRepair(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (!req.begin_repair) return true;
+        // Only the claim owner may repair it: stock guards the TE through
+        // LocalPlayerIsOwner on the client path, and the server resolves the
+        // claim at the keystone. A request outside any claim, or for someone
+        // else's, is dropped and counted like the other ownership gates.
+        const claim = self.claimCovering(req.x, req.z) orelse {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        };
+        if (claim.owner_entity != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        _ = self.repairClaimArea(req.x, req.z);
+        // Stock answers the repair pass with Setup(blockPos, false) to the
+        // requester (repair coroutine IL_0337), clearing its IsRepairing.
+        if (packages.buildLandClaimRepairBody(&self.body_buf, req.x, req.y, req.z, false)) |done| {
+            self.sendGame(peer, "NetPackageLandClaimRepair", done) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: LandClaimRepair done send failed slot={d}: {s}\n", .{ c.slot, @errorName(err) });
+            };
+        } else |_| {}
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageSharedQuest")) {

@@ -412,39 +412,31 @@ on the join path because a joining client would otherwise see an empty
 trader until it opened one; stock fills that from the client's own
 `TraderData` copy. Kept for the same reason as the basket echo.
 
-**`NetPackageLandClaimRepair` is rebroadcast where stock repairs.** Found
-2026-09-06 while auditing handlers with no scenario coverage. Stock's
-`ProcessPackage` (**IL=33**, RE `protocol-packages.md` and
+**`NetPackageLandClaimRepair` is repaired server-side since 2026-09-06.**
+Found 2026-09-06 while auditing handlers with no scenario coverage; closed the
+same day. Stock's `ProcessPackage` (**IL=33**, RE `protocol-packages.md` and
 `server-lifecycle.md` section 6) resolves `TEFeatureAreaRepair` at the block
 position and, on `beginRepair`, calls `RepairAll(world, blockPos,
 sender.entityId)` server-side; ending repair clears `IsRepairing` for the
-owner. It emits nothing.
+owner. It emits nothing, and since the fix neither does zdtd: the old code
+broadcast the package to every peer, and a client receiving it runs the same
+`ProcessPackage`, which tests `IsServer` at `IL_0022` and can only reach the
+end-repair branch for its *own* claim - so the broadcast could clear another
+player's `IsRepairing` by luck of position.
 
-zdtd has no `TEFeatureAreaRepair`, so `c2s/quest.zig` parses the body, rate
-gates it, and broadcasts it to every peer. Two departures, neither of them
-what a player asked for:
+The repair itself (`repairClaimArea`, `server/game/world.zig`) walks the claim
+square (`land_claim_size` 41, matching stock's ±22) and clears damage on every
+damaged non-air block, fanning each fix as a `SetBlock` with damage 0 to
+peers in interest range. The requester gets stock's `Setup(blockPos, false)`
+answer. Ownership is enforced: outside any claim, or for someone else's claim,
+the request is an ownership reject.
 
-- **The repair does not happen.** A land-claim area repair block is inert;
-  damaged blocks inside the claim stay damaged. This is a missing feature, not
-  a trust decision, and it is the reason the package cannot simply be dropped
-  yet: dropping it would be equally wrong and would remove the only trace that
-  the client asked.
-- **The broadcast is not stock traffic.** Unlike the `BlockTrigger` case above,
-  where the receiving client's handler falls through, a client receiving this
-  package runs the same `ProcessPackage`. Read against
-  `il/netpackages-v3.2.0/NetPackageLandClaimRepair_il.txt`: `IL_0022` tests
-  `ConnectionManager::get_IsServer` and jumps to the `ret` at `IL_0060` when
-  false, so a client cannot start a repair. The end-repair branch it can reach
-  compares the TE owner against `InternalLocalUserIdentifier`
-  (`IL_0043-0057`), so it only clears `IsRepairing` on the receiver's own
-  claim. Bounded, but inert by luck rather than by design: a player repairing
-  their own claim elsewhere in the world has it cleared by someone else's
-  packet.
-
-Closing it needs the area-repair tile entity: resolve the TE, run the repair
-server-side, replicate the resulting block changes through the normal
-`SetBlock` path, and drop the broadcast. Until then the package is parsed for
-its bounds only.
+One conscious simplification, stated not glossed: stock's `repairBlock`
+(IL=135) consumes `RepairItems` from the TE storage in proportion to the
+damage fraction, and zdtd has no TE storage inventory, so the repair is free.
+Charging for it means the TE storage subsystem, which is a larger row. Air
+stays air on both sides - stock's loop skips it (`get_isair`), so destroyed
+blocks are not rebuilt here either.
 
 **A fourth zdtd-shaped body: vehicle control under `NetPackageVehicleSpawn`.**
 Found 2026-09-06 auditing the parsers with no golden test. zdtd sends and reads

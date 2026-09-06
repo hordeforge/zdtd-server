@@ -12796,3 +12796,89 @@ test "scenario a kill notifies the killer's client so kill challenges advance" {
 
     std.debug.print("PASS award-kill: the killer's client is notified, nobody else\n", .{});
 }
+
+test "scenario the land-claim repair heals damaged blocks and answers the requester" {
+    // Stock TEFeatureAreaRepair.RepairAll (IL=9): walk the claim area and
+    // restore every damaged block, emitting nothing; the repair coroutine
+    // ends with Setup(blockPos, false) to the requester (IL_0337). zdtd used
+    // to broadcast the package to every peer and repair nothing.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const owner = try g.attachJoinedClient(&cap_a);
+    const other = try g.attachJoinedClient(&cap_b);
+
+    const cx: i32 = 250;
+    const cz: i32 = 250;
+    const stone = world_store.block_stone;
+    // Two stone blocks inside the claim, one damaged.
+    try g.world.setBlockWorld(cx + 1, 70, cz, stone);
+    try g.world.setBlockWorld(cx + 2, 70, cz, stone);
+    try g.setBlockHp(cx + 1, 70, cz, 500);
+    try std.testing.expectEqual(@as(u16, 500), g.getBlockHp(cx + 1, 70, cz));
+    g.registerClaim(cx, 70, cz, owner.entity_id);
+
+    const repair_id = packages.idOf("NetPackageLandClaimRepair") orelse
+        return error.TestUnexpectedResult;
+    const setblock_id = packages.idOf("NetPackageSetBlock") orelse
+        return error.TestUnexpectedResult;
+    var rb: [32]u8 = undefined;
+    var fb: [8192]u8 = undefined;
+    var pkgs: [8]wire_frame.Package = undefined;
+
+    // A stranger's request is an ownership reject: nothing heals.
+    const stranger = try packages.buildLandClaimRepairBody(&rb, cx, 70, cz, true);
+    try g.injectFramed(other, try packages.framed(&fb, "NetPackageLandClaimRepair", stranger));
+    try std.testing.expectEqual(@as(u16, 500), g.getBlockHp(cx + 1, 70, cz));
+
+    // The owner's begin-repair heals the damaged block and leaves the clean
+    // one alone; the fix fans out as a SetBlock with damage 0.
+    const begin = try packages.buildLandClaimRepairBody(&rb, cx, 70, cz, true);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(owner, try packages.framed(&fb, "NetPackageLandClaimRepair", begin));
+    try std.testing.expectEqual(@as(u16, 0), g.getBlockHp(cx + 1, 70, cz));
+
+    // The repaired cell must arrive as a SetBlock with damage 0.
+    var saw_fix = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != setblock_id) continue;
+            const first = packages.parseSetBlockBody(p.body) catch continue;
+            if (first.block_id == stone) saw_fix = true;
+        }
+    }
+    try std.testing.expect(saw_fix);
+
+    // The requester gets the end-repair (begin=false); nobody got the
+    // begin-repair rebroadcast the old code fanned out.
+    var saw_done = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != repair_id or p.body.len < 25) continue;
+            if (p.body[p.body.len - 1] == 0) saw_done = true;
+        }
+    }
+    try std.testing.expect(saw_done);
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            try std.testing.expect(p.id != repair_id);
+        }
+    }
+
+    std.debug.print("PASS claim-repair: damage cleared, fix replicated, requester answered\n", .{});
+}

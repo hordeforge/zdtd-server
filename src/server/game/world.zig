@@ -96,6 +96,53 @@ pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
     }
 }
 
+/// Stock `TEFeatureAreaRepair.RepairAll` (IL=9) + the `repair` coroutine: walk
+/// the claim area (stock ±22 blocks around the keystone, matching the
+/// `land_claim_size` 41 protection square) and restore every damaged block to
+/// full HP, replicating each fix through the normal `SetBlock` path. Returns
+/// the number of blocks repaired.
+///
+/// Two conscious simplifications, both stated in DIVERGENCES. Materials:
+/// stock's `repairBlock` (IL=135) consumes `RepairItems` from the TE storage
+/// in proportion to the damage fraction, and zdtd has no TE storage inventory,
+/// so the repair is free. Destroyed blocks: stock only heals damaged ones
+/// (the loop skips air via `get_isair`); a block already broken to air is not
+/// rebuilt, and neither is it here.
+pub fn repairClaimArea(self: *Game, cx: i32, cz: i32) u32 {
+    const half: i32 = @intCast(self.land_claim_size / 2);
+    var repaired: u32 = 0;
+    var x: i32 = cx - half;
+    while (x <= cx + half) : (x += 1) {
+        var z: i32 = cz - half;
+        while (z <= cz + half) : (z += 1) {
+            repaired += repairClaimColumn(self, x, z);
+        }
+    }
+    return repaired;
+}
+
+/// Repair one XZ column of the claim area: every damaged non-air block from
+/// bedrock to build height gets its damage cleared and a `SetBlock` with
+/// damage 0 fanned to nearby peers. Unloaded chunks are skipped (getOrCreate
+/// would materialize them); damage only lands on resident chunks anyway.
+fn repairClaimColumn(self: *Game, x: i32, z: i32) u32 {
+    const t = world_store.World.worldToChunk(x, z);
+    const c = self.world.chunkAt(t.pos) orelse return 0;
+    var repaired: u32 = 0;
+    var y: i32 = 0;
+    while (y < world_store.y_dim) : (y += 1) {
+        if (c.dmgAt(t.lx, y, t.lz) == 0) continue;
+        if (c.blockAt(t.lx, y, t.lz) == 0) continue;
+        c.clearDmg(t.lx, y, t.lz);
+        const id = c.blockAt(t.lx, y, t.lz);
+        if (packages.buildSetBlockBodyDamage(&self.body_buf, x, y, z, id, 0, 0, 0)) |sb| {
+            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), self.interest_range) catch {};
+        } else |_| {}
+        repaired += 1;
+    }
+    return repaired;
+}
+
 /// Release every claim recorded against `name` and report how many went. The
 /// claim record stores the owner's login name (claims.zlc), so `wipeplayer`
 /// wiping players.zsv alone would leave that name on disk, still tied to world

@@ -1682,6 +1682,10 @@ pub const Game = struct {
         return game_world.removeClaimAt(self, x, y, z);
     }
 
+    pub fn repairClaimArea(self: *Game, cx: i32, cz: i32) u32 {
+        return game_world.repairClaimArea(self, cx, cz);
+    }
+
     pub fn dropClaimsForName(self: *Game, name: []const u8) u32 {
         return game_world.dropClaimsForName(self, name);
     }
