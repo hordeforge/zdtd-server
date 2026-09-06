@@ -12,6 +12,9 @@ const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
+const ecs = @import("../../ecs/root.zig");
+const assets_buffs = @import("../../assets/buffs.zig");
+const assets_progression = @import("../../assets/progression.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
 
@@ -540,6 +543,63 @@ pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_l
     return false;
 }
 
+/// Attacker's DismemberSelfChance bonus (stock passive 143) for the dismember
+/// roll: the region multiplier is the base, and perk + active-buff rows add
+/// on top (EffectManager.GetValue, RE GetDismemberChance IL=128). Folds the
+/// named passive over purchased attribute/perk levels (level-aware curveAt)
+/// plus the actor's active buffs at level 1, mirroring trackedDeltasAt op
+/// handling (base_add/subtract accumulate; base_set overrides; perc ops
+/// skipped - no stock 143 row uses them). Returns 0 with no rows, which is
+/// the stock unbuffed value, not a silent default.
+pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot) f32 {
+    if (slot >= self.clients.len) return 0;
+    const c = &self.clients[slot];
+    var bonus: f32 = 0;
+    // Perk/attribute leg.
+    for (c.skill_levels[0..c.skill_level_n]) |sl| {
+        if (sl.level == 0) continue;
+        const passives: []const assets_buffs.Passive = blk: {
+            for (self.progression_table.attributes) |a| {
+                if (std.mem.eql(u8, a.name, sl.name)) break :blk a.passives;
+            }
+            for (self.progression_table.perks) |pk| {
+                if (std.mem.eql(u8, pk.name, sl.name)) break :blk pk.passives;
+            }
+            break :blk &.{};
+        };
+        for (passives) |p| {
+            if (!std.mem.eql(u8, p.name, "DismemberSelfChance")) continue;
+            const v = assets_buffs.curveAt(p, sl.level);
+            switch (p.op) {
+                .base_set, .set => bonus = v,
+                .base_add, .add => bonus += v,
+                .base_subtract, .subtract => bonus -= v,
+                else => {},
+            }
+        }
+    }
+    // Active-buff leg at level 1.
+    if (actor_sim_slot) |as| {
+        if (self.sim.mask[as].buffs) {
+            for (self.sim.buffs[as].slots) |bs| {
+                if (!bs.active) continue;
+                const def = self.buffs.byId(bs.def_id) orelse continue;
+                for (def.passives) |p| {
+                    if (!std.mem.eql(u8, p.name, "DismemberSelfChance")) continue;
+                    const v = assets_buffs.curveAt(p, 1);
+                    switch (p.op) {
+                        .base_set, .set => bonus = v,
+                        .base_add, .add => bonus += v,
+                        .base_subtract, .subtract => bonus -= v,
+                        else => {},
+                    }
+                }
+            }
+        }
+    }
+    return bonus;
+}
+
 const assets_progression_test = @import("../../assets/progression.zig");
 
 test "skill ledger: level-up awards SP; purchase validates, prereqs and spends" {
@@ -599,4 +659,48 @@ test "killXpAward scales by the on_entity_killed verdict percent" {
     g.killXpAward(0, 200, 150, false);
     try std.testing.expectEqual(before + 300, g.clients[0].xp);
     std.debug.print("PASS kill-xp-scale: 200 x 150% = {d}\n", .{g.clients[0].xp - before});
+}
+
+test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dismember143", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // No rows anywhere: the stock unbuffed value.
+    try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, null));
+    // Perk leg: a DismemberSelfChance base_add curve 0.1/level.
+    const perks = [_]assets_progression.PerkDef{
+        .{
+            .name = "perkSkullCrusher",
+            .max_level = 5,
+            .passives = &.{.{ .name = "DismemberSelfChance", .op = .base_add, .curve = .{ 0.1, 0.2, 0.3, 0, 0, 0, 0, 0 }, .curve_len = 3 }},
+        },
+    };
+    g.progression_table.perks = &perks;
+    _ = g.sim.spawnPlayer(0, 70, 0, 0).?;
+    g.clients[0].skill_levels[0] = .{ .name = "perkSkullCrusher", .level = 2 };
+    g.clients[0].skill_level_n = 1;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), g.dismemberSelfChance(0, null), 0.0001);
+    // Unknown skill names are ignored (fail closed).
+    g.clients[0].skill_levels[0].name = "notAPerk";
+    try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, null));
+    g.clients[0].skill_levels[0].name = "perkSkullCrusher";
+    // Buff leg: an active buff's untagged row adds at level 1.
+    const defs = [_]assets_buffs.BuffDef{
+        .{ .name = "testDismemberBuff", .passives = &.{.{ .name = "DismemberSelfChance", .op = .base_add, .value = 0.5 }} },
+    };
+    g.buffs.defs = defs[0..];
+    const ps = g.sim.playerByPeer(0) orelse return error.TestUnexpectedResult;
+    const bs = g.sim.buffsMut(ps);
+    bs.slots[0] = .{ .active = true, .def_id = 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), g.dismemberSelfChance(0, ps), 0.0001);
+    // Inactive buff contributes nothing.
+    bs.slots[0].active = false;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), g.dismemberSelfChance(0, ps), 0.0001);
+    // Removing the perk level reverts exactly.
+    g.clients[0].skill_level_n = 0;
+    try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, ps));
+    std.debug.print("PASS dismember-143: perk curve + buff leg fold, revertible\n", .{});
 }

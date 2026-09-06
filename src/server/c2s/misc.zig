@@ -692,9 +692,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
         // Dismember roll (RE CheckDismember IL=125): the claimed body part
         // feeds the region/leg gates; the weapon chance comes off the
-        // actor's held item, 0 when it carries no DismemberChance passive.
-        // The roll sets crawler/cripple state on the victim and its outcome
-        // bits ride the S2C damage body below.
+        // actor's held item, 0 when it carries no DismemberChance passive;
+        // the attacker's DismemberSelfChance (143) perk/buff fold adds onto
+        // the region multiplier (GetDismemberChance IL=128). The roll sets
+        // crawler/cripple state on the victim and its outcome bits ride the
+        // S2C damage body below.
         var dismember_bits: u8 = 0;
         if (self.sim.slotOfNetId(d.entity_id)) |vs| {
             if (self.sim.mask[vs].health) {
@@ -703,7 +705,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 else
                     0;
                 const weapon_chance = if (self.items.byId(held_id)) |idef| idef.dismember_chance else 0;
-                dismember_bits = self.sim.rollDismember(vs, d.body_part, amount, self.sim.health[vs].max_hp, weapon_chance);
+                const self_bonus = self.dismemberSelfChance(c.slot, actor_slot);
+                dismember_bits = self.sim.rollDismember(vs, d.body_part, amount, self.sim.health[vs].max_hp, weapon_chance, self_bonus);
             }
         }
         // Item durability (GAP "Item durability"): the held tool wears with

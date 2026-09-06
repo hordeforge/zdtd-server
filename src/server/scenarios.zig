@@ -31,6 +31,7 @@ const binary = @import("../wire/binary.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
 const assets_items = @import("../assets/items.zig");
+const assets_progression = @import("../assets/progression.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
@@ -13001,4 +13002,88 @@ test "scenario a leg hit past the crawler threshold crawlers the zombie" {
     try std.testing.expect(saw);
 
     std.debug.print("PASS dismember-roll: threshold leg hit crawlers and reports 0x200\n", .{});
+}
+
+test "scenario a perked attacker's dismember bonus reaches the S2C damage body" {
+    // Stock GetDismemberChance (IL=128): weapon x damagePer x (region mult +
+    // attacker DismemberSelfChance-143 bonuses). Fixture: weapon chance 1,
+    // head hit at 0.5 fraction, perk bonus 200 -> chance 100.5, clamped to
+    // 100, so the dismember bit always lands on the fanned-out body. Without
+    // the fold the chance is 0.5 and the bit is draw-dependent; the
+    // with-perk assert below is deterministic and fails if the wiring drops
+    // the bonus.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const dmg_id = packages.idOf("NetPackageDamageEntity") orelse
+        return error.TestUnexpectedResult;
+
+    // One-def weapon table: item 9 carries DismemberChance 1.
+    const wdefs = [_]assets_items.ItemDef{.{ .id = 9, .name = "testMachete", .dismember_chance = 1 }};
+    g.items.defs = wdefs[0..];
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    g.sim.inventory[ps].slots[g.sim.inventory[ps].holding] = .{ .item_id = 9, .count = 1, .quality = 1 };
+    // Perk with a +200 DismemberSelfChance row at level 1.
+    const perks = [_]assets_progression.PerkDef{
+        .{
+            .name = "perkSkullCrusher",
+            .max_level = 5,
+            .passives = &.{.{ .name = "DismemberSelfChance", .op = .base_add, .value = 200 }},
+        },
+    };
+    g.progression_table.perks = &perks;
+    g.clients[ca.slot].skill_levels[0] = .{ .name = "perkSkullCrusher", .level = 1 };
+    g.clients[ca.slot].skill_level_n = 1;
+
+    const zid = g.sim.spawnZombie(258, 70, 258, 100) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    g.sim.class_id[zs].dismember_head = 1;
+    try std.testing.expect(g.sim.mask[zs].class_id);
+
+    // Head = 2. 50 damage on 100 hp = 0.5 fraction.
+    var dmg: [256]u8 = undefined;
+    var fbuf: [512]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &dmg };
+    try w.writeI32(zid);
+    try w.writeU32(packages.dmg_pain_hit);
+    try w.writeByte(0);
+    try w.writeByte(3);
+    try w.writeU16(50);
+    try w.writeByte(0);
+    try w.writeI16(2);
+    try w.writeByte(0);
+    try w.writeI32(ca.entity_id);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", w.written()));
+
+    var pkgs: [8]wire_frame.Package = undefined;
+    var saw = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != dmg_id or p.body.len < 8) continue;
+            const head = packages.parseDamageHead(p.body) catch continue;
+            if (head.entity_id != zid) continue;
+            const fl = std.mem.readInt(u32, p.body[4..8], .little);
+            if (fl & packages.dmg_dismember != 0) saw = true;
+        }
+    }
+    try std.testing.expect(saw);
+
+    std.debug.print("PASS dismember-143-e2e: perk bonus lands the dismember bit on S2C\n", .{});
 }

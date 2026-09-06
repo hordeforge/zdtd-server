@@ -1335,11 +1335,10 @@ pub const World = struct {
     /// 4 = cripple.
     ///
     /// `weapon_chance` is the attacker's held-item DismemberChance passive
-    /// (144); `damage_per` is damage / victim max HP. The attacker's
-    /// DismemberSelfChance perk passive (143) has no model yet (no
-    /// EffectManager/perk chain), so it reads 0 - stated, not silently
-    /// defaulted. The roll is a deterministic per-hit draw seeded from the
-    /// victim net id and hp, the same policy as rollLootDrop below.
+    /// (144); `attacker_bonus` is the attacker's DismemberSelfChance (143)
+    /// perk/buff fold (the region multiplier is the base it adds onto).
+    /// The roll is a deterministic per-hit draw seeded from the victim net
+    /// id and hp, the same policy as rollLootDrop below.
     pub fn rollDismember(
         self: *World,
         victim: Slot,
@@ -1347,6 +1346,7 @@ pub const World = struct {
         amount: f32,
         max_hp: f32,
         weapon_chance: f32,
+        attacker_bonus: f32,
     ) u8 {
         if (!self.mask[victim].zombie_ai or !self.mask[victim].health) return 0;
         const ai = &self.zombie_ai[victim];
@@ -1375,16 +1375,15 @@ pub const World = struct {
         var out: u8 = 0;
         // GetDismemberChance: weapon >= 100 skips the roll at flat 100, else
         // weapon * damagePer * (region multiplier + attacker DismemberSelfChance
-        // (143) perk bonuses). The passive call takes the multiplier as its
-        // base and adds perk/buff contributions on top (the debug log prints
-        // weapon, damagePer, multiplier and result as separate factors), so
-        // with no perks the base IS the multiplier, not zero. The 143 bonus
-        // side has no model yet; it reads 0 here until the perk fold lands.
+        // (143) perk/buff bonuses). The passive call takes the multiplier as
+        // its base and adds contributions on top (the debug log prints weapon,
+        // damagePer, multiplier and result as separate factors), so with no
+        // perks the base IS the multiplier, not zero.
         // (Corrected 2026-09-06: the first version multiplied the whole term
         // by a 0 attacker bonus, which zeroed every roll. Stock's twitch
         // buffs set 143 to 0 explicitly because the unbuffed value is the
         // multiplier, not zero.)
-        const chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * damage_per * mult;
+        const chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * damage_per * (mult + attacker_bonus);
         if (chance > 0 and draw <= @min(chance, 100) / 100) {
             out |= 1;
             if (leg_path) {
@@ -2408,7 +2407,7 @@ test "rollDismember sets the wire bits stock sets" {
     w.class_id[s].dismember_legs = 1;
 
     // Flat-100 weapon on a head hit: dismember, no leg path.
-    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s, 2, 10, 100, 100));
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s, 2, 10, 100, 100, 0));
     try std.testing.expect(!w.zombie_ai[s].crawler);
 
     // Leg hit at 0.2 fraction past the 0.175 threshold: crawler.
@@ -2417,7 +2416,7 @@ test "rollDismember sets the wire bits stock sets" {
     w.class_id[s2].leg_crawler_threshold = 0.175;
     w.class_id[s2].leg_cripple_scale = 0;
     w.class_id[s2].dismember_legs = 1;
-    const bits = w.rollDismember(s2, 256, 20, 100, 0);
+    const bits = w.rollDismember(s2, 256, 20, 100, 0, 0);
     try std.testing.expect(bits & 2 != 0);
     try std.testing.expect(w.zombie_ai[s2].crawler);
 
@@ -2428,7 +2427,7 @@ test "rollDismember sets the wire bits stock sets" {
     w.class_id[s3].leg_crawler_threshold = 0.9;
     w.class_id[s3].leg_cripple_scale = 2;
     w.class_id[s3].dismember_legs = 1;
-    const b3 = w.rollDismember(s3, 256, 20, 100, 0);
+    const b3 = w.rollDismember(s3, 256, 20, 100, 0, 0);
     // Either crippled or not (draw-dependent), but never crawler, and the
     // bit agrees with the state.
     try std.testing.expect(b3 & 2 == 0);
@@ -2438,7 +2437,7 @@ test "rollDismember sets the wire bits stock sets" {
     // Non-leg, no-threshold, zero weapon: nothing.
     const z4 = w.spawnZombie(30, 70, 0, 100).?;
     const s4 = w.slotOfNetId(z4).?;
-    try std.testing.expectEqual(@as(u8, 0), w.rollDismember(s4, 1, 10, 100, 0));
+    try std.testing.expectEqual(@as(u8, 0), w.rollDismember(s4, 1, 10, 100, 0, 0));
 
     // The product term decides: weapon 1 with a 200x overkill fraction gives
     // chance 200, clamped to 100, so every draw dismembers. Zero the
@@ -2446,5 +2445,5 @@ test "rollDismember sets the wire bits stock sets" {
     const z5 = w.spawnZombie(40, 70, 0, 100).?;
     const s5 = w.slotOfNetId(z5).?;
     w.class_id[s5].dismember_head = 1;
-    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s5, 2, 200, 1, 1));
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s5, 2, 200, 1, 1, 0));
 }
