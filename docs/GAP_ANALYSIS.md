@@ -1290,20 +1290,22 @@ parsed, and quest offering is unwired.
   `TraderData.il.txt:477-520` (WriteInventoryData tier section),
   `src/wire/stock_entity.zig:121-137` (writeTraderDataBody), `asm.il:863725-863767`
 
-- **Per-entry Markup (demand model)** `WORKS`
-  `TraderStock.StockEntry.markup` (sbyte) tracks the demand delta: a buy spikes
-  it to +100 (`Entry.IncreaseMarkup`), a sell eases it by 4 saturating at i8 min
-  (`Entry.DecreaseMarkup`, asm.il 856828-856866), and a restock resets it to 0
-  (fresh entries). The wire TraderData (`stockEntries`, vending) now carries the
-  live markup, so the client shows the demand arrows and prices
-  player-owned/rentable machines from `1 + Markup*0.2` (loot-economy.md section
-  5). Price deltas are the RE-cited constants; the absolute-set-on-buy and the
-  i8 saturation are documented approximations (the nested `Entry` method IL is
-  not dumped).
+- **Per-entry Markup (vending-UI state, not demand)** `WORKS` (corrected
+  2026-09-06: the old text described a demand model stock does not have)
+  `TraderStock.StockEntry.markup` (sbyte) rides the wire TraderData
+  (`stockEntries`, vending) so the client shows whatever markup it last set;
+  buy/sell transactions never move it. Stock's `IncreaseMarkup` (+1, cap 100)
+  / `DecreaseMarkup` (-1, floor -4) run only from the client vending-machine
+  +/- UI actions (`ItemActionEntryMarkup`/`Markdown`), and NPC-trader buy
+  price ignores entry markup (`GetBuyPrice` applies `1 + Markup * 0.2` only
+  on the PlayerOwned/Rentable path). A restock rebuilds fresh entries at 0.
+  The TraderData echo path applies client-set markup back onto the entry, so
+  vending UI adjustments round-trip.
   *Anchors:* `src/ecs/components.zig` (`StockEntry.markup`),
-  `src/ecs/systems.zig` (`trade` buy/sell branches, `traderRestock`),
-  `src/server/game.zig` (`stockEntries`), `asm.il:856828-856866`,
-  `asm.il:860548-860586`, `asm.il:1830586-1830600`
+  `src/ecs/systems.zig` (`trade` buy/sell branches leave it alone,
+  `traderRestock`), `src/server/game/trader_wire.zig` (echo apply),
+  `ItemActionEntryMarkup.il.txt` / `ItemActionEntryMarkdown.il.txt`,
+  `XUiM_Trader.il.txt` (GetBuyPrice IL=240)
 
 - **Restock timer** `WORKS` `(2026-08-22)`
   The cadence is stock-faithful (`reset_interval` parsed from `<trader_info>`:
