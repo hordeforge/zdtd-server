@@ -732,10 +732,12 @@ def main():
         # exists for - three names were listed as handled while having no C2S
         # arm - so a doc mention must not be able to satisfy it.
         claimed_done = set()
-        # `[^\n]` and not `[^\n|]`: these claims live in table rows, so the
-        # status sits one cell to the right of the name, past a pipe.
+        # The status is the first word of the next table cell, so anchor on the
+        # pipe. Matching loose text instead reads the word out of an
+        # explanation ("was scored SHIPPED until...") and mistakes a corrected
+        # row for a live claim.
         for m in re.finditer(
-            r"(NetPackage\w+)[^\n]{0,40}?\b(SHIPPED|WORKS)\b", doc_text
+            r"(NetPackage\w+)`?[^|\n]{0,60}\|\s*(SHIPPED|WORKS)\b", doc_text
         ):
             claimed_done.add(m.group(1))
         unhandled_senders = sorted(
@@ -756,6 +758,78 @@ def main():
                 f"no doc row ({len(unhandled_senders)}): "
                 + ", ".join(unhandled_senders[:8])
                 + " - handle it, or record why it is ignored in DIVERGENCES 3b"
+            )
+
+        # 7k. THE OTHER DIRECTION: packages the stock SERVER sends that zdtd
+        #     never emits. 7j covers what arrives; this covers what should
+        #     leave. It found NetPackageSetAttackTarget, which stock fans out
+        #     of every AI target change and zdtd computed but never published,
+        #     leaving every remote zombie reading as untargeted on the client.
+        #     Same recovery shape, different call set.
+        server_send = re.compile(
+            r"::(?:SendPackage|SendToPlayers|SendPacketToTrackedPlayers"
+            r"|SendPacketToTrackedPlayersAndTrackedEntity)\("
+        )
+        server_senders: set[str] = set()
+        for il_path in il_dir.glob("*.il.txt"):
+            text = il_path.read_text(encoding="utf-8", errors="replace")
+            if not server_send.search(text):
+                continue
+            lines = text.split("\n")
+            for i, line in enumerate(lines):
+                if not server_send.search(line):
+                    continue
+                for j in range(i, max(-1, i - 40), -1):
+                    m = src_re.search(lines[j])
+                    if m:
+                        server_senders.add(m.group(1))
+                        break
+        emitted_names: set[str] = set()
+        # Only a real send counts. Matching every quoted occurrence would let a
+        # test that merely looks the id up, or a doc comment, stand in for the
+        # emit - which is the exact confusion this check exists to catch.
+        # Not `files`: that name holds the src file list this function reports
+        # its coverage over, and shadowing it here silently reported 44 files
+        # instead of 201.
+        # The send verbs actually used in src/server, measured rather than
+        # guessed. `idOf`, `framed`, `eql` and `injectFramed` are deliberately
+        # absent: they look a name up, frame a body, match an inbound package
+        # or feed a test, none of which is emitting one.
+        emit_re = re.compile(
+            r'\b(?:sendGame|sendGameCritical|sendGameBudget|sendFramedReliable'
+            r'|broadcast|broadcastExcept|broadcastNear|relayBodyAll'
+            r'|relayBodyExcept|sendCompressed)\s*\([^)]{0,80}?"(NetPackage\w+)"'
+        )
+        for dirpath, _dirs, srv_names in os.walk(os.path.join(ROOT, "src/server")):
+            for fname in srv_names:
+                if fname.endswith(".zig"):
+                    emitted_names.update(
+                        emit_re.findall(
+                            open(
+                                os.path.join(dirpath, fname),
+                                encoding="utf-8",
+                                errors="replace",
+                            ).read()
+                        )
+                    )
+        unsent = sorted(
+            n
+            for n in server_senders & set(advertised)
+            if n not in emitted_names
+            and (
+                n in claimed_done
+                or (
+                    n not in doc_text
+                    and f"`{n[len('NetPackage'):]}`" not in doc_text
+                )
+            )
+        )
+        if unsent:
+            failures.append(
+                "packages the stock server sends that zdtd never emits and no "
+                f"doc row covers ({len(unsent)}): "
+                + ", ".join(unsent[:8])
+                + " - emit it, or record why it is not sent in DIVERGENCES 3b"
             )
 
     if failures:

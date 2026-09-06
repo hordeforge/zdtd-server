@@ -284,6 +284,17 @@ is precisely what has to match the code. Verified by mutation in both
 directions: dropping the `PlayerLaserSight` handler fires it, and removing a
 category entry for an ignored sender fires it too.
 
+And 7k for the other direction: the 124 server senders recovered the same way,
+failing on an advertised name no send path in `src/server/` passes to
+`sendGame` / `sendGameCritical` / a broadcast / a relay. Matching any quoted
+occurrence would not do - a test that looks the id up, or a doc comment naming
+the package, would stand in for the emit, which is the confusion the check
+exists to catch. Building it surfaced three more stale scorecard rows:
+`EntityWaypointList` and `EntityAwardKillServer` were `SHIPPED` on a reading of
+their `ProcessPackage` alone (both are client-local to receive and both are
+things the *server sends*), and `DamageEntity full field semantics` said "the
+builder emits" about a builder no send path calls.
+
 Empirical backstop: `dispatch.zig` counts and logs every unhandled C2S package,
 and a full `smoke-navezgane` session (2 clients, 8 join passes, walk / jump /
 rejoin) logs **zero**. A package the stock client actually sends us would show
