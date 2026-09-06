@@ -287,6 +287,37 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         std.debug.print("zdtd: AuthConfirmation body={d}\n", .{body.len});
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackagePlayerSpawnedInWorld")) {
+        // The client echoes this after it finishes spawning locally (stock
+        // GameManager.RequestToSpawn -> SendToServer, direction 0 both ways).
+        // Stock's server ProcessPackage (IL=47) validates the claimed entity
+        // against the sender (ValidEntityIdForSender), runs
+        // PlayerSpawnedInWorld (SetAlive on died-respawns; vehicle/drone
+        // waypoints and the spawn mod-event for joins), then rebroadcasts the
+        // confirm to every other peer on channel 192 so tracking clients run
+        // their spawn handling. Apply the same: speaking for another entity
+        // is dropped and counted, and the rebroadcast carries the sender's
+        // verified entity id rather than echoing a forged one. The vehicle
+        // waypoint leg is covered separately (sendVehicleWaypoints ships them
+        // to the owner on join); drones have no zdtd surface yet.
+        const rep = packages.parseSpawnedBody(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (rep.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        for (&self.clients) |*cl| {
+            if (cl.slot == c.slot or !cl.joined) continue;
+            const op = cl.peer orelse continue;
+            self.sendGame(op, "NetPackagePlayerSpawnedInWorld", body) catch |err| {
+                self.harness.counters.inc(.net_send_errors);
+                std.debug.print("zdtd: spawn confirm relay failed slot={d}: {s}\n", .{ cl.slot, @errorName(err) });
+            };
+        }
+        return true;
+    }
     // worldInfoCo: after configs, client RequestWorldSignDataFromServer and blocks until
     // SignDataResponse(isLastBatch=true). Send prefab library shells (guid+name, 0 layers).
     if (std.mem.eql(u8, name, "NetPackageSignDataRequest")) {

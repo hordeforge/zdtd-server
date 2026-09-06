@@ -737,6 +737,23 @@ pub fn buildSpawnedBody(buf: []u8, reason: i32, x: i32, y: i32, z: i32, entity_i
     return w.written();
 }
 
+/// Parse side of the same layout (read IL=14, GetLength 16): the client sends
+/// this back after it finishes spawning locally, and stock's server
+/// `ProcessPackage` (IL=47) validates the claimed entity against the sender
+/// (`ValidEntityIdForSender`) before running `GameManager.PlayerSpawnedInWorld`
+/// and rebroadcasting the confirm to every other peer on channel 192.
+pub fn parseSpawnedBody(body: []const u8) !struct { reason: i32, x: i32, y: i32, z: i32, entity_id: i32 } {
+    if (body.len < 20) return error.EndOfStream;
+    var r: binary.Reader = .{ .data = body };
+    return .{
+        .reason = try r.readI32(),
+        .x = try r.readI32(),
+        .y = try r.readI32(),
+        .z = try r.readI32(),
+        .entity_id = try r.readI32(),
+    };
+}
+
 test "spawned-in-world body is reason, position and entity id in that order" {
     // Five i32 in a row with nothing reading them back: the join path has four
     // call sites (game.zig, c2s/join.zig) and no wire test covered any of

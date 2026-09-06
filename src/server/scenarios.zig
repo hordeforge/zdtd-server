@@ -3492,6 +3492,53 @@ test "scenario bedroll respawn: placed bed is listed and used on death" {
     std.debug.print("PASS bedroll: placed at {d}, listed on death, respawn target set\n", .{bx});
 }
 
+test "scenario spawn confirm: forged echo dropped, own echo relayed to the other peer" {
+    // Stock NetPackagePlayerSpawnedInWorld ProcessPackage (IL=47): validate
+    // the claimed entity against the sender (ValidEntityIdForSender), then
+    // rebroadcast the confirm to every other peer on channel 192. A forged
+    // echo for someone else's entity must die silently; the sender's own echo
+    // must reach the tracking client with its entity intact.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const peer_a = ca.peer.?;
+    const spawn_id = packages.idOf("NetPackagePlayerSpawnedInWorld").?;
+    // Join itself sends each client a SpawnedInWorld; drain those so the
+    // assertions below see only what this test's echoes produce.
+    cap_a.clear();
+    cap_b.clear();
+
+    const rej_before = g.harness.counters.get(.ownership_rejects);
+    var forged: [20]u8 = undefined;
+    _ = try packages.buildSpawnedBody(&forged, @intFromEnum(packages.RespawnType.died), 256, 70, 256, cb.entity_id);
+    try g.handlePackage(ca, peer_a, spawn_id, &forged);
+    try std.testing.expectEqual(rej_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(cap_b.findPkgId(spawn_id) == null);
+
+    var own: [20]u8 = undefined;
+    _ = try packages.buildSpawnedBody(&own, @intFromEnum(packages.RespawnType.died), 256, 70, 256, ca.entity_id);
+    try g.handlePackage(ca, peer_a, spawn_id, &own);
+    const relayed = cap_b.findPkgId(spawn_id) orelse return error.TestUnexpectedResult;
+    const rep = try packages.parseSpawnedBody(relayed);
+    try std.testing.expectEqual(ca.entity_id, rep.entity_id);
+    try std.testing.expect(cap_a.findPkgId(spawn_id) == null);
+
+    std.debug.print("PASS spawn-confirm: forged dropped, own relayed eid={d}\n", .{ca.entity_id});
+}
+
 test "scenario vehicle enter drive and turret kills with power" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -162,8 +162,8 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x37 across
-its four qualifier spellings, `N/A (parity)` x3, `DONE` x2, plus one each of
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x33
+(+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
 former `reviews/DOC_CONSISTENCY_AUDIT.md` snapshot was removed with the
@@ -3290,12 +3290,39 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   seeding maxima when zero; respawn no longer starves the player to 0/100.
   *Anchors:* `src/ecs/world.zig:respawnPlayer`, `src/ecs/components.zig:22-37`
 
-- **Bedroll / spawn point selection on respawn** `PARTIAL (waived)`
-  Bedroll selection and `selectedSpawnPointKey` handling need a persistent bedroll
-  registry and player-choice wire (`NetPackageRequestToSpawnPlayer`). Current
-  respawn keeps players in the world (no ghost) and preserves food/water; bed
-  placement choice is waived as respawn-choice subsystem.
-  *Anchors:* `src/server/game.zig`, `src/wire/packages.zig:467-468`
+- **Bedroll / spawn point selection on respawn** `WORKS` (was `PARTIAL (waived)`;
+  re-evaluated 2026-09-06 - the waiver predates the implementation)
+  Stock's respawn choice is client-side: the dead player's spawn-selection
+  window reads the bedroll from `EntityPlayerLocal.GetSpawnPoint` (first
+  `EntityBedrollPositionList` entry, i.e. `PersistentPlayerData.BedrollPos`,
+  else `Undef`) and the backpack from `GetLastDroppedBackpackPosition`, maps
+  the pressed button to a `SpawnMethod` (btnOnBedroll 3 OnBedRoll, btnNearBedroll
+  4 NearBedroll, btnNearBackpack 5 NearBackpack, friend list 6 NearFriend), and
+  the local `findSpawnPosition` resolves it (method 3 takes the bedroll
+  target outright; 4/5 scatter near it via `GetRandomSpawnPositionMinMaxToPosition`
+  48/96/50; backpack recovery points beyond 48 m win over the start point).
+  The server never chooses: `NetPackageRequestToSpawnPlayer` carries only
+  `chunkViewDim` + the client's profile copy + `nearEntityId`, and the death
+  respawn arrives as `NetPackagePlayerSpawnedInWorld` (reason 2 Died), which
+  stock validates (`ValidEntityIdForSender`) and rebroadcasts on channel 192.
+  zdtd covers the server-owned half: bedroll placement sets the respawn point
+  (`c2s/inv.zig` via `isBedrollId`, matching stock `BlockSleepingBag.PlaceBlock`
+  setting the spawn key), removal clears it (`noteBlockRemoved` on all destroy
+  paths, matching `PersistentPlayerList.SpawnPointRemoved`), it persists across
+  restart (players.zsv bed tail), the death screen lists world spawn + bed, the
+  `RequestToSpawnPlayer` death path respawns at the bed, and the client's
+  `PlayerSpawnedInWorld` echo is now validated against the sender and relayed
+  to the other peers (scenario `spawn confirm`). What stays client-side is
+  client-side on stock too: the window, the method buttons, and the near-
+  bedroll/backpack scatter. No server packet carries the choice.
+  *Anchors:* `src/server/c2s/join.zig` (RequestToSpawn + SpawnedInWorld arms),
+  `src/server/c2s/inv.zig:754-759`, `src/server/game/world.zig:284-294`,
+  `src/server/persist.zig:729-741`, `src/wire/packages.zig`
+  (`parseSpawnedBody`), scenarios `bedroll respawn`, `spawn confirm`,
+  IL `XUiC_SpawnSelectionWindow` (buttons b__19_2..7, switch IL_0126),
+  `PlayerMoveController.findSpawnPosition` (IL=279),
+  `GameManager.PlayerSpawnedInWorld` (IL=127),
+  `NetPackagePlayerSpawnedInWorld.ProcessPackage` (IL=47)
 
 - **DropOnDeath backpack** `WORKS` `(2026-08-22 re-audit)`
   The server spawns the death bag itself on the lethal event - both the C2S
