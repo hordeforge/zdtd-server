@@ -261,7 +261,14 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     const z3 = self.sim.spawnSleeperDef(sx + 30, sy, sz - 40, self.entityClassOf(zdef), 0);
     const adef = self.entities.defaultAnimal();
     _ = self.sim.spawnAnimalDef(sx - 20, sy, sz - 25, self.entityClassOf(adef));
-    if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, self.npc.traderIdForClass("Trader Jen"), self.trader_wallet_dukes)) |trader_id| {
+    // Stock npc.xml maps Trader Jen / npcTraderJen to traders.xml id 2.
+    // Offline fixtures have no npc.xml, so traderIdForClass returns 0; keep the
+    // stock Jen id so TraderData.get_TraderInfo() is non-null for showrestock.
+    const jen_info_id: u16 = blk: {
+        const id = self.npc.traderIdForClass("Trader Jen");
+        break :blk if (id != 0) id else 2;
+    };
+    if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, jen_info_id, self.trader_wallet_dukes)) |trader_id| {
         self.fillTraderFromXml(trader_id);
     }
     // Persistable kinds seed only on a fresh world; entities.zen owns

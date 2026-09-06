@@ -2522,16 +2522,20 @@ test "scenario quest accept kill complete and trader buy" {
     systems.drainQuestCoins(&g.sim, c.slot);
     try std.testing.expect(systems.questCoins(&g.sim, c.slot) >= 25);
 
-    // Find trader entity
+    // Find trader entity. TraderData.TraderID is traders.xml <trader_info>, not
+    // the network entity id (XUiC_TraderWindow.showrestock needs TraderInfo).
     var te: i32 = -1;
+    var trader_info_id: i32 = 0;
     var si: usize = 0;
     while (si < 512) : (si += 1) {
         if (g.sim.alive[@intCast(si)] and g.sim.mask[@intCast(si)].trader) {
             te = g.sim.network_id[@intCast(si)].id;
+            trader_info_id = g.sim.trader_stock[@intCast(si)].trader_info_id;
             break;
         }
     }
     try std.testing.expect(te > 0);
+    try std.testing.expect(trader_info_id > 0);
     // The join bundle replicated the trader as EntitySpawn; the ECD must carry
     // the trader class hash and hasTraderData so the client renders EntityTrader
     // and can open the trade window from the spawn data alone.
@@ -2563,7 +2567,7 @@ test "scenario quest accept kill complete and trader buy" {
     _ = try sr.readByte(); // spawnerSource
     try std.testing.expectEqual(@as(u16, 0), try sr.readU16()); // entityData length
     try std.testing.expectEqual(true, try sr.readBool()); // hasTraderData
-    try std.testing.expectEqual(te, try sr.readI32()); // trader id
+    try std.testing.expectEqual(trader_info_id, try sr.readI32()); // traders.xml TraderID
     // Trader lock-open: the LockResponse carries EntityTraderLockContext with
     // server TraderData; the client's trade window reads inventory from it.
     cap.clear();
@@ -2596,7 +2600,7 @@ test "scenario quest accept kill complete and trader buy" {
     try std.testing.expectEqualStrings("EntityTraderLockContext", try rr.readString(&scratch));
     try std.testing.expectEqualStrings("trade", try rr.readString(&scratch));
     try std.testing.expectEqual(true, try rr.readBool()); // hasTraderData
-    try std.testing.expectEqual(te, try rr.readI32()); // trader id
+    try std.testing.expectEqual(trader_info_id, try rr.readI32()); // traders.xml TraderID
     var open_body: [4]u8 = undefined;
     std.mem.writeInt(i32, open_body[0..4], te, .little);
     var ofb: [64]u8 = undefined;
