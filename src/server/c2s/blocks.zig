@@ -559,6 +559,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (amount <= 0) continue;
             }
             const dmg = self.sim.damageFrom(nid, amount, if (c.entity_id > 0) c.entity_id else -1);
+            // Same S2C hit fan-out as the direct-damage path (ProcessDamageResponse
+            // IL=86): the blast victim's trackers see the applied hit. Source
+            // External (Explosion.AttackEntites IL_0499) and the stock
+            // ExplosionData.DamageType default Heat (ExplosionData cctor
+            // ldc.i4.6; the initiate body carries no damage type).
+            {
+                const applied: u16 = @intCast(@min(@as(u32, @intFromFloat(@max(0, amount))), 65535));
+                const atk = if (c.entity_id > 0) c.entity_id else -1;
+                if (packages.buildDamageBody(self.body_buf[288..544], nid, 0, 6, applied, dmg.killed, atk)) |db| {
+                    self.broadcastNear("NetPackageDamageEntity", db, t.x, t.z, self.interest_range) catch {};
+                } else |_| {}
+            }
             if (dmg.killed and !self.sim.mask[es].player) {
                 // Victim position for ClearSleepers POI gating (es is the
                 // victim's sim slot).
