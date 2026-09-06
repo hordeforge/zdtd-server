@@ -1374,11 +1374,17 @@ pub const World = struct {
         const draw: f32 = @as(f32, @floatFromInt(h % 100000)) / 100000.0;
         var out: u8 = 0;
         // GetDismemberChance: weapon >= 100 skips the roll at flat 100, else
-        // weapon * damagePer * multiplier * attacker DismemberSelfChance (143).
-        // The 143 side has no model yet (no perk/EffectManager chain), so it
-        // reads 0: the dismember bit only fires at weapon >= 100 until perks
-        // land. Stated here so the dormancy is visible, not a silent zero.
-        const chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * damage_per * mult * 0;
+        // weapon * damagePer * (region multiplier + attacker DismemberSelfChance
+        // (143) perk bonuses). The passive call takes the multiplier as its
+        // base and adds perk/buff contributions on top (the debug log prints
+        // weapon, damagePer, multiplier and result as separate factors), so
+        // with no perks the base IS the multiplier, not zero. The 143 bonus
+        // side has no model yet; it reads 0 here until the perk fold lands.
+        // (Corrected 2026-09-06: the first version multiplied the whole term
+        // by a 0 attacker bonus, which zeroed every roll. Stock's twitch
+        // buffs set 143 to 0 explicitly because the unbuffed value is the
+        // multiplier, not zero.)
+        const chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * damage_per * mult;
         if (chance > 0 and draw <= @min(chance, 100) / 100) {
             out |= 1;
             if (leg_path) {
@@ -2384,4 +2390,61 @@ test "spawnTurret honors a fail-closed turret_watts hook" {
     const s = w.slotOfNetId(id).?;
     const ni = w.power.indexOfId(w.turret[s].power_node).?;
     try std.testing.expectEqual(@as(f32, 0), w.power.nodes[ni].watts);
+}
+
+test "rollDismember sets the wire bits stock sets" {
+    // RE EntityAlive.CheckDismember (IL=125) / GetDismemberChance (IL=128):
+    // weapon >= 100 skips the roll at flat 100; a leg hit past the class
+    // threshold crawlers; a scaled leg hit cripples. Bits: 1 dismember,
+    // 2 crawler, 4 cripple.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 100).?;
+    const s = w.slotOfNetId(z).?;
+    w.class_id[s].leg_crawler_threshold = 0.175;
+    w.class_id[s].leg_cripple_scale = 2;
+    w.class_id[s].dismember_head = 1;
+    w.class_id[s].dismember_arms = 1;
+    w.class_id[s].dismember_legs = 1;
+
+    // Flat-100 weapon on a head hit: dismember, no leg path.
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s, 2, 10, 100, 100));
+    try std.testing.expect(!w.zombie_ai[s].crawler);
+
+    // Leg hit at 0.2 fraction past the 0.175 threshold: crawler.
+    const z2 = w.spawnZombie(10, 70, 0, 100).?;
+    const s2 = w.slotOfNetId(z2).?;
+    w.class_id[s2].leg_crawler_threshold = 0.175;
+    w.class_id[s2].leg_cripple_scale = 0;
+    w.class_id[s2].dismember_legs = 1;
+    const bits = w.rollDismember(s2, 256, 20, 100, 0);
+    try std.testing.expect(bits & 2 != 0);
+    try std.testing.expect(w.zombie_ai[s2].crawler);
+
+    // Below the threshold with a live scale: cripple arm is reachable
+    // (scaled = fraction * scale >= 0.05 rolls the second draw).
+    const z3 = w.spawnZombie(20, 70, 0, 100).?;
+    const s3 = w.slotOfNetId(z3).?;
+    w.class_id[s3].leg_crawler_threshold = 0.9;
+    w.class_id[s3].leg_cripple_scale = 2;
+    w.class_id[s3].dismember_legs = 1;
+    const b3 = w.rollDismember(s3, 256, 20, 100, 0);
+    // Either crippled or not (draw-dependent), but never crawler, and the
+    // bit agrees with the state.
+    try std.testing.expect(b3 & 2 == 0);
+    try std.testing.expect(!w.zombie_ai[s3].crawler);
+    try std.testing.expect((b3 & 4 != 0) == w.zombie_ai[s3].crippled);
+
+    // Non-leg, no-threshold, zero weapon: nothing.
+    const z4 = w.spawnZombie(30, 70, 0, 100).?;
+    const s4 = w.slotOfNetId(z4).?;
+    try std.testing.expectEqual(@as(u8, 0), w.rollDismember(s4, 1, 10, 100, 0));
+
+    // The product term decides: weapon 1 with a 200x overkill fraction gives
+    // chance 200, clamped to 100, so every draw dismembers. Zero the
+    // multiplier term and this fails - the flat-100 arm above cannot cover it.
+    const z5 = w.spawnZombie(40, 70, 0, 100).?;
+    const s5 = w.slotOfNetId(z5).?;
+    w.class_id[s5].dismember_head = 1;
+    try std.testing.expectEqual(@as(u8, 1), w.rollDismember(s5, 2, 200, 1, 1));
 }
