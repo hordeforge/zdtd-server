@@ -737,6 +737,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else |_| {}
             }
         }
+        // Hit reaction: stock fans the applied damage to the victim's trackers
+        // (EntityAlive.ProcessDamageResponse IL=86: Setup(entityId, response)
+        // via SendPacketToTrackedPlayers for remote-player hits, buff-sourced
+        // damage and the general path). The client plays the hit reaction and
+        // reads the dismember/cripple/crawler bits off it, so without this
+        // send nothing the server computes about a hit is visible.
+        if (self.sim.slotOfNetId(d.entity_id)) |vslot| {
+            if (self.sim.mask[vslot].transform) {
+                const vt = self.sim.transform[vslot];
+                const applied: u16 = @intCast(@min(@as(u32, @intFromFloat(@max(0, amount))), 65535));
+                if (packages.buildDamageBody(self.body_buf[288..544], d.entity_id, d.source, d.dtype, applied, dmg.killed, self.sim.network_id[actor_slot].id)) |db| {
+                    self.broadcastNear("NetPackageDamageEntity", db, vt.x, vt.z, self.interest_range) catch {};
+                } else |_| {}
+            }
+        }
         if (dmg.killed) {
             // Dead players keep the entity (client runs its own death →
             // respawn flow); EntityRemove would delete the local player.

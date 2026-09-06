@@ -12882,3 +12882,54 @@ test "scenario the land-claim repair heals damaged blocks and answers the reques
 
     std.debug.print("PASS claim-repair: damage cleared, fix replicated, requester answered\n", .{});
 }
+
+test "scenario a landed hit fans the applied damage to the victim's trackers" {
+    // Stock EntityAlive.ProcessDamageResponse (IL=86) sends
+    // NetPackageDamageEntity Setup(entityId, response) to the victim's
+    // tracked players: the client plays the hit reaction and reads the
+    // dismember/cripple/crawler bits off it. zdtd applied damage silently,
+    // so no hit was ever visible to anyone but the attacker's own client.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const dmg_id = packages.idOf("NetPackageDamageEntity") orelse
+        return error.TestUnexpectedResult;
+
+    const zid = g.sim.spawnZombie(258, 70, 258, 100) orelse
+        return error.TestUnexpectedResult;
+    var dmg: [256]u8 = undefined;
+    var fbuf: [512]u8 = undefined;
+    const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 20, false, ca.entity_id);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
+
+    // A bystander tracking the victim sees the applied damage with the
+    // server-side attacker id, not just the attacker's echo.
+    var pkgs: [8]wire_frame.Package = undefined;
+    var saw = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != dmg_id) continue;
+            const head = packages.parseDamageHead(p.body) catch continue;
+            if (head.entity_id == zid) saw = true;
+        }
+    }
+    try std.testing.expect(saw);
+
+    std.debug.print("PASS s2c-damage: the victim's trackers see the applied hit\n", .{});
+}
