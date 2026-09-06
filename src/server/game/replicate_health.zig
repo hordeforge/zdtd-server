@@ -90,6 +90,10 @@ pub fn replicatePlayerHealth(self: *Game) void {
         };
         self.harness.counters.inc(.packages_encoded);
         const tp = self.sim.transform[i];
+        // EntityStatChanged is latest-wins droppable under WindowFull. If any
+        // interested peer could not take the send, re-dirty so the next tick
+        // retries with the current HP instead of leaving the client stale.
+        var any_send_failed = false;
         for (&self.clients) |*cl| {
             if (!cl.joined or !cl.entered) continue;
             const peer = cl.peer orelse continue;
@@ -97,7 +101,12 @@ pub fn replicatePlayerHealth(self: *Game) void {
             if (!owner and !self.clientObserves(cl, tp.x, tp.z)) continue;
             self.sendGame(peer, "NetPackageEntityStatChanged", body) catch {
                 self.harness.counters.inc(.net_send_errors);
+                any_send_failed = true;
             };
+        }
+        if (any_send_failed) {
+            self.sim.dirty[i].hp = true;
+            self.sim.syncDirtyBit(i);
         }
     }
 }

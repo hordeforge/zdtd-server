@@ -62,12 +62,17 @@ pub fn isCompressedPackage(pkg_name: []const u8) bool {
 }
 
 pub fn isDroppablePackage(pkg_name: []const u8) bool {
+    // Latest-wins / replaceable under WindowFull. EntityStatChanged stays
+    // ReliableOrdered (stock get_ReliableDelivery=true) but a newer value
+    // supersedes a stalled one, so hard-failing the send only stalls combat
+    // UI while the reliable window is full (playtest: n=1 then n=100 drops).
     const names = [_][]const u8{
         "NetPackageChunk",
         "NetPackageChunkRemove",
         "NetPackageDecoResetWorldChunk",
         "NetPackageEntityPosAndRot",
         "NetPackageEntitySpeeds",
+        "NetPackageEntityStatChanged",
         "NetPackageVehiclePositions",
         "NetPackageWorldTime",
     };
