@@ -232,7 +232,7 @@ None of the 29 is a live gap, for one of three reasons:
   6.15). Different package, correct behaviour.
 - **Client-side or editor features** with no headless source: `AnimateBlock`,
   `AudioPlayInHead`, `DynamicMesh`, `Localization`, `ShowToolbeltMessage`,
-  `PlayerLaserSight`, `Debug`, the `Editor*` and
+  `Debug`, the `Editor*` and
   `Wall*` volume packages. Spelled out where a handler exists rather than only
   a registry entry: **`NetPackageEditorAddVolumeFromClient`** is accepted and
   dropped. Stock's world editor pushes authored volumes from a creative-mode
@@ -255,6 +255,13 @@ None of the 29 is a live gap, for one of three reasons:
   three are unhandled: the package reaches the dispatch chain, raises the
   unhandled counter and is dropped, which is the correct fail-closed shape for
   a subsystem that does not exist here.
+- **`PlayerLaserSight`** (moved out of the client-side list 2026-09-06 for the
+  same reason). Stock's `ProcessPackage` (IL=70) re-sends the body from the
+  server to every client except the sender's own entity, so a player sees a
+  mate's laser dot. It is a server relay, not a client-local effect. zdtd
+  carries no laser-sight state on the player row, so the dot is missing for
+  other players while the shooter still sees its own. Cosmetic, and the one
+  package in this list whose absence a player could notice.
 - **Platform/matchmaking**: `DiscordLobbySecret`, `LobbyJoin`,
   `PlayerTwitchStats`, `NetMetrics`, `EAC` (EAC is off by design).
 

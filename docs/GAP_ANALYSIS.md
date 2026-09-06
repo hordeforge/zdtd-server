@@ -4158,7 +4158,12 @@ persists so little that a restart visibly damages a built base.
   zdtd expects the operator to ship the world with the client or use a
   pregenerated map, so it neither serves nor requests one; the channel-1
   routing for the name is pinned regardless), Twitch integration (PlayerTwitchStats,
-  TwitchAccess, TwitchVoteScheduling, PlayerLaserSight), headless mesh
+  TwitchAccess, TwitchVoteScheduling), the laser-sight relay (PlayerLaserSight:
+  filed under Twitch until 2026-09-06 and unrelated to it. ProcessPackage IL=70
+  re-sends the body from the server to everyone except the sender's own entity,
+  so a stock client shows a mate's laser dot. zdtd has no laser-sight state on
+  the player row, so the visual is missing for other players; the sender still
+  sees its own, which is client-local), headless mesh
   (DynamicMesh), and the junk-drone packages (DroneDataSync,
   DroneParticleEffect). The drone pair was labelled "deferred cosmetic/depth"
   until 2026-09-06; the IL does not support that either. `DroneDataSync`
