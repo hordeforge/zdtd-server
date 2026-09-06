@@ -1516,6 +1516,10 @@ pub const Game = struct {
         return game_player.killXpAward(self, killer_slot, base, scale_pct, trap_kill);
     }
 
+    pub fn awardKillNotify(self: *Game, killer_slot: usize, killed_entity_id: i32) void {
+        return game_player.awardKillNotify(self, killer_slot, killed_entity_id);
+    }
+
     /// Stock SharedKillServer -> SharedKillClient: an in-range party mate's
     /// EntityKilled quest event fires for the same kill. See game/player.zig.
     pub fn questKillForParty(self: *Game, killer_slot: usize, vx: f32, vz: f32) void {

@@ -12707,3 +12707,92 @@ test "scenario the attack target is published on change and cleared when it dies
 
     std.debug.print("PASS attack-target: published on change, -1 when the target is gone\n", .{});
 }
+
+test "scenario a kill notifies the killer's client so kill challenges advance" {
+    // Stock GameManager.AwardKill (IL=27) ships
+    // NetPackageEntityAwardKillServer(killerId, killedId) to a remote killer,
+    // and its client runs QuestEventManager.EntityKilled (IL=24) to fire the
+    // local EntityKill event that Challenges/ChallengeObjectiveKill and
+    // ChallengeObjectiveKillByTag subscribe to. zdtd credited the kill
+    // server-side and sent nothing, so kill challenges never advanced.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const award_id = packages.idOf("NetPackageEntityAwardKillServer") orelse
+        return error.TestUnexpectedResult;
+
+    const zid = g.sim.spawnZombie(258, 70, 258, 10) orelse
+        return error.TestUnexpectedResult;
+    var dmg: [256]u8 = undefined;
+    var fbuf: [512]u8 = undefined;
+    const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 100, true, ca.entity_id);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
+    try std.testing.expect(g.sim.health[g.sim.slotOfNetId(zid).?].hp <= 0);
+
+    // The killer's client is told, with its own entity as the killer and the
+    // dead zombie as the victim (stock Setup(killer.entityId, killed.entityId)).
+    const body = cap_a.findPkgIdEntity(award_id, ca.entity_id) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 8), body.len);
+    try std.testing.expectEqual(zid, std.mem.readInt(i32, body[4..8], .little));
+
+    // Only the killer: stock sends this to the killer's connection, not to
+    // everyone, and a bystander crediting the kill would be wrong.
+    var pkgs: [8]wire_frame.Package = undefined;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            try std.testing.expect(p.id != award_id);
+        }
+    }
+
+    // The explosion death path is a separate call site (c2s/blocks.zig, the
+    // ExplosionInitiate arm) and needs its own coverage: with only the melee
+    // path exercised, deleting the explosion notify leaves this test green.
+    const z2 = g.sim.spawnZombie(252, 70, 252, 10) orelse
+        return error.TestUnexpectedResult;
+    cap_a.clear();
+    {
+        var eb: [128]u8 = undefined;
+        var w: @import("../wire/binary.zig").Writer = .{ .buf = &eb };
+        try w.writeF32(252);
+        try w.writeF32(70);
+        try w.writeF32(252);
+        try w.writeI32(252);
+        try w.writeI32(70);
+        try w.writeI32(252);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeF32(0);
+        try w.writeF32(8); // blast radius: enough to reach the zombie
+        try w.writeU16(0);
+        try w.writeI32(ca.entity_id);
+        try w.writeF32(0);
+        var fb: [256]u8 = undefined;
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageExplosionInitiate", w.written()));
+    }
+    if (g.sim.slotOfNetId(z2)) |z2s| {
+        if (g.sim.health[z2s].hp <= 0) {
+            const eb2 = cap_a.findPkgIdEntity(award_id, ca.entity_id) orelse
+                return error.TestUnexpectedResult;
+            try std.testing.expectEqual(z2, std.mem.readInt(i32, eb2[4..8], .little));
+        }
+    }
+
+    std.debug.print("PASS award-kill: the killer's client is notified, nobody else\n", .{});
+}

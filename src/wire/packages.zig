@@ -2397,6 +2397,17 @@ pub fn buildEntityStatChangedBody(
     return w.written();
 }
 
+/// Stock NetPackageEntityAwardKillServer body (read IL=9): EntityId:i32 (the
+/// killer) | KilledEntityId:i32. Sent by `GameManager.AwardKill` (IL=27) to a
+/// remote killer so its client fires the local EntityKill event that kill
+/// challenges subscribe to.
+pub fn buildAwardKillBody(buf: []u8, killer_id: i32, killed_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(killer_id);
+    try w.writeI32(killed_id);
+    return w.written();
+}
+
 /// Stock NetPackageSetAttackTarget body (read IL=8, GetLength 8):
 /// entityId:i32 (the NetPackageEntityTargeted base) | targetId:i32. The
 /// client feeds it to `EntityAlive::SetAttackTargetClient`, which backs
