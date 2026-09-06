@@ -706,7 +706,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     0;
                 const weapon_chance = if (self.items.byId(held_id)) |idef| idef.dismember_chance else 0;
                 const self_bonus = self.dismemberSelfChance(c.slot, actor_slot);
-                dismember_bits = self.sim.rollDismember(vs, d.body_part, amount, self.sim.health[vs].max_hp, weapon_chance, self_bonus);
+                dismember_bits = self.sim.rollDismember(vs, d.body_part, amount, self.sim.health[vs].max_hp, weapon_chance, self_bonus, d.fatal);
             }
         }
         // Item durability (GAP "Item durability"): the held tool wears with
