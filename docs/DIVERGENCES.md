@@ -255,13 +255,12 @@ None of the 29 is a live gap, for one of three reasons:
   three are unhandled: the package reaches the dispatch chain, raises the
   unhandled counter and is dropped, which is the correct fail-closed shape for
   a subsystem that does not exist here.
-- **`PlayerLaserSight`** (moved out of the client-side list 2026-09-06 for the
-  same reason). Stock's `ProcessPackage` (IL=70) re-sends the body from the
-  server to every client except the sender's own entity, so a player sees a
-  mate's laser dot. It is a server relay, not a client-local effect. zdtd
-  carries no laser-sight state on the player row, so the dot is missing for
-  other players while the shooter still sees its own. Cosmetic, and the one
-  package in this list whose absence a player could notice.
+  `PlayerLaserSight` sat in this list too, on the same wrong reasoning, until
+  the re-derivation showed it is a plain server relay (`ProcessPackage` IL=70
+  re-sends the body to every client but the sender's). It is implemented now
+  rather than waived, so it is no longer a divergence: see the GAP_ANALYSIS
+  row. The lesson is the one this page keeps relearning - a wrong category is
+  how a real gap stays invisible.
 - **Platform/matchmaking**: `DiscordLobbySecret`, `LobbyJoin`,
   `PlayerTwitchStats`, `NetMetrics`, `EAC` (EAC is off by design).
 
