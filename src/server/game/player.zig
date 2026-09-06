@@ -543,15 +543,13 @@ pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_l
     return false;
 }
 
-/// Attacker's DismemberSelfChance bonus (stock passive 143) for the dismember
-/// roll: the region multiplier is the base, and perk + active-buff rows add
-/// on top (EffectManager.GetValue, RE GetDismemberChance IL=128). Folds the
-/// named passive over purchased attribute/perk levels (level-aware curveAt)
-/// plus the actor's active buffs at level 1, mirroring trackedDeltasAt op
-/// handling (base_add/subtract accumulate; base_set overrides; perc ops
-/// skipped - no stock 143 row uses them). Returns 0 with no rows, which is
-/// the stock unbuffed value, not a silent default.
-pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot) f32 {
+/// Fold one named passive over a client's purchased attribute/perk levels
+/// (level-aware curveAt) plus an actor sim slot's active buffs at level 1.
+/// Shared by the DismemberSelfChance (143) dismember fold and the Bartering
+/// (148/149) trade folds: base_add/subtract accumulate, base_set overrides,
+/// perc ops skipped (no stock row for these names uses them). Returns 0 with
+/// no rows, which is the stock unbuffed value, not a silent default.
+pub fn namedPassiveFold(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot, name: []const u8) f32 {
     if (slot >= self.clients.len) return 0;
     const c = &self.clients[slot];
     var bonus: f32 = 0;
@@ -568,7 +566,7 @@ pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.
             break :blk &.{};
         };
         for (passives) |p| {
-            if (!std.mem.eql(u8, p.name, "DismemberSelfChance")) continue;
+            if (!std.mem.eql(u8, p.name, name)) continue;
             const v = assets_buffs.curveAt(p, sl.level);
             switch (p.op) {
                 .base_set, .set => bonus = v,
@@ -585,7 +583,7 @@ pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.
                 if (!bs.active) continue;
                 const def = self.buffs.byId(bs.def_id) orelse continue;
                 for (def.passives) |p| {
-                    if (!std.mem.eql(u8, p.name, "DismemberSelfChance")) continue;
+                    if (!std.mem.eql(u8, p.name, name)) continue;
                     const v = assets_buffs.curveAt(p, 1);
                     switch (p.op) {
                         .base_set, .set => bonus = v,
@@ -598,6 +596,28 @@ pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.
         }
     }
     return bonus;
+}
+
+/// Attacker's DismemberSelfChance bonus (stock passive 143) for the dismember
+/// roll: the region multiplier is the base, and perk + active-buff rows add
+/// on top (EffectManager.GetValue, RE GetDismemberChance IL=128).
+pub fn dismemberSelfChance(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot) f32 {
+    return namedPassiveFold(self, slot, actor_sim_slot, "DismemberSelfChance");
+}
+
+/// Barter scales (RE XUiM_Trader GetBuyPrice IL=240 / GetSellPrice IL=217):
+/// buying pays `unit - unit * BarteringBuying(148)`, selling gains
+/// `unit + unit * BarteringSelling(149)`. Hook bodies for the ECS trade path.
+pub fn barterBuyScale(ctx: ?*anyopaque, slot: usize) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const as = g.sim.playerByPeer(slot);
+    return @max(0, 1 - namedPassiveFold(g, slot, as, "BarteringBuying"));
+}
+
+pub fn barterSellScale(ctx: ?*anyopaque, slot: usize) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const as = g.sim.playerByPeer(slot);
+    return 1 + @max(0, namedPassiveFold(g, slot, as, "BarteringSelling"));
 }
 
 const assets_progression_test = @import("../../assets/progression.zig");
@@ -703,4 +723,37 @@ test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {
     g.clients[0].skill_level_n = 0;
     try std.testing.expectEqual(@as(f32, 0), g.dismemberSelfChance(0, ps));
     std.debug.print("PASS dismember-143: perk curve + buff leg fold, revertible\n", .{});
+}
+
+test "barter scales discount buying and bonus selling off the same fold" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_barter", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // No rows: scales are identity (slot 0 has no player yet, so the
+    // buff leg resolves empty and only the empty perk ledger folds).
+    // g is already *Game; &g would be **Game and mis-cast.
+    const ctx: ?*anyopaque = @ptrCast(g);
+    try std.testing.expectEqual(@as(f32, 1), barterBuyScale(ctx, 0));
+    try std.testing.expectEqual(@as(f32, 1), barterSellScale(ctx, 0));
+    const perks = [_]assets_progression.PerkDef{
+        .{
+            .name = "perkBetterBarter",
+            .max_level = 5,
+            .passives = &.{
+                .{ .name = "BarteringBuying", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 },
+                .{ .name = "BarteringSelling", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 },
+            },
+        },
+    };
+    g.progression_table.perks = &perks;
+    _ = g.sim.spawnPlayer(0, 70, 0, 0).?;
+    g.clients[0].skill_levels[0] = .{ .name = "perkBetterBarter", .level = 2 };
+    g.clients[0].skill_level_n = 1;
+    // Level 2: 10% off buys, 10% over sells.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.9), barterBuyScale(ctx, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.1), barterSellScale(ctx, 0), 0.0001);
+    std.debug.print("PASS barter-scale: buy 0.9x sell 1.1x at level 2\n", .{});
 }

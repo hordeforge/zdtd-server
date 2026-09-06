@@ -924,6 +924,10 @@ pub const Game = struct {
         self.sim.item_degradation_fn = &game_craft.itemDegradation;
         self.sim.item_penetration_ctx = self;
         self.sim.item_penetration_fn = &game_craft.itemPenetration;
+        self.sim.barter_buy_ctx = self;
+        self.sim.barter_buy_fn = &game_player.barterBuyScale;
+        self.sim.barter_sell_ctx = self;
+        self.sim.barter_sell_fn = &game_player.barterSellScale;
         // Quest POI placement: rally objectives need a real prefab footprint.
         self.sim.poi_ctx = self;
         self.sim.poi_fn = &poiRectAtWorld;
