@@ -2328,13 +2328,16 @@ pub fn buildWorldFolderPartBody(buf: []u8, seq: i32, total: i32, data: []const u
 }
 
 /// Empty world-folder transfer: one part carrying a zlib-deflated
-/// `fileCount:i32 = 0` blob. Stock's prepareWorldFolderData streams real
-/// world files; zdtd's flat/default worlds have nothing to ship (WorldInfo
-/// already advertised hashCount=0), but worldInfoCo still calls RequestWorld
-/// when no local world matches, and that coroutine waits on
-/// WorldReceivedAndUncompressed. An empty last-part clears the wait the same
-/// way a zero-file zip would (uncompressWorld: count=0 loop, write completed
-/// marker, set the flag).
+/// `fileCount:i32 = 0` blob. RE: `NetPackageWorldFolder.write` IL=30,
+/// `ProcessPackage` IL=93, `sendPacketsToClient` IL=84 and
+/// `uncompressWorld` coroutine IL=321
+/// (`../7dtd-engine-research/docs/protocol-packages.md` "World-folder").
+/// Stock's prepareWorldFolderData streams real world files; zdtd's
+/// flat/default worlds have nothing to ship (WorldInfo already advertised
+/// hashCount=0), but worldInfoCo still calls RequestWorld when no local world
+/// matches, and that coroutine waits on WorldReceivedAndUncompressed. An
+/// empty last-part clears the wait the same way a zero-file zip would
+/// (uncompressWorld: count=0 loop, write completed marker, set the flag).
 pub fn buildEmptyWorldFolderTransfer(buf: []u8) ![]u8 {
     const flate = std.compress.flate;
     var plain: [4]u8 = undefined;
