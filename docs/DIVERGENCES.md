@@ -284,6 +284,17 @@ is precisely what has to match the code. Verified by mutation in both
 directions: dropping the `PlayerLaserSight` handler fires it, and removing a
 category entry for an ignored sender fires it too.
 
+And 7k for the other direction: the 124 server senders recovered the same way,
+failing on an advertised name no send path in `src/server/` passes to
+`sendGame` / `sendGameCritical` / a broadcast / a relay. Matching any quoted
+occurrence would not do - a test that looks the id up, or a doc comment naming
+the package, would stand in for the emit, which is the confusion the check
+exists to catch. Building it surfaced three more stale scorecard rows:
+`EntityWaypointList` and `EntityAwardKillServer` were `SHIPPED` on a reading of
+their `ProcessPackage` alone (both are client-local to receive and both are
+things the *server sends*), and `DamageEntity full field semantics` said "the
+builder emits" about a builder no send path calls.
+
 Empirical backstop: `dispatch.zig` counts and logs every unhandled C2S package,
 and a full `smoke-navezgane` session (2 clients, 8 join passes, walk / jump /
 rejoin) logs **zero**. A package the stock client actually sends us would show
@@ -299,14 +310,29 @@ The 29-package figure above was an artefact of comparing against the RE
 still holds.
 
 **Corrected again 2026-09-04.** That paragraph used to say the server "builds
-and sends" the S2C-only set. It does not: **55 of the 191 registered names are
-never referenced anywhere in `src/server/`**, so they are registered for id
+and sends" the S2C-only set. It does not: **52 of the 191 registered names are
+never referenced anywhere in `src/server/`** (55 when this was written; the
+laser-sight relay and `SetAttackTarget` have since been implemented, and
+`PlayerLaserSight` moved to the C2S side too), so they are registered for id
 mapping only. Most are the categories already listed above (editor, Twitch,
 EAC/encryption, client-side FX, mod API). Registration without a sender is the
 right call for those - the negotiated name-to-id map has to match stock whether
 or not we ever emit the package - but the claim that we emit all 105 was
 wrong, and the distinction matters: "no C2S handler needed" and "we send this"
 are different properties, and only the first was measured.
+
+Re-derived 2026-09-06 from the IL rather than from this list: walking back from
+every `SendPackage` / `SendToPlayers` / `SendPacketToTrackedPlayers*` call to
+the `GetPackage<T>` that supplies it recovers **124 types the stock server
+sends**, and every one of them is a name zdtd advertises, so the negotiated map
+has no hole in this direction either. Cross-checking those 124 against what
+`src/server/` emits is what surfaced `SetAttackTarget`: a package stock sends on
+every AI target change, which zdtd computed and never published. The spot check
+also re-verified three claims below against the IL - `TeleportPlayer` really is
+covered by `EntityTeleport` (whose `SetPosAndRotFromNetwork` carries the
+rotation the teleport package would), and `EntityPrimeDetonator` really is
+client-side only (`PrimeDetonator` IL=23 sets a pulse rate, a red light and a
+countdown, nothing else).
 
 Of those 55, **39 are named somewhere in GAP_ANALYSIS or on this page** (the
 never-sent non-goals list, the waived categories, the accept-and-drop rows).
@@ -332,12 +358,16 @@ against the RE package table; none is a live gap, for these reasons:
   `BlockLimitTracking` logs a discard server-side even in stock (Process
   IL=11); `OwnedEntitySync` tracks owned-entity lists (drones/turrets) zdtd
   does not keep; `EntitySetPartActive` is per-part vehicle damage state.
-- **Effect not recorded in the RE.** `EntityPrimeDetonator` (Process IL=23:
-  `PrimeDetonator()` on `EntityZombieCop`) and `MinEventFire` have no RE entry
-  for what the client-side call actually does. zdtd already sends
-  `NetPackageExplosionClient` for every cop blast, which is the visible
-  outcome; whether the prime signal adds a wind-up cue is unknown. Same
-  posture as `VehicleCount` below: not emitted on a guess.
+- **Client-local effect, read out of the IL 2026-09-06.** `EntityPrimeDetonator`
+  is settled: `EntityZombieCop.PrimeDetonator` (IL=23) sets the `Detonator`
+  component's `PulseRateScale`, turns its light red and starts the countdown
+  animation. Purely the wind-up visual, no sim state, and zdtd already sends
+  `NetPackageExplosionClient` for the blast itself. Not a gap.
+  `MinEventFire` is a different shape: `Explosion` sends it with
+  `MinEventTypes 19` when a remote entity dies to a blast (IL_0683), which
+  fires the victim's client-side buff/perk event chain. zdtd has no MinEvent
+  system at all, so this is one package of a whole absent subsystem rather
+  than an unsent packet - closing it means the event model, not a builder.
 
 ### Six zdtd-shaped bodies under stock package names (2026-09-04, extended 2026-09-06)
 
@@ -521,13 +551,24 @@ IL=29), and the client mirrors the three values into its `serverVehicleCount` /
 zdtd tracks vehicles as ECS entities with their own mask, so the counts are
 derivable; we simply never emit the package.
 
-Not closed here because the RE does not record what the client *does* with those
-mirrored statics: there is no documented `ProcessPackage` consumer, and no entry
-in the coverage or closed-gaps notes. Emitting a packet on a guess about its
-effect would be inventing behaviour. What is needed first is the consumer side
-in `../7dtd-engine-research` (who reads `serverVehicleCount`, and whether an
-unset value changes anything the player sees); if it drives a spawn cap or a UI
-count, this becomes a real gap with a known cost rather than an unsent packet.
+**Answered 2026-09-06 from the IL.** The consumer question above now has a
+concrete answer, and it closes the item rather than promoting it. Each mirrored
+static has exactly one reader: `VehicleManager.GetServerVehicleCount` (IL=13)
+returns the real list count on the server and the mirrored static on a client,
+and its only caller is `CanAddMoreVehicles` (IL=9). `TurretTracker` and
+`DroneManager` are identical. So the value does drive a spawn cap - but the cap
+is `DeviceFlags.IsCurrent(56)` gated, and 56 is the console flag set
+(`XBoxSeriesS | XBoxSeriesX | PS5`), while `IsCurrent` masks against the build's
+`Current`. On a standalone Linux dedicated the guard is false and both
+`CanAddMoreVehicles` and its server-side counterpart in
+`NetPackageVehicleSpawn.ProcessPackage` (IL_0014) return true unconditionally.
+There is no UI reader at all: nothing outside those three managers touches the
+statics.
+
+The package is therefore console-only bookkeeping on this platform, not a
+missing behaviour, and zdtd having no 500-entity spawn cap matches what a stock
+Linux dedicated does. Still worth noting as a divergence from *console* stock,
+which is why this paragraph stays.
 
 Caveat, stated rather than glossed: loadgen drives a wide but not exhaustive
 action set. It does not fire every stock verb (vehicles, drones, twitch

@@ -177,6 +177,30 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
     }
 }
 
+/// Stock `GameManager.AwardKill` (IL=27): when the killer is a remote entity
+/// the server ships `NetPackageEntityAwardKillServer(killerId, killedId)` to
+/// it, and the receiving client runs `QuestEventManager.EntityKilled`
+/// (IL=24), which fires its local `EntityKill` event. That event is what
+/// `Challenges/ChallengeObjectiveKill` and `ChallengeObjectiveKillByTag`
+/// subscribe to, so without this send a player's kill challenges never
+/// advance - challenges are client-tracked, and this is the wire that feeds
+/// them.
+///
+/// Server-side credit (quests, XP, the score counter) is computed on the
+/// death path and is not affected: this notifies, it does not award. The
+/// inbound direction stays an accept-and-drop (DIVERGENCES 1.12).
+pub fn awardKillNotify(self: *Game, killer_slot: usize, killed_entity_id: i32) void {
+    const killer = &self.clients[killer_slot];
+    const peer = killer.peer orelse return;
+    if (killer.entity_id <= 0) return;
+    var buf: [8]u8 = undefined;
+    const body = packages.buildAwardKillBody(&buf, killer.entity_id, killed_entity_id) catch return;
+    self.sendGame(peer, "NetPackageEntityAwardKillServer", body) catch |err| {
+        self.harness.counters.inc(.net_send_errors);
+        std.debug.print("zdtd: send AwardKill failed: {s}\n", .{@errorName(err)});
+    };
+}
+
 /// Stock SharedKillServer -> SharedKillClient (IL=65): an in-range party
 /// mate's EntityKilled quest event fires for the same kill, so their shared
 /// quest copies advance (the same GameStats[54] range as the XP share gates

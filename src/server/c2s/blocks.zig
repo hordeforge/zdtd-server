@@ -564,6 +564,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // victim's sim slot).
                 systems.questOnZombieKilled(&self.sim, c.slot, self.sim.transform[es].x, self.sim.transform[es].z);
                 self.killXpAward(c.slot, self.xpGainFor(nid), dmg.kill_scale_pct, false);
+                // Stock GameManager.AwardKill: tell the killer's client so its
+                // local EntityKill event fires (kill challenges hang off it).
+                self.awardKillNotify(c.slot, nid);
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
                 if (c.peer) |kpeer| {
                     // Both counters ride one body (RE protocol-packages.md 27);

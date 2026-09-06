@@ -2397,6 +2397,31 @@ pub fn buildEntityStatChangedBody(
     return w.written();
 }
 
+/// Stock NetPackageEntityAwardKillServer body (read IL=9): EntityId:i32 (the
+/// killer) | KilledEntityId:i32. Sent by `GameManager.AwardKill` (IL=27) to a
+/// remote killer so its client fires the local EntityKill event that kill
+/// challenges subscribe to.
+pub fn buildAwardKillBody(buf: []u8, killer_id: i32, killed_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(killer_id);
+    try w.writeI32(killed_id);
+    return w.written();
+}
+
+/// Stock NetPackageSetAttackTarget body (read IL=8, GetLength 8):
+/// entityId:i32 (the NetPackageEntityTargeted base) | targetId:i32. The
+/// client feeds it to `EntityAlive::SetAttackTargetClient`, which backs
+/// `GetAttackTargetLocal` for remote entities (drone beam targeting and the
+/// DynamicMusic threat level read it). `target_id` is -1 for "no target",
+/// which is what stock sends when the attack-target window expires
+/// (EntityAlive::OnUpdateLive) as well as on an explicit clear.
+pub fn buildSetAttackTargetBody(buf: []u8, entity_id: i32, target_id: i32) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(entity_id);
+    try w.writeI32(target_id);
+    return w.written();
+}
+
 /// Stock NetPackageEntityStealth body (write IL=12): id:i32 | data:u16.
 /// The data packing matches the three Setup overloads + the client-branch
 /// read (ProcessPackage IL=92): bit 0 = crouching, bit 2 = eating, bit 3 =

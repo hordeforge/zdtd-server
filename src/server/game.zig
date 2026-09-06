@@ -314,6 +314,17 @@ const EntityLookSent = struct {
     gen: u32 = 0,
 };
 
+/// Last attack target published for a slot (RE EntityAlive::SetAttackTarget
+/// IL=70 and the OnUpdateLive expiry clear, both of which fan
+/// NetPackageSetAttackTarget out to tracking players). `id` is the wire value,
+/// so -1 is stock's "no target"; `sent` separates "cleared" from "never sent".
+/// `gen` pins the entry to the slot's current occupant like EntityLookSent.
+const AttackTargetSent = struct {
+    id: i32 = -1,
+    sent: bool = false,
+    gen: u32 = 0,
+};
+
 /// Last-sent TurretSync state (RE EntityTurret.lastTargetEntityId/lastIsOn).
 /// `gen` pins the entry to the slot's current occupant: a stale target/on
 /// pair that coincides with the new turret's initial state must not
@@ -529,6 +540,10 @@ pub const Game = struct {
     /// sqr-delta gate skips re-sends until the look moves ~0.04 blocks, so
     /// the per-tick look pass is quiet between meaningful target changes.
     entity_look_sent: [ecs.max_entities]EntityLookSent = [_]EntityLookSent{.{}} ** ecs.max_entities,
+    /// Edge detector for NetPackageSetAttackTarget: stock sends on every
+    /// change, so the per-tick target value only goes out when it differs
+    /// from what this slot last published.
+    attack_target_sent: [ecs.max_entities]AttackTargetSent = [_]AttackTargetSent{.{}} ** ecs.max_entities,
     /// Ticks until the next NetPackagePersistentPlayerPositions broadcast
     /// (stock GameManager.playerPositionsCountdownTimer, 6 s cadence).
     player_positions_timer: u16 = 0,
@@ -1501,6 +1516,10 @@ pub const Game = struct {
         return game_player.killXpAward(self, killer_slot, base, scale_pct, trap_kill);
     }
 
+    pub fn awardKillNotify(self: *Game, killer_slot: usize, killed_entity_id: i32) void {
+        return game_player.awardKillNotify(self, killer_slot, killed_entity_id);
+    }
+
     /// Stock SharedKillServer -> SharedKillClient: an in-range party mate's
     /// EntityKilled quest event fires for the same kill. See game/player.zig.
     pub fn questKillForParty(self: *Game, killer_slot: usize, vx: f32, vz: f32) void {
@@ -1599,6 +1618,10 @@ pub const Game = struct {
 
     pub fn tickEntityLookAt(self: *Game) void {
         return game_tick.tickEntityLookAt(self);
+    }
+
+    pub fn tickAttackTarget(self: *Game) void {
+        return game_tick.tickAttackTarget(self);
     }
 
     /// Stock PlayerStealth.TickServer S2C: broadcast NetPackageEntityStealth
