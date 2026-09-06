@@ -4134,13 +4134,48 @@ persists so little that a restart visibly damages a built base.
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
   yields 98 names the stock client actually sends (independently reproduced
   2026-09-06 over the v3.2.0 dump, same 98); 16 have no handler,
-  categorized by scope (protocol-packages.md 5.14): mod API surface
-  (ModifyCVar, SetProp, SimpleRPC, Debug), EAC/encryption waivers (EAC,
+  categorized by scope (protocol-packages.md 5.14). Reclassified 2026-09-06:
+  three of the four "mod API surface" names are ordinary gameplay paths and
+  the old label was wrong. `ModifyCVar` is the buff CVar sync
+  (`EntityBuffs.SetCustomVarNetwork` IL=33 forwards to the server when
+  `!IsServer`), and stock's ProcessPackage (IL=26) applies it to the target's
+  `EntityBuffs`; zdtd reads CVars out of the XML effect groups and keeps no
+  per-entity CVar table, so a reported change has nothing to land in.
+  `SetProp` is a world prop change (`Block.PlaceProp` IL=87 to
+  `WorldBase.SetPropRPC`, sitting beside `SetBlockRPC`), sender-validated by
+  user id *and* entity id, then fanned by `GameManager.SetPropsOnClients`;
+  zdtd has no prop layer. `SimpleRPC` (IL=17) is the holding-item RPC: type 0
+  runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
+  client-side item hooks with no server state. Only `Debug` (no ProcessPackage
+  server branch at all) is the developer surface the old label described. All
+  four remain unhandled; the difference is that the reason is now the real
+  one. EAC/encryption waivers (EAC,
   EncryptionPublicKey, KeyExchangeComplete), creative/editor
-  (EditorUpdateVolume, WorldFolder), Twitch integration (PlayerTwitchStats,
-  TwitchAccess, TwitchVoteScheduling, PlayerLaserSight), headless mesh
-  (DynamicMesh), deferred cosmetic/depth (DroneDataSync,
-  DroneParticleEffect junk-drone state).
+  (EditorUpdateVolume), the world-folder download (WorldFolder: the C2S
+  package is a client asking for the server's world files, and stock's
+  ProcessPackage IL=93 answers `StartSendingPacketsToClient` on the IsServer
+  branch. Filed under "creative/editor" until 2026-09-06, which it is not.
+  zdtd expects the operator to ship the world with the client or use a
+  pregenerated map, so it neither serves nor requests one; the channel-1
+  routing for the name is pinned regardless), Twitch integration (PlayerTwitchStats,
+  TwitchAccess, TwitchVoteScheduling), the laser-sight relay (PlayerLaserSight:
+  filed under Twitch until 2026-09-06 and unrelated to it. ProcessPackage IL=70
+  re-sends the body from the server to everyone except the sender's own entity,
+  so a stock client shows a mate's laser dot. zdtd has no laser-sight state on
+  the player row, so the visual is missing for other players; the sender still
+  sees its own, which is client-local), headless mesh
+  (DynamicMesh: verified 2026-09-06, the category is right. ProcessPackage
+  IL=24 returns immediately unless `DynamicMeshManager.CONTENT_ENABLED`, and
+  only then calls `DynamicMeshServer.ClientReadyForNextMesh` on the IsServer
+  branch, so a server without the dynamic-mesh content has nothing to answer),
+  and the junk-drone packages (DroneDataSync,
+  DroneParticleEffect). The drone pair was labelled "deferred cosmetic/depth"
+  until 2026-09-06; the IL does not support that either. `DroneDataSync`
+  (ProcessPackage IL=106) resolves the `EntityDrone` and syncs its stored
+  state, and `DroneParticleEffect` (IL=78) fans the effect from the server on
+  the `!IsRemote` branch. Neither is cosmetic-only. The reason zdtd does not
+  handle them is simpler and larger: there is no `EntityDrone` in the sim at
+  all, so the whole junk-drone subsystem is absent rather than deferred.
   Re-audited 2026-08-22: ragdolls **do** relay - the owner's client forces
   its local ragdoll and the server re-broadcasts the verbatim body to the
   entity's other tracked players (stock SendPacketToTrackedPlayersAndTracked

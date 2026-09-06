@@ -232,13 +232,36 @@ None of the 29 is a live gap, for one of three reasons:
   6.15). Different package, correct behaviour.
 - **Client-side or editor features** with no headless source: `AnimateBlock`,
   `AudioPlayInHead`, `DynamicMesh`, `Localization`, `ShowToolbeltMessage`,
-  `PlayerLaserSight`, `ModifyCVar`, `SetProp`, `Debug`, the `Editor*` and
+  `Debug`, the `Editor*` and
   `Wall*` volume packages. Spelled out where a handler exists rather than only
   a registry entry: **`NetPackageEditorAddVolumeFromClient`** is accepted and
   dropped. Stock's world editor pushes authored volumes from a creative-mode
   client; zdtd loads volumes from the prefab data instead and has no editor
   session, so there is no server-side model for a client-authored volume to
   land in.
+- **Server-side paths with no zdtd counterpart** (reclassified 2026-09-06;
+  these three sat under "client-side or editor features", which the IL does
+  not support). `ModifyCVar` is the buff CVar sync: a client reaches
+  `SendToServer` through `EntityBuffs.SetCustomVarNetwork` (IL=33) and stock's
+  `ProcessPackage` (IL=26) writes the value into the target's `EntityBuffs`.
+  zdtd reads CVars out of the XML effect groups and holds no per-entity CVar
+  table, so there is nothing for a reported change to land in. `SetProp` is a
+  world prop change (`Block.PlaceProp` IL=87 to `WorldBase.SetPropRPC`, beside
+  `SetBlockRPC`), sender-validated by user id and entity id, then fanned by
+  `GameManager.SetPropsOnClients`; zdtd has no prop layer, so blocks are the
+  only placeable world state. `SimpleRPC` (IL=17) carries the holding-item
+  hooks - type 0 `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset` -
+  which are client-side item callbacks with no server state to change. All
+  three are unhandled: the package reaches the dispatch chain, raises the
+  unhandled counter and is dropped, which is the correct fail-closed shape for
+  a subsystem that does not exist here.
+- **`PlayerLaserSight`** (moved out of the client-side list 2026-09-06 for the
+  same reason). Stock's `ProcessPackage` (IL=70) re-sends the body from the
+  server to every client except the sender's own entity, so a player sees a
+  mate's laser dot. It is a server relay, not a client-local effect. zdtd
+  carries no laser-sight state on the player row, so the dot is missing for
+  other players while the shooter still sees its own. Cosmetic, and the one
+  package in this list whose absence a player could notice.
 - **Platform/matchmaking**: `DiscordLobbySecret`, `LobbyJoin`,
   `PlayerTwitchStats`, `NetMetrics`, `EAC` (EAC is off by design).
 

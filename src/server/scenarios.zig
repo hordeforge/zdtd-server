@@ -12543,9 +12543,10 @@ test "scenario every registered package id survives dispatch with a malformed bo
     // Nothing may be silently eaten by the phase gate; that would make the
     // sweep vacuous (it would measure the gate instead of the handlers).
     try std.testing.expectEqual(rejects_before, g.harness.counters.get(.phase_rejects));
-    // Measured 2026-09-02: 84 of the 189 swept ids reach a C2S handler (191
-    // registered, less the two teardown verbs skipped above).
-    try std.testing.expect(handled_n >= 84);
+    // Measured 2026-09-06: 87 of the 189 swept ids reach a C2S handler (191
+    // registered, less the two teardown verbs skipped above). Was 84 until
+    // EntityStatChanged, GameEventResponse and SharedPartyKill gained arms.
+    try std.testing.expect(handled_n >= 87);
     // "Reaches no C2S handler" and "the server sends it" are different
     // properties, and only the first is measured here: 55 registered names are
     // never referenced in src/server/ at all, registered for id mapping and
