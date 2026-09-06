@@ -34,8 +34,11 @@ pub const Config = struct {
     difficulty_bonus: f32 = 1,
     starting_weight: f32 = 1,
     diminishing_returns: f32 = 0.5,
-    /// Blood-moon / wandering-horde loot drop bonus counters. Parsed and exposed
-    /// but not yet consumed: zdtd has no per-horde kill counter to apply them to.
+    /// Blood-moon / wandering-horde loot drop bonus counters (gamestages.xml
+    /// config block; stock values 12 / 30 / 25x and 3 / 15x). The Game pushes
+    /// them into the director with the nightly stage freeze
+    /// (pushBloodMoonBonus); the wandering pair is read off the table the
+    /// same way at spawn time.
     loot_bonus_every: i32 = 0,
     loot_bonus_max_count: i32 = 0,
     loot_bonus_scale: f32 = 0,

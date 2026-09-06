@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x33
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x25 open
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -1681,12 +1681,29 @@ encoding is one day high.
   *Anchors:* `src/ecs/systems.zig:1707`, `:1722`, `src/server/game.zig`,
   `asm.il:412618`, `asm.il:413662`
 
-- **Blood-moon bonus loot bags** `PARTIAL (waived)`
-  Stock `LootBonusScale` / `bonusLootEvery` bump on horde is not yet wired; horde
-  uses the ordinary `LootDropProb` path. 2026-08-27: progression/gamestage
-  partially landed (quest ambushes + sleeper stage) but `LootBonusScale` is still
-  not wired into the horde bag roll. Still recorded, not a wire-parity gap.
-  *Anchors:* `asm.il:413875`, `asm.il:414005`
+- **Blood-moon bonus loot bags** `WORKS` (was `PARTIAL (waived)`; closed
+  2026-09-06)
+  Stock scales the spawner's per-kill `lootDropProb` every Nth horde spawn:
+  blood-moon `bonusLootSpawnCount >= bonusLootEvery` resets and multiplies by
+  `LootBonusScale` (`AIDirectorBloodMoonParty.SpawnZombie` IL_00CD-0102),
+  wandering `>= LootWanderingBonusEvery` x `LootWanderingBonusScale`
+  (`AIWanderingHordeSpawner` IL_00F8-011C); the death path reads the stored
+  probability verbatim. zdtd does the same: the director counts non-vulture
+  blood-moon wave spawns and wandering-pack spawns separately, scales the
+  spawned zombie's `class_id.drop_prob` at the cadence, and marks the row
+  (`bonus_loot`) so the kill roll (which already reads that row) needs no
+  change. The blood-moon cadence resolves per night as
+  `max(stageSpawnMax / LootBonusMaxCount, LootBonusEvery)` against the frozen
+  party stage (`SetPartyLevel` IL_0065-007C, pushed via `pushBloodMoonBonus`);
+  the counter seeds at half cadence (`InitParty` IL_0072-0080). Stock values
+  from gamestages.xml: every 12th x25 blood-moon, every 3rd x15 wandering.
+  Conscious simplification: the forced radiated-vulture roll (50% on
+  AttachedToEntity, which skips the count in stock) has no zdtd path, so
+  every horde spawn through the two kinds counts.
+  *Anchors:* `src/ecs/aidirector.zig` (`bm_bonus_*`, `wander_bonus_*`,
+  `setBloodMoonBonus`, `spawnOneZombieLoot`), `src/server/game.zig`
+  (`pushBloodMoonBonus`), `src/server/game/step.zig` (nightly push +
+  wandering refresh), test `horde bonus loot scales every Nth spawn`
 
 - **Blood-moon corpse decay / chunk pinning** `PARTIAL (waived)`
   Stock horde `bIsChunkObserver` / 3x gib cleanup is noted but not wired: the

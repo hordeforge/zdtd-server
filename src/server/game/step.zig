@@ -103,6 +103,22 @@ pub fn step(self: *Game) !void {
             self.harness.counters.add(.terrain_snap_chunks, covered);
         }
         self.sim.director.party_stage = self.partyHighestGameStage();
+        // Nightly bonus-loot cadence (stock SetPartyLevel, pushed at the
+        // InitParty freeze): resolve max(stageSpawnMax / LootBonusMaxCount,
+        // LootBonusEvery) + LootBonusScale from the gamestage table against
+        // the frozen stage, so the horde counter below runs the XML values.
+        // The freeze-once gate lives in the director; re-push here is cheap
+        // (two table lookups) and covers a ladder that loads mid-night.
+        // The wandering pair refreshes the same way every tick (stock reads
+        // the GameStageDefinition statics at spawn time).
+        if (self.sim.director.bloodmoon_active and self.sim.director.bm_stage_frozen != 0) {
+            self.pushBloodMoonBonus(self.sim.director.bm_stage_frozen);
+        }
+        {
+            const cfg = self.gamestages.config;
+            if (cfg.loot_wandering_bonus_every > 0) self.sim.director.wander_bonus_every = @intCast(cfg.loot_wandering_bonus_every);
+            if (cfg.loot_wandering_bonus_scale > 0) self.sim.director.wander_bonus_scale = cfg.loot_wandering_bonus_scale;
+        }
         // Day/night ambient (world/sky.zig slice 1): one value per tick from
         // the world clock + its dawn/dusk boundary (WorldClock dawn/dusk =
         // stock GameUtils::CalcDuskDawnHours(DayLightLength)) feeds the sim's

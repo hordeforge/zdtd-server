@@ -1150,6 +1150,7 @@ pub const World = struct {
             self.class_id[s].dismember_legs = def.dismember_legs;
             self.class_id[s].leg_cripple_scale = def.leg_cripple_scale;
             self.class_id[s].leg_crawler_threshold = def.leg_crawler_threshold;
+            self.class_id[s].bonus_loot = false;
         }
         return id;
     }

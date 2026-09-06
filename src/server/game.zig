@@ -3032,6 +3032,30 @@ pub const Game = struct {
         return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive };
     }
 
+    /// Blood-moon bonus-loot cadence for the frozen stage
+    /// (`AIDirectorGameStagePartySpawner.SetPartyLevel` IL_0065-007C):
+    /// `bonusLootEvery = max(stageSpawnMax / LootBonusMaxCount, LootBonusEvery)`
+    /// with `stageSpawnMax` summing every spawn-group `num` in the stage.
+    /// Pushes the nightly cadence + `LootBonusScale` into the director (which
+    /// seeds its counter at half cadence, stock InitParty IL_0072-0080).
+    /// Falls back to the stock XML defaults when the ladder has no stage
+    /// (offline/builtin tables).
+    pub fn pushBloodMoonBonus(self: *Game, stage: i32) void {
+        const cfg = self.gamestages.config;
+        var every: u32 = @max(1, @as(u32, @intCast(@max(0, cfg.loot_bonus_every))));
+        if (self.gamestages.spawnerByName(ecs.aidirector.Director.bloodmoon_spawner)) |sp| {
+            if (sp.getStage(stage)) |st| {
+                var sum: u32 = 0;
+                for (st.spawns) |sg| sum +|= sg.num;
+                const maxc: u32 = @max(1, @as(u32, @intCast(@max(0, cfg.loot_bonus_max_count))));
+                const cadence: u32 = @max(sum / maxc, @as(u32, @intCast(@max(0, cfg.loot_bonus_every))));
+                every = @max(1, cadence);
+            }
+        }
+        const scale: f32 = if (cfg.loot_bonus_scale > 0) cfg.loot_bonus_scale else 1.0;
+        self.sim.director.setBloodMoonBonus(every, scale);
+    }
+
     /// spawning.xml <entityspawner name=…> → its EntityGroupName property.
     pub fn pickSpawnerGroup(ctx: ?*anyopaque, spawner: []const u8) ?[]const u8 {
         const g: *Game = @ptrCast(@alignCast(ctx.?));

@@ -85,6 +85,13 @@ pub const ClassId = struct {
     loot_list: []const u8 = "",
     /// LootDropProb chance a death drops the bag; 1.0 default.
     drop_prob: f32 = 1.0,
+    /// Bonus-loot kill: this zombie's `drop_prob` was already scaled at spawn
+    /// (blood-moon `bonusLootSpawnCount >= bonusLootEvery` x `LootBonusScale`,
+    /// wandering `>= LootWanderingBonusEvery` x `LootWanderingBonusScale`;
+    /// aidirector.md). The kill roll reads the stored probability verbatim,
+    /// exactly as stock's death path reads the entity field the spawner
+    /// mutated.
+    bonus_loot: bool = false,
     /// TimeStayAfterDeath seconds the corpse lingers (30 zombies, 300 animals).
     time_stay: f32 = 0,
     /// Resolved per-entity class stats (XML chase/wander/damage). 0 = fall

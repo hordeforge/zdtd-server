@@ -319,6 +319,27 @@ pub const Director = struct {
     bm_party_n: u8 = 0,
     /// Party gamestage snapshot at dusk (stock InitParty freezes it).
     bm_stage_frozen: i32 = 0,
+    /// Blood-moon bonus-loot spawn counter
+    /// (`AIDirectorBloodMoonParty.bonusLootSpawnCount`): incremented per
+    /// non-vulture horde spawn; when it reaches `bonus_loot_every` it resets
+    /// and that zombie's `lootDropProb` scales by `loot_bonus_scale`
+    /// (SpawnZombie IL_00CD-0102). Seeded at `bonus_loot_every / 2` when the
+    /// night's parties form (InitParty IL_0072-0080). The per-night
+    /// `bonus_loot_every` itself is `max(stageSpawnMax / LootBonusMaxCount,
+    /// LootBonusEvery)` (SetPartyLevel IL_007C); zdtd resolves it from the
+    /// frozen party stage the same way through the gamestage table.
+    bm_bonus_count: u32 = 0,
+    bm_bonus_every: u32 = 0,
+    bm_bonus_scale: f32 = 1.0,
+    /// Wandering-horde bonus-loot spawn counter
+    /// (`AIWanderingHordeSpawner.bonusLootSpawnCount`): same shape against
+    /// `wander_bonus_every` x `wander_bonus_scale`
+    /// (AIWanderingHordeSpawner IL_00F8-011C). Both refresh from the
+    /// gamestages.xml config block each tick (the Game syncs them; the ECS
+    /// layer stays free of asset imports).
+    wander_bonus_count: u32 = 0,
+    wander_bonus_every: u32 = 3,
+    wander_bonus_scale: f32 = 15.0,
     /// World time (ticks) of the next wandering horde (0 = not scheduled yet).
     /// ChooseNextTime: now + RandomRange(12000, 24000); player-gated.
     wandering_next: u64 = 0,
@@ -476,8 +497,14 @@ pub const Director = struct {
             }
             if (self.bloodmoon_active and self.bloodmoon_cd <= 0) {
                 // Freeze the party gamestage at dusk (InitParty): the ladder and
-                // the horde size stay fixed for the whole night.
-                if (self.bm_stage_frozen == 0) self.bm_stage_frozen = self.party_stage;
+                // the horde size stay fixed for the whole night. The Game pushes
+                // the matching bonus-loot cadence in through pushBloodMoonBonus
+                // (the stage sum lives in the asset table, not in this layer);
+                // until it does, the stock XML defaults below stand in.
+                if (self.bm_stage_frozen == 0) {
+                    self.bm_stage_frozen = self.party_stage;
+                    if (self.bm_bonus_every == 0) self.setBloodMoonBonus(12, 25);
+                }
                 self.buildBloodMoonParties(w);
                 self.recountAndTeleportHorde(w);
                 if (spawn_z) {
@@ -624,6 +651,22 @@ pub const Director = struct {
         const sg = f(self.stage_group_ctx, spawner, stage) orelse return null;
         if (sg.group.len == 0) return null;
         return sg;
+    }
+
+    /// Blood-moon bonus cadence for the frozen stage
+    /// (`AIDirectorGameStagePartySpawner.SetPartyLevel` IL_0065-007C):
+    /// `bonusLootEvery = max(stageSpawnMax / LootBonusMaxCount, LootBonusEvery)`
+    /// where `stageSpawnMax` sums every spawn-group `num` in the stage
+    /// (CalcStageSpawnMax IL=30). The spawn-count walk needs the full stage,
+    /// which the `stage_group_fn` projection (first row only) does not carry,
+    /// so the Game pushes the resolved cadence + scale in with the nightly
+    /// stage freeze; the fallback below keeps offline/builtin tables on the
+    /// stock XML defaults. Seeding `bm_bonus_count` at half the cadence is
+    /// stock `InitParty` (IL_0072-0080).
+    pub fn setBloodMoonBonus(self: *Director, every: u32, scale: f32) void {
+        self.bm_bonus_every = @max(1, every);
+        self.bm_bonus_scale = if (scale > 0) scale else 1.0;
+        self.bm_bonus_count = self.bm_bonus_every / 2;
     }
 
     /// Daytime scout entity group for the current party stage; empty when the
@@ -837,7 +880,7 @@ pub const Director = struct {
                 const x = party.focus_x + @cos(ang) * r;
                 const z = party.focus_z + @sin(ang) * r;
                 const y = w.groundY(x, z) orelse (nearestPlayerY(w, x, z) orelse continue);
-                const slot = self.spawnOneZombie(w, x, y, z, group, self.total_spawned +% n, true) orelse continue;
+                const slot = self.spawnOneZombieLoot(w, x, y, z, group, self.total_spawned +% n, true, .bloodmoon) orelse continue;
                 if (nearestPlayerSlot(w, x, z)) |ps| {
                     w.zombie_ai[slot].state = .chase;
                     w.zombie_ai[slot].target_id = w.network_id[ps].id;
@@ -852,7 +895,17 @@ pub const Director = struct {
 
     /// Pick the group class at (x,z) and spawn one zombie; mark horde when
     /// requested. Shared by the per-player ring and the party spawner.
+    /// `loot_kind` selects the bonus-loot counter the spawn feeds: blood-moon
+    /// waves count toward `bonusLootEvery` x `LootBonusScale`, wandering packs
+    /// toward `LootWanderingBonusEvery` x `LootWanderingBonusScale`, and
+    /// everything else (drips, scouts, ambient) carries no bonus. Stock keeps
+    /// one counter per spawner object; zdtd keeps one per kind on the
+    /// director, which is the same count (one spawner of each kind per night).
+    const LootKind = enum { none, bloodmoon, wandering };
     fn spawnOneZombie(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool) ?ecs_world.Slot {
+        return self.spawnOneZombieLoot(w, x, y, z, group_override, seed, mark_horde, .none);
+    }
+    fn spawnOneZombieLoot(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool, loot_kind: LootKind) ?ecs_world.Slot {
         var ct = w.class_table[1];
         const fallback = if (self.clock.isNight()) self.night_group else self.day_group;
         const grp = if (group_override.len > 0)
@@ -904,6 +957,35 @@ pub const Director = struct {
         const nid = id orelse return null;
         const slot = w.slotOfNetId(nid) orelse return null;
         if (mark_horde) w.zombie_ai[slot].is_horde = true;
+        // Bonus loot (SpawnZombie IL_00CD-0102, AIWanderingHordeSpawner
+        // IL_00F8-011C): count the spawn, and every Nth one carries the
+        // scaled drop probability on its class row. Stock skips the count for
+        // the forced radiated vulture (the 50% AttachedToEntity roll returns
+        // before the counter); zdtd has no vulture force path, so every spawn
+        // through these two kinds counts.
+        switch (loot_kind) {
+            .none => {},
+            .bloodmoon => {
+                const every = if (self.bm_bonus_every > 0) self.bm_bonus_every else 12;
+                const scale = if (self.bm_bonus_scale > 0) self.bm_bonus_scale else 25;
+                self.bm_bonus_count += 1;
+                if (self.bm_bonus_count >= every) {
+                    self.bm_bonus_count = 0;
+                    w.class_id[slot].drop_prob *= scale;
+                    w.class_id[slot].bonus_loot = true;
+                }
+            },
+            .wandering => {
+                const every = if (self.wander_bonus_every > 0) self.wander_bonus_every else 3;
+                const scale = if (self.wander_bonus_scale > 0) self.wander_bonus_scale else 15;
+                self.wander_bonus_count += 1;
+                if (self.wander_bonus_count >= every) {
+                    self.wander_bonus_count = 0;
+                    w.class_id[slot].drop_prob *= scale;
+                    w.class_id[slot].bonus_loot = true;
+                }
+            },
+        }
         return slot;
     }
 
@@ -945,7 +1027,7 @@ pub const Director = struct {
                 const x = w.transform[p].x + @cos(ang) * w.rules.director.wandering_spawn_dist;
                 const z = w.transform[p].z + @sin(ang) * w.rules.director.wandering_spawn_dist;
                 const y = w.groundY(x, z) orelse w.transform[p].y;
-                const slot = self.spawnOneZombie(w, x, y, z, "", self.total_spawned +% n, true) orelse continue;
+                const slot = self.spawnOneZombieLoot(w, x, y, z, "", self.total_spawned +% n, true, .wandering) orelse continue;
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
                 w.zombie_ai[slot].alert = true;
@@ -1414,6 +1496,40 @@ test "director without stage hooks keeps its unstaged behaviour" {
     const r = dir.tick(&w, 0.1);
     try std.testing.expect(dir.bloodmoon_active);
     try std.testing.expectEqual(@as(u32, 4), r.spawned); // BloodMoonEnemyCount / 2
+}
+
+test "horde bonus loot scales every Nth spawn and marks the row" {
+    // Stock SpawnZombie (IL_00CD-0102): bonusLootSpawnCount++ per non-vulture
+    // spawn, reset + lootDropProb *= LootBonusScale at bonusLootEvery; the
+    // death path then reads the stored probability verbatim. Seeded at half
+    // cadence by InitParty (IL_0072-0080).
+    var w: ecs_world.World = .{};
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{};
+    dir.setBloodMoonBonus(4, 25);
+    try std.testing.expectEqual(@as(u32, 2), dir.bm_bonus_count); // seeded at every/2
+    var bonus_n: u32 = 0;
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const slot = dir.spawnOneZombieLoot(&w, 0, 70, 0, "", i, true, .bloodmoon) orelse return error.TestUnexpectedResult;
+        if (w.class_id[slot].bonus_loot) {
+            bonus_n += 1;
+            try std.testing.expectEqual(@as(f32, 25.0), w.class_id[slot].drop_prob);
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), bonus_n); // 2nd spawn after the half seed
+    try std.testing.expectEqual(@as(u32, 0), dir.bm_bonus_count); // reset on the award
+    // Wandering kind runs its own counter (every 3rd x15, stock XML values).
+    var wbonus: u32 = 0;
+    i = 0;
+    while (i < 3) : (i += 1) {
+        const slot = dir.spawnOneZombieLoot(&w, 0, 70, 0, "", 100 + i, true, .wandering) orelse return error.TestUnexpectedResult;
+        if (w.class_id[slot].bonus_loot) {
+            wbonus += 1;
+            try std.testing.expectEqual(@as(f32, 15.0), w.class_id[slot].drop_prob);
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), wbonus);
 }
 
 test "bloodMoonDayFor returns the jittered horde day, not the multiple" {
