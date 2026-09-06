@@ -76,9 +76,18 @@ sends that must not wait behind a batch. zdtd's `Peer.sendReliable` writes the
 datagram straight to the socket, so every package is effectively flushed on
 send and the property has nothing to select. It becomes relevant only if a
 send queue is ever introduced - at which point these eight names are the set
-that must bypass it. With this, all eight `NetPackage` properties are
-accounted for. Channel, Compress, PackageDirection and ReliableDelivery are
-pinned by tests against the IL. `PackageId` is not a per-package constant at
+that must bypass it, so they are written down rather than left to be
+re-derived (each `get_FlushQueue() IL=2` returning `ldc.i4.1` in
+`il/full-v3.2.0/_global/`): `NetPackageAuthConfirmation`,
+`NetPackageAuthState`, `NetPackageDynamicMesh`, `NetPackagePackageIds`,
+`NetPackagePersistentPlayerPositions`, `NetPackagePlayerDenied`,
+`NetPackagePlayerLoginAnswer`, `NetPackageRegionMetaData`. With this, all eight `NetPackage` properties are
+accounted for, though not all by the same mechanism. Channel, Compress and
+ReliableDelivery are pinned by unit tests that walk the whole advertised table
+against the IL-derived override sets. `PackageDirection` is not: it is
+enforced at build time instead, by `provenance_scan` check 7i (below), which
+reads the property out of the 3.2.0 IL and fails a C2S handler that claims a
+`ToClient` name. `PackageId` is not a per-package constant at
 all - `NetPackage::get_PackageId` (IL=4) looks the runtime type up in
 `NetPackageManager`, which is the negotiated table zdtd advertises as
 `default_mappings`; its invariants (no duplicate name, and `framed` stamping
