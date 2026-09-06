@@ -1411,9 +1411,12 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         // Stock credits the trader's AvailableMoney with the sale (the
         // wire TraderData shows the live balance). Clamp at i32 max.
         stock.wallet = @intCast(@min(@as(i64, stock.wallet) + cost, std.math.maxInt(i32)));
-        // Demand spike: a buy raises the entry's markup to +100
-        // (TraderData/Entry::IncreaseMarkup, asm.il 856828-856866).
-        en.markup = 100;
+        // No markup change on buy: stock's IncreaseMarkup/DecreaseMarkup run
+        // only from the client vending-machine +/- UI actions
+        // (ItemActionEntryMarkup/Markdown), never from buy/sell transactions.
+        // NPC-trader buy price ignores entry markup entirely (GetBuyPrice
+        // applies it only on the PlayerOwned/Rentable path); the markup the
+        // client shows arrives via the TraderData echo zdtd already applies.
         return true;
     } else {
         // Sell: stock GetSellPrice (XUiM_Trader IL=217) prices the SOLD
@@ -1480,9 +1483,8 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         }
         if (entry) |en| {
             en.count += qty;
-            // A sell eases demand: step the entry's markup down by 4
-            // (DecreaseMarkup, asm.il 856828-856866), saturating at i8 min.
-            en.markup -|= 4;
+            // No markup change on sell either (same note as the buy path
+            // above): entry markup is vending-UI state, not a demand signal.
         }
         w.wallet[ps].coins += gain;
         stock.wallet -= @intCast(gain);
@@ -5390,7 +5392,12 @@ test "trader wallet debits on sell, credits on buy and refuses overdraft" {
     try std.testing.expectEqual(@as(i32, 500), w.trader_stock[ts].wallet);
 }
 
-test "trade demand markup: buy spikes +100, sell eases -4, restock resets" {
+test "trade leaves entry markup alone; restock resets" {
+    // Stock's IncreaseMarkup/DecreaseMarkup run only from the client
+    // vending-machine +/- UI actions (ItemActionEntryMarkup/Markdown), never
+    // from buy/sell transactions - and NPC-trader buy price ignores entry
+    // markup (GetBuyPrice applies it only on the PlayerOwned/Rentable path).
+    // So neither side of a trade may move the entry's markup.
     var w: World = .{};
     defer w.deinit();
     _ = w.spawnPlayer(0, 70, 0, 0).?;
@@ -5402,12 +5409,12 @@ test "trade demand markup: buy spikes +100, sell eases -4, restock resets" {
     const item = w.trader_stock[ts].entries[0].item;
     w.wallet[ps].coins = 1000;
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
-    // A buy spikes demand to +100 (Entry.IncreaseMarkup).
+    // A buy leaves markup at neutral.
     try std.testing.expect(trade(&w, 0, trader_id, item, 1, 0, 6));
-    try std.testing.expectEqual(@as(i8, 100), w.trader_stock[ts].entries[0].markup);
-    // A sell eases demand by 4 (Entry.DecreaseMarkup), saturating at i8 min.
+    try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
+    // A sell leaves markup at neutral too.
     try std.testing.expect(trade(&w, 0, trader_id, item, 1, 1, 6));
-    try std.testing.expectEqual(@as(i8, 96), w.trader_stock[ts].entries[0].markup);
+    try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);
     // A restock rebuilds fresh entries: markup back to neutral.
     traderRestock(&w);
     try std.testing.expectEqual(@as(i8, 0), w.trader_stock[ts].entries[0].markup);

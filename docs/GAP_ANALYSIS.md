@@ -5585,10 +5585,16 @@ already-correct full `TraderData` v2 body (`buildTraderDataStock`) parses and th
 real `traderAlways` stock plus base econ prices show in the client window. Still
 not stock:
 
-- **Per-item markup / price drift**: stock adjusts `Entry.Markup` at runtime
-  (Increase +100 on buy, Decrease -4 on sell, asm.il 856828-856866) from demand.
-  zdtd always sends `Markup=0`, so prices are static base econ values with no
-  supply/demand drift.
+- **Per-item markup / price drift**: corrected 2026-09-06 - there is no
+  demand drift on stock. `IncreaseMarkup` (+1, cap 100) / `DecreaseMarkup` (-1,
+  floor -4) run only from the client vending-machine +/- UI actions
+  (`ItemActionEntryMarkup`/`Markdown`); buy/sell transactions never touch
+  entry markup, and NPC-trader buy price ignores it (`GetBuyPrice` applies the
+  `1 + Markup * 0.2` factor only on the PlayerOwned/Rentable path). zdtd used
+  to spike +100 on buy and -4 on sell (misread method bodies as transaction
+  behavior); both are removed, and the markup the client shows arrives via the
+  TraderData echo zdtd already applies. Prices are static base econ values,
+  matching stock NPC-trader behavior.
 - **TierItemGroups**: stock `TraderData.TierItemGroups` (`List<ItemStack[]>`,
   written u8 count + WriteItemStack per group, asm.il 857562-857587) unlocks
   deeper stock as trader tier rises. zdtd always writes 0 groups: only the flat
