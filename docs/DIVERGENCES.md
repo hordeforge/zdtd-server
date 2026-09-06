@@ -275,6 +275,15 @@ and Twitch - `PlayerTwitchStats` does set player fields (`TwitchEnabled`,
 `TwitchSafe`, `TwitchVoteLock`), but all three are Twitch-integration state,
 so the label is accurate.
 
+Gated since 2026-09-06 by `provenance_scan` 7j, the mirror of 7i: it recovers
+the client senders from the IL the same way (walk back from each
+`SendToServer` to the `GetPackage<T>` that supplies it) and fails on an
+advertised name that reaches no C2S handler and has no stated reason. A name
+the docs call `SHIPPED` or `WORKS` gets no doc excuse at all, since that claim
+is precisely what has to match the code. Verified by mutation in both
+directions: dropping the `PlayerLaserSight` handler fires it, and removing a
+category entry for an ignored sender fires it too.
+
 Empirical backstop: `dispatch.zig` counts and logs every unhandled C2S package,
 and a full `smoke-navezgane` session (2 clients, 8 join passes, walk / jump /
 rejoin) logs **zero**. A package the stock client actually sends us would show

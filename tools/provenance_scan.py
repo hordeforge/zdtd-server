@@ -692,6 +692,72 @@ def main():
                 "accept-and-drop in DIVERGENCES 1 or stop claiming the name"
             )
 
+        # 7j. THE MIRROR OF 7i: packages the stock CLIENT sends that reach no
+        #     handler here. 7i catches claiming a name stock never sends us;
+        #     this catches ignoring one it does. Both directions have gone
+        #     wrong: three names (EntityStatChanged, GameEventResponse,
+        #     SharedPartyKill) were listed as handled in GAP_ANALYSIS while
+        #     having no C2S arm at all, and PlayerLaserSight sat filed under
+        #     "Twitch integration" - a wrong category is how a real gap stays
+        #     invisible. The senders are recovered from the IL rather than
+        #     trusted from prose: walk back from each SendToServer call to the
+        #     nearest GetPackage<T> / ParsePackage<T> that supplies it.
+        senders: set[str] = set()
+        src_re = re.compile(
+            r"NetPackageManager::(?:GetPackage|ParsePackage)<(?:class )?(NetPackage\w+)>"
+        )
+        for il_path in il_dir.glob("*.il.txt"):
+            text = il_path.read_text(encoding="utf-8", errors="replace")
+            if "SendToServer(" not in text:
+                continue
+            lines = text.split("\n")
+            for i, line in enumerate(lines):
+                if "::SendToServer(" not in line:
+                    continue
+                # 40 lines back covers the Setup-argument runs in these dumps.
+                for j in range(i, max(-1, i - 40), -1):
+                    m = src_re.search(lines[j])
+                    if m:
+                        senders.add(m.group(1))
+                        break
+        # Only names zdtd advertises can arrive at all: an unregistered one has
+        # no id in the negotiated map.
+        # Unlike 7d/7i this accepts a backticked short name: the existing prose
+        # names these by short form inside the category paragraphs, and the
+        # point here is "is there a stated reason", not "is it in the register"
+        # (an ignored client sender need not be an authority divergence). The
+        # backticks still keep it from matching ordinary prose words.
+        # A name the docs call SHIPPED or WORKS gets no excuse: that claim is
+        # exactly what has to match the code. This is the failure the check
+        # exists for - three names were listed as handled while having no C2S
+        # arm - so a doc mention must not be able to satisfy it.
+        claimed_done = set()
+        # `[^\n]` and not `[^\n|]`: these claims live in table rows, so the
+        # status sits one cell to the right of the name, past a pipe.
+        for m in re.finditer(
+            r"(NetPackage\w+)[^\n]{0,40}?\b(SHIPPED|WORKS)\b", doc_text
+        ):
+            claimed_done.add(m.group(1))
+        unhandled_senders = sorted(
+            n
+            for n in senders & set(advertised)
+            if n not in inbound
+            and (
+                n in claimed_done
+                or (
+                    n not in doc_text
+                    and f"`{n[len('NetPackage'):]}`" not in doc_text
+                )
+            )
+        )
+        if unhandled_senders:
+            failures.append(
+                "packages the stock client sends that reach no C2S handler and "
+                f"no doc row ({len(unhandled_senders)}): "
+                + ", ".join(unhandled_senders[:8])
+                + " - handle it, or record why it is ignored in DIVERGENCES 3b"
+            )
+
     if failures:
         for f in failures:
             print("FAIL:", f)

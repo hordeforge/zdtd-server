@@ -4149,16 +4149,16 @@ persists so little that a restart visibly damages a built base.
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
   server branch at all) is the developer surface the old label described. All
   four remain unhandled; the difference is that the reason is now the real
-  one. EAC/encryption waivers (EAC,
-  EncryptionPublicKey, KeyExchangeComplete), creative/editor
-  (EditorUpdateVolume), the world-folder download (WorldFolder: the C2S
+  one. EAC/encryption waivers (`EAC`,
+  `EncryptionPublicKey`, `KeyExchangeComplete`), creative/editor
+  (`EditorUpdateVolume`), the world-folder download (`WorldFolder`: the C2S
   package is a client asking for the server's world files, and stock's
   ProcessPackage IL=93 answers `StartSendingPacketsToClient` on the IsServer
   branch. Filed under "creative/editor" until 2026-09-06, which it is not.
   zdtd expects the operator to ship the world with the client or use a
   pregenerated map, so it neither serves nor requests one; the channel-1
-  routing for the name is pinned regardless), Twitch integration (PlayerTwitchStats,
-  TwitchAccess, TwitchVoteScheduling), headless mesh
+  routing for the name is pinned regardless), Twitch integration
+  (`PlayerTwitchStats`, `TwitchAccess`, `TwitchVoteScheduling`), headless mesh
   (DynamicMesh: verified 2026-09-06, the category is right. ProcessPackage
   IL=24 returns immediately unless `DynamicMeshManager.CONTENT_ENABLED`, and
   only then calls `DynamicMeshServer.ClientReadyForNextMesh` on the IsServer
