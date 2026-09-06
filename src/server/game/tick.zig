@@ -721,6 +721,47 @@ pub fn tickEntityLookAt(self: *Game) void {
     }
 }
 
+/// NetPackageSetAttackTarget S2C. Stock fans this out from every server-side
+/// attack-target change: `EntityAlive::SetAttackTarget` (IL=70) sends
+/// `Setup(entityId, target ? target.entityId : -1)`, and the expiry path in
+/// `OnUpdateLive` (IL=363) sends `Setup(entityId, -1)` when attackTargetTime
+/// runs out. The client stores it as `attackTargetClient`, which is what
+/// `GetAttackTargetLocal` returns for a remote entity (the drone beam and the
+/// DynamicMusic threat level read it).
+///
+/// zdtd picks targets in the sim (`ai.target_id`) and never published them, so
+/// remote clients saw every zombie as untargeted. This is the edge detector:
+/// stock's per-change sends become a per-tick diff against the last published
+/// value, which is the same traffic without mirroring stock's call sites.
+pub fn tickAttackTarget(self: *Game) void {
+    for (self.sim.kind_groups.slice(.zombie)) |s| {
+        if (!self.sim.alive[s] or !self.sim.mask[s].network_id or !self.sim.mask[s].zombie_ai) continue;
+        if (!self.sim.mask[s].transform) continue;
+        // A sleeping sleeper has no live target to advertise, and waking is
+        // its own package (drainSleeperWakeups).
+        if (self.sim.mask[s].sleeper and !self.sim.sleeper[s].awake) continue;
+        const st = &self.attack_target_sent[s];
+        // Slot recycled onto a new entity: the previous occupant's last-sent
+        // target must not gate this one's first send (spawnBase bumped gen).
+        if (st.gen != self.sim.network_id[s].gen) st.* = .{ .gen = self.sim.network_id[s].gen };
+        // Stock's wire value: -1 when there is no target, and equally when the
+        // target is gone, since a dead entity is not a target any more.
+        var want: i32 = -1;
+        const tid = self.sim.zombie_ai[s].target_id;
+        if (tid >= 0) {
+            if (self.sim.slotOfNetId(tid)) |t| {
+                if (self.sim.alive[t]) want = tid;
+            }
+        }
+        if (st.sent and st.id == want) continue;
+        st.id = want;
+        st.sent = true;
+        if (packages.buildSetAttackTargetBody(&self.body_buf, self.sim.network_id[s].id, want)) |body| {
+            self.broadcastNear("NetPackageSetAttackTarget", body, self.sim.transform[s].x, self.sim.transform[s].z, self.interest_range) catch {};
+        } else |_| {}
+    }
+}
+
 /// NetPackageClientInfo broadcast (RE ConnectionManager.updateClientInfo:
 /// 5 s cadence): the per-player list (entityId, ping, admin flag) that drives
 /// the player list UI and admin crowns. Ping is 0 (zdtd has no RTT

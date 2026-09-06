@@ -299,14 +299,29 @@ The 29-package figure above was an artefact of comparing against the RE
 still holds.
 
 **Corrected again 2026-09-04.** That paragraph used to say the server "builds
-and sends" the S2C-only set. It does not: **55 of the 191 registered names are
-never referenced anywhere in `src/server/`**, so they are registered for id
+and sends" the S2C-only set. It does not: **52 of the 191 registered names are
+never referenced anywhere in `src/server/`** (55 when this was written; the
+laser-sight relay and `SetAttackTarget` have since been implemented, and
+`PlayerLaserSight` moved to the C2S side too), so they are registered for id
 mapping only. Most are the categories already listed above (editor, Twitch,
 EAC/encryption, client-side FX, mod API). Registration without a sender is the
 right call for those - the negotiated name-to-id map has to match stock whether
 or not we ever emit the package - but the claim that we emit all 105 was
 wrong, and the distinction matters: "no C2S handler needed" and "we send this"
 are different properties, and only the first was measured.
+
+Re-derived 2026-09-06 from the IL rather than from this list: walking back from
+every `SendPackage` / `SendToPlayers` / `SendPacketToTrackedPlayers*` call to
+the `GetPackage<T>` that supplies it recovers **124 types the stock server
+sends**, and every one of them is a name zdtd advertises, so the negotiated map
+has no hole in this direction either. Cross-checking those 124 against what
+`src/server/` emits is what surfaced `SetAttackTarget`: a package stock sends on
+every AI target change, which zdtd computed and never published. The spot check
+also re-verified three claims below against the IL - `TeleportPlayer` really is
+covered by `EntityTeleport` (whose `SetPosAndRotFromNetwork` carries the
+rotation the teleport package would), and `EntityPrimeDetonator` really is
+client-side only (`PrimeDetonator` IL=23 sets a pulse rate, a red light and a
+countdown, nothing else).
 
 Of those 55, **39 are named somewhere in GAP_ANALYSIS or on this page** (the
 never-sent non-goals list, the waived categories, the accept-and-drop rows).
