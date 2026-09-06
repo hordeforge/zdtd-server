@@ -1581,7 +1581,7 @@ test "blood moon walks the stage spawn groups across the night" {
     try std.testing.expect(dir.stageGroupAt(2) == null);
 }
 
-test "scout spawner tier follows the stock gamestage thresholds" {    // SpawnScouts (asm.il ~415972): >=45 Scouts2, >=85 ScoutsFeral, >=125 radiated.
+test "scout spawner tier follows the stock gamestage thresholds" { // SpawnScouts (asm.il ~415972): >=45 Scouts2, >=85 ScoutsFeral, >=125 radiated.
     try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(0));
     try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(44));
     try std.testing.expectEqualStrings("Scouts2", scoutSpawnerName(45));
