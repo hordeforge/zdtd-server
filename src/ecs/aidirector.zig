@@ -164,10 +164,15 @@ pub const WorldClock = struct {
 };
 
 /// Resolved gamestages.xml `<spawn>` row: which entitygroup, and how many.
+/// Carries the pacing fields stock's party spawner walks (`SetupGroup`:
+/// `interval` seconds between spawns, `duration` seconds before the next
+/// group row, 0 = no time gate; `num` total spawns before the row is done).
 pub const StageGroup = struct {
     group: []const u8 = "",
     num: u16 = 1,
     max_alive: u16 = 1,
+    interval: u16 = 2,
+    duration: u16 = 0,
 };
 
 /// AIDirectorChunkEventComponent::SpawnScouts (asm.il ~415972): the scout
@@ -300,9 +305,15 @@ pub const Director = struct {
     party_stage: i32 = 0,
     /// Optional lookup: (ctx, spawner_name, stage) → entitygroup name plus wave
     /// size, resolving gamestages.xml. Game wires it; the ECS layer stays free
-    /// of asset imports, matching the group_pick_fn contract above.
+    /// of asset imports, matching the group_pick_fn contract above. First-row
+    /// only (legacy burst path); the nightly walk uses `stage_group_at_fn`.
     stage_group_ctx: ?*anyopaque = null,
     stage_group_fn: ?*const fn (?*anyopaque, []const u8, i32) ?StageGroup = null,
+    /// Optional lookup: (ctx, spawner_name, stage, index) → the stage's row at
+    /// `index`, null past the end (stock `Stage.GetSpawnGroup`, which returns
+    /// null out of range). Feeds the nightly group walk.
+    stage_group_at_ctx: ?*anyopaque = null,
+    stage_group_at_fn: ?*const fn (?*anyopaque, []const u8, i32, u32) ?StageGroup = null,
     /// Optional lookup: (ctx, entityspawner_name) → EntityGroupName from
     /// spawning.xml, for the code-named scout spawners.
     spawner_group_ctx: ?*anyopaque = null,
@@ -319,6 +330,19 @@ pub const Director = struct {
     bm_party_n: u8 = 0,
     /// Party gamestage snapshot at dusk (stock InitParty freezes it).
     bm_stage_frozen: i32 = 0,
+    /// Nightly spawn-group walk (`AIDirectorGameStagePartySpawner`: `groupIndex`
+    /// into the frozen stage's rows, `SetupGroup` per row). `bm_group_index`
+    /// is the current row, `bm_spawned_in_group` counts spawns against its
+    /// `num` (`canSpawn = spawnCount < numToSpawn`), `bm_group_deadline` is
+    /// the world-time tick when a `duration` row expires (0 = no time gate),
+    /// and `bm_spawn_at` paces spawns within the row by its `interval`
+    /// seconds. Reset at each dusk freeze; the walk ends when the rows run
+    /// out (stock `get_IsDone = groupIndex > 0 && spawnGroup == null`), and
+    /// the wave loop falls back to the legacy first-row burst.
+    bm_group_index: u32 = 0,
+    bm_spawned_in_group: u32 = 0,
+    bm_group_deadline: u64 = 0,
+    bm_spawn_at: f32 = 0,
     /// Blood-moon bonus-loot spawn counter
     /// (`AIDirectorBloodMoonParty.bonusLootSpawnCount`): incremented per
     /// non-vulture horde spawn; when it reaches `bonus_loot_every` it resets
@@ -504,24 +528,57 @@ pub const Director = struct {
                 if (self.bm_stage_frozen == 0) {
                     self.bm_stage_frozen = self.party_stage;
                     if (self.bm_bonus_every == 0) self.setBloodMoonBonus(12, 25);
+                    // Start the nightly group walk at row 0 (stock SetPartyLevel
+                    // resets groupIndex/spawnCount, then SetupGroup).
+                    self.bm_group_index = 0;
+                    self.setupBmGroup(w);
                 }
                 self.buildBloodMoonParties(w);
                 self.recountAndTeleportHorde(w);
                 if (spawn_z) {
-                    const bm = self.stageGroup(bloodmoon_spawner);
-                    var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
-                    var bm_group: []const u8 = "";
-                    if (bm) |sg| {
-                        wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
-                        bm_group = sg.group;
+                    const now = self.clock.worldTimeBits();
+                    // Row pacing (spawner Tick): a `duration` row expires into
+                    // the next row; the row's `interval` gates the wave burst.
+                    // Stock ticks this per party spawner; one shared walk is
+                    // the same count (one spawner per night per party, and
+                    // zdtd runs one wave loop across parties).
+                    if (self.stageGroupAt(self.bm_group_index) != null) {
+                        if (self.bm_group_deadline != 0 and now >= self.bm_group_deadline) {
+                            self.bm_group_index += 1;
+                            self.setupBmGroup(w);
+                        }
                     }
-                    spawned += self.spawnBloodMoonParties(w, wave, bm_group);
+                    if (self.stageGroupAt(self.bm_group_index)) |row| {
+                        // Row done (`spawnCount >= numToSpawn`) advances, like
+                        // canSpawn going false into the next SetupGroup.
+                        if (self.bm_spawned_in_group >= row.num) {
+                            self.bm_group_index += 1;
+                            self.setupBmGroup(w);
+                        }
+                    }
+                    if (self.stageGroupAt(self.bm_group_index)) |walk| {
+                        spawned += self.spawnBloodMoonWalk(w, walk);
+                    } else {
+                        // Walk exhausted (or no indexed lookup wired): the
+                        // legacy first-row burst keeps the night populated.
+                        const bm = self.stageGroup(bloodmoon_spawner);
+                        var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
+                        var bm_group: []const u8 = "";
+                        if (bm) |sg| {
+                            wave = @min(wave, @max(1, @as(u32, sg.max_alive)));
+                            bm_group = sg.group;
+                        }
+                        spawned += self.spawnBloodMoonParties(w, wave, bm_group);
+                    }
                     self.bloodmoon_cd = w.rules.director.bloodmoon_wave_cd;
                 }
             } else if (!self.bloodmoon_active and self.bm_stage_frozen != 0) {
                 // EndBloodMoon (412618): clear horde marks and the frozen stage at
                 // dawn; nothing is despawned.
                 self.bm_stage_frozen = 0;
+                self.bm_group_index = 0;
+                self.bm_spawned_in_group = 0;
+                self.bm_group_deadline = 0;
                 clearHordeMarks(w);
             }
             // Horde zombies keep to their party focus every tick (teleport back
@@ -651,6 +708,36 @@ pub const Director = struct {
         const sg = f(self.stage_group_ctx, spawner, stage) orelse return null;
         if (sg.group.len == 0) return null;
         return sg;
+    }
+
+    /// Resolve one row of the frozen stage by index (stock
+    /// `Stage.GetSpawnGroup`, null past the end). Null group also ends the
+    /// walk, matching `get_IsDone = groupIndex > 0 && spawnGroup == null`.
+    fn stageGroupAt(self: *const Director, index: u32) ?StageGroup {
+        const f = self.stage_group_at_fn orelse return null;
+        const sg = f(self.stage_group_at_ctx, bloodmoon_spawner, self.bm_stage_frozen, index) orelse return null;
+        if (sg.group.len == 0) return null;
+        return sg;
+    }
+
+    /// Advance the nightly group walk to the next row (stock `SetupGroup`:
+    /// row = stage row at `groupIndex`; `interval` paces spawns, `duration`
+    /// arms the row deadline in world ticks, `num` sizes the row). A null row
+    /// ends the walk for the night. World ticks run 20 Hz (50 ms).
+    fn setupBmGroup(self: *Director, w: *ecs_world.World) void {
+        _ = w;
+        if (self.stageGroupAt(self.bm_group_index)) |sg| {
+            self.bm_spawned_in_group = 0;
+            self.bm_spawn_at = 0;
+            self.bm_group_deadline = if (sg.duration > 0)
+                self.clock.worldTimeBits() + @as(u64, sg.duration) * 20
+            else
+                0;
+        } else {
+            // Past the last row: mark done. The wave loop treats this as
+            // "walk exhausted" and falls back to the legacy first-row burst.
+            self.bm_group_index = std.math.maxInt(u32);
+        }
     }
 
     /// Blood-moon bonus cadence for the frozen stage
@@ -890,7 +977,30 @@ pub const Director = struct {
                 n += 1;
             }
         }
+        self.bm_spawned_in_group +|= n;
         return n;
+    }
+
+    /// Spawn one walk-row wave per party (stock spawner Tick pacing): the
+    /// current row's `interval` gates bursts (`bm_spawn_at` accumulates the
+    /// wave cooldown), `num` caps the row (`bm_spawned_in_group`), and the
+    /// row's `maxAlive` caps the burst like the legacy path. Counts into the
+    /// row total so the driver advances when the row is done.
+    fn spawnBloodMoonWalk(self: *Director, w: *ecs_world.World, row: StageGroup) u32 {
+        self.bm_spawn_at -= w.rules.director.bloodmoon_wave_cd;
+        const interval_s: f32 = @floatFromInt(@max(1, row.interval));
+        if (self.bm_spawn_at > 0 and interval_s > 0) {
+            // Not due yet: hold the burst until the row interval elapses.
+            self.bm_spawn_at += w.rules.director.bloodmoon_wave_cd;
+            return 0;
+        }
+        self.bm_spawn_at = interval_s;
+        const remaining: u32 = row.num -| self.bm_spawned_in_group;
+        if (remaining == 0) return 0;
+        var wave: u32 = @max(1, @as(u32, @trunc(@min(@as(f64, @floatFromInt(self.bloodmoon_enemy_count)) * @as(f64, w.rules.bloodmoon.wave_frac), 4294967295.0))));
+        wave = @min(wave, @max(1, @as(u32, row.max_alive)));
+        wave = @min(wave, remaining);
+        return self.spawnBloodMoonParties(w, wave, row.group);
     }
 
     /// Pick the group class at (x,z) and spawn one zombie; mark horde when
@@ -1416,8 +1526,62 @@ test "bloodmoon frequency and range" {
     try std.testing.expectEqual(@as(u32, 1), hits); // exactly one blood moon in cycle 1's window
 }
 
-test "scout spawner tier follows the stock gamestage thresholds" {
-    // SpawnScouts (asm.il ~415972): >=45 Scouts2, >=85 ScoutsFeral, >=125 radiated.
+test "blood moon walks the stage spawn groups across the night" {
+    // Stock party spawner (SetupGroup/Tick): row 0 spawns `num` zombies, then
+    // the walk advances to row 1; a null row ends the walk (get_IsDone).
+    const Hooks = struct {
+        fn stageGroupAt(_: ?*anyopaque, spawner: []const u8, stage: i32, index: u32) ?StageGroup {
+            if (!std.mem.eql(u8, spawner, Director.bloodmoon_spawner)) return null;
+            if (stage != 61) return null;
+            if (index == 0) return .{ .group = "ZombiesNight", .num = 2, .max_alive = 8, .interval = 1, .duration = 0 };
+            if (index == 1) return .{ .group = "ZombiesNight", .num = 3, .max_alive = 8, .interval = 1, .duration = 0 };
+            return null;
+        }
+        fn pick(_: ?*anyopaque, _: []const u8, _: u32) ?[]const u8 {
+            return null; // class_table rotation fallback
+        }
+    };
+    var w: ecs_world.World = .{};
+    w.rules.director.initial_population_frac = 0;
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .bloodmoon_enemy_count = 8,
+        .bloodmoon_cd = 0,
+        .horde_cd = 999,
+        .party_stage = 61,
+        .group_pick_fn = &Hooks.pick,
+        .stage_group_at_ctx = undefined,
+        .stage_group_at_fn = &Hooks.stageGroupAt,
+    };
+    // Dusk freeze starts the walk at row 0.
+    _ = dir.tick(&w, 0.1);
+    try std.testing.expectEqual(@as(i32, 61), dir.bm_stage_frozen);
+    try std.testing.expectEqual(@as(u32, 0), dir.bm_group_index);
+    // Drive waves until row 0 (num=2) is done: the walk must advance to row 1
+    // and keep spawning its num=3.
+    var ticks: u32 = 0;
+    while (dir.bm_group_index == 0 and ticks < 40) : (ticks += 1) {
+        dir.bloodmoon_cd = 0;
+        _ = dir.tick(&w, 0.1);
+    }
+    try std.testing.expectEqual(@as(u32, 1), dir.bm_group_index);
+    // The advancing tick already spawns row 1's first wave (stock advances
+    // and spawns in the same spawner tick), so the counter is mid-row, not
+    // zero; what matters is the walk keeps spawning row 1 to its num=3.
+    try std.testing.expect(dir.bm_spawned_in_group >= 1);
+    ticks = 0;
+    while (dir.bm_spawned_in_group < 3 and ticks < 60) : (ticks += 1) {
+        dir.bloodmoon_cd = 0;
+        _ = dir.tick(&w, 0.1);
+    }
+    try std.testing.expectEqual(@as(u32, 3), dir.bm_spawned_in_group);
+    // Past the last row the walk is done; the night stays populated via the
+    // legacy first-row burst (no indexed lookup here means the walk ends).
+    try std.testing.expect(dir.stageGroupAt(2) == null);
+}
+
+test "scout spawner tier follows the stock gamestage thresholds" {    // SpawnScouts (asm.il ~415972): >=45 Scouts2, >=85 ScoutsFeral, >=125 radiated.
     try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(0));
     try std.testing.expectEqualStrings("Scouts1", scoutSpawnerName(44));
     try std.testing.expectEqualStrings("Scouts2", scoutSpawnerName(45));

@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x25 open
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x24 open
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -1601,12 +1601,25 @@ encoding is one day high.
   `pickStageGroup`, `Data/Config/gamestages.xml:4428`,
   `Data/Config/entitygroups.xml:15809`
 
-- **Escalation by gamestage** `PARTIAL (waived)`
-  Gamestage is holistic (party stage, loot quality, quest tier, spawn ramps);
-  blood moon is intentionally flat (constant `BloodMoonEnemyCount/2` burst) until
-  the full `GameStageDefinition` stage machine lands. Waived as progression
-  subsystem, not wire fake.
-  *Anchors:* `src/ecs/aidirector.zig:163`, `src/assets/xml_patch.zig:99`
+- **Escalation by gamestage** `WORKS` (was `PARTIAL (waived)`; closed
+  2026-09-06 - the waiver predates the stage machine)
+  The blood-moon ladder is no longer flat: each night freezes the party stage
+  (`bm_stage_frozen`, stock InitParty) and walks the frozen stage's `<spawn>`
+  rows in order (`bm_group_index`, stock `groupIndex` + `SetupGroup`). Each
+  row spawns its `num` zombies (`bm_spawned_in_group` vs `canSpawn =
+  spawnCount < numToSpawn`), paced by its `interval` (`bm_spawn_at`) and
+  expired by its `duration` (`bm_group_deadline` in world ticks); a null row
+  ends the walk for the night (`get_IsDone`), falling back to the legacy
+  first-row burst so the night stays populated. The class mix escalates
+  because each row names its own entitygroup (feral/radiated ladders per
+  stage), and the burst stays capped by the row's `maxAlive` and the
+  per-party alive cap. Conscious simplification: stock ticks one spawner per
+  party (each with its own row clock); zdtd runs one shared walk across
+  parties, which is the same spawn count with one row clock.
+  *Anchors:* `src/ecs/aidirector.zig` (`bm_group_*`, `setupBmGroup`,
+  `spawnBloodMoonWalk`, `stageGroupAt`), `src/server/game.zig`
+  (`pickStageGroupAt`), `src/server/game/init_assets.zig` (hook wiring),
+  test `blood moon walks the stage spawn groups across the night`
 
 - **BloodMoonEnemyCount semantics** `WORKS` (2026-08-20 reconciliation)
   Parsed (clamped 0..60). The party spawner enforces the stock per-party

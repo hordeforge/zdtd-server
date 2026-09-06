@@ -3024,12 +3024,25 @@ pub const Game = struct {
     }
 
     /// gamestages.xml spawner ladder → the stage's first <spawn> row.
+    /// The pacing fields ride along for the nightly group walk (SetupGroup).
     pub fn pickStageGroup(ctx: ?*anyopaque, spawner: []const u8, stage: i32) ?ecs.aidirector.StageGroup {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
         const sp = g.gamestages.spawnerByName(spawner) orelse return null;
         const st = sp.getStage(stage) orelse return null;
         const sg = st.spawnGroup(0) orelse return null;
-        return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive };
+        return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive, .interval = sg.interval, .duration = sg.duration };
+    }
+
+    /// gamestages.xml spawner ladder → the stage's `<spawn>` row at `index`
+    /// (stock `Stage.GetSpawnGroup`, null past the end - not clamped; the
+    /// walk ends when it returns null). Feeds the nightly group walk.
+    pub fn pickStageGroupAt(ctx: ?*anyopaque, spawner: []const u8, stage: i32, index: u32) ?ecs.aidirector.StageGroup {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const sp = g.gamestages.spawnerByName(spawner) orelse return null;
+        const st = sp.getStage(stage) orelse return null;
+        if (index >= st.spawns.len) return null;
+        const sg = st.spawns[index];
+        return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive, .interval = sg.interval, .duration = sg.duration };
     }
 
     /// Blood-moon bonus-loot cadence for the frozen stage
