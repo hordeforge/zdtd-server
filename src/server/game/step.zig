@@ -265,14 +265,19 @@ pub fn step(self: *Game) !void {
                 // ItemActionAttack.Hit / ProjectileMoveScript.checkCollision scale a
                 // turret/trap kill's XP by PassiveEffects.ElectricalTrapXP rather than
                 // paying full credit like a direct player kill; stock's own default is
-                // 0 (buffs.xml), unlocked only by perkAdvancedEngineering. zdtd has no
-                // perk levels yet (docs/adr/0023-perk-attribute-system.md), so
-                // trap_kill_xp_frac is a flat floor rather than a per-player lookup.
+                // 0 (buffs.xml), unlocked only by perkAdvancedEngineering
+                // (base_set 0.15..0.75 by level). The owner's perk fold wins when
+                // nonzero; otherwise the operator floor trap_kill_xp_frac stands
+                // (a zdtd-native kindness - stock pays 0 without the perk).
                 const trap_xp = self.xpGainFor(r.killed_ids[tk]);
+                const trap_frac: f32 = blk: {
+                    const perk = self.namedPassiveFold(osz, null, "ElectricalTrapXP");
+                    if (perk > 0) break :blk perk;
+                    break :blk @max(0, self.sim.rules.progression.trap_kill_xp_frac);
+                };
                 // Guard the float->int cast: a negative or huge
                 // trap_kill_xp_frac (config) traps @trunc into u64.
-                const trap_scaled_f = @as(f32, @floatFromInt(trap_xp)) *
-                    @max(0, self.sim.rules.progression.trap_kill_xp_frac);
+                const trap_scaled_f = @as(f32, @floatFromInt(trap_xp)) * trap_frac;
                 const trap_xp_scaled: u64 = if (!std.math.isFinite(trap_scaled_f))
                     0
                 else

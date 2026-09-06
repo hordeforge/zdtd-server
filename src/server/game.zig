@@ -1520,6 +1520,10 @@ pub const Game = struct {
         return game_player.dismemberSelfChance(self, slot, actor_sim_slot);
     }
 
+    pub fn namedPassiveFold(self: *const Game, slot: usize, actor_sim_slot: ?ecs.Slot, name: []const u8) f32 {
+        return game_player.namedPassiveFold(self, slot, actor_sim_slot, name);
+    }
+
     pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool) void {
         return game_player.killXpAward(self, killer_slot, base, scale_pct, trap_kill);
     }

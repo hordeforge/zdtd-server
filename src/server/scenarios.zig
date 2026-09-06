@@ -3645,6 +3645,27 @@ test "scenario vehicle enter drive and turret kills with power" {
         var k3: u32 = 0;
         while (k3 < 50) : (k3 += 1) try g.step();
         try std.testing.expect(c.xp > xp_before2);
+        // The real perk fold wins over the floor: reset the floor to 0, grant
+        // the equivalent perk at level 3 (.45), and the next turret kill still
+        // credits.
+        g.sim.rules.progression.trap_kill_xp_frac = 0;
+        const perks = [_]assets_progression.PerkDef{
+            .{
+                .name = "perkAdvancedEngineering",
+                .max_level = 5,
+                .passives = &.{.{ .name = "ElectricalTrapXP", .op = .base_set, .curve = .{ 0.15, 0.3, 0.45, 0, 0, 0, 0, 0 }, .curve_len = 3 }},
+            },
+        };
+        g.progression_table.perks = &perks;
+        g.clients[c.slot].skill_levels[0] = .{ .name = "perkAdvancedEngineering", .level = 3 };
+        g.clients[c.slot].skill_level_n = 1;
+        g.sim.turret[owned_t].ammo = 20;
+        g.sim.power.resolve();
+        _ = g.sim.spawnZombie(tx + 2, ty, tz, 15);
+        const xp_before3 = c.xp;
+        var k4: u32 = 0;
+        while (k4 < 50) : (k4 += 1) try g.step();
+        try std.testing.expect(c.xp > xp_before3);
     }
 
     const load = g.sim.power.addNode(.consumer, 1, 70, 1, 5).?;
