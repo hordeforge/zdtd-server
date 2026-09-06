@@ -4134,8 +4134,22 @@ persists so little that a restart visibly damages a built base.
   Scanning asm.il for `GetPackage<X>` immediately preceding `SendToServer`
   yields 98 names the stock client actually sends (independently reproduced
   2026-09-06 over the v3.2.0 dump, same 98); 16 have no handler,
-  categorized by scope (protocol-packages.md 5.14): mod API surface
-  (ModifyCVar, SetProp, SimpleRPC, Debug), EAC/encryption waivers (EAC,
+  categorized by scope (protocol-packages.md 5.14). Reclassified 2026-09-06:
+  three of the four "mod API surface" names are ordinary gameplay paths and
+  the old label was wrong. `ModifyCVar` is the buff CVar sync
+  (`EntityBuffs.SetCustomVarNetwork` IL=33 forwards to the server when
+  `!IsServer`), and stock's ProcessPackage (IL=26) applies it to the target's
+  `EntityBuffs`; zdtd reads CVars out of the XML effect groups and keeps no
+  per-entity CVar table, so a reported change has nothing to land in.
+  `SetProp` is a world prop change (`Block.PlaceProp` IL=87 to
+  `WorldBase.SetPropRPC`, sitting beside `SetBlockRPC`), sender-validated by
+  user id *and* entity id, then fanned by `GameManager.SetPropsOnClients`;
+  zdtd has no prop layer. `SimpleRPC` (IL=17) is the holding-item RPC: type 0
+  runs `ItemClass.OnHoldingItemActivated`, type 1 `OnHoldingReset`, both
+  client-side item hooks with no server state. Only `Debug` (no ProcessPackage
+  server branch at all) is the developer surface the old label described. All
+  four remain unhandled; the difference is that the reason is now the real
+  one. EAC/encryption waivers (EAC,
   EncryptionPublicKey, KeyExchangeComplete), creative/editor
   (EditorUpdateVolume, WorldFolder), Twitch integration (PlayerTwitchStats,
   TwitchAccess, TwitchVoteScheduling, PlayerLaserSight), headless mesh
