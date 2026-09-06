@@ -106,6 +106,25 @@ pub const EntityDef = struct {
     /// entityclasses ExplodeDelay seconds (Demolition prime-to-explode
     /// delay). 0.5 stock default when unset.
     explode_delay_s: f32 = 0.5,
+    /// entityclasses DismemberMultiplierHead/Arms/Legs (stock per-template
+    /// values, e.g. feral .7, radiated .4; the EntityClass cctor default is 1
+    /// for all three, RE EntityClass Init IL=0xBBF/0xBE0/0xC01). They scale the
+    /// dismember chance per body region in EntityAlive.GetDismemberChance.
+    /// 0 = unset (class inherits the template through resolveProp; a literal
+    /// stock 0 would also read as unset, which matches the cctor).
+    dismember_head: f32 = 0,
+    dismember_arms: f32 = 0,
+    dismember_legs: f32 = 0,
+    /// entityclasses LegCrippleScale (stock zombieTemplate 2): "scales chance
+    /// to cripple (percent of health that a hit does is the chance)". The
+    /// struct default 0 matches stock's implicit default (no ParseFloat
+    /// fallback in EntityClass Init), so 0 = unset.
+    leg_cripple_scale: f32 = 0,
+    /// entityclasses LegCrawlerThreshold (stock zombieTemplate 0, "at like
+    /// .175 nearly every zombie knocked down from a leg hit turns into a
+    /// crawler"): damage fraction above which a leg hit crawlers the zombie.
+    /// 0 = unset, same implicit default as stock.
+    leg_crawler_threshold: f32 = 0,
     /// <property class="Explosion"> blast params (radius/damages/bonuses),
     /// Extends-resolved per field. Unset fields stay 0 -> Rules floor.
     explosion: ExplosionDef = .{},
@@ -690,6 +709,42 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 }
             }
         }
+        // Dismember / crawler tuning (RE EntityAlive.CheckDismember IL=125 and
+        // GetDismemberChance IL=128, EntityClass Init IL=0xB83+): the three
+        // multipliers default to 1 in the stock cctor, so a parsed positive
+        // value is stored and 0 stays "unset" (the effective 1 lands when the
+        // roll reads the template-resolved value). The leg pair has no cctor
+        // fallback, so 0 is the true stock default there too.
+        var dis_head: f32 = 0;
+        if (resolveProp(&classes, name, "DismemberMultiplierHead", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) dis_head = f;
+            }
+        }
+        var dis_arms: f32 = 0;
+        if (resolveProp(&classes, name, "DismemberMultiplierArms", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) dis_arms = f;
+            }
+        }
+        var dis_legs: f32 = 0;
+        if (resolveProp(&classes, name, "DismemberMultiplierLegs", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) dis_legs = f;
+            }
+        }
+        var cripple_scale: f32 = 0;
+        if (resolveProp(&classes, name, "LegCrippleScale", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 100) cripple_scale = f;
+            }
+        }
+        var crawler_threshold: f32 = 0;
+        if (resolveProp(&classes, name, "LegCrawlerThreshold", 0)) |v| {
+            if (xml.parseF32(v)) |f| {
+                if (f >= 0 and f <= 1) crawler_threshold = f;
+            }
+        }
         var time_stay: f32 = 0;
         if (resolveProp(&classes, name, "TimeStayAfterDeath", 0)) |ts| {
             if (xml.parseF32(ts)) |f| {
@@ -740,6 +795,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .view_angle_deg = view_angle,
             .explode_threshold = explode_threshold,
             .explode_delay_s = explode_delay,
+            .dismember_head = dis_head,
+            .dismember_arms = dis_arms,
+            .dismember_legs = dis_legs,
+            .leg_cripple_scale = cripple_scale,
+            .leg_crawler_threshold = crawler_threshold,
             .explosion = expl orelse .{},
             .xp_gain = xp_gain,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
@@ -1079,4 +1139,81 @@ test "Explosion class resolves per field through Extends with DamageBonus" {
     try std.testing.expectEqual(@as(f32, 0), plain.explode_threshold);
     try std.testing.expectEqual(@as(f32, 0), plain.explosion.radius_blocks);
     try std.testing.expectEqual(@as(f32, 0), plain.explosion.block_damage);
+}
+
+test "stock dismember and leg tuning parses (template, feral, radiated)" {
+    // Ground truth = the live stock file: zombieTemplateMale ships
+    // DismemberMultiplier 1/1/1, LegCrippleScale 2, LegCrawlerThreshold 0;
+    // the feral tier overrides the multipliers to .7 and the radiated tier
+    // to .4, inheriting the leg pair through Extends.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/entityclasses.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const template = t.byName("zombieTemplateMale") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 1), template.dismember_head);
+    try std.testing.expectEqual(@as(f32, 1), template.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 1), template.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 2), template.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0), template.leg_crawler_threshold);
+    const feral = t.byName("zombieBoeFeral") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 0.7), feral.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0.7), feral.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0.7), feral.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 2), feral.leg_cripple_scale);
+    const radiated = t.byName("zombieBoeRadiated") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 0.4), radiated.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0.4), radiated.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0.4), radiated.dismember_legs);
+}
+
+test "dismember tuning resolves through Extends in an offline file" {
+    // A base template ships the leg pair; the tier overrides only the
+    // multipliers, so the leg values must inherit, not reset to 0.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec3.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="ZombieBase">
+        \\    <property name="MaxHealth" value="100"/>
+        \\    <property name="DismemberMultiplierHead" value="1"/>
+        \\    <property name="DismemberMultiplierArms" value="1"/>
+        \\    <property name="DismemberMultiplierLegs" value="1"/>
+        \\    <property name="LegCrippleScale" value="2"/>
+        \\    <property name="LegCrawlerThreshold" value="0.175"/>
+        \\  </entity_class>
+        \\  <entity_class name="bareWalker">
+        \\    <property name="MaxHealth" value="50"/>
+        \\  </entity_class>
+        \\  <entity_class name="zombieTier" extends="ZombieBase">
+        \\    <property name="DismemberMultiplierHead" value=".7"/>
+        \\    <property name="DismemberMultiplierArms" value=".7"/>
+        \\    <property name="DismemberMultiplierLegs" value=".7"/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const base = t.byName("ZombieBase").?;
+    try std.testing.expectEqual(@as(f32, 1), base.dismember_head);
+    try std.testing.expectEqual(@as(f32, 2), base.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0.175), base.leg_crawler_threshold);
+    const tier = t.byName("zombieTier").?;
+    try std.testing.expectEqual(@as(f32, 0.7), tier.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0.7), tier.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0.7), tier.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 2), tier.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0.175), tier.leg_crawler_threshold);
+    // A class with no dismember props at all reads 0 on every field: the
+    // parse must not supply a value the stock file did not carry.
+    const bare = t.byName("bareWalker").?;
+    try std.testing.expectEqual(@as(f32, 0), bare.dismember_head);
+    try std.testing.expectEqual(@as(f32, 0), bare.dismember_arms);
+    try std.testing.expectEqual(@as(f32, 0), bare.dismember_legs);
+    try std.testing.expectEqual(@as(f32, 0), bare.leg_cripple_scale);
+    try std.testing.expectEqual(@as(f32, 0), bare.leg_crawler_threshold);
 }
