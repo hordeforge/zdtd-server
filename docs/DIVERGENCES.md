@@ -536,13 +536,24 @@ IL=29), and the client mirrors the three values into its `serverVehicleCount` /
 zdtd tracks vehicles as ECS entities with their own mask, so the counts are
 derivable; we simply never emit the package.
 
-Not closed here because the RE does not record what the client *does* with those
-mirrored statics: there is no documented `ProcessPackage` consumer, and no entry
-in the coverage or closed-gaps notes. Emitting a packet on a guess about its
-effect would be inventing behaviour. What is needed first is the consumer side
-in `../7dtd-engine-research` (who reads `serverVehicleCount`, and whether an
-unset value changes anything the player sees); if it drives a spawn cap or a UI
-count, this becomes a real gap with a known cost rather than an unsent packet.
+**Answered 2026-09-06 from the IL.** The consumer question above now has a
+concrete answer, and it closes the item rather than promoting it. Each mirrored
+static has exactly one reader: `VehicleManager.GetServerVehicleCount` (IL=13)
+returns the real list count on the server and the mirrored static on a client,
+and its only caller is `CanAddMoreVehicles` (IL=9). `TurretTracker` and
+`DroneManager` are identical. So the value does drive a spawn cap - but the cap
+is `DeviceFlags.IsCurrent(56)` gated, and 56 is the console flag set
+(`XBoxSeriesS | XBoxSeriesX | PS5`), while `IsCurrent` masks against the build's
+`Current`. On a standalone Linux dedicated the guard is false and both
+`CanAddMoreVehicles` and its server-side counterpart in
+`NetPackageVehicleSpawn.ProcessPackage` (IL_0014) return true unconditionally.
+There is no UI reader at all: nothing outside those three managers touches the
+statics.
+
+The package is therefore console-only bookkeeping on this platform, not a
+missing behaviour, and zdtd having no 500-entity spawn cap matches what a stock
+Linux dedicated does. Still worth noting as a divergence from *console* stock,
+which is why this paragraph stays.
 
 Caveat, stated rather than glossed: loadgen drives a wide but not exhaustive
 action set. It does not fire every stock verb (vehicles, drones, twitch
