@@ -5,8 +5,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-06
+
 ### Fixed
 
+- Damaging and explosive hits are now fanned out to the victim's tracking
+  clients. Stock plays the hit reaction off `EntityAlive.ProcessDamageResponse`
+  (IL=86), which ships the applied damage via `SendPacketToTrackedPlayers`;
+  zdtd computed the damage but only the killer-route damage body reached a
+  client, so remote observers saw no hit reaction and never read the
+  dismember/cripple/crawler bits. Blast victims get the same fan-out
+  (stock `Explosion.AttackEntites`, source External, Heat damage type).
 - `NetPackageQuestEntitySpawn` now summons one entity per packet, for the
   sender only. The body's third field is `entityIDQuestHolder` (RE
   `protocol-packages.md` 6.17, read IL_0002-001F), but it was read as a spawn
@@ -20,6 +29,94 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   back on the next chunk load and kept blocking placement and pathing in the
   meantime. Stock replicates the pickup rather than simulating it client-side
   (RE `blocks.md` "Server authority").
+- Multi-stage blocks now downgrade instead of clearing to air on destroy.
+  Stock `DamageBlock` downgrades via `Stage2Health` (`Block.OnBlockDamaged`
+  into base `OnBlockDestroyedBy` returning the downgrade); zdtd always
+  cleared to air, visibly wrong on the small multi-stage set. `DowngradeBlock`
+  resolves from `blocks.xml` through Extends on all four destroy paths
+  (player dig, zombie chew, explosion, Demolition tick) with a SetBlock echo,
+  and the wire damage display caps at the Stage2Health threshold.
+- Dismember chance now starts from the region multiplier, not 1.0. Stock
+  `GetDismemberChance` (IL=128) multiplies the weapon/armor/attacker/perk
+  chain by the `DismemberMultiplierHead/Arms/Legs` of the hit region; zdtd
+  started every region at full chance, so headshots on feral/radiated
+  zombies (stock 0.7/0.4 multipliers) dismembered far too often. The three
+  multipliers plus `LegCrippleScale`/`LegCrawlerThreshold` now load from
+  `entityclasses.xml` (stock cctor/Init defaults when unset), the attacker
+  `DismemberSelfChance-143` perks and buffs fold in, and the killing blow
+  prescales by the victim's remaining-health fraction before the roll. Rolled
+  outcomes ride the S2C damage body so clients see them.
+- Trap and turret kill XP now scales by the owner's `ElectricalTrapXP` perk.
+  Stock `EntityAlive.AwardKillXPServer` multiplies `KillXPScale` by the
+  killer's perk value on trap kills (research `docs/changelog-3.2.0.md` §4.3);
+  zdtd passed the wire scale through but never applied the perk.
+- Trader buy/sell prices now fold in the buyer's `BarteringBuying` and the
+  seller's `BarteringSelling` perk scales (stock `GetBuyPrice`/`GetSellPrice`),
+  ceiled like stock. The verdict hook still sees the pre-barter price.
+- Land-claim repair requests now run the repair server-side instead of being
+  rebroadcast. Stock `ProcessPackage` (IL=33) resolves the TE at the block
+  position and runs `RepairAll` (healing damaged blocks to full HP across the
+  claim square, replicated per block through SetBlock), emitting nothing; zdtd
+  fanned the request to every peer. Requests outside any claim, or for
+  someone else's claim, are dropped; the requester gets the stock
+  `Setup(blockPos, false)` completion. Conscious simplification, recorded in
+  DIVERGENCES: the repair is free (stock consumes `RepairItems` from TE
+  storage, which zdtd has no inventory for) and air stays air.
+- The join handshake now sends the empty `AuthConfirmation` the client
+  echoes. Stock `AuthFinalizer.Authorize` (IL=10) sends it as the last
+  authorizer step and the client answers back; without the send the
+  round-trip never started.
+
+### Added
+
+- The killer's client is now told about its kill so kill challenges advance.
+  Stock `GameManager.AwardKill` (IL=27) ships
+  `NetPackageEntityAwardKillServer` to a remote killer and the client fires
+  its local `EntityKill` event, which `ChallengeObjectiveKill`/`KillByTag`
+  subscribe to. Server-side credit (quests, XP, score) already ran on the
+  death path; this send only feeds the client-tracked challenges. The inbound
+  direction stays accept-and-drop (DIVERGENCES 1.12).
+- Zombie attack targets are now published to tracking clients. Stock fans
+  `NetPackageSetAttackTarget` out of every server-side attack-target change
+  (`EntityAlive.SetAttackTarget`, plus the expiry send in `OnUpdateLive`);
+  zdtd picked targets in the sim but never published them, so every zombie
+  read as untargeted on remote clients (drone beam, DynamicMusic threat).
+  A per-tick diff against the last published value produces the same traffic
+  without mirroring stock's call sites.
+- Player laser sights now relay to the other clients. Stock re-sends the
+  `NetPackagePlayerLaserSight` body to every client except the sender's own
+  entity (IL=70); zdtd dropped it, so a mate's laser dot never showed. Relay
+  is gated on the sender speaking for its own entity plus the cosmetic-relay
+  rate cap.
+- Owned vehicles now reach the owner's map as a waypoint list. Stock
+  `VehicleManager.UpdateVehicleWaypointsForPlayer` ships the owner's parked
+  vehicles as `NetPackageEntityWaypointList` (listType Vehicle); zdtd kept
+  the data but never sent it.
+- Three client-sent reports that had no C2S arm are now validated and
+  dropped instead of falling through: `NetPackageEntityStatChanged`
+  (accepting the number would let a peer set its own health; the server owns
+  stats and replicates them out), `NetPackageGameEventResponse` (zdtd keeps
+  no `GameEventActionSequence` state for a reported hit to bump), and
+  `NetPackageSharedPartyKill` (zdtd computes the party split server-side, so
+  accepting the forward would award the kill twice).
+- Deaths under an XP-penalty `DeathPenalty` now send the deficit sequence
+  action. Stock `EntityPlayer.HandleClientDeath` (IL=71) runs the matching
+  `game_on_death_*` sequence and the `AddXPDeficit` action reaches the dead
+  player's client as a `ClientSequenceAction` response; zdtd ran the server
+  side but never sent it.
+
+### Changed
+
+- `NetPackageWorldFolder` rides channel 1. The RE names five channel-1
+  overrides (`network.md`, `NetPackageWorldFolder` read IL_0000
+  `ldc.i4.1`); the table listed four, so the first WorldFolder send would
+  have gone out on the wrong stream. The compressed-package set is now
+  pinned the same way: exactly the five stock `get_Compress` overrides zdtd
+  emits, with the three never-sent names asserted out.
+- Trader demand drift is gone. zdtd decayed a per-entry demand scalar toward
+  1.0 on every restock tick; stock has no such model (per-entry markup is
+  vending-UI state, `GetBuyPrice` has no demand term), so prices moved in a
+  way no stock client or server reproduces. Markup docs corrected with it.
 
 ## [0.3.0] - 2026-09-06
 
