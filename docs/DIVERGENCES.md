@@ -264,6 +264,17 @@ None of the 29 is a live gap, for one of three reasons:
 - **Platform/matchmaking**: `DiscordLobbySecret`, `LobbyJoin`,
   `PlayerTwitchStats`, `NetMetrics`, `EAC` (EAC is off by design).
 
+Category audit 2026-09-06: the 98 client senders were re-derived from the
+v3.2.0 IL independently of the original scan (same 98), and every one of the 16
+without a handler had its `ProcessPackage` read to check the bucket it sits in.
+Four buckets were wrong and are corrected above; `PlayerLaserSight` turned out
+to be a real gap and is implemented. The buckets that held up: EAC/encryption
+(off by design), `EditorUpdateVolume` (creative editor), `DynamicMesh` (gated
+on `DynamicMeshManager.CONTENT_ENABLED`), `Debug` (no server branch at all),
+and Twitch - `PlayerTwitchStats` does set player fields (`TwitchEnabled`,
+`TwitchSafe`, `TwitchVoteLock`), but all three are Twitch-integration state,
+so the label is accurate.
+
 Empirical backstop: `dispatch.zig` counts and logs every unhandled C2S package,
 and a full `smoke-navezgane` session (2 clients, 8 join passes, walk / jump /
 rejoin) logs **zero**. A package the stock client actually sends us would show
