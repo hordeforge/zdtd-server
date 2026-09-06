@@ -670,8 +670,15 @@ def main():
                 path.read_text(encoding="utf-8", errors="replace"),
             ):
                 inbound.add(m.group(1))
+        # DIVERGENCES only, not doc_text: a passing mention anywhere in the
+        # 6k-line GAP_ANALYSIS satisfied this for 41 of the 68 ToClient names,
+        # so three accept-and-drops carried no stated reason until 2026-09-06.
+        # The register row is the artifact this check is asking for.
+        divergences = pathlib.Path(ROOT, "docs/DIVERGENCES.md").read_text(
+            encoding="utf-8", errors="replace"
+        )
         undocumented_inbound = sorted(
-            n for n in inbound & to_client if n not in doc_text
+            n for n in inbound & to_client if n not in divergences
         )
         if undocumented_inbound:
             failures.append(
