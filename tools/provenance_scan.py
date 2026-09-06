@@ -414,6 +414,12 @@ def main():
     doc_text = ""
     for doc in ("docs/GAP_ANALYSIS.md", "docs/DIVERGENCES.md"):
         doc_text += open(os.path.join(ROOT, doc), encoding="utf-8", errors="replace").read()
+    # Checks 7d and 7i ask for a divergence-register row specifically, so they
+    # read this file alone: a passing mention in the 6k-line GAP_ANALYSIS is
+    # not the artifact either failure text is asking the author to write.
+    divergences_text = open(
+        os.path.join(ROOT, "docs/DIVERGENCES.md"), encoding="utf-8", errors="replace"
+    ).read()
     never_sent = [n for n in registered if n not in referenced]
     undocumented = []
     for name in never_sent:
@@ -448,15 +454,19 @@ def main():
             re.S,
         ):
             pkg, body = m.group(1), m.group(2)
+            # `self.<anything>(` covers the helper-call form (handleQuestEvent,
+            # savePlayers, dropClientSlot); the old fixed subsystem list read
+            # four real mutators as silent drops. `c.<field> =` covers the
+            # per-client state a handler writes directly (MapPosition's middle).
             mutates = re.search(
-                r"self\.(?:sim|world|containers|vending|quests|allies|ban_list|admin)\."
-                r"|broadcast|sendGame|relayBody|send\w+\(",
-                body,
+                r"self\.\w+[.(]|c\.\w+ = |broadcast|sendGame|relayBody|send\w+\(",
+                body.replace("self.harness.counters.inc", "__counter"),
             )
             if mutates:
                 continue
-            short = pkg[len("NetPackage"):]
-            if pkg in doc_text or re.search(rf"\b{re.escape(short)}\b", doc_text):
+            # DIVERGENCES only: the failure text asks for a register row, and
+            # a short-name word match anywhere in GAP_ANALYSIS is not one.
+            if pkg in divergences_text:
                 continue
             drop_undocumented.append(f"{fname}:{pkg}")
     if drop_undocumented:
@@ -670,15 +680,8 @@ def main():
                 path.read_text(encoding="utf-8", errors="replace"),
             ):
                 inbound.add(m.group(1))
-        # DIVERGENCES only, not doc_text: a passing mention anywhere in the
-        # 6k-line GAP_ANALYSIS satisfied this for 41 of the 68 ToClient names,
-        # so three accept-and-drops carried no stated reason until 2026-09-06.
-        # The register row is the artifact this check is asking for.
-        divergences = pathlib.Path(ROOT, "docs/DIVERGENCES.md").read_text(
-            encoding="utf-8", errors="replace"
-        )
         undocumented_inbound = sorted(
-            n for n in inbound & to_client if n not in divergences
+            n for n in inbound & to_client if n not in divergences_text
         )
         if undocumented_inbound:
             failures.append(

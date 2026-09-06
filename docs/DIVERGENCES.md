@@ -39,6 +39,7 @@ Reproducing stock here means accepting a documented cheat vector.
 | 1.11 | `NetPackagePartyData` is the leader/member snapshot the server fans to a party (party id, leader index, voice lobby, member ids, changed entity, action, disband) | Accepted, counted as an ownership reject, dropped | `ToClient` (`get_PackageDirection` IL=2 returns 2), so stock never reads one server-side. Party state is owned by `src/ecs/party.zig` and mutated only through `NetPackagePartyActions`; honouring a client-authored snapshot would let any client rewrite another party's membership and leadership |
 | 1.12 | `NetPackageEntityAwardKillServer` reports a kill the client's local player scored (`killerEntityId:i32`, `killedEntityId:i32`) so the server runs `QuestEventManager.EntityKilled` | Body length-validated, dropped | `ToClient` per the IL, and zdtd already credits the kill authoritatively at the death path (`questOnZombieKilled` plus the XP award, covering melee, ranged, turret and trap kills). Applying the report as well would double-credit both the objective and the XP |
 | 1.13 | `NetPackageAllyResponse` carries the resolved ally relationship back to a client | Accepted, dropped | `ToClient` (asm.il 886358). The relationship table is server-owned (`AllyStore::ComputeTransition`, `src/server/ally.zig`) and driven by `NetPackageAllyRequest`; a client-sent response would let one peer declare its own standing with another |
+| 1.14 | `NetPackageEntityStealth` (read IL=9: `id:i32`, `data:u16`) carries the client's own stealth state - crouch, smell, eating, sheltered and alert packed into the u16 - and stock feeds it to the AI detection model | Body length-validated, dropped | zdtd derives stealth server-side: the crouch flag rides the movement frames, and the AI senses row takes smell from buffs. Trusting the reported word would let a client claim to be unsmellable while standing in the open. zdtd still *sends* the stock body S2C on change |
 
 **`AllowedBeforeAuth` checked, no divergence (2026-09-04).** Stock's third
 per-package property gates *sending*, not receiving: `ClientInfo::SendPackage`
@@ -113,6 +114,15 @@ names, which made the check nearly inert. It now reads this file only, matching
 what the paragraph above always claimed, and three handlers that had been
 accepted on a bare GAP_ANALYSIS mention gained real rows: 1.11 `PartyData`,
 1.12 `EntityAwardKillServer`, 1.13 `AllyResponse`.
+
+The sibling accept-and-drop check (7d) had both weaknesses and one of its own:
+it accepted a bare short-name word match (`Stealth`) anywhere in either doc,
+and its "does this handler mutate anything" test was a fixed list of subsystem
+prefixes, which read four real mutators (`PlayerDisconnect`, `MapPosition`,
+`ConsoleCmdServer`, `QuestEvent`) as silent drops and would have accepted a doc
+row for each. Both are fixed: 7d reads this file only and detects mutation by
+`self.<name>` call or `c.<field> =` write. That leaves eleven true
+accept-and-drops, one of which had no row - 1.14 `EntityStealth`.
 
 **Correction 2026-09-02.** Row 1.4 previously also named
 `NetPackageEntityVelocity` and `EntitySpeeds` as client-driven motion zdtd
