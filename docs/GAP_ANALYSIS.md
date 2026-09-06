@@ -3058,9 +3058,10 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   the periodic autosave (step.zig) - a disconnect does not lose XP. Award
   amount resolves `entityclasses.xml` `ExperienceGain` per victim class
   (including the `^xpNormal01`-style `<replace_properties>` ladder); a
-  turret/trap kill scales by `Rules.progression.trap_kill_xp_frac` (0.0
-  default, stock's unperked default) since stock's `ElectricalTrapXP` needs a
-  per-player perk level zdtd does not yet have (ADR 0023). The client XP push
+  turret/trap kill scales by the owner's `ElectricalTrapXP` perk fold
+  (`perkAdvancedEngineering` base_set 0.15..0.75 by level) when nonzero,
+  else the `Rules.progression.trap_kill_xp_frac` operator floor (0.0 default,
+  stock's unperked default). The client XP push
   is owned by the (waived) server-to-client XP/level row; the ledger lives on
   the per-peer Client as its persistence key.
   *Anchors:* `src/server/game/player.zig` `killXpAward`/`xpGainFor`,

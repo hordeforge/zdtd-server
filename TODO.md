@@ -128,8 +128,9 @@ every peer; the passive-effects VM folds the tracked perk/buff deltas
       the perk `parent` attribute, enforced at spend; any other shape fails
       the purchase closed.
 - [x] T26: the passive-effects VM covers the progression + buffs layers
-      (`trackedDeltasFrom` over the parsed 649 rows); `ElectricalTrapXP` reads
-      the buffs.xml passive, no floor.
+      (`trackedDeltasFrom` over the parsed 649 rows); `ElectricalTrapXP` folds
+      the trap owner's perk levels (base_set 0.15..0.75) with the operator
+      floor as fallback, applied per kill in the turret/trap award path.
 - [x] T27: C2S perk/attribute spend lands on the sim and echoes correctly
       (`buildPlayerStatsBody` S2C + skill-level echo, both shipped).
 - [x] T28: armor mitigation: `items.xml` armor
