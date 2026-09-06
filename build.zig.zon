@@ -1,6 +1,6 @@
 .{
     .name = .zdtd,
-    .version = "0.4.0",
+    .version = "0.4.1",
     .dependencies = .{
         .zwasm = .{
             .url = "https://github.com/clojurewasm/zwasm/archive/refs/tags/v2.5.0.tar.gz",
