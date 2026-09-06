@@ -342,13 +342,17 @@ pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Sl
     const s = ti orelse return;
     if (!self.sim.mask[s].trader_stock) return;
     const eid = self.sim.network_id[s].id;
-    // Stock TraderData with primary inventory from SoA stock table.
+    // Stock TraderData.TraderID indexes traders.xml <trader_info>. The client
+    // resolves TraderInfo from that id (XUiC_TraderWindow.showrestock reads
+    // TraderInfo.ResetInterval); sending the entity id made get_TraderInfo()
+    // null and NRE'd the trader window.
+    const trader_id: i32 = self.sim.trader_stock[s].trader_info_id;
     var entries: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
     const n = self.stockEntries(s, &entries);
     const body = try packages.buildTraderDataStock(
         self.body_buf[0..4096],
         eid,
-        eid, // trader id (stock TraderID is a traders.xml index; entity id is a safe placeholder)
+        trader_id,
         self.traderMoney(s),
         entries[0..n],
     );
@@ -567,7 +571,8 @@ pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i
             .trader_data = if (k == .trader and self.sim.mask[i].trader_stock) blk: {
                 var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
                 const n = self.stockEntries(i, &ent_buf);
-                break :blk .{ .trader_id = nid, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
+                // TraderID indexes traders.xml; entity id leaves TraderInfo null.
+                break :blk .{ .trader_id = self.sim.trader_stock[i].trader_info_id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
             } else null,
         });
         try self.sendGame(peer, "NetPackageEntitySpawn", body);

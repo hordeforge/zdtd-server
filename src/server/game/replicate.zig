@@ -173,7 +173,8 @@ pub fn replicate(self: *Game) !void {
                 .trader_data = if (self.sim.kind[i] == .trader and self.sim.mask[i].trader_stock) blk: {
                     var ent_buf: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
                     const n = self.stockEntries(i, &ent_buf);
-                    break :blk .{ .trader_id = self.sim.network_id[i].id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
+                    // TraderID indexes traders.xml; entity id leaves TraderInfo null.
+                    break :blk .{ .trader_id = self.sim.trader_stock[i].trader_info_id, .available_money = self.traderMoney(i), .entries = ent_buf[0..n] };
                 } else null,
             })) |spb| {
                 var m = spawn_mask;

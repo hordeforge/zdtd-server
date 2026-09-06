@@ -1110,8 +1110,14 @@ parsed, and quest offering is unwired.
   `traderData.Clone()` onto the spawned `EntityTrader`. `buildEntitySpawnStock`
   now takes a `trader_data` option and emits that block; the trader scenario
   parses the join spawn body and asserts the flag plus the trader id.
+  `TraderID` is the `traders.xml` `<trader_info>` index (`trader_stock.trader_info_id`),
+  not the entity network id. Sending the entity id left `TraderData.get_TraderInfo()`
+  null and NRE'd `XUiC_TraderWindow` on `showrestock` (`TraderInfo.ResetInterval`).
+  Fixed 2026-09-07 in spawn ECD, `sendTraderSnapshot`, and LockResponse.
   *Anchors:* `src/wire/stock_entity.zig:250-257`, `writeTraderDataBody`,
-  `asm.il:472732-472745`, `asm.il:472307-472325`, `asm.il:471328-471340`
+  `src/server/game/join.zig`, `src/server/game/replicate.zig`,
+  `src/server/c2s/misc.zig`, `asm.il:472732-472745`, `asm.il:472307-472325`,
+  `asm.il:471328-471340`
 
 - **TraderData on the real trader-open path (LockRequest channel 1)** `WORKS`
   Stock opens the window in two steps: activate gives `LockRequestLocal(channel 0)`
@@ -1122,10 +1128,11 @@ parsed, and quest offering is unwired.
   lock handler now detects a trader entity target and answers with
   `buildLockResponseTrader`: the request's type name and Command echoed, then
   `hasTraderData=true` and the server stock (restock roll still deferred, so the
-  window shows the static stock). The trader scenario drives the request and
-  asserts the response context.
+  window shows the static stock). `TraderID` is the `traders.xml` index
+  (`trader_info_id`), matching spawn ECD / snapshot. The trader scenario drives
+  the request and asserts the response context.
   *Anchors:* `src/wire/packages.zig` `buildLockResponseTrader`,
-  `src/server/game.zig` lock handler trader branch,
+  `src/server/c2s/misc.zig` lock handler trader branch,
   `asm.il:531397-531465`, `asm.il:533826-533834`, `asm.il:533455-533474`,
   `asm.il:530836-530893`
 
