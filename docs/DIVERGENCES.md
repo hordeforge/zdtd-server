@@ -255,15 +255,34 @@ None of the 29 is a live gap, for one of three reasons:
   three are unhandled: the package reaches the dispatch chain, raises the
   unhandled counter and is dropped, which is the correct fail-closed shape for
   a subsystem that does not exist here.
-- **`PlayerLaserSight`** (moved out of the client-side list 2026-09-06 for the
-  same reason). Stock's `ProcessPackage` (IL=70) re-sends the body from the
-  server to every client except the sender's own entity, so a player sees a
-  mate's laser dot. It is a server relay, not a client-local effect. zdtd
-  carries no laser-sight state on the player row, so the dot is missing for
-  other players while the shooter still sees its own. Cosmetic, and the one
-  package in this list whose absence a player could notice.
+  `PlayerLaserSight` sat in this list too, on the same wrong reasoning, until
+  the re-derivation showed it is a plain server relay (`ProcessPackage` IL=70
+  re-sends the body to every client but the sender's). It is implemented now
+  rather than waived, so it is no longer a divergence: see the GAP_ANALYSIS
+  row. The lesson is the one this page keeps relearning - a wrong category is
+  how a real gap stays invisible.
 - **Platform/matchmaking**: `DiscordLobbySecret`, `LobbyJoin`,
   `PlayerTwitchStats`, `NetMetrics`, `EAC` (EAC is off by design).
+
+Category audit 2026-09-06: the 98 client senders were re-derived from the
+v3.2.0 IL independently of the original scan (same 98), and every one of the 16
+without a handler had its `ProcessPackage` read to check the bucket it sits in.
+Four buckets were wrong and are corrected above; `PlayerLaserSight` turned out
+to be a real gap and is implemented. The buckets that held up: EAC/encryption
+(off by design), `EditorUpdateVolume` (creative editor), `DynamicMesh` (gated
+on `DynamicMeshManager.CONTENT_ENABLED`), `Debug` (no server branch at all),
+and Twitch - `PlayerTwitchStats` does set player fields (`TwitchEnabled`,
+`TwitchSafe`, `TwitchVoteLock`), but all three are Twitch-integration state,
+so the label is accurate.
+
+Gated since 2026-09-06 by `provenance_scan` 7j, the mirror of 7i: it recovers
+the client senders from the IL the same way (walk back from each
+`SendToServer` to the `GetPackage<T>` that supplies it) and fails on an
+advertised name that reaches no C2S handler and has no stated reason. A name
+the docs call `SHIPPED` or `WORKS` gets no doc excuse at all, since that claim
+is precisely what has to match the code. Verified by mutation in both
+directions: dropping the `PlayerLaserSight` handler fires it, and removing a
+category entry for an ignored sender fires it too.
 
 Empirical backstop: `dispatch.zig` counts and logs every unhandled C2S package,
 and a full `smoke-navezgane` session (2 clients, 8 join passes, walk / jump /

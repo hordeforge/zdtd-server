@@ -6003,6 +6003,32 @@ pub const RagdollInvoke = struct {
     flags: u8,
 };
 
+/// NetPackagePlayerLaserSight (read IL=16): entityId i32 | laserSightActive
+/// bool | laserSightPosition Vector3. Stock's ProcessPackage (IL=70) re-sends
+/// the body from the server to every client except the sender's own entity,
+/// so a player sees a mate's laser dot.
+pub const LaserSight = struct {
+    entity_id: i32,
+    active: bool,
+    x: f32,
+    y: f32,
+    z: f32,
+};
+
+/// Read side of NetPackagePlayerLaserSight (read IL=16), laid out on
+/// `LaserSight` above. Server-side the body is relayed verbatim, so nothing
+/// past the ownership check reads these fields.
+pub fn parseLaserSight(body: []const u8) binary.ReadError!LaserSight {
+    var r: binary.Reader = .{ .data = body };
+    return .{
+        .entity_id = try r.readI32(),
+        .active = try r.readBool(),
+        .x = try r.readF32(),
+        .y = try r.readF32(),
+        .z = try r.readF32(),
+    };
+}
+
 /// Read side of NetPackageEntityRagdoll, whose layout and conditional tails are
 /// documented on RagdollInvoke above (RE protocol-packages.md, write IL=59).
 /// Only `entityId` and `flags` are returned; the flagged tails are consumed so

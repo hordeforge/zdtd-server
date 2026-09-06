@@ -267,6 +267,30 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         relayBodyExcept(self, "NetPackageEntityRagdoll", body, rg.entity_id, "EntityRagdoll");
         return true;
     }
+    if (std.mem.eql(u8, name, "NetPackagePlayerLaserSight")) {
+        // Stock ProcessPackage (IL=70): on the server the body is re-sent to
+        // every client except the sender's own entity, so a player sees a
+        // mate's laser dot. Pure relay, no server state.
+        const ls = packages.parseLaserSight(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        // Only speak for your own entity: without this a peer could paint a
+        // dot on anyone. Stock leans on the sender's ClientInfo for the
+        // exclusion; zdtd checks the claimed id directly.
+        if (ls.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        // Same rate gate as the other cosmetic relays: the client sends on
+        // aim changes, so an unthrottled loop would fan out for free.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        relayBodyExcept(self, "NetPackagePlayerLaserSight", body, ls.entity_id, "PlayerLaserSight");
+        return true;
+    }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
         const ps = self.sim.playerByPeer(c.slot);
         if (ps) |slot| {

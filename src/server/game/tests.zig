@@ -3975,3 +3975,85 @@ test "the three client-sent reports the server must not apply are handled and dr
     try std.testing.expect(g.harness.counters.get(.c2s_malformed) >= malformed_before + 2);
     try std.testing.expectEqual(@as(f32, 42), g.sim.health[ps].hp);
 }
+
+test "the laser sight relays to other players but not back to the sender" {
+    // Stock NetPackagePlayerLaserSight ProcessPackage (IL=70): the server
+    // re-sends the body to every client except the sender's own entity, so a
+    // player sees a mate's laser dot. Filed as Twitch integration in
+    // GAP_ANALYSIS until 2026-09-06, which is why it went unimplemented.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+
+    const ls_id = packages.idOf("NetPackagePlayerLaserSight").?;
+    var frame_buf: [128]u8 = undefined;
+    var pkgs: [8]wire_frame.Package = undefined;
+
+    // entityId i32 | active bool | position Vector3 = 17 bytes (read IL=16).
+    var body: [17]u8 = undefined;
+    var w: wire_binary.Writer = .{ .buf = &body };
+    try w.writeI32(ca.entity_id);
+    try w.writeBool(true);
+    try w.writeF32(10.5);
+    try w.writeF32(64);
+    try w.writeF32(-3.25);
+    try std.testing.expectEqual(@as(usize, 17), w.written().len);
+
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackagePlayerLaserSight", w.written()));
+
+    var a_got = false;
+    var b_body: ?[]const u8 = null;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == ls_id) a_got = true;
+        }
+    }
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == ls_id) b_body = p.body;
+        }
+    }
+    // No self-echo (AGENTS rule 19), and the mate gets the body verbatim.
+    try std.testing.expect(!a_got);
+    const relayed = b_body orelse return error.TestUnexpectedResult;
+    const parsed = try packages.parseLaserSight(relayed);
+    try std.testing.expectEqual(ca.entity_id, parsed.entity_id);
+    try std.testing.expect(parsed.active);
+    try std.testing.expectEqual(@as(f32, 10.5), parsed.x);
+    try std.testing.expectEqual(@as(f32, -3.25), parsed.z);
+
+    // Claiming another player's entity is an ownership reject, not a relay:
+    // without the check a peer could paint a dot on anyone.
+    var spoof: [17]u8 = undefined;
+    var sw: wire_binary.Writer = .{ .buf = &spoof };
+    try sw.writeI32(ca.entity_id + 1000);
+    try sw.writeBool(true);
+    try sw.writeF32(1);
+    try sw.writeF32(2);
+    try sw.writeF32(3);
+    cap_b.clear();
+    const rejects_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackagePlayerLaserSight", sw.written()));
+    try std.testing.expectEqual(rejects_before + 1, g.harness.counters.get(.ownership_rejects));
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            try std.testing.expect(p.id != ls_id);
+        }
+    }
+}

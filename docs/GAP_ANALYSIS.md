@@ -4149,21 +4149,16 @@ persists so little that a restart visibly damages a built base.
   client-side item hooks with no server state. Only `Debug` (no ProcessPackage
   server branch at all) is the developer surface the old label described. All
   four remain unhandled; the difference is that the reason is now the real
-  one. EAC/encryption waivers (EAC,
-  EncryptionPublicKey, KeyExchangeComplete), creative/editor
-  (EditorUpdateVolume), the world-folder download (WorldFolder: the C2S
+  one. EAC/encryption waivers (`EAC`,
+  `EncryptionPublicKey`, `KeyExchangeComplete`), creative/editor
+  (`EditorUpdateVolume`), the world-folder download (`WorldFolder`: the C2S
   package is a client asking for the server's world files, and stock's
   ProcessPackage IL=93 answers `StartSendingPacketsToClient` on the IsServer
   branch. Filed under "creative/editor" until 2026-09-06, which it is not.
   zdtd expects the operator to ship the world with the client or use a
   pregenerated map, so it neither serves nor requests one; the channel-1
-  routing for the name is pinned regardless), Twitch integration (PlayerTwitchStats,
-  TwitchAccess, TwitchVoteScheduling), the laser-sight relay (PlayerLaserSight:
-  filed under Twitch until 2026-09-06 and unrelated to it. ProcessPackage IL=70
-  re-sends the body from the server to everyone except the sender's own entity,
-  so a stock client shows a mate's laser dot. zdtd has no laser-sight state on
-  the player row, so the visual is missing for other players; the sender still
-  sees its own, which is client-local), headless mesh
+  routing for the name is pinned regardless), Twitch integration
+  (`PlayerTwitchStats`, `TwitchAccess`, `TwitchVoteScheduling`), headless mesh
   (DynamicMesh: verified 2026-09-06, the category is right. ProcessPackage
   IL=24 returns immediately unless `DynamicMeshManager.CONTENT_ENABLED`, and
   only then calls `DynamicMeshServer.ClientReadyForNextMesh` on the IsServer
@@ -5069,6 +5064,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageEntityRotation` | SHIPPED (2026-08-26 re-audit: the PosAndRot motion frames carry the full rotation (rx/ry/rz, replicate.zig), so a turning entity's rotation rides the same channel - the dedicated package is the client's local-only rotation for itself, no separate server role) |
 | `NetPackageEntityAnimationData` | SHIPPED (2026-08-26: client-originated avatar anim params (the local AvatarController broadcasts; stock ProcessPackage IL=64 relays) - the server re-broadcasts the raw body to the entity's tracked players, gated on the sender's own entity id + rate-limited) |
 | `NetPackageEntityRagdoll` | WORKS (re-audited 2026-09-02: the C2S handler parses the stock flags body via `parseRagdollInvoke` (write IL=59: entityId i32, flags u8, then conditional duration/bodyPart/vectors, mode, state) and relays it verbatim to the other tracked peers, matching stock `SendPacketToTrackedPlayersAndTrackedEntity` - the owner already ragdolled locally. Rate-gated on the block bucket like the other cosmetic relays; covered by a scenario test. The P2 label predated the handler) |
+| `NetPackagePlayerLaserSight` | SHIPPED (2026-09-06: found by re-deriving the 98 client senders from the v3.2.0 IL. Stock `ProcessPackage` IL=70 re-sends the body to every client except the sender's own entity, so a player sees a mate's laser dot; zdtd parses the stock 17-byte body (`entityId` i32, `laserSightActive` bool, `laserSightPosition` Vector3) via `parseLaserSight`, rejects a body claiming another player's entity, rate-gates on the block bucket like the other cosmetic relays, and fans it out with `relayBodyExcept`. Was filed under "Twitch integration" before the re-derivation, which is why it went unimplemented) |
 | `NetPackageEntityAttach` / detach | SHIPPED (vehicle multi-seat: seatRider/unseatRider broadcast attach/detach to observers; C2S seat requests resolved server-side) |
 | `NetPackageEntityStatChanged` / stats / buffs | PARTIAL (join sends Health/Stamina/Food/Water stock body; player Health replicates from the tick pass on `dirty.hp` per `EntityStats::TickWait` (asm.il:199393); buff set is server-owned via AddRemoveBuff with join sync + own-buff rejoin bundle; the C2S NetPackageEntityStatsBuff (which in stock applies the client's full buff blob, EntityBuffs.Read IL=76) stays an accepted no-op - a documented trust divergence: the server never lets the client overwrite its buff set, so client-local consume buffs (onSelfPrimaryActionEnd AddBuff, e.g. buffProcessConsumables / the disease roll) don't sync server-side and the dysentery-dependent behaviors (smell extension) miss them; recorded. Stealth meter S2C wired 2026-08-26 - NetPackageEntityStealth (id:i32, data:u16: noise 7-bit <<8, alert<<15, crouch bit 0) every 16 ticks on change, stock PlayerStealth.TickServer IL_0470, light = slice-1 day/night ambient (2026-08-26, world/sky.zig; block-light/moon/shade slices recorded); NPC stat-change stays deferred - traders are invulnerable, no stat they change) |
 
