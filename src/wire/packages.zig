@@ -5487,6 +5487,32 @@ pub fn buildWaypointInviteBody(buf: []u8, wp: *const WaypointInvite, inviter: i3
     return w.written();
 }
 
+pub const WaypointEntry = struct {
+    entity_id: i32,
+    x: f32,
+    y: f32,
+    z: f32,
+};
+
+/// Stock `NetPackageEntityWaypointList` (write IL=39): listType i16
+/// (`eWayPointListType` Vehicle=0 / Drone=1) then a count-prefixed list of
+/// (entityId i32, position Vector3 as 3xf32). The server ships the owner's
+/// vehicles to a remote player
+/// (`VehicleManager.UpdateVehicleWaypointsForPlayer` IL=69, channel 192) so
+/// their map shows where they parked.
+pub fn buildEntityWaypointListBody(buf: []u8, list_type: i16, entries: []const WaypointEntry) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI16(list_type);
+    try w.writeI32(@intCast(entries.len));
+    for (entries) |e| {
+        try w.writeI32(e.entity_id);
+        try w.writeF32(e.x);
+        try w.writeF32(e.y);
+        try w.writeF32(e.z);
+    }
+    return w.written();
+}
+
 test "waypoint invite parses and rebuilds round-trip" {
     var src: [512]u8 = undefined;
     var w: binary.Writer = .{ .buf = &src };

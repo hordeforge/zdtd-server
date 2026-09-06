@@ -4089,3 +4089,58 @@ test "a fresh login sends the empty AuthConfirmation for the client to echo" {
     }
     try std.testing.expect(saw);
 }
+
+test "an owner receives their parked vehicles as a waypoint list" {
+    // Stock VehicleManager.UpdateVehicleWaypointsForPlayer (IL=69): the
+    // server ships the owner's (entityId, pos) vehicle pairs as
+    // NetPackageEntityWaypointList with listType Vehicle (0) so their map
+    // shows where they parked. Unowned vehicles are nobody's waypoints.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = cb;
+    const wl_id = packages.idOf("NetPackageEntityWaypointList") orelse
+        return error.TestUnexpectedResult;
+
+    const v = g.sim.spawnVehicleEx(.minibike, 256, 70, 260, 500, 12, 1).?;
+    const vs = g.sim.slotOfNetId(v).?;
+    g.sim.vehicle[vs].owner_slot = @intCast(ca.slot);
+    const u = g.sim.spawnVehicleEx(.minibike, 300, 70, 300, 500, 12, 1).?;
+    _ = u; // unowned: must not appear in anyone's list
+
+    cap_a.clear();
+    cap_b.clear();
+    try g.sendVehicleWaypoints(ca.peer.?, ca.slot);
+    var pkgs: [8]wire_frame.Package = undefined;
+    var saw = false;
+    for (cap_a.slots[0..cap_a.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != wl_id) continue;
+            // listType i16 Vehicle=0, count i32, then (id i32, 3xf32).
+            try std.testing.expect(p.body.len >= 6);
+            try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, p.body[0..2], .little));
+            try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, p.body[2..6], .little));
+            try std.testing.expectEqual(v, std.mem.readInt(i32, p.body[6..10], .little));
+            saw = true;
+        }
+    }
+    try std.testing.expect(saw);
+    // The other client gets nothing from this send.
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            try std.testing.expect(p.id != wl_id);
+        }
+    }
+}

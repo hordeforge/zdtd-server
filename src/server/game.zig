@@ -2480,6 +2480,9 @@ pub const Game = struct {
             // empty; the explicit bundle keeps buff icons across a rejoin).
             try self.sendOwnBuffs(peer, c);
             try self.sendSeatedRiders(peer);
+            // The owner's parked vehicles for their map (stock
+            // UpdateVehicleWaypointsForPlayer; no-op without owned vehicles).
+            try self.sendVehicleWaypoints(peer, c.slot);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);
@@ -3401,6 +3404,10 @@ pub const Game = struct {
     /// their seats instead of standing on the hull.
     fn sendSeatedRiders(self: *Game, peer: *ln_peer.Peer) !void {
         try game_vehicle.sendSeatedRiders(self, peer);
+    }
+
+    pub fn sendVehicleWaypoints(self: *Game, peer: *ln_peer.Peer, slot: usize) !void {
+        try game_vehicle.sendVehicleWaypoints(self, peer, slot);
     }
 
     pub fn broadcastVehiclePositions(self: *Game) !void {
