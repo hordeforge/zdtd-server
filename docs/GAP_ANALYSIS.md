@@ -1240,8 +1240,10 @@ parsed, and quest offering is unwired.
 
 - **Trade execution** `WORKS`
   `systems.trade` is coherent bookkeeping with rollback and overflow guards:
-  buys debit the wallet and the trader's money pool (demand spike +100), sells
-  credit the wallet and debit the pool (demand ease -4), all atomic. Sells no
+  buys debit the wallet and credit the trader's money pool, sells credit the
+  wallet and debit the pool, all atomic; neither side moves entry markup
+  (corrected 2026-09-06 - the old parentheticals described a demand model
+  stock does not have). Sells no
   longer require the item in the trader's stock - a non-stocked item prices at
   its EconomicValue x EconomicSellScale x SellMarkdown via the Game's
   sell-price hook (stock lets you sell anything, RE GetSellPrice), with unit

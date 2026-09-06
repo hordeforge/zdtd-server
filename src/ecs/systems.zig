@@ -1516,8 +1516,8 @@ pub fn traderRestock(w: *World) void {
             if (stock.entries[e].count < w.trader_restock_cap) {
                 stock.entries[e].count +%= @min(w.trader_restock_refill, w.trader_restock_cap -| stock.entries[e].count);
             }
-            // Fresh entries: demand resets (stock HandleFullReset rebuilds the
-            // inventory, which drops the old markups).
+            // Fresh entries rebuild at neutral markup (stock HandleFullReset
+            // rebuilds the inventory, dropping the old markups).
             stock.entries[e].markup = 0;
         }
         // The money pool regenerates toward its spawn default each restock.
