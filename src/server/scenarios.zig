@@ -12933,3 +12933,72 @@ test "scenario a landed hit fans the applied damage to the victim's trackers" {
 
     std.debug.print("PASS s2c-damage: the victim's trackers see the applied hit\n", .{});
 }
+
+test "scenario a leg hit past the crawler threshold crawlers the zombie" {
+    // Stock EntityAlive.CheckDismember (IL=125): a leg hit whose damage
+    // fraction reaches the class LegCrawlerThreshold sets TurnIntoCrawler,
+    // and the S2C damage body carries 0x200. The template default threshold
+    // is 0 (path off); a class carrying .175 crawlers on a 20%-hp hit.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+    const dmg_id = packages.idOf("NetPackageDamageEntity") orelse
+        return error.TestUnexpectedResult;
+
+    const zid = g.sim.spawnZombie(258, 70, 258, 100) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid) orelse return error.TestUnexpectedResult;
+    // A class with a live crawler threshold and no cripple scale isolates
+    // the crawler arm: fraction = damage / max_hp.
+    g.sim.class_id[zs].leg_crawler_threshold = 0.175;
+    g.sim.class_id[zs].leg_cripple_scale = 0;
+    try std.testing.expect(g.sim.mask[zs].class_id);
+
+    // LeftLowerLeg = 256. 20 damage on 100 hp = 0.2 >= 0.175.
+    var dmg: [256]u8 = undefined;
+    var fbuf: [512]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &dmg };
+    try w.writeI32(zid);
+    try w.writeU32(packages.dmg_pain_hit);
+    try w.writeByte(0);
+    try w.writeByte(3);
+    try w.writeU16(20);
+    try w.writeByte(0);
+    try w.writeI16(256);
+    try w.writeByte(0);
+    try w.writeI32(ca.entity_id);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", w.written()));
+
+    try std.testing.expect(g.sim.zombie_ai[zs].crawler);
+    // The bystander sees the crawler bit on the fanned-out body.
+    var pkgs: [8]wire_frame.Package = undefined;
+    var saw = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != dmg_id or p.body.len < 8) continue;
+            const head = packages.parseDamageHead(p.body) catch continue;
+            if (head.entity_id != zid) continue;
+            const fl = std.mem.readInt(u32, p.body[4..8], .little);
+            if (fl & packages.dmg_turn_into_crawler != 0) saw = true;
+        }
+    }
+    try std.testing.expect(saw);
+
+    std.debug.print("PASS dismember-roll: threshold leg hit crawlers and reports 0x200\n", .{});
+}

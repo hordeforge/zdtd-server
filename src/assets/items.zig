@@ -142,6 +142,13 @@ pub const ItemDef = struct {
     /// normal/power pair (first = normal); the negative quality-curve rows
     /// are recorded, not guessed.
     stamina_loss: f32 = 0,
+    /// items.xml DismemberChance passive (144, first row value): the weapon's
+    /// dismember contribution carried on DamageSource.DismemberChance (RE
+    /// Explosion.AttackEntites IL_04F0 / ItemActionAttack.Hit IL_08E7).
+    /// Stock feeds it into EntityAlive.GetDismemberChance: >= 100 skips the
+    /// roll at flat 100, else chance = value * damagePer * the attacker's
+    /// DismemberSelfChance passive (143). 0 = unset (no dismember from it).
+    dismember_chance: f32 = 0,
     /// items.xml TargetArmor passive (163, perc_add, UNTAGGED rows only):
     /// armor penetration fraction applied to the target's mitigation
     /// (GetTotalPhysicalArmorRating IL=47: passive 163 on the attacking item
@@ -706,6 +713,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_degrad_per_use.deinit(allocator);
     var stock_stamina_loss: std.ArrayList(f32) = .empty;
     defer stock_stamina_loss.deinit(allocator);
+    var stock_dismember_chance: std.ArrayList(f32) = .empty;
+    defer stock_dismember_chance.deinit(allocator);
     var stock_target_armor: std.ArrayList(f32) = .empty;
     defer stock_target_armor.deinit(allocator);
     var stock_target_armor_tagged: std.ArrayList(f32) = .empty;
@@ -937,6 +946,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 if (xml.attr(row, 0, "value")) |v| stamina_loss = xml.parseF32(v) orelse 0;
             }
             try stock_stamina_loss.append(allocator, stamina_loss);
+            // DismemberChance (144): first row value, same first-match rule
+            // as StaminaLoss above. Perk-tagged rows (e.g. perkMiner69r) are
+            // the attacker's DismemberSelfChance side, not the weapon's, so
+            // they do not belong here; only an untagged row counts.
+            var dismember_chance: f32 = 0;
+            var di: usize = 0;
+            while (di < body.len) {
+                const pi = std.mem.findPos(u8, body, di, "<passive_effect") orelse break;
+                const pname = xml.attr(body, pi, "name") orelse {
+                    di = pi + 15;
+                    continue;
+                };
+                if (!std.mem.eql(u8, pname, "DismemberChance")) {
+                    di = pi + 15;
+                    continue;
+                }
+                if (xml.attr(body, pi, "tags") != null) {
+                    di = pi + 15;
+                    continue;
+                }
+                if (xml.attr(body, pi, "value")) |v| dismember_chance = xml.parseF32(v) orelse 0;
+                break;
+            }
+            try stock_dismember_chance.append(allocator, dismember_chance);
             try stock_target_armor.append(allocator, target_armor);
             try stock_target_armor_tagged.append(allocator, target_armor_tagged);
             try stock_target_armor_tag.append(allocator, target_armor_tag);
@@ -1178,6 +1211,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.mod_slots_n = stock_mslots_n.items[idx];
                 def.degradation_per_use = stock_degrad_per_use.items[idx];
                 def.stamina_loss = stock_stamina_loss.items[idx];
+                def.dismember_chance = stock_dismember_chance.items[idx];
                 def.target_armor = stock_target_armor.items[idx];
                 def.target_armor_tagged = stock_target_armor_tagged.items[idx];
                 def.target_armor_tag = stock_target_armor_tag.items[idx];
@@ -1238,6 +1272,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .mod_slots_n = stock_mslots_n.items[idx],
             .degradation_per_use = stock_degrad_per_use.items[idx],
             .stamina_loss = stock_stamina_loss.items[idx],
+            .dismember_chance = stock_dismember_chance.items[idx],
             .target_armor = stock_target_armor.items[idx],
             .target_armor_tagged = stock_target_armor_tagged.items[idx],
             .target_armor_tag = stock_target_armor_tag.items[idx],

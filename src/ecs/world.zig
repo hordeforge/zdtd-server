@@ -221,6 +221,13 @@ pub const EntityClass = struct {
     ai_attack: bool = true,
     /// entityclasses ExperienceGain kill XP; 0 = use the caller's flat floor.
     xp_gain: f32 = 0,
+    /// Dismember tuning (RE EntityAlive.CheckDismember / GetDismemberChance);
+    /// copied onto the entity's class_id at spawn. 0 = unset.
+    dismember_head: f32 = 0,
+    dismember_arms: f32 = 0,
+    dismember_legs: f32 = 0,
+    leg_cripple_scale: f32 = 0,
+    leg_crawler_threshold: f32 = 0,
 };
 
 pub const World = struct {
@@ -1129,6 +1136,11 @@ pub const World = struct {
             self.class_id[s].explosion_bonus_cat = def.explosion_bonus_cat;
             self.class_id[s].explosion_bonus_mult = def.explosion_bonus_mult;
             self.class_id[s].explosion_bonus_n = def.explosion_bonus_n;
+            self.class_id[s].dismember_head = def.dismember_head;
+            self.class_id[s].dismember_arms = def.dismember_arms;
+            self.class_id[s].dismember_legs = def.dismember_legs;
+            self.class_id[s].leg_cripple_scale = def.leg_cripple_scale;
+            self.class_id[s].leg_crawler_threshold = def.leg_crawler_threshold;
         }
         return id;
     }
@@ -1316,6 +1328,98 @@ pub const World = struct {
     /// turret kills. Stock uses the world GameRandom; the net id is stable
     /// within a run, so the same inputs give the same outcomes. drop_prob is
     /// clamped to [0,1] at load; >= 1 always drops.
+    /// Stock `EntityAlive.CheckDismember` (IL=125) + `GetDismemberChance`
+    /// (IL=128), run on a zombie/animal hit with the claimed body part. Sets
+    /// the victim's crippled/crawler state and reports the wire bits for the
+    /// S2C damage body. Returns bit flags: 1 = dismember, 2 = crawler,
+    /// 4 = cripple.
+    ///
+    /// `weapon_chance` is the attacker's held-item DismemberChance passive
+    /// (144); `damage_per` is damage / victim max HP. The attacker's
+    /// DismemberSelfChance perk passive (143) has no model yet (no
+    /// EffectManager/perk chain), so it reads 0 - stated, not silently
+    /// defaulted. The roll is a deterministic per-hit draw seeded from the
+    /// victim net id and hp, the same policy as rollLootDrop below.
+    pub fn rollDismember(
+        self: *World,
+        victim: Slot,
+        body_part: i16,
+        amount: f32,
+        max_hp: f32,
+        weapon_chance: f32,
+    ) u8 {
+        if (!self.mask[victim].zombie_ai or !self.mask[victim].health) return 0;
+        const ai = &self.zombie_ai[victim];
+        const cls = if (self.mask[victim].class_id) &self.class_id[victim] else null;
+        const is_leg = (body_part & c.bodypart_leg_mask) != 0;
+        // Stock gates the leg path on the victim being alive and neither
+        // stunned nor sleeping (no stun model here, so alive + awake); a leg
+        // hit on a corpse or a sleeper only rolls the plain dismember chance.
+        const awake = !self.mask[victim].sleeper or self.sleeper[victim].awake;
+        const leg_path = is_leg and self.alive[victim] and awake;
+        const region = c.bodyPartRegion(body_part);
+        const mult: f32 = if (cls) |cl| switch (region) {
+            .head => if (cl.dismember_head > 0) cl.dismember_head else 1,
+            .arms => if (cl.dismember_arms > 0) cl.dismember_arms else 1,
+            .legs => if (cl.dismember_legs > 0) cl.dismember_legs else 1,
+            .other => 0,
+        } else 1;
+        // GetDamageFraction: damage / max HP.
+        const damage_per = if (max_hp > 0) amount / max_hp else 0;
+        // Deterministic per-hit draw: victim net id folded with hp, the same
+        // hash-roll policy as rollLootDrop below.
+        var h: u64 = @bitCast(@as(i64, self.network_id[victim].id));
+        h = h *% 1103515245 +% @as(u64, @bitCast(@as(i64, @intFromFloat(self.health[victim].hp * 1000)))) +% 12345;
+        h = (h >> 16) ^ h;
+        const draw: f32 = @as(f32, @floatFromInt(h % 100000)) / 100000.0;
+        var out: u8 = 0;
+        // GetDismemberChance: weapon >= 100 skips the roll at flat 100, else
+        // weapon * damagePer * multiplier * attacker DismemberSelfChance (143).
+        // The 143 side has no model yet (no perk/EffectManager chain), so it
+        // reads 0: the dismember bit only fires at weapon >= 100 until perks
+        // land. Stated here so the dormancy is visible, not a silent zero.
+        const chance: f32 = if (weapon_chance >= 100) 100 else weapon_chance * damage_per * mult * 0;
+        if (chance > 0 and draw <= @min(chance, 100) / 100) {
+            out |= 1;
+            if (leg_path) {
+                ai.crawler = true;
+                out |= 2;
+                return out;
+            }
+            return out;
+        }
+        if (!leg_path) return out;
+        // LegCrawlerThreshold: damage fraction at/above it crawlers the zombie.
+        const threshold: f32 = if (cls) |cl| cl.leg_crawler_threshold else 0;
+        if (threshold > 0 and damage_per >= threshold) {
+            ai.crawler = true;
+            out |= 2;
+            return out;
+        }
+        // ShouldBeCrawler (BodyDamage state) has no model yet; without it a
+        // second leg hit re-checks the threshold rather than short-circuiting.
+        // LegCrippleScale: scaled = damagePer * scale must reach 0.05, then a
+        // second draw under it cripples - left leg unless already crippled
+        // (BodyDamage flag 4096), else right (8192). One crippled flag covers
+        // both here since the walk-slow does not distinguish sides yet.
+        const scale: f32 = if (cls) |cl| cl.leg_cripple_scale else 0;
+        if (scale <= 0) return out;
+        const scaled = damage_per * scale;
+        if (scaled < 0.05) return out;
+        if (ai.crippled) return out;
+        const left = (body_part & c.bodypart_left_leg_mask) != 0;
+        const right = (body_part & c.bodypart_right_leg_mask) != 0;
+        if (!left and !right) return out;
+        var h2: u64 = h *% 6364136223846793005 +% 1442695040888963407;
+        h2 = (h2 >> 16) ^ h2;
+        const draw2: f32 = @as(f32, @floatFromInt(h2 % 100000)) / 100000.0;
+        if (draw2 < scaled) {
+            ai.crippled = true;
+            out |= 4;
+        }
+        return out;
+    }
+
     pub fn rollLootDrop(self: *const World, net_id: i32, drop_prob: f32) bool {
         _ = self;
         if (drop_prob >= 1.0) return true;

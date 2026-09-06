@@ -2855,6 +2855,11 @@ pub const Game = struct {
             .explosion_bonus_cat = d.explosion.bonus_cat,
             .explosion_bonus_mult = d.explosion.bonus_mult,
             .explosion_bonus_n = d.explosion.bonus_n,
+            .dismember_head = d.dismember_head,
+            .dismember_arms = d.dismember_arms,
+            .dismember_legs = d.dismember_legs,
+            .leg_cripple_scale = d.leg_cripple_scale,
+            .leg_crawler_threshold = d.leg_crawler_threshold,
         };
     }
 
