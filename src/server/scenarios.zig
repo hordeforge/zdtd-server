@@ -5433,6 +5433,44 @@ test "scenario an enforced guard kick tells the client why" {
     std.debug.print("PASS guard kick: PlayerDenied sent, reason={d} custom=\"{s}\"\n", .{ reason, custom });
 }
 
+test "scenario the five unreliable packages leave the reliable window alone" {
+    // Stock overrides get_Reliable to false in exactly five classes
+    // (EntityPosAndRot, EntityRelPosAndRot, EntityRotation, EntitySpeeds,
+    // EntityStatsBuff; RE network.md "defaults to true and is overridden to
+    // false by exactly five classes"), and NetworkServerLiteNetLib maps that
+    // to DeliveryMethod 4 instead of 2. `isUnreliablePackage` has a unit test
+    // for the name list, but nothing checked that the send path acts on it:
+    // routing every package reliably would still pass that test while filling
+    // the retransmit window with position spam.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_unreliable");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_unreliable", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const peer = c.peer orelse return error.TestUnexpectedResult;
+
+    // The reliable sequence counter only advances on the reliable path, so it
+    // is the observable difference between the two routes.
+    var body: [64]u8 = undefined;
+    const pos = try packages.buildPosAndRotBody(&body, c.entity_id, 1, 2, 3, 0, 0, 0, true);
+    const seq_before = peer.local_seq;
+    try g.sendGame(peer, "NetPackageEntityPosAndRot", pos);
+    try std.testing.expectEqual(seq_before, peer.local_seq);
+
+    // A package not on the list takes the reliable route and does advance it.
+    const wt = try packages.buildWorldTimeBody(body[0..16], 1234);
+    try g.sendGame(peer, "NetPackageWorldTime", wt);
+    try std.testing.expect(peer.local_seq != seq_before);
+    std.debug.print("PASS unreliable-route: PosAndRot left seq at {d}, WorldTime moved it to {d}\n", .{ seq_before, peer.local_seq });
+}
+
 test "scenario workstation queue: C2S write, craft tick, S2C echo keeps stock geometry" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_ws");
