@@ -3313,11 +3313,23 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `src/server/admin_console.zig:748,905`, `src/server/preset.zig`,
   `src/assets/sandbox_data.zig:126`, `serverconfig.example.xml`
 
-- **XP deficit death penalty on the server** `PARTIAL (waived)`
-  `AddXPDeficit` (`ExpDeficitPerDeathPercentage`/`MaxPercentage` on
-  `OnRespawnFromDeath`) not tracked; death/rebalance is otherwise client-ledger
-  bound and has no player-visible blocker without the full progression runtime.
-  *Anchors:* `asm.il:1084044`, `asm.il:1084146`
+- **XP deficit death penalty on the server** `WORKS` (was `PARTIAL (waived)`;
+  closed 2026-09-06)
+  Stock earns the deficit client-side: `EntityPlayer.HandleClientDeath`
+  (IL=71) switches on DeathPenalty and runs the matching `game_on_death_*`
+  sequence, and `AddXPDeficit` is a client action (`ActionBaseClientAction`),
+  so the server performs it by sending a `ClientSequenceAction` (12) response
+  the client runs locally (`HandleGameEventSequenceItemForClient`). The server
+  sends that response on authoritative player death in the hp-replicate pass
+  (exactly once per death - the dirty bit drains there): DeathPenalty 1 sends
+  `game_on_death_default:0`, 2 sends `game_on_death_injured:0` (AddXPDeficit is
+  action index 0 in both stock gameevents.xml sequences; root keys are
+  `Name:index`). 0 and 3 send nothing (no deficit arm). The earn math itself
+  (passive 0x61 default 0.1 over next-level XP, clamped by 0x60 default 0.5)
+  and the consume path (`AddLevelExpRecursive` burns deficit before XP) stay
+  client-side, exactly as on stock - the server carries no deficit ledger.
+  *Anchors:* `asm.il:1084044`, `asm.il:1084146`, `src/wire/packages.zig`
+  (`buildGameEventSequenceAction`), `src/server/game/replicate_health.zig`
 
 - **Death / kill counters** `PARTIAL` (re-evaluated 2026-09-02; the `(waived)`
   qualifier is dropped and the row is split)

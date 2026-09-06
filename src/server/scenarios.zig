@@ -13087,3 +13087,61 @@ test "scenario a perked attacker's dismember bonus reaches the S2C damage body" 
 
     std.debug.print("PASS dismember-143-e2e: perk bonus lands the dismember bit on S2C\n", .{});
 }
+
+test "scenario player death sends the deficit sequence action under XPOnly" {
+    // Stock EntityPlayer.HandleClientDeath (IL=71) switches on DeathPenalty:
+    // 1 runs game_on_death_default, 2 runs game_on_death_injured, and both
+    // carry AddXPDeficit at action index 0. The server performs it as a
+    // ClientSequenceAction (12) response so the dead player's client earns
+    // the deficit locally (AddXPDeficit IL=65); without the send the client
+    // never runs it from the server side.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_deathdeficit");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_deathdeficit", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.death_penalty = 1;
+    _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+    try std.testing.expectEqual(@as(f32, 0), g.sim.health[ps].hp);
+    cap.clear();
+    g.replicatePlayerHealth();
+    const resp_id = packages.idOf("NetPackageGameEventResponse").?;
+    const body = cap.findPkgId(resp_id) orelse return error.TestUnexpectedResult;
+    var r = binary.Reader{ .data = body };
+    var nb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("game_on_death_default", try r.readString(&nb));
+    try std.testing.expectEqual(c.entity_id, try r.readI32());
+    var eb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&eb));
+    var tb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&tb));
+    try std.testing.expectEqual(@as(u8, 12), try r.readByte());
+    // DeathPenalty 2 selects the injured sequence instead.
+    g.death_penalty = 2;
+    g.sim.health[ps].hp = 100;
+    g.sim.markDirty(ps, .{ .hp = true });
+    _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+    cap.clear();
+    g.replicatePlayerHealth();
+    const body2 = cap.findPkgId(resp_id) orelse return error.TestUnexpectedResult;
+    var r2 = binary.Reader{ .data = body2 };
+    var nb2: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("game_on_death_injured", try r2.readString(&nb2));
+    // DeathPenalty 0 sends nothing: game_on_death_none carries no deficit arm.
+    g.death_penalty = 0;
+    g.sim.health[ps].hp = 100;
+    g.sim.markDirty(ps, .{ .hp = true });
+    _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+    cap.clear();
+    g.replicatePlayerHealth();
+    try std.testing.expect(cap.findPkgId(resp_id) == null);
+    std.debug.print("PASS death-deficit: XPOnly/Injured send the deficit action, None sends nothing\n", .{});
+}

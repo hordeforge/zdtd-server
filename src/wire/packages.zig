@@ -3523,6 +3523,48 @@ pub fn buildGameEventResponse(buf: []u8, request_body: []const u8) ![]u8 {
     return w.written();
 }
 
+/// Stock NetPackageGameEventResponse carrying a client action for the
+/// receiver to perform (`ActionBaseClientAction.PerformTargetAction` sends
+/// `ResponseTypes.ClientSequenceAction = 12` with the action key; the client
+/// runs it via `HandleGameEventSequenceItemForClient(eventName, actionKey)`
+/// against its own gameevents.xml copy). Body: eventName str |
+/// targetEntityID i32 | extraData str | tag str | responseType u8 |
+/// entitySpawnedID i32 (-1 stock) | actionKey str (read IL=89, write IL=144).
+pub fn buildGameEventSequenceAction(
+    buf: []u8,
+    event_name: []const u8,
+    target_entity_id: i32,
+    action_key: []const u8,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeString(event_name);
+    try w.writeI32(target_entity_id);
+    try w.writeString("");
+    try w.writeString("");
+    try w.writeByte(12); // ResponseTypes.ClientSequenceAction
+    try w.writeI32(-1); // entitySpawnedID (unused by the type-12 arm)
+    try w.writeString(action_key);
+    return w.written();
+}
+
+test "game event sequence action carries type 12 plus the action key" {
+    var buf: [128]u8 = undefined;
+    const body = try buildGameEventSequenceAction(&buf, "game_on_death_default", 107, "game_on_death_default:0");
+    var r: binary.Reader = .{ .data = body };
+    var nb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("game_on_death_default", try r.readString(&nb));
+    try std.testing.expectEqual(@as(i32, 107), try r.readI32());
+    var eb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&eb));
+    var tb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&tb));
+    try std.testing.expectEqual(@as(u8, 12), try r.readByte());
+    try std.testing.expectEqual(@as(i32, -1), try r.readI32());
+    var kb: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("game_on_death_default:0", try r.readString(&kb));
+    try std.testing.expectEqual(body.len, r.pos);
+}
+
 test "game event response echoes request name and approves" {
     var rb: [128]u8 = undefined;
     var rw: binary.Writer = .{ .buf = &rb };
