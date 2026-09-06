@@ -4057,3 +4057,35 @@ test "the laser sight relays to other players but not back to the sender" {
         }
     }
 }
+
+test "a fresh login sends the empty AuthConfirmation for the client to echo" {
+    // Stock AuthFinalizer.Authorize (IL=10) sends an empty AuthConfirmation
+    // as the last authorizer step; the client echoes it (ProcessPackage
+    // IL_002E) and the server's ReplyReceived completes auth. The echo arm
+    // existed without the send, so the round-trip never started.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{ .enable_sample_plugin = false });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+    const ac_id = packages.idOf("NetPackageAuthConfirmation") orelse
+        return error.TestUnexpectedResult;
+    var pkgs: [8]wire_frame.Package = undefined;
+    var saw = false;
+    for (cap.slots[0..cap.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != ac_id) continue;
+            // Empty body: read IL=1 touches nothing past the base header.
+            try std.testing.expectEqual(@as(usize, 0), p.body.len);
+            saw = true;
+        }
+    }
+    try std.testing.expect(saw);
+}

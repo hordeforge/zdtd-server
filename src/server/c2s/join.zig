@@ -206,6 +206,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         const ans = try packages.buildLoginAnswerBody(self.body_buf[0..2048], true, gsi);
         try self.sendGame(peer, "NetPackagePlayerLoginAnswer", ans);
+        // Stock AuthFinalizer.Authorize (IL=10): the last authorizer step
+        // sends an empty AuthConfirmation, which the client echoes back
+        // (ProcessPackage IL_002E, SendToServer). The echo arm below already
+        // handles it; without the send the round-trip never starts.
+        // GetLength 9 is the base NetPackage header; the body is empty
+        // (read IL=1, write IL=4 both touch nothing past the base).
+        try self.sendGame(peer, "NetPackageAuthConfirmation", &.{});
         const surf0 = self.spawnSurface(sp.x, sp.z);
         const was_joined = c.joined;
         const eid = self.sim.spawnPlayer(@floatFromInt(surf0.x), @floatFromInt(surf0.y), @floatFromInt(surf0.z), @intCast(c.slot)) orelse return true;
