@@ -4302,6 +4302,19 @@ pub fn parseLandClaimRepair(body: []const u8) !struct { x: i32, y: i32, z: i32, 
     return .{ .x = x, .y = y, .z = z, .begin_repair = begin };
 }
 
+/// Write side of NetPackageLandClaimRepair (write IL=26): blockPosition as
+/// three i64, then `beginRepair` bool. The server emits the end-repair form
+/// (`Setup(blockPos, false)`) to the requester when the repair pass finishes
+/// (TEFeatureAreaRepair repair coroutine IL_0337), clearing its IsRepairing.
+pub fn buildLandClaimRepairBody(buf: []u8, x: i32, y: i32, z: i32, begin_repair: bool) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI64(x);
+    try w.writeI64(y);
+    try w.writeI64(z);
+    try w.writeBool(begin_repair);
+    return w.written();
+}
+
 /// NetPackageNavObject add/remove map marker (quest/trader style).
 /// Wire: class | name | pos | isAdd | useOverrideColor | color u32 | usingLoc bool | entityId
 pub fn buildNavObjectAdd(
