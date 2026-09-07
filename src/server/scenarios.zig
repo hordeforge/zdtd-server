@@ -10690,9 +10690,18 @@ test "scenario a client-reported XP add mints nothing" {
     try std.testing.expectEqual(level_before, c.level);
 
     // The server's own award path still works, so the refusal above is the
-    // trust gate and not a dead XP system.
+    // trust gate and not a dead XP system. Harvest/quest/magazine XP also
+    // push AddExpClient as `_xpOther` so the owning client shows the icon.
+    cap.clear();
     g.awardXp(c.slot, 100);
     try std.testing.expect(c.xp > xp_before);
+    const xp_id = packages.idOf("NetPackageEntityAddExpClient").?;
+    const xpb = cap.findPkgId(xp_id) orelse return error.TestUnexpectedResult;
+    var xr = binary.Reader{ .data = xpb };
+    try std.testing.expectEqual(c.entity_id, try xr.readI32());
+    try std.testing.expectEqual(@as(i32, 100), try xr.readI32());
+    try std.testing.expectEqual(packages.stock_xp.xp_type_other, try xr.readI16());
+    try std.testing.expectEqual(false, try xr.readBool());
     std.debug.print("PASS xp-trust: client-reported XP refused, server award applies\n", .{});
 }
 

@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x21 open
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x19 open
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -3122,13 +3122,14 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   *Anchors:* `src/server/config.zig:238`, `src/server/game.zig`, ``,
   `output_log_client_zdtd_connect.txt:5236`
 
-- **XP from non-kill sources** `PARTIAL (waived)`
-  Kill XP, quest `Exp` rewards, and magazine `GiveExp` (50, `_xpOther`) are
-  server-awarded (`awardXp`). Mining/repair XP stays client-reported and would
-  be faked without the harvest/repair XP economy; waived as authority rather
-  than a missing magazine grant.
-  *Anchors:* `src/server/game.zig` `awardXp`, `src/server/game/player.zig`
-  (`grantMagazineRead`), `Data/Config/quests.xml:103`
+- **XP from non-kill sources** `WORKS` `(2026-09-07)`
+  Harvest XP (`harvestXpForBlock` × rolled count), quest `Exp` rewards, craft
+  `craft_exp_gain` (stock values are 0), and magazine `GiveExp` are
+  server-awarded and notify via `NetPackageEntityAddExpClient` `_xpOther`.
+  Residual: repair XP has no stock server source without trusting the
+  client-side repair queue (waived RepairItem row).
+  *Anchors:* `src/server/c2s/blocks.zig` harvest XP, `src/server/game/step.zig`
+  quest Exp, `src/server/game/player.zig` `awardXp`
 
 - **Skill points granted per level** `WORKS` (was `PARTIAL (waived)`;
   re-evaluated 2026-09-02)
@@ -3160,12 +3161,14 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   *Anchors:* `src/server/c2s/misc.zig` (C2S blob accepted, no sim),
   `src/server/game/join.zig` (`sendPlayerStatsTo`), `asm.il:833182`
 
-- **Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)** `PARTIAL (waived)`
-  Builder exists but push is via authoritative `EntityStatChanged`/`PlayerStats`
-  path that is pending full progression ledger sync. Dedicated push is polish.
-  SHIPS 2026-08-27: `NetPackageEntityAddExpClient` rides the server XP award
-  (`game/player.zig:143`) driven by the server ledger.
-  *Anchors:* `src/wire/packages.zig:158-159`, `asm.il:813609`
+- **Server to client XP/level push (EntityAddExpClient, EntitySetSkillLevelClient)** `WORKS` `(2026-09-07)`
+  Kill XP sends `NetPackageEntityAddExpClient` as Kill (`xpType` 0). Harvest,
+  quest Exp, craft, and magazine GiveExp go through `awardXp`, which pushes
+  the same package as `_xpOther` so the owning client shows the icon.
+  `NetPackageEntitySetSkillLevelClient` still echoes perk spend. The C2S
+  ingest of client-authored XP stays dropped (authority, DIVERGENCES 1.2).
+  *Anchors:* `src/server/game/player.zig` (`awardXp` / `awardXpSilent` /
+  `killXpAward`), `src/wire/stock_xp.zig`, `asm.il:813609`
 
 - **progression.xml attribute and perk catalog load** → **non-goal** (2026-08-25):
   the catalog parses (8 attributes, 57 perks, per-perk parent/max_level); a

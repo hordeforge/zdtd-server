@@ -24,8 +24,21 @@ const max_clients = game_mod.max_clients;
 /// GameStats[54] party_shared_kill_range (stock default 100; no V3.1.0
 /// serverconfig key, so it rides the `[sim] party_shared_kill_range` surface).
 /// Award XP to a client's server-side ledger, scaled by XPMultiplier.
-/// Levels up using progression.xml exp curve when loaded.
+/// Levels up using progression.xml exp curve when loaded. Non-kill sources
+/// (harvest, quest Exp, craft, magazine GiveExp) also push
+/// NetPackageEntityAddExpClient as `_xpOther` so the owning client shows
+/// the icon; kill XP uses awardXpSilent + a typed Kill packet instead.
 pub fn awardXp(self: *Game, slot: usize, base: u64) void {
+    awardXpTyped(self, slot, base, packages.stock_xp.xp_type_other);
+}
+
+/// Ledger + level-up only. Kill XP and party-share use this so the typed
+/// S2C packet (AddExpClient Kill / SharedPartyKill) is the only client notify.
+pub fn awardXpSilent(self: *Game, slot: usize, base: u64) void {
+    awardXpTyped(self, slot, base, null);
+}
+
+fn awardXpTyped(self: *Game, slot: usize, base: u64, notify_type: ?i16) void {
     if (slot >= self.clients.len) return;
     const c = &self.clients[slot];
     const before_xp = c.xp;
@@ -54,8 +67,27 @@ pub fn awardXp(self: *Game, slot: usize, base: u64) void {
     }
     // Stat-changed observer (ADR 0034): the XP/level leg, one call per award.
     if (c.xp != before_xp) {
-        const h = &self.sim.health[self.sim.playerByPeer(slot) orelse return];
-        self.statChangedObserver(c.entity_id, @trunc(h.hp), @trunc(h.food), @trunc(h.water), @trunc(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+        if (self.sim.playerByPeer(slot)) |ps| {
+            const h = &self.sim.health[ps];
+            self.statChangedObserver(c.entity_id, @trunc(h.hp), @trunc(h.food), @trunc(h.water), @trunc(h.stamina), c.level, @intCast(@min(c.xp, std.math.maxInt(i32))));
+        }
+        if (notify_type) |xp_type| {
+            const granted: i32 = @intCast(@min(c.xp -| before_xp, std.math.maxInt(i32)));
+            if (granted > 0 and c.entity_id > 0) {
+                if (c.peer) |peer| {
+                    if (packages.stock_xp.buildAddExpClientBody(&self.body_buf, .{
+                        .entity_id = c.entity_id,
+                        .xp = granted,
+                        .xp_type = xp_type,
+                    })) |xb| {
+                        self.sendGame(peer, "NetPackageEntityAddExpClient", xb) catch |err| {
+                            self.harness.counters.inc(.net_send_errors);
+                            std.debug.print("zdtd: send AddExpClient failed: {s}\n", .{@errorName(err)});
+                        };
+                    } else |_| {}
+                }
+            }
+        }
     }
 }
 
@@ -141,11 +173,12 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         base_scaled * (100 - 10 * @as(u64, in_range)) / 100
     else
         base_scaled;
-    awardXp(self, killer_slot, split);
+    awardXpSilent(self, killer_slot, split);
     // Stock sends NetPackageEntityAddExpClient (xpType 0 = Kill) so the
     // killer's client shows the XP icon and applies the gain locally; the
     // party split is server-computed, so the killer cannot derive it alone.
     // Mates get NetPackageSharedPartyKill instead (below), matching stock.
+    // awardXpSilent keeps the ledger from also emitting `_xpOther`.
     if (killer.peer) |peer| {
         if (packages.stock_xp.buildAddExpClientBody(&self.body_buf, .{
             .entity_id = killer.entity_id,
@@ -162,7 +195,7 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
         for (p.members[0..p.n]) |m| {
             if (m == killer.entity_id) continue;
             if (self.clientByEntityId(m)) |mate| {
-                awardXp(self, mate.slot, split);
+                awardXpSilent(self, mate.slot, split);
                 if (mate.peer) |peer| {
                     if (packages.stock_party.buildSharedKillBody(&self.body_buf, .{
                         .entity_type = 3, // zombieEntity (class hash name in stock; ECD carries the class)
@@ -601,25 +634,7 @@ pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
         _ = addProgressionLevel(self, slot, def.progression_name, def.progression_add);
     }
     if (def.eat_exp == 0) return;
-    const c = &self.clients[slot];
-    const before = c.xp;
     awardXp(self, slot, def.eat_exp);
-    const granted: i32 = @intCast(@min(c.xp -| before, std.math.maxInt(i32)));
-    if (granted <= 0) return;
-    if (c.peer) |peer| {
-        if (c.entity_id > 0) {
-            if (packages.stock_xp.buildAddExpClientBody(&self.body_buf, .{
-                .entity_id = c.entity_id,
-                .xp = granted,
-                .xp_type = packages.stock_xp.xp_type_other,
-            })) |xb| {
-                self.sendGame(peer, "NetPackageEntityAddExpClient", xb) catch |err| {
-                    self.harness.counters.inc(.net_send_errors);
-                    std.debug.print("zdtd: send magazine AddExpClient failed: {s}\n", .{@errorName(err)});
-                };
-            } else |_| {}
-        }
-    }
 }
 
 /// Fold one named passive over a client's purchased attribute/perk levels

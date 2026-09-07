@@ -17,6 +17,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   recipes unlock when the skill meets the `unlock_entry` tier; the join PDF
   and server craft path honour that list. `always_unlocked` recipes stay
   available from the start.
+- Harvest, quest, craft, and magazine XP now push
+  `NetPackageEntityAddExpClient` as `_xpOther` so the owning client shows
+  the icon. Kill XP still uses the typed Kill packet.
 
 ## [0.4.0] - 2026-09-06
 
