@@ -30,6 +30,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `NetPackageLockResponse`. Quest requirement rows and trader dialog
   chrome are scored WORKS against stock (zero requirement XML; dialog
   is client-local).
+- Workstation TE queues honour recipes.xml: magazine `unlock_entry`
+  gates, plus per-craft count, duration, and `craft_exp_gain` from the
+  catalog rather than the client blob. Material-based recipes stay
+  rejected (no scrap yield table).
 
 ## [0.4.0] - 2026-09-06
 

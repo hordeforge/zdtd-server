@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x13 open)
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x12 open)
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -2902,11 +2902,17 @@ unvalidated, and durability, mods and repair do not exist.
   and the server re-exposes it via `workstations.zig` rate hooks so inventory
   and XP stay authoritative elsewhere. Mark waived vs adding a parallel forge sim.
 
-- **Workstation recipe validation against recipes.xml** `PARTIAL (waived)`
-  Craft queuing is client-driven Recipe blobs; server validates placement/rate
-  and gates unlocks elsewhere (`recipes.zig` + `craft_area` + `craft_tool`). Full
-  body-cop parsing would reimplement `TileEntityWorkstation` verbatim.
-  *Anchors:* `src/wire/stock_te.zig:509-523`, `src/world/workstations.zig:257-269`
+- **Workstation recipe validation against recipes.xml** `WORKS` `(2026-09-07)`
+  With stock recipes.xml loaded, a queued TE craft survives only when its
+  output type resolves to a recipe, the recipe's `craft_area` is allowed on
+  that block, it is not `material_based`, and the player's magazine
+  `unlock_entry` (if any) is met. Per-craft count, duration, and
+  `craft_exp_gain` come from recipes.xml, not the client blob. Builtin
+  catalogs (offline/test, no stock types) skip the gate. Residual: the
+  Recipe.Write ingredient list is still echoed, not re-parsed, because
+  stock HandleRecipeQueue already consumed inputs client-side.
+  *Anchors:* `src/server/c2s/inv.zig` (workstation TE apply),
+  `src/assets/recipes.zig`, `src/assets/progression.zig` (`unlockRequirement`)
 
 - **Non-fuel workstations (workbench, cement mixer, table saw)** `FIXED (2026-08-08)`
   The craft gate now mirrors stock TileEntityWorkstation.HandleRecipeQueue

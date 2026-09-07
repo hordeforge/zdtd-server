@@ -24,6 +24,7 @@ const stabilityAfterSetBlock = game_mod.stabilityAfterSetBlock;
 const reverseItemType = game_mod.Game.reverseItemType;
 const resolveItemType = game_mod.Game.resolveItemType;
 const eatProps = game_mod.Game.eatProps;
+const assets_progression = @import("../../assets/progression.zig");
 
 /// Server-authoritative mod attachment scrub (RE items.md CalcModSlotCount
 /// IL=29 + ItemClassModifier suitability): after an inventory write, a slot's
@@ -546,10 +547,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // could otherwise claim any output count or craft in
                         // zero time). Stock HandleRecipeQueue reads the Recipe
                         // object for both; the item restarts on the server time.
+                        if (assets_progression.unlockRequirement(&self.progression_table, rd.name)) |req| {
+                            if (self.skillLevelOf(c.slot, req[0]) < req[1]) {
+                                dst.* = .{};
+                                continue;
+                            }
+                        }
                         dst.* = q;
                         dst.output_count = rd.count;
                         dst.one_item_craft_time = rd.craft_time;
                         dst.craft_time_left = rd.craft_time;
+                        dst.craft_exp_gain = if (rd.craft_exp_gain >= 0) rd.craft_exp_gain else 0;
                     }
                 } else {
                     @memcpy(st.queue[0..ws.queue_n], ws.queue[0..ws.queue_n]);
