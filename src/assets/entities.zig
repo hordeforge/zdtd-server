@@ -49,6 +49,9 @@ pub const EntityDef = struct {
     /// false only for classes whose task list exists without one (timid
     /// animals), true otherwise so brainless classes keep the zombie default.
     ai_attack: bool = true,
+    /// Inherited AITask list as TaskId bits. 0 = no XML list (native table).
+    /// Bit 15 (`ai_task_list_set`) means a list was parsed.
+    ai_tasks: u16 = 0,
     /// entityclasses MoveSpeedAggro max = night chase speed (m/s scale); the
     /// stock XML comment on the prop ("min/max (like day or night)") pins the
     /// split, matching GetMoveSpeedAggro dark → aggroMax (passive 134). 0 =
@@ -339,39 +342,100 @@ fn parseBoolLoose(s: []const u8) bool {
     return std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "True") or std.mem.eql(u8, s, "1");
 }
 
-/// Stock AITask-* task names that make an entity attack. V3.1.0 b14
-/// entityclasses.xml ships only ApproachAndAttackTarget (the AI task enum's
-/// attack-capable task; every hostile animal and zombie template carries it,
-/// timid animals never do). A new attack task name lands here as RE evidence,
-/// not in per-class data.
-const attack_task_names = [_][]const u8{"ApproachAndAttackTarget"};
+/// First token of one AITask list entry (pipe form carries `class=` / `data=`
+/// after the name). Empty / Leap / RangedAttackTarget stay unmapped: Leap is
+/// cosmetic on the mountain lion; RangedAttackTarget has no native task yet.
+fn taskNameToId(name: []const u8) ?components.TaskId {
+    if (std.mem.eql(u8, name, "BreakBlock")) return .break_block;
+    if (std.mem.eql(u8, name, "DestroyArea")) return .destroy_area;
+    if (std.mem.eql(u8, name, "ApproachAndAttackTarget")) return .approach_attack;
+    if (std.mem.eql(u8, name, "Territorial")) return .territorial;
+    if (std.mem.eql(u8, name, "ApproachDistraction")) return .approach_distraction;
+    if (std.mem.eql(u8, name, "ApproachSpot")) return .approach_spot;
+    if (std.mem.eql(u8, name, "RunawayWhenHurt")) return .runaway;
+    if (std.mem.eql(u8, name, "RunawayFromEntity")) return .runaway;
+    if (std.mem.eql(u8, name, "Look")) return .look;
+    if (std.mem.eql(u8, name, "Wander")) return .wander;
+    return null;
+}
 
-/// Does the class's inherited AITask-* list contain an attack task? Walks the
-/// extends chain like resolveProp. A class with no AITask-* at all reports
-/// true (the sim drives those with the zombie brain and they keep attacking);
-/// a class whose list exists without an attack task (timid animal template)
-/// reports false, so it never picks approach_attack.
-fn resolvedAiAttacks(
+fn orTaskName(mask: *u16, raw: []const u8) void {
+    var tok = raw;
+    while (tok.len > 0 and std.ascii.isWhitespace(tok[0])) tok = tok[1..];
+    while (tok.len > 0 and std.ascii.isWhitespace(tok[tok.len - 1])) tok = tok[0 .. tok.len - 1];
+    if (tok.len == 0) return;
+    var name = tok;
+    if (std.mem.findScalar(u8, tok, ' ')) |sp| name = tok[0..sp];
+    if (std.mem.findScalar(u8, name, '|')) |bar| name = name[0..bar];
+    if (name.len == 0) return;
+    if (taskNameToId(name)) |id| {
+        mask.* |= components.aiTaskBit(id);
+    }
+}
+
+/// Walk the Extends chain like resolveProp. Numbered `AITask-N` props (animals)
+/// and the pipe-separated `AITask` blob (zombieTemplateMale and class overrides)
+/// both count. Child classes that set `AITask` replace the parent list; numbered
+/// keys merge with the parent unless the child also ships a pipe blob.
+fn resolvedAiTasks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
-) bool {
-    var has_any_task = false;
+) u16 {
+    var mask: u16 = 0;
+    var saw_list = false;
     var cur: ?[]const u8 = name;
     var depth: u8 = 0;
     while (cur) |cn| : (depth += 1) {
         if (depth > 24) break;
         const rc = classes.get(cn) orelse break;
+        var numbered: u16 = 0;
+        var numbered_n: u8 = 0;
+        var pipe: u16 = 0;
+        var has_pipe = false;
         var it = rc.props.iterator();
         while (it.next()) |e| {
-            if (!std.mem.startsWith(u8, e.key_ptr.*, "AITask-")) continue;
-            has_any_task = true;
-            for (attack_task_names) |att| {
-                if (std.mem.eql(u8, e.value_ptr.*, att)) return true;
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            if (std.mem.eql(u8, key, "AITask")) {
+                has_pipe = true;
+                var rest = val;
+                while (rest.len > 0) {
+                    const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                    orTaskName(&pipe, rest[0..cut]);
+                    if (cut >= rest.len) break;
+                    rest = rest[cut + 1 ..];
+                }
+                continue;
             }
+            if (!std.mem.startsWith(u8, key, "AITask-")) continue;
+            numbered_n += 1;
+            orTaskName(&numbered, val);
+        }
+        if (has_pipe) {
+            mask = pipe;
+            saw_list = true;
+            break;
+        }
+        if (numbered_n > 0) {
+            mask |= numbered;
+            saw_list = true;
         }
         cur = rc.extends;
     }
-    return !has_any_task;
+    if (!saw_list) return 0;
+    return mask | components.ai_task_list_set;
+}
+
+/// Does the class's inherited AITask list contain an attack task? Pipe
+/// `AITask` (zombieTemplateMale) and numbered `AITask-N` (animals) both count.
+/// No list at all reports true so brainless classes keep the zombie default.
+fn resolvedAiAttacks(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) bool {
+    const tasks = resolvedAiTasks(classes, name);
+    if (tasks & components.ai_task_list_set == 0) return true;
+    return components.aiTaskAllowed(tasks, .approach_attack);
 }
 
 fn inferKind(name: []const u8, tags: []const u8, is_animal: bool) components.Kind {
@@ -554,6 +618,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const tags = resolveProp(&classes, name, "Tags", 0) orelse "";
         const is_animal = if (resolveProp(&classes, name, "IsAnimalEntity", 0)) |v| parseBoolLoose(v) else false;
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
+        const ai_tasks = resolvedAiTasks(&classes, name);
         const ai_attack = resolvedAiAttacks(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
@@ -778,6 +843,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .spawnable = spawnable,
             .is_enemy = is_enemy,
             .ai_attack = ai_attack,
+            .ai_tasks = ai_tasks,
             .chase_speed = chase,
             .chase_speed_day = chase_day,
             .wander_speed = wander,
@@ -938,6 +1004,22 @@ test "load stock entityclasses when present" {
     const boar = t.byName("animalBoar").?;
     try std.testing.expect(boar.ai_attack);
     try std.testing.expect(boe.ai_attack); // zombieTemplate has the attack task
+    // Pipe `AITask` on zombieTemplateMale (BreakBlock|DestroyArea|Territorial|...):
+    // the numbered-only walker used to miss it, so every zombie ran the shared table.
+    const set = components.ai_task_list_set;
+    try std.testing.expect(boe.ai_tasks & set != 0);
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .territorial));
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .approach_distraction));
+    const rancher = t.byName("zombieRancher").?;
+    try std.testing.expect(rancher.ai_tasks & set != 0);
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .territorial));
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(rancher.ai_tasks, .approach_attack));
+    try std.testing.expect(stag2.ai_tasks & set != 0);
+    try std.testing.expect(components.aiTaskAllowed(stag2.ai_tasks, .runaway));
+    try std.testing.expect(!components.aiTaskAllowed(stag2.ai_tasks, .approach_attack));
+    try std.testing.expect(!components.aiTaskAllowed(stag2.ai_tasks, .break_block));
 }
 
 test "day/night speeds parse from entityclasses XML" {
@@ -1045,6 +1127,56 @@ test "AITask attack gating parses from entityclasses XML" {
     try std.testing.expect(!t.byName("animalDeer").?.ai_attack); // inherited timid list
     try std.testing.expect(t.byName("animalWolf").?.ai_attack); // hostile template
     try std.testing.expect(t.byName("mysteryNoTasks").?.ai_attack); // no list -> default
+    try std.testing.expectEqual(@as(u16, 0), t.byName("mysteryNoTasks").?.ai_tasks);
+    const deer = t.byName("animalDeer").?;
+    try std.testing.expect(deer.ai_tasks & components.ai_task_list_set != 0);
+    try std.testing.expect(components.aiTaskAllowed(deer.ai_tasks, .runaway));
+    try std.testing.expect(components.aiTaskAllowed(deer.ai_tasks, .look));
+    try std.testing.expect(components.aiTaskAllowed(deer.ai_tasks, .wander));
+    try std.testing.expect(!components.aiTaskAllowed(deer.ai_tasks, .approach_attack));
+}
+
+test "pipe AITask blob replaces parent list and numbered keys merge" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/ec_pipe.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<entity_classes>
+        \\  <entity_class name="zombieTemplateMale">
+        \\    <property name="AITask" value="
+        \\    BreakBlock|
+        \\    DestroyArea|
+        \\    Territorial|
+        \\    ApproachAndAttackTarget class=EntityPlayer,0|
+        \\    Wander|
+        \\    "/>
+        \\  </entity_class>
+        \\  <entity_class name="zombieBoe" extends="zombieTemplateMale">
+        \\    <property name="MaxHealth" value="150"/>
+        \\  </entity_class>
+        \\  <entity_class name="zombieRancher" extends="zombieTemplateMale">
+        \\    <property name="AITask" value="
+        \\    BreakBlock|
+        \\    ApproachAndAttackTarget class=EntityPlayer,0|
+        \\    Wander|
+        \\    "/>
+        \\  </entity_class>
+        \\</entity_classes>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const boe = t.byName("zombieBoe").?;
+    try std.testing.expect(boe.ai_attack);
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(boe.ai_tasks, .territorial));
+    const rancher = t.byName("zombieRancher").?;
+    try std.testing.expect(rancher.ai_attack);
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .territorial));
+    try std.testing.expect(!components.aiTaskAllowed(rancher.ai_tasks, .destroy_area));
+    try std.testing.expect(components.aiTaskAllowed(rancher.ai_tasks, .break_block));
 }
 
 test "stock Demolition Explosion class parses (zombieFatCop tiers)" {

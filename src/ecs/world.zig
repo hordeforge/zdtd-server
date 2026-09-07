@@ -219,6 +219,8 @@ pub const EntityClass = struct {
     /// resolvedAiAttacks): timid animals never attack even when a player is
     /// close. Defaults true (brainless classes keep the zombie behavior).
     ai_attack: bool = true,
+    /// Inherited AITask list as TaskId bits (0 = native table). See ClassId.ai_tasks.
+    ai_tasks: u16 = 0,
     /// entityclasses ExperienceGain kill XP; 0 = use the caller's flat floor.
     xp_gain: f32 = 0,
     /// Dismember tuning (RE EntityAlive.CheckDismember / GetDismemberChance);
@@ -1078,6 +1080,8 @@ pub const World = struct {
             .loot_list = ct.loot_list,
             .drop_prob = ct.drop_prob,
             .time_stay = ct.time_stay,
+            .ai_attack = ct.ai_attack,
+            .ai_tasks = ct.ai_tasks,
             .explode_threshold = ct.explode_threshold,
             .explode_delay_s = ct.explode_delay_s,
             .explosion_radius = ct.explosion_radius,
@@ -1135,6 +1139,7 @@ pub const World = struct {
             self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
+            self.class_id[s].ai_tasks = def.ai_tasks;
             self.class_id[s].xp_gain = def.xp_gain;
             self.class_id[s].explode_threshold = def.explode_threshold;
             self.class_id[s].explode_delay_s = def.explode_delay_s;
@@ -1178,6 +1183,7 @@ pub const World = struct {
                 .hash = ct.hash,
                 .loot_list = ct.loot_list,
                 .ai_attack = ct.ai_attack,
+                .ai_tasks = ct.ai_tasks,
             };
         }
         return id;
@@ -1227,6 +1233,7 @@ pub const World = struct {
             self.class_id[s].sleeper_wake_far_max = def.sleeper_wake_far_max;
             self.class_id[s].is_enemy = def.is_enemy;
             self.class_id[s].ai_attack = def.ai_attack;
+            self.class_id[s].ai_tasks = def.ai_tasks;
             self.class_id[s].xp_gain = def.xp_gain;
         }
         return id;

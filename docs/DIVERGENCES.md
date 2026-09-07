@@ -706,7 +706,8 @@ Recorded because they are easy to mistake for one:
 - **Unimplemented EAI tasks** (Dodge, Leap, RangedAttackTarget). These are
   blocked on missing subsystems (client animator state, MoveHelper physics, item
   actions) and are tracked as gaps in [GAP_ANALYSIS](GAP_ANALYSIS.md), not as
-  decisions to behave differently.
+  decisions to behave differently. Per-class XML lists now omit them rather
+  than mapping them onto ApproachAndAttackTarget.
 
 ## Keeping this current
 

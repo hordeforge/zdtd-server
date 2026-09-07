@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x23 open
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x22 open
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -2391,40 +2391,32 @@ gamestage, no wandering hordes, and no screamers.
   row was written: the distraction task chases a dropped decoy/item
   (`approachDistractionCanExecute` + the decoy scenario) and the fear task
   flees a wolf/zombie/player (`runawayCanExecute` + the flee tests), so a
-  thrown distraction is chased and a timid animal flees a wolf. The absent
-  classes (Leap, Dodge, RangedAttackTarget, MeleeAttackTarget, ItemTask, the
-  three Drone tasks, PathTest) have **zero AITask uses in the V3.1.0 b14
-  entityclasses.xml** - the file's whole AITask vocabulary is the 10 values
-  enumerated in the earlier hardcode audit - except Leap (animalMountainLion
-  AITask-1): the mountain lion approaches and melees like the other predators,
-  only without the pounce animation (documented cosmetic residual).
+  thrown distraction is chased and a timid animal flees a wolf. Leap
+  (animalMountainLion AITask-1) and RangedAttackTarget (zombieRancher, Chuck,
+  FatCop, Mutated pipe lists) stay unmapped: no native task, so they are omitted
+  rather than faked. Dodge, MeleeAttackTarget, ItemTask, the three Drone tasks
+  and PathTest have **zero AITask uses** in the stock file.
   *Anchors:* `src/ecs/systems.zig:1341` zombie_tasks,
   `Data/Config/entityclasses.xml:562-571`, `asm.il` EAI* class list
 
-- **Per-class AITask/AITarget lists from entityclasses.xml** `PARTIAL (waived)`
-  The attack-task leg ships (2026-08-22): the inherited `AITask-*` list is
-  parsed per class (resolvedAiAttacks, stock name set = ApproachAndAttackTarget)
-  and gates whether the entity hunts (timid animals never attack). The full
-  per-class task graph is still one shared `zombie_tasks` table: the
-  wander/look/approach-spot/territorial task *selection* is not class-specific
-  beyond the attack discriminator.
-
-  Re-evaluated 2026-09-02: the old "waived as EAI completeness vs wire"
-  reasoning does not hold. AGENTS rule 29 (wasm-first, ADR 0020) says anything
-  expressible over the plugin boundary ships as a plugin and that "it is core"
-  is not a reason to stay native; a per-class task graph with a ruleset per
-  zombie type is exactly that shape. Some per-class AI data already loads from
-  `entityclasses.xml` into `class_table` (`SightRange`, view angle, explode
-  threshold/delay) with the `Rules` value as a floor (ADR 0021), so the data
-  path exists - what is missing is per-class *task lists* and a plugin-side
-  owner for them. The open question is throughput, not design: the AI pass runs
-  parallel over slots while the plugin host is single-threaded with per-module
-  fuel, so the sense/queue cost per zombie-tick has to be measured against the
-  50 ms budget before committing. Tracked as an ADR-worthy decision rather than
-  a waiver.
-  *Anchors:* `src/assets/entities.zig` (`resolvedAiAttacks`),
-  `src/ecs/systems.zig` (`zombie_tasks` table, ~1550), `src/ecs/world.zig`
-  (`class_table` per-class AI fields), AGENTS rule 29, ADR 0020, ADR 0026
+- **Per-class AITask/AITarget lists from entityclasses.xml** `WORKS` `(2026-09-07)`
+  The inherited list now drives native task *selection*, not only the attack
+  discriminator. Pipe `AITask` (zombieTemplateMale and class overrides such as
+  zombieRancher dropping Territorial/DestroyArea) and numbered `AITask-N`
+  (animals) resolve through the Extends chain into `ai_tasks` bits; a class
+  with no list keeps the shared `zombie_tasks` table. `entityClassOf` used to
+  drop `ai_attack`, so XML timid animals could hunt; that field (and the new
+  mask) now copy onto every spawn path.
+  Residual: Leap (mountain lion) and RangedAttackTarget (rancher/cop/chuck)
+  have no native task yet, so those names stay unmapped rather than faked.
+  AITarget rows (SetAsTargetIfHurt / SetNearestEntityAsTarget) are still the
+  native sense/revenge path. Moving the brain into a Wasm plugin (AGENTS rule
+  29) stays an ADR: the AI pass is parallel over slots and the host is
+  single-threaded with per-module fuel.
+  *Anchors:* `src/assets/entities.zig` (`resolvedAiTasks`),
+  `src/ecs/systems.zig` (`aiTaskAllowed` on the `zombie_tasks` scan),
+  `src/ecs/components.zig` (`ai_task_list_set`), `src/server/game.zig`
+  (`entityClassOf`)
 
 - **Timid animals run the zombie task table** `WORKS` `(2026-08-22)`
   `approach_attack` is now gated by the class's inherited AITask-* list:

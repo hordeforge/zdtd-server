@@ -158,6 +158,9 @@ pub const ClassId = struct {
     /// predators and zombies carry the attack task. Defaults true so classes
     /// without a task list keep the zombie-brain behavior.
     ai_attack: bool = true,
+    /// Inherited AITask list as TaskId bits. 0 = no XML list (native table).
+    /// Bit 15 set means a list was parsed; only the TaskId bits then run.
+    ai_tasks: u16 = 0,
     /// entityclasses ExperienceGain kill XP; 0 = fall back to class_table[id]
     /// then the caller's flat floor.
     xp_gain: f32 = 0,
@@ -208,6 +211,21 @@ pub const TaskId = enum(u8) {
     look,
     wander,
 };
+
+/// entityclasses.xml parsed a task list (pipe `AITask` or numbered `AITask-N`).
+/// Unset mask 0 keeps the shared native table; a set list only runs its bits.
+pub const ai_task_list_set: u16 = 1 << 15;
+
+pub fn aiTaskBit(id: TaskId) u16 {
+    const n = @intFromEnum(id);
+    if (n == 0) return 0;
+    return @as(u16, 1) << @intCast(n);
+}
+
+pub fn aiTaskAllowed(mask: u16, id: TaskId) bool {
+    if (mask & ai_task_list_set == 0) return true;
+    return mask & aiTaskBit(id) != 0;
+}
 
 /// Waypoints buffered from one A* solve. Eight cells is roughly the distance a
 /// chasing zombie covers in one replan interval, so the buffer empties about

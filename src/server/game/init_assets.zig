@@ -273,6 +273,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .explode_threshold = zdef.explode_threshold,
             .explode_delay_s = zdef.explode_delay_s,
             .ai_attack = zdef.ai_attack,
+            .ai_tasks = zdef.ai_tasks,
             .is_enemy = zdef.is_enemy,
             .xp_gain = zdef.xp_gain,
         });
@@ -301,6 +302,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .sleeper_wake_far_max = adef.sleeper_wake_far_max,
             .view_angle_deg = adef.view_angle_deg,
             .ai_attack = adef.ai_attack,
+            .ai_tasks = adef.ai_tasks,
             .is_enemy = adef.is_enemy,
             .xp_gain = adef.xp_gain,
         });
@@ -371,6 +373,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 .sleeper_wake_far_max = def.sleeper_wake_far_max,
                 .view_angle_deg = def.view_angle_deg,
                 .ai_attack = def.ai_attack,
+                .ai_tasks = def.ai_tasks,
                 .is_enemy = def.is_enemy,
                 .xp_gain = def.xp_gain,
                 .explode_threshold = def.explode_threshold,

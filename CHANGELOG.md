@@ -5,6 +5,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Entityclasses `AITask` lists now select which native EAI tasks a class
+  actually runs. Pipe lists on `zombieTemplateMale` (and class overrides such
+  as `zombieRancher` dropping Territorial) and numbered `AITask-N` on animals
+  both resolve through Extends. Classes with no list keep the shared table.
+  Leap and RangedAttackTarget stay unmapped (no native task).
+
 ## [0.4.0] - 2026-09-06
 
 ### Fixed

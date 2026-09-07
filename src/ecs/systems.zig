@@ -1960,7 +1960,10 @@ const AiCtx = struct {
             if (ai.decision_cd <= 0) {
                 var chosen: c.TaskId = .none;
                 for (zombie_tasks) |t| {
-                    if (isBestTask(t, ai.active_task) and canExecute(ctx.w, s, t.id, ai, np)) {
+                    if (c.aiTaskAllowed(ctx.w.class_id[s].ai_tasks, t.id) and
+                        isBestTask(t, ai.active_task) and
+                        canExecute(ctx.w, s, t.id, ai, np))
+                    {
                         chosen = t.id;
                         break;
                     }
@@ -2027,6 +2030,7 @@ fn senseDistSq(w: *const World, s: Slot) f32 {
 
 /// Dispatch to a task's CanExecute gate (selection pass, step 2).
 fn canExecute(w: *const World, s: Slot, id: c.TaskId, ai: *const c.ZombieAi, np: TargetSnap) bool {
+    if (!c.aiTaskAllowed(w.class_id[s].ai_tasks, id)) return false;
     const sense_d2 = senseDistSq(w, s);
     return switch (id) {
         .break_block => breakBlockCanExecute(w, s, ai, np.id, np.d2, sense_d2),
@@ -2206,13 +2210,15 @@ fn refreshFearSource(w: *World, pos: *const [max_entities]c.Transform, s: Slot, 
     ai.fear_target = best;
 }
 
-/// Combined gate: AITask-1 RunawayWhenHurt (fresh revenge target) or AITask-2
-/// RunawayFromEntity (fresh fear source). Only passive animals carry either in
-/// stock XML (the animal templates' AITask-1/2), so kind gates the task.
+/// Combined gate: RunawayWhenHurt (fresh revenge target) or RunawayFromEntity
+/// (fresh fear source). Timid templates carry both; wolves also list
+/// RunawayWhenHurt, but is_enemy keeps predators hunting instead of fleeing
+/// unprovoked. Kind still gates: zombies never pick this even when the mask
+/// would allow it (no stock zombie list includes it).
 fn runawayCanExecute(w: *const World, s: Slot, ai: *const c.ZombieAi) bool {
     if (!w.mask[s].kind or w.kind[s] != .animal) return false;
     // Predators (wolf, bear, coyote, snake, boar) hunt; only passive wildlife
-    // carries the flee tasks (stock animal templates' AITask-1/2).
+    // flees. The XML mask may still list RunawayWhenHurt on a predator.
     if (w.class_id[s].is_enemy) return false;
     if (ai.revenge_target >= 0 and ai.revenge_time > 0 and w.slotOfNetId(ai.revenge_target) != null) return true;
     return ai.fear_target >= 0 and w.slotOfNetId(ai.fear_target) != null;
@@ -4143,6 +4149,26 @@ test "timid animal near a player never attacks; a predator does" {
     try std.testing.expect(w.zombie_ai[ss].active_task != c.TaskId.approach_attack);
     // The predator, same distance, picks approach_attack and moves in.
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[ws].active_task);
+}
+
+test "class without Territorial in its AITask list does not leash home" {
+    // Stock zombieRancher overrides the template AITask blob and drops Territorial
+    // (and DestroyArea). The shared native table used to leash every zombie.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 40).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].ai_tasks = c.ai_task_list_set |
+        c.aiTaskBit(.break_block) |
+        c.aiTaskBit(.approach_attack) |
+        c.aiTaskBit(.approach_spot) |
+        c.aiTaskBit(.look) |
+        c.aiTaskBit(.wander);
+    w.transform[zs].x = 40;
+    w.transform[zs].z = 0;
+    var t: f32 = 0;
+    while (t < 3.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(w.zombie_ai[zs].active_task != c.TaskId.territorial);
 }
 
 test "far animals despawn like zombies; near animals stay" {
