@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x12 open)
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x11 open)
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -2800,12 +2800,16 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/assets/loot.zig` `resolveQuality` / `rollContainer`,
   `src/ecs/components.zig:363-395`, `:444-466`
 
-- **Repair (item repair queue / RepairItem)** `PARTIAL (waived)`
-  `RepairItem` payload is intentionally ignored (hard-flagged false); item repair
-  via workstation queue is client-FX + inventory-authoritative durability refs.
-  True `ItemClass.RepairTime` scheduling would reimplement the workstation craft
-  queue - stock-parallel path out of scope vs wire contract.
-  *Anchors:* `src/wire/stock_te.zig:389`, `:532-536`
+- **Repair (item repair queue / RepairItem)** `WORKS` `(2026-09-07)`
+  Stock `TileEntityWorkstation` never reads `RecipeQueueItem.RepairItem` /
+  `AmountToRepair` (IL dump: zero references). Repair queues live in client UI
+  (`XUiC_CraftingWindowGroup.AddRepairItemToQueue` → `XUiC_CraftingQueue` →
+  `XUiC_RecipeStack.SetRepairRecipe`); durability is applied client-side and
+  synced via inventory. zdtd matches: `writeQueueItem` emits `has_repair=false`,
+  `readQueueItem` skips the optional ItemValue+u16 so the TE payload stays
+  aligned. Residual: none on the dedi wire path.
+  *Anchors:* `src/wire/stock_te.zig` (`writeQueueItem` / `readQueueItem`),
+  `RecipeQueueItem.il.txt`, `TileEntityWorkstation.il.txt` (no RepairItem)
 
 - **Block upgrade path (hammer upgrade)** `WORKS`
   `blocks.xml` `UpgradeBlock.ToBlock` is parsed (property class, through the

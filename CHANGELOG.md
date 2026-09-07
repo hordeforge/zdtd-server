@@ -34,6 +34,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   gates, plus per-craft count, duration, and `craft_exp_gain` from the
   catalog rather than the client blob. Material-based recipes stay
   rejected (no scrap yield table).
+- Workstation `RepairItem` / `AmountToRepair` is scored WORKS against
+  stock: `TileEntityWorkstation` never reads those fields; repair queues
+  are client UI only. zdtd already emits `has_repair=false` and skips the
+  optional payload on read.
 
 ## [0.4.0] - 2026-09-06
 
