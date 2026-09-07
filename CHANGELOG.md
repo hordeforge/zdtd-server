@@ -20,6 +20,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Harvest, quest, craft, and magazine XP now push
   `NetPackageEntityAddExpClient` as `_xpOther` so the owning client shows
   the icon. Kill XP still uses the typed Kill packet.
+- Auth-state timeout (`MaxDurationInAuthState` 10 s) and player/party
+  gamestage spawn lookups were already in code; the GAP rows that still
+  called them waived are now scored WORKS. Blood-moon `SetScaling`
+  (`FastLerp(1, 2.5, (scaling-1)/3)`) stays a dusk-freeze residual.
 
 ## [0.4.0] - 2026-09-06
 

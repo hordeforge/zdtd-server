@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x19 open
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x17 open)
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -3213,14 +3213,16 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `src/server/game/craft.zig` (`tryCraftRecipe`),
   `src/assets/recipes.zig` (`appendUnlockedFor`)
 
-- **Gamestage (level plus days survived driving spawn difficulty)** `PARTIAL (waived)`
-  Spawn uses `gsScale=1` (no scaling); `gamestages.xml` is now parsed in `§8`
-  Gamestage PARTIAL and wiring full stage to every spawn needs the progression
-  ledger. Waived until progression-driven difficulty lands.
-  PARTIAL 2026-08-27: `gamestages.xml` parsing + stage-0 spawn-group resolution
-  now drive quest ambushes (`QuestActionSpawnGSEnemy`) and sleeper stage
-  resolution; per-spawn `gsScale` level scaling is still recorded.
-  *Anchors:* `src/assets/gamestages.zig`, `src/server/game/hooks.zig` questSpawnGsEnemy
+- **Gamestage (level plus days survived driving spawn difficulty)** `WORKS` `(2026-09-07)`
+  `gameStageOf` is the stock formula (level + days lived, biome/quest mods,
+  difficultyBonus). `partyLevel` uses StartingWeight / DiminishingReturns.
+  Quest ambushes, sleeper volumes, scouts, and the blood-moon ladder all
+  look up `gamestages.xml` by that stage. The leftover `gsScale=1` claim
+  was stale: there is no such field in spawn. Blood-moon `SetScaling`
+  (`FastLerp(1, 2.5, (scaling-1)/3)` then `partyLevel *= gsScaling`) is
+  recorded as a dusk-freeze residual, not a spawn-path miss.
+  *Anchors:* `src/server/game/player.zig` (`gameStageOf`, `partyLevel`),
+  `src/assets/gamestages.zig`, `src/server/game/hooks.zig` (`questSpawnGsEnemy`)
 
 - **buffs.xml catalog and passive_effect parse** → **non-goal** (2026-08-25):
   482 buff defs parse; the full passive_effect VM (comma lists, level
@@ -4491,11 +4493,15 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game/net.zig` allocateClient,
   `src/protocol.zig:11-12`, `asm.il:852999`, `asm.il:853010-853025`
 
-- **Auth-state timeout (half-open connection reaping)** `PARTIAL (waived)`
-  `MaxDurationInAuthState` half-open sweep not wired; `peer_stale_ms` reaps on RX
-  silence (see also Connect rate limiting PARTIAL). Documented as hardening vs
-  blocker for EAC-off direct-IP parity.
-  *Anchors:* `src/server/game.zig`, `asm.il`
+- **Auth-state timeout (half-open connection reaping)** `WORKS` `(2026-09-07)`
+  `reapStalePeers` reaps by challenge age (`default_auth_state_ms` = 10 s,
+  stock `MaxDurationInAuthState`), not RX silence. A peer that keeps the
+  socket warm with junk but never echoes is still dropped; an authenticated
+  peer of the same age survives (`challenge_ns` cleared on echo). RX-silence
+  `peer_stale_ms` is a separate arm.
+  *Anchors:* `src/server/game/tick.zig` (`reapStalePeers`),
+  `src/server/scenarios.zig` (`a peer that never echoes is reaped past the
+  auth age`), RE `network.md:810`
 
 - **Connect rate limiting** `WORKS` `(2026-08-21)`
   500 ms/IP (`ConnectionRateLimitMilliseconds = 0x1F4`, asm.il 852995) is now
