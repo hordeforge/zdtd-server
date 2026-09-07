@@ -43,10 +43,10 @@ pub fn isUnreliablePackage(pkg_name: []const u8) bool {
     return false;
 }
 
-/// Stock `get_Compress() == true` (RE network.md: 8 packages, all IL=2). Only
-/// the five zdtd actually emits are listed; the other three
-/// (DynamicClientArrive, DynamicMesh, MapChunks) are never sent, tracked in
-/// GAP_ANALYSIS "S2C compression".
+/// Stock `get_Compress() == true` (RE network.md: 8 packages, all IL=2). Six
+/// zdtd emits are listed; DynamicClientArrive and DynamicMesh stay out (no
+/// S2C body builder yet). MapChunks is sent via trySendCompressed from
+/// map.zig and must stay in this set so sendGameBudget also deflates it.
 pub fn isCompressedPackage(pkg_name: []const u8) bool {
     const names = [_][]const u8{
         "NetPackageChunk",
@@ -54,6 +54,7 @@ pub fn isCompressedPackage(pkg_name: []const u8) bool {
         "NetPackageIdMapping",
         "NetPackageConfigFile",
         "NetPackagePOIMetadataResponse",
+        "NetPackageMapChunks",
     };
     for (names) |n| {
         if (std.mem.eql(u8, pkg_name, n)) return true;
@@ -102,12 +103,8 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
     // and friends): Chunk, ConfigFile, DynamicClientArrive, DynamicMesh,
     // IdMapping, MapChunks, POIMetadataResponse, SignDataResponse (the
     // 3.2.0 set swaps POIAround for POIMetadataResponse, changelog-3.2.0
-    // §3.5). The five zdtd emits today are deflated here (the rest are not
-    // yet sent - S2C coverage row). Re-checked against the 3.2.0 IL
-    // 2026-09-04, after the sibling channel list turned out to carry a
-    // POIAround override its replacement does not have: all five names below
-    // do declare `get_Compress() IL=2` returning ldc.i4.1, so this list is
-    // right where `packages.channelFor` was wrong.
+    // §3.5). Six zdtd emits are deflated here (isCompressedPackage); the
+    // two without S2C builders (DynamicClientArrive, DynamicMesh) stay out.
     // IdMapping/ConfigFile deflating cuts the join cost (one flat-world join
     // was 6.4 MB out) and relieves the reliable window.
     if (isCompressedPackage(pkg_name)) {
@@ -503,26 +500,27 @@ test "the unreliable set is exactly the stock ReliableDelivery overrides" {
 
 test "the compressed set is exactly the stock get_Compress overrides we emit" {
     // Stock deflates 8 packages (RE network.md "Compression via get_Compress()
-    // == true", all IL=2). Three of them zdtd never sends, so the send path
-    // lists five. Nothing walked the advertised table against that list, which
-    // is the check that caught the channel set carrying a stale POIAround
-    // override: a name added here without an IL override behind it would
-    // deflate a body a stock client reads uncompressed.
+    // == true", all IL=2). Six of them zdtd emits (MapChunks via map.zig
+    // trySendCompressed; the rest via sendGameBudget). Nothing walked the
+    // advertised table against that list, which is the check that caught the
+    // channel set carrying a stale POIAround override: a name added here
+    // without an IL override behind it would deflate a body a stock client
+    // reads uncompressed.
     const compressed = [_][]const u8{
         "NetPackageChunk",
         "NetPackageSignDataResponse",
         "NetPackageIdMapping",
         "NetPackageConfigFile",
         "NetPackagePOIMetadataResponse",
+        "NetPackageMapChunks",
     };
     for (compressed) |n| try std.testing.expect(isCompressedPackage(n));
 
-    // The three stock-compressed names zdtd does not emit stay out: adding one
+    // The two stock-compressed names zdtd does not emit stay out: adding one
     // here without a send site would claim coverage the server does not have.
     const not_emitted = [_][]const u8{
         "NetPackageDynamicClientArrive",
         "NetPackageDynamicMesh",
-        "NetPackageMapChunks",
     };
     for (not_emitted) |n| try std.testing.expect(!isCompressedPackage(n));
 
