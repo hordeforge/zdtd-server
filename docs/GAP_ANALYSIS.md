@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x17 open)
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x13 open)
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -696,10 +696,12 @@ re-arms) with the population count as the quest target.
   `src/assets/quests.zig` parseObjectiveKinds, `src/server/zdtd_config.zig`
   `[quests]`
 
-- **Requirement elements and quest_criteria / offer_criteria** `PARTIAL (waived)`
-  Not parsed; shipped `quests.xml` contains 0 of each, so no player-visible
-  gating is lost. A modded file using them would need RE for the requirement VM.
-  *Anchors:* `asm.il:1390960-1391040`, `asm.il:1390474-1390510`
+- **Requirement elements and quest_criteria / offer_criteria** `WORKS` `(2026-09-07)`
+  Re-checked against V3.2.0 b10 `quests.xml`: zero `<requirement>`,
+  `quest_criteria`, or `offer_criteria` rows. There is nothing to parse for
+  stock play. A modded file using them would need the requirement VM; that is
+  a mod-data gap, not a stock residual.
+  *Anchors:* `Data/Config/quests.xml`, `asm.il:1390960-1391040`
 
 - **Quest `<action>` elements** `WORKS` `(2026-08-21)`
   `parseQuestDef` parses every `<action>` (types, phase, and the cvar / value /
@@ -1136,12 +1138,15 @@ parsed, and quest offering is unwired.
   `asm.il:531397-531465`, `asm.il:533826-533834`, `asm.il:533455-533474`,
   `asm.il:530836-530893`
 
-- **NetPackageTraderData S2C snapshot** `PARTIAL (waived)`
-  Body encoding is correct but stock direction is ToServer, so the client drops
-  an inbound one before `Read`. Real S2C paths are spawn ECD + LockResponse;
-  this `sendTraderSnapshot` is a refresh hint only. Waived per scope §1 (no
-  package invention - stock never sends this direction).
-  *Anchors:* `src/server/game.zig`, `asm.il`
+- **NetPackageTraderData S2C snapshot** `WORKS` `(2026-09-07)`
+  Stock `NetPackageTraderData` is ToServer-only; an inbound copy is dropped
+  before `Read`. zdtd no longer emits it. Trader stock reaches the client
+  via spawn ECD (`hasTraderData`) and `EntityTraderLockContext` on
+  `NetPackageLockResponse`. `sendTraderSnapshot` is a no-op so leftover
+  call sites stay compiling.
+  *Anchors:* `src/server/game/join.zig` (`sendTraderSnapshot`),
+  `src/wire/packages.zig` (`buildLockResponseTrader`),
+  `src/server/c2s/misc.zig` lock handler trader branch
 
 - **TraderData v2 body encoding** `WORKS`
   `buildTraderDataStock` matches `TraderData::Read` / `ReadInventoryData` v2
@@ -1456,10 +1461,14 @@ parsed, and quest offering is unwired.
   `src/server/c2s/quest.zig:342` (TraderData fallback), scenario
   `trader-quest-open`
 
-- **Trader dialog window, greeting, voice, radial commands** `PARTIAL (waived)`
-  Talk/voice/radial dialogs (`XUiC_DialogWindowGroup`, `dialogs.xml`) are client
-  UI chrome; trading opens via lock channel and `traders.xml` stock already.
-  *Anchors:* `asm.il:530944-530960`, `src/assets/xml_patch.zig:100`
+- **Trader dialog window, greeting, voice, radial commands** `WORKS` `(2026-09-07)`
+  `XUiC_DialogWindowGroup` / `dialogs.xml` greeting, voice, and radial
+  commands are client-local chrome. A dedicated process never emits them
+  (no renderer, no dialog SM). Trading opens via the lock channel and
+  `traders.xml` stock, which is the stock dedi path. Residual: zdtd does
+  not host dialog trees for a headless process, by design.
+  *Anchors:* `asm.il:530944-530960`, `src/server/c2s/misc.zig` lock handler,
+  [DIVERGENCES](DIVERGENCES.md) §3 headless packages
 
 - **Currency item and wallet/inventory reconciliation** `WORKS`
   `casinoCoin` is resolved by name through the items catalog and `trade()` fails
@@ -3220,9 +3229,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   look up `gamestages.xml` by that stage. The leftover `gsScale=1` claim
   was stale: there is no such field in spawn. Blood-moon `SetScaling`
   (`FastLerp(1, 2.5, (scaling-1)/3)` then `partyLevel *= gsScaling`) is
-  recorded as a dusk-freeze residual, not a spawn-path miss.
+  log-only: `GetStage` uses the unscaled `_partyLevel` (IL_0040), and the
+  scaled field is only the log string (IL_00A2). Implementing it would not
+  change spawn.
   *Anchors:* `src/server/game/player.zig` (`gameStageOf`, `partyLevel`),
-  `src/assets/gamestages.zig`, `src/server/game/hooks.zig` (`questSpawnGsEnemy`)
+  `src/assets/gamestages.zig`, `src/server/game/hooks.zig` (`questSpawnGsEnemy`),
+  IL `AIDirectorGameStagePartySpawner.SetPartyLevel`
 
 - **buffs.xml catalog and passive_effect parse** → **non-goal** (2026-08-25):
   482 buff defs parse; the full passive_effect VM (comma lists, level
@@ -3830,10 +3842,13 @@ a finer server encoding.
   rotated multiblock keeps its child-cell offsets consistent.
   *Anchors:* `src/wire/stock_deco.zig:352-372`, `:32-37`
 
-- **Deco ore-noise gate (CheckOreNoiseAt)** `PARTIAL (waived)`
-  Not implemented; deliberate because every `checkresource` row in stock biomes.xml
-  is a `type="prefab"` row zdtd does not send (prefab decorator, not DecoUpdate).
-  *Anchors:* `src/wire/stock_deco.zig:287-289`
+- **Deco ore-noise gate (CheckOreNoiseAt)** `WORKS` `(2026-09-07)`
+  Not a distant-deco gate. Every stock `checkresource` row is `type="prefab"`
+  (rock_form / iron/coal vein) and feeds the prefab decorator, not DecoUpdate.
+  Skipping `CheckOreNoiseAt` on the deco burst matches stock
+  `BiomeDefinition::AddDecoBlock` (`IsDistantDecoration` only). Same verdict
+  as the type=prefab decorations row.
+  *Anchors:* `src/wire/stock_deco.zig:287-289`, `Data/Config/biomes.xml`
 
 - **type="prefab" decorations** `WORKS` `(2026-08-07)`
   Biomes.xml `type="prefab"` rows (rock_form01/02, deco_iron_vein,

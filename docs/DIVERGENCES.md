@@ -208,6 +208,7 @@ so the stock client never sends them to us.
 | `NetPackageDiscordIdMappings` | Discord rich presence; no sim effect |
 | `NetPackageLobbyRegisterClient` | Matchmaking lobby; a self-hosted dedi does not join one |
 | `NetPackageInventoryKeepOpen` | Stock's own dedi handler is a thin unused path (RE `protocol-packages.md`) |
+| Trader dialog chrome (`XUiC_DialogWindowGroup`, `dialogs.xml`) | Greeting, voice, and radial commands are client-local; a dedicated process has no dialog SM. Trading is lock + `traders.xml` |
 
 ## 3b. Registry coverage audit (2026-09-02)
 

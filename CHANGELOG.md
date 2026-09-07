@@ -23,7 +23,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 - Auth-state timeout (`MaxDurationInAuthState` 10 s) and player/party
   gamestage spawn lookups were already in code; the GAP rows that still
   called them waived are now scored WORKS. Blood-moon `SetScaling`
-  (`FastLerp(1, 2.5, (scaling-1)/3)`) stays a dusk-freeze residual.
+  (`FastLerp(1, 2.5, (scaling-1)/3)`) is log-only (`GetStage` uses the
+  unscaled argument).
+- `NetPackageTraderData` is no longer emitted ToClient. Stock drops an
+  inbound copy before `Read`; trader stock already rides spawn ECD and
+  `NetPackageLockResponse`. Quest requirement rows and trader dialog
+  chrome are scored WORKS against stock (zero requirement XML; dialog
+  is client-local).
 
 ## [0.4.0] - 2026-09-06
 

@@ -329,34 +329,12 @@ pub fn sendSignDataBatches(self: *Game, peer: *ln_peer.Peer) !void {
 }
 
 pub fn sendTraderSnapshot(self: *Game, peer: *ln_peer.Peer, prefer_slot: ?ecs.Slot) !void {
-    var ti: ?ecs.Slot = prefer_slot;
-    if (ti == null) {
-        var i: ecs.Slot = 0;
-        while (i < ecs.max_entities) : (i += 1) {
-            if (self.sim.alive[i] and self.sim.mask[i].trader and self.sim.mask[i].trader_stock) {
-                ti = i;
-                break;
-            }
-        }
-    }
-    const s = ti orelse return;
-    if (!self.sim.mask[s].trader_stock) return;
-    const eid = self.sim.network_id[s].id;
-    // Stock TraderData.TraderID indexes traders.xml <trader_info>. The client
-    // resolves TraderInfo from that id (XUiC_TraderWindow.showrestock reads
-    // TraderInfo.ResetInterval); sending the entity id made get_TraderInfo()
-    // null and NRE'd the trader window.
-    const trader_id: i32 = self.sim.trader_stock[s].trader_info_id;
-    var entries: [ecs.components.max_stock]packages.TraderStockEntry = undefined;
-    const n = self.stockEntries(s, &entries);
-    const body = try packages.buildTraderDataStock(
-        self.body_buf[0..4096],
-        eid,
-        trader_id,
-        self.traderMoney(s),
-        entries[0..n],
-    );
-    try self.sendGame(peer, "NetPackageTraderData", body);
+    // Stock never emits NetPackageTraderData ToClient (ProcessPackage is
+    // ToServer-only). Trader stock reaches the client via spawn ECD and
+    // EntityTraderLockContext on NetPackageLockResponse.
+    _ = self;
+    _ = peer;
+    _ = prefer_slot;
 }
 
 /// Stock NetPackageChunkClusterInfo, sent right after WorldInfo in the
