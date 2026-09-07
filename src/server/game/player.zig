@@ -15,6 +15,7 @@ const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const assets_progression = @import("../../assets/progression.zig");
+const assets_items = @import("../../assets/items.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
 
@@ -589,12 +590,36 @@ pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8
     return true;
 }
 
-/// Magazine eat: items.xml AddProgressionLevel on the consumed item.
+/// Magazine eat: items.xml AddProgressionLevel + GiveExp on the consumed item.
+/// GiveExp (RE minevents.md IL=63) is `_xpOther` / XPTypes 8 on stock; the
+/// wire maps any non-kill type to `_xpOther`, so AddExpClient uses
+/// xp_type_other. Unknown names fail closed; 0 exp is a no-op.
 pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
-    if (item_id == 0) return;
+    if (item_id == 0 or slot >= self.clients.len) return;
     const def = self.items.byId(item_id) orelse return;
-    if (def.progression_add == 0 or def.progression_name.len == 0) return;
-    _ = addProgressionLevel(self, slot, def.progression_name, def.progression_add);
+    if (def.progression_add > 0 and def.progression_name.len > 0) {
+        _ = addProgressionLevel(self, slot, def.progression_name, def.progression_add);
+    }
+    if (def.eat_exp == 0) return;
+    const c = &self.clients[slot];
+    const before = c.xp;
+    awardXp(self, slot, def.eat_exp);
+    const granted: i32 = @intCast(@min(c.xp -| before, std.math.maxInt(i32)));
+    if (granted <= 0) return;
+    if (c.peer) |peer| {
+        if (c.entity_id > 0) {
+            if (packages.stock_xp.buildAddExpClientBody(&self.body_buf, .{
+                .entity_id = c.entity_id,
+                .xp = granted,
+                .xp_type = packages.stock_xp.xp_type_other,
+            })) |xb| {
+                self.sendGame(peer, "NetPackageEntityAddExpClient", xb) catch |err| {
+                    self.harness.counters.inc(.net_send_errors);
+                    std.debug.print("zdtd: send magazine AddExpClient failed: {s}\n", .{@errorName(err)});
+                };
+            } else |_| {}
+        }
+    }
 }
 
 /// Fold one named passive over a client's purchased attribute/perk levels
@@ -754,6 +779,34 @@ test "addProgressionLevel clamps to crafting_skill max and fails closed on unkno
     try std.testing.expect(g.addProgressionLevel(0, "craftingHarvestingTools", 10));
     try std.testing.expectEqual(@as(u8, 5), g.skillLevelOf(0, "craftingHarvestingTools"));
     try std.testing.expect(!g.addProgressionLevel(0, "craftingHarvestingTools", 1));
+}
+
+test "grantMagazineRead awards GiveExp through the server ledger" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_magxp", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const skills = [_]assets_progression.CraftingSkill{
+        .{ .name = "craftingHarvestingTools", .max_level = 100, .entries = &.{} },
+    };
+    g.progression_table.crafting_skills = &skills;
+    const defs = [_]assets_items.ItemDef{
+        .{
+            .id = 100,
+            .name = "harvestingToolsSkillMagazine",
+            .is_eat = true,
+            .progression_name = "craftingHarvestingTools",
+            .progression_add = 1,
+            .eat_exp = 50,
+        },
+    };
+    g.items = .{ .defs = &defs, .source = .xml };
+    const before = g.clients[0].xp;
+    g.grantMagazineRead(0, 100);
+    try std.testing.expectEqual(before + 50, g.clients[0].xp);
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "craftingHarvestingTools"));
 }
 
 test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {

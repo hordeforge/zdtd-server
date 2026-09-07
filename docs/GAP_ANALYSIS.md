@@ -3123,11 +3123,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `output_log_client_zdtd_connect.txt:5236`
 
 - **XP from non-kill sources** `PARTIAL (waived)`
-  Kill XP and quest `Exp` rewards are server-awarded (`awardXp`; quest payout
-  at `step.zig`). Mining/repair/craft XP stays client-reported and would be
-  faked without the full skill/XP economy; waived until the progression
-  ledger is wired end-to-end.
-  *Anchors:* `src/server/game.zig` `awardXp`, `Data/Config/quests.xml:103`
+  Kill XP, quest `Exp` rewards, and magazine `GiveExp` (50, `_xpOther`) are
+  server-awarded (`awardXp`). Mining/repair XP stays client-reported and would
+  be faked without the harvest/repair XP economy; waived as authority rather
+  than a missing magazine grant.
+  *Anchors:* `src/server/game.zig` `awardXp`, `src/server/game/player.zig`
+  (`grantMagazineRead`), `Data/Config/quests.xml:103`
 
 - **Skill points granted per level** `WORKS` (was `PARTIAL (waived)`;
   re-evaluated 2026-09-02)
@@ -3200,11 +3201,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   on eat, RE minevents.md IL=143) raise the matching `crafting_skill` (clamped
   to class max, interned against the catalog, persisted in the ZPV11 skill tail).
   `tryCraftRecipe` refuses a gated recipe the player has not unlocked; the join
-  PDF ships `always_unlocked` plus currently met gates. Residual: the 50 XP
-  GiveExp on magazine read is still the non-kill XP waiver; `level="-1"` (set
-  to max) is omitted rather than guessed.
-  *Anchors:* `src/assets/items.zig` (`firstProgressionAdd`),
-  `src/server/game/player.zig` (`addProgressionLevel`),
+  PDF ships `always_unlocked` plus currently met gates. Magazine `GiveExp`
+  (stock 50, `_xpOther`) awards through the server ledger and
+  `NetPackageEntityAddExpClient`. Residual: `level="-1"` (set to max) is
+  omitted rather than guessed.
+  *Anchors:* `src/assets/items.zig` (`firstProgressionAdd`, `firstGiveExp`),
+  `src/server/game/player.zig` (`addProgressionLevel`, `grantMagazineRead`),
   `src/server/game/craft.zig` (`tryCraftRecipe`),
   `src/assets/recipes.zig` (`appendUnlockedFor`)
 

@@ -188,6 +188,8 @@ pub const ItemDef = struct {
     progression_name: []const u8 = "",
     /// Amount added per use (stock magazines ship 1). 0 = no grant.
     progression_add: u8 = 0,
+    /// items.xml `GiveExp` on eat (stock magazines ship 50). 0 = no XP.
+    eat_exp: u16 = 0,
     /// items.xml `DistractionTags` (EntityItem distraction; RE EntityItem::SetupDistraction
     /// + ItemClass::get_IsEatDistraction). Bits: 1 = eat, 2 = requires_contact, 4 = zombie.
     /// Stock ships only decoy (`zombie,requires_contact`).
@@ -640,6 +642,36 @@ fn firstProgressionAdd(body: []const u8) ?struct { []const u8, u8 } {
     return null;
 }
 
+/// First `GiveExp` triggered_effect exp amount. Magazines ship 50.
+/// Cvar-backed GiveExp is not modelled (stock magazines use a literal).
+fn firstGiveExp(body: []const u8) u16 {
+    var i: usize = 0;
+    while (i < body.len) {
+        const ti = std.mem.findPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.findPos(u8, body, ti, "/>") orelse (std.mem.findPos(u8, body, ti, ">") orelse break);
+        const win = body[ti .. end + 2];
+        const action = xml.attr(win, 0, "action") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!std.mem.eql(u8, action, "GiveExp")) {
+            i = ti + 10;
+            continue;
+        }
+        const raw = xml.attr(win, 0, "exp") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const n = xml.parseI32Prefix(raw) orelse 0;
+        if (n <= 0) {
+            i = ti + 10;
+            continue;
+        }
+        return if (n > 65535) 65535 else @intCast(n);
+    }
+    return 0;
+}
+
 /// Builtin ECS catalog (stable small ids for sim/save).
 pub const builtin_defs = [_]ItemDef{
     .{ .id = 0, .name = "none", .stack = 0 },
@@ -735,6 +767,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_prog_name.deinit(allocator);
     var stock_prog_add: std.ArrayList(u8) = .empty;
     defer stock_prog_add.deinit(allocator);
+    var stock_eat_exp: std.ArrayList(u16) = .empty;
+    defer stock_eat_exp.deinit(allocator);
     var stock_dtags: std.ArrayList(u8) = .empty;
     defer stock_dtags.deinit(allocator);
     var stock_dradius: std.ArrayList(f32) = .empty;
@@ -907,6 +941,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_water_amt.append(allocator, water_amt);
             try stock_prog_name.append(allocator, prog_name);
             try stock_prog_add.append(allocator, prog_add);
+            try stock_eat_exp.append(allocator, firstGiveExp(body));
             // EntityItem distraction (stock decoy: `zombie,requires_contact`).
             var dtags: u8 = 0;
             if (xml.propertyValue(body, "DistractionTags")) |v| {
@@ -1315,6 +1350,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .water_amount = stock_water_amt.items[idx],
             .progression_name = stock_prog_name.items[idx],
             .progression_add = stock_prog_add.items[idx],
+            .eat_exp = stock_eat_exp.items[idx],
             .distraction_tags = stock_dtags.items[idx],
             .distraction_radius = stock_dradius.items[idx],
             .phys_resist_curve = stock_pdr_curves.items[idx],
@@ -1466,9 +1502,11 @@ test "magazine AddProgressionLevel parses onto the eat item" {
     try std.testing.expect(t.isEat(mag.id));
     try std.testing.expectEqualStrings("craftingHarvestingTools", mag.progression_name);
     try std.testing.expectEqual(@as(u8, 1), mag.progression_add);
+    try std.testing.expectEqual(@as(u16, 50), mag.eat_exp);
     const food = t.byName("foodCanBeef").?;
     try std.testing.expectEqual(@as(u8, 0), food.progression_add);
     try std.testing.expectEqualStrings("", food.progression_name);
+    try std.testing.expectEqual(@as(u16, 0), food.eat_exp);
 }
 
 test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {
