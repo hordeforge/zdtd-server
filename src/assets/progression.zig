@@ -403,9 +403,8 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
 }
 
 /// Unlock requirement for an item: (crafting skill name, required level), or
-/// null when no unlock_entry gates it (always_unlocked). The gate is inert
-/// until a crafting-skill level source lands (magazines / crafting XP); the
-/// data is read so the join list can honour it.
+/// null when no unlock_entry gates it (always_unlocked). Magazines raise the
+/// skill via AddProgressionLevel; the join PDF and tryCraft honour the gate.
 pub fn unlockRequirement(self: *const Table, item_name: []const u8) ?struct { []const u8, u8 } {
     for (self.crafting_skills) |sk| {
         for (sk.entries) |e| {

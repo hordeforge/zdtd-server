@@ -159,6 +159,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const props = eatProps(self, e.id);
                     const r = invsys.applyEatProps(&self.sim, ps, props);
                     if (!r.ate) break;
+                    self.grantMagazineRead(c.slot, e.id);
                     ate_any = true;
                     units_left -= 1;
                 }
@@ -175,6 +176,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         const props = eatProps(self, eid);
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
+                        self.grantMagazineRead(c.slot, eid);
                         ate_any = true;
                         units_left -= 1;
                     }
@@ -194,6 +196,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         const props = eatProps(self, eid);
                         const r = invsys.applyEatProps(&self.sim, ps, props);
                         if (!r.ate) break;
+                        self.grantMagazineRead(c.slot, eid);
                         ate_any = true;
                         units_left -= 1;
                     }
@@ -720,7 +723,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         var r: invsys.Result = .{};
         // Captured before apply: a rejected place must refund what it consumed.
         const place_item_id: u16 = blk: {
-            if (tx.op != @intFromEnum(invsys.Op.place) or tx.a >= ecs.components.max_inv_slots) break :blk 0;
+            if (tx.op != @intFromEnum(invsys.Op.place) and tx.op != @intFromEnum(invsys.Op.use)) break :blk 0;
+            if (tx.a >= ecs.components.max_inv_slots) break :blk 0;
             const ps = self.sim.playerByPeer(c.slot) orelse break :blk 0;
             if (!self.sim.mask[ps].inventory) break :blk 0;
             break :blk self.sim.inventory[ps].slots[tx.a].item_id;
@@ -795,6 +799,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         // ItemActionEat.consume → EntityStatChanged food/water/health (stock path).
         if (r.ok and r.ate and c.entity_id > 0) {
+            self.grantMagazineRead(c.slot, place_item_id);
             try self.sendSurvivalStats(peer, c.entity_id, r.hp, r.max_hp, r.food, r.food_max, r.water, r.water_max);
         }
         return true;

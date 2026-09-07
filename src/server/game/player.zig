@@ -543,6 +543,60 @@ pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_l
     return false;
 }
 
+/// Intern a progression.xml name (attribute, perk, or crafting_skill) so
+/// Client.skill_levels points at catalog memory, not a transient buffer.
+fn internProgressionName(self: *const Game, name: []const u8) ?[]const u8 {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.name;
+    }
+    for (self.progression_table.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, name)) return pk.name;
+    }
+    for (self.progression_table.crafting_skills) |sk| {
+        if (std.mem.eql(u8, sk.name, name)) return sk.name;
+    }
+    return null;
+}
+
+/// MinEventActionAddProgressionLevel (RE minevents.md IL=143): add `delta`
+/// to the named ProgressionValue, clamped to the crafting_skill max_level
+/// (stock magazines ship level="1"). Unknown names fail closed.
+pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {
+    if (delta == 0 or slot >= self.clients.len) return false;
+    const interned = internProgressionName(self, name) orelse return false;
+    var max_level: u16 = 100;
+    for (self.progression_table.crafting_skills) |sk| {
+        if (std.mem.eql(u8, sk.name, interned)) {
+            max_level = sk.max_level;
+            break;
+        }
+    }
+    const c = &self.clients[slot];
+    var i: usize = 0;
+    while (i < c.skill_level_n) : (i += 1) {
+        if (std.mem.eql(u8, c.skill_levels[i].name, interned)) {
+            const cur: u16 = c.skill_levels[i].level;
+            const next: u16 = @min(max_level, cur + delta);
+            if (next == cur) return false;
+            c.skill_levels[i].level = @intCast(next);
+            return true;
+        }
+    }
+    if (c.skill_level_n >= c.skill_levels.len) return false;
+    const first: u16 = @min(max_level, delta);
+    c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = @intCast(first) };
+    c.skill_level_n += 1;
+    return true;
+}
+
+/// Magazine eat: items.xml AddProgressionLevel on the consumed item.
+pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
+    if (item_id == 0) return;
+    const def = self.items.byId(item_id) orelse return;
+    if (def.progression_add == 0 or def.progression_name.len == 0) return;
+    _ = addProgressionLevel(self, slot, def.progression_name, def.progression_add);
+}
+
 /// Fold one named passive over a client's purchased attribute/perk levels
 /// (level-aware curveAt) plus an actor sim slot's active buffs at level 1.
 /// Shared by the DismemberSelfChance (143) dismember fold and the Bartering
@@ -679,6 +733,27 @@ test "killXpAward scales by the on_entity_killed verdict percent" {
     g.killXpAward(0, 200, 150, false);
     try std.testing.expectEqual(before + 300, g.clients[0].xp);
     std.debug.print("PASS kill-xp-scale: 200 x 150% = {d}\n", .{g.clients[0].xp - before});
+}
+
+test "addProgressionLevel clamps to crafting_skill max and fails closed on unknown names" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_magread", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const skills = [_]assets_progression.CraftingSkill{
+        .{ .name = "craftingHarvestingTools", .max_level = 5, .entries = &.{} },
+    };
+    g.progression_table.crafting_skills = &skills;
+    try std.testing.expect(!g.addProgressionLevel(0, "notASkill", 1));
+    try std.testing.expect(g.addProgressionLevel(0, "craftingHarvestingTools", 1));
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "craftingHarvestingTools"));
+    try std.testing.expect(g.addProgressionLevel(0, "craftingHarvestingTools", 1));
+    try std.testing.expectEqual(@as(u8, 2), g.skillLevelOf(0, "craftingHarvestingTools"));
+    try std.testing.expect(g.addProgressionLevel(0, "craftingHarvestingTools", 10));
+    try std.testing.expectEqual(@as(u8, 5), g.skillLevelOf(0, "craftingHarvestingTools"));
+    try std.testing.expect(!g.addProgressionLevel(0, "craftingHarvestingTools", 1));
 }
 
 test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {

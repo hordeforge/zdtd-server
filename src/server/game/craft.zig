@@ -14,6 +14,7 @@ const Game = game_mod.Game;
 const Client = game_mod.Client;
 const assets_items = @import("../../assets/items.zig");
 const assets_recipes = @import("../../assets/recipes.zig");
+const assets_progression = @import("../../assets/progression.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
@@ -189,6 +190,9 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     const ps = self.sim.playerByPeer(peer_slot) orelse return false;
     if (!self.sim.mask[ps].inventory) return false;
     if (!generalCraftAllowed(recipe)) return false;
+    if (assets_progression.unlockRequirement(&self.progression_table, recipe.name)) |req| {
+        if (self.skillLevelOf(peer_slot, req[0]) < req[1]) return false;
+    }
     var n: u16 = if (times == 0) 1 else @min(times, self.craft_max_times);
     // Wasm-first (AGENTS rule 29): crafting passes the on_craft_request
     // verdict (<0 deny, 0 keep, >0 caps the batch). The recipe name is the

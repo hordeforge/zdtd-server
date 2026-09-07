@@ -125,9 +125,9 @@ sub-block byte is discarded. Nothing ever collapses.
 skills parse from `progression.xml` with their 648 `passive_effect` rows (the
 passive-effects VM applies the tracked deltas); spending is server-authoritative
 (`NetPackageEntitySetSkillLevelServer` C2S + the `on_perk_spend` Wasm verdict),
-and game stage drives spawn tiers and trader stage. The only open leg is the
-A21+ magazine-driven crafting-skill advancement (book unlocks stay recorded,
-not driven).
+and game stage drives spawn tiers and trader stage. Magazines raise the 23
+crafting skills on eat and gated recipes unlock at the matching `unlock_entry`
+tier. Book-group schematic unlocks stay recorded, not driven.
 
 ---
 
@@ -162,7 +162,7 @@ moved into the counted set; the chunk-pointer stability gap was closed
 MISSING" figure was an incremental projection that had drifted from the
 markers (the file carries no `MISSING` tag today); every formerly-MISSING gap
 was implemented or consolidated into a PARTIAL row with a documented residual.
-Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x22 open
+Fifty feature bullets use ad-hoc status labels (`PARTIAL (waived)` x21 open
 (+ x5 scoped waivers: direct-IP parity, EAC-off, loopback-only admin), `N/A (parity)` x3, `DONE` x2, plus one each of
 `ROLLED`, `SIZED`, `PERSISTED`, `RESOLVED`, `PER-CLASS` and a handful of
 one-off prose tags) outside the canonical vocabulary and are not counted; the
@@ -2834,8 +2834,8 @@ unvalidated, and durability, mods and repair do not exist.
   the workstation queue is server-paced via `one_item_craft_time` /
   `craft_time_left` like stock. Hand crafting stays client-driven (stock's
   model: the client owns its progress bar, the server validates and applies
-  at request time). The remaining recipe-unlock gate is tracked under
-  "Crafting skills / magazines / recipe unlock by progression".
+  at request time). Recipe unlocks (magazines + `unlock_entry` tiers) land
+  under "Crafting skills / magazines / recipe unlock by progression".
 
 - **NetPackageInventoryTransactionRequest / Response wire format** `WORKS`
   The stock `InventoryTransaction::Read` layout is parsed (`parseStockInvTx`
@@ -2857,12 +2857,9 @@ unvalidated, and durability, mods and repair do not exist.
   `docs/wire/INVENTORY.md:74-75`, `asm.il:823033-823059`, `asm.il:614000-614087`,
   `asm.il:612874-612917`
 
-- **Unlocked recipe list on join** `WORKS` (2026-08-25):
-  the join PDF ships the stock `always_unlocked` set (41 recipes) plus the
-  seeded demo names, capped at 64 - correct for a server without the
-  progression ledger. The magazine/crafting-skill learn gate (99
-  `unlock_entry` rows) is tracked under "Crafting skills / magazines /
-  recipe unlock by progression"; the join surface advances with that ledger.
+- **Unlocked recipe list on join** `WORKS` (2026-08-25; magazine gates 2026-09-07):
+  the join PDF ships the stock `always_unlocked` set plus recipes whose
+  `unlock_entry` the player's crafting-skill levels currently meet, capped at 64.
 
 - **Workstation TE (type 12) C2S parse and S2C echo** `WORKS`
   Full stock body: fuel/input/tools/output arrays at the client's declared lengths,
@@ -3198,11 +3195,18 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
 
-- **Crafting skills / magazines / recipe unlock by progression** `PARTIAL (waived)`
-  99 `unlock_entry` rows gating recipes behind crafting_skill not yet parsed;
-  join PDF ships `always_unlocked` + wood-club seeds. Needs progression ledger to
-  do without faking unlocks.
-  *Anchors:* `src/assets/recipes.zig:52-88`, `Data/Config/progression.xml:245`
+- **Crafting skills / magazines / recipe unlock by progression** `WORKS` `(2026-09-07)`
+  `unlock_entry` gates parse from progression.xml. Magazines (`AddProgressionLevel`
+  on eat, RE minevents.md IL=143) raise the matching `crafting_skill` (clamped
+  to class max, interned against the catalog, persisted in the ZPV11 skill tail).
+  `tryCraftRecipe` refuses a gated recipe the player has not unlocked; the join
+  PDF ships `always_unlocked` plus currently met gates. Residual: the 50 XP
+  GiveExp on magazine read is still the non-kill XP waiver; `level="-1"` (set
+  to max) is omitted rather than guessed.
+  *Anchors:* `src/assets/items.zig` (`firstProgressionAdd`),
+  `src/server/game/player.zig` (`addProgressionLevel`),
+  `src/server/game/craft.zig` (`tryCraftRecipe`),
+  `src/assets/recipes.zig` (`appendUnlockedFor`)
 
 - **Gamestage (level plus days survived driving spawn difficulty)** `PARTIAL (waived)`
   Spawn uses `gsScale=1` (no scaling); `gamestages.xml` is now parsed in `§8`

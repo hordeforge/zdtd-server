@@ -1119,6 +1119,14 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                                 }
                             }
                         }
+                        if (resolved == null) {
+                            for (self.progression_table.crafting_skills) |sk| {
+                                if (std.mem.eql(u8, sk.name, sname)) {
+                                    resolved = sk.name;
+                                    break;
+                                }
+                            }
+                        }
                         const rname = resolved orelse continue;
                         c.skill_levels[c.skill_level_n] = .{ .name = rname, .level = slevel };
                         c.skill_level_n += 1;

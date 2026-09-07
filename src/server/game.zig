@@ -1482,6 +1482,28 @@ pub const Game = struct {
         return game_player.purchaseSkillAtCost(self, slot, skill, target_level, cost_override);
     }
 
+    pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {
+        return game_player.addProgressionLevel(self, slot, name, delta);
+    }
+
+    pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
+        game_player.grantMagazineRead(self, slot, item_id);
+    }
+
+    pub fn appendUnlockedRecipes(self: *const Game, slot: usize, out: [][]const u8) usize {
+        const SlotCtx = struct {
+            var peer: usize = 0;
+            var game: ?*const Game = null;
+            fn level(name: []const u8) u8 {
+                const g = game orelse return 0;
+                return g.skillLevelOf(peer, name);
+            }
+        };
+        SlotCtx.peer = slot;
+        SlotCtx.game = self;
+        return self.recipes.appendUnlockedFor(out, &self.progression_table, SlotCtx.level);
+    }
+
     pub fn skillCostOf(self: *const Game, slot: usize, skill: []const u8, target_level: u8) ?u32 {
         return game_player.skillCostOf(self, slot, skill, target_level);
     }
@@ -2381,7 +2403,7 @@ pub const Game = struct {
         const qn = self.fillStockJournalWrites(c.slot, &qbuf, &reward_store, &obj_val_store, &kind_store, &pos_store);
         // Cap always_unlocked list so PlayerId stays under body_buf slice.
         var unlock_names: [64][]const u8 = undefined;
-        const unlock_n = self.recipes.appendAlwaysUnlocked(&unlock_names);
+        const unlock_n = self.appendUnlockedRecipes(c.slot, &unlock_names);
         // Restored inventory (players.zsv v2) rides the join PDF: toolbelt =
         // sim slots 0..9, bag = 10.. (client PDF apply keeps that split).
         var tb_slots: [ecs.components.inv_bag_start]packages.stock_inv.StockSlot = undefined;

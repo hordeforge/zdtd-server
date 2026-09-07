@@ -426,8 +426,8 @@ pub const InitOptions = struct {
 pub const SkillLevel = assets_progression.SkillLevel;
 
 /// Cap on distinct purchased skills per player (stock: 8 attributes + 57
-/// perks + skills; 64 covers the tree with room for skill rows).
-pub const max_skill_levels: usize = 64;
+/// perks + 23 crafting_skills; 128 covers the tree with room for skill rows).
+pub const max_skill_levels: usize = 128;
 
 pub const Client = struct {
     peer: ?*ln_peer.Peer = null,

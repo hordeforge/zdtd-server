@@ -114,6 +114,37 @@ pub const RecipeTable = struct {
         }
         return n;
     }
+
+    /// Join PDF unlockedRecipeList: always_unlocked plus recipes whose
+    /// unlock_entry the player currently meets. `skill_level(name)` is the
+    /// player's purchased/magazine crafting-skill level. Offline catalogs
+    /// with no progression table still seed demo names via appendAlwaysUnlocked.
+    pub fn appendUnlockedFor(
+        self: *const RecipeTable,
+        out: [][]const u8,
+        table: *const @import("progression.zig").Table,
+        skill_level: *const fn ([]const u8) u8,
+    ) usize {
+        var n = self.appendAlwaysUnlocked(out);
+        if (table.crafting_skills.len == 0) return n;
+        for (self.defs) |d| {
+            if (n >= out.len) break;
+            if (d.always_unlocked) continue;
+            const req = @import("progression.zig").unlockRequirement(table, d.name) orelse continue;
+            if (skill_level(req[0]) < req[1]) continue;
+            var dup = false;
+            for (out[0..n]) |e| {
+                if (std.mem.eql(u8, e, d.name)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+            out[n] = d.name;
+            n += 1;
+        }
+        return n;
+    }
 };
 
 /// Minimal offline craft set (wood frame-ish).
@@ -282,4 +313,42 @@ test "craft_exp_gain parses the declared 0 and defaults undeclared to -1" {
         }
     }
     try std.testing.expect(undeclared_found);
+}
+
+test "appendUnlockedFor includes gated recipes only when the skill meets the tier" {
+    const recipes = [_]RecipeDef{
+        .{ .name = "resourceWood", .always_unlocked = true },
+        .{ .name = "meleeToolRepairT0StoneAxe", .always_unlocked = false },
+        .{ .name = "meleeToolPickT1IronPickaxe", .always_unlocked = false },
+    };
+    const table: RecipeTable = .{ .defs = &recipes, .source = .xml };
+    const skills = [_]@import("progression.zig").CraftingSkill{
+        .{
+            .name = "craftingHarvestingTools",
+            .max_level = 100,
+            .entries = &.{
+                .{ .items = "meleeToolRepairT0StoneAxe", .level = 1 },
+                .{ .items = "meleeToolPickT1IronPickaxe", .level = 11 },
+            },
+        },
+    };
+    const prog: @import("progression.zig").Table = .{ .crafting_skills = &skills };
+    const Harvest = struct {
+        var harvest: u8 = 0;
+        fn level(name: []const u8) u8 {
+            if (std.mem.eql(u8, name, "craftingHarvestingTools")) return harvest;
+            return 0;
+        }
+    };
+    var names: [8][]const u8 = undefined;
+    Harvest.harvest = 0;
+    const n0 = table.appendUnlockedFor(&names, &prog, Harvest.level);
+    try std.testing.expectEqual(@as(usize, 1), n0);
+    try std.testing.expectEqualStrings("resourceWood", names[0]);
+    Harvest.harvest = 1;
+    const n1 = table.appendUnlockedFor(&names, &prog, Harvest.level);
+    try std.testing.expectEqual(@as(usize, 2), n1);
+    Harvest.harvest = 11;
+    const n2 = table.appendUnlockedFor(&names, &prog, Harvest.level);
+    try std.testing.expectEqual(@as(usize, 3), n2);
 }

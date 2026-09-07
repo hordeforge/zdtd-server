@@ -183,6 +183,11 @@ pub const ItemDef = struct {
     food_health: f32 = 0,
     /// $waterAmountAdd from effect_group (PlayerEntityStats.Water gain).
     water_amount: f32 = 0,
+    /// items.xml `AddProgressionLevel` on eat (magazines: Unlocks a
+    /// crafting_skill and adds `level`). Empty = not a magazine. Arena-owned.
+    progression_name: []const u8 = "",
+    /// Amount added per use (stock magazines ship 1). 0 = no grant.
+    progression_add: u8 = 0,
     /// items.xml `DistractionTags` (EntityItem distraction; RE EntityItem::SetupDistraction
     /// + ItemClass::get_IsEatDistraction). Bits: 1 = eat, 2 = requires_contact, 4 = zombie.
     /// Stock ships only decoy (`zombie,requires_contact`).
@@ -383,6 +388,7 @@ pub const ItemTable = struct {
     pub fn isEat(self: *const ItemTable, item_id: u16) bool {
         if (self.byId(item_id)) |d| {
             if (d.is_eat) return true;
+            if (d.progression_add > 0 and d.progression_name.len > 0) return true;
             if (d.food_amount > 0 or d.water_amount > 0) return true;
             // Offline name heuristic for food*/drink* without parsed Action0.
             // After items.xml load, missing Action0 fails closed (wrong eat
@@ -601,6 +607,39 @@ fn firstCvarAdd(body: []const u8, cvar: []const u8) ?f32 {
     return null;
 }
 
+/// First `AddProgressionLevel` triggered_effect: (progression_name, level).
+/// Magazines ship `level="1"` (add 1, clamped to class max). `level="-1"`
+/// (set to max) is not modelled: missing beats a guessed max.
+fn firstProgressionAdd(body: []const u8) ?struct { []const u8, u8 } {
+    var i: usize = 0;
+    while (i < body.len) {
+        const ti = std.mem.findPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.findPos(u8, body, ti, "/>") orelse (std.mem.findPos(u8, body, ti, ">") orelse break);
+        const win = body[ti .. end + 2];
+        const action = xml.attr(win, 0, "action") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!std.mem.eql(u8, action, "AddProgressionLevel")) {
+            i = ti + 10;
+            continue;
+        }
+        const pname = xml.attr(win, 0, "progression_name") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const raw = xml.attr(win, 0, "level") orelse "1";
+        const lvl = xml.parseI32Prefix(raw) orelse 1;
+        if (lvl <= 0) {
+            i = ti + 10;
+            continue;
+        }
+        const add: u8 = if (lvl > 255) 255 else @intCast(lvl);
+        return .{ pname, add };
+    }
+    return null;
+}
+
 /// Builtin ECS catalog (stable small ids for sim/save).
 pub const builtin_defs = [_]ItemDef{
     .{ .id = 0, .name = "none", .stack = 0 },
@@ -692,6 +731,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_food_hp.deinit(allocator);
     var stock_water_amt: std.ArrayList(f32) = .empty;
     defer stock_water_amt.deinit(allocator);
+    var stock_prog_name: std.ArrayList([]const u8) = .empty;
+    defer stock_prog_name.deinit(allocator);
+    var stock_prog_add: std.ArrayList(u8) = .empty;
+    defer stock_prog_add.deinit(allocator);
     var stock_dtags: std.ArrayList(u8) = .empty;
     defer stock_dtags.deinit(allocator);
     var stock_dradius: std.ArrayList(f32) = .empty;
@@ -851,10 +894,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             if (!is_eat and (food_amt > 0 or water_amt > 0)) is_eat = true;
             if (!is_eat and (std.mem.startsWith(u8, name, "food") or std.mem.startsWith(u8, name, "drink")))
                 is_eat = true;
+            var prog_name: []const u8 = "";
+            var prog_add: u8 = 0;
+            if (firstProgressionAdd(body)) |pg| {
+                prog_name = try arena.dupe(u8, pg[0]);
+                prog_add = pg[1];
+                is_eat = true;
+            }
             try stock_is_eat.append(allocator, is_eat);
             try stock_food_amt.append(allocator, food_amt);
             try stock_food_hp.append(allocator, food_hp);
             try stock_water_amt.append(allocator, water_amt);
+            try stock_prog_name.append(allocator, prog_name);
+            try stock_prog_add.append(allocator, prog_add);
             // EntityItem distraction (stock decoy: `zombie,requires_contact`).
             var dtags: u8 = 0;
             if (xml.propertyValue(body, "DistractionTags")) |v| {
@@ -1261,6 +1313,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .food_amount = stock_food_amt.items[idx],
             .food_health = stock_food_hp.items[idx],
             .water_amount = stock_water_amt.items[idx],
+            .progression_name = stock_prog_name.items[idx],
+            .progression_add = stock_prog_add.items[idx],
             .distraction_tags = stock_dtags.items[idx],
             .distraction_radius = stock_dradius.items[idx],
             .phys_resist_curve = stock_pdr_curves.items[idx],
@@ -1375,6 +1429,46 @@ test "XML item table fails closed instead of using builtin balance or ids" {
     try std.testing.expectEqual(@as(f32, 15), builtin.foodAmountFor(2));
     try std.testing.expectEqual(@as(u16, 6), builtin.ecsIdByName("casinoCoin"));
     try std.testing.expect(builtin.isEat(2));
+}
+
+test "magazine AddProgressionLevel parses onto the eat item" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="harvestingToolsSkillMagazine">
+        \\    <property class="Action0">
+        \\      <property name="Class" value="Eat"/>
+        \\    </property>
+        \\    <effect_group tiered="false">
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="AddProgressionLevel" progression_name="craftingHarvestingTools" level="1"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="GiveExp" exp="50"/>
+        \\    </effect_group>
+        \\  </item>
+        \\  <item name="foodCanBeef">
+        \\    <property class="Action0">
+        \\      <property name="Class" value="Eat"/>
+        \\    </property>
+        \\    <effect_group>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="ModifyCVar" cvar="$foodAmountAdd" operation="add" value="15"/>
+        \\    </effect_group>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const mag = t.byName("harvestingToolsSkillMagazine").?;
+    try std.testing.expect(mag.is_eat);
+    try std.testing.expect(t.isEat(mag.id));
+    try std.testing.expectEqualStrings("craftingHarvestingTools", mag.progression_name);
+    try std.testing.expectEqual(@as(u8, 1), mag.progression_add);
+    const food = t.byName("foodCanBeef").?;
+    try std.testing.expectEqual(@as(u8, 0), food.progression_add);
+    try std.testing.expectEqualStrings("", food.progression_name);
 }
 
 test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {

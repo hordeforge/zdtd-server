@@ -12,6 +12,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   as `zombieRancher` dropping Territorial) and numbered `AITask-N` on animals
   both resolve through Extends. Classes with no list keep the shared table.
   Leap and RangedAttackTarget stay unmapped (no native task).
+- Magazines raise crafting skills on eat (`AddProgressionLevel`). Gated
+  recipes unlock when the skill meets the `unlock_entry` tier; the join PDF
+  and server craft path honour that list. `always_unlocked` recipes stay
+  available from the start.
 
 ## [0.4.0] - 2026-09-06
 
