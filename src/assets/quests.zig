@@ -208,6 +208,20 @@ const PhaseGraph = struct {
     objectives: []const quest.FlatObjective,
 };
 
+/// Objective `type` attribute to its stock Write shape. The client builds the
+/// objective by reflection on the attribute (`GetTypeWithPrefix("Objective",
+/// type)`, QuestsFromXml.il.txt:634), so the type name selects the class whose
+/// Write override the body must match. Only these four override Write; every
+/// other type keeps the BaseObjective shape. A wrong shape here desyncs the
+/// whole objective block, not just one entry.
+fn objectiveWireKind(typ: []const u8) quest.ObjectiveWireKind {
+    if (std.mem.eql(u8, typ, "TreasureChest")) return .treasure_chest;
+    if (std.mem.eql(u8, typ, "POIStayWithin")) return .empty;
+    if (std.mem.eql(u8, typ, "StayWithin")) return .empty;
+    if (std.mem.eql(u8, typ, "Time")) return .time;
+    return .base;
+}
+
 /// Build the ordered phase graph from a quest body, mirroring stock
 /// QuestClass.HighestPhase (max objective `phase`) and per-phase advancing
 /// objective (Quest.refreshQuestCompletion). `tier` drives the kill-count boost
@@ -279,14 +293,7 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
             .force = objectiveFlag(el, "force_phase_finish"),
         };
         obj_phase_bytes[n] = phase;
-        // Objective Write subclass by type (stock CreateQuest). Everything not
-        // listed writes the BaseObjective shape (FileVersion + CurrentValue).
-        obj_kind_bytes[n] = if (std.mem.eql(u8, typ, "TreasureChest"))
-            .treasure_chest
-        else if (std.mem.eql(u8, typ, "POIStayWithin"))
-            .empty
-        else
-            .base;
+        obj_kind_bytes[n] = objectiveWireKind(typ);
         if (phase > highest) highest = phase;
         n += 1;
     }
@@ -1190,16 +1197,22 @@ test "objective write kinds follow objective type" {
         \\    <objective type="Goto" phase="1"/>
         \\    <objective type="TreasureChest" phase="2"/>
         \\    <objective type="POIStayWithin" phase="3"/>
+        \\    <objective type="StayWithin" phase="4"/>
+        \\    <objective type="Time" phase="5"/>
         \\  </quest>
         \\</quests>
     ;
     var cat = try parseCatalog(std.testing.allocator, fixture, .{});
     defer cat.deinit();
     const d = cat.byName("mixed").?;
-    try std.testing.expectEqual(@as(usize, 3), d.objective_kinds.len);
+    try std.testing.expectEqual(@as(usize, 5), d.objective_kinds.len);
     try std.testing.expectEqual(quest.ObjectiveWireKind.base, d.objective_kinds[0]);
     try std.testing.expectEqual(quest.ObjectiveWireKind.treasure_chest, d.objective_kinds[1]);
     try std.testing.expectEqual(quest.ObjectiveWireKind.empty, d.objective_kinds[2]);
+    // StayWithin is a distinct class from POIStayWithin and also Writes
+    // nothing; Time writes a bare UInt16 instead of the base pair.
+    try std.testing.expectEqual(quest.ObjectiveWireKind.empty, d.objective_kinds[3]);
+    try std.testing.expectEqual(quest.ObjectiveWireKind.time, d.objective_kinds[4]);
 }
 
 test "reward_coin sums casinoCoin Item rewards and fails closed" {

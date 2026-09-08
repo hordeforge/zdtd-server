@@ -364,13 +364,14 @@ pub const FlatObjective = struct {
     poi_gated: bool = false,
 };
 
-/// Objective Write subclass (Quest.Write CreateQuest): BaseObjective writes
-/// FileVersion + CurrentValue, ObjectiveTreasureChest writes destroyCount +
-/// CurrentRadius (no base call), ObjectivePOIStayWithin writes nothing extra.
+/// Objective Write subclass (Quest.Write CreateQuest). Stock has exactly four
+/// BaseObjective subclasses that override Write; every other type keeps the
+/// base shape. See the wire enum in wire/stock_quest.zig for the byte layouts.
 pub const ObjectiveWireKind = enum(u8) {
     base = 0,
     treasure_chest = 1,
     empty = 2,
+    time = 3,
 };
 
 pub const max_reward_flags: usize = 16;

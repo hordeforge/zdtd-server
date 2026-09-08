@@ -198,8 +198,8 @@ pub fn fillStockJournalWrites(
             };
             pn += 2;
         }
-        // Per-objective Write subclass from the catalog (TreasureChest and
-        // POIStayWithin use non-base shapes; everything else is Base).
+        // Per-objective Write subclass from the catalog: the four stock
+        // overrides carry their own body shape, everything else is Base.
         var kinds: []const packages.stock_quest.ObjectiveWriteKind = &.{};
         if (d.objective_kinds.len > 0) {
             const klim = @min(d.objective_kinds.len, kind_store.len);
@@ -209,6 +209,7 @@ pub fn fillStockJournalWrites(
                     .base => .base,
                     .treasure_chest => .treasure_chest,
                     .empty => .empty,
+                    .time => .time,
                 };
             }
             kinds = kind_store[n][0..klim];

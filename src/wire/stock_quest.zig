@@ -18,14 +18,22 @@ pub const position_data_location: u8 = 1;
 pub const position_data_poi_position: u8 = 2;
 pub const position_data_poi_size: u8 = 3;
 
-/// Stock objective Write path (from Assembly-CSharp BaseObjective / overrides).
+/// Stock objective Write path. Exactly four BaseObjective subclasses override
+/// Write (every `kind base=BaseObjective` / `base=Objective*` type in
+/// `il/full-v3.2.0/_global` was checked); the rest inherit the base shape.
 pub const ObjectiveWriteKind = enum(u8) {
-    /// BaseObjective.Write: FileVersion u8 + CurrentValue u8.
+    /// BaseObjective.Write: FileVersion u8 + CurrentValue u8 (BaseObjective.il.txt:542).
     base = 0,
-    /// ObjectiveTreasureChest.Write: destroyCount i32 + CurrentRadius i32 (no base call).
+    /// ObjectiveTreasureChest.Write: destroyCount i32 + CurrentRadius i32, no
+    /// base call (ObjectiveTreasureChest.il.txt:2592).
     treasure_chest = 1,
-    /// ObjectivePOIStayWithin.Write: empty.
+    /// ObjectivePOIStayWithin.Write and ObjectiveStayWithin.Write are both a
+    /// bare `ret` (ObjectivePOIStayWithin.il.txt:100, ObjectiveStayWithin.il.txt:136).
     empty = 2,
+    /// ObjectiveTime.Write: `(UInt16)currentTime`, no base call
+    /// (ObjectiveTime.il.txt:126); Read casts it back to the currentTime float
+    /// and pins currentValue to 1 (:115).
+    time = 3,
 };
 
 pub const QuestState = enum(u8) {
@@ -158,7 +166,9 @@ pub fn writeStockQuest(w: *binary.Writer, q: StockQuestWrite) !void {
         try w.writeI32(q.quest_code);
     }
     // Objectives size marker (UInt16) + virtual BaseObjective.Write per entry.
-    // IL: most types = FileVersion + CurrentValue; TreasureChest = 2×i32; StayWithin = empty.
+    // A kind mismatch desyncs the whole list: the client sizes the block from
+    // the marker and Quest.Read clears every objective when ValidateSizeMarker
+    // rejects it (Quest.il.txt:3454-3470).
     {
         const m = try reserveU16(w);
         var i: u8 = 0;
@@ -182,6 +192,10 @@ pub fn writeStockQuest(w: *binary.Writer, q: StockQuestWrite) !void {
                     try w.writeI32(0); // CurrentRadius
                 },
                 .empty => {},
+                // currentTime seconds; the client casts it straight back to
+                // its float field, so the progress value rides here, not in a
+                // CurrentValue byte.
+                .time => try w.writeU16(val),
             }
         }
         finalizeU16(w, m);
@@ -816,4 +830,38 @@ test "treasure chest objective write is 8 bytes not base" {
     try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, tc[head..][0..2], .little));
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tc[head + 2 ..][0..4], .little)); // destroyCount
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, tc[head + 6 ..][0..4], .little)); // CurrentRadius
+}
+
+test "empty and time objective writes carry their own body size" {
+    // ObjectiveStayWithin / ObjectivePOIStayWithin Write nothing; ObjectiveTime
+    // writes a bare UInt16. Neither calls base, so neither emits FileVersion.
+    var buf_empty: [128]u8 = undefined;
+    var buf_time: [128]u8 = undefined;
+    var w_empty: binary.Writer = .{ .buf = &buf_empty };
+    var w_time: binary.Writer = .{ .buf = &buf_time };
+    const kinds_empty = [_]ObjectiveWriteKind{.empty};
+    const kinds_time = [_]ObjectiveWriteKind{.time};
+    const values = [_]u8{47};
+    const q_empty = StockQuestWrite{
+        .id = "intro_buried_supplies",
+        .state = .in_progress,
+        .tracked = true,
+        .current_phase = 1,
+        .quest_code = 9,
+        .objective_count = 1,
+        .objective_values = values[0..],
+        .objective_kinds = kinds_empty[0..],
+    };
+    var q_time = q_empty;
+    q_time.objective_kinds = kinds_time[0..];
+    try writeStockQuest(&w_empty, q_empty);
+    try writeStockQuest(&w_time, q_time);
+    const e = w_empty.written();
+    const t = w_time.written();
+    const id_prefix: usize = 1 + "intro_buried_supplies".len;
+    const head: usize = id_prefix + 1 + 1 + 1 + 4 + 4 + 1 + 1 + 4;
+    // FinalizeSizeMarker counts the u16 itself: empty body = 2, time body = 4.
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, e[head..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 4), std.mem.readInt(u16, t[head..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 47), std.mem.readInt(u16, t[head + 2 ..][0..2], .little));
 }
