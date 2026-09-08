@@ -18,6 +18,12 @@ the chat path end to end against a real LiteNet client, not just unit tests.
 Tick p50 held at 0.39 ms; the spikes (max 7.4 s, 213 overruns, 1000 window
 drops) come from the run's own rejoin churn (41 joins, 39 rejoins in ~100 s)
 and are the known join-burst PARTIAL in GAP_ANALYSIS §11, not a regression.
+Re-run 2026-09-09 after the equipment and animation parser rewrites: another
+81 joins across the same four modes, all the same counters still 0.
+**What loadgen does not cover:** it never sends `NetPackagePlayerEquipment` or
+`NetPackageEntityAnimationData` (checked against its sender list), so those two
+parsers are exercised only by `scenarios.zig` through the real C2S handler, not
+by a live client. A stock-client pass is still the open validation step.
 `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
 owns all C2S domains. `GAP_ANALYSIS.md` scores 299 features: **296 `WORKS`,

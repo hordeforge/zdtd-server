@@ -12537,6 +12537,28 @@ test "scenario animation data relays to the other players" {
             return error.TestUnexpectedResult;
         try std.testing.expectEqual(bw.written().len, got.len);
         try std.testing.expectEqualSlices(u8, bw.written(), got);
+
+        // Appended bytes are trimmed off rather than fanned out.
+        cap_b.clear();
+        var apad: [96]u8 = undefined;
+        const an_n = bw.written().len;
+        @memcpy(apad[0..an_n], bw.written());
+        @memset(apad[an_n..][0..6], 0x3c);
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAnimationData", apad[0 .. an_n + 6]));
+        const an_trimmed = cap_b.findPkgIdEntity(an_id, ca.entity_id) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqual(an_n, an_trimmed.len);
+
+        // An unrecognised parameter type is rejected, not relayed.
+        cap_b.clear();
+        var abad: [32]u8 = undefined;
+        var abw = binary.Writer{ .buf = &abad };
+        try abw.writeI32(ca.entity_id);
+        try abw.writeI32(1);
+        try abw.writeI32(7);
+        try abw.writeByte(9); // no such AnimParamData.ValueTypes
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAnimationData", abw.written()));
+        try std.testing.expect(cap_b.findPkgId(an_id) == null);
     }
     // PlayerEquipment is the same verbatim-relay shape and had no scenario at
     // all. Two properties matter and neither was covered: the body reaches the
@@ -12548,11 +12570,21 @@ test "scenario animation data relays to the other players" {
         // empty slot is the bare `0` its version field would carry. Stock
         // writes version 4; versions 2 and up also carry the cosmetic tail.
         // 4 id + 1 version + 12 null slots + 12 cosmetic i32 + 4 unlocked.
-        var eq: [128]u8 = undefined;
+        var eq: [256]u8 = undefined;
         var ew = binary.Writer{ .buf = &eq };
         try ew.writeI32(ca.entity_id);
         try ew.writeByte(4); // version -> 12 equipment slots
-        for (0..12) |_| try ew.writeByte(0); // null ItemValue per slot
+        // Slot 3 carries a real item: an all-empty body cannot tell a correct
+        // parse from one that mis-tracks the slot cursor, which is how the
+        // presence-bool bug survived here.
+        const worn_stock: i32 = packages.stock_inv.items_start_here + 5;
+        for (0..12) |i| {
+            if (i == 3) {
+                try packages.stock_inv.writeItemValue(&ew, .{ .type_id = worn_stock, .count = 1 });
+            } else {
+                try ew.writeByte(0); // null ItemValue
+            }
+        }
         for (0..12) |_| try ew.writeI32(0); // cosmetic ids
         try ew.writeI32(0); // unlocked cosmetics count
         cap_b.clear();
@@ -12560,6 +12592,27 @@ test "scenario animation data relays to the other players" {
         const got_eq = cap_b.findPkgIdEntity(eq_id, ca.entity_id) orelse
             return error.TestUnexpectedResult;
         try std.testing.expectEqualSlices(u8, ew.written(), got_eq);
+        // The parser landed the item in the slot it was written to, and left
+        // its neighbours empty: a cursor that drifted by one byte would not.
+        {
+            const psa = g.sim.playerByPeer(ca.slot).?;
+            const inv = &g.sim.inventory[psa];
+            const base = quest_mod_components.inv_equip_start;
+            try std.testing.expect(inv.slots[base + 3].item_id != 0);
+            try std.testing.expectEqual(@as(u16, 0), inv.slots[base + 2].item_id);
+            try std.testing.expectEqual(@as(u16, 0), inv.slots[base + 4].item_id);
+        }
+
+        // A body with trailing bytes relays trimmed to the stock length.
+        cap_b.clear();
+        var padded: [288]u8 = undefined;
+        const n_eq = ew.written().len;
+        @memcpy(padded[0..n_eq], ew.written());
+        @memset(padded[n_eq..][0..7], 0xb7);
+        try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerEquipment", padded[0 .. n_eq + 7]));
+        const trimmed = cap_b.findPkgIdEntity(eq_id, ca.entity_id) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqual(n_eq, trimmed.len);
 
         // Spoofed: A claims B's entity id. The relay must drop it, or one
         // client could rewrite another's visible gear.
