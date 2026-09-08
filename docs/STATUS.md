@@ -30,7 +30,14 @@ storage TEs rather than being filtered out.
 **What loadgen does not cover:** it never sends `NetPackagePlayerEquipment` or
 `NetPackageEntityAnimationData` (checked against its sender list), so those two
 parsers are exercised only by `scenarios.zig` through the real C2S handler, not
-by a live client. A stock-client pass is still the open validation step.
+by a live client. It also cannot validate the chat echo: it resolves
+`NetPackageSimpleChat` in preference to `NetPackageChat` (`ActionLoop.cs:597`),
+so it drives the path that always broadcast, not the branch fixed on
+2026-09-09; and it paces chats ~40 ms apart against the 200 ms
+`min_chat_gap_ns` anti-spam gate, so only the first chat per client is
+accepted (110 sent, 2 accepted in the 2026-09-09 stock-map run). That gate is
+deliberate, not a defect. A stock-client pass is still the open validation
+step.
 `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
 owns all C2S domains. `GAP_ANALYSIS.md` scores 299 features: **296 `WORKS`,
