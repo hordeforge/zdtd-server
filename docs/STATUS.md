@@ -20,6 +20,13 @@ drops) come from the run's own rejoin churn (41 joins, 39 rejoins in ~100 s)
 and are the known join-burst PARTIAL in GAP_ANALYSIS §11, not a regression.
 Re-run 2026-09-09 after the equipment and animation parser rewrites: another
 81 joins across the same four modes, all the same counters still 0.
+**Stock-map run 2026-09-09** (the first on real prefab data; earlier runs used
+the flat proc world, which has no prefabs and so never exercised the prefab TE
+scan): `--game-dir` Navezgane, 1559 prefabs loaded, 16 joins, `join_fail=0`,
+and `stream_errors`, `c2s_malformed`, `c2s_unhandled`, `decode_rejects`,
+`encode_errors`, `net_send_errors` all 0. 19.6 M TE cells scanned and
+`containers.zct` persisted 6400 bytes, confirming the scan produced real
+storage TEs rather than being filtered out.
 **What loadgen does not cover:** it never sends `NetPackagePlayerEquipment` or
 `NetPackageEntityAnimationData` (checked against its sender list), so those two
 parsers are exercised only by `scenarios.zig` through the real C2S handler, not
