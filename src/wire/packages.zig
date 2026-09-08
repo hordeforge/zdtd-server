@@ -881,7 +881,11 @@ fn readWorldI32(r: *binary.Reader) binary.ReadError!i32 {
 /// has for the entity, and a rotation from the wire is not a value it acts on.
 /// Position goes through readWorldF32 so a coordinate outside the world bound
 /// is an error here, not a teleport the sim has to undo.
-pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool } {
+/// `wire_len` is where the stock body ends, which is not `body.len`: the
+/// `bUseQRotation` branch makes the length variable, and a peer may append
+/// trailing bytes. A relay must forward `body[0..wire_len]`, never the raw
+/// slice.
+pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y: f32, z: f32, on_ground: bool, wire_len: usize } {
     if (body.len < 30) return error.EndOfStream;
     var r: binary.Reader = .{ .data = body };
     const entity_id = try r.readI32();
@@ -900,7 +904,7 @@ pub fn parsePosAndRotBody(body: []const u8) !struct { entity_id: i32, x: f32, y:
         _ = try readFiniteF32(&r);
     }
     const on_ground = try r.readBool();
-    return .{ .entity_id = entity_id, .x = x, .y = y, .z = z, .on_ground = on_ground };
+    return .{ .entity_id = entity_id, .x = x, .y = y, .z = z, .on_ground = on_ground, .wire_len = r.pos };
 }
 
 /// NetPackageEntityRelPosAndRot (RE protocol-packages.md 5.5.4, write IL=30).
@@ -3971,22 +3975,30 @@ pub const ParticleEffectInvoke = struct {
     world_spawn: bool,
 };
 
-/// NetPackageParticleEffect (RE inventories/netpackage-bodies.md, write IL=20):
-/// `pe` (ParticleEffect.Write: id, pos, rot, colour, sound names, volume, …) |
-/// `entityThatCausedIt` i32 | `forceCreation` bool | `worldSpawn` bool.
+/// NetPackageParticleEffect (write IL=20, NetPackageParticleEffect.il.txt:43):
+/// `pe` (ParticleEffect::Write) | `entityThatCausedIt` i32 | `forceCreation`
+/// bool | `worldSpawn` bool.
+///
+/// `ParticleEffect::Write` (ParticleEffect.il.txt:397-435) ends with
+/// `parentEntityId` i32 and `attachment` u8 after volumeScale. Those five
+/// bytes are part of the effect, not the package tail: reading the package's
+/// own i32 too early took `parentEntityId` as `entityThatCausedIt` and then
+/// derived both bools from the attachment byte and the real causing id.
 pub fn parseParticleEffectInvoke(body: []const u8) (binary.ReadError || error{Overflow})!ParticleEffectInvoke {
     var r: binary.Reader = .{ .data = body };
     _ = try r.readI32(); // ParticleId
     var i: usize = 0;
     while (i < 3) : (i += 1) _ = try r.readF32(); // pos
     i = 0;
-    while (i < 4) : (i += 1) _ = try r.readF32(); // rot
+    while (i < 4) : (i += 1) _ = try r.readF32(); // rot (Quaternion)
     i = 0;
-    while (i < 4) : (i += 1) _ = try r.readByte(); // color
+    while (i < 4) : (i += 1) _ = try r.readByte(); // color (Color32)
     var scratch: [128]u8 = undefined;
     _ = try r.readString(&scratch); // soundName
     _ = try r.readString(&scratch); // additionalHitSoundName
     _ = try r.readF32(); // volumeScale
+    _ = try r.readI32(); // ParticleEffect.parentEntityId
+    _ = try r.readByte(); // ParticleEffect.attachment
     return .{
         .entity_caused = try r.readI32(),
         .force_creation = try r.readBool(),
@@ -4011,7 +4023,11 @@ test "particle effect invoke parses the stock body" {
     try w.writeByte(255);
     try w.writeString("Sounds/blood");
     try w.writeString("");
-    try w.writeF32(1);
+    try w.writeF32(1); // volumeScale
+    // ParticleEffect::Write ends here, with two fields the package tail sits
+    // behind. Distinct values so reading them as the tail cannot pass.
+    try w.writeI32(999); // ParticleEffect.parentEntityId
+    try w.writeByte(3); // ParticleEffect.attachment
     try w.writeI32(42); // entityThatCausedIt
     try w.writeBool(true); // forceCreation
     try w.writeBool(false); // worldSpawn
@@ -5447,7 +5463,11 @@ pub const PlayerLogin = struct {
 /// only be theatre.
 pub fn parsePlayerLogin(body: []const u8, name_buf: []u8) binary.ReadError!PlayerLogin {
     var r: binary.Reader = .{ .data = body };
-    var out: PlayerLogin = .{ .name = try r.readString(name_buf) };
+    // Stock writes playerName as an unbounded .NET string. Keep what fits and
+    // consume the rest: failing here would abandon the whole body, and the
+    // caller's version check and player-slot cap ride on a successful parse.
+    // A split codepoint at the cut is dropped by sanitizePlayerName.
+    var out: PlayerLogin = .{ .name = try r.readStringTruncating(name_buf) };
     var plat_buf: [platform_user.max_platform_len]u8 = undefined;
     var id_buf: [platform_user.max_id_len]u8 = undefined;
 
@@ -5812,6 +5832,30 @@ test "player login body parses stock field order" {
     try std.testing.expectEqualStrings("V 3.10", login.compVersion());
     // InternalId prefers the crossplatform account.
     try std.testing.expectEqualStrings("EOS", login.internalId().get().?.platform);
+}
+
+test "player login with a name longer than the buffer still parses" {
+    // Stock writes playerName unbounded. An over-long name used to fail the
+    // whole parse, and the caller runs its version check and player-slot cap
+    // only on the success branch, so such a client joined ungated.
+    var body: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    const long_name = "0123456789012345678901234567890123456789ABCDEF";
+    try w.writeString(long_name);
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "0123456789abcdef" });
+    try w.writeString("native-ticket");
+    try platform_user.write(&w, .{ .platform = "EOS", .id = "0123456789abcdef" });
+    try w.writeString("eos-jwt");
+    try w.writeString("V 3.2.0");
+    try w.writeString("V 3.2.0");
+    try w.writeU64(7);
+
+    var name_buf: [32]u8 = undefined;
+    const login = try parsePlayerLogin(w.written(), &name_buf);
+    try std.testing.expectEqualStrings(long_name[0..32], login.name);
+    // The fields behind the name still land, so the version gate can run.
+    try std.testing.expectEqualStrings("V 3.2.0", login.compVersion());
+    try std.testing.expectEqual(@as(u64, 7), login.discord_user_id);
 }
 
 test "player login with both identities null still yields the name" {
@@ -6212,29 +6256,37 @@ pub const RagdollInvoke = struct {
 };
 
 /// NetPackagePlayerLaserSight (read IL=16): entityId i32 | laserSightActive
-/// bool | laserSightPosition Vector3. Stock's ProcessPackage (IL=70) re-sends
-/// the body from the server to every client except the sender's own entity,
-/// so a player sees a mate's laser dot.
+/// bool | laserSightPosition Vector3 **only when active** (the read branches
+/// on the flag at IL_001E, so an inactive body is 5 bytes, not 17). Stock's
+/// ProcessPackage (IL=70) re-sends the body from the server to every client
+/// except the sender's own entity, so a player sees a mate's laser dot.
 pub const LaserSight = struct {
     entity_id: i32,
     active: bool,
-    x: f32,
-    y: f32,
-    z: f32,
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    /// End of the stock body; the length is variable, so a relay must trim to
+    /// it rather than forward the raw slice.
+    wire_len: usize = 0,
 };
 
 /// Read side of NetPackagePlayerLaserSight (read IL=16), laid out on
-/// `LaserSight` above. Server-side the body is relayed verbatim, so nothing
-/// past the ownership check reads these fields.
+/// `LaserSight` above. Server-side the body is relayed, so nothing past the
+/// ownership check reads the position fields.
 pub fn parseLaserSight(body: []const u8) binary.ReadError!LaserSight {
     var r: binary.Reader = .{ .data = body };
-    return .{
+    var out: LaserSight = .{
         .entity_id = try r.readI32(),
         .active = try r.readBool(),
-        .x = try r.readF32(),
-        .y = try r.readF32(),
-        .z = try r.readF32(),
     };
+    if (out.active) {
+        out.x = try r.readF32();
+        out.y = try r.readF32();
+        out.z = try r.readF32();
+    }
+    out.wire_len = r.pos;
+    return out;
 }
 
 /// Read side of NetPackageEntityRagdoll, whose layout and conditional tails are
@@ -6259,6 +6311,35 @@ pub fn parseRagdollInvoke(body: []const u8) binary.ReadError!RagdollInvoke {
     if ((flags & 2) != 0) _ = try r.readByte(); // mode
     if ((flags & 4) != 0) _ = try r.readByte(); // state
     return .{ .entity_id = entity_id, .flags = flags };
+}
+
+test "laser sight position is conditional on the active flag" {
+    // An inactive body is 5 bytes: stock's read branches on the flag, so
+    // demanding the Vector3 rejected every laser-off packet as malformed and
+    // the off transition never reached the other clients.
+    var off_buf: [8]u8 = undefined;
+    var ow: binary.Writer = .{ .buf = &off_buf };
+    try ow.writeI32(107);
+    try ow.writeBool(false);
+    const off = try parseLaserSight(ow.written());
+    try std.testing.expectEqual(@as(i32, 107), off.entity_id);
+    try std.testing.expect(!off.active);
+    try std.testing.expectEqual(@as(usize, 5), off.wire_len);
+
+    var on_buf: [32]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &on_buf };
+    try w.writeI32(107);
+    try w.writeBool(true);
+    try w.writeF32(1.5);
+    try w.writeF32(2.5);
+    try w.writeF32(3.5);
+    const on = try parseLaserSight(w.written());
+    try std.testing.expect(on.active);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.5), on.y, 0.001);
+    try std.testing.expectEqual(@as(usize, 17), on.wire_len);
+
+    // A truncated active body is still an error, not a short read.
+    try std.testing.expectError(error.EndOfStream, parseLaserSight(on_buf[0..9]));
 }
 
 test "ragdoll invoke parses the stock body" {

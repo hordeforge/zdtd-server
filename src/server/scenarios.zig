@@ -12328,7 +12328,7 @@ test "scenario animation data relays to the other players" {
     try bw.writeI32(1); // anim param count
     try bw.writeI32(7); // one opaque param name hash
     try bw.writeF32(0.5); // value
-    var fb: [64]u8 = undefined;
+    var fb: [192]u8 = undefined;
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAnimationData", bw.written()));
     // B received the relayed body for A. The server treats the param list as
     // opaque and forwards it verbatim, which is exactly why the bytes need
@@ -12394,7 +12394,7 @@ test "scenario animation data relays to the other players" {
     // two sound-name strings | volume f32 | entityThatCausedIt | two bools.
     // The relay excludes the causing entity, so A must not receive its own.
     if (packages.idOf("NetPackageParticleEffect")) |pe_id| {
-        var pe: [96]u8 = undefined;
+        var pe: [128]u8 = undefined;
         var pw = binary.Writer{ .buf = &pe };
         try pw.writeI32(42); // ParticleId
         for (0..3) |_| try pw.writeF32(10.0); // pos
@@ -12403,6 +12403,8 @@ test "scenario animation data relays to the other players" {
         try pw.writeString(""); // soundName
         try pw.writeString(""); // additionalHitSoundName
         try pw.writeF32(1.0); // volumeScale
+        try pw.writeI32(0); // ParticleEffect.parentEntityId
+        try pw.writeByte(0); // ParticleEffect.attachment
         try pw.writeI32(ca.entity_id); // entityThatCausedIt
         try pw.writeBool(false); // forceCreation
         try pw.writeBool(true); // worldSpawn

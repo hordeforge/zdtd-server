@@ -3074,7 +3074,10 @@ test "particle effects relay to all clients except the causing owner; stealth is
     try w.writeByte(255);
     try w.writeString("Sounds/blood");
     try w.writeString("");
-    try w.writeF32(1);
+    try w.writeF32(1); // volumeScale
+    // ParticleEffect::Write tail, ahead of the package's own fields.
+    try w.writeI32(0); // parentEntityId
+    try w.writeByte(0); // attachment
     try w.writeI32(ca.entity_id);
     try w.writeBool(true);
     try w.writeBool(false);
@@ -3598,9 +3601,12 @@ test "on_perk_spend verdict denies and scales through the C2S spend handler" {
     try std.testing.expectEqual(@as(u16, 1), cl.level);
 
     const body_of = struct {
-        fn build(skill: []const u8, level: i32) [64]u8 {
+        // Inherited NetPackageEntitySetSkillLevelClient body: the entity id
+        // leads, ahead of the skill name and level.
+        fn build(entity_id: i32, skill: []const u8, level: i32) [64]u8 {
             var b: [64]u8 = undefined;
             var w = wire_binary.Writer{ .buf = &b };
+            w.writeI32(entity_id) catch {};
             w.writeString(skill) catch {};
             w.writeI32(level) catch {};
             return b;
@@ -3608,13 +3614,13 @@ test "on_perk_spend verdict denies and scales through the C2S spend handler" {
     };
 
     // Denied: the purchase is refused, no SP spent, no level granted.
-    var body = body_of.build("perkForbidden", 1);
+    var body = body_of.build(cl.entity_id, "perkForbidden", 1);
     _ = try c2s_misc.handle(g, cl, cl.peer.?, "NetPackageEntitySetSkillLevelServer", body[0..]);
     try std.testing.expectEqual(@as(u8, 0), g.skillLevelOf(cl.slot, "perkForbidden"));
     try std.testing.expectEqual(@as(u32, 10), cl.skill_points);
 
     // Scaled 200%: catalog cost 1 becomes 2, spent from the balance.
-    body = body_of.build("perkLightEater", 1);
+    body = body_of.build(cl.entity_id, "perkLightEater", 1);
     _ = try c2s_misc.handle(g, cl, cl.peer.?, "NetPackageEntitySetSkillLevelServer", body[0..]);
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(cl.slot, "perkLightEater"));
     try std.testing.expectEqual(@as(u32, 8), cl.skill_points);

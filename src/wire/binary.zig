@@ -80,6 +80,21 @@ pub const Reader = struct {
         return buf[0..len];
     }
 
+    /// readString that keeps the prefix of a string longer than `buf` instead
+    /// of failing. The whole field is still consumed, so the reader stays
+    /// aligned for the fields after it. Use where stock writes an unbounded
+    /// .NET string that zdtd stores in a fixed buffer and the value is display
+    /// or key material rather than something parsed further; a hard `Overflow`
+    /// there would abandon the rest of the body.
+    pub fn readStringTruncating(self: *Reader, buf: []u8) ReadError![]const u8 {
+        const len = try self.readStringLen();
+        if (self.pos + len > self.data.len) return error.EndOfStream;
+        const keep = @min(len, buf.len);
+        @memcpy(buf[0..keep], self.data[self.pos..][0..keep]);
+        self.pos += len;
+        return buf[0..keep];
+    }
+
     pub fn skipString(self: *Reader) ReadError!void {
         const len = try self.readStringLen();
         if (self.pos + len > self.data.len) return error.EndOfStream;
@@ -285,6 +300,26 @@ test "string readers reject truncation and preserve cursor at payload" {
 
     var skip_truncated: Reader = .{ .data = &.{ 2, 'a' } };
     try std.testing.expectError(error.EndOfStream, skip_truncated.skipString());
+}
+
+test "readStringTruncating keeps the prefix and stays aligned for the next field" {
+    // An over-long string must not abandon the fields behind it: the cursor
+    // lands on the trailing marker either way.
+    var r: Reader = .{ .data = &.{ 5, 'a', 'b', 'c', 'd', 'e', 0x2a } };
+    var small: [2]u8 = undefined;
+    const kept = try r.readStringTruncating(&small);
+    try std.testing.expectEqualStrings("ab", kept);
+    try std.testing.expectEqual(@as(u8, 0x2a), try r.readByte());
+
+    // A string that fits reads whole, exactly like readString.
+    var r2: Reader = .{ .data = &.{ 3, 'x', 'y', 'z', 0x2a } };
+    var big: [8]u8 = undefined;
+    try std.testing.expectEqualStrings("xyz", try r2.readStringTruncating(&big));
+    try std.testing.expectEqual(@as(u8, 0x2a), try r2.readByte());
+
+    // Truncation of the payload itself is still an error, not a short read.
+    var r3: Reader = .{ .data = &.{ 4, 'a', 'b' } };
+    try std.testing.expectError(error.EndOfStream, r3.readStringTruncating(&big));
 }
 
 test "f32 is a little-endian bit pattern, sign preserved" {

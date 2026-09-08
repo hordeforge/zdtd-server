@@ -7,6 +7,29 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Perk and attribute purchases were parsed from the wrong offset.
+  `NetPackageEntitySetSkillLevelServer` derives from
+  `...SetSkillLevelClient` and overrides neither `read` nor `write`, so it
+  inherits that body verbatim: `entityId` i32 first, then the skill name and
+  level. zdtd started at the name, so every purchase from the skill window
+  read a garbled skill and silently failed. The id is now consumed and
+  ownership-checked.
+- `NetPackagePlayerLaserSight` reads its `Vector3` only when the active flag
+  is set; zdtd read it unconditionally, so every laser-off packet failed as
+  malformed and the off transition never reached other players.
+- `NetPackageParticleEffect` skipped the two fields that end
+  `ParticleEffect::Write` (`parentEntityId` i32, `attachment` u8), taking
+  `parentEntityId` as the causing entity and deriving both trailing bools from
+  the wrong bytes. Combat and block-hit effects relayed to the wrong peers.
+- A player name longer than 32 bytes aborted the whole login parse, and the
+  compatibility-version check and player-slot cap both run only on a
+  successful parse, so such a client joined ungated. The name field now keeps
+  what fits and consumes the rest, leaving the reader aligned.
+- Movement relays forwarded the raw C2S body.
+  `NetPackageEntityAliveFlags` and `NetPackageEntitySpeeds` are re-encoded
+  from their parsed fields, and `NetPackageEntityTeleport` is trimmed to the
+  parsed length, so trailing bytes a peer appends are no longer fanned out to
+  everyone.
 - Stealth crouch and light rode one `NetPackageEntityStealth`. Stock's three
   `Setup` overloads are mutually exclusive: the crouch form sets `data` to
   exactly 0 or 1, while the light form packs

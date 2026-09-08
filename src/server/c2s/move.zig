@@ -178,8 +178,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 self.sim.player[idx].crouching = (f.flags & packages.cF_crouching) != 0;
             }
         }
-        // Fan-out to other peers (stock tracked-players path).
-        try self.broadcastExcept("NetPackageEntityAliveFlags", body, c.slot);
+        // Fan-out to other peers (stock tracked-players path). Re-encode from
+        // the parsed fields rather than relaying the raw body: stock writes
+        // exactly i32+u16 and its Process re-Setups from server state, so a
+        // peer that appends trailing bytes must not have them forwarded.
+        var flags_buf: [8]u8 = undefined;
+        const flags_body = packages.buildAliveFlagsBody(&flags_buf, f.entity_id, f.flags) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        try self.broadcastExcept("NetPackageEntityAliveFlags", flags_body, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntitySpeeds")) {
@@ -195,7 +203,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // entity-ai.md SetMovementState); lapses on a stale timer.
         c.sprint_speed = sprintMagnitude(s.movement_state, s.speed_forward, s.speed_strafe);
         c.sprint_stale_cd = self.sim.rules.progression.sprint_stale_seconds;
-        try self.broadcastExcept("NetPackageEntitySpeeds", body, c.slot);
+        // Re-encode rather than relay: stock's body is exactly 13 bytes, and
+        // the parser only requires a minimum, so a raw relay would forward a
+        // peer's trailing bytes to everyone.
+        var speeds_buf: [16]u8 = undefined;
+        const speeds_body = packages.buildEntitySpeedsBody(
+            &speeds_buf,
+            s.entity_id,
+            s.movement_state,
+            s.speed_forward,
+            s.speed_strafe,
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        try self.broadcastExcept("NetPackageEntitySpeeds", speeds_body, c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityTeleport")) {
@@ -227,7 +249,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // gate checks all three axes: a Y-only clamp (fly attempt) must not
         // relay the raw teleport Y to peers either.
         if (env.x == p.x and env.y == p.y and env.z == p.z) {
-            try self.broadcastExcept("NetPackageEntityTeleport", body, c.slot);
+            // Trim to the parsed body: the length is variable and anything a
+            // peer appends past it must not be relayed.
+            try self.broadcastExcept("NetPackageEntityTeleport", body[0..p.wire_len], c.slot);
         }
         return true;
     }

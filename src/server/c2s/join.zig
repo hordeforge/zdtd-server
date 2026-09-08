@@ -130,7 +130,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // stays null and the deterministic fallback below applies.
                 self.harness.counters.inc(.c2s_malformed);
                 var r: wire_binary.Reader = .{ .data = body };
-                if (r.readString(c.name[0..])) |nm| {
+                if (r.readStringTruncating(c.name[0..])) |nm| {
                     c.name_len = sanitizePlayerName(c.name[0..], nm);
                 } else |_| {}
             }

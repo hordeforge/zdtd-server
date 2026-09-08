@@ -288,7 +288,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        relayBodyExcept(self, "NetPackagePlayerLaserSight", body, ls.entity_id, "PlayerLaserSight");
+        relayBodyExcept(self, "NetPackagePlayerLaserSight", body[0..ls.wire_len], ls.entity_id, "PlayerLaserSight");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerData")) {
@@ -447,12 +447,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntitySetSkillLevelServer")) {
-        // ADR 0023 ledger: the client requests one skill purchase. Body
-        // (sender-addressed, inherited serialization): skill string | level
-        // i32 (RE netpackage-bodies.md). Server-validated; echoes the Client
-        // package on success.
+        // ADR 0023 ledger: the client requests one skill purchase.
+        // NetPackageEntitySetSkillLevelServer derives from
+        // ...SetSkillLevelClient and overrides neither read nor write, so it
+        // inherits that body verbatim: entityId i32 | skill string | level
+        // i32 (NetPackageEntitySetSkillLevelClient.il.txt:37). The leading id
+        // is not optional; skipping it read the skill from the wrong offset.
+        // Server-validated; echoes the Client package on success.
         var r = wire_binary.Reader{ .data = body };
         var skill_buf: [128]u8 = undefined;
+        const req_entity = r.readI32() catch return true;
+        if (req_entity != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
         const skill = r.readString(&skill_buf) catch return true;
         const level = r.readI32() catch return true;
         if (skill.len == 0 or level < 1 or level > 255) return true;
