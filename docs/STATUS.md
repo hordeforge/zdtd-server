@@ -8,7 +8,13 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`); `game.zig` delegates to 44 shards in
+`lint-architecture: clean`). **Loadgen smoke 2026-09-08** (AGENTS rule 5, on
+the ReleaseSafe binary against a fresh proc world): 81 joins, `join_fail=0`,
+and `c2s_malformed`, `c2s_unhandled`, `decode_rejects`, `encode_errors`,
+`ownership_rejects` and `net_send_errors` all 0 across wander and chatty
+modes. That exercises the join handshake, movement, block edits and the chat
+path end to end against a real LiteNet client, not just unit tests.
+`game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
 owns all C2S domains. `GAP_ANALYSIS.md` scores 299 features: **296 `WORKS`,
 3 `PARTIAL`, 0 `MISSING`** (recounted 2026-09-04 from the per-feature markers;
