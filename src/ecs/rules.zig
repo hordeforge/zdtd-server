@@ -94,9 +94,6 @@ pub const C2s = struct {
     /// Eat effect units applied per ItemActionEat C2S push (cap on multi-unit
     /// stack loss; the client normally pushes one unit per action).
     eat_units_per_push: u8 = 4,
-    /// Entities spawned per journal quest-summon C2S request (cap; the client
-    /// requests one summon per journal event).
-    quest_summon_per_request: u8 = 8,
 };
 
 /// Parachute glide (ADR 0037): while a player's glide flag is armed (plugin
@@ -803,7 +800,6 @@ pub const CombatOverlay = struct {
 
 pub const C2sOverlay = struct {
     eat_units_per_push: ?u8 = null,
-    quest_summon_per_request: ?u8 = null,
 };
 
 pub const GlideOverlay = struct {

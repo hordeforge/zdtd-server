@@ -1486,6 +1486,10 @@ pub const Game = struct {
         return game_player.addProgressionLevel(self, slot, name, delta);
     }
 
+    pub fn setProgressionLevelMax(self: *Game, slot: usize, name: []const u8) bool {
+        return game_player.setProgressionLevelMax(self, slot, name);
+    }
+
     pub fn grantMagazineRead(self: *Game, slot: usize, item_id: u16) void {
         game_player.grantMagazineRead(self, slot, item_id);
     }
@@ -3106,9 +3110,23 @@ pub const Game = struct {
         return s.entitygroup;
     }
 
+    /// spawning.xml <entityspawner name=…> → its TotalPerWave property
+    /// (0 = unset, caller falls back). Rule 15: the wave size is stock data,
+    /// not a sim default.
+    pub fn pickSpawnerWave(ctx: ?*anyopaque, spawner: []const u8) u8 {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        const s = g.spawning.spawnerByName(spawner) orelse return 0;
+        return s.total_per_wave;
+    }
+
     /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
     pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
         return game_craft.tryCraft(self, peer_slot, recipe_index, times);
+    }
+
+    /// Scrap bag slot via GetScrapableRecipe (InvTx scrap op). Consumes input, grants scrap.
+    pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
+        return game_craft.tryScrap(self, peer_slot, bag_slot, qty);
     }
 
     pub fn coinItemId(self: *const Game) u16 {

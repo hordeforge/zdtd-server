@@ -559,9 +559,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // il/netpackages-v3.2.0/NetPackageQuestEntitySpawn_il.txt IL_0002-001F):
         // entityType i32 | gamestageGroup string | entityIDQuestHolder i32.
         // The third field is the quest holder's entity id, not a count. It was
-        // read as one, so a single packet summoned that many zombies (capped
-        // at quest_summon_per_request) with the client choosing the number.
-        // Stock ProcessPackage (IL=37) calls SpawnQuestEntity exactly once.
+        // read as one, so a single packet summoned that many zombies with the
+        // client choosing the number. Stock ProcessPackage (IL=37) calls
+        // SpawnQuestEntity exactly once, so there is no per-request cap to
+        // apply: the count is not client-chosen at all.
         var r: wire_binary.Reader = .{ .data = body };
         _ = r.readI32() catch return true; // entityType (-1 = resolve from group)
         var gname: [64]u8 = undefined;

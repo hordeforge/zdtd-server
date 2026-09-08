@@ -522,6 +522,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         self.sim.director.stage_group_at_fn = &Game.pickStageGroupAt;
         self.sim.director.spawner_group_ctx = self;
         self.sim.director.spawner_group_fn = &Game.pickSpawnerGroup;
+        self.sim.director.spawner_wave_ctx = self;
+        self.sim.director.spawner_wave_fn = &Game.pickSpawnerWave;
         // Plugin kill verdict (T15): routes the sim's death decision to the
         // Wasm host (on_player_death for players, on_entity_killed for the
         // rest). Unset hook = no plugins = today's behaviour.

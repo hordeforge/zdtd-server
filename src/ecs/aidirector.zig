@@ -318,6 +318,12 @@ pub const Director = struct {
     /// spawning.xml, for the code-named scout spawners.
     spawner_group_ctx: ?*anyopaque = null,
     spawner_group_fn: ?*const fn (?*anyopaque, []const u8) ?[]const u8 = null,
+    /// Optional lookup: (ctx, entityspawner_name) → that spawner's
+    /// `TotalPerWave` from spawning.xml (0 = unset). Stock sizes a scout wave
+    /// per tier (Scouts1 1, Scouts2 2, ScoutsFeral and ScoutsRadiated "1,2"),
+    /// so without it every tier spawns the same count.
+    spawner_wave_ctx: ?*anyopaque = null,
+    spawner_wave_fn: ?*const fn (?*anyopaque, []const u8) u8 = null,
     bloodmoon_cd: f32 = 0,
     scouts_cd: f32 = 0,
     total_spawned: u32 = 0,
@@ -603,7 +609,8 @@ pub const Director = struct {
             // Heat map: decay always; the 5 s scout spawn is cap-gated.
             self.tickHeat(w, dt, spawn_z);
             if (spawn_z and !self.clock.isNight() and self.scouts_cd <= 0) {
-                spawned += self.spawnNearPlayers(w, 1, w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
+                // Wave size is the tier's own TotalPerWave, not a flat 1.
+                spawned += self.spawnNearPlayers(w, self.scoutWaveSize(1), w.rules.director.enemy_spawn_ring_min, w.rules.director.enemy_spawn_ring_max, self.scoutGroup());
                 self.scouts_cd = w.rules.director.scout_drip_cd;
             }
         }
@@ -761,6 +768,14 @@ pub const Director = struct {
     fn scoutGroup(self: *const Director) []const u8 {
         const f = self.spawner_group_fn orelse return "";
         return f(self.spawner_group_ctx, scoutSpawnerName(self.party_stage)) orelse "";
+    }
+
+    /// The tier's `TotalPerWave` from spawning.xml, falling back to `dflt`
+    /// when no table is wired (offline tests) or the property is absent.
+    fn scoutWaveSize(self: *const Director, dflt: u32) u32 {
+        const f = self.spawner_wave_fn orelse return dflt;
+        const n = f(self.spawner_wave_ctx, scoutSpawnerName(self.party_stage));
+        return if (n > 0) n else dflt;
     }
 
     /// `group_override` wins over the day/night spawning.xml groups; empty
@@ -1258,7 +1273,10 @@ pub const Director = struct {
         const group = self.scoutGroup();
         var n: u32 = 0;
         var i: u32 = 0;
-        while (i < w.rules.director.heat_scout_count) : (i += 1) {
+        // Stock sizes the heat wave from the tier's TotalPerWave; the rule is
+        // the fallback when no spawning.xml table is wired.
+        const wave = self.scoutWaveSize(w.rules.director.heat_scout_count);
+        while (i < wave) : (i += 1) {
             const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 2.399963;
             const x = center.x + @cos(ang) * w.rules.director.heat_scout_dist;
             const z = center.z + @sin(ang) * w.rules.director.heat_scout_dist;
@@ -1619,6 +1637,46 @@ test "director draws the daytime scout group from the stage tier" {
     const r = dir.tick(&w, 0.1);
     try std.testing.expect(r.spawned >= 1);
     try std.testing.expectEqualStrings("ScoutsFeral", Hooks.asked[0..Hooks.asked_len]);
+}
+
+test "daytime scout wave size comes from the spawner TotalPerWave" {
+    // The count was a hardcoded 1 while spawning.xml sizes each tier
+    // (Scouts1 1, Scouts2 2, ScoutsFeral/Radiated "1,2"). With a table wired
+    // the tier's own value drives the wave; without one the caller's fallback
+    // still applies.
+    const Hooks = struct {
+        fn spawnerGroup(_: ?*anyopaque, _: []const u8) ?[]const u8 {
+            return "ZombieScoutsFeral";
+        }
+        fn pick(_: ?*anyopaque, group: []const u8, _: u32) ?[]const u8 {
+            if (std.mem.eql(u8, group, "ZombieScoutsFeral")) return "zombieJoe";
+            return null;
+        }
+        fn waveThree(_: ?*anyopaque, _: []const u8) u8 {
+            return 3;
+        }
+        fn waveUnset(_: ?*anyopaque, _: []const u8) u8 {
+            return 0;
+        }
+    };
+    var w: ecs_world.World = .{};
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    var dir: Director = .{
+        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .party_stage = 90,
+        .spawner_group_fn = &Hooks.spawnerGroup,
+        .group_pick_fn = &Hooks.pick,
+        .spawner_wave_fn = &Hooks.waveThree,
+    };
+    try std.testing.expectEqual(@as(u32, 3), dir.scoutWaveSize(1));
+
+    // An absent property keeps the caller's fallback rather than spawning 0.
+    dir.spawner_wave_fn = &Hooks.waveUnset;
+    try std.testing.expectEqual(@as(u32, 1), dir.scoutWaveSize(1));
+
+    // No table wired at all (offline tests) also keeps the fallback.
+    dir.spawner_wave_fn = null;
+    try std.testing.expectEqual(@as(u32, 2), dir.scoutWaveSize(2));
 }
 
 test "blood moon wave size is capped by the stage maxAlive" {

@@ -10818,15 +10818,18 @@ test "scenario a quest entity spawn summons one entity for the sender only" {
     try std.testing.expectEqual(before_no_quest, countZombies(g));
     try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rejects_before);
 
-    // With the quest back, one packet summons exactly one entity. The holder
-    // field carries an entity id, which the old reading would have turned into
-    // that many spawns (capped at quest_summon_per_request).
+    // With the quest back, one packet summons exactly one entity, matching
+    // stock ProcessPackage. The holder field carries an entity id, which the
+    // old reading turned into that many spawns.
     g.sim.journal[psa] = saved_journal;
     try std.testing.expect(g.sim.journal[psa].anyActive());
     const before_one = countZombies(g);
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageQuestEntitySpawn", try buildSpawn(&body, -1, "group", ca.entity_id)));
     try std.testing.expectEqual(before_one + 1, countZombies(g));
-    try std.testing.expect(g.sim.rules.c2s.quest_summon_per_request > 1);
+    // A large holder id is still exactly one spawn, not that many.
+    const before_big = countZombies(g);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageQuestEntitySpawn", try buildSpawn(&body, -1, "group", ca.entity_id)));
+    try std.testing.expectEqual(before_big + 1, countZombies(g));
 
     // Naming another player as the holder is refused.
     const own_before = g.harness.counters.get(.ownership_rejects);

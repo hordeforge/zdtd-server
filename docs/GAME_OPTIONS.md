@@ -204,7 +204,6 @@ test, so a retune cannot land silently).
 | `knockback_speed` / `knockback_seconds` | 8.0 / 0.3 | Melee knockback impulse: shove speed (blocks/s) and hit window (s); 0.3 s at 8 blocks/s pushes ~2.4 blocks (stock melee shove ballpark) |
 | `[rules.c2s]` | | Per-request caps on untrusted C2S push paths (AGENTS rule 20): how much one client package may apply |
 | `eat_units_per_push` | 4 | Eat effect units applied per `ItemActionEat` C2S push. Stock eats one unit per action; the cap bounds a multi-unit stack-loss push (`c2s/inv.zig`) |
-| `quest_summon_per_request` | 8 | Entities spawned per journal quest-summon C2S request. Stock spawns the quest entity per journal event; the cap bounds a hostile multi-spawn push (`c2s/misc.zig`) |
 | `[rules.glide]` | | ADR 0037 parachute: server-side fall slow-down while a player's glide flag is armed (plugin verb `glide`) |
 | `sink_vy_mps` | 2.5 | C2S vertical delta clamp (blocks/s) while gliding; the clamped position is broadcast back (no client mod needed). Fall-damage stays client-owned (stock wire) |
 | `item_tag` | parachute | Worn armor item tag that reports `wearing_glider` in the sense v4 record |

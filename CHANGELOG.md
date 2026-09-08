@@ -7,6 +7,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Scout wave size ignored `spawning.xml`. `TotalPerWave` was parsed onto the
+  spawner and dropped, so the daytime drip spawned a hardcoded 1 and the
+  chunk-heat wave used a zdtd rule, while stock sizes each tier from the
+  spawner (Scouts1 1, Scouts2 2, ScoutsFeral and ScoutsRadiated "1,2"). The
+  director now reads the tier's own value and falls back to the previous
+  numbers when no table is loaded.
+
 - `[rules.worldgen] height_amp` did nothing. It was stored on the generator
   and never read: `columnTarget` used inline amplitudes, so an operator could
   set the documented knob and the terrain would not move. The three shaping
@@ -80,6 +87,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   inherited through `Extends`), so stackables still have none. The ceiling and
   the fallback range are `[rules.trader]` (`max_tier`,
   `default_quality_min` / `default_quality_max`).
+
+### Removed
+
+- `[rules.c2s] quest_summon_per_request`. It was documented as bounding a
+  hostile multi-spawn push, but nothing read it: the handler was corrected
+  earlier to spawn exactly once, matching stock `ProcessPackage`, so the
+  count is not client-chosen and there is nothing to cap.
 
 ### Changed
 
