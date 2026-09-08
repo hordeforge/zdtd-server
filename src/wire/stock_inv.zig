@@ -1318,6 +1318,81 @@ pub fn readDropItemsContainer(body: []const u8) binary.ReadError!DropItemsParsed
 
 // --- golden tests ---
 
+/// Build a `NetPackagePlayerData` body for tests: the PDF write shape the C2S
+/// handler parses (ECD head with networkWrite=false, then toolbelt, bag, drag,
+/// the meta head and Equipment v4). `entity_id` is the id the body claims,
+/// which the handler compares against the sending peer. Toolbelt slot 0 gets
+/// `toolbelt_item` and equipment slot 0 gets `equip_item`, both relative ECS
+/// ids; 0 leaves the slot empty.
+///
+/// Test-only helper: it exists so a scenario can drive the real handler with a
+/// well-formed body instead of duplicating ~60 hand-written field writes, and
+/// so the claimed entity id is a parameter rather than a constant.
+pub fn buildPlayerDataBodyForTest(
+    w: *binary.Writer,
+    entity_id: i32,
+    toolbelt_item: u16,
+    equip_item: u16,
+) !void {
+    try w.writeByte(36);
+    try w.writeI32(0);
+    try w.writeI32(entity_id);
+    try w.writeF32(std.math.floatMax(f32));
+    try w.writeF32(-273);
+    try w.writeF32(61);
+    try w.writeF32(449);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeF32(0);
+    try w.writeBool(true);
+    try w.writeI32(4);
+    try w.writeI32(0);
+    try w.writeU32(0);
+    try w.writeBool(false);
+    try w.writeI16(0);
+    try w.writeBool(false);
+    try w.writeI32(-273);
+    try w.writeI32(61);
+    try w.writeI32(449);
+    try w.writeI16(-1);
+    try w.writeByte(0);
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeF32(0); // stressAmount v36
+    try w.writeU16(1);
+    try writeItemStack(w, .{ .type_id = items_start_here + toolbelt_item, .count = 3, .quality = 1 });
+    try w.writeByte(0); // selectedInventorySlot
+    try w.writeByte(1); // Bag v1
+    try w.writeU16(0);
+    try w.writeBool(false);
+    try w.writeBool(false);
+    try w.writeBool(false);
+    try w.writeU16(1); // dragAndDrop: one empty stack
+    try w.writeU16(0);
+    try w.writeU16(0); // alreadyCrafted
+    try w.writeByte(0);
+    try w.writeI64(0);
+    try w.writeBool(true);
+    try w.writeI16(0);
+    try w.writeBool(true); // bLoaded
+    try w.writeI32(-273);
+    try w.writeI32(61);
+    try w.writeI32(449);
+    try w.writeF32(0);
+    try w.writeI32(entity_id);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeByte(4); // Equipment v4
+    try writeItemValue(w, .{ .type_id = items_start_here + equip_item, .count = 1, .quality = 1 });
+    var ei: usize = 1;
+    while (ei < equipment_slots) : (ei += 1) try w.writeByte(0);
+    ei = 0;
+    while (ei < equipment_slots) : (ei += 1) try w.writeI32(0);
+    try w.writeI32(0);
+}
+
 test "applyPlayerDataNetwork applies equipment after drag" {
     var buf: [1024]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
@@ -1402,6 +1477,13 @@ test "applyPlayerDataNetwork applies equipment after drag" {
     const before = unchanged;
     try std.testing.expectError(error.EndOfStream, applyPlayerDataNetwork(w.written()[0 .. w.written().len - 1], &unchanged, null, null));
     try std.testing.expectEqualDeep(before, unchanged);
+
+    // The shared test builder emits the same body this fixture writes by hand,
+    // so a scenario driving the real handler exercises this exact layout.
+    var hbuf: [1024]u8 = undefined;
+    var hw: binary.Writer = .{ .buf = &hbuf };
+    try buildPlayerDataBodyForTest(&hw, 106, 2, 8);
+    try std.testing.expectEqualSlices(u8, w.written(), hw.written());
 }
 
 test "empty item value is single zero byte" {
