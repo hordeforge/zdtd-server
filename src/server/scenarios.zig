@@ -9010,6 +9010,31 @@ test "scenario chat routes by recipient list and preserves the channel" {
     try std.testing.expect(rch.sender != cc.entity_id);
     try std.testing.expectEqualStrings("not from me", rch.msg);
 
+    // NetPackageSimpleChat: zdtd upgrades it to a stock NetPackageChat and
+    // broadcasts. A stock server would drop a recipient-less SimpleChat
+    // outright (ProcessPackage IL_0015 branches to the terminal ret at
+    // IL_012A), so this is a deliberate divergence, recorded in
+    // DIVERGENCES 1a4. Pinned here so it is not "fixed" into silence, and so
+    // the upgrade keeps substituting the real sender id.
+    cap_a.clear();
+    cap_b.clear();
+    cap_c.clear();
+    clock.advanceNs(2 * std.time.ns_per_s);
+    var simple: [128]u8 = undefined;
+    var sw = binary.Writer{ .buf = &simple };
+    try sw.writeString("REFake1"); // sender name, read and discarded
+    try sw.writeString("simple hello");
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSimpleChat", sw.written()));
+    // It arrives as NetPackageChat, not SimpleChat, and reaches everyone
+    // including the speaker (same audience as a global NetPackageChat).
+    const up_a = cap_a.findPkgId(chat_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap_b.findPkgId(chat_id) != null);
+    try std.testing.expect(cap_c.findPkgId(chat_id) != null);
+    const up = try packages.parseStockChat(up_a);
+    try std.testing.expectEqualStrings("simple hello", up.msg);
+    // The sender is the sending peer, not anything the body claimed.
+    try std.testing.expectEqual(cb.entity_id, up.sender);
+
     std.debug.print("PASS chat-sender: the relayed sender is the sending peer, not the claimed one\n", .{});
 }
 

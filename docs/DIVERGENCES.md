@@ -207,6 +207,29 @@ section of `NetPackagePlayerInventory`, which goes through
 so the standalone package consumed a bool that was really the next slot's
 version byte.
 
+## 1a4. `NetPackageSimpleChat` is upgraded, stock drops it
+
+A stock server receiving `NetPackageSimpleChat` **with no recipient list does
+nothing**: `ProcessPackage` (`NetPackageSimpleChat.il.txt:109`) tests
+`recipientEntityIds` at `IL_0015` and branches straight to the terminal `ret`
+at `IL_012A` when it is null. Only the per-recipient loop sends anything, via
+`ClientInfo::SendPackage` (`:IL_00A2`); the code after `IL_00C3` is the
+client-side display path (`XUiC_ChatOutput::AddMessage`).
+
+zdtd instead parses the sender name and message, rebuilds it as a stock
+`NetPackageChat` with the server's own entity id, and broadcasts it
+(`c2s/misc.zig`, the `SimpleChat` else-branch). So a `SimpleChat` a stock
+server would silently discard becomes a visible global chat line here.
+
+Kept deliberately: dropping it would make a bot or tool that speaks the older
+package silently unheard, and the rebuild routes it through the same
+sanitisation, rate gate and plugin filter as `NetPackageChat`, so it is not a
+trust hole. Worth revisiting only if a stock client is observed sending
+`SimpleChat` in normal play, which would then produce a line stock does not
+show. zdtd's own loadgen resolves `SimpleChat` first
+(`7dtd-loadgen ActionLoop.cs:597`), which is why this path gets exercised at
+all.
+
 ## 1a3. Lock-context shapes, audited
 
 Stock has three concrete `ILockContext` implementations and no two share a
