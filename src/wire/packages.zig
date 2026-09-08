@@ -2229,14 +2229,50 @@ test "quest treasure point body branches on the action byte" {
     try std.testing.expectEqual(@as(i32, -4), short.z);
 
     // The reply form round-trips through the long branch.
+    // The reply: check the bytes at fixed offsets rather than round-tripping.
+    // A round trip through zdtd's own writer and reader proves they agree with
+    // each other, not with stock, and Setup pins distance/offset/treasureRadius
+    // to zero - three consecutive fields (f32, i32, f32) that no round-trip
+    // assertion can tell apart from each other or from a width swap.
+    // Order per NetPackageQuestTreasurePoint::read (IL=54, :125): action u8 |
+    // playerId i32 | distance f32 | offset i32 | treasureRadius f32 |
+    // blocksPerReduction i32 | questCode i32 | position Vector3i |
+    // treasureOffset Vector3 | useNearby bool.
     var buf: [64]u8 = undefined;
-    const reply = try buildQuestTreasurePointReply(&buf, 107, 77, 3, 100, 60, -200, 0.5, 0, 1.5);
+    const reply = try buildQuestTreasurePointReply(&buf, 107, 77, 3, 100, 60, -200, 0.5, 0.25, 1.5);
+    try std.testing.expectEqual(@as(usize, 1 + 4 + 4 + 4 + 4 + 4 + 4 + 12 + 12 + 1), reply.len);
+    try std.testing.expectEqual(quest_point_get_treasure, reply[0]);
+    const i32At = struct {
+        fn f(b: []const u8, off: usize) i32 {
+            return std.mem.readInt(i32, b[off..][0..4], .little);
+        }
+    }.f;
+    const f32At = struct {
+        fn f(b: []const u8, off: usize) f32 {
+            return @bitCast(std.mem.readInt(u32, b[off..][0..4], .little));
+        }
+    }.f;
+    try std.testing.expectEqual(@as(i32, 107), i32At(reply, 1)); // playerId
+    try std.testing.expectEqual(@as(f32, 0), f32At(reply, 5)); // distance
+    try std.testing.expectEqual(@as(i32, 0), i32At(reply, 9)); // offset
+    try std.testing.expectEqual(@as(f32, 0), f32At(reply, 13)); // treasureRadius
+    try std.testing.expectEqual(@as(i32, 3), i32At(reply, 17)); // blocksPerReduction
+    try std.testing.expectEqual(@as(i32, 77), i32At(reply, 21)); // questCode
+    try std.testing.expectEqual(@as(i32, 100), i32At(reply, 25)); // position.x
+    try std.testing.expectEqual(@as(i32, 60), i32At(reply, 29)); // position.y
+    try std.testing.expectEqual(@as(i32, -200), i32At(reply, 33)); // position.z
+    // Distinct offsets: equal ones could not catch a swap among the three.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), f32At(reply, 37), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), f32At(reply, 41), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), f32At(reply, 45), 0.001);
+    try std.testing.expectEqual(@as(u8, 0), reply[49]); // useNearby
+
+    // The parser agrees with those bytes.
     const got = try parseQuestTreasurePoint(reply);
-    try std.testing.expectEqual(quest_point_get_treasure, got.action);
     try std.testing.expectEqual(@as(i32, 107), got.player_id);
     try std.testing.expectEqual(@as(i32, 3), got.blocks_per_reduction);
     try std.testing.expectEqual(@as(i32, -200), got.z);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.5), got.off_z, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), got.off_y, 0.001);
 
     try std.testing.expectError(error.EndOfStream, parseQuestTreasurePoint(reply[0 .. reply.len - 1]));
 }

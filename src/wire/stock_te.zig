@@ -1309,8 +1309,13 @@ test "powered trigger C2S body roundtrips every stock trigger type" {
             .reset_trigger = true,
             .target_type = 9,
         };
+        // Two wires with distinct coordinates: with a single entry an
+        // off-by-one in the wire loop shifts parentPos but reads back the same
+        // way a correct parse of a different count would, so the test could
+        // not tell the two apart.
         src.wires[0] = .{ .x = 4, .y = 71, .z = 5 };
-        src.wire_n = 1;
+        src.wires[1] = .{ .x = -6, .y = 72, .z = 7 };
+        src.wire_n = 2;
         const body = try buildPoweredTriggerTeBodyToServer(&buf, 10, 70, -3, 19300, src);
         const p = try parsePoweredTriggerTeBody(body);
         try std.testing.expectEqual(@as(u8, 3), p.handle);
@@ -1318,9 +1323,18 @@ test "powered trigger C2S body roundtrips every stock trigger type" {
         try std.testing.expectEqual(@as(i32, 19300), p.block_id);
         try std.testing.expect(p.is_player_placed);
         try std.testing.expectEqual(@as(u8, 3), p.power_item_type);
-        try std.testing.expectEqual(@as(usize, 1), p.wire_n);
+        try std.testing.expectEqual(@as(usize, 2), p.wire_n);
+        try std.testing.expectEqual(@as(i32, 4), p.wires[0].x);
         try std.testing.expectEqual(@as(i32, 71), p.wires[0].y);
+        try std.testing.expectEqual(@as(i32, 5), p.wires[0].z);
+        try std.testing.expectEqual(@as(i32, -6), p.wires[1].x);
+        try std.testing.expectEqual(@as(i32, 72), p.wires[1].y);
+        try std.testing.expectEqual(@as(i32, 7), p.wires[1].z);
+        // parentPos sits right after the wire list, so a miscounted loop
+        // lands here.
+        try std.testing.expectEqual(@as(i32, 1), p.parent.x);
         try std.testing.expectEqual(@as(i32, 70), p.parent.y);
+        try std.testing.expectEqual(@as(i32, 2), p.parent.z);
         try std.testing.expectApproxEqAbs(@as(f32, -1.5), p.yaw, 0.001);
         try std.testing.expectEqual(t, p.trigger_type);
         if (t == trigger_type_switch) {
