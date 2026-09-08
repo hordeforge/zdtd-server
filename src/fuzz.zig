@@ -249,6 +249,7 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
     if (packages.parseWaterSet(input, &water_changes)) |got| {
         try std.testing.expect(got.n <= water_changes.len);
     } else |_| {}
+    _ = packages.parseQuestTreasurePoint(input) catch null;
     _ = packages.parseLockRequest(input) catch null;
     if (packages.parseStockChat(input)) |chat| {
         try std.testing.expect(chat.msg.len <= input.len);

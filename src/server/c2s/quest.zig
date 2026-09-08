@@ -162,17 +162,66 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageQuestTreasurePoint")) {
-        // Stock NetPackageQuestTreasurePoint (read IL=54): playerId,
-        // distance, offset, treasureRadius, questCode, position,
-        // useNearby, treasureOffset, blocksPerReduction, ActionType - the
-        // client reports treasure-dig progress. zdtd's fetch/treasure
-        // quests complete through the client's QuestObjectiveUpdate
-        // treasure_complete event (bumpPhase fetch_item), so this parallel
-        // path is a redundant echo: validate and drop.
-        if (body.len < 32) {
+        // This is a REQUEST, not a progress echo. ObjectiveTreasureChest
+        // ::GetPosition (ObjectiveTreasureChest.il.txt:232) only asks the
+        // server when the quest carries neither PositionData TreasurePoint(4)
+        // nor TreasureOffset(8), and zdtd fills only 0..3, so a stock client
+        // always asks. Stock's server resolves a dig site and sends the
+        // package back to that player (ProcessPackage :242, SendPackage
+        // :322); dropping it left the treasure quest with no marker and no
+        // way to finish.
+        const req = packages.parseQuestTreasurePoint(body) catch {
             self.harness.counters.inc(.c2s_malformed);
             return true;
+        };
+        switch (req.action) {
+            // The client telling us where it dug, and the derived
+            // blocks-per-reduction step. Nothing to answer.
+            packages.quest_point_update_treasure, packages.quest_point_update_blocks => return true,
+            packages.quest_point_get_treasure => {},
+            // GetGotoPoint rides the same package; zdtd already ships the
+            // Location marker in the journal, so the client does not ask.
+            else => return true,
         }
+        if (req.player_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const s = systems.questFindByCode(&self.sim, c.slot, req.quest_code) orelse {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        // Stock scans for a buriable spot around the quest's POI, falling back
+        // to the player. zdtd has no buried-container search, so anchor the
+        // dig site on the same POI the journal already advertises and let the
+        // client's own radius shrink guide the player in.
+        const px = self.sim.transform[ps].x;
+        const pz = self.sim.transform[ps].z;
+        const cx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else px;
+        const cz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else pz;
+        const gy_u = self.world.heightWorld(@intFromFloat(cx), @intFromFloat(cz)) catch {
+            self.harness.counters.inc(.c2s_rejects);
+            return true;
+        };
+        const gy: i32 = gy_u;
+        var buf: [64]u8 = undefined;
+        const reply = packages.buildQuestTreasurePointReply(
+            &buf,
+            req.player_id,
+            req.quest_code,
+            req.blocks_per_reduction,
+            @intFromFloat(cx),
+            gy,
+            @intFromFloat(cz),
+            0,
+            0,
+            0,
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        try self.sendGame(peer, "NetPackageQuestTreasurePoint", reply);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageAllyRequest")) {

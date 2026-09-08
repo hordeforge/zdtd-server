@@ -693,6 +693,57 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
     std.debug.print("PASS setblock-storage: TileEntity broadcast for chest at (251,70,250)\n", .{});
 }
 
+test "scenario treasure point: the server answers the client's dig-site request" {
+    // ObjectiveTreasureChest asks the server for a dig site whenever the quest
+    // carries no PositionData TreasurePoint(4)/TreasureOffset(8), which zdtd
+    // never fills. The package used to be validated and dropped, so a treasure
+    // quest got no marker and could not finish.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_treasure");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_treasure", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const ps = g.sim.playerByPeer(ca.slot).?;
+
+    // Give the player one active quest with a known code.
+    g.sim.mask[ps].journal = true;
+    const qcode: i32 = 4242;
+    g.sim.journal[ps].slots[0].active = true;
+    g.sim.journal[ps].slots[0].quest_code = qcode;
+
+    var req_buf: [64]u8 = undefined;
+    const req = try packages.buildQuestTreasurePointReply(&req_buf, ca.entity_id, qcode, 5, 0, 0, 0, 0, 0, 0);
+    var fb: [128]u8 = undefined;
+    cap_a.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageQuestTreasurePoint", req));
+
+    const tp_id = packages.idOf("NetPackageQuestTreasurePoint").?;
+    const got = cap_a.findPkgId(tp_id) orelse return error.TestUnexpectedResult;
+    const reply = try packages.parseQuestTreasurePoint(got);
+    try std.testing.expectEqual(packages.quest_point_get_treasure, reply.action);
+    try std.testing.expectEqual(ca.entity_id, reply.player_id);
+    try std.testing.expectEqual(qcode, reply.quest_code);
+    // The blocks-per-reduction step the client asked with is echoed back, and
+    // the dig site sits on the terrain surface rather than at y=0.
+    try std.testing.expectEqual(@as(i32, 5), reply.blocks_per_reduction);
+    try std.testing.expect(reply.y > 0);
+
+    // A request naming another entity is refused.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    const spoof = try packages.buildQuestTreasurePointReply(&req_buf, ca.entity_id + 999, qcode, 5, 0, 0, 0, 0, 0, 0);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageQuestTreasurePoint", spoof));
+    try std.testing.expect(g.harness.counters.get(.ownership_rejects) > own_before);
+    std.debug.print("PASS treasure-point: dig site resolved and sent to the asking player\n", .{});
+}
+
 test "scenario waterset: a client water edit applies and reaches peer B" {
     // Stock water edits (jar fill/empty) originate client-side and the server
     // relays them; zdtd dropped NetPackageWaterSet as unhandled, so the change

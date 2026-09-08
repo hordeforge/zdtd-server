@@ -7,6 +7,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Treasure quests could never be completed. `NetPackageQuestTreasurePoint` was
+  accepted and dropped as a "redundant progress echo", but it is a request:
+  `ObjectiveTreasureChest::GetPosition` asks the server whenever the quest
+  carries no `TreasurePoint`/`TreasureOffset` position data, and zdtd fills
+  neither, so a stock client always asks. Stock's server resolves a dig site
+  and sends the package back to the asking player. With no answer the quest
+  showed no dig marker and the objective could not finish. The server now
+  replies with a site anchored on the quest's POI (or the player), at the
+  terrain surface. The two client-report actions stay accept-and-drop.
 - `NetPackageWaterSet` was dropped as unhandled. It is the client-originated
   water edit (filling or emptying a jar, the water-cube tool), and stock's
   server relays it to every other peer and then applies it. zdtd ignored it,

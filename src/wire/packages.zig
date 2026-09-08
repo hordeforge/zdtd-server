@@ -2023,6 +2023,127 @@ test "water set body round-trips the stock layout" {
     try std.testing.expectError(error.EndOfStream, parseWaterSet(body[0 .. body.len - 1], &out));
 }
 
+/// `NetPackageQuestTreasurePoint/QuestPointActions`
+/// (NetPackageQuestTreasurePoint_QuestPointActions.il.txt:3).
+pub const quest_point_get_goto: u8 = 0;
+pub const quest_point_get_treasure: u8 = 1;
+pub const quest_point_update_treasure: u8 = 2;
+pub const quest_point_update_blocks: u8 = 3;
+
+/// `NetPackageQuestTreasurePoint` body. The layout branches on the leading
+/// `ActionType` byte (read IL=54, NetPackageQuestTreasurePoint.il.txt:125):
+/// action 2 carries only `questCode` i32 + `position` Vector3i; every other
+/// action carries the full request/response form.
+pub const QuestTreasurePoint = struct {
+    action: u8 = 0,
+    player_id: i32 = 0,
+    distance: f32 = 0,
+    offset: i32 = 0,
+    treasure_radius: f32 = 0,
+    blocks_per_reduction: i32 = 0,
+    quest_code: i32 = 0,
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    off_x: f32 = 0,
+    off_y: f32 = 0,
+    off_z: f32 = 0,
+    use_nearby: bool = false,
+};
+
+/// Read side of the branch above (stock `NetPackageQuestTreasurePoint::read`
+/// IL=54, NetPackageQuestTreasurePoint.il.txt:125): `ActionType` u8, then for
+/// action 2 only `questCode` i32 + `position` Vector3i, else `playerId` i32,
+/// `distance` f32, `offset` i32, `treasureRadius` f32, `blocksPerReduction`
+/// i32, `questCode` i32, `position` Vector3i, `treasureOffset` Vector3 and
+/// `useNearby` bool.
+pub fn parseQuestTreasurePoint(body: []const u8) binary.ReadError!QuestTreasurePoint {
+    var r: binary.Reader = .{ .data = body };
+    var out: QuestTreasurePoint = .{ .action = try r.readByte() };
+    if (out.action == quest_point_update_treasure) {
+        out.quest_code = try r.readI32();
+        out.x = try r.readI32();
+        out.y = try r.readI32();
+        out.z = try r.readI32();
+        return out;
+    }
+    out.player_id = try r.readI32();
+    out.distance = try r.readF32();
+    out.offset = try r.readI32();
+    out.treasure_radius = try r.readF32();
+    out.blocks_per_reduction = try r.readI32();
+    out.quest_code = try r.readI32();
+    out.x = try r.readI32();
+    out.y = try r.readI32();
+    out.z = try r.readI32();
+    out.off_x = try r.readF32();
+    out.off_y = try r.readF32();
+    out.off_z = try r.readF32();
+    out.use_nearby = try r.readBool();
+    return out;
+}
+
+/// The server's answer to a GetTreasurePoint request: stock re-Setups the
+/// package with the resolved dig position and sends it back to the asking
+/// player (`Setup` IL=26 at :36 pins ActionType 1 and zeroes distance/offset;
+/// `write` IL=59 at :182 emits the same branch the reader expects).
+pub fn buildQuestTreasurePointReply(
+    buf: []u8,
+    player_id: i32,
+    quest_code: i32,
+    blocks_per_reduction: i32,
+    x: i32,
+    y: i32,
+    z: i32,
+    off_x: f32,
+    off_y: f32,
+    off_z: f32,
+) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeByte(quest_point_get_treasure);
+    try w.writeI32(player_id);
+    try w.writeF32(0); // distance: Setup zeroes it
+    try w.writeI32(0); // offset: Setup zeroes it
+    try w.writeF32(0); // treasureRadius: not re-set by Setup
+    try w.writeI32(blocks_per_reduction);
+    try w.writeI32(quest_code);
+    try w.writeI32(x);
+    try w.writeI32(y);
+    try w.writeI32(z);
+    try w.writeF32(off_x);
+    try w.writeF32(off_y);
+    try w.writeF32(off_z);
+    try w.writeBool(false); // useNearby: not re-set by Setup
+    return w.written();
+}
+
+test "quest treasure point body branches on the action byte" {
+    // Action 2 is the short form: questCode + Vector3i and nothing else.
+    var short_buf: [32]u8 = undefined;
+    var sw: binary.Writer = .{ .buf = &short_buf };
+    try sw.writeByte(quest_point_update_treasure);
+    try sw.writeI32(77);
+    try sw.writeI32(10);
+    try sw.writeI32(70);
+    try sw.writeI32(-4);
+    const short = try parseQuestTreasurePoint(sw.written());
+    try std.testing.expectEqual(@as(usize, 17), sw.written().len);
+    try std.testing.expectEqual(@as(i32, 77), short.quest_code);
+    try std.testing.expectEqual(@as(i32, -4), short.z);
+
+    // The reply form round-trips through the long branch.
+    var buf: [64]u8 = undefined;
+    const reply = try buildQuestTreasurePointReply(&buf, 107, 77, 3, 100, 60, -200, 0.5, 0, 1.5);
+    const got = try parseQuestTreasurePoint(reply);
+    try std.testing.expectEqual(quest_point_get_treasure, got.action);
+    try std.testing.expectEqual(@as(i32, 107), got.player_id);
+    try std.testing.expectEqual(@as(i32, 3), got.blocks_per_reduction);
+    try std.testing.expectEqual(@as(i32, -200), got.z);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), got.off_z, 0.001);
+
+    try std.testing.expectError(error.EndOfStream, parseQuestTreasurePoint(reply[0 .. reply.len - 1]));
+}
+
 fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     var ch: BlockChange = .{};
     const ref_type = try r.readByte();
