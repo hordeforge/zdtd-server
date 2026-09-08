@@ -78,9 +78,12 @@ pub const LootContainer = struct {
     /// per-type LootAbundance multiplier. Parsed; the type multiplier table
     /// is RE-tracked (loot-economy), not applied in the sim yet.
     abundance_type: []const u8 = "",
-    /// unmodified_lootstage="true" (138 stock): roll at the raw stage,
-    /// skipping the container's stage-modifier chain. Parsed; the stage
-    /// chain is Game-side, not applied here.
+    /// unmodified_lootstage="true": roll at the raw stage, skipping the
+    /// container's stage-modifier chain. Parsed and deliberately not applied:
+    /// all 65 stock containers carrying it are `twitch_*`, placed only by the
+    /// Twitch integration this server does not implement, so no reachable
+    /// container is affected. Wire it into `rollContainer` if a modlet ever
+    /// sets the attribute on a normal container.
     raw_lootstage: bool = false,
     /// open_time seconds the container stays open (190 stock; client
     /// display). Parsed; not consumed server-side.

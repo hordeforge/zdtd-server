@@ -36,8 +36,10 @@ pub const Spawner = struct {
     entitygroup: []const u8 = "",
     /// TotalAlive property; low bound of a comma list. 0 = unset.
     total_alive: u8 = 0,
-    /// TotalPerWave property; low bound of a comma list. 0 = unset.
+    /// TotalPerWave property, as the stock min/max pair (a single value sets
+    /// both). Stock rolls `RandomRange(min, max + 1)` per wave. 0 = unset.
     total_per_wave: u8 = 0,
+    total_per_wave_max: u8 = 0,
 };
 
 pub const Table = struct {
@@ -188,6 +190,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
             .entitygroup = try arena.dupe(u8, eg),
             .total_alive = lowU8List(xml.propertyValue(body, "TotalAlive")),
             .total_per_wave = lowU8List(xml.propertyValue(body, "TotalPerWave")),
+            .total_per_wave_max = highU8List(xml.propertyValue(body, "TotalPerWave")),
         });
     }
 
@@ -203,6 +206,16 @@ fn lowU8List(s: ?[]const u8) u8 {
     const v = s orelse return 0;
     const comma = std.mem.findScalar(u8, v, ',') orelse v.len;
     return std.fmt.parseInt(u8, std.mem.trim(u8, v[0..comma], " \t"), 10) catch 0;
+}
+
+/// High bound of a `"1,2"` list, or the single value when there is no comma;
+/// 0 when absent or unparsable. Stock stores TotalPerWave as a min/max pair
+/// and rolls `RandomRange(min, max + 1)` per wave
+/// (EntitySpawner.il.txt:565-573), so the high bound is not decoration.
+fn highU8List(s: ?[]const u8) u8 {
+    const v = s orelse return 0;
+    const comma = std.mem.findScalar(u8, v, ',') orelse return lowU8List(s);
+    return std.fmt.parseInt(u8, std.mem.trim(u8, v[comma + 1 ..], " \t"), 10) catch 0;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
@@ -231,10 +244,14 @@ test "stock entityspawners feed the gamestage scout thresholds" {
     try std.testing.expectEqualStrings("ZombieScouts", t.spawnerByName("Scouts2").?.entitygroup);
     try std.testing.expectEqualStrings("ZombieScoutsFeral", t.spawnerByName("ScoutsFeral").?.entitygroup);
     try std.testing.expectEqualStrings("ZombieScoutsRadiated", t.spawnerByName("ScoutsRadiated").?.entitygroup);
-    // TotalAlive / TotalPerWave take the low bound of a comma list.
+    // TotalAlive takes the low bound; TotalPerWave keeps the whole range,
+    // because stock rolls RandomRange(min, max + 1) per wave. A single value
+    // sets both ends; ScoutsFeral ships "1,2".
     try std.testing.expectEqual(@as(u8, 1), t.spawnerByName("Scouts1").?.total_alive);
     try std.testing.expectEqual(@as(u8, 2), t.spawnerByName("Scouts2").?.total_per_wave);
+    try std.testing.expectEqual(@as(u8, 2), t.spawnerByName("Scouts2").?.total_per_wave_max);
     try std.testing.expectEqual(@as(u8, 1), t.spawnerByName("ScoutsFeral").?.total_per_wave);
+    try std.testing.expectEqual(@as(u8, 2), t.spawnerByName("ScoutsFeral").?.total_per_wave_max);
     try std.testing.expect(t.spawnerByName("NoSuchSpawner") == null);
 }
 

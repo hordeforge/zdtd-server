@@ -12,7 +12,9 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   chunk-heat wave used a zdtd rule, while stock sizes each tier from the
   spawner (Scouts1 1, Scouts2 2, ScoutsFeral and ScoutsRadiated "1,2"). The
   director now reads the tier's own value and falls back to the previous
-  numbers when no table is loaded.
+  numbers when no table is loaded. `TotalPerWave` is a min/max pair and stock
+  rolls `RandomRange(min, max + 1)` per wave, so the loader keeps both ends
+  and the director rolls in the range rather than pinning the low bound.
 
 - `[rules.worldgen] height_amp` did nothing. It was stored on the generator
   and never read: `columnTarget` used inline amplitudes, so an operator could

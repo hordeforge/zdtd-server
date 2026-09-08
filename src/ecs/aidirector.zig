@@ -175,6 +175,12 @@ pub const StageGroup = struct {
     duration: u16 = 0,
 };
 
+/// An `<entityspawner>` TotalPerWave min/max pair (min 0 = property absent).
+pub const WaveRange = struct {
+    min: u32 = 0,
+    max: u32 = 0,
+};
+
 /// AIDirectorChunkEventComponent::SpawnScouts (asm.il ~415972): the scout
 /// `<entityspawner>` is picked purely by party game stage at 45 / 85 / 125.
 pub fn scoutSpawnerName(party_stage: i32) []const u8 {
@@ -319,11 +325,12 @@ pub const Director = struct {
     spawner_group_ctx: ?*anyopaque = null,
     spawner_group_fn: ?*const fn (?*anyopaque, []const u8) ?[]const u8 = null,
     /// Optional lookup: (ctx, entityspawner_name) → that spawner's
-    /// `TotalPerWave` from spawning.xml (0 = unset). Stock sizes a scout wave
-    /// per tier (Scouts1 1, Scouts2 2, ScoutsFeral and ScoutsRadiated "1,2"),
-    /// so without it every tier spawns the same count.
+    /// `TotalPerWave` min/max from spawning.xml (min 0 = unset). Stock sizes a
+    /// scout wave per tier (Scouts1 1, Scouts2 2, ScoutsFeral and
+    /// ScoutsRadiated "1,2") and rolls in the range, so without it every tier
+    /// spawns the same count.
     spawner_wave_ctx: ?*anyopaque = null,
-    spawner_wave_fn: ?*const fn (?*anyopaque, []const u8) u8 = null,
+    spawner_wave_fn: ?*const fn (?*anyopaque, []const u8) WaveRange = null,
     bloodmoon_cd: f32 = 0,
     scouts_cd: f32 = 0,
     total_spawned: u32 = 0,
@@ -774,8 +781,16 @@ pub const Director = struct {
     /// when no table is wired (offline tests) or the property is absent.
     fn scoutWaveSize(self: *const Director, dflt: u32) u32 {
         const f = self.spawner_wave_fn orelse return dflt;
-        const n = f(self.spawner_wave_ctx, scoutSpawnerName(self.party_stage));
-        return if (n > 0) n else dflt;
+        const r = f(self.spawner_wave_ctx, scoutSpawnerName(self.party_stage));
+        if (r.min == 0) return dflt;
+        const hi = @max(r.min, r.max);
+        if (hi == r.min) return r.min;
+        // Stock rolls RandomRange(min, max + 1) per wave
+        // (EntitySpawner.il.txt:565-573). Seeded off the spawn counter so the
+        // sequence stays deterministic for a given run.
+        const span: u64 = hi - r.min + 1;
+        const roll: u64 = (@as(u64, self.total_spawned) *% 2654435761) % span;
+        return r.min + @as(u32, @intCast(roll));
     }
 
     /// `group_override` wins over the day/night spawning.xml groups; empty
@@ -1652,11 +1667,15 @@ test "daytime scout wave size comes from the spawner TotalPerWave" {
             if (std.mem.eql(u8, group, "ZombieScoutsFeral")) return "zombieJoe";
             return null;
         }
-        fn waveThree(_: ?*anyopaque, _: []const u8) u8 {
-            return 3;
+        fn waveThree(_: ?*anyopaque, _: []const u8) WaveRange {
+            return .{ .min = 3, .max = 3 };
         }
-        fn waveUnset(_: ?*anyopaque, _: []const u8) u8 {
-            return 0;
+        fn waveUnset(_: ?*anyopaque, _: []const u8) WaveRange {
+            return .{};
+        }
+        // The ScoutsFeral / ScoutsRadiated shape: TotalPerWave "1,2".
+        fn waveOneToTwo(_: ?*anyopaque, _: []const u8) WaveRange {
+            return .{ .min = 1, .max = 2 };
         }
     };
     var w: ecs_world.World = .{};
@@ -1677,6 +1696,27 @@ test "daytime scout wave size comes from the spawner TotalPerWave" {
     // No table wired at all (offline tests) also keeps the fallback.
     dir.spawner_wave_fn = null;
     try std.testing.expectEqual(@as(u32, 2), dir.scoutWaveSize(2));
+
+    // A "1,2" range rolls inside the range, never below min or above max, and
+    // both ends are reachable across the spawn counter.
+    dir.spawner_wave_fn = &Hooks.waveOneToTwo;
+    var saw_one = false;
+    var saw_two = false;
+    var i: u32 = 0;
+    while (i < 16) : (i += 1) {
+        dir.total_spawned = i;
+        const n = dir.scoutWaveSize(9);
+        try std.testing.expect(n >= 1 and n <= 2);
+        if (n == 1) saw_one = true;
+        if (n == 2) saw_two = true;
+    }
+    try std.testing.expect(saw_one and saw_two);
+
+    // Deterministic: the same counter yields the same roll.
+    dir.total_spawned = 5;
+    const first = dir.scoutWaveSize(9);
+    dir.total_spawned = 5;
+    try std.testing.expectEqual(first, dir.scoutWaveSize(9));
 }
 
 test "blood moon wave size is capped by the stage maxAlive" {

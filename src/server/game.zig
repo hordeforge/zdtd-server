@@ -3110,13 +3110,13 @@ pub const Game = struct {
         return s.entitygroup;
     }
 
-    /// spawning.xml <entityspawner name=…> → its TotalPerWave property
-    /// (0 = unset, caller falls back). Rule 15: the wave size is stock data,
-    /// not a sim default.
-    pub fn pickSpawnerWave(ctx: ?*anyopaque, spawner: []const u8) u8 {
+    /// spawning.xml <entityspawner name=…> → its TotalPerWave min/max
+    /// (min 0 = unset, caller falls back). Rule 15: the wave size is stock
+    /// data, not a sim default.
+    pub fn pickSpawnerWave(ctx: ?*anyopaque, spawner: []const u8) ecs.aidirector.WaveRange {
         const g: *Game = @ptrCast(@alignCast(ctx.?));
-        const s = g.spawning.spawnerByName(spawner) orelse return 0;
-        return s.total_per_wave;
+        const s = g.spawning.spawnerByName(spawner) orelse return .{};
+        return .{ .min = s.total_per_wave, .max = s.total_per_wave_max };
     }
 
     /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
