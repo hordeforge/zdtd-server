@@ -207,6 +207,24 @@ section of `NetPackagePlayerInventory`, which goes through
 so the standalone package consumed a bool that was really the next slot's
 version byte.
 
+## 1a3. Lock-context shapes, audited
+
+Stock has three concrete `ILockContext` implementations and no two share a
+serialized layout:
+
+| Context | `Read` layout | IL |
+|---|---|---|
+| `EntityLockContext` | `Command` string, `FirstTimeTouched` bool, `hasBag` bool, then `Bag::Read` only when set | `Entity_EntityLockContext.il.txt:93` |
+| `EntityTraderLockContext` | `Command` string, `hasTraderData` bool, then `TraderData::Read` only when set | `EntityTrader_EntityTraderLockContext.il.txt:38` |
+| `VendingMachineLockContext` | `TraderData::Read` immediately, no command and no bool | `TileEntityVendingMachine_VendingMachineLockContext.il.txt:19` |
+
+zdtd emits a context tail in two places. `buildLockResponse` (grant/deny)
+echoes the request's tail verbatim, which is correct for any of the three.
+`buildLockResponseTrader` builds one, and until 2026-09-09 it emitted the
+entity shape for both trader kinds; it now keys off the type name the client
+sent. Re-check this table if a fourth context appears, or if zdtd ever
+synthesises a tail instead of echoing the client's.
+
 ## 1b. Block updates are interest-scoped, stock's are global
 
 `GameManager::SetBlocksOnClients` (`GameManager.il.txt:6841`) hands

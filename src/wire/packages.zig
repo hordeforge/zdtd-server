@@ -3739,6 +3739,37 @@ test "lock response for a trader carries the context and trader data" {
     });
     try std.testing.expectEqual(@as(u8, 0), resp2[0]); // locking echoed false
     try std.testing.expectEqual(@as(u8, 1), resp2[1]); // success still forced
+
+    // Same builder, vending context: VendingMachineLockContext::Read takes the
+    // TraderData straight after the type name, with no Command and no
+    // hasTraderData bool (TileEntityVendingMachine_VendingMachineLockContext
+    // .il.txt:19). Emitting the entity shape here handed the client two extra
+    // bytes it reads as the first half of TraderID.
+    var vreq_buf: [64]u8 = undefined;
+    var vw: binary.Writer = .{ .buf = &vreq_buf };
+    try vw.writeBool(true);
+    try vw.writeU16(3);
+    try vw.writeI32(0);
+    try vw.writeString(vending_lock_context);
+    const vhead = try parseLockRequest(vw.written());
+    var vresp_buf: [512]u8 = undefined;
+    const vresp = try buildLockResponseTrader(&vresp_buf, vhead, .{
+        .trader_id = 42,
+        .available_money = 1000,
+        .entries = &.{},
+    });
+    var vr: binary.Reader = .{ .data = vresp };
+    _ = try vr.readBool(); // locking
+    _ = try vr.readBool(); // success
+    _ = try vr.readString(&s_buf); // errorMsg
+    _ = try vr.readBool(); // isForceUnlocked
+    _ = try vr.readU16(); // channel
+    _ = try vr.readI32(); // targets count
+    try std.testing.expectEqualStrings(vending_lock_context, try vr.readString(&s_buf));
+    // TraderData begins immediately: its TraderID, not a command length byte.
+    try std.testing.expectEqual(@as(i32, 42), try vr.readI32());
+    // The two contexts must not produce the same tail length for equal data.
+    try std.testing.expect(vresp.len < resp.len);
 }
 
 /// One biome weather snapshot (WeatherPackage on wire).
