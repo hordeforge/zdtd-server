@@ -23,6 +23,17 @@ const binary = @import("binary.zig");
 
 /// `PlatformUserIdentifierAbs.UserIdentifierVersion` (asm.il 30507). Stock reads
 /// it and pops it, but writes 1, so zdtd writes 1 to stay byte-identical.
+///
+/// Single-form on the wire, audited 2026-09-09. `PlatformUserIdentifierAbs` has
+/// five implementations (Eos, Local, PSN, Steam, Xbl) but none overrides
+/// `WriteCustomData`/`ReadCustomData`, and the base pair is a bare `ret`
+/// (`PlatformUserIdentifierAbs.il.txt:9`, `:12`). The optional custom-data tail
+/// in `PlatformUserIdentifierExtensions::ToStream` (`:34`) is therefore empty
+/// even when requested, and every package and TE site passes
+/// `_inclCustomData = false` anyway (checked: AllyRequest, SetBlock,
+/// PickupBlock, PlayerVendingMachine, SetProp, TEFeatureLockable,
+/// TileEntityComposite). So the flat `present | version | platform | id` form
+/// below covers every subtype; there is no per-platform variant to model.
 pub const user_identifier_version: u8 = 1;
 
 /// PlatformIdentifierString is an `EPlatformIdentifier` name (asm.il 2661453):
