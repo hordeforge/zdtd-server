@@ -13557,3 +13557,194 @@ test "scenario player death sends the deficit sequence action under XPOnly" {
     try std.testing.expect(cap.findPkgId(resp_id) == null);
     std.debug.print("PASS death-deficit: XPOnly/Injured send the deficit action, None sends nothing\n", .{});
 }
+
+test "scenario playerdata: a spoofed entity id cannot reach another player's inventory" {
+    // Every stock client sends NetPackagePlayerData periodically, and it is the
+    // only C2S package that carries a whole inventory. The handler
+    // (c2s/misc.zig) applies it to the *sender's* slot resolved from
+    // playerByPeer, and only compares the body's entity id for the reject
+    // counter. Nothing drove that path end to end, so the property that matters
+    // (a forged id never crosses into another peer's slots) was unpinned.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_pdata");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pdata", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const pa = g.sim.playerByPeer(ca.slot).?;
+    const pb = g.sim.playerByPeer(cb.slot).?;
+    try std.testing.expect(pa != pb);
+
+    // Give B a distinct toolbelt slot 0 so any bleed-through is visible.
+    g.sim.inventory[pb].slots[0] = .{ .item_id = 11, .count = 7, .quality = 1 };
+    const b_before = g.sim.inventory[pb];
+
+    const tb_item: u16 = 2;
+    const eq_item: u16 = 8;
+    var body_buf: [1024]u8 = undefined;
+
+    // Honest body: A's own entity id. Toolbelt slot 0 and equip slot 0 land.
+    var w: binary.Writer = .{ .buf = &body_buf };
+    try packages.stock_inv.buildPlayerDataBodyForTest(&w, ca.entity_id, tb_item, eq_item);
+    var fb: [1200]u8 = undefined;
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerData", w.written()));
+
+    try std.testing.expectEqual(tb_item, g.sim.inventory[pa].slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 3), g.sim.inventory[pa].slots[0].count);
+    const eq = quest_mod_components.inv_equip_start;
+    try std.testing.expectEqual(eq_item, g.sim.inventory[pa].slots[eq].item_id);
+    try std.testing.expectEqual(own_before, g.harness.counters.get(.ownership_rejects));
+    // B is untouched by A's own legitimate update.
+    try std.testing.expectEqualDeep(b_before, g.sim.inventory[pb]);
+
+    // Spoofed body: A claims B's entity id. The reject counter rises, A's own
+    // slot still takes the write (the id is advisory), and B is untouched.
+    var w2: binary.Writer = .{ .buf = &body_buf };
+    const spoof_tb: u16 = 6;
+    try packages.stock_inv.buildPlayerDataBodyForTest(&w2, cb.entity_id, spoof_tb, eq_item);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerData", w2.written()));
+
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expectEqual(spoof_tb, g.sim.inventory[pa].slots[0].item_id);
+    try std.testing.expectEqualDeep(b_before, g.sim.inventory[pb]);
+    std.debug.print("PASS playerdata: forged entity id counts a reject and never crosses slots\n", .{});
+}
+
+test "scenario skill purchase: the ledger keeps catalog memory, not the packet buffer" {
+    // NetPackageEntitySetSkillLevelServer reads the skill name into a stack
+    // buffer in the C2S handler, and Client.skill_levels[].name is a borrowed
+    // slice that outlives the packet: the save writer and the passive-effects
+    // fold read it later. The two sibling writers (addProgressionLevel,
+    // setProgressionLevelMax) intern the name through the catalog; the
+    // purchase path did not, so it parked a dangling slice in the ledger.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_skill");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_skill", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const attrs = [_]assets_progression.AttrDef{
+        .{ .name = "attPerception", .max_level = 10, .base_cost = 1, .cost_mult = 1.0 },
+    };
+    g.progression_table.attributes = &attrs;
+    g.clients[c.slot].skill_points = 5;
+
+    var body: [256]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeI32(c.entity_id);
+    try w.writeString("attPerception");
+    try w.writeI32(1);
+    var fb: [320]u8 = undefined;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntitySetSkillLevelServer", w.written()));
+
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(c.slot, "attPerception"));
+    try std.testing.expectEqual(@as(u32, 4), g.clients[c.slot].skill_points);
+    // The stored name must alias the catalog row, not the handler's buffer.
+    try std.testing.expectEqual(
+        @intFromPtr(attrs[0].name.ptr),
+        @intFromPtr(g.clients[c.slot].skill_levels[0].name.ptr),
+    );
+    // The client is told the new level.
+    const echo_id = packages.idOf("NetPackageEntitySetSkillLevelClient").?;
+    try std.testing.expect(cap.findPkgId(echo_id) != null);
+
+    // A name outside the catalog is refused and costs nothing.
+    var w2: binary.Writer = .{ .buf = &body };
+    try w2.writeI32(c.entity_id);
+    try w2.writeString("attNotInCatalog");
+    try w2.writeI32(1);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntitySetSkillLevelServer", w2.written()));
+    try std.testing.expectEqual(@as(u32, 4), g.clients[c.slot].skill_points);
+    try std.testing.expectEqual(@as(usize, 1), g.clients[c.slot].skill_level_n);
+    std.debug.print("PASS skill purchase: ledger name interned from the catalog\n", .{});
+}
+
+test "scenario wire tool: a claimed foreign entity id is dropped, not relayed" {
+    // NetPackageWireToolActions::ProcessPackage (IL=254) opens with
+    // ValidEntityIdForSender(entityID, false) and returns on failure, and its
+    // switch acts only on operations 0 (SetParent) and 1 (RemoveParent),
+    // returning before either SendPackage otherwise. zdtd relayed every body
+    // unread, so one client could paint a wire-tool visual on another
+    // player's hands and any operation byte was forwarded.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_wiretool");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_wiretool", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const tool_id = packages.idOf("NetPackageWireToolActions").?;
+
+    const Body = struct {
+        fn make(buf: []u8, op: u8, eid: i32) ![]u8 {
+            var w: binary.Writer = .{ .buf = buf };
+            try w.writeByte(op);
+            try w.writeI32(10);
+            try w.writeI32(70);
+            try w.writeI32(20);
+            try w.writeI32(eid);
+            return w.written();
+        }
+    };
+    var body: [64]u8 = undefined;
+    var fb: [128]u8 = undefined;
+
+    // Own id, SetParent: relayed to the other peer, never echoed to the sender.
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageWireToolActions", try Body.make(&body, 0, ca.entity_id)));
+    const relayed = cap_b.findPkgId(tool_id);
+    try std.testing.expect(relayed != null);
+    const parsed = try packages.parseWireToolActions(relayed.?);
+    try std.testing.expectEqual(ca.entity_id, parsed.entity_id);
+    try std.testing.expectEqual(@as(i32, 70), parsed.y);
+    try std.testing.expect(cap_a.findPkgId(tool_id) == null);
+
+    // Another player's id: refused, and B sees nothing.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageWireToolActions", try Body.make(&body, 0, cb.entity_id)));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(cap_b.findPkgId(tool_id) == null);
+
+    // An operation stock's switch does not take is dropped before the relay.
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageWireToolActions", try Body.make(&body, 2, ca.entity_id)));
+    try std.testing.expect(cap_b.findPkgId(tool_id) == null);
+
+    // A truncated body counts as malformed instead of being forwarded.
+    const mal_before = g.harness.counters.get(.c2s_malformed);
+    cap_b.clear();
+    const full = try Body.make(&body, 0, ca.entity_id);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageWireToolActions", full[0 .. full.len - 1]));
+    try std.testing.expectEqual(mal_before + 1, g.harness.counters.get(.c2s_malformed));
+    try std.testing.expect(cap_b.findPkgId(tool_id) == null);
+    std.debug.print("PASS wire tool: sender-gated, op-gated, and length-checked before relay\n", .{});
+}

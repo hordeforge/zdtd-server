@@ -572,19 +572,23 @@ pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: 
 pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_level: u8, cost_override: ?u32) bool {
     if (slot >= self.clients.len) return false;
     const c = &self.clients[slot];
-    const cost = self.skillCostOf(slot, skill, target_level) orelse return false;
+    // The C2S caller reads the name into a stack buffer, so the ledger must
+    // hold catalog memory: skill_levels outlives the packet frame and is what
+    // the save writer and the passive-effects fold read.
+    const interned = internProgressionName(self, skill) orelse return false;
+    const cost = self.skillCostOf(slot, interned, target_level) orelse return false;
     const eff_cost = cost_override orelse cost;
     if (c.skill_points < eff_cost) return false;
     c.skill_points -= eff_cost;
     var i: usize = 0;
     while (i < c.skill_level_n) : (i += 1) {
-        if (std.mem.eql(u8, c.skill_levels[i].name, skill)) {
+        if (std.mem.eql(u8, c.skill_levels[i].name, interned)) {
             c.skill_levels[i].level = target_level;
             return true;
         }
     }
     if (c.skill_level_n < c.skill_levels.len) {
-        c.skill_levels[c.skill_level_n] = .{ .name = skill, .level = target_level };
+        c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = target_level };
         c.skill_level_n += 1;
         return true;
     }

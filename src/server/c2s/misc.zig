@@ -35,6 +35,11 @@ const chatMsgOk = c2s_text.chatMsgOk;
 /// 1600; the 9999-HP trader class is excluded by the zombie/animal gate).
 const fatal_kill_amount: f32 = 9999;
 
+/// Highest `WireActions` value NetPackageWireToolActions::ProcessPackage
+/// (IL=254) acts on: the switch takes 0 (SetParent) and 1 (RemoveParent) and
+/// returns for anything else, so a higher op never reaches its rebroadcast.
+const wire_tool_max_op: u8 = 1;
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageChat") or std.mem.eql(u8, name, "NetPackageSimpleChat")) {
@@ -1127,6 +1132,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         // Tool handshake carries one endpoint + player: visual only, no graph
         // mutation (mirrors stock ProcessPackage re-Setup+SendPackage to peers).
+        // read IL=13: currentOperation u8 | tileEntityPosition Vector3i |
+        // entityID i32. ProcessPackage IL=254 opens with
+        // ValidEntityIdForSender(entityID, false) and returns on failure, so a
+        // body naming another player is dropped, not relayed. It also returns
+        // for any operation outside {0,1} before reaching either SendPackage.
+        const tool = packages.parseWireToolActions(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (tool.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        if (tool.operation > wire_tool_max_op) return true;
         try self.broadcastExcept("NetPackageWireToolActions", body, c.slot);
         return true;
     }

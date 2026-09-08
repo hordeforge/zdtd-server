@@ -5708,6 +5708,32 @@ pub fn buildVehicleControlBody(buf: []u8, entity_id: i32, op: u8, throttle: f32,
     return buf[0..13];
 }
 
+/// One decoded NetPackageWireToolActions body. `operation` is the stock
+/// `WireActions` enum byte; `entity_id` is the player the client claims is
+/// holding the wire tool, which the server checks against the sender.
+pub const WireToolActions = struct {
+    operation: u8 = 0,
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    entity_id: i32 = 0,
+};
+
+/// NetPackageWireToolActions::read (IL=13,
+/// il/netpackages-v3.2.0/NetPackageWireToolActions_il.txt:17):
+/// currentOperation u8 | tileEntityPosition Vector3i | entityID i32.
+/// GetLength() IL=2 returns 12, but the read is 17 bytes; the length hint is
+/// the pool size class, not the body size, so trust the read.
+pub fn parseWireToolActions(body: []const u8) binary.ReadError!WireToolActions {
+    var r: binary.Reader = .{ .data = body };
+    const op = try r.readByte();
+    const x = try r.readI32();
+    const y = try r.readI32();
+    const z = try r.readI32();
+    const eid = try r.readI32();
+    return .{ .operation = op, .x = x, .y = y, .z = z, .entity_id = eid };
+}
+
 /// Stock NetPackageWireActions SetParent body (asm.il:842779): op=0,
 /// tileEntityPosition=child, childCount=1, wireChildren[0]=parent, wiringEntityID.
 pub fn buildWireSetParentBody(buf: []u8, cx: i32, cy: i32, cz: i32, px: i32, py: i32, pz: i32, entity_id: i32) ![]u8 {
