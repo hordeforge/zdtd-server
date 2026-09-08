@@ -7,6 +7,16 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `[rules.worldgen] height_amp` did nothing. It was stored on the generator
+  and never read: `columnTarget` used inline amplitudes, so an operator could
+  set the documented knob and the terrain would not move. The three shaping
+  octaves now take their amplitude as shares of it, written so the default
+  (24) reproduces the previous numbers exactly. The old params test moved
+  `base_height` at the same time, which is why it never caught this.
+- Turret magazines ignored `BurstRoundCount`. The value was parsed off
+  blocks.xml and dropped, so every placed turret used the 200-round component
+  fallback instead of the block's own count (rule 15: stock data comes from
+  the assets, never a hardcoded sim default).
 - Perk and attribute purchases were parsed from the wrong offset.
   `NetPackageEntitySetSkillLevelServer` derives from
   `...SetSkillLevelClient` and overrides neither `read` nor `write`, so it

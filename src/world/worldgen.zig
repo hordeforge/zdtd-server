@@ -44,6 +44,17 @@ pub const height_amp: f32 = 24;
 pub const min_surface: u8 = 12;
 pub const max_surface: u8 = 200;
 
+/// How `height_amp` splits across the three shaping octaves, as shares of it.
+/// zdtd-owned procedural shaping (non-goal #8), not stock data: the values are
+/// the pre-rules amplitudes over the default height_amp of 24, so a default
+/// config generates the same terrain as before the split (8, 8+16, 4, 4+22,
+/// and 6 at the flat and mountain ends respectively).
+const cont_amp_base: f32 = 8.0 / height_amp;
+const cont_amp_mountain: f32 = 16.0 / height_amp;
+const ridge_amp_base: f32 = 4.0 / height_amp;
+const ridge_amp_mountain: f32 = 22.0 / height_amp;
+const detail_amp_share: f32 = 6.0 / height_amp;
+
 /// Top water cell of the RWG water table. RE: `Block.cWaterLevel` cctor
 /// `ldc.r4 62.88` (7dtd-engine-research stock_facts `world_water_level`; the client
 /// renders the surface of the top water cell at 62.88), so the table fills
@@ -301,12 +312,17 @@ pub const WorldGen = struct {
         // lerp so regions slope into each other instead of cliffing at a tile
         // edge (the stock tile grid is discrete; the smooth blend keeps the
         // no-seam guarantee by construction).
+        //
+        // The three amplitudes are shares of `[rules.worldgen] height_amp`,
+        // so raising the knob raises the relief and the default (24) keeps
+        // the pre-rules numbers exactly: 8/24, 16/24, 4/24, 22/24, 6/24.
         const m = self.mountainness(fx, fz);
-        const cont_amp = 8.0 + m * 16.0;
-        const ridge_amp = 4.0 + m * 22.0;
+        const cont_amp = self.height_amp * (cont_amp_base + m * cont_amp_mountain);
+        const ridge_amp = self.height_amp * (ridge_amp_base + m * ridge_amp_mountain);
 
         // cont ~[-1,1], ridge ~[0,2], detail ~[-1,1]
-        const h = self.base_height + cont * cont_amp + ridge * ridge_amp + detail * 6.0;
+        const h = self.base_height + cont * cont_amp + ridge * ridge_amp +
+            detail * (self.height_amp * detail_amp_share);
         return std.math.clamp(
             h,
             @as(f32, @floatFromInt(self.min_surface)) + self.margin,
@@ -1068,6 +1084,31 @@ test "worldgen first pass uses live air id, not AssignIds pin" {
     var blocks: [16 * 256 * 16]u32 = undefined;
     g.generateChunkBlocks(0, 0, &heights, &blocks);
     try std.testing.expectEqual(@as(u32, 80), blocks[255 * 256]);
+}
+
+test "worldgen height_amp alone changes the relief" {
+    // The existing params test moves base_height too, so it passed even while
+    // height_amp was stored and never read: columnTarget used inline
+    // amplitudes, and the documented knob did nothing. Vary only height_amp.
+    const g1 = WorldGen.init(11);
+    var g2 = WorldGen.init(11);
+    g2.applyParams(.{ .height_amp = height_amp * 4 });
+    var a: [256]u8 = undefined;
+    var b: [256]u8 = undefined;
+    g1.fillHeights(0, 0, &a);
+    g2.fillHeights(0, 0, &b);
+    var changed: usize = 0;
+    for (a, b) |x, y| {
+        if (x != y) changed += 1;
+    }
+    try std.testing.expect(changed > 0);
+
+    // And the default stays byte-identical to the pre-rules generator.
+    var g3 = WorldGen.init(11);
+    g3.applyParams(.{});
+    var c: [256]u8 = undefined;
+    g3.fillHeights(0, 0, &c);
+    try std.testing.expectEqualSlices(u8, &a, &c);
 }
 
 test "worldgen [rules.worldgen] params change heights deterministically" {

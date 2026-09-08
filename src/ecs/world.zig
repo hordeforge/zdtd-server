@@ -1637,6 +1637,7 @@ pub const World = struct {
                 if (ts.max_distance > 0) t.range = ts.max_distance;
                 if (ts.entity_damage > 0) t.damage = ts.entity_damage;
                 if (ts.burst_fire_rate > 0) t.fire_interval = ts.burst_fire_rate;
+                if (ts.burst_rounds > 0) t.ammo = ts.burst_rounds;
             }
         }
         self.turret[s] = t;
@@ -2400,7 +2401,7 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     // component defaults.
     var w: World = .{};
     defer w.deinit();
-    var stats: c.TurretBlockStats = .{ .max_distance = 30, .entity_damage = 32, .burst_fire_rate = 0.15 };
+    var stats: c.TurretBlockStats = .{ .max_distance = 30, .entity_damage = 32, .burst_fire_rate = 0.15, .burst_rounds = 15 };
     w.turret_stats_fn = struct {
         fn f(ctx: ?*anyopaque) ?c.TurretBlockStats {
             const s: *c.TurretBlockStats = @ptrCast(@alignCast(ctx.?));
@@ -2413,6 +2414,9 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     try std.testing.expectEqual(@as(f32, 30), w.turret[s].range);
     try std.testing.expectEqual(@as(f32, 32), w.turret[s].damage);
     try std.testing.expectEqual(@as(f32, 0.15), w.turret[s].fire_interval);
+    // BurstRoundCount is the magazine: it was parsed off blocks.xml and then
+    // dropped, so every turret held the 200-round component fallback.
+    try std.testing.expectEqual(@as(u16, 15), w.turret[s].ammo);
     // Without the hook the component defaults hold.
     var w2: World = .{};
     defer w2.deinit();
@@ -2420,6 +2424,7 @@ test "spawnTurret applies the block-data combat stats through the hook" {
     const s2 = w2.slotOfNetId(id2).?;
     try std.testing.expectEqual(@as(f32, 24), w2.turret[s2].range);
     try std.testing.expectEqual(@as(f32, 12), w2.turret[s2].damage);
+    try std.testing.expectEqual(@as(u16, 200), w2.turret[s2].ammo);
 }
 
 test "spawnTurret honors a fail-closed turret_watts hook" {
