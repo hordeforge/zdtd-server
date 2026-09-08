@@ -7,6 +7,19 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Stealth crouch and light rode one `NetPackageEntityStealth`. Stock's three
+  `Setup` overloads are mutually exclusive: the crouch form sets `data` to
+  exactly 0 or 1, while the light form packs
+  `(byte)lightLevel | ((noise & 127) << 8)` plus bit 15 for alert. zdtd ORed
+  the crouch flag into the light form, and the client reads the light level as
+  `(byte)data`, so a crouching player reported light+1 and even light values
+  could not be expressed. The two forms now ship as separate packages.
+- `readTraderDataBody` parsed the `TierItemGroups` block as a name string plus
+  a u8 count plus u16 ids. Stock reads each group through
+  `GameUtils::ReadItemStack` (u16 count + `ItemStack` per entry). Stock
+  traders.xml ships no `<tier_items>`, so a stock client always sends 0 groups
+  and the wrong shape was unreachable, but a non-zero count would have
+  desynced the trailing `AvailableMoney`.
 - `TileEntityLight` network body was 9 bytes short: `LightState` u8, `Rate`
   f32 and `Delay` f32 were missing. Stock gates those three on payload
   version, but the network path pins the version to 18, so the client always
@@ -23,6 +36,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   mismatch fails the client's `ValidateSizeMarker` and clears the entire
   objective list for that quest, so a journal containing stock
   `intro_buried_supplies` lost its objectives.
+- Trader stock quality. Stock parses a `<item>` ref with no `quality`
+  attribute as min = max = -1 and `TraderInfo::SpawnItem` substitutes 1..6 for
+  it, then clamps to `TraderMaxTier` (static, default 6) and drops the item
+  when the clamped max falls below the min. zdtd defaulted those refs to
+  quality 1 and only rolled when the XML carried an explicit range, so 653 of
+  the ~780 stock refs sold at quality 1: every trader window was tier-1 gear.
+  Whether an item can carry quality at all now comes from
+  `ItemClass.HasQuality` (any owner-tiered `effect_group` in items.xml,
+  inherited through `Extends`), so stackables still have none. The ceiling and
+  the fallback range are `[rules.trader]` (`max_tier`,
+  `default_quality_min` / `default_quality_max`).
 
 ### Changed
 
