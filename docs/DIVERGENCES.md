@@ -182,14 +182,17 @@ peer cannot append bytes and have the server fan them out
 (`EntityRagdoll`, `SoundAtPosition`, `ParticleEffect`, `PlayerLaserSight`,
 `EntityAliveFlags`, `EntitySpeeds`, `EntityTeleport`).
 
-`NetPackagePlayerEquipment` joined them on 2026-09-09, once its body was
-modelled correctly (see below).
+`NetPackagePlayerEquipment` and `NetPackageEntityAnimationData` joined them on
+2026-09-09, once their bodies were modelled. **No relay forwards a raw client
+body any more.**
 
-One still does: `NetPackageEntityAnimationData` (`c2s/misc.zig`). It reads only
-the leading `entityId` to ownership-check the sender and never models the
-opaque animation-parameter list, so there is no parsed end to trim to. The
-exposure is bounded: it is rate-gated, it verifies the sender owns the entity,
-and the receiving client parses only as far as its own reader expects.
+`EntityAnimationData` is `entityId` i32 + a count i32 + that many
+`AnimParamData` (`NetPackageEntityAnimationData.il.txt:58`), each a `hash` i32
++ a `type` u8 + a value the type sizes: Bool/Trigger a bool, Float/DataFloat an
+f32, Int an i32 (`AnimParamData.il.txt:54`, enum at
+`AnimParamData_ValueTypes.il.txt:3`). An unrecognised type throws in stock, so
+zdtd rejects it too. The parameters stay opaque to the server; only the length
+is used, to trim the relay.
 
 **Equipment body, for the record.** `NetPackagePlayerEquipment` is `entityId` +
 `Equipment::Write` (`Equipment.il.txt:1594`): a version byte (stock writes 4),

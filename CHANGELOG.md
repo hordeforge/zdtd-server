@@ -7,6 +7,11 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackageEntityAnimationData` is now parsed rather than relayed blind, so
+  no relay forwards a raw client body any more. Its parameter entries are a
+  hash, a type byte and a type-sized value; an unrecognised type is rejected,
+  as stock does. A malformed or spoofed body is now counted and dropped
+  instead of being fanned out to the other players.
 - `NetPackagePlayerEquipment` was parsed with the wrong body shape. It carries
   `Equipment::Write` (version byte, then one `ItemValue` per slot where a null
   slot is a bare `0`), but zdtd read a presence bool before each slot, which is

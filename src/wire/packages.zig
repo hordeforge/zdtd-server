@@ -6541,6 +6541,92 @@ test "parseItemReload reads the single entityId" {
 /// NetEntityDistribution.SendPacketToTrackedPlayersAndTrackedEntity, so a
 /// verbatim relay to the other clients matches the intent (the owner already
 /// ragdolled locally).
+/// `AnimParamData/ValueTypes` (AnimParamData_ValueTypes.il.txt:3). The value
+/// width follows the type: Bool and Trigger read a bool, Float and DataFloat a
+/// f32, Int an i32 (`CreateFromBinary` switch, AnimParamData.il.txt:62).
+pub const anim_param_bool: u8 = 0;
+pub const anim_param_trigger: u8 = 1;
+pub const anim_param_float: u8 = 2;
+pub const anim_param_int: u8 = 3;
+pub const anim_param_data_float: u8 = 4;
+
+/// `NetPackageEntityAnimationData::read` (IL=22,
+/// NetPackageEntityAnimationData.il.txt:58): the `NetPackageEntityTargeted`
+/// base `entityId` i32, a count i32, then that many `AnimParamData` entries of
+/// `hash` i32 + `type` u8 + a type-sized value. An unknown type throws in
+/// stock ("Invalid Value Type:", :82), so it is a parse error here too.
+///
+/// Only the id and the consumed length are returned: the parameters are an
+/// opaque client animation list the server does not act on, but the length is
+/// what lets the relay trim instead of forwarding appended bytes.
+pub const AnimationData = struct {
+    entity_id: i32 = 0,
+    param_count: i32 = 0,
+    wire_len: usize = 0,
+};
+
+/// Read side of the layout above (stock
+/// `NetPackageEntityAnimationData::read` IL=22,
+/// NetPackageEntityAnimationData.il.txt:58, over the
+/// `NetPackageEntityTargeted::read` base and `AnimParamData::CreateFromBinary`
+/// at AnimParamData.il.txt:54).
+pub fn parseAnimationData(body: []const u8) binary.ReadError!AnimationData {
+    var r: binary.Reader = .{ .data = body };
+    var out: AnimationData = .{ .entity_id = try r.readI32() };
+    out.param_count = try r.readI32();
+    if (out.param_count < 0) return error.EndOfStream;
+    var i: i32 = 0;
+    while (i < out.param_count) : (i += 1) {
+        _ = try r.readI32(); // parameter name hash
+        switch (try r.readByte()) {
+            anim_param_bool, anim_param_trigger => _ = try r.readBool(),
+            anim_param_float, anim_param_data_float => _ = try r.readF32(),
+            anim_param_int => _ = try r.readI32(),
+            else => return error.EndOfStream, // stock throws on an unknown type
+        }
+    }
+    out.wire_len = r.pos;
+    return out;
+}
+
+test "animation data parses the typed parameter list" {
+    var buf: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    try w.writeI32(107);
+    try w.writeI32(3);
+    try w.writeI32(0x1111);
+    try w.writeByte(anim_param_bool);
+    try w.writeBool(true);
+    try w.writeI32(0x2222);
+    try w.writeByte(anim_param_float);
+    try w.writeF32(1.5);
+    try w.writeI32(0x3333);
+    try w.writeByte(anim_param_int);
+    try w.writeI32(-9);
+    const got = try parseAnimationData(w.written());
+    try std.testing.expectEqual(@as(i32, 107), got.entity_id);
+    try std.testing.expectEqual(@as(i32, 3), got.param_count);
+    // 4 id + 4 count + bool(4+1+1) + float(4+1+4) + int(4+1+4) = 32
+    try std.testing.expectEqual(@as(usize, 32), got.wire_len);
+    try std.testing.expectEqual(w.written().len, got.wire_len);
+
+    // Trailing bytes do not extend the parsed length.
+    var padded: [96]u8 = undefined;
+    const n = w.written().len;
+    @memcpy(padded[0..n], w.written());
+    @memset(padded[n..][0..5], 0x5a);
+    try std.testing.expectEqual(n, (try parseAnimationData(padded[0 .. n + 5])).wire_len);
+
+    // An unknown value type is a parse error, as it is in stock.
+    var bad: [16]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &bad };
+    try bw.writeI32(107);
+    try bw.writeI32(1);
+    try bw.writeI32(0x4444);
+    try bw.writeByte(9);
+    try std.testing.expectError(error.EndOfStream, parseAnimationData(bw.written()));
+}
+
 pub const RagdollInvoke = struct {
     entity_id: i32,
     flags: u8,

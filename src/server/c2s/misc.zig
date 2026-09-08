@@ -1142,10 +1142,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        if (body.len < 4) return true;
-        const eid = std.mem.readInt(i32, body[0..4], .little);
-        if (eid != c.entity_id) return true;
-        relayBodyExcept(self, "NetPackageEntityAnimationData", body, eid, "EntityAnimationData");
+        const anim = packages.parseAnimationData(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (anim.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        // Trim to the parsed body: the parameter list is variable length, so a
+        // raw relay would forward whatever a peer appended.
+        relayBodyExcept(self, "NetPackageEntityAnimationData", body[0..anim.wire_len], anim.entity_id, "EntityAnimationData");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageTurretSpawn")) {

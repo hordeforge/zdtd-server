@@ -250,6 +250,7 @@ fn fuzzPackageDecoders(_: void, smith: *std.testing.Smith) !void {
         try std.testing.expect(got.n <= water_changes.len);
     } else |_| {}
     _ = packages.parseQuestTreasurePoint(input) catch null;
+    _ = packages.parseAnimationData(input) catch null;
     var audio_name: [128]u8 = undefined;
     _ = packages.parseAudioPlay(input, &audio_name) catch null;
     _ = packages.parseLockRequest(input) catch null;
