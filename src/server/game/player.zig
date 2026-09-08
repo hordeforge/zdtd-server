@@ -301,11 +301,25 @@ pub fn tickStealthBroadcast(self: *Game) void {
             }
         }
         if (noise8 == c.stealth_noise_sent and crouch == c.stealth_crouch_sent and alert == c.stealth_alert_sent and light8 == c.stealth_light_sent) continue;
+        const crouch_changed = crouch != c.stealth_crouch_sent;
+        const levels_changed = noise8 != c.stealth_noise_sent or alert != c.stealth_alert_sent or light8 != c.stealth_light_sent;
         c.stealth_noise_sent = noise8;
         c.stealth_crouch_sent = crouch;
         c.stealth_alert_sent = alert;
         c.stealth_light_sent = light8;
-        if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, light8, noise8, alert, crouch)) |sb| {
+        // Stock's Setup overloads are mutually exclusive: the crouch flag has
+        // its own package and never rides the light/noise payload, whose low
+        // byte the client reads whole as the light level.
+        if (crouch_changed) {
+            if (packages.buildEntityStealthCrouchBody(self.body_buf[0..16], c.entity_id, crouch)) |cb| {
+                self.broadcastExcept("NetPackageEntityStealth", cb, null) catch |err| {
+                    self.harness.counters.inc(.net_send_errors);
+                    std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});
+                };
+            } else |_| {}
+        }
+        if (!levels_changed) continue;
+        if (packages.buildEntityStealthBody(self.body_buf[0..16], c.entity_id, light8, noise8, alert)) |sb| {
             self.broadcastExcept("NetPackageEntityStealth", sb, null) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
                 std.debug.print("zdtd: EntityStealth broadcast failed: {s}\n", .{@errorName(err)});

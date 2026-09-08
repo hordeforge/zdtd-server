@@ -156,14 +156,19 @@ pub fn readTraderDataBody(
         }
         _ = try r.readBool(); // AddedByPlayer
     }
+    // TierItemGroups: u8 group count, then each group is a bare ItemStack
+    // array via GameUtils::ReadItemStack (u16 count + ItemStack per entry,
+    // GameUtils.il.txt:2131), not a named block. Stock traders.xml ships no
+    // <tier_items>, so a stock client always sends 0 here; the loop still has
+    // to consume a modded non-zero count in the right shape or the trailing
+    // AvailableMoney reads garbage.
+    // Read mirror of WriteInventoryData (TraderData.il.txt:436-458, :477).
     const tier_groups = try r.readByte();
     var tg: u8 = 0;
     while (tg < tier_groups) : (tg += 1) {
-        // TierItemGroup: name string + item count + item ids.
-        try r.skipString();
-        const item_count = try r.readByte();
-        var k: u8 = 0;
-        while (k < item_count) : (k += 1) _ = try r.readU16();
+        const item_count = try r.readU16();
+        var k: u16 = 0;
+        while (k < item_count) : (k += 1) _ = try stock_inv.readItemStack(r);
     }
     const money = try r.readI32();
     return .{ .trader_id = trader_id, .money = money, .n = n };
