@@ -182,21 +182,27 @@ peer cannot append bytes and have the server fan them out
 (`EntityRagdoll`, `SoundAtPosition`, `ParticleEffect`, `PlayerLaserSight`,
 `EntityAliveFlags`, `EntitySpeeds`, `EntityTeleport`).
 
-Two do not: `NetPackagePlayerEquipment` and `NetPackageEntityAnimationData`
-(`c2s/misc.zig`). Both read only the leading `entityId` to ownership-check the
-sender and never model the rest, so there is no parsed end to trim to. Stock's
-own bodies are `entityId` + `Equipment::Write` (version byte, 12 slots of
-`ItemValue::Write` where a null slot is a bare `0`, then the cosmetic tail;
-`Equipment.il.txt:1594`, `EquipmentSlots.il.txt:3` gives 12 real slots plus the
-`Count`/`None` sentinels) and `entityId` + an opaque animation-parameter list.
+`NetPackagePlayerEquipment` joined them on 2026-09-09, once its body was
+modelled correctly (see below).
 
-The exposure is bounded: both are rate-gated, both verify the sender owns the
-entity, and the receiving client parses only as far as its own reader expects.
-Closing them means writing the two parsers, which is worth doing when either
-body is needed for anything else. Note this is a *different* path from the
-equipment section of `NetPackagePlayerInventory`, which zdtd does model
-correctly: that one uses `GameUtils::ReadItemValueArray` (u16 count + a bool
-per entry, `GameUtils.il.txt:2205`), not `Equipment::Read`.
+One still does: `NetPackageEntityAnimationData` (`c2s/misc.zig`). It reads only
+the leading `entityId` to ownership-check the sender and never models the
+opaque animation-parameter list, so there is no parsed end to trim to. The
+exposure is bounded: it is rate-gated, it verifies the sender owns the entity,
+and the receiving client parses only as far as its own reader expects.
+
+**Equipment body, for the record.** `NetPackagePlayerEquipment` is `entityId` +
+`Equipment::Write` (`Equipment.il.txt:1594`): a version byte (stock writes 4),
+then one `ItemValue::Write` per slot where a null slot is the bare `0` its own
+version field would carry, then from version 2 the cosmetic tail. There is
+**no** presence bool. The slot count is the version (5 at <= 2, 8 at 3, else
+the ctor's `ldc.i4.s 12`); `EquipmentSlots` lists 14 names but two are the
+`Count`/`None` sentinels. This is a *different* shape from the equipment
+section of `NetPackagePlayerInventory`, which goes through
+`GameUtils::ReadItemValueArray` (u16 count + a bool per entry,
+`GameUtils.il.txt:2205`). zdtd read the array shape for both until 2026-09-09,
+so the standalone package consumed a bool that was really the next slot's
+version byte.
 
 ## 1b. Block updates are interest-scoped, stock's are global
 

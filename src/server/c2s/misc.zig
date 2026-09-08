@@ -482,8 +482,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (eid != c.entity_id) return true;
         const ps = self.sim.playerByPeer(c.slot) orelse return true;
         if (!self.sim.mask[ps].inventory) return true;
-        packages.stock_inv.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch return true;
-        relayBodyExcept(self, "NetPackagePlayerEquipment", body, eid, "PlayerEquipment");
+        const eq_len = packages.stock_inv.applyEquipmentBody(body[4..], &self.sim.inventory[ps], reverseItemType, self) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        // Trim to the parsed body: Equipment is variable length (the version
+        // byte picks the slot count and each slot is either one `0` or a full
+        // ItemValue), so a raw relay would forward appended bytes.
+        relayBodyExcept(self, "NetPackagePlayerEquipment", body[0 .. 4 + eq_len], eid, "PlayerEquipment");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityAddScoreServer") or std.mem.eql(u8, name, "NetPackageEntityAddExpServer")) {

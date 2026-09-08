@@ -12540,15 +12540,17 @@ test "scenario animation data relays to the other players" {
     // other player unchanged, and a client cannot relay equipment for someone
     // else's entity (the handler gates on eid == c.entity_id).
     if (packages.idOf("NetPackagePlayerEquipment")) |eq_id| {
-        // Equipment body (stock_inv.applyEquipmentBody): entityId, then a
-        // marker selecting the slot count, one present-bool per slot, one
-        // cosmetic i32 per slot, and an unlocked-cosmetics count.
-        var eq: [64]u8 = undefined;
+        // Equipment body (Equipment::Write): entityId, then the version byte
+        // that selects the slot count, then one ItemValue per slot where an
+        // empty slot is the bare `0` its version field would carry. Stock
+        // writes version 4; versions 2 and up also carry the cosmetic tail.
+        // 4 id + 1 version + 12 null slots + 12 cosmetic i32 + 4 unlocked.
+        var eq: [128]u8 = undefined;
         var ew = binary.Writer{ .buf = &eq };
         try ew.writeI32(ca.entity_id);
-        try ew.writeByte(0); // marker <= 2 -> 5 equipment slots
-        for (0..5) |_| try ew.writeBool(false); // no item in any slot
-        for (0..5) |_| try ew.writeI32(0); // cosmetic ids
+        try ew.writeByte(4); // version -> 12 equipment slots
+        for (0..12) |_| try ew.writeByte(0); // null ItemValue per slot
+        for (0..12) |_| try ew.writeI32(0); // cosmetic ids
         try ew.writeI32(0); // unlocked cosmetics count
         cap_b.clear();
         try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePlayerEquipment", ew.written()));

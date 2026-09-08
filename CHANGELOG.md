@@ -7,6 +7,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackagePlayerEquipment` was parsed with the wrong body shape. It carries
+  `Equipment::Write` (version byte, then one `ItemValue` per slot where a null
+  slot is a bare `0`), but zdtd read a presence bool before each slot, which is
+  the shape of the *other* equipment encoding used inside
+  `NetPackagePlayerInventory`. The spurious bool consumed the next slot's
+  version byte, so an armor swap desynced the rest of the body: at best the
+  equipment applied wrong, at worst the whole package failed to parse. The
+  version-gated cosmetic tail is now gated too, and the relay trims to the
+  parsed length instead of forwarding the raw body.
 - Three more cosmetic relays forwarded the raw client body.
   `NetPackageEntityRagdoll`, `NetPackageSoundAtPosition` and
   `NetPackageParticleEffect` all have variable-length bodies (flag-gated tails

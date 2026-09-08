@@ -807,36 +807,50 @@ pub fn applyPlayerInventoryBody(
     }
 }
 
-/// NetPackagePlayerEquipment body after the entityId (Equipment.Read IL=93):
-/// byte count-marker (5 slots when <= 2, 8 when == 3, else 12) | N x (byte
-/// present + ItemValue) | N x cosmetic i32 | i32 unlockedCount | N x i32.
-/// Applies the armor/equipment values to the ECS equip slots (the cosmetic +
-/// unlock tail is skipped: client-side cosmetics, recorded). Mirrors the
-/// embedded-equipment section of applyPlayerInventoryBody but with the
-/// byte marker + equipment_slots width.
+/// NetPackagePlayerEquipment body after the entityId (`Equipment::Read` IL=93,
+/// Equipment.il.txt:1673): version byte (5 slots when <= 2, 8 when == 3, else
+/// the ctor's 12) | N x `ItemValue::ReadOrNull` | when version >= 2, N x
+/// cosmetic i32 | i32 unlockedCount | unlockedCount x i32.
+///
+/// `ReadOrNull` (ItemValue.il.txt:2202) reads the ItemValue's own version byte
+/// and treats 0 as null, so an empty slot is a single `0` and there is **no**
+/// separate presence bool. This is not the same shape as the equipment section
+/// of `NetPackagePlayerInventory`, which goes through
+/// `GameUtils::ReadItemValueArray` (u16 count + a bool per entry); reading a
+/// bool here consumed the next slot's version byte and desynced the rest of
+/// the body.
+///
+/// Returns the number of bytes consumed so a relay can trim to the stock body.
+/// The cosmetic + unlock tail is parsed for stream correctness and dropped
+/// (client-side cosmetics, recorded).
 pub fn applyEquipmentBody(
     body: []const u8,
     inv: *components.Inventory,
     reverse: ?ReverseResolver,
     ctx: ?*anyopaque,
-) binary.ReadError!void {
+) binary.ReadError!usize {
     var r: binary.Reader = .{ .data = body };
-    const marker = try r.readByte();
-    const eq_n: usize = if (marker <= 2) 5 else if (marker == 3) 8 else equipment_slots;
+    const version = try r.readByte();
+    const eq_n: usize = if (version <= 2) 5 else if (version == 3) 8 else equipment_slots;
     var i: usize = 0;
     while (i < eq_n) : (i += 1) {
-        const present = try r.readBool();
-        var s: StockSlot = .{};
-        if (present) s = try readItemValue(&r);
+        // ReadOrNull: the ItemValue's own version byte doubles as the presence
+        // marker, so an empty slot is one `0` byte.
+        const s = try readItemValue(&r);
         if (i < components.inv_equip_count) {
             inv.slots[components.inv_equip_start + i] = toEcs(s, reverse, ctx);
         }
     }
-    var ci: usize = 0;
-    while (ci < eq_n) : (ci += 1) _ = try r.readI32();
-    const unlocked = try r.readI32();
-    var ui: i32 = 0;
-    while (ui < unlocked) : (ui += 1) _ = try r.readI32();
+    // The cosmetic + unlock tail only exists from version 2 on
+    // (Equipment.il.txt:1711, `blt` past it when version < 2).
+    if (version >= 2) {
+        var ci: usize = 0;
+        while (ci < eq_n) : (ci += 1) _ = try r.readI32();
+        const unlocked = try r.readI32();
+        var ui: i32 = 0;
+        while (ui < unlocked) : (ui += 1) _ = try r.readI32();
+    }
+    return r.pos;
 }
 
 /// PreferenceTracker.Write (IL): playerId:i32, then optional toolbelt stacks,
@@ -1704,28 +1718,40 @@ test "item mods survive the ECS conversion both ways" {
 }
 
 test "applyEquipmentBody parses the standalone equipment body" {
-    // RE Equipment.Read IL=93: byte count-marker (>= 4 → 12 slots) | N x
-    // (bool present + ItemValue) | N x cosmetic i32 | i32 unlocked | N x i32.
+    // Equipment::Write (Equipment.il.txt:1594): version 4 | 12 x
+    // ItemValue::Write, where a null slot is the bare `0` byte its own version
+    // field would carry | 12 x cosmetic i32 | i32 unlocked | unlocked x i32.
+    // There is no presence bool: this test used to write one, which is why the
+    // parser's matching bug survived.
     var buf: [1024]u8 = undefined;
     var w = binary.Writer{ .buf = &buf };
-    try w.writeByte(4); // count marker → 12 slots
+    try w.writeByte(4); // Equipment version -> 12 slots
     for (0..12) |i| {
         if (i == 2) {
-            try w.writeBool(true);
             // Absolute stock type (items_start_here + relative); fallbackEcsId
             // maps it back to the relative ECS id.
             try writeItemValue(&w, .{ .type_id = items_start_here + 5, .count = 1 });
         } else {
-            try w.writeBool(false);
+            try w.writeByte(0); // null ItemValue
         }
     }
     for (0..12) |_| try w.writeI32(0); // cosmetics
     try w.writeI32(0); // unlocked count
     var inv: components.Inventory = .{};
-    try applyEquipmentBody(w.written(), &inv, null, null);
+    const used = try applyEquipmentBody(w.written(), &inv, null, null);
     try std.testing.expectEqual(@as(u16, 5), inv.slots[components.inv_equip_start + 2].item_id);
     try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 0].item_id);
     try std.testing.expectEqual(@as(u16, 0), inv.slots[components.inv_equip_start + 11].item_id);
+    // The whole body is consumed, so a relay can trim to it.
+    try std.testing.expectEqual(w.written().len, used);
+
+    // Trailing bytes do not extend the parsed length.
+    var padded: [1024]u8 = undefined;
+    const n = w.written().len;
+    @memcpy(padded[0..n], w.written());
+    @memset(padded[n..][0..6], 0xcc);
+    var inv2: components.Inventory = .{};
+    try std.testing.expectEqual(n, try applyEquipmentBody(padded[0 .. n + 6], &inv2, null, null));
 }
 
 test "bag blob parses the stock Bag.Write layout" {
