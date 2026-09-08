@@ -4105,6 +4105,9 @@ pub const SoundAtPosition = struct {
     distance: i32 = 0,
     entity_id: i32 = 0,
     volume_scale: f32 = 0,
+    /// End of the stock body. The clip string makes the length variable, so a
+    /// relay must forward `body[0..wire_len]` rather than the raw slice.
+    wire_len: usize = 0,
 
     pub fn clipSlice(self: *const SoundAtPosition) []const u8 {
         return self.clip[0..self.clip_len];
@@ -4138,6 +4141,7 @@ pub fn parseSoundAtPosition(body: []const u8) (binary.ReadError || error{Overflo
     out.mode = try r.readByte();
     out.distance = try r.readI32();
     out.entity_id = try r.readI32();
+    out.wire_len = r.pos;
     return out;
 }
 
@@ -4255,6 +4259,9 @@ pub const ParticleEffectInvoke = struct {
     entity_caused: i32,
     force_creation: bool,
     world_spawn: bool,
+    /// End of the stock body. The two sound-name strings make the length
+    /// variable, so a relay must forward `body[0..wire_len]`.
+    wire_len: usize = 0,
 };
 
 /// NetPackageParticleEffect (write IL=20, NetPackageParticleEffect.il.txt:43):
@@ -4281,11 +4288,13 @@ pub fn parseParticleEffectInvoke(body: []const u8) (binary.ReadError || error{Ov
     _ = try r.readF32(); // volumeScale
     _ = try r.readI32(); // ParticleEffect.parentEntityId
     _ = try r.readByte(); // ParticleEffect.attachment
-    return .{
+    var out: ParticleEffectInvoke = .{
         .entity_caused = try r.readI32(),
         .force_creation = try r.readBool(),
         .world_spawn = try r.readBool(),
     };
+    out.wire_len = r.pos;
+    return out;
 }
 
 test "particle effect invoke parses the stock body" {
@@ -6535,6 +6544,9 @@ test "parseItemReload reads the single entityId" {
 pub const RagdollInvoke = struct {
     entity_id: i32,
     flags: u8,
+    /// End of the stock body. The flag-gated tails make the length variable,
+    /// so a relay must forward `body[0..wire_len]` and not the raw slice.
+    wire_len: usize = 0,
 };
 
 /// NetPackagePlayerLaserSight (read IL=16): entityId i32 | laserSightActive
@@ -6592,7 +6604,7 @@ pub fn parseRagdollInvoke(body: []const u8) binary.ReadError!RagdollInvoke {
     }
     if ((flags & 2) != 0) _ = try r.readByte(); // mode
     if ((flags & 4) != 0) _ = try r.readByte(); // state
-    return .{ .entity_id = entity_id, .flags = flags };
+    return .{ .entity_id = entity_id, .flags = flags, .wire_len = r.pos };
 }
 
 test "laser sight position is conditional on the active flag" {
@@ -6645,6 +6657,47 @@ test "ragdoll invoke parses the stock body" {
     const r = try parseRagdollInvoke(w.written());
     try std.testing.expectEqual(@as(i32, 77), r.entity_id);
     try std.testing.expectEqual(@as(u8, 0x07), r.flags);
+    // wire_len is where the stock body ends, so a relay can trim whatever a
+    // peer appended instead of fanning it out.
+    try std.testing.expectEqual(w.written().len, r.wire_len);
+
+    // A flags=0 body stops right after the flags byte, and trailing bytes do
+    // not extend it.
+    var short: [32]u8 = undefined;
+    var sw: binary.Writer = .{ .buf = &short };
+    try sw.writeI32(77);
+    try sw.writeByte(0);
+    try sw.writeBytes(&[_]u8{ 0xde, 0xad, 0xbe, 0xef });
+    const r2 = try parseRagdollInvoke(sw.written());
+    try std.testing.expectEqual(@as(usize, 5), r2.wire_len);
+    try std.testing.expect(r2.wire_len < sw.written().len);
+}
+
+test "variable-length relay bodies report where the stock body ends" {
+    // SoundAtPosition and ParticleEffect both carry client-sized strings, so
+    // body.len is not the stock length: a raw relay forwards appended bytes.
+    var buf: [128]u8 = undefined;
+    const snd = try buildSoundAtPosition(&buf, .{
+        .pos = .{ 1, 2, 3 },
+        .clip = blk: {
+            var c: [max_audio_clip_len]u8 = .{0} ** max_audio_clip_len;
+            @memcpy(c[0..4], "boom");
+            break :blk c;
+        },
+        .clip_len = 4,
+        .mode = 1,
+        .distance = 30,
+        .entity_id = 107,
+    });
+    const exact = try parseSoundAtPosition(snd);
+    try std.testing.expectEqual(snd.len, exact.wire_len);
+
+    var padded: [160]u8 = undefined;
+    @memcpy(padded[0..snd.len], snd);
+    @memset(padded[snd.len..][0..8], 0xaa);
+    const trailing = try parseSoundAtPosition(padded[0 .. snd.len + 8]);
+    try std.testing.expectEqual(snd.len, trailing.wire_len);
+    try std.testing.expectEqual(@as(i32, 107), trailing.entity_id);
 }
 
 test "id mapping body is name, then length, then bytes" {

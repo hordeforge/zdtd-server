@@ -7,6 +7,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Three more cosmetic relays forwarded the raw client body.
+  `NetPackageEntityRagdoll`, `NetPackageSoundAtPosition` and
+  `NetPackageParticleEffect` all have variable-length bodies (flag-gated tails
+  and client-sized strings), so `body.len` is not the stock length and
+  anything a peer appended was fanned out to every other player. Each parser
+  now reports where the stock body ends and the relay trims to it, matching
+  the fix already applied to the movement and laser-sight relays.
 - A player never saw their own chat. The server excluded the sender from both
   the global broadcast and the targeted recipient loop, but stock excludes
   them from neither: the broadcast passes `allBut = -1`, the targeted loop

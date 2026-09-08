@@ -147,7 +147,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.bounds_rejects);
             return true;
         }
-        relayBodyExcept(self, "NetPackageSoundAtPosition", body, snd.entity_id, "SoundAtPosition");
+        relayBodyExcept(self, "NetPackageSoundAtPosition", body[0..snd.wire_len], snd.entity_id, "SoundAtPosition");
         // No AI-noise leg here: on a dedicated server the relay is audio-only.
         // NetPackageSoundAtPosition.ProcessPackage -> PlaySoundAtPositionServer
         // skips AIDirector.NotifyNoise when IsDedicatedServer (RE protocol
@@ -178,7 +178,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_malformed);
             return true;
         };
-        relayBodyExcept(self, "NetPackageParticleEffect", body, pe.entity_caused, "ParticleEffect");
+        relayBodyExcept(self, "NetPackageParticleEffect", body[0..pe.wire_len], pe.entity_caused, "ParticleEffect");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityStealth")) {
@@ -271,7 +271,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        relayBodyExcept(self, "NetPackageEntityRagdoll", body, rg.entity_id, "EntityRagdoll");
+        // Trim to the parsed body: the flag-gated tails make the length
+        // variable, so a raw relay would forward bytes a peer appended.
+        relayBodyExcept(self, "NetPackageEntityRagdoll", body[0..rg.wire_len], rg.entity_id, "EntityRagdoll");
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerLaserSight")) {
