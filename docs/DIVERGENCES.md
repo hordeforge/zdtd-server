@@ -175,6 +175,32 @@ platform-keyed identity (ZPV4-style bump or flagged extension), tracked in
 GAP_ANALYSIS §10; ADR 0017 should be superseded rather than edited when it
 lands.
 
+## 1b. Block updates are interest-scoped, stock's are global
+
+`GameManager::SetBlocksOnClients` (`GameManager.il.txt:6841`) hands
+`ConnectionManager::SendPackage` an `_allButAttachedToEntityId` of the editing
+entity and `_entitiesInRangeOfEntity = -1`, so a stock server fans every block
+change to **every logged-in client** and excludes only the editor. zdtd sends
+`NetPackageSetBlock` through `broadcastNear` at `interest_range` (default 160
+blocks) from 21 call sites, and includes the editor.
+
+Both halves are deliberate, and both are visible at the edges:
+
+- **Interest scoping** is AGENTS rule 19 (updates only to observing peers).
+  The cost is a player further than `interest_range` from an edit does not see
+  it until the chunk is re-streamed. Stock's own view distance can exceed 160
+  blocks, so this is a real difference, not just a bandwidth saving. Raising
+  `[authority] interest_range_blocks` narrows the window; setting it beyond the
+  furthest view distance reproduces stock exactly at stock's bandwidth.
+- **Including the editor** is the safe direction of the two. zdtd validates and
+  may clamp or reject an edit, so the echo doubles as the correction that tells
+  the client what actually landed. Stock omits it because its client applies
+  the edit optimistically and the server agrees; a server that can disagree has
+  to answer.
+
+Re-check this row if `interest_range` ever stops being operator-tunable, or if
+a block path starts relying on the editor *not* receiving its own echo.
+
 ## 2. Fields with no truthful server-side value
 
 Stock carries real numbers here only by relaying what the owning client sent
