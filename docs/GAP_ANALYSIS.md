@@ -465,10 +465,23 @@ area and the concrete work.
     gone. 3.2.0 update (2026-08-29): `NetPackagePOIMetadataResponse` (the
     POIAround replacement) also ships deflated (net.zig compress set);
     POIAround itself is removed in 3.2.0, so the old "not sent" note is
-    moot. Still open: the remaining stock compressed set (ConfigFile has no
-    payload in zdtd's LoadLocal path; DynamicMesh/MapChunks are not sent),
-    bulk world data on channel 1, and multi-package envelopes
-    (`src/server/game.zig` send path).
+    moot. **Re-verified 2026-09-08** against the v3.2.0 IL, and most of the
+    old "still open" list was already closed or was never a gap:
+    - *Compressed set*: exactly 7 stock types return true from `get_Compress`
+      (11 declare it; the base plus `Localization` and `WorldFolder` return
+      false). zdtd's `isCompressedPackage` carries 6 of the 7 and sends none
+      of the 7th (`NetPackageDynamicClientArrive`), so the set is complete for
+      what zdtd emits. `MapChunks` is sent *and* compressed (`game/map.zig`
+      via `trySendCompressed`), contradicting the old "not sent" note.
+    - *Channel 1*: verified exhaustively - five types override `get_Channel`
+      to 1 (`Chunk`, `ChunkRemove`, `DynamicMesh`, `MapChunks`,
+      `WorldFolder`), and `channelFor` matches that set exactly.
+    - *Multi-package envelopes*: still one package per envelope
+      (`frame.framePackage` pins count = 1). This is a legal stock envelope,
+      just a less efficient one: it repeats the 6-byte inner header per
+      package rather than batching. A bandwidth optimisation, not a
+      compatibility gap, so the PARTIAL is now about transport efficiency
+      alone.
 
 21. **Progression: build a buff runtime + the passive-effects VM.** `WORKS`
     (2026-08-25): buffs are no longer inert. `NetPackageAddRemoveBuff` is
