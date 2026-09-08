@@ -175,6 +175,29 @@ platform-keyed identity (ZPV4-style bump or flagged extension), tracked in
 GAP_ANALYSIS §10; ADR 0017 should be superseded rather than edited when it
 lands.
 
+## 1a2. Two relays still forward the raw client body
+
+Most cosmetic relays now parse the body and forward `body[0..wire_len]`, so a
+peer cannot append bytes and have the server fan them out
+(`EntityRagdoll`, `SoundAtPosition`, `ParticleEffect`, `PlayerLaserSight`,
+`EntityAliveFlags`, `EntitySpeeds`, `EntityTeleport`).
+
+Two do not: `NetPackagePlayerEquipment` and `NetPackageEntityAnimationData`
+(`c2s/misc.zig`). Both read only the leading `entityId` to ownership-check the
+sender and never model the rest, so there is no parsed end to trim to. Stock's
+own bodies are `entityId` + `Equipment::Write` (version byte, 12 slots of
+`ItemValue::Write` where a null slot is a bare `0`, then the cosmetic tail;
+`Equipment.il.txt:1594`, `EquipmentSlots.il.txt:3` gives 12 real slots plus the
+`Count`/`None` sentinels) and `entityId` + an opaque animation-parameter list.
+
+The exposure is bounded: both are rate-gated, both verify the sender owns the
+entity, and the receiving client parses only as far as its own reader expects.
+Closing them means writing the two parsers, which is worth doing when either
+body is needed for anything else. Note this is a *different* path from the
+equipment section of `NetPackagePlayerInventory`, which zdtd does model
+correctly: that one uses `GameUtils::ReadItemValueArray` (u16 count + a bool
+per entry, `GameUtils.il.txt:2205`), not `Equipment::Read`.
+
 ## 1b. Block updates are interest-scoped, stock's are global
 
 `GameManager::SetBlocksOnClients` (`GameManager.il.txt:6841`) hands
