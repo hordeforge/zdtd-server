@@ -3177,9 +3177,15 @@ test "scenario vending machine opens via LockRequest with TraderData" {
     try std.testing.expectEqual(@as(i32, 2), try rr.readI32());
     // Context type name preserved from the request.
     try std.testing.expectEqualStrings("VendingMachineLockContext", try rr.readString(&scratch));
-    try std.testing.expectEqualStrings("", try rr.readString(&scratch)); // command
-    try std.testing.expectEqual(true, try rr.readBool()); // hasTraderData
+    // VendingMachineLockContext::Read takes TraderData straight after the type
+    // name: no Command string, no hasTraderData bool (those belong to
+    // EntityTraderLockContext). This test used to assert both of them, which
+    // is what kept the wrong shape in place: a stock client would have read
+    // the empty command's length byte and the bool as the first two bytes of
+    // TraderID.
     try std.testing.expectEqual(@as(i32, 3), try rr.readI32()); // trader id
+    _ = try rr.readU64(); // lastInventoryUpdate
+    try std.testing.expectEqual(@as(u8, 2), try rr.readByte()); // TraderData FileVersion
 
     // The machine's TE (type 7 payload) is pushed to the peer too.
     const te_id = packages.idOf("NetPackageTileEntity").?;

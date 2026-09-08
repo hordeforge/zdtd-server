@@ -7,6 +7,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Opening a vending machine sent the wrong lock-context shape. Stock has two
+  trader lock contexts and they do not share a layout:
+  `EntityTraderLockContext` carries `Command` + a `hasTraderData` bool before
+  the `TraderData`, while `VendingMachineLockContext` carries the `TraderData`
+  directly. zdtd emitted the entity shape for both, so a vending machine
+  handed the client two extra bytes that it read as the first half of
+  `TraderID`, desyncing the rest of the body. The scenario test asserted those
+  two fields, which is what kept the wrong shape in place.
 - `NetPackageEntityAnimationData` is now parsed rather than relayed blind, so
   no relay forwards a raw client body any more. Its parameter entries are a
   hash, a type byte and a type-sized value; an unrecognised type is rejected,

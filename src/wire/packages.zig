@@ -2004,9 +2004,12 @@ pub fn buildWaterSetBody(buf: []u8, sender: i32, changes: []const WaterSetChange
 
 test "water set body round-trips the stock layout" {
     var buf: [64]u8 = undefined;
+    // Every coordinate is distinct, so swapping any two of the three i32
+    // writes (or the matching reads) fails here. Sharing y between entries
+    // would let an x/y swap through.
     const changes = [_]WaterSetChange{
         .{ .x = 10, .y = 70, .z = -4, .mass = water_mass_full },
-        .{ .x = 11, .y = 70, .z = -4, .mass = 0 },
+        .{ .x = 11, .y = 71, .z = -5, .mass = 0 },
     };
     const body = try buildWaterSetBody(&buf, 107, &changes);
     // i32 sender + u16 count + 2 x (3 x i32 + u16)
@@ -2015,8 +2018,13 @@ test "water set body round-trips the stock layout" {
     const got = try parseWaterSet(body, &out);
     try std.testing.expectEqual(@as(i32, 107), got.sender);
     try std.testing.expectEqual(@as(usize, 2), got.n);
+    try std.testing.expectEqual(@as(i32, 10), out[0].x);
+    try std.testing.expectEqual(@as(i32, 70), out[0].y);
     try std.testing.expectEqual(@as(i32, -4), out[0].z);
     try std.testing.expectEqual(water_mass_full, out[0].mass);
+    try std.testing.expectEqual(@as(i32, 11), out[1].x);
+    try std.testing.expectEqual(@as(i32, 71), out[1].y);
+    try std.testing.expectEqual(@as(i32, -5), out[1].z);
     try std.testing.expectEqual(@as(u16, 0), out[1].mass);
 
     // A count larger than the body is a truncation error, not a short read.
@@ -2098,8 +2106,14 @@ test "audio play body round-trips the stock field order" {
     try std.testing.expectEqual(@as(i32, 107), got.entity_id);
     try std.testing.expectEqualStrings("open_door", got.sound_group);
     try std.testing.expect(got.play);
+    // Assert every f32, not just z: occlusion and volume_scale are adjacent
+    // same-width fields, and x/y went unchecked, so a swap among them would
+    // otherwise pass.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), got.x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 70), got.y, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, -2.5), got.z, 0.001);
     try std.testing.expect(got.play_on_entity);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), got.occlusion, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.75), got.volume_scale, 0.001);
     try std.testing.expect(!got.signal_only);
 
@@ -3183,11 +3197,20 @@ fn buildLockResponse(buf: []u8, req: LockRequestHead, success: bool, err_msg: []
     return w.written();
 }
 
-/// Grant a lock whose target is a trader entity. Stock serializes the
-/// EntityTraderLockContext into the LockResponse (loot-economy.md): the type
-/// name and Command are echoed from the request, then hasTraderData=true and
-/// the server TraderData. NetPackageTraderData is ToServer-only, so this is
-/// the packet that carries trader inventory to the opening client.
+/// Grant a lock whose target is a trader. Stock serializes the target's lock
+/// context into the LockResponse, and the two trader-ish contexts do **not**
+/// share a layout:
+///   - `EntityTraderLockContext::Read` (EntityTrader_EntityTraderLockContext
+///     .il.txt:38): `Command` string, `hasTraderData` bool, then TraderData
+///     only when that bool is set.
+///   - `VendingMachineLockContext::Read` (TileEntityVendingMachine_Vending
+///     MachineLockContext.il.txt:19): TraderData **directly**, with no command
+///     and no bool.
+/// Emitting the entity shape for a vending machine hands the client two extra
+/// bytes (the empty command's length and the bool) which it reads as the first
+/// half of `TraderID`, desyncing the rest of the body.
+/// NetPackageTraderData is ToServer-only, so this is the packet that carries
+/// trader inventory to the opening client.
 pub fn buildLockResponseTrader(buf: []u8, req: LockRequestHead, td: stock_entity.TraderDataInfo) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     // Type name + Command from the request context tail (empty-safe fallbacks).
@@ -3210,11 +3233,19 @@ pub fn buildLockResponseTrader(buf: []u8, req: LockRequestHead, td: stock_entity
     try w.writeU16(req.channel);
     try w.writeBytes(req.targets_blob);
     try w.writeString(type_name);
-    try w.writeString(command);
-    try w.writeBool(true); // hasTraderData
+    // VendingMachineLockContext has neither field; only the entity context
+    // carries Command + hasTraderData ahead of the TraderData.
+    if (!std.mem.eql(u8, type_name, vending_lock_context)) {
+        try w.writeString(command);
+        try w.writeBool(true); // hasTraderData
+    }
     try stock_entity.writeTraderDataBody(&w, td);
     return w.written();
 }
+
+/// Stock type name for the vending-machine lock context, the discriminator the
+/// client uses to pick which context `Read` runs.
+pub const vending_lock_context = "VendingMachineLockContext";
 
 /// Unlock response (locking=false path on client ProcessPackage).
 /// NetPackageLockResponse for an unlock (RE write IL=74; field order in
