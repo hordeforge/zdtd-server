@@ -3422,6 +3422,10 @@ pub const Game = struct {
         return game_net.broadcastNear(self, name, body, wx, wz, range_blocks);
     }
 
+    pub fn broadcastNearExcept(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32, skip_slot: usize) !void {
+        return game_net.broadcastNearExcept(self, name, body, wx, wz, range_blocks, skip_slot);
+    }
+
     pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_slot: ?usize) !void {
         return game_net.broadcastExcept(self, name, body, except_slot);
     }

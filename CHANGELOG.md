@@ -7,6 +7,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Other players heard nothing. `NetPackageAudio` was dropped as a
+  "client-local sound cue", but a client sends it to the server, and stock's
+  dedicated server relays it to every in-range player. Doors, storage,
+  switches and locks all raise it. The server now re-encodes and relays it
+  within interest range, excluding the sender, who already played it locally.
+  `signalOnly` bodies are the AI-stimulus form and stay unrelayed, matching
+  stock.
 - Treasure quests could never be completed. `NetPackageQuestTreasurePoint` was
   accepted and dropped as a "redundant progress echo", but it is a request:
   `ObjectiveTreasureChest::GetPosition` asks the server whenever the quest

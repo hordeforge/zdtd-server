@@ -2023,6 +2023,89 @@ test "water set body round-trips the stock layout" {
     try std.testing.expectError(error.EndOfStream, parseWaterSet(body[0 .. body.len - 1], &out));
 }
 
+/// `Audio.NetPackageAudio` body: the `NetPackageEntityTargeted` base
+/// (`entityId` i32, NetPackageEntityTargeted.il.txt:11) then `soundGroupName`
+/// string, `play` bool, `position` as three bare f32, `playOnEntity` bool,
+/// `occlusion` f32, `volumeScale` f32, `signalOnly` bool (read IL=49,
+/// Audio/NetPackageAudio.il.txt:55).
+pub const AudioPlay = struct {
+    entity_id: i32 = 0,
+    sound_group: []const u8 = "",
+    play: bool = false,
+    x: f32 = 0,
+    y: f32 = 0,
+    z: f32 = 0,
+    play_on_entity: bool = false,
+    occlusion: f32 = 0,
+    volume_scale: f32 = 1,
+    signal_only: bool = false,
+};
+
+/// Read side of the layout above (stock `Audio.NetPackageAudio::read` IL=49,
+/// Audio/NetPackageAudio.il.txt:55, over the `NetPackageEntityTargeted::read`
+/// base at NetPackageEntityTargeted.il.txt:11). `name_buf` receives the
+/// sound-group name.
+pub fn parseAudioPlay(body: []const u8, name_buf: []u8) binary.ReadError!AudioPlay {
+    var r: binary.Reader = .{ .data = body };
+    var out: AudioPlay = .{ .entity_id = try r.readI32() };
+    out.sound_group = try r.readStringTruncating(name_buf);
+    out.play = try r.readBool();
+    out.x = try r.readF32();
+    out.y = try r.readF32();
+    out.z = try r.readF32();
+    out.play_on_entity = try r.readBool();
+    out.occlusion = try r.readF32();
+    out.volume_scale = try r.readF32();
+    out.signal_only = try r.readBool();
+    return out;
+}
+
+/// Write side of the same body, for the server relay (stock
+/// `Audio.NetPackageAudio::write` IL=53, Audio/NetPackageAudio.il.txt:106:
+/// base write then the same field order the reader expects).
+pub fn buildAudioPlayBody(buf: []u8, a: AudioPlay) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(a.entity_id);
+    try w.writeString(a.sound_group);
+    try w.writeBool(a.play);
+    try w.writeF32(a.x);
+    try w.writeF32(a.y);
+    try w.writeF32(a.z);
+    try w.writeBool(a.play_on_entity);
+    try w.writeF32(a.occlusion);
+    try w.writeF32(a.volume_scale);
+    try w.writeBool(a.signal_only);
+    return w.written();
+}
+
+test "audio play body round-trips the stock field order" {
+    var buf: [128]u8 = undefined;
+    const src: AudioPlay = .{
+        .entity_id = 107,
+        .sound_group = "open_door",
+        .play = true,
+        .x = 1.5,
+        .y = 70,
+        .z = -2.5,
+        .play_on_entity = true,
+        .occlusion = 0.25,
+        .volume_scale = 0.75,
+        .signal_only = false,
+    };
+    const body = try buildAudioPlayBody(&buf, src);
+    var name_buf: [64]u8 = undefined;
+    const got = try parseAudioPlay(body, &name_buf);
+    try std.testing.expectEqual(@as(i32, 107), got.entity_id);
+    try std.testing.expectEqualStrings("open_door", got.sound_group);
+    try std.testing.expect(got.play);
+    try std.testing.expectApproxEqAbs(@as(f32, -2.5), got.z, 0.001);
+    try std.testing.expect(got.play_on_entity);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75), got.volume_scale, 0.001);
+    try std.testing.expect(!got.signal_only);
+
+    try std.testing.expectError(error.EndOfStream, parseAudioPlay(body[0 .. body.len - 1], &name_buf));
+}
+
 /// `NetPackageQuestTreasurePoint/QuestPointActions`
 /// (NetPackageQuestTreasurePoint_QuestPointActions.il.txt:3).
 pub const quest_point_get_goto: u8 = 0;

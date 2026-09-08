@@ -355,14 +355,54 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     // deliberate no-op, not an unhandled package). Each is a documented
     // divergence in docs/DIVERGENCES.md; keep that list in sync when adding
     // one here.
-    // - NetPackageAudio: client-local sound cue; the server has no audio.
     // - NetPackagePlayerStats: stock relays the owning client's own stats blob
     //   (EntityNetworkStats::ToEntity, RE progression.md 441560ff). Applying it
     //   would let a client author its level/XP/kill totals, so the server keeps
     //   its own ledger and sends that instead (AGENTS rule 17).
     // - NetPackageDiscordIdMappings: Discord rich-presence id map, a client
     //   social feature with no server-side sim effect.
-    if (std.mem.eql(u8, name, "NetPackageAudio") or std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
+    if (std.mem.eql(u8, name, "NetPackagePlayerStats") or std.mem.eql(u8, name, "NetPackageDiscordIdMappings")) {
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageAudio")) {
+        // Not a client-local cue. A client's Audio.Manager::BroadcastPlay
+        // falls through to SendToServer when it holds no ServerAudio
+        // (Audio/Manager.il.txt:758-790), and the dedicated server's
+        // ProcessPackage routes into Audio.Server::Play, which relays a fresh
+        // package to every in-range player (Audio/Server.il.txt:13-83 via
+        // Audio.Client::Play at Client.il.txt:16). Doors, storage, switches
+        // and locks all reach it (59 BroadcastPlay call sites), so dropping
+        // it left every other player in silence.
+        if (!self.takeBlockToken(c)) {
+            self.harness.counters.inc(.c2s_throttle);
+            return true;
+        }
+        var name_buf: [128]u8 = undefined;
+        const a = packages.parseAudioPlay(body, &name_buf) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (a.sound_group.len == 0) return true; // stock's IsNullOrEmpty early out
+        if (a.play_on_entity and a.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        // signalOnly means "AI stimulus, do not play": stock skips the relay
+        // loop entirely for those (Server.il.txt:29, `brtrue` past the loop).
+        if (a.signal_only) return true;
+        // Re-encode rather than relay the raw body, and place the sound at the
+        // sender when it rides an entity.
+        var out_buf: [192]u8 = undefined;
+        const relay = packages.buildAudioPlayBody(&out_buf, a) catch {
+            self.harness.counters.inc(.encode_errors);
+            return true;
+        };
+        const ps = self.sim.playerByPeer(c.slot) orelse return true;
+        const ox: f32 = if (a.play_on_entity) self.sim.transform[ps].x else a.x;
+        const oz: f32 = if (a.play_on_entity) self.sim.transform[ps].z else a.z;
+        self.broadcastNearExcept("NetPackageAudio", relay, ox, oz, self.interest_range, c.slot) catch {
+            self.harness.counters.inc(.net_send_errors);
+        };
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageMapPosition")) {

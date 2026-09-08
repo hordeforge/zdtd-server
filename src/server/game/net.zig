@@ -237,9 +237,20 @@ pub fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
     try broadcastExcept(self, name, body, null);
 }
 
+/// `broadcastNear` that also skips one client slot. Stock's audio relay
+/// rebuilds the package per in-range peer and never echoes it to the sender,
+/// who already played the sound locally.
+pub fn broadcastNearExcept(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32, skip_slot: usize) !void {
+    return broadcastNearImpl(self, name, body, wx, wz, range_blocks, skip_slot);
+}
+
 /// World-position broadcast: only clients whose player is within
 /// `range_blocks` of (wx,wz).
 pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32) !void {
+    return broadcastNearImpl(self, name, body, wx, wz, range_blocks, null);
+}
+
+fn broadcastNearImpl(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32, skip_slot: ?usize) !void {
     const framed = packages.framed(&self.send_buf, name, body) catch |err| {
         self.harness.counters.inc(.encode_errors);
         const n = self.harness.counters.get(.encode_errors);
@@ -252,6 +263,9 @@ pub fn broadcastNear(self: *Game, name: []const u8, body: []const u8, wx: f32, w
     for (&self.clients) |*c| {
         const p = c.peer orelse continue;
         if (!c.joined) continue;
+        if (skip_slot) |s| {
+            if (c.slot == s) continue;
+        }
         if (self.sim.playerByPeer(c.slot)) |ps| {
             const dx = self.sim.transform[ps].x - wx;
             const dz = self.sim.transform[ps].z - wz;

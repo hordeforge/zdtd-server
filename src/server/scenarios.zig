@@ -693,6 +693,75 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
     std.debug.print("PASS setblock-storage: TileEntity broadcast for chest at (251,70,250)\n", .{});
 }
 
+test "scenario audio: a client sound relays to the other player, not the sender" {
+    // NetPackageAudio was dropped as a client-local cue. It is not: a client's
+    // BroadcastPlay falls through to SendToServer, and the dedicated server
+    // relays it to every in-range player through Audio.Server::Play. Doors,
+    // storage, switches and locks all reach it, so dropping it left everyone
+    // else in silence.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_audio");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_audio", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+
+    var abuf: [128]u8 = undefined;
+    const body = try packages.buildAudioPlayBody(&abuf, .{
+        .entity_id = ca.entity_id,
+        .sound_group = "open_door",
+        .play = true,
+        .play_on_entity = true,
+        .volume_scale = 1,
+    });
+    var fb: [192]u8 = undefined;
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageAudio", body));
+
+    const au_id = packages.idOf("NetPackageAudio").?;
+    const b_got = cap_b.findPkgId(au_id) orelse return error.TestUnexpectedResult;
+    // The sender already played it locally, so stock never echoes it back.
+    try std.testing.expect(cap_a.findPkgId(au_id) == null);
+    var nbuf: [64]u8 = undefined;
+    const relayed = try packages.parseAudioPlay(b_got, &nbuf);
+    try std.testing.expectEqualStrings("open_door", relayed.sound_group);
+    try std.testing.expect(relayed.play);
+
+    // signalOnly is an AI stimulus, not a sound: stock skips the relay loop.
+    const sig = try packages.buildAudioPlayBody(&abuf, .{
+        .entity_id = ca.entity_id,
+        .sound_group = "footstep",
+        .play = true,
+        .play_on_entity = true,
+        .signal_only = true,
+    });
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageAudio", sig));
+    try std.testing.expect(cap_b.findPkgId(au_id) == null);
+
+    // Claiming another entity's sound is refused.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    const spoof = try packages.buildAudioPlayBody(&abuf, .{
+        .entity_id = ca.entity_id + 999,
+        .sound_group = "open_door",
+        .play = true,
+        .play_on_entity = true,
+    });
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageAudio", spoof));
+    try std.testing.expect(g.harness.counters.get(.ownership_rejects) > own_before);
+    std.debug.print("PASS audio: sound relayed to the other player, sender excluded\n", .{});
+}
+
 test "scenario treasure point: the server answers the client's dig-site request" {
     // ObjectiveTreasureChest asks the server for a dig site whenever the quest
     // carries no PositionData TreasurePoint(4)/TreasureOffset(8), which zdtd

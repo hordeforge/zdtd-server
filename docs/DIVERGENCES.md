@@ -204,7 +204,7 @@ so the stock client never sends them to us.
 |---|---|
 | `NetPackageDynamicMesh` | Client-side destroyed-block geometry; no server source |
 | `NetPackageEmitSmell` | Client-supplied AI stimulus; accepting it re-opens 1.3 |
-| `NetPackageAudio` | Client-local sound cue |
+| `NetPackageAudio` | **Relayed since 2026-09-08** (was wrongly listed as a client-local sound cue). A client's `Audio.Manager::BroadcastPlay` falls through to `SendToServer` when it holds no `ServerAudio` (`Audio/Manager.il.txt:758-790`), and the dedicated server's `ProcessPackage` routes into `Audio.Server::Play`, which signals AI and relays a fresh package to every in-range player (`Audio/Server.il.txt:13-83` via `Audio.Client::Play`, `Client.il.txt:16`). 59 `BroadcastPlay` call sites include doors, storage, switches and locks, so dropping it left every other player in silence. zdtd now re-encodes and relays within interest range, excluding the sender; `signalOnly` bodies are the AI-stimulus form and are correctly not relayed (`Server.il.txt:29`) |
 | `NetPackageBossEvent` | Client-side boss HUD banner |
 | `NetPackageDiscordIdMappings` | Discord rich presence; no sim effect |
 | `NetPackageLobbyRegisterClient` | Matchmaking lobby; a self-hosted dedi does not join one |
