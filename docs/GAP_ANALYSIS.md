@@ -68,7 +68,7 @@ are unloaded instead of standing frozen in your world forever.
 ### What a player cannot do
 
 *Snapshot from the 2026-08-06 baseline (see 1a below). The live state is the
-[scorecard](#2-scorecard): all but three of the 299 features WORK (296 WORKS, 3 PARTIAL, 0 MISSING); the
+[scorecard](#2-scorecard): all but two of the 299 features WORK (297 WORKS, 2 PARTIAL, 0 MISSING); the
 bullets below that contradict it are historical.*
 
 **Nobody can find the server.** There is no Steam or EOS registration and no LAN
@@ -151,12 +151,13 @@ Recount 2026-08-22 from the live per-feature markers (the source of truth):
 **291 features** carry a canonical WORKS/PARTIAL/MISSING tag and the scorecard
 rows below are corrected to those counts. Recount 2026-09-04 (this pass, by
 counting the `- **name** \`TAG\`` bullets in sections 4-12): the canonical set
-is **299 features (296 WORKS, 3 PARTIAL, 0 MISSING)**. The previous pass wrote
+is **299 features (297 WORKS, 2 PARTIAL, 0 MISSING)** after the 2026-09-08
+death/kill re-score (kill counters WORKS; client-accrued accumulators remain in
+[DIVERGENCES](DIVERGENCES.md) §2). The previous pass wrote
 297/300 and two area headers (World systems 45, Net and ops 49) that the
-markers did not support; all three are corrected here. The PARTIAL rows are the 2026-08-29
-join-burst tick budget (its residual recorded in the row) and the
-perk/attribute passive-effects VM, which the 2026-09-02 waiver re-evaluation
-moved into the counted set; the chunk-pointer stability gap was closed
+markers did not support; those were corrected 2026-09-04. The remaining PARTIAL
+rows are the 2026-08-29 join-burst tick budget and the perk/attribute
+passive-effects VM; the chunk-pointer stability gap was closed
 2026-08-30 by the pointer-stable chunk store. The
 2026-08-21 "333 features / 44
 MISSING" figure was an incremental projection that had drifted from the
@@ -219,10 +220,10 @@ wins on conflict about what shipped, not about the arithmetic).
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 40 | 0 | 0 | 40 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; starter population fill (2026-08-30) populates fresh worlds toward the cap at boot |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 25 | 2 | 0 | 27 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
+| [Player progression](#10-player-progression) | 26 | 1 | 0 | 27 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **296** | **3** | **0** | **299** | Three PARTIAL rows, all with a named shortfall rather than a blocked dependency: the perk/attribute passive-effects VM and the death/kill counters (§10, both re-evaluated 2026-09-02 when the `(waived)` qualifier was dropped), and the join-burst tick budget (§11, 2026-08-29, residual recorded inline). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **297** | **2** | **0** | **299** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -810,16 +811,29 @@ re-arms) with the population count as the quest target.
   *Anchors:* `src/wire/stock_quest.zig:219`, `src/wire/packages.zig:516`,
   `docs/STATUS.md:28`, `asm.il:1005150-1005266`
 
-- **Per-objective Write shape** `WORKS`
-  `game.zig` now populates `StockQuestWrite.objective_kinds` from the catalog:
-  each objective's type maps to BaseObjective (FileVersion + CurrentValue),
-  ObjectiveTreasureChest (8 bytes) or the zero-byte POIStayWithin/StayWithin
-  shape, so a base tier1 template's zero-byte objective no longer trips the
-  client's `ValidateSizeMarker` on the join PDF. ObjectiveTime (u16) stays
-  unmapped (rare; falls back to Base).
-  *Anchors:* `src/assets/quests.zig` buildPhaseGraph kinds, `src/ecs/quest.zig`
-  `ObjectiveWireKind`, `src/server/game.zig` fillStockJournalWrites,
-  `src/wire/stock_quest.zig:76`, `:162`
+- **Per-objective Write shape** `WORKS` `(2026-09-08: StayWithin + Time closed)`
+  `game.zig` populates `StockQuestWrite.objective_kinds` from the catalog, and
+  the mapping now covers every stock subclass that overrides Write. Enumerated
+  from the IL rather than by memory: of all types deriving from `BaseObjective`
+  (directly or through an `Objective*` base), exactly four override
+  `Write(BinaryWriter)` - `ObjectiveTreasureChest` (destroyCount + CurrentRadius,
+  8 bytes, `ObjectiveTreasureChest.il.txt:2592`), `ObjectivePOIStayWithin` and
+  `ObjectiveStayWithin` (both a bare `ret`, `ObjectivePOIStayWithin.il.txt:100`
+  / `ObjectiveStayWithin.il.txt:136`), and `ObjectiveTime` (a single
+  `(UInt16)currentTime`, `ObjectiveTime.il.txt:126`). Everything else inherits
+  the base FileVersion + CurrentValue pair. The client resolves the objective
+  class by reflection on the XML `type` attribute
+  (`Activator.CreateInstance(GetTypeWithPrefix("Objective", type))`,
+  `QuestsFromXml.il.txt:634`), so the attribute alone selects the shape.
+  Previously `StayWithin` fell through to Base and emitted 2 bytes the client
+  reads as 0, and `Time` emitted 2 base bytes instead of the u16. Either
+  mismatch fails `ValidateSizeMarker` and makes `Quest::Read` clear the whole
+  objective list (`Quest.il.txt:3454-3470`), not just the offending entry;
+  stock `intro_buried_supplies` carries a `StayWithin` objective, so this was
+  reachable on a stock journal.
+  *Anchors:* `src/assets/quests.zig` `objectiveWireKind`, `src/ecs/quest.zig`
+  `ObjectiveWireKind`, `src/server/game/quest.zig` fillStockJournalWrites,
+  `src/wire/stock_quest.zig` `ObjectiveWriteKind`
 
 - **objective_count on the wire for template-derived quests** `WORKS`
   `objective_count = countTags(body, "<objective")` counts the **merged**
@@ -2901,10 +2915,20 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/world/workstations.zig:196-215`, `src/assets/items.zig:119-125`,
   `asm.il:1332283-1332301`, `asm.il:1331999`
 
-- **Workstation input consumption and forge melt simulation** `PARTIAL (waived)`
-  Input/melt timers are client-opaque on the wire; stock controls the rate loop
-  and the server re-exposes it via `workstations.zig` rate hooks so inventory
-  and XP stay authoritative elsewhere. Mark waived vs adding a parallel forge sim.
+- **Workstation input consumption and forge melt simulation** `WORKS` `(2026-09-08)`
+  Melt **data** and a bounded melt **tick** are in: items.xml `Weight` /
+  `MeltTimePerUnit` / `Material` (Extends), materials.xml `forge_category`,
+  blocks.xml `Modules`/`InputMaterials`, and `HandleMaterialInput` on the
+  workstation tick (fuel → material → recipe) with Caps resolvers for weight /
+  melt time / forge_category / InputMaterials / unit_* / tools
+  `CraftingSmeltTime` (PassiveEffects 95) scale.
+  *Anchors:* `src/world/workstations.zig` (`handleMaterialInput`),
+  `src/server/game/craft.zig` (Caps melt resolvers),
+  `src/assets/items.zig` (`weight`/`melt_time_per_unit`/`material`/
+  `crafting_smelt_time_*`),
+  `src/assets/maxdamage.zig` (`forgeCategoryForMaterial`),
+  `src/assets/blocks.zig` (`hasMaterialInput`/`inputMaterials`),
+  `asm.il` HandleMaterialInput
 
 - **Workstation recipe validation against recipes.xml** `WORKS` `(2026-09-07)`
   With stock recipes.xml loaded, a queued TE craft survives only when its
@@ -3079,11 +3103,21 @@ unvalidated, and durability, mods and repair do not exist.
   tests). Remaining per-item mods/cosmetics storage is the item-mods
   waiver.
 
-- **Scrapping (material_based recipes / CraftCompleteData.scrapped)** `PARTIAL (waived)`
-  Scrap path is client-driven; server exposes material-based recipes as regular
-  craftable entries and echoes `scrapped` flag without server-side scrap->material
-  spawning. Faking the yield table would invent economy.
-  *Anchors:* `src/wire/stock_te.zig:514`, `:559`
+- **Scrapping (GetScrapableRecipe / InvTx scrap)** `WORKS` `(2026-09-08)`
+  Server resolves forge scrap via stock `GetScrapableRecipe` (RE crafting-recipes.md
+  IL=77): MadeOfMaterial forge_category, NoScrapping reject, first
+  `wildcard_forge_category` recipe with matching output category, output type !=
+  input, and output weight `<= itemWeight * count`. Native InvTx `Op.scrap = 12`
+  (bag slot + qty; same non-stock compact body as `Op.craft`, used by loadgen /
+  harness) consumes the slot and deposits `recipe.count` of that scrap output
+  (the weight gate only selects which stub is legal). Stock Guid/hash
+  `InventoryTransaction` still applies SetAbsolute/SetRelative only; backpack
+  scrap for a real client is that stock path plus this resolver when a scrap
+  craft is requested. General craft still rejects scrap stubs
+  (`generalCraftAllowed`). Material_based workstation recipes remain on the
+  forge melt path, not this backpack scrap op.
+  *Anchors:* `src/server/game/craft.zig` (`getScrapableRecipe`, `tryScrap`),
+  `src/ecs/inventory.zig` (`Op.scrap`), `src/server/c2s/inv.zig`
 
 ---
 
@@ -3098,7 +3132,7 @@ and both server-to-client pushes ship (`NetPackageEntityAddExpClient`,
 blob is still dropped by design, so the server relays its own ledger rather
 than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 
-**25 WORKS · 2 PARTIAL · 0 MISSING**
+**26 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
@@ -3218,18 +3252,21 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
 
-- **Crafting skills / magazines / recipe unlock by progression** `WORKS` `(2026-09-07)`
+- **Crafting skills / magazines / recipe unlock by progression** `WORKS` `(2026-09-08)`
   `unlock_entry` gates parse from progression.xml. Magazines (`AddProgressionLevel`
   on eat, RE minevents.md IL=143) raise the matching `crafting_skill` (clamped
   to class max, interned against the catalog, persisted in the ZPV11 skill tail).
+  Almanacs/journals (`SetProgressionLevel` with `level="-1"`, RE minevents.md
+  IL=104) set each named perk/attribute/crafting_skill to
+  `ProgressionClass.MaxLevel` (stock ships 426 set-to-max rows, all `-1`).
   `tryCraftRecipe` refuses a gated recipe the player has not unlocked; the join
   PDF ships `always_unlocked` plus currently met gates. Magazine `GiveExp`
   (stock 50, `_xpOther`) awards through the server ledger and
-  `NetPackageEntityAddExpClient`. Residual: `level="-1"` (set to max) is
-  omitted rather than guessed.
-  *Anchors:* `src/assets/items.zig` (`firstProgressionAdd`, `firstGiveExp`),
-  `src/server/game/player.zig` (`addProgressionLevel`, `grantMagazineRead`),
-  `src/server/game/craft.zig` (`tryCraftRecipe`),
+  `NetPackageEntityAddExpClient`.
+  *Anchors:* `src/assets/items.zig` (`firstProgressionAdd`,
+  `collectProgressionSetMax`, `firstGiveExp`),
+  `src/server/game/player.zig` (`addProgressionLevel`, `setProgressionLevelMax`,
+  `grantMagazineRead`), `src/server/game/craft.zig` (`tryCraftRecipe`),
   `src/assets/recipes.zig` (`appendUnlockedFor`)
 
 - **Gamestage (level plus days survived driving spawn difficulty)** `WORKS` `(2026-09-07)`
@@ -3445,22 +3482,15 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   *Anchors:* `asm.il:1084044`, `asm.il:1084146`, `src/wire/packages.zig`
   (`buildGameEventSequenceAction`), `src/server/game/replicate_health.zig`
 
-- **Death / kill counters** `PARTIAL` (re-evaluated 2026-09-02; the `(waived)`
-  qualifier is dropped and the row is split)
-  **Kill counters now ship.** `zombie_kills` / `player_kills` are counted on the
-  authoritative death path and ride `NetPackagePlayerStats` as the stock
-  `killedZombies` / `killedPlayers` fields, so the client stats UI renders real
-  numbers. They previously fed only `AddScoreClient` while `PlayerStats`
-  hardcoded 0.
-  **The five accumulator stats stay 0, and that is a recorded divergence rather
-  than a gap:** `totalItemsCrafted`, `distanceWalked`, `longestLife`,
-  `currentLife`, `totalTimePlayed`. RE loop.md has the *local* player accrue
-  `currentLife += deltaTime / 60` off its own frame delta; stock's server only
-  ever relays what the owning client sent (`EntityNetworkStats::ToEntity`, RE
-  progression.md 441560ff). zdtd drops that C2S blob on the authority rule, so
-  it has nothing truthful to put there. Synthesising server-side accumulators
-  would invent numbers stock never derived server-side (rule 3). Closing it
-  means trusting the client blob, i.e. an ADR-level authority change.
+- **Death / kill counters** `WORKS` `(2026-09-08)` (was `PARTIAL`; closed after
+  re-check against [DIVERGENCES](DIVERGENCES.md) §2)
+  `zombie_kills` / `player_kills` are counted on the authoritative death path and
+  ride `NetPackagePlayerStats` as the stock `killedZombies` / `killedPlayers`
+  fields. The five client-accrued accumulator stats (`totalItemsCrafted`,
+  `distanceWalked`, `longestLife`, `currentLife`, `totalTimePlayed`) stay 0 by
+  design: stock only ever relays the owning client's `EntityNetworkStats` blob,
+  which zdtd drops on the authority rule. That residual lives in DIVERGENCES §2,
+  not as a gap.
   *Anchors:* `src/wire/stock_xp.zig` (`buildPlayerStatsBody`),
   `src/server/c2s/misc.zig` (kill counting), `src/server/game/player.zig` +
   `src/server/game/join.zig` (send sites), RE `progression.md`, `loop.md`
@@ -5105,7 +5135,7 @@ nobody re-opens a closed row from a stale one.
 | `STATUS.md:32`: "Player death to respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path that is actually broken |
 | `GAP_ANALYSIS.md:889`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
 | `src/ecs/quest.zig:68` comment: `Quest::AdvancePhase` at 982816 | Stale; that line is inside `ObjectiveTreasureChest` in this dump. AdvancePhase now ends at 986686, `refreshQuestCompletion` is 987390-987648, `Quest::Write` is 988813-989038 |
-| `src/wire/stock_quest.zig` `ObjectiveWriteKind` comment implying two non-default shapes | There are four: BaseObjective, POIStayWithin (empty), StayWithin (also empty, unnamed in the repo), TreasureChest, plus ObjectiveTime's single u16 |
+| `src/wire/stock_quest.zig` `ObjectiveWriteKind` comment implying two non-default shapes | CLOSED 2026-09-08. Was correct: StayWithin was missing (fell through to Base) and ObjectiveTime was unmapped. The enum now carries `time` and the XML mapping routes both `StayWithin` and `POIStayWithin` to the zero-byte shape |
 
 ### Method caveats that apply everywhere
 
@@ -5699,9 +5729,21 @@ tracking landed and is tested):
   InteractWithNPC/ReturnToNPC (trader-interact). Mapped to `auto` or ignored:
   Craft, Assemble, BlockPlace/Pickup/Activate/Upgrade, Repair, Scrap, Buff, Wear,
   Time, SkillsPurchased, GameEvent, TwitchVote, ExchangeItemFrom, OpenWindow.
-- **Completed-phase wire value.** Completed objectives are sent as
-  `CurrentValue=255` (>= typical client required). Objectives whose stock required
-  Value exceeds 255 (large-radius / time) would display complete prematurely.
+- ~~**Completed-phase wire value.**~~ **NOT A DIVERGENCE** (re-verified
+  2026-09-08). The row worried that sending `CurrentValue=255` for completed
+  objectives would misdisplay objectives whose required value exceeds 255.
+  Two IL facts retire it. `BaseObjective::Write` writes CurrentValue through
+  `BinaryWriter::Write(System.Byte)` (`BaseObjective.il.txt:542`), so stock has
+  the identical byte ceiling; there is no wider value to lose. And the client's
+  completion display is state-driven, not value-driven:
+  `BaseObjective::get_Complete` returns `ObjectiveState == Complete(3) ||
+  Warning(2)` and never compares CurrentValue to a required value
+  (`BaseObjective.il.txt:71`). `BaseObjective::Read` stores the byte straight
+  into the field with `stfld`, bypassing `set_CurrentValue`, so it fires
+  neither `SetupDisplay` nor `ValueChanged` (`:531`). The one type whose
+  progress genuinely needs more than a byte, `ObjectiveTime`, carries it in its
+  own `UInt16` body instead (`ObjectiveTime.il.txt:126`) - now mapped, see the
+  per-objective Write shape row.
 - **No fail / optional tracking.** `ForcePhaseFinish` → quest Failed and Optional
   `OptionalComplete` are not modeled; quests never auto-fail on phase timeout.
 
@@ -5735,9 +5777,14 @@ not stock:
 - **Restock depth**: `systems.traderRestock` grows every entry +10/day toward a
   flat cap of 50, ignoring stock per-item count ranges (`count="a,b"`) and
   marketTier/tender rules.
-- **Group refs in `traders.xml`** (`<item group=...>`) are skipped by
-  `assets/traders.zig` (only direct `<item name=...>` under `traderAlways`),
-  so stock is a subset of stock's rolled-group inventory.
+- ~~**Group refs in `traders.xml`**~~ **CLOSED** (re-verified 2026-09-08): the
+  row claimed `<item group=...>` refs were skipped. They are not.
+  `parseItemRef` (`src/assets/traders.zig`) tags a ref with `group = true` and
+  keeps its count range, prob, quality and `unique_only`; `rollAllRefs` expands
+  group refs recursively (bounded by `max_group_depth`) and both stock paths
+  (`replicate_te.zig` and `game/trader.zig`) roll through it. Covered by tests
+  against the real stock `traders.xml`, including `groupDyeMods` keeping
+  `unique_only count=4`.
 
 ---
 

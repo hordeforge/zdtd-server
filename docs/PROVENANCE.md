@@ -617,6 +617,7 @@ below is therefore the surviving record of the final live statuses.
 | Constant | Value | B | Stock source |
 |---|--:|:-:|---|
 | `workstations.default_fuel_burn_seconds` | 10.0 | A | **Offline fallback** for `items.xml` FuelValue (production wires the XML via `craft.zig`; RULES_CONFIG "STOCK fallbacks") |
+| `workstations.melt_idle_sentinel` | -2.147484e9 | R | Stock `currentMeltTimesLeft` idle marker; `ldc.r4 -2.147484E+09` throughout `TileEntityWorkstation::HandleMaterialInput` (IL=531, `il/full-v3.2.0/_global/TileEntityWorkstation.il.txt:892`) and the read/write paths |
 | `bot.bot_spawn_spread` / `bot_spawn_y` | 2.0 / 70 | Z | zdtd-owned `[bots]` config defaults (ADR 0026 host policy knobs; `spawn_spread`/`spawn_y` binder keys) |
 | `bot.sense_kind_bot` | 2 | R | Sense contract kind tag for bots (RFC 0001 §3: 0 player, 1 zombie, 2 bot; the guest reads it in the ZBS3 records) |
 | `bot.sense_kind_bot_info` | 4 | R | Sense record kind for the host-assigned weapon info row (RFC 0001 §3) |

@@ -5,18 +5,44 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Quest objective wire shape for `StayWithin` and `Time`. Stock has exactly
+  four `BaseObjective` subclasses that override `Write`; the mapping covered
+  only two, so `StayWithin` emitted the 2-byte base pair where the client reads
+  nothing, and `Time` emitted that pair instead of its `UInt16`. Either
+  mismatch fails the client's `ValidateSizeMarker` and clears the entire
+  objective list for that quest, so a journal containing stock
+  `intro_buried_supplies` lost its objectives.
+
 ### Changed
 
+- Backpack scrap: stock `GetScrapableRecipe` (RE crafting-recipes.md IL=77)
+  resolves forge scrap by MadeOfMaterial forge_category, NoScrapping reject,
+  and the first `wildcard_forge_category` recipe whose output material matches
+  and whose output weight is `<= itemWeight * count`. InvTx `Op.scrap = 12`
+  (bag slot + qty) consumes the slot and deposits `recipe.count` of that scrap
+  output. General craft still rejects scrap stubs.
+- Death/kill counters scored WORKS: `killedZombies` / `killedPlayers` already
+  ride `NetPackagePlayerStats`. The five client-accrued accumulator fields stay
+  0 by design (DIVERGENCES §2), not as an open gap.
+- Forge melt: items.xml `Weight` / `MeltTimePerUnit` / `Material` (Extends),
+  materials.xml `forge_category`, blocks.xml `Modules`/`InputMaterials`, and a
+  bounded `HandleMaterialInput` tick (scrap → unit_* via Caps resolvers).
+  Tools PassiveEffects 95 (`CraftingSmeltTime`, e.g. toolBellows) scale melt
+  duration.
 - Entityclasses `AITask` lists now select which native EAI tasks a class
   actually runs. Pipe lists on `zombieTemplateMale` (and class overrides such
   as `zombieRancher` dropping Territorial) and numbered `AITask-N` on animals
   both resolve through Extends. Classes with no list keep the shared table.
   Leap and RangedAttackTarget stay unmapped (no native task).
 - Magazines raise crafting skills on eat (`AddProgressionLevel`) and grant
-  the stock `GiveExp` (50, `_xpOther`) through the server ledger. Gated
-  recipes unlock when the skill meets the `unlock_entry` tier; the join PDF
-  and server craft path honour that list. `always_unlocked` recipes stay
-  available from the start.
+  the stock `GiveExp` (50, `_xpOther`) through the server ledger. Almanacs
+  and journals with `SetProgressionLevel` `level="-1"` set each named
+  perk/attribute/crafting_skill to catalog MaxLevel (RE minevents.md
+  IL=104). Gated recipes unlock when the skill meets the `unlock_entry`
+  tier; the join PDF and server craft path honour that list.
+  `always_unlocked` recipes stay available from the start.
 - Harvest, quest, craft, and magazine XP now push
   `NetPackageEntityAddExpClient` as `_xpOther` so the owning client shows
   the icon. Kill XP still uses the typed Kill packet.
