@@ -693,6 +693,65 @@ test "scenario setblock: peer B receives SetBlock after A edit" {
     std.debug.print("PASS setblock-storage: TileEntity broadcast for chest at (251,70,250)\n", .{});
 }
 
+test "scenario waterset: a client water edit applies and reaches peer B" {
+    // Stock water edits (jar fill/empty) originate client-side and the server
+    // relays them; zdtd dropped NetPackageWaterSet as unhandled, so the change
+    // stayed local to the acting client and was lost on relog.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_waterset");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_waterset", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+
+    // A cell inside the editor's reach, at the player's own position.
+    const ps = g.sim.playerByPeer(ca.slot).?;
+    const tr = g.sim.transform[ps];
+    const wx: i32 = @intFromFloat(tr.x);
+    const wy: i32 = @intFromFloat(tr.y);
+    const wz: i32 = @intFromFloat(tr.z);
+
+    const changes = [_]packages.WaterSetChange{
+        .{ .x = wx, .y = wy, .z = wz, .mass = packages.water_mass_full },
+    };
+    var wbuf: [64]u8 = undefined;
+    const wbody = try packages.buildWaterSetBody(&wbuf, ca.entity_id, &changes);
+    var fb: [128]u8 = undefined;
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageWaterSet", wbody));
+
+    // The server applied it to its own world, so it persists and survives a
+    // relog rather than living only on the sender.
+    try std.testing.expectEqual(world_store.block_water, try g.world.blockWorld(wx, wy, wz));
+
+    // Peer B was told; the sender was not (it already applied locally).
+    const ws_id = packages.idOf("NetPackageWaterSet").?;
+    const b_got = cap_b.findPkgId(ws_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(cap_a.findPkgId(ws_id) == null);
+    var out: [4]packages.WaterSetChange = undefined;
+    const relayed = try packages.parseWaterSet(b_got, &out);
+    try std.testing.expectEqual(@as(usize, 1), relayed.n);
+    try std.testing.expectEqual(wx, out[0].x);
+    try std.testing.expectEqual(packages.water_mass_full, out[0].mass);
+
+    // A change naming another entity as the sender is refused outright.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    const spoof = try packages.buildWaterSetBody(&wbuf, ca.entity_id + 999, &changes);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageWaterSet", spoof));
+    try std.testing.expect(g.harness.counters.get(.ownership_rejects) > own_before);
+    std.debug.print("PASS waterset: applied server-side and relayed to the other peer\n", .{});
+}
+
 test "scenario NetPackagePlayerDisconnect frees the slot immediately" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_disconnect");

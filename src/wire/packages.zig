@@ -1945,6 +1945,84 @@ pub fn parseSetBlockChanges(body: []const u8, out: []BlockChange) !usize {
     return written;
 }
 
+/// One `NetPackageWaterSet/WaterSetInfo`: `worldPos` Vector3i then a
+/// `WaterValue` whose whole serialized form is a `UInt16 mass`
+/// (WaterValue.il.txt:127, SerializedLength IL=2 returns 2).
+pub const WaterSetChange = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    mass: u16 = 0,
+};
+
+/// Stock `WaterValue.Full` mass (WaterValue.il.txt:141, `ldc.i4 19500`); the
+/// `BlockValue` ctor maps an isWater block to exactly this. `Empty` is 0.
+pub const water_mass_full: u16 = 19500;
+
+/// `NetPackageWaterSet::read` (NetPackageWaterSet.il.txt:55): `senderEntityId`
+/// i32 | `changes.Count` u16 | WaterSetInfo per entry. The client sends this
+/// when a jar fill/empty or a water-cube tool edits water; stock's server
+/// relays it to every other peer and then applies it, so the change is not
+/// local to the acting client.
+pub fn parseWaterSet(body: []const u8, out: []WaterSetChange) binary.ReadError!struct { sender: i32, n: usize } {
+    var r: binary.Reader = .{ .data = body };
+    const sender = try r.readI32();
+    const count = try r.readU16();
+    var written: usize = 0;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const x = try r.readI32();
+        const y = try r.readI32();
+        const z = try r.readI32();
+        const mass = try r.readU16();
+        if (written < out.len) {
+            out[written] = .{ .x = x, .y = y, .z = z, .mass = mass };
+            written += 1;
+        }
+    }
+    return .{ .sender = sender, .n = written };
+}
+
+/// Write side of the same body, for the server relay (stock
+/// `NetPackageWaterSet::write` IL=36, NetPackageWaterSet.il.txt:86: base
+/// write, `senderEntityId` i32, `changes.Count` as u16, then
+/// `WaterSetInfo::Write` per entry, itself `StreamUtils::Write(Vector3i)` plus
+/// `WaterValue::Write` u16, NetPackageWaterSet_WaterSetInfo.il.txt:16).
+pub fn buildWaterSetBody(buf: []u8, sender: i32, changes: []const WaterSetChange) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeI32(sender);
+    if (changes.len > std.math.maxInt(u16)) return error.Overflow;
+    try w.writeU16(@intCast(changes.len));
+    for (changes) |c| {
+        try w.writeI32(c.x);
+        try w.writeI32(c.y);
+        try w.writeI32(c.z);
+        try w.writeU16(c.mass);
+    }
+    return w.written();
+}
+
+test "water set body round-trips the stock layout" {
+    var buf: [64]u8 = undefined;
+    const changes = [_]WaterSetChange{
+        .{ .x = 10, .y = 70, .z = -4, .mass = water_mass_full },
+        .{ .x = 11, .y = 70, .z = -4, .mass = 0 },
+    };
+    const body = try buildWaterSetBody(&buf, 107, &changes);
+    // i32 sender + u16 count + 2 x (3 x i32 + u16)
+    try std.testing.expectEqual(@as(usize, 4 + 2 + 2 * 14), body.len);
+    var out: [4]WaterSetChange = undefined;
+    const got = try parseWaterSet(body, &out);
+    try std.testing.expectEqual(@as(i32, 107), got.sender);
+    try std.testing.expectEqual(@as(usize, 2), got.n);
+    try std.testing.expectEqual(@as(i32, -4), out[0].z);
+    try std.testing.expectEqual(water_mass_full, out[0].mass);
+    try std.testing.expectEqual(@as(u16, 0), out[1].mass);
+
+    // A count larger than the body is a truncation error, not a short read.
+    try std.testing.expectError(error.EndOfStream, parseWaterSet(body[0 .. body.len - 1], &out));
+}
+
 fn readBlockChangeInfo(r: *binary.Reader) binary.ReadError!BlockChange {
     var ch: BlockChange = .{};
     const ref_type = try r.readByte();

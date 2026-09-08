@@ -1322,8 +1322,24 @@ parsed, and quest offering is unwired.
   `u8 count + GameUtils::WriteItemStack` per group) is documented RE but
   unverifiable without a modded traders.xml sample; `TraderMaxTier` /
   `TraderItemAbundance` are GameStats knobs, not XML.
+  `traderstage_templates` are a separate mechanism and, unlike the tier
+  machinery, stock data *does* exercise them: the shipped traders.xml defines
+  37 templates over 117 `<entry min max quality>` rows, and 171 items.xml plus
+  26 blocks.xml entries carry a `TraderStageTemplate` property. They still do
+  not belong on the server. `TraderStageTemplateGroup::IsWithin(traderStage,
+  quality)` has exactly two call sites in the assembly, both client UI
+  (`XUiC_TraderWindow.il.txt:899` and `:1021`, `XUiC_CategoryList.il.txt:805`);
+  `TraderInfo.il.txt` never references `TraderStageTemplate`, `IsWithin`, or a
+  trader stage at all, and `TraderManager::HandleFullReset` calls
+  `TraderInfo::Spawn` (`TraderManager.il.txt:123`) without consulting a
+  template. The roll's only quality input is the entry's own `quality="lo,hi"`
+  (`TraderInfo.il.txt:884`/`:887` feeding `applyQuality` at `:674`), which zdtd
+  already rolls. So the templates filter what the client *displays* from stock
+  the server already sent: implementing them server-side would make zdtd send
+  less than stock, not more.
   *Anchors:* `TradersFromXml.il.txt:470-500` (element dispatch),
-  `:566-642` (ParseTierItems), `TraderInfo.il.txt:719-750` (SpawnTierGroup),
+  `:566-642` (ParseTierItems), `:807-902` (ParseTraderStageTemplates),
+  `TraderInfo.il.txt:719-750` (SpawnTierGroup),
   `TraderData.il.txt:477-520` (WriteInventoryData tier section),
   `src/wire/stock_entity.zig:121-137` (writeTraderDataBody), `asm.il:863725-863767`
 
@@ -4018,11 +4034,23 @@ a finer server encoding.
   via same-value / byte-planes, carried in every chunk; client renders wet.
   *Anchors:* `src/wire/stock_chunk.zig:630-680`, `:768-801`
 
-- **Water simulation / flow packages** `PARTIAL (waived)`
-  Static water blocks + channel mass are live; dynamic flow sim via
-  `NetPackageWaterSet` / `NetPackageWaterSimChunkUpdate` remains stock-only.
-  Placing/removing a water source does not trigger flow.
-  *Anchors:* `src/wire/packages.zig:247-248`
+- **Water simulation / flow packages** `PARTIAL (waived)` `(C2S closed 2026-09-08)`
+  Static water blocks + channel mass are live. The continuous mass-flow sim
+  behind `NetPackageWaterSimChunkUpdate` remains stock-only: zdtd models water
+  as a block id, and the leveler pours a basin in one pass rather than
+  streaming per-cell mass deltas.
+  **`NetPackageWaterSet` is now handled** (2026-09-08). It is not part of the
+  flow sim: it is the client-originated water *edit* (jar fill and empty, the
+  water-cube tool), and stock's `ProcessPackage` relays it to every other peer
+  and then applies it (`NetPackageWaterSet.il.txt:163`). zdtd dropped it as
+  unhandled, so a jar edit stayed local to the acting client and was lost on
+  relog. The handler validates sender ownership, edit reach and land claims,
+  applies each accepted cell through the normal block path, and relays only
+  the accepted set. Body: `senderEntityId` i32 | `changes.Count` u16 |
+  (`Vector3i` + `WaterValue` u16 mass) per entry, `Full` = 19500
+  (`WaterValue.il.txt:127`, `:141`).
+  *Anchors:* `src/wire/packages.zig` `parseWaterSet` / `buildWaterSetBody`,
+  `src/server/c2s/blocks.zig` NetPackageWaterSet arm
 
 - **Block stability plane / structural support** `WORKS` `(2026-08-06)`
   `src/world/stability.zig` ports the stock model: per-block byte plane (15 full
@@ -5222,7 +5250,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | `NetPackageBiomeIntensity` | WORKS (2026-08-26 re-audit: the per-cell biome ids ride the chunk body (per-chunk biome row) and the client computes its own intensities locally (Chunk.CalcBiomeIntensity IL=58); the NetPackageBiomeIntensity package itself has NO stock sender (Setup has zero callers in the assembly) - parity N/A, like HordeEvent) |
 | `NetPackageDecoUpdate` / deco reset | WORKS (2026-08-26 re-audit: join burst + deco streaming with newly entered chunks (`sendDecoForStreamedChunk`, `Client.deco_sent`) - the client's `DecoManager.Read` ADDS post-join firstPackage=false updates, so the world is decorated beyond the join radius; species/density biome-driven from biomes.xml with stock's `decorateChunkRandom` shape, mirrored into the block store with ischild packing. Residuals: deterministic PRNG instead of `GameRandom`, no `CheckOreNoiseAt`, rotation always 0, subbiome noise not evaluated - see the 'Join-time deco burst' WORKS row + DECO_NRE.md) |
 | `NetPackageIdMapping` "blocks" | HAVE (full AssignIds dump sent before the config files, in the stock slot; envelope raw-deflated like `NetConnectionAbs::Compress`. All-or-nothing with `[feature] block_id_mapping` kill switch. Needs one live V3.1.x client run to confirm) |
-| `NetPackageWater*` (if any in build) | N/A (2026-08-26 re-audit: `NetPackageWaterSet` (the water-sim change RPC, BlockTools → SetWaterRPC) + `NetPackageWaterSimChunkUpdate` (the mass-flow chunk data) sync the stock jobified water sim - zdtd's water model is block-based (the leveling pours change the blocks, synced via SetBlock), so the water-sim packages are N/A for the ported model) |
+| `NetPackageWater*` (if any in build) | SPLIT (corrected 2026-09-08). `NetPackageWaterSimChunkUpdate` stays N/A: it carries the stock jobified mass-flow sim, and zdtd's block-based model pours a basin in one pass instead. `NetPackageWaterSet` was wrongly folded into that verdict - it is the client-originated water edit (jar fill/empty, water-cube tool), stock relays it to the other peers and applies it, and zdtd dropped it unhandled so the edit was local-only and lost on relog. Now handled C2S with ownership, reach and claim gates, applied through the block path and relayed to the other peers |
 | `NetPackageDynamicMesh` | N/A headless (re-audited 2026-09-02: the id is registered and routed to channel 1 with the other bulk world traffic, but nothing builds or consumes a body. Stock uses it for the client-side dynamic mesh (destroyed-block geometry), which a headless server has no source for; inventing one would be a fake body under rule 3. Evidence it is not needed: a full smoke-navezgane session (2 clients, 8 join passes, walk/jump/rejoin) logged zero `c2s_unhandled` packages, so the stock client never sends it to us) |
 
 #### Entity lifecycle

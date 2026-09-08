@@ -7,6 +7,14 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `NetPackageWaterSet` was dropped as unhandled. It is the client-originated
+  water edit (filling or emptying a jar, the water-cube tool), and stock's
+  server relays it to every other peer and then applies it. zdtd ignored it,
+  so the change lived only on the acting client and vanished on relog. Now
+  parsed and validated (sender ownership, edit reach, land claims), applied
+  through the normal block path so it persists, and relayed to the other
+  peers. The prior audit folded this in with the mass-flow sim packages and
+  scored it N/A; only `NetPackageWaterSimChunkUpdate` is genuinely N/A.
 - Water leveling never reached joined clients. A pour (digging beside a lake,
   placing water) wrote through the chunk store and marked the chunk dirty, but
   that flag only drives persistence, not replication: the fill was saved and
