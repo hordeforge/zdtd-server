@@ -891,6 +891,11 @@ pub const Game = struct {
         // Door-id oracle for the solid probe: an open door is passable.
         self.world.door_id_ctx = self;
         self.world.door_id_fn = &blockIsDoor;
+        // Water leveler fills: broadcast each filled cell. The chunk dirty
+        // flag is persistence-only, so without this a pour is saved but never
+        // sent and a joined client keeps seeing the dry basin.
+        self.world.water_fill_ctx = self;
+        self.world.water_fill_fn = &broadcastWaterFill;
         // AI sense smell probe: effective radius (stock cSmellRadiusMin / Bleed,
         // the latter bound to buffInjuryBleeding via the buff catalog).
         self.sim.smell_ctx = self;
@@ -1094,6 +1099,24 @@ pub const Game = struct {
 
     fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {
         return game_hooks.blockIsDoor(ctx, id);
+    }
+
+    /// One water-leveler fill: send the cell as a plain SetBlock to observers.
+    /// Stock streams water deltas with NetPackageWaterSimChunkUpdate, but the
+    /// client's Chunk::SetBlockRaw turns an isWater BlockValue into air plus
+    /// SetWater(Full), so a SetBlock renders the same result without modelling
+    /// the native water sim. Best-effort: the store is authoritative and a
+    /// dropped packet only delays the paint until the chunk is re-streamed.
+    fn broadcastWaterFill(ctx: ?*anyopaque, x: i32, y: i32, z: i32, id: u16) void {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        var buf: [96]u8 = undefined;
+        const sb = packages.buildSetBlockBodyRaw(&buf, x, y, z, id, 0, -1, -1) catch {
+            g.harness.counters.inc(.encode_errors);
+            return;
+        };
+        g.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(x), @floatFromInt(z), g.interest_range) catch {
+            g.harness.counters.inc(.net_send_errors);
+        };
     }
 
     fn smellRadiusFor(ctx: ?*anyopaque, slot: ecs.Slot) f32 {

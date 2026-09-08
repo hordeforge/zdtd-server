@@ -7,6 +7,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Water leveling never reached joined clients. A pour (digging beside a lake,
+  placing water) wrote through the chunk store and marked the chunk dirty, but
+  that flag only drives persistence, not replication: the fill was saved and
+  never sent, so a player kept seeing the dry basin until the chunk happened
+  to be re-streamed. Each filled cell now goes out as a `NetPackageSetBlock`,
+  which the client turns back into water through its own `Chunk::SetBlockRaw`
+  path, so no native water-sim modelling is needed.
 - Scout wave size ignored `spawning.xml`. `TotalPerWave` was parsed onto the
   spawner and dropped, so the daytime drip spawned a hardcoded 1 and the
   chunk-heat wave used a zdtd rule, while stock sizes each tier from the

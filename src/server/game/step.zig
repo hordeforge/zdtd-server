@@ -148,8 +148,9 @@ pub fn step(self: *Game) !void {
         // whose AABB contains them (post-tick: the points landed mid-tick).
         self.triggerSleeperVolumesByStealthNoise();
         // Water leveling: pour basins opened by this tick's block edits (dig
-        // beside a lake, placed water). Budgeted per tick; the fills mark
-        // chunks dirty and the chunk stream broadcasts them.
+        // beside a lake, placed water). Budgeted per tick; each filled cell
+        // goes out as a SetBlock through the store's water_fill hook (the
+        // chunk dirty flag is persistence-only and does not re-send).
         _ = self.world.levelWaterTick(
             self.sim.rules.water.edits_per_tick,
             self.sim.rules.water.spread_cap,

@@ -562,6 +562,13 @@ pub const World = struct {
     /// door block, so `isSolidWorld` treats an open door as passable.
     door_id_ctx: ?*anyopaque = null,
     door_id_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    /// Water-fill notifier: called per cell the leveler fills so the Game can
+    /// broadcast the change. The chunk `dirty` flag only drives persistence,
+    /// so without this a pour is saved but never sent, and a client sees the
+    /// basin stay dry until the chunk is re-streamed. Keeps the store
+    /// wire-free (world must not import wire).
+    water_fill_ctx: ?*anyopaque = null,
+    water_fill_fn: ?*const fn (?*anyopaque, i32, i32, i32, u16) void = null,
     /// Live AssignIds for air/stone/dirt/water/bedrock (A05). Pins until resolve.
     terrain_ids: TerrainIds = .{},
     /// Hand chunk writes to the background flusher ([perf] async_chunk_flush).
@@ -1137,6 +1144,16 @@ pub const World = struct {
 
     /// One edit: find the water surface from the edit cell and its 5
     /// neighbors, then flood-fill the connected air basin up to that surface.
+    /// Fill one cell with water and tell the Game so it can broadcast. The
+    /// chunk `dirty` flag is persistence-only, so the notify is what makes a
+    /// pour visible to an already-joined client.
+    fn fillWaterCell(self: *World, x: i32, y: i32, z: i32, water_id: u16) !void {
+        const t = worldToChunk(x, z);
+        const c = try self.getOrCreate(t.pos);
+        try c.setBlockRaw(self.allocator, t.lx, y, t.lz, water_id);
+        if (self.water_fill_fn) |f| f(self.water_fill_ctx, x, y, z, water_id);
+    }
+
     fn pourAt(self: *World, ex: i32, ey: i32, ez: i32, water_id: u16, spread: usize, puddle: usize) u32 {
         // Placed water cascades (stock WaterSimulationNative gravity flow,
         // bounded): the column of air below fills down to the first solid,
@@ -1171,8 +1188,7 @@ pub const World = struct {
             if (c.y < 0 or c.y >= self.yDim()) continue;
             if (c.y > surface) continue;
             if (self.blockWorld(c.x, c.y, c.z) catch 0 != air_id) continue; // water or solid: stop
-            const t = worldToChunk(c.x, c.z);
-            (self.getOrCreate(t.pos) catch continue).setBlockRaw(self.allocator, t.lx, c.y, t.lz, water_id) catch continue;
+            self.fillWaterCell(c.x, c.y, c.z, water_id) catch continue;
             filled += 1;
             if (sp + 6 <= stack.len) {
                 stack[sp] = .{ .x = c.x + 1, .y = c.y, .z = c.z };
@@ -1199,8 +1215,7 @@ pub const World = struct {
         var y: i32 = ey - 1;
         while (y >= 0 and filled < spread) : (y -= 1) {
             if (self.blockWorld(ex, y, ez) catch 0 != air_id) break;
-            const t = worldToChunk(ex, ez);
-            (self.getOrCreate(t.pos) catch break).setBlockRaw(self.allocator, t.lx, y, t.lz, water_id) catch break;
+            self.fillWaterCell(ex, y, ez, water_id) catch break;
             filled += 1;
         }
         const bottom = y + 1; // lowest filled cell (or ey when the column was blocked)
@@ -1223,8 +1238,7 @@ pub const World = struct {
             const c = stack[sp];
             if (self.blockWorld(c.x, c.y, c.z) catch 0 != air_id) continue;
             if (self.blockWorld(c.x, c.y - 1, c.z) catch 0 == air_id) continue; // floating: no spread
-            const t = worldToChunk(c.x, c.z);
-            (self.getOrCreate(t.pos) catch continue).setBlockRaw(self.allocator, t.lx, c.y, t.lz, water_id) catch continue;
+            self.fillWaterCell(c.x, c.y, c.z, water_id) catch continue;
             filled += 1;
             pu += 1;
             if (sp + 4 <= stack.len) {
@@ -2391,6 +2405,44 @@ test "water leveling: digging beside a lake pours the connected basin to its sur
     // Above the surface cell (63) the flat terrain holds; never water.
     try std.testing.expect((try w.blockWorld(7, 63, 0)) != block_water);
     try std.testing.expect((try w.blockWorld(4, 63, 0)) != block_water);
+}
+
+test "water leveling notifies every filled cell so the Game can broadcast" {
+    // The chunk dirty flag only drives persistence, so without this notify a
+    // pour was saved but never sent and a joined client kept seeing the dry
+    // basin until the chunk was re-streamed.
+    const Sink = struct {
+        var n: u32 = 0;
+        var last_id: u16 = 0;
+        fn onFill(_: ?*anyopaque, _: i32, _: i32, _: i32, id: u16) void {
+            n += 1;
+            last_id = id;
+        }
+    };
+    Sink.n = 0;
+    Sink.last_id = 0;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+    w.water_fill_fn = &Sink.onFill;
+
+    carveAirColumn(&w, 0, 51, 62) catch return;
+    const ch = try w.getOrCreate(.{ .x = 0, .z = 0 });
+    var y: i32 = 51;
+    while (y <= 62) : (y += 1) {
+        try ch.setBlockRaw(w.allocator, 0, y, 0, block_water);
+    }
+    for (1..8) |x| try carveAirColumn(&w, @intCast(x), 51, 62);
+    try w.setBlockWorld(1, 51, 0, block_air);
+    const filled = w.levelWaterTick(4, 128, 8);
+    // One notify per filled cell, carrying the water id the client renders.
+    try std.testing.expectEqual(filled, Sink.n);
+    try std.testing.expect(filled > 0);
+    try std.testing.expectEqual(block_water, Sink.last_id);
 }
 
 test "water leveling: a deep dig not connected to water stays dry" {
