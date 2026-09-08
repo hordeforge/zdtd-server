@@ -11,9 +11,13 @@
 `lint-architecture: clean`). **Loadgen smoke 2026-09-08** (AGENTS rule 5, on
 the ReleaseSafe binary against a fresh proc world): 81 joins, `join_fail=0`,
 and `c2s_malformed`, `c2s_unhandled`, `decode_rejects`, `encode_errors`,
-`ownership_rejects` and `net_send_errors` all 0 across wander and chatty
-modes. That exercises the join handshake, movement, block edits and the chat
-path end to end against a real LiteNet client, not just unit tests.
+`ownership_rejects` and `net_send_errors` all 0 across wander, chatty, combat
+and demolition modes (122 joins total, `phase_rejects=0`). That exercises the
+join handshake, movement, crouch/stealth, melee, block breaks, dynamite and
+the chat path end to end against a real LiteNet client, not just unit tests.
+Tick p50 held at 0.39 ms; the spikes (max 7.4 s, 213 overruns, 1000 window
+drops) come from the run's own rejoin churn (41 joins, 39 rejoins in ~100 s)
+and are the known join-burst PARTIAL in GAP_ANALYSIS §11, not a regression.
 `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
 owns all C2S domains. `GAP_ANALYSIS.md` scores 299 features: **296 `WORKS`,
