@@ -7,6 +7,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Powered-block prefab markers were turned into loot containers. The chunk TE
+  scan classified `TileEntityType.Powered` (0x0F) alongside the storage types,
+  so a powered marker got an invented 8-slot grid and the storage TE sender
+  would push a composite-storage body for it. The client builds its tile
+  entity from the block, so those bytes would reach `TileEntityPowered::read`.
+  Powered blocks replicate through the power-registry path instead.
 - Opening a vending machine sent the wrong lock-context shape. Stock has two
   trader lock contexts and they do not share a layout:
   `EntityTraderLockContext` carries `Command` + a `hasTraderData` bool before

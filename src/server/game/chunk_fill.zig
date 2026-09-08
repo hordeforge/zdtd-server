@@ -311,8 +311,15 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                     }
                     return;
                 }
-                // Loot-like types only.
-                if (!(te_types.isStorageLike(te_type) or te_type == te_types.powered or te_types.isSignLike(te_type))) return;
+                // Loot-like types only. `powered` (0x0F) is deliberately NOT
+                // here: it is a TileEntityPowered, not storage, and making it
+                // a container gave it an invented 8-slot grid and meant
+                // `sendStorageTe` would push a composite-storage body for it.
+                // The client instantiates its TE from the block, so those
+                // bytes would land in `TileEntityPowered::read`. Powered
+                // blocks replicate through `broadcastPoweredTriggerTe`, which
+                // is driven by the power registry instead.
+                if (!(te_types.isStorageLike(te_type) or te_types.isSignLike(te_type))) return;
                 const pos = containers_mod.PosKey{ .x = wx, .y = wy, .z = wz };
                 if (tc.g.containers.get(pos) != null) return;
                 // Block id from the chunk being scanned, not world.blockWorld:
