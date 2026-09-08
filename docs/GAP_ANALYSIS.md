@@ -3073,6 +3073,22 @@ unvalidated, and durability, mods and repair do not exist.
   creation (deterministic per block) and respawns by touched_day, so the
   server-side lazy-roll key (RE loot-economy.md `LootContainerOpened`) is not
   needed and the client UI does not render the list name.
+  **Residual, recorded 2026-09-09: only the Storage feature ships.** A
+  composite TE is a module list, and `TileEntityComposite::write`
+  (`TileEntityComposite.il.txt:1709`) emits every feature the block declares;
+  zdtd hardcodes a count of 1 and the Storage hash
+  (`src/wire/stock_te.zig:131-133`), and the parser skips any other hash
+  (`:263`). Stock blocks.xml pairs Storage with others on real blocks: 457
+  Storage uses alongside 83 `TEFeatureLockable`, 178 `TEFeatureCanvas` and 10
+  `TEFeatureLockPickable` (`cntWallSafe` = Storage + LockPickable,
+  `cntWoodWritableCrate` = Storage + Lockable + Canvas). This is **not** a
+  stream desync: each module is bounded by its own size marker and
+  `TileEntityComposite::read` only warns for features missing from the stream
+  and defaults them (`:1665`). The real gap is upstream of the wire - zdtd has
+  no container lock state to send (`world/containers.zig` has no locked /
+  password / allowed-user fields; only vending machines model those), so
+  padlocking a chest does not replicate. Closing this is a sim feature plus
+  the extra module writers, not an encoder tweak.
   *Anchors:* `src/wire/stock_te.zig:148-162` (grid), `src/server/c2s/inv.zig`
   (lock-path size capture), `src/world/containers.zig` (ZCT2),
   `asm.il:156979`
