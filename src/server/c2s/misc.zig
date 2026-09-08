@@ -52,9 +52,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 chat_msg,
                 ch.recipients[0..ch.recipient_count],
             ) catch return true;
+            // The sender is included, in both directions. Stock's client does
+            // not add its own line locally: XUiC_Chat sends to the server and
+            // waits for the echo, and it puts its own entity id first in the
+            // party recipient list (XUiC_Chat.il.txt:212-223). The server
+            // broadcast passes allBut = -1 and the targeted loop sends to
+            // every listed ClientInfo, neither excluding the speaker
+            // (GameManager.il.txt:7690-7735). Excluding them here meant a
+            // player never saw their own messages.
             if (ch.recipient_count > 0) {
                 for (ch.recipients[0..ch.recipient_count]) |rid| {
-                    if (rid == c.entity_id) continue;
                     if (self.clientByEntityId(rid)) |rc| {
                         if (rc.peer) |rpeer| {
                             self.sendGame(rpeer, "NetPackageChat", stock) catch |err| {
@@ -65,7 +72,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                 }
             } else {
-                try self.broadcastExcept("NetPackageChat", stock, c.slot);
+                try self.broadcast("NetPackageChat", stock);
             }
         } else {
             var r: wire_binary.Reader = .{ .data = body };

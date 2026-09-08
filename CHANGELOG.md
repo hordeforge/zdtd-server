@@ -7,6 +7,13 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- A player never saw their own chat. The server excluded the sender from both
+  the global broadcast and the targeted recipient loop, but stock excludes
+  them from neither: the broadcast passes `allBut = -1`, the targeted loop
+  sends to every listed `ClientInfo`, and the client does not add its own line
+  locally. It even puts its own entity id first in the party recipient list,
+  expecting the echo. zdtd's own `NetPackageSimpleChat` path already
+  broadcast to everyone, so the two disagreed.
 - Other players heard nothing. `NetPackageAudio` was dropped as a
   "client-local sound cue", but a client sends it to the server, and stock's
   dedicated server relays it to every in-range player. Doors, storage,

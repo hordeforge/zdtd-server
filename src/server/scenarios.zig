@@ -8958,19 +8958,32 @@ test "scenario chat routes by recipient list and preserves the channel" {
     const ch = try packages.parseStockChat(b_body);
     try std.testing.expectEqual(@as(u8, 2), ch.chat_type);
     try std.testing.expectEqualStrings("party hi", ch.msg);
+    // A is not in this recipient list, so A does not receive it. A real
+    // client puts its own entity id first in the party list, which is why the
+    // server must not filter the sender out (XUiC_Chat.il.txt:212-223).
     try std.testing.expect(cap_a.findPkgId(chat_id) == null);
     try std.testing.expect(cap_c.findPkgId(chat_id) == null);
 
-    // A global message (no recipients) broadcasts to everyone except the
-    // sender; sent by the third peer so the per-client chat rate limiter does
-    // not trip (the same client cannot chat twice within min_chat_gap_ns).
+    // A party message that lists the sender reaches the sender: stock's
+    // targeted loop sends to every listed ClientInfo with no self-exclusion
+    // (GameManager.il.txt:7690-7708), and the client renders only the echo.
+    cap_a.clear();
+    cap_b.clear();
+    const self_recips = [_]i32{ cb.entity_id, cb.entity_id };
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageChat", try packages.buildStockChat(&body, 2, cb.entity_id, "party self", &self_recips)));
+    try std.testing.expect(cap_b.findPkgId(chat_id) != null);
+
+    // A global message (no recipients) broadcasts to everyone, sender
+    // included: stock passes allBut = -1 (GameManager.il.txt:7717-7735) and
+    // the client does not add its own line locally. Sent by the third peer so
+    // the per-client chat rate limiter does not trip.
     cap_a.clear();
     cap_b.clear();
     cap_c.clear();
     try g.injectFramed(cc, try packages.framed(&fbuf, "NetPackageChat", try packages.buildStockChat(&body, 0, cc.entity_id, "global hi", &.{})));
     try std.testing.expect(cap_a.findPkgId(chat_id) != null);
     try std.testing.expect(cap_b.findPkgId(chat_id) != null);
-    try std.testing.expect(cap_c.findPkgId(chat_id) == null); // no self-echo
+    try std.testing.expect(cap_c.findPkgId(chat_id) != null); // the speaker sees it too
 
     // Unlike the verbatim relays, chat is parsed and rebuilt, and the rebuild
     // substitutes the sender's own entity id for whatever the client claimed.
