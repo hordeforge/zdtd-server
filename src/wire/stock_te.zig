@@ -1510,10 +1510,18 @@ test "vending TE body matches TileEntityVendingMachine::write layout" {
     try std.testing.expectEqual(@as(usize, 0), pr.remaining());
 }
 
-/// TileEntityLight network body (RE tile-entities-power.md 3.x
-/// TileEntityLight.write IL=48): TileEntity.write network (chunkPos local
+/// TileEntityLight network body (TileEntityLight.write IL=48,
+/// TileEntityLight.il.txt:198): TileEntity.write network (chunkPos local
 /// Vector3i + version u16 18) then LightIntensity f32, LightRange f32,
-/// Color32, LightType u8, LightAngle f32, LightShadows u8.
+/// Color32, LightType u8, LightAngle f32, LightShadows u8, LightState u8,
+/// Rate f32, Delay f32.
+///
+/// The last three are not optional on this path. `read` gates them on
+/// version > 5 / > 6 / > 7 (`:174-195`), but the network branch pins the
+/// version to 18 (`:135-137`), so the client always reads all nine fields.
+/// Nothing brackets the body with a size marker, and the reader holds only
+/// this package's payload, so a short body reads stale bytes out of the
+/// pooled buffer instead of failing.
 pub const LightTeInfo = struct {
     intensity: f32 = 1.0,
     range: f32 = 10.0,
@@ -1522,12 +1530,14 @@ pub const LightTeInfo = struct {
     light_type: u8 = 1,
     angle: f32 = 0,
     shadows: u8 = 1,
+    state: u8 = 0,
+    rate: f32 = 0,
+    delay: f32 = 0,
 };
 
 /// NetPackageTileEntity carrying a light TE (RE: TileEntityLight write). Outer
-/// TE header, then the payload written below: intensity, range, colour, light
-/// type, angle and shadow flag.
-pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world_z: i32, info: LightTeInfo) ![]u8 {
+/// TE header, then the nine payload fields in `LightTeInfo` order.
+pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world_z: i32, te_block_id: i32, info: LightTeInfo) ![]u8 {
     var payload: [64]u8 = undefined;
     var pw: binary.Writer = .{ .buf = &payload };
     const lp = localChunkPos(world_x, world_y, world_z);
@@ -1541,31 +1551,41 @@ pub fn buildLightTeBody(buf: []u8, handle: u8, world_x: i32, world_y: i32, world
     try pw.writeByte(info.light_type);
     try pw.writeF32(info.angle);
     try pw.writeByte(info.shadows);
+    try pw.writeByte(info.state);
+    try pw.writeF32(info.rate);
+    try pw.writeF32(info.delay);
 
     var w: binary.Writer = .{ .buf = buf };
-    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, 0, pw.written().len);
+    try writeOuterTeHeader(&w, handle, world_x, world_y, world_z, te_block_id, pw.written().len);
     try w.writeBytes(pw.written());
     return w.written();
 }
 
 test "light TE body round-trips the stock network layout" {
     var buf: [128]u8 = undefined;
-    const body = try buildLightTeBody(&buf, 255, 10, 70, 20, .{
+    const body = try buildLightTeBody(&buf, 255, 10, 70, 20, 1234, .{
         .intensity = 1.3,
         .range = 3.0,
         .color = 0xff2993ff,
         .light_type = 2,
         .angle = 0.5,
         .shadows = 1,
+        .state = 3,
+        .rate = 0.25,
+        .delay = 1.5,
     });
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(@as(u8, 255), try r.readByte()); // handle
     try std.testing.expectEqual(@as(i32, 10), try r.readI32()); // world pos
     try std.testing.expectEqual(@as(i32, 70), try r.readI32());
     try std.testing.expectEqual(@as(i32, 20), try r.readI32());
-    _ = try r.readI32(); // block id (0)
+    // ProcessPackage drops the package when this disagrees with the client's
+    // block at the position, so it carries the real world block.
+    try std.testing.expectEqual(@as(i32, 1234), try r.readI32());
     const pay_len = try r.readI32();
-    try std.testing.expect(pay_len == 3 * 4 + 2 + 4 + 4 + 4 + 1 + 4 + 1);
+    // chunkPos + version + the nine fields; the client reads every one of
+    // them on the network path, so a short body is a stream desync.
+    try std.testing.expect(pay_len == 3 * 4 + 2 + 4 + 4 + 4 + 1 + 4 + 1 + 1 + 4 + 4);
     // payload: local chunkPos + version 18 + fields
     try std.testing.expectEqual(@as(i32, 10), try r.readI32());
     try std.testing.expectEqual(@as(i32, 70), try r.readI32());
@@ -1576,5 +1596,9 @@ test "light TE body round-trips the stock network layout" {
     try std.testing.expectEqual(@as(u32, 0xff2993ff), try r.readU32());
     try std.testing.expectEqual(@as(u8, 2), try r.readByte());
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), try r.readF32(), 0.001);
-    try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+    try std.testing.expectEqual(@as(u8, 1), try r.readByte()); // shadows
+    try std.testing.expectEqual(@as(u8, 3), try r.readByte()); // state
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), try r.readF32(), 0.001); // rate
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), try r.readF32(), 0.001); // delay
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }

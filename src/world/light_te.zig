@@ -32,6 +32,12 @@ pub const Light = struct {
     light_type: u8 = 1,
     angle: f32 = 0,
     shadows: u8 = 1,
+    /// LightStateType: the blink/flicker mode. Authored payloads below v6 omit
+    /// it, so the default is the steady state stock initializes the field to.
+    state: u8 = 0,
+    /// Blink rate and start delay in seconds (payload v>6 / v>7).
+    rate: f32 = 0,
+    delay: f32 = 0,
 };
 
 /// Parse a prefab `.tts` Light TE persistency payload (RE TileEntityLight.il
@@ -69,6 +75,21 @@ pub fn parsePayload(payload: []const u8, out: *Light) bool {
         o += 4;
         out.shadows = payload[o];
         o += 1;
+    }
+    if (ver > 5) {
+        if (o + 1 > payload.len) return false;
+        out.state = payload[o];
+        o += 1;
+    }
+    if (ver > 6) {
+        if (o + 4 > payload.len) return false;
+        out.rate = @bitCast(std.mem.readInt(u32, payload[o..][0..4], .little));
+        o += 4;
+    }
+    if (ver > 7) {
+        if (o + 4 > payload.len) return false;
+        out.delay = @bitCast(std.mem.readInt(u32, payload[o..][0..4], .little));
+        o += 4;
     }
     return true;
 }
@@ -111,8 +132,10 @@ pub const Store = struct {
 test "parsePayload decodes a stock-format light payload" {
     // Synthetic payload mirroring the abandoned_house_07 marker (v16):
     // ver u16 16 | pos 3xi32 | i32 -1 (v<=18) | u64 0 (v>1) | f32 1.3 |
-    // f32 3.0 | Color32 ff2993ff | u8 type 2 | f32 angle | u8 shadows.
-    var p: [48]u8 = undefined;
+    // f32 3.0 | Color32 ff2993ff | u8 type 2 | f32 angle | u8 shadows |
+    // u8 state | f32 rate | f32 delay. A v16 payload carries all nine fields;
+    // the version gates only matter for the older authored markers.
+    var p: [64]u8 = undefined;
     var o: usize = 0;
     const w = struct {
         fn put16(b: []u8, pos: *usize, v: u16) void {
@@ -147,6 +170,10 @@ test "parsePayload decodes a stock-format light payload" {
     w.putf32(&p, &o, 0.5);
     p[o] = 1;
     o += 1;
+    p[o] = 3;
+    o += 1;
+    w.putf32(&p, &o, 0.25);
+    w.putf32(&p, &o, 1.5);
 
     var lt: Light = .{};
     try std.testing.expect(parsePayload(p[0..o], &lt));
@@ -156,8 +183,23 @@ test "parsePayload decodes a stock-format light payload" {
     try std.testing.expectEqual(@as(u8, 2), lt.light_type);
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), lt.angle, 0.001);
     try std.testing.expectEqual(@as(u8, 1), lt.shadows);
+    try std.testing.expectEqual(@as(u8, 3), lt.state);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), lt.rate, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), lt.delay, 0.001);
 
     // Truncated payload fails closed (default light).
     var lt2: Light = .{};
     try std.testing.expect(!parsePayload(p[0..8], &lt2));
+
+    // A v5 marker stops after shadows; the three tail fields keep their
+    // defaults rather than reading past the authored payload.
+    var p5: [64]u8 = undefined;
+    @memcpy(p5[0..o], p[0..o]);
+    var o5: usize = 0;
+    w.put16(&p5, &o5, 5);
+    var lt3: Light = .{};
+    try std.testing.expect(parsePayload(p5[0 .. o - 9], &lt3));
+    try std.testing.expectEqual(@as(u8, 0), lt3.state);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), lt3.rate, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), lt3.delay, 0.001);
 }

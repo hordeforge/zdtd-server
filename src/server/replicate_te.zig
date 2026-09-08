@@ -410,16 +410,21 @@ pub fn broadcastVendingTe(self: *Game, x: i32, y: i32, z: i32) !void {
 }
 
 /// Send a POI light TE (TileEntityLight, type 18) to one peer: the authored
-/// intensity/range/colour from the prefab .tts marker, in the stock network
-/// body (stock_te.buildLightTeBody).
+/// light fields from the prefab .tts marker, in the stock network body
+/// (stock_te.buildLightTeBody).
 pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !void {
     const l = self.light_te.get(.{ .x = x, .y = y, .z = z }) orelse return;
+    // ProcessPackage drops the package when teBlockId disagrees with the
+    // block the client holds at the position, so send the real world block
+    // rather than a placeholder.
+    const block_id = self.world.blockWorld(x, y, z) catch return;
     const body = try stock_te.buildLightTeBody(
         self.body_buf[0..4096],
         255,
         x,
         y,
         z,
+        block_id,
         .{
             .intensity = l.intensity,
             .range = l.range,
@@ -427,6 +432,9 @@ pub fn sendLightTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !vo
             .light_type = l.light_type,
             .angle = l.angle,
             .shadows = l.shadows,
+            .state = l.state,
+            .rate = l.rate,
+            .delay = l.delay,
         },
     );
     try self.sendGame(peer, "NetPackageTileEntity", body);

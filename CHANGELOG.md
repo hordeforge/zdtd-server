@@ -7,6 +7,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `TileEntityLight` network body was 9 bytes short: `LightState` u8, `Rate`
+  f32 and `Delay` f32 were missing. Stock gates those three on payload
+  version, but the network path pins the version to 18, so the client always
+  reads all nine fields. Nothing brackets this body with a size marker and the
+  reader holds only the package payload, so the client was filling the three
+  fields from stale bytes in the pooled buffer. The prefab `.tts` parser read
+  the fields and discarded them; they now reach the wire. The same body also
+  carried a placeholder `teBlockId` of 0, which makes the client drop the
+  package outright ("Block type changed"); it now sends the real world block.
 - Quest objective wire shape for `StayWithin` and `Time`. Stock has exactly
   four `BaseObjective` subclasses that override `Write`; the mapping covered
   only two, so `StayWithin` emitted the 2-byte base pair where the client reads
