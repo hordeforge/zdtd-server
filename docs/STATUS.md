@@ -38,6 +38,24 @@ so it drives the path that always broadcast, not the branch fixed on
 accepted (110 sent, 2 accepted in the 2026-09-09 stock-map run). That gate is
 deliberate, not a defect. A stock-client pass is still the open validation
 step.
+
+**Regression run for the 2026-09-09 relay and reach gates** (DIVERGENCES 1a5,
+1a6): 185 joins over wander and combat on a flat world, `join_fail=0`,
+`ownership_rejects=0`, `decode_rejects=0`, `c2s_malformed=0`,
+`c2s_unhandled=0`, `encode_errors=0`, `net_send_errors=0`, `phase_rejects=0`.
+`bounds_rejects` moved 1 to 4, from the pre-existing block and movement sites,
+not the new trader gates.
+
+What that run does and does not prove: it shows the eight new gates reject
+nothing in ordinary play, which is the regression risk when adding a gate.
+It does **not** exercise the gated paths, because loadgen sends none of
+`NetPackageTraderData`, `NetPackageNPCQuestList`, `NetPackageItemActionEffects`,
+`NetPackageItemReload`, `NetPackageWireToolActions` or `NetPackageSharedQuest`
+(checked against its sources; those names appear nowhere in `src/LoadGen`).
+The accept side of each gate is covered only by `scenarios.zig`, which drives
+the real handler and was mutation-checked, but by a synthetic body rather than
+a real client. Confirming the trader paths against a stock client remains
+open.
 `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
 owns all C2S domains. `GAP_ANALYSIS.md` scores 299 features: **296 `WORKS`,
