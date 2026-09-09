@@ -15028,3 +15028,83 @@ test "scenario the inventory transaction route honours both quarantine surfaces"
     try std.testing.expectEqual(q2 + 1, g.harness.counters.get(.quarantine_rejects));
     std.debug.print("PASS invtx quarantine: container and block surfaces both gated\n", .{});
 }
+
+test "scenario every saved inventory slot field survives a restart" {
+    // The v12 slot record grew from 13 bytes to 21 when the mod ids landed,
+    // but the writer's room check kept the old 13 while the write reached to
+    // 21. Nothing caught it because no test read a saved slot back field by
+    // field: the clamp scenarios only look at item_id and count, so the four
+    // fields appended after them (use_times, seed and the mod array) were
+    // written and never verified to come back.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_slotfields");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const slot_i: usize = 3;
+    const last_i: usize = quest_mod_components.max_inv_slots - 1;
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_slotfields", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const ps = g.sim.playerByPeer(c.slot).?;
+        g.sim.inventory[ps].slots[slot_i] = .{
+            .item_id = 2,
+            .count = 3,
+            .quality = 5,
+            .meta = 4321,
+            .use_times = 12.5,
+            .seed = 777,
+            .mods = .{ 11, 12, 13, 14 },
+            .mod_n = 4,
+        };
+        // The last slot exercises the writer's room check: it is the one the
+        // stride miscount would truncate first if the record ever tightened.
+        g.sim.inventory[ps].slots[last_i] = .{
+            .item_id = 9,
+            .count = 1,
+            .quality = 6,
+            .meta = 1234,
+            .use_times = 0.25,
+            .seed = 4242,
+            .mods = .{ 21, 22, 23, 24 },
+            .mod_n = 4,
+        };
+        try g.savePlayers();
+    }
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_slotfields", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const ps = g.sim.playerByPeer(c.slot).?;
+
+        const s = g.sim.inventory[ps].slots[slot_i];
+        try std.testing.expectEqual(@as(u16, 2), s.item_id);
+        try std.testing.expectEqual(@as(u16, 3), s.count);
+        try std.testing.expectEqual(@as(u8, 5), s.quality);
+        try std.testing.expectEqual(@as(u16, 4321), s.meta);
+        try std.testing.expectEqual(@as(f32, 12.5), s.use_times);
+        try std.testing.expectEqual(@as(u16, 777), s.seed);
+        try std.testing.expectEqual([4]u16{ 11, 12, 13, 14 }, s.mods);
+        try std.testing.expectEqual(@as(u8, 4), s.mod_n);
+
+        // A full inventory must round-trip to its last slot, not just its
+        // first: a short room check drops the tail silently.
+        const t = g.sim.inventory[ps].slots[last_i];
+        try std.testing.expectEqual(@as(u16, 9), t.item_id);
+        try std.testing.expectEqual(@as(u16, 4242), t.seed);
+        try std.testing.expectEqual([4]u16{ 21, 22, 23, 24 }, t.mods);
+    }
+    std.debug.print("PASS slot fields: all v12 slot fields survive a restart, first slot and last\n", .{});
+}

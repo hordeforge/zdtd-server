@@ -585,6 +585,17 @@ pub fn savePlayers(self: *Game) !void {
     for (&self.clients) |*cl| {
         if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
         const ps = self.sim.playerByPeer(cl.slot) orelse continue;
+        // The slot loop below breaks on a short buffer rather than failing,
+        // so a record that cannot hold a full inventory would silently drop
+        // the tail slots. Prove at compile time that it never has to: name
+        // header + position + wallet + inv_n + every slot at the v12 stride
+        // must fit, or the cap moved and this buffer needs to move with it.
+        comptime {
+            const head = 1 + 32 + 3 * 4 + 4 + 1;
+            const inv_bytes = ecs.components.max_inv_slots * zpvSlotStride(12);
+            if (head + inv_bytes > 2048)
+                @compileError("player record buffer too small for a full v12 inventory");
+        }
         var rec: [2048]u8 = undefined;
         var o: usize = 0;
         rec[o] = @intCast(cl.name_len);
@@ -605,11 +616,19 @@ pub fn savePlayers(self: *Game) !void {
         o += 1;
         var inv_n: u8 = 0;
         if (self.sim.mask[ps].inventory) {
+            // The write below emits a full v12 slot, so the room it needs is
+            // the v12 stride. Reading it off `zpvSlotStride` keeps the bound
+            // and the layout on one number: the previous literal 13 was the
+            // v10 stride left behind when v12 appended the mod ids, so the
+            // guard admitted a slot with room for the head and none for the
+            // tail.
+            const slot_bytes = zpvSlotStride(12);
             for (self.sim.inventory[ps].slots) |s| {
-                // ZPV10 slot record: item:u16, count:u16, quality:u8, meta:u16,
+                // ZPV12 slot record: item:u16, count:u16, quality:u8, meta:u16,
                 // use_times:f32 (stock ItemValue.UseTimes), seed:u16 (stock
-                // ItemValue.Seed, so a plantable's seed survives a restart).
-                if (o + 13 > rec.len) break;
+                // ItemValue.Seed, so a plantable's seed survives a restart),
+                // then 4 mod ids:u16 (stock ItemValue.Modifications).
+                if (o + slot_bytes > rec.len) break;
                 std.mem.writeInt(u16, rec[o..][0..2], s.item_id, .little);
                 std.mem.writeInt(u16, rec[o + 2 ..][0..2], s.count, .little);
                 rec[o + 4] = s.quality;
@@ -621,7 +640,7 @@ pub fn savePlayers(self: *Game) !void {
                 while (mz < s.mods.len) : (mz += 1) {
                     std.mem.writeInt(u16, rec[o + 13 + mz * 2 ..][0..2], s.mods[mz], .little);
                 }
-                o += 21;
+                o += slot_bytes;
                 inv_n += 1;
             }
         }
