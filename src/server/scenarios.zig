@@ -37,6 +37,7 @@ const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const evidence_mod = @import("evidence.zig");
+const powerblocks_mod = @import("../ecs/powerblocks.zig");
 const persist = @import("persist.zig");
 const phase_gate = @import("phase_gate.zig");
 const util_log = @import("../util/log.zig");
@@ -15390,4 +15391,91 @@ test "scenario PlayerStats carries the held item, not bare hands" {
     _ = try r3.readI32(); // killed
     try std.testing.expectEqual(@as(u16, 3), try r3.readU16()); // held count
     std.debug.print("PASS playerstats-held: the held stack rides the stats wire (broadcast and join)\n", .{});
+}
+
+test "scenario a motion sensor keeps the target selection the player set" {
+    // TriggerType 3 carries TargetType, a bitmask of who the sensor fires on
+    // (research tile-entities-power.md: Self 1, Allies 2, Strangers 4,
+    // Zombies 8). The parser read it and the handler dropped it, so the echo
+    // that follows the very same write told the client 0: a player picking
+    // "zombies" watched their selection clear itself.
+    const stock_te = packages.stock_te;
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_motiontarget");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_motiontarget", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const plate_id = g.maxdamage.idByName("pressureplate") orelse return error.SkipZigTest;
+    if (g.power_registry.lookup(plate_id) == null) return error.SkipZigTest;
+    // Re-tag that registered block as a motion sensor: the handler gates the
+    // TargetType arm on the registry's trigger_type, and this keeps the test
+    // offline instead of depending on a motion block existing in the catalog.
+    {
+        var i: usize = 0;
+        while (i < g.power_registry.n) : (i += 1) {
+            if (g.power_registry.ids[i] == plate_id) {
+                g.power_registry.trigger_type[i] = @intFromEnum(powerblocks_mod.TriggerType.motion);
+                break;
+            }
+        }
+    }
+
+    const tx: i32 = 210;
+    const ty: i32 = 70;
+    const tz: i32 = 210;
+    try g.world.setBlockWorld(tx, ty, tz, plate_id);
+    const nid = g.sim.power.addNodeAt(.consumer, tx, ty, tz, 1) orelse return error.TestUnexpectedResult;
+    const ni = g.sim.power.indexOfId(nid) orelse return error.TestUnexpectedResult;
+    g.sim.power.nodes[ni].is_trigger = true;
+
+    // Zombies only (bit 8), the selection a trap owner most often makes.
+    const want_target: i32 = 8;
+
+    // Build the C2S powered-trigger body by hand in the stock field order,
+    // so the test drives the real parser rather than a helper that could
+    // share a bug with it.
+    var payload: [256]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &payload };
+    try pw.writeI32(tx & 15); // chunk-local x
+    try pw.writeI32(ty);
+    try pw.writeI32(tz & 15);
+    try pw.writeI32(0); // no pitch/yaw follows
+    try pw.writeBool(true); // isPlayerPlaced
+    try pw.writeByte(0); // powerItemType
+    try pw.writeByte(0); // wire count
+    try pw.writeI32(0); // parent x
+    try pw.writeI32(0); // parent y
+    try pw.writeI32(0); // parent z
+    try pw.writeByte(stock_te.trigger_type_motion);
+    try pw.writeBool(false); // null owner PlatformUserIdentifierAbs
+    try pw.writeByte(0); // TriggerPowerDelay
+    try pw.writeByte(1); // TriggerPowerDuration
+    try pw.writeBool(false); // resetTrigger
+    try pw.writeI32(want_target); // TargetType
+    const pay = pw.written();
+
+    var body_buf: [512]u8 = undefined;
+    var bw: binary.Writer = .{ .buf = &body_buf };
+    try bw.writeByte(255); // handle
+    try bw.writeI32(tx);
+    try bw.writeI32(ty);
+    try bw.writeI32(tz);
+    try bw.writeI32(@intCast(plate_id));
+    try bw.writeI32(@intCast(pay.len));
+    try bw.writeBytes(pay);
+
+    var fb: [1024]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTileEntity", bw.written()));
+
+    // The server kept it, rather than parsing and discarding.
+    try std.testing.expectEqual(want_target, g.sim.power.nodes[ni].target_type);
+    std.debug.print("PASS motion target: TargetType {d} survives the round trip\n", .{want_target});
 }

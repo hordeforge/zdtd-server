@@ -84,6 +84,12 @@ pub const PowerNode = struct {
     /// Stock TriggerPowerDuration index. Default 1 = Triggered, which maps to the
     /// fixed contact pulse zdtd uses for a plate with no configured duration.
     duration_idx: u8 = 1,
+    /// Motion-sensor TargetType bitmask, stock `PowerTrigger.TargetType` for
+    /// TriggerType 3 (research tile-entities-power.md: Self 1, Allies 2,
+    /// Strangers 4, Zombies 8). The sim does not filter on it yet; it is held
+    /// so the setting a player makes survives the round trip instead of the
+    /// echo resetting their sensor to "nobody".
+    target_type: i32 = 0,
     /// Last on/powered pair echoed to clients as block meta, and whether one was
     /// ever sent. Lives on the node because removeAt swaps the tail node into a
     /// freed slot, so any index-keyed side table would follow the wrong block.
@@ -291,6 +297,15 @@ pub const PowerGrid = struct {
         if (!self.nodes[i].is_trigger) return false;
         self.nodes[i].delay_idx = delay_idx;
         self.nodes[i].duration_idx = duration_idx;
+        return true;
+    }
+
+    /// Apply a motion sensor's TargetType bitmask. Returns false when the cell
+    /// holds no trigger.
+    pub fn setTriggerTargetAt(self: *PowerGrid, x: i32, y: i32, z: i32, target_type: i32) bool {
+        const i = self.indexOfPosition(x, y, z) orelse return false;
+        if (!self.nodes[i].is_trigger) return false;
+        self.nodes[i].target_type = target_type;
         return true;
     }
 

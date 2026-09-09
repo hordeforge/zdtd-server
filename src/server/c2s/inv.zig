@@ -672,6 +672,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 );
                 if (trig.reset_trigger) _ = self.sim.power.resetTriggerAt(trig.world_x, trig.world_y, trig.world_z);
             }
+            // A motion sensor carries its TargetType bitmask (stock
+            // PowerTrigger.TargetType for TriggerType 3). The parser already
+            // read it and the handler dropped it, so the echo below reset the
+            // player's target selection to 0 the moment they set it.
+            if (trig.trigger_type == stock_te.trigger_type_motion) {
+                _ = self.sim.power.setTriggerTargetAt(
+                    trig.world_x,
+                    trig.world_y,
+                    trig.world_z,
+                    trig.target_type,
+                );
+            }
             self.sim.power.resolve();
             try replicate_te.broadcastPoweredTriggerTe(self, trig.world_x, trig.world_y, trig.world_z);
             return true;

@@ -256,6 +256,7 @@ pub fn broadcastPoweredTriggerTe(self: *Game, x: i32, y: i32, z: i32) !void {
         .trigger_type = @intFromEnum(tt),
         .property1 = node.delay_idx,
         .property2 = node.duration_idx,
+        .target_type = node.target_type,
     });
     try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(x), @floatFromInt(z), self.interest_range);
 }

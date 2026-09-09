@@ -5468,8 +5468,12 @@ child→parent by world position, `RemoveParent` (op 1) drops the child's edges,
   `wire/stock_te.zig` (both directions, asm.il:1325813 / 1326015).
   Gaps: `PowerTimerRelay` StartTime/EndTime hour semantics (Property1/Property2
   are carried but a TimerRelay still runs on the old `armTimer` period), Motion
-  sensor ownerID and TargetTypes filtering (TargetType is parsed and echoed, not
-  enforced), multi-parent directed edges, and the S2C TE leg only lands where
+  sensor ownerID and TargetTypes filtering (TargetType is parsed, held on the
+  power node and echoed back since 2026-09-10, but not enforced: nothing filters
+  actuation by it yet. Before that date the "echoed" half of this line was
+  wrong. The handler dropped the parsed value and the echo wrote the struct
+  default, so the reply to a player's own write cleared the selection they had
+  just made), multi-parent directed edges, and the S2C TE leg only lands where
   the client already holds a TileEntity: zdtd streams chunks with tile-entity
   count 0 (`stock_chunk.zig`), and `NetPackageTileEntity::ProcessPackage`
   (asm.il:842860) drops an update for a position with no TileEntity. That leg is
