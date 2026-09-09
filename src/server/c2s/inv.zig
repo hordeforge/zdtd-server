@@ -359,6 +359,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         .{};
                 }
                 v.basket_n = @intCast(parsed.n);
+                // Same stack clamp the player-inventory branch above applies,
+                // and the container / workstation TE bodies below. The basket
+                // is a client-writable InvSlot group like the rest, so an
+                // over-cap count here was the one way to write a stack past
+                // its items.xml Stacknumber and have it persist.
+                self.clampStackSlots(v.basket[0..v.basket_n]);
                 try self.broadcastExcept("NetPackageBag", body, c.slot);
             }
         } else return true;

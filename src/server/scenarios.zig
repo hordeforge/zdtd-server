@@ -14533,3 +14533,67 @@ test "scenario pending power wires survive a save/load cycle" {
     }
     std.debug.print("PASS pending wires: an unreconnected edge survives the restart\n", .{});
 }
+
+test "scenario vehicle basket stacks are clamped like every other client-written group" {
+    // NetPackageBag has three branches: the sender's own inventory, another
+    // entity's inventory (loot bag), and a vehicle's basket. The first two
+    // ran clampInventoryStacks on what the client sent; the basket branch
+    // wrote the parsed stacks straight into vehicle.basket with no clamp, so
+    // it was the one way to push a stack past its items.xml Stacknumber and
+    // have the server keep it.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_basket");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_basket", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    // One item with a small, known stack cap.
+    const item_id: u16 = 9;
+    const cap_max: u16 = 5;
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = item_id, .name = "testStackable", .stack = cap_max },
+    };
+    g.items.defs = idefs[0..];
+
+    // A vehicle at the player's feet so the reach gate passes.
+    const vid = g.sim.spawnVehicle(.bicycle, g.sim.transform[ps].x, g.sim.transform[ps].y, g.sim.transform[ps].z) orelse
+        return error.TestUnexpectedResult;
+    const vs = g.sim.slotOfNetId(vid).?;
+    try std.testing.expect(g.sim.mask[vs].vehicle);
+
+    // A bag body naming the vehicle, carrying a stack far over the cap.
+    // Built by hand in the entity-targeted shape the vehicle branch parses
+    // (entity id, blob length, then Bag.Write), with an absolute stock type
+    // so the reverse resolver finds the item.
+    var blob: [256]u8 = undefined;
+    var bw = binary.Writer{ .buf = &blob };
+    try bw.writeByte(1); // version
+    try bw.writeU16(1); // one slot
+    try packages.stock_inv.writeItemStack(&bw, .{
+        .type_id = packages.stock_inv.items_start_here + @as(i32, item_id),
+        .count = 999,
+        .quality = 1,
+    });
+    var body: [512]u8 = undefined;
+    var w = binary.Writer{ .buf = &body };
+    try w.writeI32(vid);
+    try w.writeU16(@intCast(bw.pos));
+    @memcpy(body[w.pos..][0..bw.pos], blob[0..bw.pos]);
+    const body_len = w.pos + bw.pos;
+    var fb: [640]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageBag", body[0..body_len]));
+
+    // The basket took the item but not the over-cap count.
+    try std.testing.expectEqual(item_id, g.sim.vehicle[vs].basket[0].item_id);
+    try std.testing.expectEqual(cap_max, g.sim.vehicle[vs].basket[0].count);
+    std.debug.print("PASS vehicle basket: an over-cap client stack is clamped\n", .{});
+}
