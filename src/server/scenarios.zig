@@ -14597,3 +14597,73 @@ test "scenario vehicle basket stacks are clamped like every other client-written
     try std.testing.expectEqual(cap_max, g.sim.vehicle[vs].basket[0].count);
     std.debug.print("PASS vehicle basket: an over-cap client stack is clamped\n", .{});
 }
+
+test "scenario container quarantine covers the bag path, not only tile entities" {
+    // The guard's container surface denies TileEntity writes. NetPackageBag
+    // writes client-supplied contents into a non-player entity too (loot
+    // bags and vehicle baskets), so a peer quarantined off containers could
+    // keep rewriting bags through the arm that had no gate.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_qbag");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_qbag", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    const item_id: u16 = 9;
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = item_id, .name = "testStackable", .stack = 50 },
+    };
+    g.items.defs = idefs[0..];
+
+    // A vehicle in reach, so only the quarantine can stop the write.
+    const vid = g.sim.spawnVehicle(.bicycle, g.sim.transform[ps].x, g.sim.transform[ps].y, g.sim.transform[ps].z) orelse
+        return error.TestUnexpectedResult;
+    const vs = g.sim.slotOfNetId(vid).?;
+
+    const Body = struct {
+        fn make(buf: []u8, target: i32, iid: u16) ![]u8 {
+            var blob: [256]u8 = undefined;
+            var bw = binary.Writer{ .buf = &blob };
+            try bw.writeByte(1);
+            try bw.writeU16(1);
+            try packages.stock_inv.writeItemStack(&bw, .{
+                .type_id = packages.stock_inv.items_start_here + @as(i32, iid),
+                .count = 3,
+                .quality = 1,
+            });
+            var w = binary.Writer{ .buf = buf };
+            try w.writeI32(target);
+            try w.writeU16(@intCast(bw.pos));
+            @memcpy(buf[w.pos..][0..bw.pos], blob[0..bw.pos]);
+            return buf[0 .. w.pos + bw.pos];
+        }
+    };
+    var body: [512]u8 = undefined;
+    var fb: [640]u8 = undefined;
+
+    // Not quarantined: the write lands, so the gate below is what changes.
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageBag", try Body.make(&body, vid, item_id)));
+    try std.testing.expectEqual(item_id, g.sim.vehicle[vs].basket[0].item_id);
+
+    // Quarantine the container surface (what the guard ladder sets on a
+    // container-surface trip) and clear the basket.
+    g.authority_mode = .correct;
+    g.clients[c.slot].guard.quarantine.container = true;
+    g.sim.vehicle[vs].basket[0] = .{};
+    g.sim.vehicle[vs].basket_n = 0;
+
+    const q_before = g.harness.counters.get(.quarantine_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageBag", try Body.make(&body, vid, item_id)));
+    try std.testing.expectEqual(q_before + 1, g.harness.counters.get(.quarantine_rejects));
+    try std.testing.expectEqual(@as(u16, 0), g.sim.vehicle[vs].basket[0].item_id);
+    std.debug.print("PASS bag quarantine: a container-quarantined peer cannot rewrite a basket\n", .{});
+}

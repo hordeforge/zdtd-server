@@ -307,6 +307,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageBag")) {
+        // Same container quarantine the TileEntity arm applies. Both write
+        // client-supplied item contents into a non-player entity (this one
+        // reaches loot bags and vehicle baskets), so a peer quarantined off
+        // the container surface could keep rewriting bags through here while
+        // its TE writes were denied.
+        if (self.quarantineDenies(c, .container)) return true;
         // Rate gate: a bag write mutates inventory and echoes to every other
         // peer; unthrottled it is the same broadcast-amplification hole as
         // the SetBlock relay.
