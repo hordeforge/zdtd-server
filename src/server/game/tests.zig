@@ -2391,6 +2391,57 @@ test "power nodes rebuild from chunk blocks after restart (scanChunkPower)" {
     try std.testing.expect(g.sim.power.indexOfPosition(9, 70, 8) == null);
 }
 
+test "a latched switch comes back on after a restart, not off" {
+    // The grid is runtime state rebuilt from the block plane, and the rebuild
+    // ran applyToNode, which latches a switch off because that is right for a
+    // freshly placed one. A switch read off disk is not freshly placed: the
+    // player's latch is in the block meta the SetBlock path wrote and the ZCH3
+    // plane kept. Every restart therefore switched every powered base off
+    // while the clients still rendered the switches as on.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const SwitchStub = struct {
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "switch")) return 20003;
+            return null;
+        }
+        pub fn wattsByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "switch")) return 0;
+            return null;
+        }
+    };
+    var stub: SwitchStub = .{};
+    try stub.power_class_by_name.put(std.testing.allocator, "switch", "Switch");
+    defer stub.power_class_by_name.deinit(std.testing.allocator);
+    g.power_registry = ecs.powerblocks.Registry.build(&stub);
+    const switch_id: u16 = 20003;
+
+    const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+    const blocks = ch.blocks.?;
+    // Two switches off the same plane: one saved latched on, one off. Both
+    // must come back the way the meta records them, so a scan that simply
+    // forced one value would fail on the other.
+    blocks[4 + 4 * 16 + 70 * 256] = packages.withBlockMeta(@as(u32, switch_id), packages.block_meta_on);
+    blocks[6 + 4 * 16 + 70 * 256] = packages.withBlockMeta(@as(u32, switch_id), 0);
+    g.scanChunkPower(ch, 0, 0);
+
+    const on_i = g.sim.power.indexOfPosition(4, 70, 4) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.power.nodes[on_i].is_switch);
+    try std.testing.expect(g.sim.power.nodes[on_i].on);
+
+    const off_i = g.sim.power.indexOfPosition(6, 70, 4) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.power.nodes[off_i].is_switch);
+    try std.testing.expect(!g.sim.power.nodes[off_i].on);
+}
+
 test "trader POIs spawn their NPC classes on a stock map" {
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     const map = game_dir ++ "/Data/Worlds/Navezgane";

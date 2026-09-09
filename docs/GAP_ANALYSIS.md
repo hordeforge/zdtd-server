@@ -5090,6 +5090,15 @@ persists so little that a restart visibly damages a built base.
   power from the block grid. Power grid **nodes** rebuild from the chunk block
   grid on first chunk load (`scanChunkPower`, `power_scanned` per chunk), so a
   generator/consumer/battery layout survives restart without saving the graph.
+  The *layout* did, but a switch's latch did not until 2026-09-10: the rebuild
+  ran `applyToNode`, which latches a switch off because that is right for a
+  freshly placed one, and a switch read off disk is not freshly placed. Its
+  latch is in the block meta the SetBlock path writes and the ZCH3 plane keeps,
+  so every restart switched every powered base off while the clients still
+  rendered the switches as on. The scan now reads the meta bit for switch
+  nodes. Still runtime-only and reset by a restart: trigger delay/duration
+  indices, motion-sensor TargetType, generator fuel and battery charge - none
+  of those has a block-meta home, so closing them needs a saved node record.
   Since 2026-08-22 the wire **edges** between nodes persist too: `saveEntities`
   writes each live edge by its endpoint positions (node ids are per-session) as
   a kind-3 record, and `loadEntities` queues them as pending wires that

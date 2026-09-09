@@ -208,7 +208,8 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
         while (lz < 16) : (lz += 1) {
             var lx: i32 = 0;
             while (lx < 16) : (lx += 1) {
-                const id: u16 = world_store.typeId(blocks[live.blockIndex(lx, y, lz)]);
+                const raw = blocks[live.blockIndex(lx, y, lz)];
+                const id: u16 = world_store.typeId(raw);
                 if (id != last_id) {
                     last_id = id;
                     last_power = self.power_registry.lookup(id);
@@ -217,7 +218,18 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
                 const wx = base_x + lx;
                 const wz = base_z + lz;
                 if (self.sim.power.addNodeAt(pn.kind, wx, y, wz, pn.watts)) |nid| {
-                    if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
+                    if (self.sim.power.indexOfId(nid)) |ni| {
+                        pn.applyToNode(&self.sim.power.nodes[ni]);
+                        // applyToNode latches a switch off, which is right for
+                        // a freshly placed one. Here the block came off disk
+                        // with the player's own latch in its meta (the SetBlock
+                        // path writes it and the ZCH3 plane keeps it), so a
+                        // restart used to switch every powered base back off.
+                        if (pn.is_switch) {
+                            const on = (packages.blockMeta(raw) & packages.block_meta_on) != 0;
+                            self.sim.power.nodes[ni].on = on;
+                        }
+                    }
                 }
             }
         }
