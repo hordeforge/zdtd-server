@@ -1143,7 +1143,7 @@ pub fn saveEntities(self: *Game) !void {
     const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
     // Vehicle/turret records (32 B each) plus the power-wire section
     // (24 B per saved edge, 512 max).
-    var buf: [ecs.max_entities * 32 + ecs.electric.max_wires * 24 + 16]u8 = undefined;
+    var buf: [ecs.max_entities * 32 + ecs.electric.max_wires * 2 * 24 + 16]u8 = undefined;
     var w = wire_binary.Writer{ .buf = &buf };
     // Overflow must propagate (callers log persistence errors): a silent
     // abort here would drop the vehicle/turret save without any signal.
@@ -1178,10 +1178,16 @@ pub fn saveEntities(self: *Game) !void {
         }
     }
     // Power wire edges by endpoint position (node ids are per-session).
-    // The grid also keeps a live wire list plus any pending reconnect set;
-    // saving both would duplicate, so persist the live wires only.
-    if (self.sim.power.wire_n > 0) {
-        var edge_buf: [ecs.electric.max_wires * 24]u8 = undefined;
+    // Both the live wire list and the pending-reconnect set are written: they
+    // are disjoint, not duplicates. A pending edge is one loaded from a
+    // previous save whose endpoints have not come back yet (the blocks sit in
+    // chunks nobody has visited this session), and `reconnectPending` only
+    // promotes it once both are present. Writing the live list alone dropped
+    // every such edge on each save, so a base in unvisited chunks lost its
+    // wiring after one restart.
+    if (self.sim.power.wire_n > 0 or self.sim.power.pending_wire_n > 0) {
+        // Live plus pending, each capped at max_wires: 24 bytes per edge.
+        var edge_buf: [ecs.electric.max_wires * 2 * 24]u8 = undefined;
         var ew = wire_binary.Writer{ .buf = &edge_buf };
         var edges: u16 = 0;
         var wi: usize = 0;
@@ -1197,6 +1203,19 @@ pub fn saveEntities(self: *Game) !void {
             try ew.writeI32(pb.x);
             try ew.writeI32(pb.y);
             try ew.writeI32(pb.z);
+            edges += 1;
+        }
+        // Carry the not-yet-reconnected edges through untouched, in the same
+        // endpoint-position form the loader reads back.
+        var pi: usize = 0;
+        while (pi < self.sim.power.pending_wire_n) : (pi += 1) {
+            const pw = self.sim.power.pending_wires[pi];
+            try ew.writeI32(pw.ax);
+            try ew.writeI32(pw.ay);
+            try ew.writeI32(pw.az);
+            try ew.writeI32(pw.bx);
+            try ew.writeI32(pw.by);
+            try ew.writeI32(pw.bz);
             edges += 1;
         }
         if (edges > 0) {

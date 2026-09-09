@@ -14474,3 +14474,62 @@ test "scenario stock inventory transaction is all-or-nothing" {
     try std.testing.expect(cap.findPkgId(resp_id) == null);
     std.debug.print("PASS invtx: a rejected transaction applies none of its ops\n", .{});
 }
+
+test "scenario pending power wires survive a save/load cycle" {
+    // A saved wire whose endpoints are in chunks nobody has visited sits in
+    // the grid's pending-reconnect set, not the live wire list:
+    // reconnectPending only promotes an edge once both endpoint nodes exist.
+    // saveEntities used to write the live list only, on the reasoning that
+    // saving both would duplicate. They are disjoint, so every pending edge
+    // was dropped: a base in unvisited chunks lost its wiring after one
+    // restart, and again on every restart after that.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_pendwire");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pendwire", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        // An edge between two positions with no loaded nodes: exactly the
+        // shape the loader produces for a base in an unvisited chunk.
+        g.sim.power.addPendingWire(.{
+            .ax = 1000,
+            .ay = 70,
+            .az = 1000,
+            .bx = 1000,
+            .by = 70,
+            .bz = 1001,
+        });
+        try std.testing.expectEqual(@as(usize, 1), g.sim.power.pending_wire_n);
+        try persist.saveEntities(g);
+    }
+
+    // Restart: the edge must come back, still pending, still waiting for its
+    // chunks. Before the fix pending_wire_n was 0 here and the wiring was
+    // gone for good.
+    {
+        const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_pendwire", 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        try persist.loadEntities(g2);
+        // Find our edge by its endpoints: the default world seeds its own
+        // demo wire, which is live at save time and comes back pending too,
+        // so the set holds more than one entry.
+        var found = false;
+        var i: usize = 0;
+        while (i < g2.sim.power.pending_wire_n) : (i += 1) {
+            const w = g2.sim.power.pending_wires[i];
+            if (w.ax == 1000 and w.ay == 70 and w.az == 1000 and
+                w.bx == 1000 and w.by == 70 and w.bz == 1001) found = true;
+        }
+        try std.testing.expect(found);
+    }
+    std.debug.print("PASS pending wires: an unreconnected edge survives the restart\n", .{});
+}
