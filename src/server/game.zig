@@ -3109,12 +3109,21 @@ pub const Game = struct {
     /// (`AIDirectorGameStagePartySpawner.SetPartyLevel` IL_0065-007C):
     /// `bonusLootEvery = max(stageSpawnMax / LootBonusMaxCount, LootBonusEvery)`
     /// with `stageSpawnMax` summing every spawn-group `num` in the stage.
-    /// Pushes the nightly cadence + `LootBonusScale` into the director (which
-    /// seeds its counter at half cadence, stock InitParty IL_0072-0080).
+    /// Pushes the nightly cadence + `LootBonusScale` into the director.
     /// Falls back to the stock XML defaults when the ladder has no stage
     /// (offline/builtin tables).
+    ///
+    /// Parameters only: the counter is seeded once at the nightly stage
+    /// freeze (stock InitParty IL_0072-0080). This runs every tick of an
+    /// active blood moon so a ladder loaded mid-night takes effect, and
+    /// re-seeding here reset the progress counter at 20 Hz while it only
+    /// advances per horde spawn, so the bonus drop never fired.
     pub fn pushBloodMoonBonus(self: *Game, stage: i32) void {
         const cfg = self.gamestages.config;
+        // No gamestages.xml means no cadence to push. Clamping the absent 0
+        // up to 1 would overwrite the director's stock defaults with "bonus
+        // on every spawn, unscaled", which is the opposite of the intent.
+        if (cfg.loot_bonus_every <= 0) return;
         var every: u32 = @max(1, @as(u32, @intCast(@max(0, cfg.loot_bonus_every))));
         if (self.gamestages.spawnerByName(ecs.aidirector.Director.bloodmoon_spawner)) |sp| {
             if (sp.getStage(stage)) |st| {
@@ -3126,7 +3135,7 @@ pub const Game = struct {
             }
         }
         const scale: f32 = if (cfg.loot_bonus_scale > 0) cfg.loot_bonus_scale else 1.0;
-        self.sim.director.setBloodMoonBonus(every, scale);
+        self.sim.director.setBloodMoonBonusParams(every, scale);
     }
 
     /// spawning.xml <entityspawner name=…> → its EntityGroupName property.

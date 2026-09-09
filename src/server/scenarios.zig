@@ -14334,3 +14334,69 @@ test "scenario trader override equal to the fallback is not mistaken for unset" 
     try std.testing.expectEqual(@as(u32, 500), g.sim.sell_price_fn.?(g.sim.sell_price_ctx, 9, @intCast(ts2)));
     std.debug.print("PASS trader markup: an override equal to the fallback survives resolution\n", .{});
 }
+
+test "scenario blood moon bonus loot survives the per-tick cadence re-push" {
+    // pushBloodMoonBonus runs every tick of an active blood moon so a
+    // gamestage ladder loaded mid-night takes effect. It used to call
+    // setBloodMoonBonus, which re-seeds bm_bonus_count to every/2 as stock
+    // InitParty does once per night. The counter only advances per horde
+    // spawn, so a 20 Hz re-seed pinned it below the cadence and the bonus
+    // drop never fired for any cadence above 2.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_bmbonus");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bmbonus", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap);
+
+    // Give the ladder a real cadence so the per-tick re-push actually runs.
+    // With no gamestages.xml it returns early (nothing to push), which would
+    // hide the re-seed this test is about.
+    g.gamestages.config.loot_bonus_every = 12;
+    g.gamestages.config.loot_bonus_max_count = 1;
+    g.gamestages.config.loot_bonus_scale = 25;
+
+    // Blood moon night, as the party scenario above sets it up.
+    g.sim.director.clock.day = 7;
+    g.sim.director.clock.hours = 22.0;
+    g.sim.director.bloodmoon_enemy_count = 8;
+    g.sim.director.bloodmoon_cd = 0;
+    try g.step();
+    try std.testing.expect(g.sim.director.bloodmoon_active);
+    try std.testing.expect(g.sim.director.bm_stage_frozen != 0);
+
+    // Seeded at half cadence by the nightly freeze, then advanced by the
+    // spawns that same step, so it is at or above the seed.
+    const every = g.sim.director.bm_bonus_every;
+    try std.testing.expect(every > 2);
+    try std.testing.expect(g.sim.director.bm_bonus_count >= every / 2);
+
+    // Ticking alone must not pull the counter back: the re-push carries the
+    // cadence and scale, not the progress. This is the regression - with the
+    // old re-seed, five idle ticks dragged it back to every/2.
+    g.sim.director.bm_bonus_count = every - 1;
+    var t: u8 = 0;
+    while (t < 5) : (t += 1) try g.step();
+    try std.testing.expectEqual(every, g.sim.director.bm_bonus_every);
+    try std.testing.expect(g.sim.director.bm_bonus_count >= every - 1);
+
+    // Drive spawns directly: from the seed, `every - every/2` of them reach
+    // the cadence and award the bonus. Before the fix the tick re-seed made
+    // this unreachable.
+    var awarded = false;
+    var n: u32 = 0;
+    while (n < every * 2 and !awarded) : (n += 1) {
+        g.sim.director.bm_bonus_count += 1;
+        if (g.sim.director.bm_bonus_count >= every) awarded = true;
+        try g.step();
+    }
+    try std.testing.expect(awarded);
+    std.debug.print("PASS blood moon bonus: the cadence counter is not reset by the per-tick re-push\n", .{});
+}

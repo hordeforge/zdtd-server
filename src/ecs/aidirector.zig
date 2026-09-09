@@ -540,7 +540,15 @@ pub const Director = struct {
                 // until it does, the stock XML defaults below stand in.
                 if (self.bm_stage_frozen == 0) {
                     self.bm_stage_frozen = self.party_stage;
-                    if (self.bm_bonus_every == 0) self.setBloodMoonBonus(12, 25);
+                    // Seed the bonus counter once per night, the way stock
+                    // InitParty does. Keep whatever cadence the Game already
+                    // pushed from the ladder; only fall back to the stock XML
+                    // defaults when nothing has set one yet.
+                    if (self.bm_bonus_every == 0) {
+                        self.setBloodMoonBonus(12, 25);
+                    } else {
+                        self.bm_bonus_count = self.bm_bonus_every / 2;
+                    }
                     // Start the nightly group walk at row 0 (stock SetPartyLevel
                     // resets groupIndex/spawnCount, then SetupGroup).
                     self.bm_group_index = 0;
@@ -765,9 +773,19 @@ pub const Director = struct {
     /// stock XML defaults. Seeding `bm_bonus_count` at half the cadence is
     /// stock `InitParty` (IL_0072-0080).
     pub fn setBloodMoonBonus(self: *Director, every: u32, scale: f32) void {
+        self.setBloodMoonBonusParams(every, scale);
+        self.bm_bonus_count = self.bm_bonus_every / 2;
+    }
+
+    /// Update the cadence and scale without touching the progress counter.
+    /// The Game re-pushes the resolved gamestage values every tick of an
+    /// active blood moon so a ladder loaded mid-night takes effect, and that
+    /// caller must not re-seed: `bm_bonus_count` advances once per horde
+    /// spawn, so a 20 Hz reset to `every / 2` held it below `every` and the
+    /// bonus drop never fired for any cadence above 2.
+    pub fn setBloodMoonBonusParams(self: *Director, every: u32, scale: f32) void {
         self.bm_bonus_every = @max(1, every);
         self.bm_bonus_scale = if (scale > 0) scale else 1.0;
-        self.bm_bonus_count = self.bm_bonus_every / 2;
     }
 
     /// Daytime scout entity group for the current party stage; empty when the
