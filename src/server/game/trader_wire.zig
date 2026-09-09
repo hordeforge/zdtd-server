@@ -36,6 +36,18 @@ pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) 
 
 pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
     const t = packages.parseTraderTrade(body) catch return;
+    // Same reach gate as the TraderData echo below: the client can only open
+    // the trade window by activating the NPC in use range, so a trade naming
+    // a trader across the map is not a legitimate one. Without this a peer
+    // could buy and sell against every trader on the map from spawn.
+    if (self.sim.slotOfNetId(t.trader_entity)) |ts| {
+        if (!self.sim.mask[ts].transform) return;
+        const tp = self.sim.transform[ts];
+        if (!inTradeReach(self, c, tp.x, tp.y, tp.z)) {
+            self.harness.counters.inc(.bounds_rejects);
+            return;
+        }
+    } else return;
     if (t.side == 1) {
         if (self.sim.slotOfNetId(t.trader_entity)) |ts| {
             const info_id = self.sim.trader_stock[ts].trader_info_id;

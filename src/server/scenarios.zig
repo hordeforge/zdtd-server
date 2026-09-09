@@ -13960,3 +13960,60 @@ test "scenario item action effects: only the firing player's own muzzle FX relay
     try std.testing.expectEqual(honest.len, trimmed.len);
     std.debug.print("PASS item action effects: sender-gated and trimmed to the stock body\n", .{});
 }
+
+test "scenario trade reach: a trader across the map cannot be traded with" {
+    // The trade body names the trader by entity id. systems.trade checked that
+    // the id resolved to a trader with stock, but never that the player was
+    // near it, so one peer could buy and sell against every trader on the map
+    // from spawn. The TraderData echo path (applyTraderDataCopyFrom) already
+    // gated on inTradeReach; the trade itself did not. Reach is the configured
+    // [sim] trader_use_range, not a literal here.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_reach");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_reach", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    const item_id: u16 = 2;
+    const coin_id = g.coinItemId();
+    if (coin_id == 0) return error.SkipZigTest;
+
+    // Trader far outside trade_use_range of the player.
+    const far = g.trade_use_range * 4;
+    const tid = g.sim.spawnTrader("npcTraderJen", g.sim.transform[ps].x + far, 70, g.sim.transform[ps].z, 5, 5000).?;
+    const ts = g.sim.slotOfNetId(tid).?;
+    g.sim.trader_stock[ts].entries[0] = .{ .item = item_id, .count = 10, .price = 1, .sell = 1, .markup = 0 };
+    g.sim.trader_stock[ts].n = 1;
+    g.sim.trader_stock[ts].wallet = 5000;
+    g.sim.wallet[ps].coins = 1000;
+
+    var tb: [16]u8 = undefined;
+    var fb: [64]u8 = undefined;
+    const trade = try packages.buildTraderTradeBody(&tb, tid, item_id, 1, 0);
+
+    const bounds_before = g.harness.counters.get(.bounds_rejects);
+    const stock_before = g.sim.trader_stock[ts].entries[0].count;
+    const coins_before = g.sim.wallet[ps].coins;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", trade));
+    try std.testing.expectEqual(bounds_before + 1, g.harness.counters.get(.bounds_rejects));
+    try std.testing.expectEqual(stock_before, g.sim.trader_stock[ts].entries[0].count);
+    try std.testing.expectEqual(coins_before, g.sim.wallet[ps].coins);
+
+    // Walk the player to the trader: the same body now trades.
+    g.sim.transform[ps].x = g.sim.transform[ts].x;
+    g.sim.transform[ps].y = g.sim.transform[ts].y;
+    g.sim.transform[ps].z = g.sim.transform[ts].z;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", trade));
+    try std.testing.expectEqual(stock_before - 1, g.sim.trader_stock[ts].entries[0].count);
+    try std.testing.expect(g.sim.wallet[ps].coins < coins_before);
+    std.debug.print("PASS trade reach: the trade needs the player standing at the trader\n", .{});
+}
