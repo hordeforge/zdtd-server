@@ -1815,7 +1815,13 @@ pub const World = struct {
 
     /// Corpse sweep: decrement dwell timers; destroy expired corpses. Returns
     /// the count written to `out`, which the caller broadcasts as EntityRemove.
-    pub fn sweepCorpses(self: *World, dt: f32, out: []NetId) usize {
+    /// `out_slots`, when given, receives the slot each reported corpse
+    /// occupied at the moment it was destroyed, parallel to `out`. The net
+    /// layer needs it to scope the EntityRemove to the peers that knew the
+    /// entity: after `destroy` the id no longer resolves to a slot, so the
+    /// caller cannot recover it. It must be at least as long as `out`.
+    pub fn sweepCorpses(self: *World, dt: f32, out: []NetId, out_slots: ?[]Slot) usize {
+        if (out_slots) |os| std.debug.assert(os.len >= out.len);
         var n: usize = 0;
         // O(live): only living slots can hold a corpse timer. destroy() of the
         // current slot is safe for the bitset iterator (the bit is already
@@ -1832,6 +1838,7 @@ pub const World = struct {
             self.health[s].corpse_seconds -= dt;
             if (self.health[s].corpse_seconds > 0) continue;
             out[n] = self.network_id[s].id;
+            if (out_slots) |os| os[n] = s;
             n += 1;
             self.destroy(s);
         }
@@ -1921,7 +1928,7 @@ test "ecs spawn player zombie damage" {
     try std.testing.expect(w.health[zs].hp <= 0);
     try std.testing.expect(w.health[zs].corpse_seconds > 0);
     var out: [2]NetId = undefined;
-    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out, null));
     try std.testing.expect(w.slotOfNetId(z) == null);
 }
 
@@ -2327,9 +2334,9 @@ test "corpse dwell keeps the body at hp 0, then the sweep removes it" {
     try std.testing.expect(w.alive[s]);
     // The sweep leaves the body until the dwell elapses, then destroys it.
     var out: [4]NetId = undefined;
-    try std.testing.expectEqual(@as(usize, 0), w.sweepCorpses(2, &out));
+    try std.testing.expectEqual(@as(usize, 0), w.sweepCorpses(2, &out, null));
     try std.testing.expect(w.alive[s]);
-    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(10, &out));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(10, &out, null));
     try std.testing.expectEqual(id, out[0]);
     try std.testing.expect(!w.alive[s]);
 }
@@ -2346,10 +2353,10 @@ test "sweepCorpses never destroys more than it reports" {
     // Buffer smaller than the expiring set: the overflow keeps its slot so the
     // caller never has to broadcast an EntityRemove it was not handed.
     var out: [2]NetId = undefined;
-    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out, null));
     try std.testing.expectEqual(@as(u32, 3), w.countKind(.zombie));
-    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out));
-    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out));
+    try std.testing.expectEqual(@as(usize, 2), w.sweepCorpses(1000, &out, null));
+    try std.testing.expectEqual(@as(usize, 1), w.sweepCorpses(1000, &out, null));
     try std.testing.expectEqual(@as(u32, 0), w.countKind(.zombie));
 }
 

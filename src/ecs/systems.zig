@@ -3461,7 +3461,12 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
 /// lifecycle instead (dawn clears the marks, empty parties destroy the
 /// stragglers). zdtd has no chunk-observer refcount, but the lifecycle half
 /// is the same: skip `is_horde` and let the horde passes decide.
-pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
+/// `out_slots`, when given, receives the slot each despawned mob occupied at
+/// the moment it was destroyed, parallel to `out_ids`. The net layer scopes
+/// the EntityRemove by it: after `destroy` the id no longer resolves, so the
+/// caller cannot recover the slot. Must be at least as long as `out_ids`.
+pub fn systemDespawnFar(w: *World, out_ids: []i32, out_slots: ?[]Slot) u8 {
+    if (out_slots) |os| std.debug.assert(os.len >= out_ids.len);
     const despawn_dist_sq = w.rules.ai.despawn_dist_sq;
     if (w.countKind(.zombie) == 0 and w.countKind(.animal) == 0) return 0;
     var snaps: [64]PlayerSnap = undefined;
@@ -3492,6 +3497,7 @@ pub fn systemDespawnFar(w: *World, out_ids: []i32) u8 {
         if (near) continue;
         if (w.mask[i].network_id) {
             out_ids[n] = w.network_id[i].id;
+            if (out_slots) |os| os[n] = i;
             n += 1;
         }
         w.destroy(i);
@@ -4189,7 +4195,7 @@ test "far animals despawn like zombies; near animals stay" {
     const hz = w.spawnZombie(400, 70, 4, 40).?;
     w.zombie_ai[w.slotOfNetId(hz).?].is_horde = true;
     var ids: [8]i32 = undefined;
-    const n = systemDespawnFar(&w, &ids);
+    const n = systemDespawnFar(&w, &ids, null);
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqual(far, ids[0]);
     try std.testing.expectEqual(@as(?u16, null), w.slotOfNetId(far));

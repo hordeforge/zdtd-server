@@ -14228,3 +14228,54 @@ test "scenario entity remove scope: a peer that never saw the bag is not told to
     try std.testing.expect(cap_unknown.findPkgId(rm_id) == null);
     std.debug.print("PASS entity remove scope: only peers that knew the entity are told\n", .{});
 }
+
+test "scenario despawn remove scope: the far-mob cull tells only the peers that saw it" {
+    // The despawn sweep destroys the mob before reporting it, so the id no
+    // longer resolves to a slot and the remove used to go to every peer. That
+    // is the high-frequency case: the stock client logs
+    // "NetPackageEntityRemove entity {0} missing" (ProcessPackage IL=24) for
+    // a remove it cannot resolve, so a busy server wrote a steady stream of
+    // error lines into every distant player's log. systemDespawnFar now
+    // reports the slot alongside the id, and step scopes the remove by it.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_dspscope");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_dspscope", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_known: ln_peer.Capture = .{};
+    var cap_unknown: ln_peer.Capture = .{};
+    const c_known = try g.attachJoinedClient(&cap_known);
+    const c_unknown = try g.attachJoinedClient(&cap_unknown);
+    g.clients[c_known.slot].entered = true;
+    g.clients[c_unknown.slot].entered = true;
+    const rm_id = packages.idOf("NetPackageEntityRemove").?;
+
+    // A zombie far from every player, so the cull takes it this tick.
+    const ps = g.sim.playerByPeer(c_known.slot).?;
+    const far = std.math.sqrt(g.sim.rules.ai.despawn_dist_sq) * 3;
+    const zid = g.sim.spawnZombie(g.sim.transform[ps].x + far, 70, g.sim.transform[ps].z, 100) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid).?;
+    // Only one peer was ever told about it (what replication does on entry).
+    g.clients[c_known.slot].known_entities.set(zs);
+    g.clients[c_unknown.slot].known_entities.unset(zs);
+
+    cap_known.clear();
+    cap_unknown.clear();
+    try g.step();
+
+    // The cull ran: the entity is gone.
+    try std.testing.expect(g.sim.slotOfNetId(zid) == null);
+    // Its remove reached the peer that knew it, and only that peer.
+    const got = cap_known.findPkgId(rm_id);
+    try std.testing.expect(got != null);
+    try std.testing.expectEqual(zid, std.mem.readInt(i32, got.?[0..4], .little));
+    try std.testing.expect(cap_unknown.findPkgId(rm_id) == null);
+    std.debug.print("PASS despawn remove scope: the cull's remove is tracked-player scoped\n", .{});
+}

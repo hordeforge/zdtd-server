@@ -261,11 +261,14 @@ pub fn step(self: *Game) !void {
         self.reapStaleLocks();
         {
             var corpses: [16]ecs.entity.NetId = undefined;
-            const nc = self.sim.sweepCorpses(dt, &corpses);
+            var corpse_slots: [16]ecs.Slot = undefined;
+            const nc = self.sim.sweepCorpses(dt, &corpses, &corpse_slots);
             var ci: usize = 0;
             while (ci < nc) : (ci += 1) {
                 const rm = packages.buildRemoveBody(&self.body_buf, corpses[ci]) catch continue;
-                self.broadcast("NetPackageEntityRemove", rm) catch continue;
+                // The sweep destroyed the entity, so the id no longer resolves;
+                // scope by the slot it reported (stock: trackedPlayers).
+                self.broadcastKnown("NetPackageEntityRemove", rm, corpse_slots[ci]) catch continue;
             }
         }
         self.tickTraderAreas();
@@ -329,14 +332,23 @@ pub fn step(self: *Game) !void {
             const kid = r.killed_ids[ki];
             if (kid <= 0) continue;
             const rm = try packages.buildRemoveBody(&self.body_buf, kid);
-            try self.broadcast("NetPackageEntityRemove", rm);
+            // A turret kill sets hp 0 and a corpse timer without destroying,
+            // so the id still resolves and the remove can be scoped to the
+            // peers that knew it. A slot that has already gone falls back to
+            // the broadcast rather than telling nobody.
+            if (self.sim.slotOfNetId(kid)) |ks| {
+                try self.broadcastKnown("NetPackageEntityRemove", rm, ks);
+            } else {
+                try self.broadcast("NetPackageEntityRemove", rm);
+            }
         }
         var di: u8 = 0;
         while (di < r.despawned_n) : (di += 1) {
             const did = r.despawned_ids[di];
             if (did <= 0) continue;
             const rm = try packages.buildRemoveBodyReason(&self.body_buf, did, .despawned);
-            try self.broadcast("NetPackageEntityRemove", rm);
+            // Destroyed by the sweep, so scope by the reported slot.
+            try self.broadcastKnown("NetPackageEntityRemove", rm, r.despawned_slots[di]);
         }
         if (r.buff_expired_n > 0) try self.broadcastBuffExpiries(&r);
         var li: u8 = 0;

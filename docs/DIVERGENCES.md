@@ -352,10 +352,19 @@ client, and `NetPackageEntityRemove::ProcessPackage` (IL=24) logs
 something it never spawned. So a global remove writes an error line into every
 distant player's log on every despawn. `broadcastKnown` (2026-09-09) sends
 only to peers whose `known_entities` covers the slot, which is zdtd's
-`trackedPlayers`. It is used by the distraction-bag despawn, the one remove
-site that still holds a live slot; the kill and corpse sweeps hand back net
-ids after the entity is destroyed, so their slot is already gone and they stay
-global for now. Closing those needs the reap paths to report slots, not ids.
+`trackedPlayers`. All four sim remove sites now use it:
+
+- the distraction-bag despawn, which still holds a live slot when it sends;
+- the turret kill, which sets hp 0 and a corpse timer without destroying, so
+  the id still resolves (it falls back to the broadcast if the slot has gone);
+- the corpse sweep and the far-mob cull, which destroy *before* reporting.
+  Those two now hand back the slot alongside the id (`sweepCorpses` and
+  `systemDespawnFar` take an optional parallel `out_slots`), because after
+  `destroy` the id no longer resolves and the caller cannot recover it.
+
+The cull was the one that mattered most: it fires continuously on a populated
+map, so every distant player's log was taking a steady stream of those error
+lines.
 
 **The storage TE went the other way, and was fixed 2026-09-09.**
 `NetPackageTileEntity::ProcessPackage` (IL=103,
