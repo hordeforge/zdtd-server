@@ -49,6 +49,12 @@ pub const Result = struct {
     water_max: f32 = 100,
     hp: f32 = 0,
     max_hp: f32 = 100,
+    /// Net id of a loot bag this op emptied and destroyed (-1 = none). The
+    /// Game clears the owner's backpack marker on it: the ECS layer has no
+    /// Client, and a death bag drained slot-by-slot through `take` would
+    /// otherwise leave `has_backpack` latched, which suppresses every later
+    /// death bag for that player and strands a map marker.
+    emptied_bag: i32 = -1,
 };
 
 /// Offline stack caps (no ItemTable). Delegates to `components.maxStackOffline`.
@@ -413,8 +419,11 @@ pub fn closeContainer(w: *World, peer: usize) void {
     w.inventory[ps].open_container = -1;
 }
 
-/// Take from open container slot into player inventory.
-pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool {
+/// Take from open container slot into player inventory. `out_emptied`, when
+/// given, receives the net id of a loot bag this take emptied and destroyed
+/// (left untouched otherwise): the Game clears the owner's backpack marker on
+/// it, since this layer has no Client.
+pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16, out_emptied: ?*i32) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
     const cid = w.inventory[ps].open_container;
@@ -438,6 +447,7 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16) bool 
         }
     }
     if (empty and w.mask[cs].loot_bag) {
+        if (out_emptied) |oe| oe.* = w.network_id[cs].id;
         w.inventory[ps].open_container = -1;
         w.destroy(cs);
     }
@@ -547,7 +557,11 @@ pub fn applyTransactionEx(
             closeContainer(w, peer);
             break :blk .{ .ok = true };
         },
-        .take => .{ .ok = takeFromContainer(w, peer, a, qty) },
+        .take => blk: {
+            var emptied: i32 = -1;
+            const ok = takeFromContainer(w, peer, a, qty, &emptied);
+            break :blk .{ .ok = ok, .emptied_bag = emptied };
+        },
         .put => .{ .ok = putIntoContainer(w, peer, a, qty) },
         .equip => .{ .ok = equip(w, peer, a, b) },
         .place => blk: {
@@ -644,7 +658,7 @@ test "move and drop and use" {
         if (s.item_id == 2) food_after_drop += s.count;
     }
     try std.testing.expect(openContainer(&w, 0, r.dropped_entity));
-    try std.testing.expect(takeFromContainer(&w, 0, 0, 0));
+    try std.testing.expect(takeFromContainer(&w, 0, 0, 0, null));
     // Take-back restores the dropped unit into bag storage.
     var food_after_take: u16 = 0;
     for (w.inventory[ps].slots[0..c.inv_equip_start]) |s| {
@@ -697,7 +711,7 @@ test "container take and put preserve quality and meta" {
     const cs = w.slotOfNetId(bag).?;
     w.inventory[cs].slots[1] = .{ .item_id = 11, .count = 1, .quality = 5, .meta = 42 };
     try std.testing.expect(openContainer(&w, 0, bag));
-    try std.testing.expect(takeFromContainer(&w, 0, 1, 1));
+    try std.testing.expect(takeFromContainer(&w, 0, 1, 1, null));
     var found: ?c.InvSlot = null;
     for (w.inventory[ps].slots[0..c.inv_equip_start]) |s| {
         if (s.item_id == 11) found = s;

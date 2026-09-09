@@ -780,6 +780,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // ItemActionEat: resolve food/water/hp from items.xml via eatProps.
             r = invsys.applyTransactionEx(&self.sim, c.slot, op, tx.a, tx.b, tx.qty, tx.entity_id, eatProps, self);
         }
+        // Draining a death bag slot-by-slot destroys it the same way
+        // collecting the whole bag does, so the backpack marker must clear on
+        // both. Left latched, `has_backpack` suppresses every later death bag
+        // for this player (replicate_health gates on it) and strands a map
+        // marker on a bag that no longer exists.
+        if (r.ok and r.emptied_bag > 0 and c.has_backpack) {
+            c.has_backpack = false;
+            self.broadcastPlayerBackpack(c) catch {};
+        }
         if (r.ok and r.place_block != 0) {
             // Land claim is authoritative on every apply path (ADR 0004); the
             // InvTx place route must not be a way around it. Refund the unit the

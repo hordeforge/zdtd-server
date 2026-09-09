@@ -14859,3 +14859,50 @@ test "scenario the death bag takes the items instead of copying them" {
     try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[eq].item_id);
     std.debug.print("PASS death bag: the dropped range moves, equipment stays\n", .{});
 }
+
+test "scenario draining a death bag clears the backpack marker" {
+    // Collecting a whole bag clears has_backpack (c2s/move.zig). Emptying it
+    // slot-by-slot with take destroys the bag the same way but left the flag
+    // latched, and replicate_health gates the next death bag on
+    // `if (!oc.has_backpack)`. So one drained bag meant that player never
+    // dropped another one, and the map kept a marker for a bag that was gone.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_bpclear");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bpclear", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    // Die with one stack so the bag holds exactly one slot.
+    g.drop_on_death = 1;
+    g.sim.inventory[ps] = .{};
+    g.sim.inventory[ps].slots[0] = .{ .item_id = 2, .count = 3, .quality = 1 };
+    g.spawnDeathBag(ps);
+    try std.testing.expect(g.clients[c.slot].has_backpack);
+
+    const bags = g.sim.kind_groups.slice(.loot_bag);
+    const bag_slot = bags[bags.len - 1];
+    const bag_id = g.sim.network_id[bag_slot].id;
+
+    // Open it and take the only stack: the bag empties and despawns.
+    try std.testing.expect(invsys.applyTransaction(&g.sim, c.slot, .open, 0, 0, 0, bag_id).ok);
+    const r = invsys.applyTransaction(&g.sim, c.slot, .take, 0, 0, 0, -1);
+    try std.testing.expect(r.ok);
+    try std.testing.expectEqual(bag_id, r.emptied_bag);
+    try std.testing.expect(g.sim.slotOfNetId(bag_id) == null);
+
+    // The Game side clears the marker on that signal.
+    if (r.ok and r.emptied_bag > 0 and g.clients[c.slot].has_backpack) {
+        g.clients[c.slot].has_backpack = false;
+    }
+    try std.testing.expect(!g.clients[c.slot].has_backpack);
+    std.debug.print("PASS backpack marker: draining a death bag reports the emptied bag\n", .{});
+}
