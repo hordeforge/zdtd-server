@@ -1174,12 +1174,57 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     }
 }
 
+/// Bytes an `entities.zen` basket record occupies: the type byte, the slot
+/// count, then one v12-shaped slot per basket slot. The stride is the same
+/// `zpvSlotStride(12)` the player record uses, so a slot carries its mods and
+/// seed here too rather than a second, narrower slot encoding.
+const basket_record_max: usize =
+    2 + ecs.components.max_basket_slots * zpvSlotStride(12);
+
+/// Record type for a vehicle's basket, written directly after the vehicle it
+/// belongs to. A new record type rather than a magic bump: a world saved
+/// before baskets persisted still loads, it just has no type-4 records.
+const zen_rec_basket: u8 = 4;
+
+/// Write one inventory slot in the v12 shape. Shared so a second store
+/// persisting InvSlots cannot drift into its own narrower encoding.
+fn writeSaveSlot(w: *wire_binary.Writer, s: ecs.components.InvSlot) !void {
+    try w.writeU16(s.item_id);
+    try w.writeU16(s.count);
+    try w.writeByte(s.quality);
+    try w.writeU16(s.meta);
+    try w.writeU32(@bitCast(s.use_times));
+    try w.writeU16(s.seed);
+    for (s.mods) |m| try w.writeU16(m);
+}
+
+/// Read one v12-shaped inventory slot. Mirrors `writeSaveSlot` field for
+/// field; `mod_n` is derived from the ids, which is what the player record
+/// does with the same layout.
+fn readSaveSlot(r: *wire_binary.Reader) !ecs.components.InvSlot {
+    var s: ecs.components.InvSlot = .{};
+    s.item_id = try r.readU16();
+    s.count = try r.readU16();
+    s.quality = try r.readByte();
+    s.meta = try r.readU16();
+    s.use_times = @bitCast(try r.readU32());
+    s.seed = try r.readU16();
+    for (&s.mods, 0..) |*m, mi| {
+        m.* = try r.readU16();
+        if (m.* != 0) s.mod_n = @intCast(mi + 1);
+    }
+    return s;
+}
+
 pub fn saveEntities(self: *Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
-    // Vehicle/turret records (32 B each) plus the power-wire section
-    // (24 B per saved edge, 512 max).
-    var buf: [ecs.max_entities * 32 + ecs.electric.max_wires * 2 * 24 + 16]u8 = undefined;
+    // Vehicle/turret records (32 B each), one optional basket record per
+    // vehicle, plus the power-wire section (24 B per saved edge, 512 max).
+    var buf: [
+        ecs.max_entities * (32 + basket_record_max) +
+            ecs.electric.max_wires * 2 * 24 + 16
+    ]u8 = undefined;
     var w = wire_binary.Writer{ .buf = &buf };
     // Overflow must propagate (callers log persistence errors): a silent
     // abort here would drop the vehicle/turret save without any signal.
@@ -1201,6 +1246,15 @@ pub fn saveEntities(self: *Game) !void {
             try w.writeByte(v.seat_count);
             try w.writeF32(v.max_speed);
             count += 1;
+            // The basket is server-held storage: the C2S bag write reach-gates
+            // it and clamps its stacks like any other container, so dropping
+            // it on restart destroys items the server accepted.
+            if (v.basket_n > 0) {
+                try w.writeByte(zen_rec_basket);
+                try w.writeByte(v.basket_n);
+                for (v.basket[0..v.basket_n]) |s| try writeSaveSlot(&w, s);
+                count += 1;
+            }
         } else if (self.sim.kind[i] == .turret) {
             const t = self.sim.turret[i];
             try w.writeByte(2);
@@ -1280,9 +1334,14 @@ pub fn loadEntities(self: *Game) !void {
     if (data.len < 6 or !std.mem.eql(u8, data[0..4], "ZENT")) return error.BadMagic;
     const count = std.mem.readInt(u16, data[4..6], .little);
     var r = wire_binary.Reader{ .data = data, .pos = 6 };
+    // A basket record applies to the vehicle written just before it, so the
+    // loader carries that slot forward. Null when the last record was not a
+    // vehicle, or when the vehicle failed to spawn.
+    var last_vehicle: ?ecs.Slot = null;
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const rec_type = r.readByte() catch return error.Truncated;
+        if (rec_type != zen_rec_basket) last_vehicle = null;
         switch (rec_type) {
             1 => {
                 // VehicleKind is an exhaustive enum(u8), so @enumFromInt panics
@@ -1307,6 +1366,7 @@ pub fn loadEntities(self: *Game) !void {
                     if (self.sim.slotOfNetId(nid)) |vs| {
                         self.sim.vehicle[vs].fuel = fuel;
                         self.sim.transform[vs].yaw = yaw;
+                        last_vehicle = vs;
                     }
                 }
             },
@@ -1342,6 +1402,19 @@ pub fn loadEntities(self: *Game) !void {
                     };
                     self.sim.power.addPendingWire(wp);
                 }
+            },
+            zen_rec_basket => {
+                const n = r.readByte() catch return error.Truncated;
+                if (n > ecs.components.max_basket_slots) return error.BadRecord;
+                // Read every slot the record claims even when there is no
+                // vehicle to put them in: leaving bytes in the stream would
+                // shift every record after this one.
+                var bi: usize = 0;
+                while (bi < n) : (bi += 1) {
+                    const s = readSaveSlot(&r) catch return error.Truncated;
+                    if (last_vehicle) |vs| self.sim.vehicle[vs].basket[bi] = s;
+                }
+                if (last_vehicle) |vs| self.sim.vehicle[vs].basket_n = n;
             },
             else => return error.BadRecord,
         }

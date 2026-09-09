@@ -1098,6 +1098,15 @@ pub const Game = struct {
             self.clampKnownStacks(ws.tools[0..]);
             self.clampKnownStacks(ws.output[0..]);
         }
+        // Vehicle baskets restore from entities.zen, which also loads before
+        // loadAssets, so they need the same pass for the same reason.
+        var vi: usize = 0;
+        while (vi < ecs.max_entities) : (vi += 1) {
+            if (!self.sim.alive[vi] or self.sim.kind[vi] != .vehicle) continue;
+            const v = &self.sim.vehicle[vi];
+            const n = @min(@as(usize, v.basket_n), v.basket.len);
+            self.clampKnownStacks(v.basket[0..n]);
+        }
     }
 
     /// Clamp only slots whose item the catalog resolves. Unlike

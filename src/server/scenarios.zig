@@ -15108,3 +15108,78 @@ test "scenario every saved inventory slot field survives a restart" {
     }
     std.debug.print("PASS slot fields: all v12 slot fields survive a restart, first slot and last\n", .{});
 }
+
+test "scenario a vehicle basket survives a restart" {
+    // The basket is server-held storage: the C2S bag write reach-gates it and
+    // clamps its stacks like a container. It reached no save path at all, so
+    // everything stored in a vehicle was destroyed by a restart while the
+    // vehicle itself came back. entities.zen carries it as its own record
+    // type, so a world saved before this still loads.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_basketpersist");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const bike_x: f32 = 300;
+    const bike_z: f32 = 300;
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_basketpersist", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        const vid = g.sim.spawnVehicle(.bicycle, bike_x, 70, bike_z) orelse
+            return error.TestUnexpectedResult;
+        const vs = g.sim.slotOfNetId(vid) orelse return error.TestUnexpectedResult;
+        // A modded, part-used item: the basket record carries the same v12
+        // slot shape the player record does, not a narrower one.
+        g.sim.vehicle[vs].basket[0] = .{
+            .item_id = 7,
+            .count = 4,
+            .quality = 3,
+            .meta = 91,
+            .use_times = 6.5,
+            .seed = 55,
+            .mods = .{ 31, 32, 0, 0 },
+            .mod_n = 2,
+        };
+        g.sim.vehicle[vs].basket[1] = .{ .item_id = 8, .count = 1, .quality = 1 };
+        g.sim.vehicle[vs].basket_n = 2;
+        try persist.saveEntities(g);
+    }
+
+    {
+        const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_basketpersist", 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        try persist.loadEntities(g2);
+        // Find our bike by position: the default world seeds its own demo
+        // vehicles, so the entity table holds more than one.
+        var found: ?ecs.Slot = null;
+        var i: usize = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!g2.sim.alive[i] or g2.sim.kind[i] != .vehicle) continue;
+            if (g2.sim.transform[i].x == bike_x and g2.sim.transform[i].z == bike_z) {
+                found = @intCast(i);
+                break;
+            }
+        }
+        const vs = found orelse return error.TestUnexpectedResult;
+        const v = g2.sim.vehicle[vs];
+        try std.testing.expectEqual(@as(u8, 2), v.basket_n);
+        try std.testing.expectEqual(@as(u16, 7), v.basket[0].item_id);
+        try std.testing.expectEqual(@as(u16, 4), v.basket[0].count);
+        try std.testing.expectEqual(@as(u8, 3), v.basket[0].quality);
+        try std.testing.expectEqual(@as(u16, 91), v.basket[0].meta);
+        try std.testing.expectEqual(@as(f32, 6.5), v.basket[0].use_times);
+        try std.testing.expectEqual(@as(u16, 55), v.basket[0].seed);
+        try std.testing.expectEqual([4]u16{ 31, 32, 0, 0 }, v.basket[0].mods);
+        try std.testing.expectEqual(@as(u8, 2), v.basket[0].mod_n);
+        try std.testing.expectEqual(@as(u16, 8), v.basket[1].item_id);
+    }
+    std.debug.print("PASS basket persist: stored items and their mods survive a restart\n", .{});
+}

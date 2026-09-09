@@ -5910,7 +5910,7 @@ not stock:
 | Vehicle kinds + enter/drive | PARTIAL (arcade physics) |
 | Stock vehicle definitions XML | WORKS (2026-08-21 reconciliation: vehicles.xml loads into per-kind Defs (velocity_max, motor_torque, max_hp, fuel_km_per_l, seat_count) and the spawn path uses them via byKind (init_world.zig) with rules-default fallbacks) |
 | Multi-seat | HAVE (seat0..N from vehicles.xml, driver is seat 0) |
-| Storage / fuel items | PARTIAL (fuel float + the basket C2S apply ships 2026-08-27: NetPackageBag is parsed (entityId i32 + blobLen u16 + Bag.Write v1 blob) and applied to the vehicle's basket array, item ids validated by the reverse resolver, with an S2C echo to the other clients - the stock S2C broadcast sender is unpinned (research dedicated-misc-systems.md vehicle storage pin v2); basket contents do not persist across restart yet, riding the vehicle spawn row) |
+| Storage / fuel items | PARTIAL (fuel float + the basket C2S apply ships 2026-08-27: NetPackageBag is parsed (entityId i32 + blobLen u16 + Bag.Write v1 blob) and applied to the vehicle's basket array, item ids validated by the reverse resolver, with an S2C echo to the other clients - the stock S2C broadcast sender is unpinned (research dedicated-misc-systems.md vehicle storage pin v2); basket contents persist across restart since 2026-09-10 as their own entities.zen record type, carrying the full v12 slot shape (quality, meta, use_times, seed, mod ids) and clamped on load with the other saved stores) |
 | Vehicle collision / terrain stick | PARTIAL (server gravity + terrain-top clamp; no entity/block-side collision) |
 | Placeable vehicle as entity spawn stock | PARTIAL |
 | Power grid BFS | HAVE (flood from generators, demand>gen drop) |
