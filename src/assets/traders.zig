@@ -61,6 +61,15 @@ pub const RolledItem = struct {
     quality: u8 = 1,
 };
 
+/// Price multipliers used when neither a `<trader_info>` override nor the
+/// `<traders>` root row supplies one, which happens only with no game-dir
+/// (the offline builtin catalog). Stock traders.xml ships both attributes, so
+/// a real install always overrides these before they are read.
+/// `default_buy_markup` 1.0 means "pay the item's economic value"; the sell
+/// markdown is the stock root value.
+pub const default_buy_markup: f32 = 1.0;
+pub const default_sell_markdown: f32 = 0.02;
+
 /// traders.xml `<trader_info id="N">` block: per-trader hours, vending /
 /// player-owned flags and the `<trader_items>` refs that make that trader's
 /// stock (stock maps entity class → trader_id via npc.xml).

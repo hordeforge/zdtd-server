@@ -168,16 +168,23 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
     const rn = rollStockRefs(self, trader_net_id, &rolled);
     if (rn == 0) return;
     const info_id = self.sim.trader_stock[s].trader_info_id;
-    var buy_markup: f32 = 1.0;
-    var sell_markup: f32 = 0.02;
+    // Per-trader override first, then the traders.xml root row, then the
+    // built-in fallback. Resolved through an optional rather than by
+    // comparing against the fallback value: a `<trader_info>` that declares
+    // an override equal to the fallback used to be mistaken for "unset" and
+    // silently replaced by the root value.
+    var buy_ov: ?f32 = null;
+    var sell_ov: ?f32 = null;
     if (info_id != 0) {
         if (tt.traderInfo(info_id)) |ti| {
-            if (ti.override_buy_markup > 0) buy_markup = ti.override_buy_markup;
-            if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
+            if (ti.override_buy_markup > 0) buy_ov = ti.override_buy_markup;
+            if (ti.override_sell_markup > 0) sell_ov = ti.override_sell_markup;
         }
     }
-    if (buy_markup == 1.0 and tt.buy_markup > 0) buy_markup = tt.buy_markup;
-    if (sell_markup == 0.02 and tt.sell_markdown > 0) sell_markup = tt.sell_markdown;
+    const buy_markup: f32 = buy_ov orelse
+        (if (tt.buy_markup > 0) tt.buy_markup else assets_traders.default_buy_markup);
+    const sell_markup: f32 = sell_ov orelse
+        (if (tt.sell_markdown > 0) tt.sell_markdown else assets_traders.default_sell_markdown);
     // Stock GetBuyPrice/GetSellPrice apply the traders.xml quality_mod lerp
     // (QL1 -> min, QL6 -> max) to quality items (asm.il 1830625-1830948).
     const qmin = tt.quality_min_mod;

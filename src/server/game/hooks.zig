@@ -11,6 +11,7 @@ const invsys = @import("../../ecs/inventory.zig");
 const rng_util = @import("../../util/rng.zig");
 const prefabs_mod = @import("../../world/prefabs.zig");
 const items = @import("../../assets/items.zig");
+const assets_traders = @import("../../assets/traders.zig");
 const assignids = @import("../../assets/assignids_comptime.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
@@ -635,15 +636,20 @@ pub fn traderSellPrice(ctx: ?*anyopaque, item_id: u16, trader_slot: u16) u32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const d = g.items.byId(item_id) orelse return 0;
     if (d.econ == 0) return 0;
-    var sell_markup: f32 = 0.02;
+    // Same resolution order as fillTraderFromXml: per-trader override, then
+    // the traders.xml root row, then the fallback. Optional, not a sentinel
+    // compare, so an override equal to the fallback survives.
+    var sell_markup: f32 = assets_traders.default_sell_markdown;
     if (g.sim.mask[trader_slot].trader_stock) {
+        var sell_ov: ?f32 = null;
         const info_id = g.sim.trader_stock[trader_slot].trader_info_id;
         if (info_id != 0) {
             if (g.traders.traderInfo(info_id)) |ti| {
-                if (ti.override_sell_markup > 0) sell_markup = ti.override_sell_markup;
+                if (ti.override_sell_markup > 0) sell_ov = ti.override_sell_markup;
             }
         }
-        if (sell_markup == 0.02 and g.traders.sell_markdown > 0) sell_markup = g.traders.sell_markdown;
+        sell_markup = sell_ov orelse
+            (if (g.traders.sell_markdown > 0) g.traders.sell_markdown else assets_traders.default_sell_markdown);
     }
     // EconomicBundleSize (RE loot-economy.md §5 GetSellPrice): the sell base
     // divides by the bundle; the caller multiplies unit × qty.

@@ -14279,3 +14279,58 @@ test "scenario despawn remove scope: the far-mob cull tells only the peers that 
     try std.testing.expect(cap_unknown.findPkgId(rm_id) == null);
     std.debug.print("PASS despawn remove scope: the cull's remove is tracked-player scoped\n", .{});
 }
+
+test "scenario trader override equal to the fallback is not mistaken for unset" {
+    // The buy/sell multipliers resolve per-trader override, then the
+    // traders.xml root row, then a fallback. The resolution used to compare
+    // against the fallback value to decide whether an override was present,
+    // so a <trader_info> declaring override_sell_markup="0.02" (the fallback)
+    // was read as unset and silently replaced by the root sell_markdown.
+    // Same hazard for override_buy_markup="1.0".
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_markup");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_markup", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    _ = c;
+
+    // An item worth enough that the two candidate markups give different
+    // prices: 1000 * 0.02 = 20 against 1000 * 0.5 = 500.
+    const idefs = [_]assets_items.ItemDef{
+        .{ .id = 9, .name = "testRelic", .econ = 1000, .econ_sell_scale = 1.0, .econ_bundle_size = 1 },
+    };
+    g.items.defs = idefs[0..];
+
+    // The trader declares the fallback value explicitly; the root row says
+    // something very different. The trader's own value must win.
+    const infos = [_]assets_traders.TraderInfo{
+        .{ .id = 7, .override_sell_markup = assets_traders.default_sell_markdown },
+    };
+    g.traders.trader_infos = &infos;
+    g.traders.sell_markdown = 0.5;
+
+    const tid = g.sim.spawnTrader("npcTraderJen", 10, 70, 10, 7, 5000).?;
+    const ts = g.sim.slotOfNetId(tid).?;
+
+    const price = g.sim.sell_price_fn.?(g.sim.sell_price_ctx, 9, @intCast(ts));
+    // 1000 * 1.0 * 0.02 / 1, floored. f32 0.02 widens to just under 0.02, so
+    // the stock floor lands on 19 rather than 20; the point is that it is the
+    // override's magnitude and not the root row's 500.
+    try std.testing.expectEqual(@as(u32, 19), price);
+
+    // A trader with no override still falls through to the root row.
+    const infos2 = [_]assets_traders.TraderInfo{.{ .id = 8 }};
+    g.traders.trader_infos = &infos2;
+    const tid2 = g.sim.spawnTrader("npcTraderBob", 20, 70, 20, 8, 5000).?;
+    const ts2 = g.sim.slotOfNetId(tid2).?;
+    try std.testing.expectEqual(@as(u32, 500), g.sim.sell_price_fn.?(g.sim.sell_price_ctx, 9, @intCast(ts2)));
+    std.debug.print("PASS trader markup: an override equal to the fallback survives resolution\n", .{});
+}
