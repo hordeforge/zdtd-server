@@ -81,8 +81,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (body.len < 4) return true;
         const entity_id = std.mem.readInt(i32, body[0..4], .little);
         // Bounds rule 20: the id must name a real player entity, or a spoofed
-        // reload would fan out to every connected peer for free.
-        if (entity_id == 0 or self.sim.slotOfNetId(entity_id) == null) return true;
+        // reload would fan out to every connected peer for free. The body
+        // describes the sender's own weapon, so a foreign id is a claim on
+        // another player's animation, not a relay the server owes.
+        if (entity_id == 0 or entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        if (self.sim.slotOfNetId(entity_id) == null) return true;
         try self.broadcastExcept("NetPackageItemReload", body, c.slot);
         return true;
     }
@@ -578,9 +584,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 st.melt_len = ws.melt_n;
                 st.is_burning = ws.is_burning;
                 st.burn_time_left = ws.burn_time_left;
-                // Fuel-module presence is block-derived (not on the wire):
-                // the craft queue waits for burning only on fuel stations.
+                // Fuel-/material-module presence is block-derived (not on the wire):
+                // the craft queue waits for burning only on fuel stations;
+                // material_input gates HandleMaterialInput (forge melt).
                 st.has_fuel_module = self.blocks.hasFuelModule(@intCast(ws.block_id));
+                st.has_material_input = self.blocks.hasMaterialInput(@intCast(ws.block_id));
                 st.is_player_placed = ws.is_player_placed;
                 st.block_id = ws.block_id;
                 st.geometry_known = true;
@@ -740,6 +748,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const ledger_before = self.sim.inv_ledger.total;
         if (tx.op == @intFromEnum(invsys.Op.craft)) {
             r = .{ .ok = self.tryCraft(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
+        } else if (tx.op == @intFromEnum(invsys.Op.scrap)) {
+            r = .{ .ok = self.tryScrap(c.slot, tx.a, if (tx.qty == 0) 1 else tx.qty) };
         } else {
             const op: invsys.Op = if (tx.op <= @intFromEnum(invsys.Op.equip))
                 @enumFromInt(tx.op)

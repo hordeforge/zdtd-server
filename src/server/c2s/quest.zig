@@ -85,17 +85,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (with == c.entity_id) {
                 try self.sendGame(peer, "NetPackageSharedQuest", body);
             } else {
-                // Forward to target peer if present; otherwise broadcast (party).
-                var sent = false;
+                // Forward to the named peer only. GameManager.QuestShareServer
+                // (IL=37, il/full-v3.2.0/_global/GameManager.il.txt:9081) sends
+                // with _attachedToEntityId = sharedWithEntityID, so exactly one
+                // client receives it and an absent target receives nothing.
+                // The old fallback broadcast the offer to every peer, which let
+                // one client push a quest offer to the whole server by naming
+                // an id nobody holds.
                 for (&self.clients) |*cl| {
                     if (!cl.joined or cl.entity_id != with) continue;
-                    if (cl.peer) |tp| {
-                        try self.sendGame(tp, "NetPackageSharedQuest", body);
-                        sent = true;
-                    }
+                    if (cl.peer) |tp| try self.sendGame(tp, "NetPackageSharedQuest", body);
                     break;
                 }
-                if (!sent) try self.broadcast("NetPackageSharedQuest", body);
             }
         } else if (head.event == .remove_quest) {
             // Prefer stock Quest.QuestCode; fall back to catalog def_id for old clients.
@@ -112,7 +113,19 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
             try self.sendGame(peer, "NetPackageSharedQuest", body);
         } else {
-            try self.broadcast("NetPackageSharedQuest", body);
+            // add/remove_shared_member (events 2 and 3). ProcessPackage IL=371
+            // (il/netpackages-v3.2.0/NetPackageSharedQuest_il.txt:119) routes
+            // both back to sharedByEntityID alone (_attachedToEntityId =
+            // ldloc.1 at IL_028A), not to every peer, and only when that
+            // player holds a Party. Broadcasting them let one client push a
+            // party-membership event at the whole server.
+            const by = head.shared_by_entity_id;
+            if (by != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
+            if (self.parties.partyByMember(by) == null) return true;
+            try self.sendGame(peer, "NetPackageSharedQuest", body);
         }
         return true;
     }

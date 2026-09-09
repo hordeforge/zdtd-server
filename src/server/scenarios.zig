@@ -13748,3 +13748,132 @@ test "scenario wire tool: a claimed foreign entity id is dropped, not relayed" {
     try std.testing.expect(cap_b.findPkgId(tool_id) == null);
     std.debug.print("PASS wire tool: sender-gated, op-gated, and length-checked before relay\n", .{});
 }
+
+test "scenario item reload: the relay names the sender's own weapon" {
+    // The body is a bare i32 entity id, and the relay only checked that it
+    // named some live entity, so a client could make every other peer play
+    // another player's reload animation. GameManager.ItemReloadServer (IL=32,
+    // il/full-v3.2.0/_global/GameManager.il.txt:8283) rebroadcasts with
+    // _allButAttachedToEntityId = entityId, so stock excludes the *named*
+    // entity's client. Those two agree only when the id is the sender's,
+    // which is what the gate now requires.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_reload");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_reload", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const rl_id = packages.idOf("NetPackageItemReload").?;
+
+    var body: [4]u8 = undefined;
+    var fb: [64]u8 = undefined;
+
+    // Own id: the other peer sees the reload, the sender gets no echo.
+    cap_a.clear();
+    cap_b.clear();
+    std.mem.writeInt(i32, &body, ca.entity_id, .little);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemReload", &body));
+    const relayed = cap_b.findPkgId(rl_id);
+    try std.testing.expect(relayed != null);
+    try std.testing.expectEqual(ca.entity_id, std.mem.readInt(i32, relayed.?[0..4], .little));
+    try std.testing.expect(cap_a.findPkgId(rl_id) == null);
+
+    // Another live player's id: refused, and nobody sees it.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    cap_a.clear();
+    cap_b.clear();
+    std.mem.writeInt(i32, &body, cb.entity_id, .little);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemReload", &body));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(cap_b.findPkgId(rl_id) == null);
+    try std.testing.expect(cap_a.findPkgId(rl_id) == null);
+    std.debug.print("PASS item reload: only the sender's own reload is relayed\n", .{});
+}
+
+test "scenario shared quest member events reach only the sharer, and only in a party" {
+    // NetPackageSharedQuest::ProcessPackage (IL=371,
+    // il/netpackages-v3.2.0/NetPackageSharedQuest_il.txt:119) routes
+    // add/remove_shared_member (events 2 and 3) back to sharedByEntityID
+    // alone (_attachedToEntityId = ldloc.1 at IL_028A), and only when that
+    // player holds a Party. zdtd broadcast both to every peer, so one client
+    // could push a party-membership event at the whole server.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    var cap_c: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    _ = try g.attachJoinedClient(&cap_c);
+    const sq_id = packages.idOf("NetPackageSharedQuest").?;
+    var fbuf: [128]u8 = undefined;
+
+    const Member = struct {
+        fn body(buf: []u8, by: i32, event: u8, with: i32) ![]u8 {
+            var w = binary.Writer{ .buf = buf };
+            try w.writeI32(by);
+            try w.writeByte(event);
+            try w.writeI32(0); // questCode
+            try w.writeI32(with);
+            return w.written();
+        }
+    };
+    var mb: [32]u8 = undefined;
+
+    // No party yet: stock's Party check fails, so nothing is sent at all.
+    cap_a.clear();
+    cap_b.clear();
+    cap_c.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, ca.entity_id, 2, cb.entity_id)));
+    try std.testing.expect(cap_a.findPkgId(sq_id) == null);
+    try std.testing.expect(cap_b.findPkgId(sq_id) == null);
+    try std.testing.expect(cap_c.findPkgId(sq_id) == null);
+
+    // A parties with B. Now A's own member event comes back to A alone.
+    var pbody: [32]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
+    cap_a.clear();
+    cap_b.clear();
+    cap_c.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, ca.entity_id, 2, cb.entity_id)));
+    const back = cap_a.findPkgId(sq_id) orelse return error.TestUnexpectedResult;
+    const head = try packages.stock_quest.parseSharedQuestHead(back);
+    try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.add_shared_member, head.event);
+    try std.testing.expectEqual(ca.entity_id, head.shared_by_entity_id);
+    // The party member and the bystander both see nothing: stock addresses
+    // the sharer only.
+    try std.testing.expect(cap_b.findPkgId(sq_id) == null);
+    try std.testing.expect(cap_c.findPkgId(sq_id) == null);
+
+    // Claiming to be another player is refused outright.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    cap_a.clear();
+    cap_b.clear();
+    cap_c.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, cb.entity_id, 3, ca.entity_id)));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(cap_a.findPkgId(sq_id) == null);
+    try std.testing.expect(cap_b.findPkgId(sq_id) == null);
+    try std.testing.expect(cap_c.findPkgId(sq_id) == null);
+    std.debug.print("PASS shared quest members: addressed to the sharer, party-gated\n", .{});
+}

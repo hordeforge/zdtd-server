@@ -207,6 +207,37 @@ section of `NetPackagePlayerInventory`, which goes through
 so the standalone package consumed a bool that was really the next slot's
 version byte.
 
+## 1a5. Relay audience audit (2026-09-09), four gaps closed
+
+Separate question from the body shapes above: not *what* is forwarded but *to
+whom*, and on whose authority. Every `broadcast` / `broadcastExcept` /
+`relayBodyExcept` call in `server/c2s/` was checked against its stock
+`ProcessPackage` fan-out. Four diverged; all four are fixed.
+
+- **`NetPackageWireToolActions`** was relayed after only a rate check.
+  ProcessPackage (IL=254) opens with `ValidEntityIdForSender(entityID, false)`
+  and its switch acts only on op 0/1, returning before either `SendPackage`.
+  So a client could paint the wire-tool visual onto another player's hands.
+  Now sender-gated, op-gated, and length-checked.
+- **`NetPackageItemReload`** checked only that the id named *some* live
+  entity. `GameManager.ItemReloadServer` (IL=32) rebroadcasts with
+  `_allButAttachedToEntityId = entityId`, so stock excludes the *named*
+  entity's client while zdtd excluded the *sender's*. Those agree only when
+  the id is the sender's own, which the gate now requires.
+- **`NetPackageSharedQuest` share, unreachable target.** zdtd fell back to a
+  full broadcast when no peer held `sharedWithEntityID`.
+  `GameManager.QuestShareServer` (IL=37) sends with
+  `_attachedToEntityId = sharedWithEntityID`: exactly one client, and an
+  absent target receives nothing. The fallback is gone.
+- **`NetPackageSharedQuest` member events (2, 3).** Broadcast to every peer.
+  ProcessPackage (IL=371) routes both back to `sharedByEntityID` alone
+  (`_attachedToEntityId`, IL_028A) and only when that player holds a Party.
+  Now sender-gated and party-gated.
+
+Audited clean in the same pass: `HoldingItem`, `Bag`, `EntityAliveFlags`,
+`EntitySpeeds`, `EntityTeleport`, `EntityAttach`, `VehicleDataSync` (stricter
+than stock: it also requires the sender to be the vehicle's driver).
+
 ## 1a4. `NetPackageSimpleChat` is upgraded, stock drops it
 
 A stock server receiving `NetPackageSimpleChat` **with no recipient list does
