@@ -3038,7 +3038,11 @@ unvalidated, and durability, mods and repair do not exist.
 
 - **LootAbundance server setting** `WORKS`
   Clamped 1..1000, scales every rolled stack count with a floor of 1; unit test
-  asserts the 2x and 1% cases.
+  asserts the 2x and 1% cases. The GameStats blob carries the rate in force
+  since 2026-09-10: `gameStatsValues` built its literal without the field, so
+  the sim rolled at the configured rate while every join told the client the
+  struct default 100. `PartySharedKillRange` was missing from the same literal
+  for the same reason and now rides it too.
   *Anchors:* `src/server/config.zig:53`, `:237`, `src/server/game.zig`,
   `src/assets/loot.zig:52-57`, `:157-177`
 

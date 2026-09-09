@@ -15253,3 +15253,49 @@ test "scenario a turret keeps its owner across a restart" {
     }
     std.debug.print("PASS turret owner: survives a restart, re-maps on login, releases on drop\n", .{});
 }
+
+test "scenario the loot rate and party range the sim uses reach the GameStats wire" {
+    // Both knobs were live in the sim and absent from the blob the client is
+    // sent at join: gameStatsValues built its literal without them, so every
+    // join carried the struct defaults (100 / 100) no matter what the
+    // operator configured. The server rolled loot at one rate and told the
+    // client another.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{
+        .loot_abundance = 175,
+        .party_shared_kill_range = 42,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    // The sim really is using them: the loot table scales its counts by the
+    // abundance percentage, and the XP share gates on the range.
+    try std.testing.expectEqual(@as(u16, 175), g.loot.abundance_pct);
+    try std.testing.expectEqual(@as(f32, 42), g.party_shared_kill_range);
+
+    // And the client is told the same numbers.
+    const vals = g.gameStatsValues();
+    try std.testing.expectEqual(@as(i32, 175), vals.loot_abundance);
+    try std.testing.expectEqual(@as(i32, 42), vals.party_shared_kill_range);
+
+    // Down to the bytes: assert against the encoded blob, not just the struct
+    // the encoder is handed, so a builder that drops the field still fails.
+    var gs_buf: [1024]u8 = undefined;
+    const gs = try packages.buildGameStatsBodyValues(&gs_buf, vals);
+    var want_loot: [4]u8 = undefined;
+    std.mem.writeInt(i32, &want_loot, 175, .little);
+    try std.testing.expect(std.mem.find(u8, gs, &want_loot) != null);
+    var want_range: [4]u8 = undefined;
+    std.mem.writeInt(i32, &want_range, 42, .little);
+    try std.testing.expect(std.mem.find(u8, gs, &want_range) != null);
+    std.debug.print("PASS gamestats: loot abundance 175 and party range 42 reach the wire\n", .{});
+}

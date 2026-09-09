@@ -2710,6 +2710,13 @@ pub const Game = struct {
             .land_claim_online_dur = self.land_claim_online_dur,
             .land_claim_offline_dur = self.land_claim_offline_dur,
             .loot_respawn_days = self.loot_respawn_days,
+            // The sim already scales every loot roll by this (assets/loot.zig
+            // applyAbundance), so telling the client the struct default while
+            // the server rolls a different rate is a straight divergence.
+            .loot_abundance = @intCast(self.loot.abundance_pct),
+            // Same for the party XP-share radius: player.zig gates the share
+            // on this distance, so the client must hear the value in force.
+            .party_shared_kill_range = @intFromFloat(self.party_shared_kill_range),
             .land_claim_expiry_time = self.land_claim_expiry_days,
             .land_claim_count = self.land_claim_count,
             .land_claim_dead_zone = self.land_claim_dead_zone,
