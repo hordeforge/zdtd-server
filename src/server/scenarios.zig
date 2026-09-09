@@ -14814,3 +14814,48 @@ test "scenario saved container stacks are clamped on restart, not just player on
     }
     std.debug.print("PASS store clamp: saved container stacks respect the current cap\n", .{});
 }
+
+test "scenario the death bag takes the items instead of copying them" {
+    // DropOnDeath moves a slot range into the bag. spawnDeathBag copied the
+    // range and left the victim holding it, and nothing on the respawn path
+    // clears inventory, so every death duplicated the dropped slice: loot
+    // your own bag and you had it twice.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_deathbag");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_deathbag", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    // Mode 1: toolbelt + backpack move, equipment stays.
+    g.drop_on_death = 1;
+    g.sim.inventory[ps].slots[0] = .{ .item_id = 2, .count = 40, .quality = 1 };
+    const eq = quest_mod_components.inv_equip_start;
+    g.sim.inventory[ps].slots[eq] = .{ .item_id = 7, .count = 1, .quality = 1 };
+
+    const bags_before = g.sim.kind_groups.slice(.loot_bag).len;
+    g.spawnDeathBag(ps);
+    const bags = g.sim.kind_groups.slice(.loot_bag);
+    try std.testing.expectEqual(bags_before + 1, bags.len);
+
+    // The bag holds the dropped stack...
+    const bag_slot = bags[bags.len - 1];
+    try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[bag_slot].slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 40), g.sim.inventory[bag_slot].slots[0].count);
+
+    // ...and the victim no longer does. Before the fix both held 40.
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[0].item_id);
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[0].count);
+
+    // Equipment is outside the mode-1 range and must survive.
+    try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[eq].item_id);
+    std.debug.print("PASS death bag: the dropped range moves, equipment stays\n", .{});
+}

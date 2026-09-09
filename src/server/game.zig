@@ -3384,6 +3384,16 @@ pub const Game = struct {
             else => ecs.components.inv_equip_start,
         };
         if (self.sim.spawnLootBagFrom(t.x, t.y, t.z, &self.sim.inventory[victim_slot], start, end)) |bag_nid| {
+            // Stock DropOnDeath MOVES the range into the bag. The copy above
+            // left the victim holding it too, so every death duplicated the
+            // dropped slice: loot your own bag and you had it twice, and the
+            // DropOnDeath setting only chose which slice to duplicate.
+            // Clear after the bag exists, so a spawn failure drops nothing.
+            var ci: usize = start;
+            while (ci < end and ci < ecs.components.max_inv_slots) : (ci += 1) {
+                self.sim.inventory[victim_slot].slots[ci] = .{};
+            }
+            self.sim.markDirty(victim_slot, .{ .inv = true });
             self.broadcastLootSpawn(bag_nid) catch {};
             if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
                 vic.has_backpack = true;
