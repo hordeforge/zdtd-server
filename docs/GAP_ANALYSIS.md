@@ -4233,12 +4233,25 @@ a finer server encoding.
 
   So a claimed wall takes the same number of zombie hits as an unclaimed one,
   while the owner's own pickaxe needs the multiplied total. Whether stock
-  applies the modifier to zombie damage is not pinned in
-  `../7dtd-engine-research` (the stat is captured in `console-commands.md`
-  but no consumer is disassembled), so the *direction* is unverified and this
-  row does not claim one. What is certain is the asymmetry: two damage
-  sources against the same block disagree about its HP, and the row said
-  nothing about it. Settling it needs the RE for the stock block-damage path.
+  applies the modifier to zombie damage is still unverified, and this row does
+  not claim a direction. Chased 2026-09-09 and the dumps do not settle it:
+  `Block::OnBlockDamaged` (IL=497, `Block.il.txt:4460`) is the single damage
+  entry point for every source, and it reads `Block::MaxDamage` straight off
+  the block with zero `LandClaim` / `Durability` / `persistentPlayers`
+  references in its whole body; `GetShownMaxDamage` (IL=15) likewise. Grepping
+  all of `il/full-v3.2.0/` for `LandClaimOnlineDurabilityModifier` returns
+  only three enum declarations (`GameInfoInt`, `EnumGamePrefs`,
+  `EnumGameStats`) and no consumer, so the read site is behind one of the
+  obfuscated single-letter members. Settling it needs a dump that resolves
+  those, or a live A/B on a stock server.
+
+  Worth separating from this: stock's *per-source* scaling is on the damage
+  side, not the HP side, through `BlockDamagePlayer` / `BlockDamageAI` /
+  `BlockDamageAIBM`, and zdtd already implements all three (the `mult` in the
+  chew and dig paths, `GAME_OPTIONS.md:98-100`). So the claim modifier is a
+  second, independent axis, and the asymmetry above is real regardless of
+  which way stock resolves it: two damage sources against the same block
+  disagree about its HP, and the row said nothing about it.
   *Anchors:* `src/server/game.zig` registerClaim/claimCovering,
   `:5995-6005`, `src/server/c2s/blocks.zig:196-201`,
   `src/server/game/tick.zig:486`, `:637`, `src/server/game/world.zig:439`
