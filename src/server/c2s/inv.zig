@@ -777,6 +777,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 @enumFromInt(tx.op)
             else
                 .list;
+            // Per-surface quarantine, the same gate the Bag and TileEntity
+            // arms apply. This one packet reaches both surfaces: open / take /
+            // put mutate a container's contents, and place writes a world
+            // block. Ungated, a peer quarantined off either surface kept
+            // working through the transaction route while its direct packets
+            // were refused.
+            switch (op) {
+                .open, .take, .put => if (self.quarantineDenies(c, .container)) return true,
+                .place => if (self.quarantineDenies(c, .block)) return true,
+                else => {},
+            }
             // ItemActionEat: resolve food/water/hp from items.xml via eatProps.
             r = invsys.applyTransactionEx(&self.sim, c.slot, op, tx.a, tx.b, tx.qty, tx.entity_id, eatProps, self);
         }

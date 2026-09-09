@@ -14956,3 +14956,59 @@ test "scenario walking away from an open container stops the looting" {
     try std.testing.expect(invsys.applyTransaction(&g.sim, c.slot, .take, 1, 0, 0, -1).ok);
     std.debug.print("PASS container reach: take and put re-check range, not just open\n", .{});
 }
+
+test "scenario the inventory transaction route honours both quarantine surfaces" {
+    // The Bag and TileEntity arms check the container quarantine, and the
+    // SetBlock arm checks the block one. NetPackageInventoryTransactionRequest
+    // reaches both surfaces (open/take/put mutate a container, place writes a
+    // world block) and checked neither, so a quarantined peer kept working
+    // through the transaction route while its direct packets were refused.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_txq");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_txq", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.authority_mode = .correct;
+
+    // A bag at the player's feet holding one stack.
+    const t = g.sim.transform[ps];
+    const bag = g.sim.spawnLootBag(t.x, t.y, t.z, 2, 5) orelse return error.TestUnexpectedResult;
+    const bs = g.sim.slotOfNetId(bag).?;
+
+    var txb: [64]u8 = undefined;
+    var fb: [128]u8 = undefined;
+
+    // Clean peer: open then take works, so the gate below is what changes.
+    const open_req = try packages.buildInvTxRequest(&txb, @intFromEnum(invsys.Op.open), 0, 0, 0, bag);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", open_req));
+    const take_req = try packages.buildInvTxRequest(&txb, @intFromEnum(invsys.Op.take), 0, 0, 0, -1);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", take_req));
+    try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[bs].slots[0].count);
+
+    // Container-quarantined: the same take is refused and counted.
+    g.sim.inventory[bs].slots[0] = .{ .item_id = 2, .count = 5, .quality = 1 };
+    g.clients[c.slot].guard.quarantine.container = true;
+    const q_before = g.harness.counters.get(.quarantine_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", take_req));
+    try std.testing.expectEqual(q_before + 1, g.harness.counters.get(.quarantine_rejects));
+    try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[bs].slots[0].count);
+
+    // The block surface is independent: container-only quarantine leaves
+    // place alone, and setting the block bit refuses it.
+    g.clients[c.slot].guard.quarantine.container = false;
+    g.clients[c.slot].guard.quarantine.setblock = true;
+    const q2 = g.harness.counters.get(.quarantine_rejects);
+    const place_req = try packages.buildInvTxRequest(&txb, @intFromEnum(invsys.Op.place), 10, 70, 10, -1);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", place_req));
+    try std.testing.expectEqual(q2 + 1, g.harness.counters.get(.quarantine_rejects));
+    std.debug.print("PASS invtx quarantine: container and block surfaces both gated\n", .{});
+}
