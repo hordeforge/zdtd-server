@@ -62,7 +62,10 @@ pub const PlayerStatsArgs = struct {
     /// PvP kills (stock `EntityNetworkStats.killedPlayers`). Server-counted on
     /// the authoritative death path, same as `killed_zombies`.
     killed_players: i32 = 0,
-    held_item: ?stock_inv.StockSlot = null,
+    /// The sender's held stack, or null for bare hands. No default: the
+    /// server always knows which it is, and a silent omission here reads on
+    /// the client as the player having stowed their weapon.
+    held_item: ?stock_inv.StockSlot,
 };
 
 /// Progression.Write v3 with an empty values list: version byte + Level u16 +
@@ -150,6 +153,7 @@ test "player stats body is the stock EntityNetworkStats shape" {
         .level = 3,
         .exp_to_next = 1000,
         .killed_zombies = 5,
+        .held_item = null,
     });
     var r = binary.Reader{ .data = body };
     try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // entityId

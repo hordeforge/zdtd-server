@@ -312,6 +312,14 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     var cap_a: ln_peer.Capture = .{};
     var cap_b: ln_peer.Capture = .{};
     const ca = try g.attachJoinedClient(&cap_a);
+    // The starter kit arms A with the stone axe, and the PlayerStats walk
+    // below reads fixed offsets past what would then be a variable-length
+    // ItemValue. Empty the hand before B joins and takes the snapshot; that
+    // an armed player's stack does ride this package is the playerstats-held
+    // scenario's job.
+    if (g.sim.playerByPeer(ca.slot)) |a_ps| {
+        try std.testing.expect(g.sim.inventory[a_ps].setHolding(quest_mod_components.inv_no_holding));
+    }
     const cb = try g.attachJoinedClient(&cap_b);
 
     // A's join was before B existed, so B's join burst must spawn A to B
@@ -334,6 +342,9 @@ test "scenario multiplayer player bodies spawn to peers and drop removes them" {
     var pr = binary.Reader{ .data = psb };
     try std.testing.expectEqual(ca.entity_id, try pr.readI32());
     _ = try pr.readI32(); // killed
+    // Empty hand: the walk below reads fixed offsets, and a held stack is a
+    // variable-length ItemValue. That the held stack does ride this package
+    // is covered by the playerstats-held scenario.
     try std.testing.expectEqual(@as(u16, 0), try pr.readU16()); // empty held ItemStack
     try std.testing.expectEqual(@as(u8, 0), try pr.readByte()); // holdingItemIndex
     _ = try pr.readI32(); // deathHealth
@@ -12810,6 +12821,13 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     var cap_b: ln_peer.Capture = .{};
     const cb = try g.attachJoinedClient(&cap_b);
     cap_b.n = 0; // drop join traffic; keep only the broadcast below
+    // Empty the held slot so the ItemStack after `killed` is the count-0
+    // sentinel and the fields past it sit at fixed offsets. The starter kit
+    // arms every fresh player, and a real held stack is variable-length. The
+    // hand goes back before the PvP leg below, which needs a weapon.
+    const ca_ps = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+    const held_before = g.sim.inventory[ca_ps].holding;
+    try std.testing.expect(g.sim.inventory[ca_ps].setHolding(quest_mod_components.inv_no_holding));
     game_player.broadcastPlayerStats(g, ca.slot);
     const ps_id = packages.idOf("NetPackagePlayerStats").?;
     const sent = cap_b.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
@@ -12821,11 +12839,14 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     // AddScoreClient, but PlayerStats hardcoded 0. PvP damage needs
     // PlayerKillingMode != 0 (pvp_mode 0 drops player-to-player damage).
     g.pvp_mode = 3;
+    try std.testing.expect(g.sim.inventory[ca_ps].setHolding(held_before));
     const victim_nid = cb.entity_id;
     const pbody = try packages.buildDamageBody(&dmg, victim_nid, 0, 3, 1000, true, ca.entity_id);
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", pbody));
     try std.testing.expectEqual(@as(u16, 1), ca.player_kills);
     cap_b.n = 0;
+    // Empty again for the fixed-offset walk below.
+    try std.testing.expect(g.sim.inventory[ca_ps].setHolding(quest_mod_components.inv_no_holding));
     game_player.broadcastPlayerStats(g, ca.slot);
     const sent2 = cap_b.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
     // Walk the stock EntityNetworkStats write order (IL=104) to the two kill
@@ -12852,6 +12873,8 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     const score_id = packages.idOf("NetPackageEntityAddScoreClient") orelse
         return error.TestUnexpectedResult;
     cap.n = 0;
+    // Arm again: the damage path below is a real kill, not a wire read.
+    try std.testing.expect(g.sim.inventory[ca_ps].setHolding(held_before));
     const z3_nid = g.sim.spawnZombie(280, 70, 280, 101) orelse return error.TestUnexpectedResult;
     const zbody = try packages.buildDamageBody(&dmg, z3_nid, 0, 3, 1000, true, ca.entity_id);
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", zbody));
@@ -15298,4 +15321,73 @@ test "scenario the loot rate and party range the sim uses reach the GameStats wi
     std.mem.writeInt(i32, &want_range, 42, .little);
     try std.testing.expect(std.mem.find(u8, gs, &want_range) != null);
     std.debug.print("PASS gamestats: loot abundance 175 and party range 42 reach the wire\n", .{});
+}
+
+test "scenario PlayerStats carries the held item, not bare hands" {
+    // EntityNetworkStats.write puts holdingItemStack right after `killed`, and
+    // stock fills the whole struct from the entity. Both zdtd senders left the
+    // field at its default, so every progression push and every join snapshot
+    // told the other clients this player was empty-handed while the server
+    // knew otherwise. The spawn package was fixed for this in 2026-09-02;
+    // PlayerStats carries the same field and was missed.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(ca.slot) orelse return error.TestUnexpectedResult;
+
+    // Put a real stack in the held toolbelt slot.
+    const held_slot: u16 = 2;
+    g.sim.inventory[ps].slots[held_slot] = .{ .item_id = 7, .count = 3, .quality = 4 };
+    try std.testing.expect(g.sim.inventory[ps].setHolding(held_slot));
+
+    // Observe the broadcast from a second client: the owner is skipped, the
+    // same way stock pushes a player's stats to the *other* clients.
+    var cap_b: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap_b);
+    cap_b.n = 0;
+    game_player.broadcastPlayerStats(g, ca.slot);
+    const ps_id = packages.idOf("NetPackagePlayerStats").?;
+    const sent = cap_b.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
+
+    // entityId, killed, then the ItemStack: a non-zero count is the whole
+    // point, since count 0 is exactly what bare hands encode as.
+    var r: binary.Reader = .{ .data = sent };
+    _ = try r.readI32(); // entity_id
+    _ = try r.readI32(); // killed
+    try std.testing.expectEqual(@as(u16, 3), try r.readU16()); // held count
+
+    // Empty hands still encode as the count-0 sentinel rather than a fake
+    // stack: the omission and the honest empty must stay distinguishable.
+    try std.testing.expect(g.sim.inventory[ps].setHolding(quest_mod_components.inv_no_holding));
+    cap_b.n = 0;
+    game_player.broadcastPlayerStats(g, ca.slot);
+    const sent2 = cap_b.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
+    var r2: binary.Reader = .{ .data = sent2 };
+    _ = try r2.readI32();
+    _ = try r2.readI32();
+    try std.testing.expectEqual(@as(u16, 0), try r2.readU16());
+    // The join snapshot is a second sender of the same package and had the
+    // same omission. Arm the player again, then let a fresh client join: the
+    // stats it receives for the armed player must carry the stack too.
+    try std.testing.expect(g.sim.inventory[ps].setHolding(held_slot));
+    var cap_c: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap_c);
+    const joiner_view = cap_c.findPkgIdEntity(ps_id, ca.entity_id) orelse
+        return error.TestUnexpectedResult;
+    var r3: binary.Reader = .{ .data = joiner_view };
+    _ = try r3.readI32(); // entity_id
+    _ = try r3.readI32(); // killed
+    try std.testing.expectEqual(@as(u16, 3), try r3.readU16()); // held count
+    std.debug.print("PASS playerstats-held: the held stack rides the stats wire (broadcast and join)\n", .{});
 }

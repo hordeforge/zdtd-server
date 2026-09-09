@@ -2855,6 +2855,24 @@ pub const Game = struct {
         return g.items.stockTypeFor(item_id);
     }
 
+    /// The held toolbelt stack in stock wire form, or null when the player
+    /// holds nothing. Every package carrying `holdingItemStack` reads it from
+    /// here so the spawn and stats bodies cannot disagree about what a player
+    /// is holding.
+    pub fn playerHoldingStock(self: *Game, slot: ecs.Slot) ?packages.stock_inv.StockSlot {
+        if (!self.sim.mask[slot].inventory) return null;
+        const inv = &self.sim.inventory[slot];
+        if (inv.holding >= ecs.components.inv_toolbelt) return null;
+        const s = inv.slots[inv.holding];
+        if (s.count == 0 or s.item_id == 0) return null;
+        return .{
+            .type_id = resolveItemType(self, s.item_id),
+            .count = s.count,
+            .quality = s.quality,
+            .meta = s.meta,
+        };
+    }
+
     /// Per-player blood-moon-music eligibility (stock EntityPlayer.bloodMoonParty):
     /// true only while the horde is active AND the player's own blood-moon
     /// party (focus within party_join_dist) still has alive horde zombies. The

@@ -110,6 +110,13 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
         .skill_points = @intCast(@min(c.skill_points, 65535)),
         .killed_zombies = c.zombie_kills,
         .killed_players = c.player_kills,
+        // Stock fills the whole EntityNetworkStats from the entity, held
+        // stack included. Omitting it told every other client the player had
+        // just put their weapon away on each progression push.
+        .held_item = if (self.sim.playerByPeer(slot)) |ps|
+            self.playerHoldingStock(ps)
+        else
+            null,
     })) |psb| {
         for (&self.clients) |*cl| {
             if (!cl.joined or cl.peer == null or cl.entity_id == c.entity_id) continue;

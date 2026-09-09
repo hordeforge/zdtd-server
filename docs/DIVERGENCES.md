@@ -873,11 +873,22 @@ it. Where the value always exists, drop the default and let the compiler enforce
 it; where it genuinely may not (`profile`, container `owner`), keep the default
 and say why here.
 
-**Sweep closed 2026-09-04.** The remaining builder-input structs carrying
-defaulted fields were enumerated and each sender checked against them:
-`LightTeInfo`, `ActionsArgs`, `PartyDataArgs`, `SharedKillArgs`,
-`BuffValueWire`, `SoundAtPosition`, `SetBlockTexture`. All fill every field for
-which a truthful value exists. Two constants are deliberate and RE-backed:
+**Sweep closed 2026-09-04, reopened once on 2026-09-10.** The remaining
+builder-input structs carrying defaulted fields were enumerated and each sender
+checked against them: `LightTeInfo`, `ActionsArgs`, `PartyDataArgs`,
+`SharedKillArgs`, `BuffValueWire`, `SoundAtPosition`, `SetBlockTexture`. All
+fill every field for which a truthful value exists.
+
+`PlayerStatsArgs` was not on that list and had the same defect in the same
+field. `EntityNetworkStats.write` carries `holdingItemStack` right after
+`killed`, and stock fills the whole struct from the entity; both zdtd senders
+(`game/player.zig` broadcastPlayerStats, `game/join.zig` sendPlayerStatsTo)
+left `held_item` at its default. Every progression push and every join snapshot
+therefore told the other clients the player was empty-handed. Same field, same
+cause, and the spawn package's own fix in this section did not reach it because
+the enumeration was of structs, not of the field. The default is gone now, so
+the compiler rejects a third site that omits it (verified: removing it fails
+the build, naming the join site). Two constants are deliberate and RE-backed:
 `SetBlockTexture.player_id = -1` is what a dedicated server writes (IL=41,
 IL_0018-0027), and `PartyDataArgs` has exactly one sender
 (`social.zig:broadcastPartySnapshot`) which passes all seven. Five defects came
