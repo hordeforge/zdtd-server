@@ -345,6 +345,17 @@ Both halves are deliberate, and both are visible at the edges:
 Re-check this row if `interest_range` ever stops being operator-tunable, or if
 a block path starts relying on the editor *not* receiving its own echo.
 
+**The storage TE went the other way, and was fixed 2026-09-09.**
+`NetPackageTileEntity::ProcessPackage` (IL=103,
+`il/netpackages-v3.2.0/NetPackageTileEntity_il.txt`) rebroadcasts with
+`_entitiesInRangeOfWorldPos = ToWorldCenterPos()` and `_range` 192, so stock
+scopes TE updates by position. `broadcastStorageTe` used a plain global
+broadcast while its two siblings (`broadcastVendingTe`, the powered-trigger
+path) were already scoped, so every chest edit on the map reached every peer.
+It now uses `broadcastNear` at `interest_range` like the rest. The receiving
+client dropped those packages anyway when its own block at the position
+disagreed, so the extra traffic bought nothing.
+
 ## 2. Fields with no truthful server-side value
 
 Stock carries real numbers here only by relaying what the owning client sent

@@ -14129,3 +14129,58 @@ test "scenario npc quest list reach: offers and accepts need the player at the t
     try std.testing.expect(cap.findPkgId(qid) != null);
     std.debug.print("PASS npc quest list reach: the exchange needs the player at the trader\n", .{});
 }
+
+test "scenario storage te scope: a distant peer is not told about a chest edit" {
+    // NetPackageTileEntity::ProcessPackage (IL=103) rebroadcasts with
+    // _entitiesInRangeOfWorldPos = ToWorldCenterPos() and _range 192, so a
+    // stock server tells only the clients near the block. zdtd's storage TE
+    // used a global broadcast while its powered-trigger and vending siblings
+    // were already position-scoped, so every chest edit on the map went to
+    // every peer. The receiver drops it anyway when its own block at that
+    // position disagrees, so the traffic bought nothing.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_testcope");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_testcope", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_near: ln_peer.Capture = .{};
+    var cap_far: ln_peer.Capture = .{};
+    const c_near = try g.attachJoinedClient(&cap_near);
+    const c_far = try g.attachJoinedClient(&cap_far);
+    const te_id = packages.idOf("NetPackageTileEntity").?;
+
+    const p_near = g.sim.playerByPeer(c_near.slot).?;
+    const p_far = g.sim.playerByPeer(c_far.slot).?;
+
+    // Chest at the near player's feet; the far player is well past interest.
+    const cx: i32 = @intFromFloat(g.sim.transform[p_near].x);
+    const cy: i32 = 70;
+    const cz: i32 = @intFromFloat(g.sim.transform[p_near].z);
+    g.sim.transform[p_far].x = g.sim.transform[p_near].x + g.interest_range * 8;
+    g.sim.transform[p_far].z = g.sim.transform[p_near].z;
+
+    const cont = g.containers.getOrCreate(.{ .x = cx, .y = cy, .z = cz }, 8, 1) orelse
+        return error.TestUnexpectedResult;
+
+    cap_near.clear();
+    cap_far.clear();
+    try replicate_te.broadcastStorageTe(g, cont);
+    // The peer standing on it is told; the one across the map is not.
+    try std.testing.expect(cap_near.findPkgId(te_id) != null);
+    try std.testing.expect(cap_far.findPkgId(te_id) == null);
+
+    // Walking the far player into range restores delivery, so the gate is
+    // distance, not a dropped client.
+    g.sim.transform[p_far].x = g.sim.transform[p_near].x;
+    g.sim.transform[p_far].z = g.sim.transform[p_near].z;
+    cap_far.clear();
+    try replicate_te.broadcastStorageTe(g, cont);
+    try std.testing.expect(cap_far.findPkgId(te_id) != null);
+    std.debug.print("PASS storage te scope: the chest TE goes to nearby peers only\n", .{});
+}

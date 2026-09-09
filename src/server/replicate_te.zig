@@ -169,7 +169,19 @@ pub fn broadcastStorageTe(self: *Game, cont: *const containers_mod.Container) !v
         Game.resolveItemType,
         self,
     );
-    try self.broadcast("NetPackageTileEntity", body);
+    // Position-scoped, like the powered-trigger and vending TE paths above.
+    // NetPackageTileEntity::ProcessPackage (IL=103) rebroadcasts with
+    // _entitiesInRangeOfWorldPos = ToWorldCenterPos() and _range 192, so a
+    // stock server tells only the clients near the block. A global broadcast
+    // sends every chest edit on the map to every peer, and the receiver drops
+    // it anyway when its own block at that position disagrees.
+    try self.broadcastNear(
+        "NetPackageTileEntity",
+        body,
+        @floatFromInt(cont.pos.x),
+        @floatFromInt(cont.pos.z),
+        self.interest_range,
+    );
 }
 
 /// zdtd's Block::ActivateBlock (asm.il:127088 / 137044): rewrite meta bit 0x1
@@ -305,7 +317,7 @@ pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
     // the trader_id + day discriminates the stream).
     var rng = rng_util.XorShift32.initFromU64(game_trader.traderRollSeed(self, @intCast(v.trader_id)));
     var rolled: [assets_traders.max_expand]assets_traders.RolledItem = undefined;
-    const rn = tt.rollAllRefs(refs, &rng, &rolled);
+    const rn = tt.rollAllRefs(refs, &rng, game_trader.qualityPolicy(self), &rolled);
     if (rn == 0) return;
     // Vending is owner-priced: the renter sets each entry's markup, so the
     // trader_info buy/sell multipliers do not apply here (loot-economy.md
