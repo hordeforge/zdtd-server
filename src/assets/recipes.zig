@@ -45,6 +45,10 @@ pub const RecipeDef = struct {
     /// not a stock inventory ingredient, so crafting from nothing would mint
     /// items - GAP "Server craft execution").
     material_based: bool = false,
+    /// recipes.xml `<wildcard_forge_category/>`: forge scrap stub
+    /// (GetScrapableRecipe, RE crafting-recipes.md IL=77). Not a general
+    /// craft recipe; crafting it with no ingredients would mint scrap.
+    wildcard_forge_category: bool = false,
     ingredients: [max_ingredients]Ingredient = [_]Ingredient{.{}} ** max_ingredients,
     ingredient_n: u8 = 0,
 };
@@ -236,6 +240,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         if (xml.attr(clean, tag, "craft_exp_gain")) |ceg| {
             def.craft_exp_gain = xml.parseI32Prefix(ceg) orelse -1;
         }
+        // Self-closing or open body tag both mark forge scrap stubs.
+        if (std.mem.indexOf(u8, body, "<wildcard_forge_category") != null) {
+            def.wildcard_forge_category = true;
+        } else if (gt > tag and clean[gt - 1] == '/') {
+            // Self-closing recipe with no body: check the open tag itself.
+            if (std.mem.indexOf(u8, clean[tag .. gt + 1], "<wildcard_forge_category") != null) {
+                def.wildcard_forge_category = true;
+            }
+        }
 
         var ii: usize = 0;
         while (ii < body.len and def.ingredient_n < max_ingredients) {
@@ -253,8 +266,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
             ii = itag + 11;
         }
 
-        // Keep recipes with ingredients; also keep always_unlocked zero-ingredient (scrap stubs).
-        if (def.ingredient_n > 0 or def.always_unlocked) {
+        // Keep recipes with ingredients; also keep always_unlocked / scrap stubs.
+        if (def.ingredient_n > 0 or def.always_unlocked or def.wildcard_forge_category) {
             try list.append(allocator, def);
         }
         i = next_i;

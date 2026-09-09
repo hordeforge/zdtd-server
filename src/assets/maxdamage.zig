@@ -128,6 +128,9 @@ pub const Table = struct {
     /// materials.xml damage_category per material id (e.g. Mdirt → "earth").
     /// Explosion DamageBonus multipliers key on this (stock cop: earth → 0).
     material_category: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// materials.xml forge_category per material id (e.g. Mmetal → "iron").
+    /// Forge melt matches this (case-insensitive) against InputMaterials.
+    material_forge_category: std.StringHashMapUnmanaged([]const u8) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -308,6 +311,12 @@ pub const Table = struct {
         return self.material_category.get(mat);
     }
 
+    /// materials.xml forge_category for a material id (e.g. Mmetal → "iron").
+    /// Empty when the material has no forge_category (not meltable/scrapable).
+    pub fn forgeCategoryForMaterial(self: *const Table, material_id: []const u8) []const u8 {
+        return self.material_forge_category.get(material_id) orelse "";
+    }
+
     /// Power watts for a stock block name (MaxPower/RequiredPower), else null.
     pub fn wattsByName(self: *const Table, name: []const u8) ?f32 {
         return self.power_watts_by_name.get(name);
@@ -480,6 +489,13 @@ pub const Table = struct {
                 const kn = try arena.dupe(u8, mid);
                 const vv = try arena.dupe(u8, dc);
                 try self.material_category.put(arena, kn, vv);
+            }
+            // Stock MaterialBlock.ForgeCategory (materials.xml forge_category):
+            // scrap melt matches this against workstation InputMaterials.
+            if (xml.propertyValue(body, "forge_category")) |fc| {
+                const kn = try arena.dupe(u8, mid);
+                const vv = try arena.dupe(u8, fc);
+                try self.material_forge_category.put(arena, kn, vv);
             }
             i = body_end;
         }

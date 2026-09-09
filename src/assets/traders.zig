@@ -5,7 +5,9 @@
 //! always spawn (SpawnAllItemsFromList), group members are picked
 //! prob-weighted with dedupe (SpawnLootItemsFromList), counts roll uniform in
 //! [min,max] (RandomSpawnCount), and quality rolls uniform in the entry's
-//! quality range. The RNG is caller-supplied and seeded, so the same
+//! quality range or, for the 653 stock refs that carry no `quality` attribute,
+//! the QualityPolicy default range under the TraderMaxTier ceiling. The RNG is
+//! caller-supplied and seeded, so the same
 //! (world, trader, day) reproduces the same stock (sim rule: deterministic
 //! inputs), unlike stock's per-ItemValue time-seeded GameRandom.
 
@@ -32,9 +34,12 @@ pub const ItemRef = struct {
     /// (stock TraderInfo::SpawnLootItemsFromList: acc += prob / sum), so 120
     /// is a heavier weight, 0.5 is half weight, 0 never picks.
     prob: f32 = 1,
-    /// quality="lo,hi" roll bounds; 0/0 = unset (wire quality 1).
-    quality_lo: u8 = 0,
-    quality_hi: u8 = 0,
+    /// quality="lo,hi" roll bounds. -1/-1 = the attribute is absent, which is
+    /// what stock `TradersFromXml::parseItemList` passes for minQualityBase /
+    /// maxQualityBase (the `ldc.i4.m1` pair, TradersFromXml.il:558-563 and
+    /// :790-792); `SpawnItem` substitutes the default range for those.
+    quality_lo: i16 = -1,
+    quality_hi: i16 = -1,
     unique_only: bool = false,
     group: bool = false,
 };
@@ -60,6 +65,38 @@ pub const RolledItem = struct {
     count: u16 = 0,
     quality: u8 = 1,
 };
+
+/// `ItemClass.HasQuality` for an items.xml name. The Game backs this with the
+/// items table; null in offline tests means no item has quality, which keeps
+/// every roll at the unset wire quality.
+pub const HasQualityResolver = *const fn (ctx: ?*anyopaque, name: []const u8) bool;
+
+/// The quality half of stock `TraderInfo::SpawnItem` (TraderInfo.il:876-905):
+/// which items can carry quality at all, the fallback range for entries with
+/// no `quality` attribute, and the `TraderMaxTier` ceiling. Carried from
+/// `[rules.trader]` through the roll so nothing reads a global.
+pub const QualityPolicy = struct {
+    /// Stock `TraderInfo.TraderMaxTier` (static, ctor default 6): rolled
+    /// quality clamps to it, `-1` disables the clamp, and `0` drops every
+    /// quality-bearing item from the stock (SpawnItem IL_0011-0020).
+    max_tier: i32 = 6,
+    /// Substituted for a `quality`-less entry (stock parses those as -1/-1 and
+    /// SpawnItem replaces the pair with 1..6).
+    default_min: u8 = 1,
+    default_max: u8 = 6,
+    /// Per-name HasQuality lookup (null = nothing has quality).
+    has_quality: ?HasQualityResolver = null,
+    has_quality_ctx: ?*anyopaque = null,
+
+    fn itemHasQuality(self: QualityPolicy, name: []const u8) bool {
+        const resolve = self.has_quality orelse return false;
+        return resolve(self.has_quality_ctx, name);
+    }
+};
+
+/// Wire quality for an item stock says has no quality at all. Stock leaves the
+/// ItemValue at its default tier and the client shows no quality bar.
+const no_quality_wire: u8 = 1;
 
 /// Price multipliers used when neither a `<trader_info>` override nor the
 /// `<traders>` root row supplies one, which happens only with no game-dir
@@ -151,7 +188,7 @@ pub const TraderTable = struct {
     /// (SpawnAllItemsFromList, asm.il 863190): each ref always spawns, its
     /// count rolls in [min,max], and a group ref expands through
     /// spawnItemsFromGroup. Writes into out[]; returns count written.
-    pub fn rollAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, out: []RolledItem) usize {
+    pub fn rollAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, policy: QualityPolicy, out: []RolledItem) usize {
         var n: usize = 0;
         for (refs) |r| {
             const count = randomSpawnCount(rng, r.count_min, r.count_max);
@@ -159,9 +196,9 @@ pub const TraderTable = struct {
             // FastMax(1, count*abundance) floor stays so a 0 roll still sells 1.
             const count_final: i32 = @max(1, count);
             if (r.group) {
-                spawnItemsFromGroup(self, r.name, count_final, rng, r.unique_only, out, &n, 0);
+                spawnItemsFromGroup(self, r.name, count_final, rng, r.unique_only, policy, out, &n, 0);
             } else {
-                spawnItem(r, count_final, rng, out, &n);
+                spawnItem(r, count_final, rng, policy, out, &n);
             }
         }
         return n;
@@ -171,9 +208,9 @@ pub const TraderTable = struct {
     /// SpawnLootItemsFromList (asm.il 863343): one RandomFloat per pick, walk
     /// the refs accumulating prob share, first ref whose share passes the
     /// roll is spawned and (when unique) removed from the pool.
-    fn spawnLootItemsFromList(self: *const TraderTable, refs: []const ItemRef, num_to_spawn: i32, rng: *rng_util.XorShift32, used: ?[]bool, out: []RolledItem, n: *usize, depth: usize) void {
+    fn spawnLootItemsFromList(self: *const TraderTable, refs: []const ItemRef, num_to_spawn: i32, rng: *rng_util.XorShift32, used: ?[]bool, policy: QualityPolicy, out: []RolledItem, n: *usize, depth: usize) void {
         if (num_to_spawn < 0) {
-            spawnAllRefs(self, refs, rng, out, n, depth);
+            spawnAllRefs(self, refs, rng, policy, out, n, depth);
             return;
         }
         if (num_to_spawn == 0) return;
@@ -195,9 +232,9 @@ pub const TraderTable = struct {
                 if (used != null) used.?[i] = true;
                 const count = randomSpawnCount(rng, r.count_min, r.count_max);
                 if (r.group) {
-                    spawnItemsFromGroup(self, r.name, count, rng, r.unique_only, out, n, depth);
+                    spawnItemsFromGroup(self, r.name, count, rng, r.unique_only, policy, out, n, depth);
                 } else {
-                    spawnItem(r, count, rng, out, n);
+                    spawnItem(r, count, rng, policy, out, n);
                 }
                 picked = true;
                 break;
@@ -209,20 +246,20 @@ pub const TraderTable = struct {
     /// Stock SpawnAllItemsFromList (asm.il 863190) used by both the top-level
     /// spawn (numToSpawn -1) and count="all" groups: every ref spawns with a
     /// count roll and no prob gate.
-    fn spawnAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, out: []RolledItem, n: *usize, depth: usize) void {
+    fn spawnAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, policy: QualityPolicy, out: []RolledItem, n: *usize, depth: usize) void {
         for (refs) |r| {
             const count: i32 = @max(1, randomSpawnCount(rng, r.count_min, r.count_max));
             if (r.group) {
-                spawnItemsFromGroup(self, r.name, count, rng, r.unique_only, out, n, depth);
+                spawnItemsFromGroup(self, r.name, count, rng, r.unique_only, policy, out, n, depth);
             } else {
-                spawnItem(r, count, rng, out, n);
+                spawnItem(r, count, rng, policy, out, n);
             }
         }
     }
 
     /// Stock SpawnItemsFromGroup (asm.il 863290): num_to_spawn rounds, each
     /// rolling the group's own count and picking that many refs from it.
-    fn spawnItemsFromGroup(self: *const TraderTable, group_name: []const u8, num_to_spawn: i32, rng: *rng_util.XorShift32, unique: bool, out: []RolledItem, n: *usize, depth: usize) void {
+    fn spawnItemsFromGroup(self: *const TraderTable, group_name: []const u8, num_to_spawn: i32, rng: *rng_util.XorShift32, unique: bool, policy: QualityPolicy, out: []RolledItem, n: *usize, depth: usize) void {
         if (depth >= max_group_depth or n.* >= out.len) return;
         const g = self.groupByName(group_name) orelse return;
         if (g.refs.len == 0) return;
@@ -237,19 +274,41 @@ pub const TraderTable = struct {
             } else {
                 picks = randomSpawnCount(rng, g.count_min, g.count_max);
             }
-            spawnLootItemsFromList(self, g.refs, picks, rng, used, out, n, depth + 1);
+            spawnLootItemsFromList(self, g.refs, picks, rng, used, policy, out, n, depth + 1);
         }
     }
 
-    /// Stock TraderInfo::SpawnItem tail (asm.il 862810): one stack with the
-    /// rolled count and a quality rolled uniform in the entry's range when the
-    /// XML set one (stock ItemValue ctor: RandomRange(min, max+1), asm.il
-    /// 616396); unset stays quality 1 (stackables have no quality).
-    fn spawnItem(r: ItemRef, count: i32, rng: *rng_util.XorShift32, out: []RolledItem, n: *usize) void {
+    /// Stock TraderInfo::SpawnItem (TraderInfo.il:750): one stack with the
+    /// rolled count and the entry's quality, in stock's order:
+    ///   1. a quality-bearing item does not spawn at all when TraderMaxTier is
+    ///      0 (IL_0011-0020);
+    ///   2. an item with no quality skips the rest and keeps the wire default
+    ///      (IL_014B-0151);
+    ///   3. a `quality`-less entry (-1/-1) takes the policy default range,
+    ///      stock 1..6 (IL_0156-015D);
+    ///   4. maxQuality clamps to TraderMaxTier unless that is -1 (IL_015F-0175);
+    ///   5. maxQuality below minQuality drops the item (IL_0177-017C);
+    ///   6. otherwise quality rolls uniform in [min, max] (stock ItemValue ctor
+    ///      RandomRange(min, max+1), asm.il 616396).
+    /// A dropped item is never written to out[], so it does not occupy a stock
+    /// slot. The roll only draws when it reaches step 6, keeping the seeded
+    /// stream stable for entries that do not roll.
+    fn spawnItem(r: ItemRef, count: i32, rng: *rng_util.XorShift32, policy: QualityPolicy, out: []RolledItem, n: *usize) void {
         if (count < 1 or n.* >= out.len) return;
-        var quality: u8 = 1;
-        if (r.quality_lo > 0 and r.quality_hi >= r.quality_lo) {
-            quality = @intCast(r.quality_lo + rng.nextBounded(@as(u32, r.quality_hi) - @as(u32, r.quality_lo) + 1));
+        const has_quality = policy.itemHasQuality(r.name);
+        if (has_quality and policy.max_tier == 0) return;
+        var quality: u8 = no_quality_wire;
+        if (has_quality) {
+            var q_min: i32 = r.quality_lo;
+            var q_max: i32 = r.quality_hi;
+            if (q_min <= -1) {
+                q_min = policy.default_min;
+                q_max = policy.default_max;
+            }
+            if (policy.max_tier != -1 and q_max > policy.max_tier) q_max = policy.max_tier;
+            if (q_max < q_min) return;
+            const span: u32 = @intCast(q_max - q_min + 1);
+            quality = @intCast(q_min + @as(i32, @intCast(rng.nextBounded(span))));
         }
         out[n.*] = .{ .name = r.name, .count = @intCast(count), .quality = quality };
         n.* += 1;
@@ -300,16 +359,35 @@ fn parseProb(v: []const u8) f32 {
     return std.fmt.parseFloat(f32, v) catch 1;
 }
 
-/// quality="lo,hi" (both 1..6 in stock XML); 0/0 = unset.
-fn parseQuality(v: []const u8) struct { u8, u8 } {
-    if (v.len == 0) return .{ 0, 0 };
+/// minQualityBase / maxQualityBase for an entry with no `quality` attribute.
+const quality_unset: i16 = -1;
+
+/// Largest quality a parsed bound may carry. Stock quality is an ItemValue
+/// byte, so a modlet writing `quality="300"` cannot be represented on the
+/// wire; clamping here keeps the roll inside the wire type when the
+/// `max_tier` ceiling is disabled.
+const quality_parse_max: i16 = 255;
+
+/// quality="lo,hi" (both 1..6 in stock XML). An absent or unparsable attribute
+/// yields stock's -1/-1 base pair (TradersFromXml.il:558-563), which SpawnItem
+/// replaces with the policy default range.
+fn parseQuality(v: []const u8) struct { i16, i16 } {
+    if (v.len == 0) return .{ quality_unset, quality_unset };
     const comma = std.mem.findScalar(u8, v, ',') orelse {
-        const q = std.fmt.parseInt(u8, v, 10) catch return .{ 0, 0 };
-        return .{ q, q };
+        const q = std.fmt.parseInt(i16, v, 10) catch return .{ quality_unset, quality_unset };
+        const c = clampQuality(q);
+        return .{ c, c };
     };
-    const lo = std.fmt.parseInt(u8, v[0..comma], 10) catch return .{ 0, 0 };
-    const hi = std.fmt.parseInt(u8, v[comma + 1 ..], 10) catch lo;
+    const lo = clampQuality(std.fmt.parseInt(i16, v[0..comma], 10) catch return .{ quality_unset, quality_unset });
+    const hi = clampQuality(std.fmt.parseInt(i16, v[comma + 1 ..], 10) catch lo);
     return .{ lo, @max(lo, hi) };
+}
+
+/// Keep a declared bound inside the wire byte range, leaving any negative
+/// value as the unset sentinel SpawnItem substitutes for.
+fn clampQuality(q: i16) i16 {
+    if (q < 0) return quality_unset;
+    return @min(q, quality_parse_max);
 }
 
 fn parseItemRef(arena: std.mem.Allocator, body: []const u8, ii: usize) ?ItemRef {
@@ -582,14 +660,36 @@ test "trader table parses trader_info blocks with per-trader items and attrs" {
     const jen = t.traderInfo(2).?;
     var outj: [128]RolledItem = undefined;
     var rng_j = rng_util.XorShift32.init(7);
-    const ojn = t.rollAllRefs(jen.refs, &rng_j, &outj);
+    const ojn = t.rollAllRefs(jen.refs, &rng_j, .{}, &outj);
     try std.testing.expect(ojn > 0);
     var out_joel: [128]RolledItem = undefined;
     var rng_j2 = rng_util.XorShift32.init(7);
-    const ojn2 = t.rollAllRefs(joel.refs, &rng_j2, &out_joel);
+    const ojn2 = t.rollAllRefs(joel.refs, &rng_j2, .{}, &out_joel);
     try std.testing.expect(ojn2 > 0);
     try std.testing.expect(!std.mem.eql(u8, out_joel[0].name, outj[0].name));
 }
+
+/// Names the roll tests treat as quality-bearing (the items-table stand-in).
+const TestQualityNames = struct {
+    names: []const []const u8,
+
+    fn resolve(ctx: ?*anyopaque, name: []const u8) bool {
+        const self: *const TestQualityNames = @ptrCast(@alignCast(ctx.?));
+        for (self.names) |n| {
+            if (std.mem.eql(u8, n, name)) return true;
+        }
+        return false;
+    }
+
+    /// Stock-default policy (max_tier 6, fallback range 1..6). Tests that
+    /// exercise the clamp override `max_tier` on the result.
+    fn policy(self: *const TestQualityNames) QualityPolicy {
+        return .{
+            .has_quality = &resolve,
+            .has_quality_ctx = @constCast(self),
+        };
+    }
+};
 
 test "roll stays deterministic and honours count ranges and unique_only" {
     const refs = [_]ItemRef{
@@ -597,10 +697,12 @@ test "roll stays deterministic and honours count ranges and unique_only" {
         .{ .name = "ammoB", .count_min = 1, .count_max = 1 },
         .{ .name = "gunA", .quality_lo = 2, .quality_hi = 6 },
     };
+    const quality_names = TestQualityNames{ .names = &.{"gunA"} };
+    const policy = quality_names.policy();
     var t = TraderTable.empty();
     var out: [16]RolledItem = undefined;
     var rng_a = rng_util.XorShift32.init(99);
-    const n = t.rollAllRefs(&refs, &rng_a, &out);
+    const n = t.rollAllRefs(&refs, &rng_a, policy, &out);
     try std.testing.expectEqual(@as(usize, 3), n);
     try std.testing.expect(out[0].count >= 40 and out[0].count <= 150);
     try std.testing.expectEqual(@as(u16, 1), out[1].count);
@@ -608,7 +710,7 @@ test "roll stays deterministic and honours count ranges and unique_only" {
     // Same seed → same roll (deterministic sim input).
     var rng_b = rng_util.XorShift32.init(99);
     var out2: [16]RolledItem = undefined;
-    const n2 = t.rollAllRefs(&refs, &rng_b, &out2);
+    const n2 = t.rollAllRefs(&refs, &rng_b, policy, &out2);
     try std.testing.expectEqual(n, n2);
     for (out[0..n], out2[0..n2]) |a, b| {
         try std.testing.expectEqualStrings(a.name, b.name);
@@ -640,7 +742,7 @@ test "unique_only group picks distinct refs" {
     const refs = [_]ItemRef{.{ .name = gname, .group = true, .count_min = 3, .count_max = 3 }};
     var out: [16]RolledItem = undefined;
     var rng = rng_util.XorShift32.init(5);
-    const n = t.rollAllRefs(&refs, &rng, &out);
+    const n = t.rollAllRefs(&refs, &rng, .{}, &out);
     try std.testing.expect(n >= 3);
     var seen: [3]bool = .{false} ** 3;
     for (out[0..n]) |r| {
@@ -727,4 +829,135 @@ test "traders root economy attributes parse (currency_item, markup)" {
     var t2 = try loadFromPath(std.testing.allocator, path2);
     defer t2.deinit();
     try std.testing.expectEqualStrings("", t2.currency_item);
+}
+
+test "quality-less entry rolls the default range for a quality item only" {
+    // Stock parses a `quality`-less <item> with minQualityBase =
+    // maxQualityBase = -1 (TradersFromXml.il:558-563); SpawnItem substitutes
+    // 1..6 for a quality-bearing item and leaves everything else alone.
+    const refs = [_]ItemRef{
+        .{ .name = "gunPistol" },
+        .{ .name = "resourceWood", .count_min = 10, .count_max = 10 },
+    };
+    const quality_names = TestQualityNames{ .names = &.{"gunPistol"} };
+    var t = TraderTable.empty();
+    // One seed can land anywhere in 1..6; sweep so the range, not one draw,
+    // is what the test pins.
+    var saw_above_one = false;
+    var seed: u32 = 1;
+    while (seed <= 32) : (seed += 1) {
+        var rng = rng_util.XorShift32.init(seed);
+        var out: [8]RolledItem = undefined;
+        const n = t.rollAllRefs(&refs, &rng, quality_names.policy(), &out);
+        try std.testing.expectEqual(@as(usize, 2), n);
+        try std.testing.expectEqualStrings("gunPistol", out[0].name);
+        try std.testing.expect(out[0].quality >= 1 and out[0].quality <= 6);
+        if (out[0].quality > 1) saw_above_one = true;
+        // A stackable has no effect_group, so no quality is rolled at all.
+        try std.testing.expectEqualStrings("resourceWood", out[1].name);
+        try std.testing.expectEqual(@as(u8, 1), out[1].quality);
+    }
+    try std.testing.expect(saw_above_one);
+}
+
+test "explicit quality attribute wins over the default range" {
+    const refs = [_]ItemRef{.{ .name = "gunPistol", .quality_lo = 3, .quality_hi = 3 }};
+    const quality_names = TestQualityNames{ .names = &.{"gunPistol"} };
+    var t = TraderTable.empty();
+    var seed: u32 = 1;
+    while (seed <= 8) : (seed += 1) {
+        var rng = rng_util.XorShift32.init(seed);
+        var out: [4]RolledItem = undefined;
+        const n = t.rollAllRefs(&refs, &rng, quality_names.policy(), &out);
+        try std.testing.expectEqual(@as(usize, 1), n);
+        try std.testing.expectEqual(@as(u8, 3), out[0].quality);
+    }
+}
+
+test "TraderMaxTier clamps the roll and gates the spawn" {
+    // SpawnItem IL_015F-0175: maxQuality clamps to TraderMaxTier unless the
+    // cap is -1. IL_0011-0020: a cap of 0 drops quality items entirely.
+    // IL_0177-017C: an explicit min above the cap drops the item too.
+    const refs = [_]ItemRef{
+        .{ .name = "gunPistol" },
+        .{ .name = "resourceWood", .count_min = 5, .count_max = 5 },
+    };
+    const quality_names = TestQualityNames{ .names = &.{"gunPistol"} };
+    var t = TraderTable.empty();
+
+    var policy_clamped = quality_names.policy();
+    policy_clamped.max_tier = 2;
+    var seed: u32 = 1;
+    while (seed <= 32) : (seed += 1) {
+        var rng = rng_util.XorShift32.init(seed);
+        var out: [8]RolledItem = undefined;
+        const n = t.rollAllRefs(&refs, &rng, policy_clamped, &out);
+        try std.testing.expectEqual(@as(usize, 2), n);
+        try std.testing.expect(out[0].quality >= 1 and out[0].quality <= 2);
+    }
+
+    // Cap 0: the gun is not written to out[] at all, the stackable still is.
+    var policy_zero = quality_names.policy();
+    policy_zero.max_tier = 0;
+    var rng_zero = rng_util.XorShift32.init(11);
+    var out_zero: [8]RolledItem = undefined;
+    const nz = t.rollAllRefs(&refs, &rng_zero, policy_zero, &out_zero);
+    try std.testing.expectEqual(@as(usize, 1), nz);
+    try std.testing.expectEqualStrings("resourceWood", out_zero[0].name);
+
+    // Explicit min 5 with a cap of 3 leaves max < min, so nothing spawns.
+    const high_refs = [_]ItemRef{.{ .name = "gunPistol", .quality_lo = 5, .quality_hi = 6 }};
+    var policy_low = quality_names.policy();
+    policy_low.max_tier = 3;
+    var rng_low = rng_util.XorShift32.init(11);
+    var out_low: [8]RolledItem = undefined;
+    try std.testing.expectEqual(@as(usize, 0), t.rollAllRefs(&high_refs, &rng_low, policy_low, &out_low));
+
+    // max_tier -1 disables the clamp: the full default range comes back.
+    var policy_uncapped = quality_names.policy();
+    policy_uncapped.max_tier = -1;
+    var saw_six = false;
+    seed = 1;
+    while (seed <= 64) : (seed += 1) {
+        var rng = rng_util.XorShift32.init(seed);
+        var out: [8]RolledItem = undefined;
+        _ = t.rollAllRefs(&refs, &rng, policy_uncapped, &out);
+        if (out[0].quality == 6) saw_six = true;
+    }
+    try std.testing.expect(saw_six);
+}
+
+test "quality-less trader entries parse as the stock -1 base pair" {
+    var arena_holder = try std.testing.allocator.create(std.heap.ArenaAllocator);
+    arena_holder.* = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer {
+        arena_holder.deinit();
+        std.testing.allocator.destroy(arena_holder);
+    }
+    const arena = arena_holder.allocator();
+    const body = "<item name=\"plain\"/><item name=\"ranged\" quality=\"2,4\"/>";
+    const refs = try parseRefsBody(arena, std.testing.allocator, body);
+    try std.testing.expectEqual(@as(usize, 2), refs.len);
+    try std.testing.expectEqual(@as(i16, -1), refs[0].quality_lo);
+    try std.testing.expectEqual(@as(i16, -1), refs[0].quality_hi);
+    try std.testing.expectEqual(@as(i16, 2), refs[1].quality_lo);
+    try std.testing.expectEqual(@as(i16, 4), refs[1].quality_hi);
+    // A modlet bound past the wire byte clamps at parse; a negative one falls
+    // back to the unset sentinel. Neither may reach the u8 quality cast.
+    const wild = "<item name=\"huge\" quality=\"300,900\"/><item name=\"neg\" quality=\"-4\"/>";
+    const wild_refs = try parseRefsBody(arena, std.testing.allocator, wild);
+    try std.testing.expectEqual(@as(usize, 2), wild_refs.len);
+    try std.testing.expectEqual(@as(i16, 255), wild_refs[0].quality_lo);
+    try std.testing.expectEqual(@as(i16, 255), wild_refs[0].quality_hi);
+    try std.testing.expectEqual(@as(i16, -1), wild_refs[1].quality_lo);
+
+    // The clamped bound still survives the roll as a valid wire quality.
+    const quality_names = TestQualityNames{ .names = &.{"huge"} };
+    var policy = quality_names.policy();
+    policy.max_tier = -1;
+    var t = TraderTable.empty();
+    var rng = rng_util.XorShift32.init(3);
+    var out: [4]RolledItem = undefined;
+    try std.testing.expectEqual(@as(usize, 1), t.rollAllRefs(wild_refs[0..1], &rng, policy, &out));
+    try std.testing.expectEqual(@as(u8, 255), out[0].quality);
 }

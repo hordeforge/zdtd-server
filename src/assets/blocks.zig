@@ -90,6 +90,12 @@ pub const BlockDef = struct {
     /// table saw have no fuel module and advance regardless (stock
     /// TileEntityWorkstation.HandleRecipeQueue gate, asm.il 1331687).
     has_fuel_module: bool = false,
+    /// Workstation Modules list contains "material_input": forge melt path
+    /// (HandleMaterialInput). Campfire uses "input" (no melt).
+    has_material_input: bool = false,
+    /// Workstation InputMaterials comma list ("iron,brass,lead,glass,stone,clay").
+    /// Empty = no forge material slots. Arena-owned.
+    input_materials: []const u8 = "",
     /// Workstation CraftingAreaRecipes comma list ("player,workbench",
     /// "forge", "tablesaw"). Empty = the block name is the area (campfire,
     /// chemistryStation, cementMixer carry no list). Gates which recipes a
@@ -228,6 +234,18 @@ pub const BlockTable = struct {
     pub fn hasFuelModule(self: *const BlockTable, id: u16) bool {
         if (self.byId(id)) |d| return d.has_fuel_module;
         return false;
+    }
+
+    /// True when Modules includes "material_input" (forge melt path).
+    pub fn hasMaterialInput(self: *const BlockTable, id: u16) bool {
+        if (self.byId(id)) |d| return d.has_material_input;
+        return false;
+    }
+
+    /// InputMaterials comma list, or empty when unset / unknown.
+    pub fn inputMaterials(self: *const BlockTable, id: u16) []const u8 {
+        if (self.byId(id)) |d| return d.input_materials;
+        return "";
     }
 
     /// ActiveRadiusEffects buff name and squared radius for a block, or null
@@ -389,6 +407,8 @@ pub fn loadFromPath(
         is_door: bool = false,
         heat_strength: f32 = 0,
         has_fuel_module: bool = false,
+        has_material_input: bool = false,
+        input_materials: ?[]const u8 = null,
         crafting_areas: ?[]const u8 = null,
         radius_effect_buff: ?[]const u8 = null,
         radius_effect_radius_sq: f32 = 0,
@@ -438,6 +458,8 @@ pub fn loadFromPath(
         var trader_onoff = false;
         var heat_strength: f32 = 0;
         var has_fuel_module = false;
+        var has_material_input = false;
+        var input_materials: ?[]const u8 = null;
         var crafting_areas: ?[]const u8 = null;
         var radius_effect_buff: ?[]const u8 = null;
         var radius_effect_radius_sq: f32 = 0;
@@ -518,7 +540,10 @@ pub fn loadFromPath(
             } else if (std.mem.eql(u8, pname, "Modules")) {
                 if (xml.attr(clean, pi, "value")) |v| {
                     if (std.mem.find(u8, v, "fuel") != null) has_fuel_module = true;
+                    if (std.mem.find(u8, v, "material_input") != null) has_material_input = true;
                 }
+            } else if (std.mem.eql(u8, pname, "InputMaterials")) {
+                input_materials = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "CraftingAreaRecipes")) {
                 crafting_areas = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "ActiveRadiusEffects")) {
@@ -597,6 +622,8 @@ pub fn loadFromPath(
             .is_door = std.ascii.findIgnoreCase(kn, "door") != null,
             .heat_strength = heat_strength,
             .has_fuel_module = has_fuel_module,
+            .has_material_input = has_material_input,
+            .input_materials = if (input_materials) |im| try arena.dupe(u8, im) else "",
             .crafting_areas = if (crafting_areas) |ca| try arena.dupe(u8, ca) else "",
             .radius_effect_buff = if (radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
             .radius_effect_radius_sq = radius_effect_radius_sq,
@@ -690,6 +717,8 @@ pub fn loadFromPath(
             .is_door = pb.is_door,
             .heat_strength = pb.heat_strength,
             .has_fuel_module = pb.has_fuel_module,
+            .has_material_input = pb.has_material_input,
+            .input_materials = if (pb.input_materials) |im| try arena.dupe(u8, im) else "",
             .crafting_areas = if (pb.crafting_areas) |ca| try arena.dupe(u8, ca) else "",
             .radius_effect_buff = if (pb.radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
             .radius_effect_radius_sq = pb.radius_effect_radius_sq,
@@ -792,6 +821,7 @@ test "vending class and TraderID resolve with Extends inheritance" {
         \\<block name="forge">
         \\  <property class="Workstation">
         \\    <property name="Modules" value="tools,output,fuel,material_input"/>
+        \\    <property name="InputMaterials" value="iron,brass,lead,glass,stone,clay"/>
         \\    <property name="CraftingAreaRecipes" value="forge"/>
         \\  </property>
         \\</block>
@@ -836,12 +866,17 @@ test "vending class and TraderID resolve with Extends inheritance" {
     const bench = t.byName("workbench").?;
     try std.testing.expect(!t.hasFuelModule(bench.id));
     try std.testing.expect(!t.hasFuelModule(crate.id));
+    try std.testing.expect(!t.hasMaterialInput(fire.id));
+    try std.testing.expect(!t.hasMaterialInput(bench.id));
     // CraftingAreaRecipes gate: workbench allows player + workbench recipes
     // only; forge only forge; campfire (no list) only its own name.
     try std.testing.expect(t.allowsCraftArea(bench.id, "workbench"));
     try std.testing.expect(t.allowsCraftArea(bench.id, "player"));
     try std.testing.expect(!t.allowsCraftArea(bench.id, "forge"));
     const forge = t.byName("forge").?;
+    try std.testing.expect(t.hasFuelModule(forge.id));
+    try std.testing.expect(t.hasMaterialInput(forge.id));
+    try std.testing.expectEqualStrings("iron,brass,lead,glass,stone,clay", t.inputMaterials(forge.id));
     try std.testing.expect(t.allowsCraftArea(forge.id, "forge"));
     try std.testing.expect(!t.allowsCraftArea(forge.id, "campfire"));
     try std.testing.expect(t.allowsCraftArea(fire.id, "campfire"));

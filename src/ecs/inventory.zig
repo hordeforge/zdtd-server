@@ -24,6 +24,9 @@ pub const Op = enum(u8) {
     equip = 10, // move slot a → equip slot b (0..equip_count-1)
     /// Craft: a = recipe index (caller resolves), qty = output multiplier (min 1).
     craft = 11,
+    /// Scrap: a = bag slot, qty = input count (min 1). Resolved in Game via
+    /// GetScrapableRecipe (RE crafting-recipes.md IL=77).
+    scrap = 12,
 };
 
 pub const Result = struct {
@@ -554,8 +557,9 @@ pub fn applyTransactionEx(
             const z: i32 = @as(i16, @bitCast(qty));
             break :blk placeBlock(w, peer, a, x, y, z);
         },
-        // Craft resolved in Game (needs recipes + item name map).
+        // Craft/scrap resolved in Game (needs recipes + item name map).
         .craft => .{ .ok = false },
+        .scrap => .{ .ok = false },
     };
 }
 
@@ -728,6 +732,10 @@ test "open container rejects far vertical targets" {
 
 test "craft op reserved" {
     try std.testing.expectEqual(@as(u8, 11), @intFromEnum(Op.craft));
+}
+
+test "scrap op reserved" {
+    try std.testing.expectEqual(@as(u8, 12), @intFromEnum(Op.scrap));
 }
 
 test "place fuel item yields refuel_amount" {

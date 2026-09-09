@@ -1,5 +1,6 @@
 //! Crafting and workstation helpers, extracted verbatim from game.zig:
-//! tryCraft/tryCraftRecipe (InvTx craft op), tickWorkstations (burn/craft +
+//! tryCraft/tryCraftRecipe (InvTx craft op), getScrapableRecipe/tryScrap
+//! (InvTx scrap op, RE GetScrapableRecipe IL=77), tickWorkstations (burn/craft +
 //! heat map feed), tryRefuelGenerator (InvTx refuel), eatProps / itemIsArmor
 //! (items.xml ItemActionEat + armor checks), resolveWorkstationOutput, and
 //! handItemDamage (entity damage from the hand item).
@@ -170,6 +171,63 @@ fn resolveWorkstationFuel(ctx: ?*anyopaque, item_id: u16) f32 {
     return g.items.fuelValueFor(item_id);
 }
 
+/// items.xml Weight for forge melt (units produced per scrap consumed).
+fn resolveWorkstationWeight(ctx: ?*anyopaque, item_id: u16) u16 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.items.weightFor(item_id);
+}
+
+/// items.xml Stacknumber for a forged `unit_*` item: the ceiling on how much
+/// material one forge slot holds.
+fn resolveWorkstationUnitStack(ctx: ?*anyopaque, item_id: u16) u16 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.items.stackFor(item_id);
+}
+
+/// items.xml MeltTimePerUnit (seconds per weight unit; 0 → stock default 1).
+fn resolveWorkstationMeltTime(ctx: ?*anyopaque, item_id: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.items.meltTimePerUnitFor(item_id);
+}
+
+/// blocks.xml InputMaterials comma list for a workstation block.
+fn resolveWorkstationInputMaterials(ctx: ?*anyopaque, block_id: i32) []const u8 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (block_id <= 0 or block_id > 65535) return "";
+    return g.blocks.inputMaterials(@intCast(block_id));
+}
+
+/// unit_* item id for a material name ("iron" → unit_iron); 0 if unknown.
+fn resolveWorkstationUnitItem(ctx: ?*anyopaque, material_name: []const u8) u16 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    var buf: [64]u8 = undefined;
+    if (material_name.len + 5 > buf.len) return 0;
+    const name = std.fmt.bufPrint(&buf, "unit_{s}", .{material_name}) catch return 0;
+    if (g.items.byName(name)) |d| return d.id;
+    return 0;
+}
+
+/// Stock MadeOfMaterial → materials.xml forge_category (AcceptsMaterial).
+fn resolveWorkstationForgeCategory(ctx: ?*anyopaque, item_id: u16) []const u8 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const mat = g.items.materialFor(item_id);
+    if (mat.len == 0) return "";
+    return g.maxdamage.forgeCategoryForMaterial(mat);
+}
+
+/// Stock HandleMaterialInput tools path: PassiveEffects 95 (CraftingSmeltTime).
+/// Fold every occupied tool slot's perc_add curve into a multiplicative scale
+/// (ItemValue.ModifyValue then duration *= perc). Empty tools → identity 1.
+fn resolveWorkstationSmeltScale(ctx: ?*anyopaque, tools: []const components.InvSlot) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    var scale: f32 = 1.0;
+    for (tools) |t| {
+        if (t.item_id == 0 or t.count == 0) continue;
+        scale *= g.items.craftingSmeltTimeScale(t.item_id, t.quality);
+    }
+    return scale;
+}
+
 /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
 pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
     if (recipe_index >= self.recipes.defs.len) return false;
@@ -180,10 +238,11 @@ pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bo
 /// workstation/tool/material requirements - the stock player inventory
 /// never offers those, and accepting them here would bypass the workstation
 /// gate (craft_area/craft_tool) or mint items from nothing (zero-ingredient
-/// material_based recipes). GAP "Server craft execution". The workstation
-/// craft path (inv.zig) enforces craft_area against the station block.
+/// material_based / wildcard_forge_category scrap stubs). GAP "Server craft
+/// execution" / "Scrapping". The workstation craft path (inv.zig) enforces
+/// craft_area against the station block.
 pub fn generalCraftAllowed(recipe: assets_recipes.RecipeDef) bool {
-    return recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based;
+    return recipe.craft_area.len == 0 and recipe.craft_tool.len == 0 and !recipe.material_based and !recipe.wildcard_forge_category;
 }
 
 fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef, times: u16) bool {
@@ -273,6 +332,80 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     return true;
 }
 
+/// Stock CraftingManager.GetScrapableRecipe(itemValue, count) (RE crafting-recipes.md
+/// IL=77): MadeOfMaterial must carry a ForgeCategory, item must not be NoScrapping,
+/// then the first wildcard_forge_category recipe whose output material shares that
+/// ForgeCategory (output type != input type) and whose output weight is
+/// <= itemWeight * count wins. Null when no match.
+pub fn getScrapableRecipe(
+    self: *Game,
+    item_id: u16,
+    count: u16,
+) ?assets_recipes.RecipeDef {
+    if (item_id == 0 or count == 0) return null;
+    const def = self.items.byId(item_id) orelse return null;
+    if (def.no_scrapping) return null;
+    const mat = def.material;
+    if (mat.len == 0) return null;
+    const forge_cat = self.maxdamage.forgeCategoryForMaterial(mat);
+    if (forge_cat.len == 0) return null;
+    const item_weight = def.weight;
+    if (item_weight == 0) return null;
+    const budget: u32 = @as(u32, item_weight) * @as(u32, count);
+
+    for (self.recipes.defs) |recipe| {
+        if (!recipe.wildcard_forge_category) continue;
+        const out_id = self.ecsIdFromItemName(recipe.name);
+        if (out_id == 0 or out_id == item_id) continue;
+        const out_def = self.items.byId(out_id) orelse continue;
+        const out_mat = out_def.material;
+        if (out_mat.len == 0) continue;
+        const out_cat = self.maxdamage.forgeCategoryForMaterial(out_mat);
+        if (out_cat.len == 0 or !std.mem.eql(u8, out_cat, forge_cat)) continue;
+        const out_count: u16 = if (recipe.count == 0) 1 else recipe.count;
+        const out_weight: u32 = @as(u32, out_def.weight) * @as(u32, out_count);
+        if (out_weight == 0 or out_weight > budget) continue;
+        return recipe;
+    }
+    return null;
+}
+
+/// InvTx scrap op: bag slot `a`, qty = input count (min 1). Resolves scrap via
+/// GetScrapableRecipe, consumes the slot's input, deposits `recipe.count` of
+/// the scrap output (one craft of the selected stub; the RE weight gate only
+/// selects which recipe is legal). Snapshot/restore mirrors tryCraftRecipe;
+/// ledger cause reuses .craft (no scrap-specific cause yet).
+pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
+    const ps = self.sim.playerByPeer(peer_slot) orelse return false;
+    if (!self.sim.mask[ps].inventory) return false;
+    if (bag_slot >= components.max_inv_slots) return false;
+    const slot = self.sim.inventory[ps].slots[bag_slot];
+    if (slot.item_id == 0 or slot.count == 0) return false;
+    var n: u16 = if (qty == 0) 1 else qty;
+    if (n > slot.count) n = slot.count;
+
+    const recipe = getScrapableRecipe(self, slot.item_id, n) orelse return false;
+    const out_id = self.ecsIdFromItemName(recipe.name);
+    if (out_id == 0) return false;
+    const out_count: u16 = if (recipe.count == 0) 1 else recipe.count;
+
+    const inventory_before = self.sim.inventory[ps];
+    if (self.sim.inventory[ps].takeFromSlot(bag_slot, n) == null) {
+        self.sim.inventory[ps] = inventory_before;
+        return false;
+    }
+    if (!self.sim.depositItem(ps, out_id, out_count)) {
+        self.sim.inventory[ps] = inventory_before;
+        return false;
+    }
+    self.sim.markDirty(ps, .{ .inv = true });
+    const p: u16 = if (peer_slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer_slot);
+    const d: i16 = @intCast(@min(out_count, std.math.maxInt(i16)));
+    self.sim.inv_ledger.record(p, out_id, d, .craft);
+    systems.questOnCraft(&self.sim, peer_slot, recipe.name);
+    return true;
+}
+
 pub fn handItemDamage(self: *Game, hand_item: []const u8) f32 {
     if (hand_item.len == 0) return 0;
     if (self.items.byName(hand_item)) |d| return d.entity_damage;
@@ -300,6 +433,14 @@ pub fn handItemRange(self: *Game, hand_item: []const u8) f32 {
 
 /// One workstation step: burn/craft, then re-broadcast the stations it changed.
 pub fn tickWorkstations(self: *Game, dt: f32) !void {
+    // Material-input module is block-derived (not in ZWS1); refresh each tick
+    // so a loaded forge melts without waiting for a client TE rewrite.
+    for (self.workstations.items[0..], self.workstations.used[0..]) |*w, u| {
+        if (!u) continue;
+        if (w.block_id > 0 and w.block_id <= 65535) {
+            w.has_material_input = self.blocks.hasMaterialInput(@intCast(w.block_id));
+        }
+    }
     self.workstations.tickAllResolved(dt, resolveWorkstationOutput, self, .{
         .max_crafts_per_tick = self.workstation_crafts_per_tick,
         .max_craft_backlog = self.workstation_craft_backlog,
@@ -307,6 +448,17 @@ pub fn tickWorkstations(self: *Game, dt: f32) !void {
         .fuel_ctx = self,
         .on_craft_done = &onStationCraftDone,
         .craft_done_ctx = self,
+        // Forge melt: scrap → unit_* via Weight / MeltTimePerUnit / Material →
+        // materials.xml forge_category / InputMaterials / unit_* resolvers.
+        // Tools PassiveEffects 95 (CraftingSmeltTime) scale melt duration.
+        .weight_resolve = &resolveWorkstationWeight,
+        .unit_stack_resolve = &resolveWorkstationUnitStack,
+        .melt_time_resolve = &resolveWorkstationMeltTime,
+        .forge_category_resolve = &resolveWorkstationForgeCategory,
+        .input_materials_resolve = &resolveWorkstationInputMaterials,
+        .unit_item_resolve = &resolveWorkstationUnitItem,
+        .smelt_scale_resolve = &resolveWorkstationSmeltScale,
+        .melt_ctx = self,
     });
     // Heat map feed (AIDirectorChunkData): burning workstations with a
     // blocks.xml HeatMapStrength (forge 6, campfire 5, workbench 5, ...)
@@ -496,10 +648,93 @@ test "itemIsArmor does not use offline pins after catalogs requested" {
 test "general craft path rejects workstation/tool/material recipes" {
     // GAP "Server craft execution": the inventory craft path must not accept
     // forge/campfire-area recipes (they need a station), tool-bound recipes,
-    // or zero-ingredient material_based recipes that would mint items.
+    // zero-ingredient material_based recipes, or wildcard forge scrap stubs
+    // that would mint scrap from nothing.
     const base = assets_recipes.RecipeDef{};
     try std.testing.expect(generalCraftAllowed(base));
     try std.testing.expect(!generalCraftAllowed(.{ .craft_area = "forge" }));
     try std.testing.expect(!generalCraftAllowed(.{ .craft_tool = "toolForgeHammer" }));
     try std.testing.expect(!generalCraftAllowed(.{ .material_based = true }));
+    try std.testing.expect(!generalCraftAllowed(.{ .wildcard_forge_category = true }));
+}
+
+test "getScrapableRecipe and tryScrap follow RE weight/category rules" {
+    // Injected tables: input metal item (weight 5) scraps to unit_iron (weight 1)
+    // when forge_category matches; no_scrapping and overweight output reject.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, world_dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    const scrap_in_id: u16 = 100;
+    const scrap_out_id: u16 = 101;
+    const heavy_out_id: u16 = 102;
+    const noscrap_id: u16 = 103;
+    const item_defs = [_]assets_items.ItemDef{
+        .{ .id = 0, .name = "none", .stack = 0 },
+        .{ .id = scrap_in_id, .name = "scrapInput", .stack = 64, .weight = 5, .material = "Mmetal" },
+        .{ .id = scrap_out_id, .name = "unit_iron", .stack = 60000, .weight = 1, .material = "Mmetal" },
+        .{ .id = heavy_out_id, .name = "unitHeavy", .stack = 64, .weight = 20, .material = "Mmetal" },
+        .{ .id = noscrap_id, .name = "noScrapItem", .stack = 64, .weight = 5, .material = "Mmetal", .no_scrapping = true },
+    };
+    // Drop Game.create catalogs before injecting fixtures (else their arenas leak).
+    g.items.deinit();
+    g.items = .{ .defs = &item_defs, .source = .xml };
+    g.recipes.deinit();
+
+    const recipe_iron = assets_recipes.RecipeDef{
+        .name = "unit_iron",
+        .count = 1,
+        .wildcard_forge_category = true,
+    };
+    const recipe_heavy = assets_recipes.RecipeDef{
+        .name = "unitHeavy",
+        .count = 1,
+        .wildcard_forge_category = true,
+    };
+    // First matching recipe wins; iron before heavy so overweight is never chosen when iron fits.
+    const recipe_defs = [_]assets_recipes.RecipeDef{ recipe_iron, recipe_heavy };
+    const heavy_only = [_]assets_recipes.RecipeDef{recipe_heavy};
+    g.recipes = .{ .defs = &recipe_defs, .source = .xml };
+
+    g.maxdamage.deinit();
+    const arena_holder = try std.testing.allocator.create(std.heap.ArenaAllocator);
+    arena_holder.* = .init(std.testing.allocator);
+    g.maxdamage = .{ .arena_ptr = arena_holder };
+    const a = arena_holder.allocator();
+    try g.maxdamage.material_forge_category.put(a, try a.dupe(u8, "Mmetal"), try a.dupe(u8, "iron"));
+
+    // Match: weight 5 >= output 1, same forge category, different type.
+    try std.testing.expect(getScrapableRecipe(g, scrap_in_id, 1) != null);
+    try std.testing.expectEqualStrings("unit_iron", getScrapableRecipe(g, scrap_in_id, 1).?.name);
+
+    // NoScrapping rejects.
+    try std.testing.expect(getScrapableRecipe(g, noscrap_id, 1) == null);
+
+    // Overweight gate: only heavy recipe present, output weight 20 > item 5.
+    g.recipes = .{ .defs = &heavy_only, .source = .xml };
+    try std.testing.expect(getScrapableRecipe(g, scrap_in_id, 1) == null);
+    // Enough count clears the weight gate (5*4=20).
+    try std.testing.expect(getScrapableRecipe(g, scrap_in_id, 4) != null);
+    g.recipes = .{ .defs = &recipe_defs, .source = .xml };
+
+    const peer: usize = 0;
+    _ = g.sim.spawnPlayer(0, 70, 0, peer);
+    const ps = g.sim.playerByPeer(peer).?;
+    g.sim.inventory[ps].slots[0] = .{ .item_id = scrap_in_id, .count = 2 };
+
+    try std.testing.expect(tryScrap(g, peer, 0, 1));
+    try std.testing.expectEqual(@as(u16, 1), g.sim.inventory[ps].slots[0].count);
+    // Yield is recipe.count (weight gate only selects the recipe).
+    try std.testing.expectEqual(@as(u32, 1), g.sim.inventory[ps].countItem(scrap_out_id));
+
+    // no_scrapping item in bag rejects.
+    g.sim.inventory[ps].slots[1] = .{ .item_id = noscrap_id, .count = 1 };
+    try std.testing.expect(!tryScrap(g, peer, 1, 1));
+    try std.testing.expectEqual(@as(u16, 1), g.sim.inventory[ps].slots[1].count);
 }

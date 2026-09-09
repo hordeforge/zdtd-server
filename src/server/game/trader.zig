@@ -121,6 +121,26 @@ pub fn toggleGatesInArea(self: *Game, d: *const world_store.prefabs.Decoration, 
     }
 }
 
+fn resolveItemHasQuality(ctx: ?*anyopaque, name: []const u8) bool {
+    const g: *const Game = @ptrCast(@alignCast(ctx.?));
+    return g.items.hasQualityByName(name);
+}
+
+/// `[rules.trader]` + the items table as stock `TraderInfo::SpawnItem` reads
+/// them: TraderMaxTier, the fallback quality range for `quality`-less entries,
+/// and ItemClass.HasQuality per name. Both roll sites (trader stock, vending
+/// store) build it here so neither carries its own defaults.
+pub fn qualityPolicy(self: *Game) assets_traders.QualityPolicy {
+    const r = self.sim.rules.trader;
+    return .{
+        .max_tier = r.max_tier,
+        .default_min = r.default_quality_min,
+        .default_max = r.default_quality_max,
+        .has_quality = &resolveItemHasQuality,
+        .has_quality_ctx = self,
+    };
+}
+
 /// Deterministic roll seed for a trader's inventory: (world seed, trader
 /// entity, day). Same world + trader + day → same stock; restock on a later
 /// day rolls fresh (sim rule: deterministic inputs).
@@ -156,7 +176,7 @@ pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.Roll
     if (refs.len == 0) refs = tt.trader_always_refs;
     if (refs.len == 0) return 0;
     var rng = rng_util.XorShift32.initFromU64(traderRollSeed(self, trader_net_id));
-    return tt.rollAllRefs(refs, &rng, out);
+    return tt.rollAllRefs(refs, &rng, qualityPolicy(self), out);
 }
 
 pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {

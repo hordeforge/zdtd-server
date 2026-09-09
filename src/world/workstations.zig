@@ -59,6 +59,19 @@ pub const stock_melt_len: u8 = 3;
 /// in unit tests keeps the offline fallback `default_fuel_burn_seconds`.
 pub const FuelResolver = *const fn (ctx: ?*anyopaque, item_id: u16) f32;
 
+/// items.xml Weight (forge melt units per input item).
+pub const WeightResolver = *const fn (ctx: ?*anyopaque, item_id: u16) u16;
+/// items.xml MeltTimePerUnit (seconds per weight unit; 0 → stock default 1).
+pub const MeltTimeResolver = *const fn (ctx: ?*anyopaque, item_id: u16) f32;
+/// MadeOfMaterial.ForgeCategory for an input item (empty = not meltable).
+pub const ForgeCategoryResolver = *const fn (ctx: ?*anyopaque, item_id: u16) []const u8;
+/// blocks.xml InputMaterials comma list for a workstation block.
+pub const InputMaterialsResolver = *const fn (ctx: ?*anyopaque, block_id: i32) []const u8;
+/// unit_* item id for a material name (e.g. "iron" → unit_iron); 0 = unknown.
+pub const UnitItemResolver = *const fn (ctx: ?*anyopaque, material_name: []const u8) u16;
+/// Tools PassiveEffects 95 (CraftingSmeltTime) melt-duration scale; null = identity 1.
+pub const SmeltScaleResolver = *const fn (ctx: ?*anyopaque, tools: []const components.InvSlot) f32;
+
 /// Per-tick craft budgets (zdtd.toml [sim] workstation_*). Bucket B anti-abuse
 /// caps: one client write must not be able to burst a whole queue into the
 /// output, and a far-negative client-written CraftingTimeLeft must not drain
@@ -77,11 +90,65 @@ pub const Caps = struct {
     /// decides whether the station actually dings).
     on_craft_done: ?*const fn (?*anyopaque, i32, i32, i32, u16) void = null,
     craft_done_ctx: ?*anyopaque = null,
+    /// Forge melt resolvers (null = HandleMaterialInput no-ops category match /
+    /// weight / melt time; offline tests supply fakes).
+    weight_resolve: ?WeightResolver = null,
+    melt_time_resolve: ?MeltTimeResolver = null,
+    forge_category_resolve: ?ForgeCategoryResolver = null,
+    input_materials_resolve: ?InputMaterialsResolver = null,
+    unit_item_resolve: ?UnitItemResolver = null,
+    /// Tools CraftingSmeltTime scale (PassiveEffects 95); null = identity 1.
+    smelt_scale_resolve: ?SmeltScaleResolver = null,
+    melt_ctx: ?*anyopaque = null,
+    /// items.xml `Stacknumber` for the forged `unit_*` item, which is the real
+    /// ceiling on how much material a forge accumulates. Null falls back to
+    /// `max_melt_units`, which only happens with no items table (offline).
+    unit_stack_resolve: ?WeightResolver = null,
+    /// Fallback ceiling for a forged `unit_*` slot when no items table is
+    /// attached to answer `Stacknumber`. Not stock data: stock has no flat
+    /// unit cap, the per-item stack is the cap, so this only bounds the
+    /// offline path rather than standing in for a real value.
+    max_melt_units: u16 = 30000,
 };
 
 /// Offline burn time per fuel item when no items table is attached (the stock
 /// value lives in items.xml FuelValue; 10 s is the pre-loader flat fallback).
 const default_fuel_burn_seconds: f32 = 10.0;
+
+/// Stock currentMeltTimesLeft idle sentinel (asm.il HandleMaterialInput ldc.r4).
+const melt_idle_sentinel: f32 = -2.147484e9;
+
+/// weight × MeltTimePerUnit; MeltTimePerUnit 0 → stock default 1.
+fn meltDurationSeconds(weight: u16, melt_time_per_unit: f32) f32 {
+    const mtu: f32 = if (melt_time_per_unit > 0) melt_time_per_unit else 1.0;
+    return @as(f32, @floatFromInt(weight)) * mtu;
+}
+
+fn countCommaList(list: []const u8) usize {
+    if (list.len == 0) return 0;
+    var n: usize = 1;
+    for (list) |c| {
+        if (c == ',') n += 1;
+    }
+    return n;
+}
+
+fn commaListAt(list: []const u8, index: usize) ?[]const u8 {
+    var i: usize = 0;
+    var start: usize = 0;
+    var idx: usize = 0;
+    while (i <= list.len) : (i += 1) {
+        if (i == list.len or list[i] == ',') {
+            if (idx == index) {
+                const raw = list[start..i];
+                return std.mem.trim(u8, raw, " \t");
+            }
+            idx += 1;
+            start = i + 1;
+        }
+    }
+    return null;
+}
 
 /// Recipe queue cell shared by sim state and TE wire (stock RecipeQueueItem fields).
 pub const QueueItem = struct {
@@ -212,6 +279,9 @@ pub const Workstation = struct {
     /// isBurning. Non-burning stations (workbench, cement mixer, table saw)
     /// advance without fuel (stock isModuleUsed[Fuel] gate).
     has_fuel_module: bool = false,
+    /// Block's Workstation Modules list includes "material_input": forge melt
+    /// path (stock isModuleUsed[Material_input] / HandleMaterialInput gate).
+    has_material_input: bool = false,
     is_player_placed: bool = true,
     /// Set once a client write has told us this station's real geometry. Echoing
     /// guessed array lengths would resize the client's grids, so nothing is sent
@@ -229,6 +299,8 @@ pub const Workstation = struct {
     pub fn tickResolved(self: *Workstation, dt: f32, resolve: ?OutputResolver, ctx: ?*anyopaque, caps: Caps) void {
         if (dt <= 0) return;
         self.handleFuel(dt, caps);
+        // Stock UpdateTick order: HandleFuel → HandleMaterialInput → HandleRecipeQueue.
+        self.handleMaterialInput(dt, caps);
         if (self.handleRecipeQueue(dt, resolve, ctx, caps)) {
             // Produced at least one item this tick: stock TileEntityForge
             // dings once per completion tick (asm.il ~IL_02E6/02F9).
@@ -257,6 +329,162 @@ pub const Workstation = struct {
                 self.burn_time_left = 0;
                 self.dirty = true;
                 break; // burn_time_left == 0 still satisfies the loop guard
+            }
+        }
+    }
+
+    /// Stock `HandleMaterialInput` (asm.il TileEntityWorkstation IL=531): for each
+    /// scrap input slot (prefix before the unit_* material slots), tick
+    /// `currentMeltTimesLeft`, and when the timer crosses zero consume one scrap
+    /// into the matching unit_* stack. Caps resolvers supply Weight /
+    /// MeltTimePerUnit / ForgeCategory / InputMaterials; null resolvers no-op.
+    fn handleMaterialInput(self: *Workstation, dt: f32, caps: Caps) void {
+        // isModuleUsed[Material_input]: forge only.
+        if (!self.has_material_input) return;
+        // Stock: not burning AND fuel module present → return. Stations without
+        // a fuel module still melt when material_input is set (rare).
+        if (!self.is_burning and self.has_fuel_module) return;
+
+        const materials = if (caps.input_materials_resolve) |r| r(caps.melt_ctx, self.block_id) else "";
+        const mat_n = countCommaList(materials);
+        if (mat_n == 0) return;
+
+        const in_len: usize = @min(@as(usize, self.input_len), self.input.len);
+        if (in_len <= mat_n) return;
+        const scrap_n = in_len - mat_n;
+        const melt_n = @min(@as(usize, self.melt_len), self.melt.len);
+        const unit_base = scrap_n;
+
+        var i: usize = 0;
+        while (i < scrap_n and i < melt_n) : (i += 1) {
+            const slot = &self.input[i];
+            if (slot.count == 0 or slot.item_id == 0) {
+                if (slot.count != 0 or slot.item_id != 0) {
+                    slot.* = .{};
+                    self.dirty = true;
+                }
+                if (self.melt[i] != melt_idle_sentinel) {
+                    self.melt[i] = melt_idle_sentinel;
+                    self.dirty = true;
+                }
+                continue;
+            }
+
+            const item_id = slot.item_id;
+            const category = if (caps.forge_category_resolve) |r| r(caps.melt_ctx, item_id) else "";
+            if (category.len == 0) continue;
+
+            if (!std.math.isFinite(self.melt[i])) self.melt[i] = melt_idle_sentinel;
+
+            // Active timer: subtract dt (stock also resets on lastInput type
+            // mismatch; lastInput is display-only pass-through here).
+            if (self.melt[i] >= 0 and slot.count > 0) {
+                self.melt[i] -= dt;
+                self.dirty = true;
+            }
+
+            // Idle sentinel + count > 0: start a new melt from weight × MeltTimePerUnit.
+            if (self.melt[i] == melt_idle_sentinel and slot.count > 0) {
+                var mat_i: usize = 0;
+                while (mat_i < mat_n) : (mat_i += 1) {
+                    const mat_name = commaListAt(materials, mat_i) orelse continue;
+                    if (!std.ascii.eqlIgnoreCase(category, mat_name)) continue;
+                    const unit_id = if (caps.unit_item_resolve) |r| r(caps.melt_ctx, mat_name) else 0;
+                    if (unit_id == 0) continue;
+                    const weight = if (caps.weight_resolve) |r| r(caps.melt_ctx, item_id) else 0;
+                    if (weight == 0) continue;
+                    const mtu = if (caps.melt_time_resolve) |r| r(caps.melt_ctx, item_id) else 0;
+                    // Stock HandleMaterialInput: tools PassiveEffects 95
+                    // (CraftingSmeltTime) → duration *= perc after ModifyValue.
+                    const scale = if (caps.smelt_scale_resolve) |r|
+                        r(caps.melt_ctx, self.tools[0..self.tools_len])
+                    else
+                        1.0;
+                    const duration = meltDurationSeconds(weight, mtu) * scale;
+                    if (duration > 0) {
+                        self.melt[i] = duration;
+                        self.dirty = true;
+                    }
+                    break;
+                }
+            }
+
+            if (self.melt[i] == melt_idle_sentinel) continue;
+
+            // Timer crossed below zero: convert scrap → unit_* material counts.
+            var produced = false;
+            var mat_i: usize = 0;
+            var unit_idx: usize = unit_base;
+            while (unit_idx < in_len and mat_i < mat_n) : ({
+                mat_i += 1;
+                unit_idx += 1;
+            }) {
+                const mat_name = commaListAt(materials, mat_i) orelse continue;
+                if (!std.ascii.eqlIgnoreCase(category, mat_name)) continue;
+                const unit_id = if (caps.unit_item_resolve) |r| r(caps.melt_ctx, mat_name) else 0;
+                if (unit_id == 0) continue;
+
+                const unit_slot = &self.input[unit_idx];
+                if (unit_slot.item_id == 0) {
+                    unit_slot.* = .{ .item_id = unit_id, .count = 0 };
+                }
+
+                while (self.melt[i] < 0 and self.melt[i] != melt_idle_sentinel) {
+                    if (slot.count == 0) {
+                        slot.* = .{};
+                        self.melt[i] = 0;
+                        produced = true;
+                        self.dirty = true;
+                        break;
+                    }
+                    const weight = if (caps.weight_resolve) |r| r(caps.melt_ctx, item_id) else 0;
+                    if (weight == 0) {
+                        self.melt[i] = melt_idle_sentinel;
+                        self.dirty = true;
+                        break;
+                    }
+                    const next: u32 = @as(u32, unit_slot.count) + weight;
+                    // The unit item's own Stacknumber is the ceiling stock
+                    // uses; the flat cap only covers the offline path where
+                    // no items table can answer.
+                    const unit_cap: u32 = blk: {
+                        if (caps.unit_stack_resolve) |r| {
+                            const s = r(caps.melt_ctx, unit_id);
+                            if (s > 0) break :blk s;
+                        }
+                        break :blk caps.max_melt_units;
+                    };
+                    if (next > unit_cap) {
+                        self.melt[i] = melt_idle_sentinel;
+                        self.dirty = true;
+                        break;
+                    }
+                    unit_slot.count = @intCast(next);
+                    if (unit_slot.item_id == 0) unit_slot.item_id = unit_id;
+                    slot.count -= 1;
+                    if (slot.count == 0) slot.* = .{};
+
+                    const mtu = if (caps.melt_time_resolve) |r| r(caps.melt_ctx, item_id) else 0;
+                    const scale = if (caps.smelt_scale_resolve) |r|
+                        r(caps.melt_ctx, self.tools[0..self.tools_len])
+                    else
+                        1.0;
+                    self.melt[i] += meltDurationSeconds(weight, mtu) * scale;
+                    produced = true;
+                    self.dirty = true;
+
+                    if (slot.count == 0) {
+                        self.melt[i] = melt_idle_sentinel;
+                        break;
+                    }
+                }
+                break; // one ForgeCategory match per scrap slot
+            }
+
+            // Stock post-pass: produced + still mid-negative → park at sentinel.
+            if (produced and self.melt[i] < 0 and self.melt[i] != melt_idle_sentinel) {
+                self.melt[i] = melt_idle_sentinel;
+                self.dirty = true;
             }
         }
     }
@@ -814,6 +1042,207 @@ test "workstation burn consumes fuel then stops" {
     w.burn_time_left = 0.1;
     w.tick(0.2); // no fuel left → stops
     try std.testing.expect(!w.is_burning);
+}
+
+const MeltTestCtx = struct {
+    materials: []const u8 = "iron,brass",
+    category: []const u8 = "iron",
+    weight: u16 = 1,
+    melt_time: f32 = 0.25,
+    unit_iron: u16 = 100,
+    unit_brass: u16 = 101,
+    /// Tools CraftingSmeltTime scale (stock toolBellows Q1 = 0.7).
+    smelt_scale: f32 = 1.0,
+};
+
+fn testMeltWeight(ctx: ?*anyopaque, item_id: u16) u16 {
+    _ = item_id;
+    const c: *const MeltTestCtx = @ptrCast(@alignCast(ctx.?));
+    return c.weight;
+}
+fn testMeltTime(ctx: ?*anyopaque, item_id: u16) f32 {
+    _ = item_id;
+    const c: *const MeltTestCtx = @ptrCast(@alignCast(ctx.?));
+    return c.melt_time;
+}
+fn testMeltCategory(ctx: ?*anyopaque, item_id: u16) []const u8 {
+    _ = item_id;
+    const c: *const MeltTestCtx = @ptrCast(@alignCast(ctx.?));
+    return c.category;
+}
+fn testMeltMaterials(ctx: ?*anyopaque, block_id: i32) []const u8 {
+    _ = block_id;
+    const c: *const MeltTestCtx = @ptrCast(@alignCast(ctx.?));
+    return c.materials;
+}
+fn testMeltUnit(ctx: ?*anyopaque, material_name: []const u8) u16 {
+    const c: *const MeltTestCtx = @ptrCast(@alignCast(ctx.?));
+    if (std.ascii.eqlIgnoreCase(material_name, "iron")) return c.unit_iron;
+    if (std.ascii.eqlIgnoreCase(material_name, "brass")) return c.unit_brass;
+    return 0;
+}
+
+fn testMeltSmeltScale(ctx: ?*anyopaque, tools: []const components.InvSlot) f32 {
+    _ = tools;
+    const c: *const MeltTestCtx = @ptrCast(@alignCast(ctx.?));
+    return c.smelt_scale;
+}
+
+fn meltCaps(ctx: *const MeltTestCtx) Caps {
+    return .{
+        .weight_resolve = &testMeltWeight,
+        .melt_time_resolve = &testMeltTime,
+        .forge_category_resolve = &testMeltCategory,
+        .input_materials_resolve = &testMeltMaterials,
+        .unit_item_resolve = &testMeltUnit,
+        .smelt_scale_resolve = &testMeltSmeltScale,
+        .melt_ctx = @constCast(ctx),
+    };
+}
+
+test "forge melt: scrap input melts into unit_* when burning" {
+    // Forge geometry: input_len = scrap_n + mat_n. Two materials → scrap slots
+    // 0..input_len-3, unit slots at input_len-2 / input_len-1. stock_input_len=3
+    // with two materials leaves one scrap slot (index 0).
+    var ctx: MeltTestCtx = .{};
+    var w: Workstation = .{
+        .has_fuel_module = true,
+        .has_material_input = true,
+        .is_burning = true,
+        .burn_time_left = 100,
+        .input_len = 3,
+        .melt_len = 3,
+        .block_id = 1,
+    };
+    w.input[0] = .{ .item_id = 50, .count = 2 }; // scrap
+    w.melt[0] = melt_idle_sentinel;
+
+    // First tick only arms the timer (weight 1 × melt_time 0.25 = 0.25s);
+    // stock subtracts on a later tick once melt >= 0.
+    w.tickResolved(0.1, null, null, meltCaps(&ctx));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), w.melt[0], 1e-4);
+    try std.testing.expectEqual(@as(u16, 2), w.input[0].count);
+
+    // Cross zero: consume one scrap → +1 unit_iron in slot 1 (first material).
+    w.tickResolved(0.3, null, null, meltCaps(&ctx));
+    try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
+    try std.testing.expectEqual(@as(u16, 100), w.input[1].item_id);
+    try std.testing.expectEqual(@as(u16, 1), w.input[1].count);
+    try std.testing.expect(w.dirty);
+}
+
+fn testUnitStackSmall(_: ?*anyopaque, _: u16) u16 {
+    return 3;
+}
+
+test "forge melt: the unit slot caps at the item's Stacknumber, not a flat constant" {
+    // The forge stops accumulating when the unit slot is full. Stock's ceiling
+    // is that item's own Stacknumber; zdtd carried a flat max_melt_units of
+    // 30000 that nothing ever set, so the real per-item cap was ignored.
+    var ctx: MeltTestCtx = .{};
+    var caps = meltCaps(&ctx);
+    caps.unit_stack_resolve = &testUnitStackSmall; // unit_* stacks to 3
+
+    var w: Workstation = .{
+        .has_fuel_module = true,
+        .has_material_input = true,
+        .is_burning = true,
+        .burn_time_left = 1000,
+        .input_len = 3,
+        .melt_len = 3,
+        .block_id = 1,
+    };
+    w.input[0] = .{ .item_id = 50, .count = 10 }; // plenty of scrap
+    w.melt[0] = melt_idle_sentinel;
+
+    // Melt until the unit slot stops growing (weight 1 per scrap).
+    var i: usize = 0;
+    while (i < 40) : (i += 1) w.tickResolved(0.3, null, null, caps);
+
+    // Capped at the resolved stack of 3, and scrap is left over to prove the
+    // stop came from the cap rather than from running out of input. The melt
+    // timer re-arms rather than latching, which is what lets the forge resume
+    // once the player pulls units out.
+    try std.testing.expectEqual(@as(u16, 3), w.input[1].count);
+    try std.testing.expect(w.input[0].count > 0);
+
+    // Without the resolver the flat fallback applies, so the same input runs
+    // well past 3 and is limited only by the scrap available.
+    var ctx2: MeltTestCtx = .{};
+    var w2: Workstation = .{
+        .has_fuel_module = true,
+        .has_material_input = true,
+        .is_burning = true,
+        .burn_time_left = 1000,
+        .input_len = 3,
+        .melt_len = 3,
+        .block_id = 1,
+    };
+    w2.input[0] = .{ .item_id = 50, .count = 10 };
+    w2.melt[0] = melt_idle_sentinel;
+    i = 0;
+    while (i < 40) : (i += 1) w2.tickResolved(0.3, null, null, meltCaps(&ctx2));
+    try std.testing.expect(w2.input[1].count > 3);
+}
+
+test "forge melt: no-op without material_input module or resolvers" {
+    var w: Workstation = .{
+        .has_fuel_module = true,
+        .has_material_input = false,
+        .is_burning = true,
+        .burn_time_left = 100,
+        .input_len = 3,
+        .melt_len = 3,
+    };
+    w.input[0] = .{ .item_id = 50, .count = 1 };
+    w.melt[0] = melt_idle_sentinel;
+    w.tickResolved(1.0, null, null, .{});
+    try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
+    try std.testing.expectEqual(melt_idle_sentinel, w.melt[0]);
+
+    // Module present but no Caps resolvers: still no-op (mat_n == 0).
+    w.has_material_input = true;
+    w.tickResolved(1.0, null, null, .{});
+    try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
+}
+
+test "forge melt: waits for burning when fuel module is set" {
+    var ctx: MeltTestCtx = .{};
+    var w: Workstation = .{
+        .has_fuel_module = true,
+        .has_material_input = true,
+        .is_burning = false,
+        .input_len = 3,
+        .melt_len = 3,
+        .block_id = 1,
+    };
+    w.input[0] = .{ .item_id = 50, .count = 1 };
+    w.melt[0] = melt_idle_sentinel;
+    w.tickResolved(1.0, null, null, meltCaps(&ctx));
+    try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
+    try std.testing.expectEqual(melt_idle_sentinel, w.melt[0]);
+}
+
+test "forge melt: tools CraftingSmeltTime scales melt duration" {
+    // Stock toolBellows Q1 perc_add -.3 → scale 0.7; weight 1 × mtu 0.25 × 0.7 = 0.175.
+    var ctx: MeltTestCtx = .{ .smelt_scale = 0.7 };
+    var w: Workstation = .{
+        .has_fuel_module = true,
+        .has_material_input = true,
+        .is_burning = true,
+        .burn_time_left = 100,
+        .input_len = 3,
+        .melt_len = 3,
+        .tools_len = 3,
+        .block_id = 1,
+    };
+    w.input[0] = .{ .item_id = 50, .count = 1 };
+    w.tools[0] = .{ .item_id = 60, .count = 1, .quality = 1 };
+    w.melt[0] = melt_idle_sentinel;
+
+    w.tickResolved(0.1, null, null, meltCaps(&ctx));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.175), w.melt[0], 1e-4);
+    try std.testing.expectEqual(@as(u16, 1), w.input[0].count);
 }
 
 test "workstation catches up multiple crafts and fuel units after a delayed tick" {

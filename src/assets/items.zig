@@ -95,6 +95,12 @@ pub const ItemDef = struct {
     /// RE items.md §7 + ItemValue.get_PercentUsesLeft (IL=17).
     degradation_min: u32 = 0,
     degradation_max: u32 = 0,
+    /// Stock `ItemClass.HasQuality` (IL=9): true when any `<effect_group>` is
+    /// owner-tiered. `MinEffectGroup.OwnerTiered` defaults to true in the ctor
+    /// and stock items.xml only ever writes `tiered="false"`, so an item has
+    /// quality unless every one of its effect groups opts out. Gates the
+    /// trader stock roll's quality substitution and `TraderMaxTier` clamp.
+    has_quality: bool = false,
     /// items.xml Action0 DamageEntity (melee hand damage; 0 = none/unset).
     entity_damage: f32 = 0,
     /// items.xml DamageBlock property (hand-item block chew: zombie hand 8,
@@ -132,6 +138,12 @@ pub const ItemDef = struct {
     /// carries no row → no mods allowed (fail closed).
     mod_slots_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     mod_slots_n: u8 = 0,
+    /// items.xml CraftingSmeltTime passive (PassiveEffects 95, perc_add quality
+    /// curve). Forge tools (toolBellows) scale melt duration via
+    /// ItemValue.ModifyValue in HandleMaterialInput. 0 segments = no row →
+    /// identity (scale 1). Values are perc_add deltas (e.g. -.3 → 0.7×).
+    crafting_smelt_time_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
+    crafting_smelt_time_n: u8 = 0,
     /// items.xml DegradationPerUse passive (base_set, stock
     /// ItemValue.UseTimes wear per use): the durability consumed by one use.
     /// 0 = no row -> the callers' 1.0 default (the pre-XML behavior).
@@ -175,6 +187,16 @@ pub const ItemDef = struct {
     place_block_name: []const u8 = "",
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
     fuel_value: f32 = 0,
+    /// items.xml Weight (forge melt units added per input item; 0 = unset).
+    weight: u16 = 0,
+    /// items.xml MeltTimePerUnit (seconds per weight unit; 0 = stock default 1).
+    melt_time_per_unit: f32 = 0,
+    /// items.xml Material (MadeOfMaterial id, e.g. Mmetal). Empty = none.
+    /// Forge melt resolves materials.xml forge_category through this.
+    material: []const u8 = "",
+    /// items.xml NoScrapping: item cannot be scrap-salvaged
+    /// (GetScrapableRecipe, RE crafting-recipes.md IL=77).
+    no_scrapping: bool = false,
     /// ItemActionEat (Action0 Class=Eat) or name prefix food/drink.
     is_eat: bool = false,
     /// $foodAmountAdd from effect_group (PlayerEntityStats.Food gain).
@@ -188,6 +210,10 @@ pub const ItemDef = struct {
     progression_name: []const u8 = "",
     /// Amount added per use (stock magazines ship 1). 0 = no grant.
     progression_add: u8 = 0,
+    /// items.xml `SetProgressionLevel` with `level="-1"` (RE minevents.md
+    /// IL=104: set ProgressionClass.MaxLevel). Stock almanacs/journals ship
+    /// one or more perk names; arena-owned slice of interned names.
+    progression_set_max: []const []const u8 = &.{},
     /// items.xml `GiveExp` on eat (stock magazines ship 50). 0 = no XP.
     eat_exp: u16 = 0,
     /// items.xml `DistractionTags` (EntityItem distraction; RE EntityItem::SetupDistraction
@@ -296,6 +322,17 @@ pub const ItemTable = struct {
         return @trunc(@min(v, 255.0));
     }
 
+    /// Stock HandleMaterialInput tools path (PassiveEffects 95 CraftingSmeltTime):
+    /// ItemValue.ModifyValue with perc_add → duration *= (1 + curve[quality]).
+    /// No row → identity 1. Quality 0 treats as tier 1 (same as ModSlots).
+    pub fn craftingSmeltTimeScale(self: *const ItemTable, item_id: u16, quality: u8) f32 {
+        const d = self.byId(item_id) orelse return 1.0;
+        if (d.crafting_smelt_time_n == 0) return 1.0;
+        const q: usize = if (quality == 0) 1 else quality;
+        const idx = @min(q, @as(usize, d.crafting_smelt_time_n)) - 1;
+        return 1.0 + d.crafting_smelt_time_curve[idx];
+    }
+
     /// Stock ItemValue.type → item name (reverse of stockTypeFor). Walks the
     /// defs; used off the hot path for trust-boundary checks (workstation queue
     /// validation). Builtin rows carry no stock type, so this only resolves
@@ -359,12 +396,39 @@ pub const ItemTable = struct {
         return 1;
     }
 
+    /// Stock `ItemClass.HasQuality` (IL=9) for an items.xml name. The trader
+    /// stock roll keys off names, so this is the name-side lookup. An unknown
+    /// name has no quality (fail closed: a rolled quality on a stackable is
+    /// worse than none).
+    pub fn hasQualityByName(self: *const ItemTable, name: []const u8) bool {
+        if (self.byName(name)) |d| return d.has_quality;
+        return false;
+    }
+
     /// FuelValue from items.xml (0 if unset / not a fuel item).
     pub fn fuelValueFor(self: *const ItemTable, item_id: u16) f32 {
         if (self.byId(item_id)) |d| {
             if (d.fuel_value > 0) return d.fuel_value;
         }
         return 0;
+    }
+
+    /// Weight from items.xml (forge melt units per input item; 0 if unset).
+    pub fn weightFor(self: *const ItemTable, item_id: u16) u16 {
+        if (self.byId(item_id)) |d| return d.weight;
+        return 0;
+    }
+
+    /// MeltTimePerUnit from items.xml (seconds per weight unit; 0 → stock default 1).
+    pub fn meltTimePerUnitFor(self: *const ItemTable, item_id: u16) f32 {
+        if (self.byId(item_id)) |d| return d.melt_time_per_unit;
+        return 0;
+    }
+
+    /// items.xml Material id (MadeOfMaterial); empty when unset.
+    pub fn materialFor(self: *const ItemTable, item_id: u16) []const u8 {
+        if (self.byId(item_id)) |d| return d.material;
+        return "";
     }
 
     /// True if item is ItemActionEat consumable (or builtin food/medicine).
@@ -391,6 +455,7 @@ pub const ItemTable = struct {
         if (self.byId(item_id)) |d| {
             if (d.is_eat) return true;
             if (d.progression_add > 0 and d.progression_name.len > 0) return true;
+            if (d.progression_set_max.len > 0) return true;
             if (d.food_amount > 0 or d.water_amount > 0) return true;
             // Offline name heuristic for food*/drink* without parsed Action0.
             // After items.xml load, missing Action0 fails closed (wrong eat
@@ -610,8 +675,9 @@ fn firstCvarAdd(body: []const u8, cvar: []const u8) ?f32 {
 }
 
 /// First `AddProgressionLevel` triggered_effect: (progression_name, level).
-/// Magazines ship `level="1"` (add 1, clamped to class max). `level="-1"`
-/// (set to max) is not modelled: missing beats a guessed max.
+/// Magazines ship `level="1"` (add 1, clamped to class max). Absolute
+/// `SetProgressionLevel` rows are collected separately via
+/// `collectProgressionSetMax`.
 fn firstProgressionAdd(body: []const u8) ?struct { []const u8, u8 } {
     var i: usize = 0;
     while (i < body.len) {
@@ -640,6 +706,52 @@ fn firstProgressionAdd(body: []const u8) ?struct { []const u8, u8 } {
         return .{ pname, add };
     }
     return null;
+}
+
+/// Collect `SetProgressionLevel` names with `level="-1"` (RE minevents.md
+/// IL=104: set ProgressionClass.MaxLevel). Stock ships only `-1`; other
+/// levels are omitted rather than guessed. Arena owns the returned names.
+fn collectProgressionSetMax(arena: std.mem.Allocator, body: []const u8) ![]const []const u8 {
+    var names: std.ArrayList([]const u8) = .empty;
+    // Names live in the items arena; only the list storage needs teardown on error.
+    errdefer names.deinit(arena);
+    var i: usize = 0;
+    while (i < body.len) {
+        const ti = std.mem.findPos(u8, body, i, "triggered_effect") orelse break;
+        const end = std.mem.findPos(u8, body, ti, "/>") orelse (std.mem.findPos(u8, body, ti, ">") orelse break);
+        const win = body[ti .. end + 2];
+        const action = xml.attr(win, 0, "action") orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (!std.mem.eql(u8, action, "SetProgressionLevel")) {
+            i = ti + 10;
+            continue;
+        }
+        const pname = xml.attr(win, 0, "progression_name") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const raw = xml.attr(win, 0, "level") orelse {
+            i = ti + 10;
+            continue;
+        };
+        const lvl = xml.parseI32Prefix(raw) orelse {
+            i = ti + 10;
+            continue;
+        };
+        if (lvl != -1) {
+            i = ti + 10;
+            continue;
+        }
+        try names.append(arena, try arena.dupe(u8, pname));
+        i = ti + 10;
+    }
+    if (names.items.len == 0) {
+        names.deinit(arena);
+        return &.{};
+    }
+    return try names.toOwnedSlice(arena);
 }
 
 /// First `GiveExp` triggered_effect exp amount. Magazines ship 50.
@@ -755,6 +867,20 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_melee_ranges.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
     defer stock_fuels.deinit(allocator);
+    var stock_weights: std.ArrayList(u16) = .empty;
+    defer stock_weights.deinit(allocator);
+    var stock_weight_declared: std.ArrayList(bool) = .empty;
+    defer stock_weight_declared.deinit(allocator);
+    var stock_melt_times: std.ArrayList(f32) = .empty;
+    defer stock_melt_times.deinit(allocator);
+    var stock_melt_declared: std.ArrayList(bool) = .empty;
+    defer stock_melt_declared.deinit(allocator);
+    var stock_materials: std.ArrayList([]const u8) = .empty;
+    defer stock_materials.deinit(allocator);
+    var stock_material_declared: std.ArrayList(bool) = .empty;
+    defer stock_material_declared.deinit(allocator);
+    var stock_no_scrapping: std.ArrayList(bool) = .empty;
+    defer stock_no_scrapping.deinit(allocator);
     var stock_is_eat: std.ArrayList(bool) = .empty;
     defer stock_is_eat.deinit(allocator);
     var stock_food_amt: std.ArrayList(f32) = .empty;
@@ -767,6 +893,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_prog_name.deinit(allocator);
     var stock_prog_add: std.ArrayList(u8) = .empty;
     defer stock_prog_add.deinit(allocator);
+    var stock_prog_set_max: std.ArrayList([]const []const u8) = .empty;
+    defer stock_prog_set_max.deinit(allocator);
     var stock_eat_exp: std.ArrayList(u16) = .empty;
     defer stock_eat_exp.deinit(allocator);
     var stock_dtags: std.ArrayList(u8) = .empty;
@@ -784,6 +912,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_mslots_curves.deinit(allocator);
     var stock_mslots_n: std.ArrayList(u8) = .empty;
     defer stock_mslots_n.deinit(allocator);
+    var stock_smelt_curves: std.ArrayList([buffs.max_curve_len]f32) = .empty;
+    defer stock_smelt_curves.deinit(allocator);
+    var stock_smelt_n: std.ArrayList(u8) = .empty;
+    defer stock_smelt_n.deinit(allocator);
     var stock_tags: std.ArrayList([]const u8) = .empty;
     defer stock_tags.deinit(allocator);
     var stock_degrad_per_use: std.ArrayList(f32) = .empty;
@@ -811,6 +943,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_degrad_min.deinit(allocator);
     var stock_degrad_max: std.ArrayList(u32) = .empty;
     defer stock_degrad_max.deinit(allocator);
+    var stock_has_quality: std.ArrayList(bool) = .empty;
+    defer stock_has_quality.deinit(allocator);
+    var stock_effect_group_declared: std.ArrayList(bool) = .empty;
+    defer stock_effect_group_declared.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -915,6 +1051,41 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 fuel = xml.parseF32(v) orelse 0;
             }
             try stock_fuels.append(allocator, fuel);
+            var weight: u16 = 0;
+            var weight_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "Weight")) |v| {
+                weight_declared = true;
+                const w = xml.parseF32(v) orelse 0;
+                if (w > 0 and w <= @as(f32, @floatFromInt(std.math.maxInt(u16)))) {
+                    weight = @intFromFloat(w);
+                }
+            }
+            try stock_weights.append(allocator, weight);
+            try stock_weight_declared.append(allocator, weight_declared);
+            var melt_t: f32 = 0;
+            var melt_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "MeltTimePerUnit")) |v| {
+                melt_declared = true;
+                melt_t = xml.parseF32(v) orelse 0;
+            }
+            try stock_melt_times.append(allocator, melt_t);
+            try stock_melt_declared.append(allocator, melt_declared);
+            // items.xml Material → MadeOfMaterial; forge melt looks up
+            // materials.xml forge_category through this id.
+            var mat_name: []const u8 = "";
+            var mat_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "Material")) |mv| {
+                mat_declared = true;
+                mat_name = try arena.dupe(u8, mv);
+            }
+            try stock_materials.append(allocator, mat_name);
+            try stock_material_declared.append(allocator, mat_declared);
+            // items.xml NoScrapping: GetScrapableRecipe rejects these.
+            var no_scrap = false;
+            if (xml.propertyValue(clean[ii..item_end], "NoScrapping")) |v| {
+                no_scrap = std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
+            }
+            try stock_no_scrapping.append(allocator, no_scrap);
             // ItemActionEat: Action0 Class=Eat + effect_group cvars.
             const body = clean[ii..item_end];
             var is_eat = itemActionClassIs(body, "Eat");
@@ -935,12 +1106,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 prog_add = pg[1];
                 is_eat = true;
             }
+            const prog_set_max = try collectProgressionSetMax(arena, body);
+            if (prog_set_max.len > 0) is_eat = true;
             try stock_is_eat.append(allocator, is_eat);
             try stock_food_amt.append(allocator, food_amt);
             try stock_food_hp.append(allocator, food_hp);
             try stock_water_amt.append(allocator, water_amt);
             try stock_prog_name.append(allocator, prog_name);
             try stock_prog_add.append(allocator, prog_add);
+            try stock_prog_set_max.append(allocator, prog_set_max);
             try stock_eat_exp.append(allocator, firstGiveExp(body));
             // EntityItem distraction (stock decoy: `zombie,requires_contact`).
             var dtags: u8 = 0;
@@ -997,6 +1171,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             }
             try stock_mslots_curves.append(allocator, mslots_curve);
             try stock_mslots_n.append(allocator, mslots_n);
+            // CraftingSmeltTime (PassiveEffects 95, perc_add quality curve):
+            // forge tools (toolBellows) scale melt duration. 0 = no row.
+            var smelt_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+            var smelt_n: u8 = 0;
+            const smelt_v = xml.passiveEffectValue(body, "CraftingSmeltTime");
+            if (smelt_v) |v| {
+                smelt_n = buffs.parseCurveValue(v, &smelt_curve);
+            }
+            try stock_smelt_curves.append(allocator, smelt_curve);
+            try stock_smelt_n.append(allocator, smelt_n);
             // Tags property: the mod-attachment tag surface (comma list).
             const tags = xml.propertyValue(body, "Tags") orelse "";
             try stock_tags.append(allocator, tags);
@@ -1125,6 +1309,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             }
             try stock_degrad_min.append(allocator, dmin);
             try stock_degrad_max.append(allocator, dmax);
+            // ItemClass.HasQuality (IL=9): any owner-tiered effect_group. An
+            // item declaring no effect_group of its own inherits its parent's
+            // answer through the Extends pass below.
+            try stock_has_quality.append(allocator, xml.hasTieredEffectGroup(body));
+            try stock_effect_group_declared.append(allocator, xml.hasEffectGroup(body));
             try stock_dtags.append(allocator, dtags);
             try stock_dradius.append(allocator, dradius);
             try stock_dlifetime.append(allocator, dlifetime);
@@ -1152,12 +1341,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         defer own_econ_map.deinit(allocator);
         var own_bundle_map: std.StringHashMapUnmanaged(u16) = .{};
         defer own_bundle_map.deinit(allocator);
+        var own_weight_map: std.StringHashMapUnmanaged(u16) = .{};
+        defer own_weight_map.deinit(allocator);
+        var own_melt_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_melt_map.deinit(allocator);
+        var own_material_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer own_material_map.deinit(allocator);
         var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
         defer ext_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
             if (own_stacks.items[idx] != 0) try own_stack_map.put(allocator, n, own_stacks.items[idx]);
             if (stock_econ_declared.items[idx]) try own_econ_map.put(allocator, n, stock_econs.items[idx]);
             if (stock_bundle_declared.items[idx]) try own_bundle_map.put(allocator, n, stock_bundles.items[idx]);
+            if (stock_weight_declared.items[idx]) try own_weight_map.put(allocator, n, stock_weights.items[idx]);
+            if (stock_melt_declared.items[idx]) try own_melt_map.put(allocator, n, stock_melt_times.items[idx]);
+            if (stock_material_declared.items[idx]) try own_material_map.put(allocator, n, stock_materials.items[idx]);
             if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
         }
         const max_hops: usize = 24;
@@ -1192,6 +1390,64 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Weight / MeltTimePerUnit inherit through Extends (unit_lead → unit_iron).
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_weight_map.get(cur)) |w| {
+                    stock_weights.items[idx] = w;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_melt_map.get(cur)) |m| {
+                    stock_melt_times.items[idx] = m;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Material (MadeOfMaterial) inherits through Extends like Weight.
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_material_map.get(cur)) |m| {
+                    stock_materials.items[idx] = m;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // HasQuality inherits through Extends: Effects is a property like any
+        // other, so a child declaring no effect_group of its own answers from
+        // the first ancestor that declares one (gunHandgunT1Pistol ->
+        // gunHandgunMaster).
+        {
+            var own_quality_map: std.StringHashMapUnmanaged(bool) = .{};
+            defer own_quality_map.deinit(allocator);
+            for (stock_names.items, 0..) |n, idx| {
+                if (stock_effect_group_declared.items[idx])
+                    try own_quality_map.put(allocator, n, stock_has_quality.items[idx]);
+            }
+            for (stock_names.items, 0..) |n, idx| {
+                var cur = n;
+                var hops: usize = 0;
+                while (hops < max_hops) : (hops += 1) {
+                    if (own_quality_map.get(cur)) |q| {
+                        stock_has_quality.items[idx] = q;
+                        break;
+                    }
+                    cur = ext_map.get(cur) orelse break;
+                }
             }
         }
         // Armor resist curves inherit through the Extends chain like any
@@ -1265,6 +1521,31 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                     }
                 }
             }
+            // CraftingSmeltTime inherits through Extends (same as ModSlots).
+            {
+                var own_smelt_map: std.StringHashMapUnmanaged([buffs.max_curve_len]f32) = .{};
+                defer own_smelt_map.deinit(allocator);
+                var own_smeltn_map: std.StringHashMapUnmanaged(u8) = .{};
+                defer own_smeltn_map.deinit(allocator);
+                for (stock_names.items, 0..) |n, idx| {
+                    if (stock_smelt_n.items[idx] > 0) {
+                        try own_smelt_map.put(allocator, n, stock_smelt_curves.items[idx]);
+                        try own_smeltn_map.put(allocator, n, stock_smelt_n.items[idx]);
+                    }
+                }
+                for (stock_names.items, 0..) |n, idx| {
+                    var cur = n;
+                    var hops: usize = 0;
+                    while (hops < max_hops) : (hops += 1) {
+                        if (own_smeltn_map.get(cur)) |cn| {
+                            stock_smelt_n.items[idx] = cn;
+                            stock_smelt_curves.items[idx] = own_smelt_map.get(cur).?;
+                            break;
+                        }
+                        cur = ext_map.get(cur) orelse break;
+                    }
+                }
+            }
         }
     }
 
@@ -1284,6 +1565,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.econ_sell_scale = stock_econ_scales.items[idx];
                 def.degradation_min = stock_degrad_min.items[idx];
                 def.degradation_max = stock_degrad_max.items[idx];
+                def.has_quality = stock_has_quality.items[idx];
                 def.entity_damage = stock_edmgs.items[idx];
                 def.place_block_name = stock_place_names.items[idx];
                 def.damage_block = stock_dmg_blocks.items[idx];
@@ -1296,6 +1578,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.tags = try arena.dupe(u8, stock_tags.items[idx]);
                 def.mod_slots_curve = stock_mslots_curves.items[idx];
                 def.mod_slots_n = stock_mslots_n.items[idx];
+                def.crafting_smelt_time_curve = stock_smelt_curves.items[idx];
+                def.crafting_smelt_time_n = stock_smelt_n.items[idx];
                 def.degradation_per_use = stock_degrad_per_use.items[idx];
                 def.stamina_loss = stock_stamina_loss.items[idx];
                 def.dismember_chance = stock_dismember_chance.items[idx];
@@ -1304,10 +1588,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.target_armor_tag = stock_target_armor_tag.items[idx];
                 def.harvest_rows = stock_harvest_rows.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
+                def.weight = stock_weights.items[idx];
+                def.melt_time_per_unit = stock_melt_times.items[idx];
+                def.material = stock_materials.items[idx];
+                def.no_scrapping = stock_no_scrapping.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
                 def.food_health = stock_food_hp.items[idx];
                 def.water_amount = stock_water_amt.items[idx];
+                def.progression_name = stock_prog_name.items[idx];
+                def.progression_add = stock_prog_add.items[idx];
+                def.progression_set_max = stock_prog_set_max.items[idx];
+                def.eat_exp = stock_eat_exp.items[idx];
                 // Prefer stock name so byName("casinoCoin") works without alias walk.
                 def.name = n;
                 break;
@@ -1337,12 +1629,17 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .econ_sell_scale = stock_econ_scales.items[idx],
             .degradation_min = stock_degrad_min.items[idx],
             .degradation_max = stock_degrad_max.items[idx],
+            .has_quality = stock_has_quality.items[idx],
             .entity_damage = stock_edmgs.items[idx],
             .place_block_name = stock_place_names.items[idx],
             .damage_block = stock_dmg_blocks.items[idx],
             .light_value = stock_light_values.items[idx],
             .melee_range = stock_melee_ranges.items[idx],
             .fuel_value = stock_fuels.items[idx],
+            .weight = stock_weights.items[idx],
+            .melt_time_per_unit = stock_melt_times.items[idx],
+            .material = stock_materials.items[idx],
+            .no_scrapping = stock_no_scrapping.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
             .is_eat = stock_is_eat.items[idx],
             .food_amount = stock_food_amt.items[idx],
@@ -1350,6 +1647,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .water_amount = stock_water_amt.items[idx],
             .progression_name = stock_prog_name.items[idx],
             .progression_add = stock_prog_add.items[idx],
+            .progression_set_max = stock_prog_set_max.items[idx],
             .eat_exp = stock_eat_exp.items[idx],
             .distraction_tags = stock_dtags.items[idx],
             .distraction_radius = stock_dradius.items[idx],
@@ -1360,6 +1658,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .tags = try arena.dupe(u8, stock_tags.items[idx]),
             .mod_slots_curve = stock_mslots_curves.items[idx],
             .mod_slots_n = stock_mslots_n.items[idx],
+            .crafting_smelt_time_curve = stock_smelt_curves.items[idx],
+            .crafting_smelt_time_n = stock_smelt_n.items[idx],
             .degradation_per_use = stock_degrad_per_use.items[idx],
             .stamina_loss = stock_stamina_loss.items[idx],
             .dismember_chance = stock_dismember_chance.items[idx],
@@ -1507,6 +1807,44 @@ test "magazine AddProgressionLevel parses onto the eat item" {
     try std.testing.expectEqual(@as(u8, 0), food.progression_add);
     try std.testing.expectEqualStrings("", food.progression_name);
     try std.testing.expectEqual(@as(u16, 0), food.eat_exp);
+    try std.testing.expectEqual(@as(usize, 0), food.progression_set_max.len);
+}
+
+test "almanac SetProgressionLevel level=-1 parses as set-to-max" {
+    // RE minevents.md IL=104: level=-1 sets ProgressionClass.MaxLevel.
+    // Stock ships only -1 (426 rows); non -1 is omitted.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="bookFiremansAlmanacHeat">
+        \\    <property class="Action0">
+        \\      <property name="Class" value="Eat"/>
+        \\    </property>
+        \\    <effect_group tiered="false">
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="SetProgressionLevel" progression_name="perkFiremansAlmanacHeat" level="-1"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="SetProgressionLevel" progression_name="perkFiremansAlmanacComplete" level="-1"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="SetProgressionLevel" progression_name="perkIgnoredAbsolute" level="3"/>
+        \\      <triggered_effect trigger="onSelfPrimaryActionEnd" action="GiveExp" exp="50"/>
+        \\    </effect_group>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const book = t.byName("bookFiremansAlmanacHeat").?;
+    try std.testing.expect(book.is_eat);
+    try std.testing.expect(t.isEat(book.id));
+    try std.testing.expectEqual(@as(u8, 0), book.progression_add);
+    try std.testing.expectEqualStrings("", book.progression_name);
+    try std.testing.expectEqual(@as(usize, 2), book.progression_set_max.len);
+    try std.testing.expectEqualStrings("perkFiremansAlmanacHeat", book.progression_set_max[0]);
+    try std.testing.expectEqualStrings("perkFiremansAlmanacComplete", book.progression_set_max[1]);
+    try std.testing.expectEqual(@as(u16, 50), book.eat_exp);
 }
 
 test "Tags + ModSlots parse and modSlotsFor gates the mod budget" {
@@ -1674,7 +2012,12 @@ test "load stock items.xml when present" {
     if (t.byId(8)) |axe| {
         try std.testing.expectEqual(@as(u32, 250), axe.degradation_min);
         try std.testing.expectEqual(@as(u32, 500), axe.degradation_max);
+        // A tool carries owner-tiered effect groups, so the trader roll gives
+        // it a quality (ItemClass.HasQuality).
+        try std.testing.expect(axe.has_quality);
     }
+    // Stackable resources carry no effect_group at all: no quality.
+    try std.testing.expect(!t.hasQualityByName("resourceWood"));
     // Non-durable items (no DegradationMax) price full: pul term is 1.
     if (t.byName("resourceWood")) |wood| {
         try std.testing.expectEqual(@as(u32, 0), wood.degradation_max);
@@ -1683,6 +2026,22 @@ test "load stock items.xml when present" {
     if (t.byName("ammoGasCan")) |gas| {
         try std.testing.expect(gas.fuel_value > 0);
         try std.testing.expectEqual(gas.fuel_value, t.fuelValueFor(gas.id));
+    }
+    // Forge melt inputs: Weight + MeltTimePerUnit from items.xml.
+    if (t.byName("unit_iron")) |iron| {
+        try std.testing.expectEqual(@as(u16, 1), iron.weight);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.25), iron.melt_time_per_unit, 1e-4);
+        try std.testing.expectEqual(iron.weight, t.weightFor(iron.id));
+        try std.testing.expectApproxEqAbs(iron.melt_time_per_unit, t.meltTimePerUnitFor(iron.id), 1e-4);
+    }
+    // unit_lead Extends unit_iron: Weight + MeltTimePerUnit inherit.
+    if (t.byName("unit_lead")) |lead| {
+        try std.testing.expectEqual(@as(u16, 1), lead.weight);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.25), lead.melt_time_per_unit, 1e-4);
+    }
+    if (t.byName("resourceScrapBrass")) |brass| {
+        try std.testing.expectEqual(@as(u16, 1), brass.weight);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.4), brass.melt_time_per_unit, 1e-4);
     }
     // Action1 PlaceAsBlock Blockname: b14 exactly two items place, and the
     // rest (resourceWood etc.) are not placeable.
@@ -1847,4 +2206,49 @@ test "StaminaLoss parses as the per-attack cost" {
         }
     }
     try std.testing.expect(found);
+}
+
+test "HasQuality follows owner-tiered effect groups and inherits through Extends" {
+    // ItemClass.HasQuality (IL=9) = Effects != null && IsOwnerTiered(). Effects
+    // is a property, so a child with no effect_group of its own answers from
+    // the first ancestor that declares one.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path, "<items>\n" ++
+        "  <item name=\"gunMaster\">\n" ++
+        "    <effect_group name=\"gunMaster\">\n" ++
+        "      <passive_effect name=\"ModSlots\" operation=\"base_set\" value=\"1,1,1,2,2,3\" tier=\"1,2,3,4,5,6\"/>\n" ++
+        "    </effect_group>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"gunChild\">\n" ++
+        "    <property name=\"Extends\" value=\"gunMaster\"/>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"perkBook\">\n" ++
+        "    <effect_group name=\"perkBook\" tiered=\"false\">\n" ++
+        "      <passive_effect name=\"ModSlots\" operation=\"base_set\" value=\"1\"/>\n" ++
+        "    </effect_group>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"perkBookChild\">\n" ++
+        "    <property name=\"Extends\" value=\"perkBook\"/>\n" ++
+        "  </item>\n" ++
+        "  <item name=\"resourceWood\">\n" ++
+        "    <property name=\"Stacknumber\" value=\"100\"/>\n" ++
+        "  </item>\n" ++
+        "</items>\n");
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(t.byName("gunMaster").?.has_quality);
+    try std.testing.expect(t.byName("gunChild").?.has_quality);
+    try std.testing.expect(!t.byName("perkBook").?.has_quality);
+    try std.testing.expect(!t.byName("perkBookChild").?.has_quality);
+    // No effect_group anywhere in the chain: null Effects, no quality.
+    try std.testing.expect(!t.byName("resourceWood").?.has_quality);
+    // Name lookup mirrors the field (the trader roll's resolver); an unknown
+    // name fails closed.
+    try std.testing.expect(t.hasQualityByName("gunChild"));
+    try std.testing.expect(!t.hasQualityByName("noSuchItem"));
 }

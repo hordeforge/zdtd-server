@@ -374,6 +374,13 @@ test, so a retune cannot land silently).
 | `battery_initial_charge_frac` | 0.5 | Initial battery charge as a fraction of capacity on fresh placement |
 | `trigger_pulse_s` | 0.5 | Trigger-plate / tripwire pulse duration (s) when the block sets duration=Triggered |
 
+`[rules.trader]` (trader stock quality roll, stock `TraderInfo::SpawnItem`):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `max_tier` | 6 | Stock `TraderInfo.TraderMaxTier` (a static with ctor default 6, not a traders.xml attribute). Rolled quality clamps to it; `-1` disables the clamp; `0` keeps every quality-bearing item out of the stock entirely |
+| `default_quality_min` / `default_quality_max` | 1 / 6 | Quality range used for a `<item>` ref with no `quality` attribute. Stock parses those with minQualityBase = maxQualityBase = -1 and `SpawnItem` substitutes 1..6 before the `max_tier` clamp. Items with no owner-tiered `effect_group` (`ItemClass.HasQuality`) never roll |
+
 `[rules.water]` (water-leveling budgets, GAP "Water flow / physics" PARTIAL;
 the stock sim is a jobified mass-flow engine, light-mesh-water.md §4):
 

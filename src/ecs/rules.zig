@@ -767,6 +767,21 @@ pub const Power = struct {
     trigger_pulse_s: f32 = 0.5,
 };
 
+pub const Trader = struct {
+    /// Stock `TraderInfo.TraderMaxTier` (static, ctor default 6): the ceiling
+    /// the trader stock roll clamps rolled quality to. Stock exposes it as a
+    /// GameStats knob rather than a traders.xml attribute, so it lives here.
+    /// -1 disables the clamp; 0 stops quality items spawning at all, which is
+    /// the `SpawnItem` early return.
+    max_tier: i32 = 6,
+    /// Quality range a roll falls back to when the entry carries no
+    /// `quality` attribute. Stock parses those entries with minQuality =
+    /// maxQuality = -1 and `SpawnItem` substitutes 1..6 for a quality-bearing
+    /// item before applying the `max_tier` clamp.
+    default_quality_min: u8 = 1,
+    default_quality_max: u8 = 6,
+};
+
 /// Full rule surface. Carried on World; the TOML overlay mirrors it field for
 /// field (RulesOverlay) and mergeOverlay applies the non-null subset.
 pub const Rules = struct {
@@ -785,6 +800,7 @@ pub const Rules = struct {
     difficulty: Difficulty = .{},
     water: Water = .{},
     power: Power = .{},
+    trader: Trader = .{},
 };
 
 pub const CombatOverlay = struct {
@@ -1045,6 +1061,12 @@ pub const PowerOverlay = struct {
     trigger_pulse_s: ?f32 = null,
 };
 
+pub const TraderOverlay = struct {
+    max_tier: ?i32 = null,
+    default_quality_min: ?u8 = null,
+    default_quality_max: ?u8 = null,
+};
+
 /// All-optional mirror of Rules for mode-pack / zdtd.toml `[rules.*]` sections
 /// (ADR 0021 decision 3). Hand-written next to Rules because Zig 0.16's
 /// `@Struct` cannot lay out a recursive anonymous overlay type; the parity test
@@ -1065,6 +1087,7 @@ pub const RulesOverlay = struct {
     difficulty: DifficultyOverlay = .{},
     water: WaterOverlay = .{},
     power: PowerOverlay = .{},
+    trader: TraderOverlay = .{},
 };
 
 /// Apply a RulesOverlay onto a concrete Rules: only non-null fields override.
