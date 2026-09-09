@@ -4216,13 +4216,32 @@ a finer server encoding.
   `src/server/game/world.zig` (`drainExplosions`),
   `src/ecs/world.zig` (`EntityClass.explosion_*`)
 
-- **Land claim keystone registration, edit deny, durability modifier** `WORKS`
+- **Land claim keystone registration, edit deny, durability modifier** `PARTIAL`
   Placing a keystoneBlock registers a claim; `claimCovering` does a Chebyshev test
   against LandClaimSize/2 and blocks edits by anyone but the owner; the owner's
   blocks get max_hp multiplied by the online/offline durability modifier. Cap of
   256 claims, new claims silently dropped past that (documented limit).
+
+  **Residual (found 2026-09-09): the durability modifier applies to player
+  block damage only.** The multiplier is read at exactly one site, the
+  `SetBlock` C2S handler (`c2s/blocks.zig:196-201`), gated on
+  `claim.owner_entity == editor_ent`. Every other path that destroys a block
+  calls plain `maxDamageForBlock(id)` and never looks a claim up: zombie chew
+  (`game/tick.zig:486`), zombie dig (`game/tick.zig:637`) and explosion AoE
+  (`game/world.zig:439`). `rg claimCovering src/` confirms no damage path
+  outside that one handler consults it.
+
+  So a claimed wall takes the same number of zombie hits as an unclaimed one,
+  while the owner's own pickaxe needs the multiplied total. Whether stock
+  applies the modifier to zombie damage is not pinned in
+  `../7dtd-engine-research` (the stat is captured in `console-commands.md`
+  but no consumer is disassembled), so the *direction* is unverified and this
+  row does not claim one. What is certain is the asymmetry: two damage
+  sources against the same block disagree about its HP, and the row said
+  nothing about it. Settling it needs the RE for the stock block-damage path.
   *Anchors:* `src/server/game.zig` registerClaim/claimCovering,
-  `:5995-6005`
+  `:5995-6005`, `src/server/c2s/blocks.zig:196-201`,
+  `src/server/game/tick.zig:486`, `:637`, `src/server/game/world.zig:439`
 
 - **Land claim removal when the keystone is destroyed** `WORKS`
   `removeClaimAt` drops the claim when the keystone breaks (SetBlock damage >= max
