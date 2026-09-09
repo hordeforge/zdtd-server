@@ -392,19 +392,27 @@ pub fn openContainer(w: *World, peer: usize, container_net: i32) bool {
     // open another player's bag and take/put through it.
     if (w.mask[cs].player) return false;
     if (!w.mask[cs].loot_bag and !w.mask[cs].inventory) return false;
-    if (w.mask[ps].transform and w.mask[cs].transform) {
-        const dx = w.transform[ps].x - w.transform[cs].x;
-        const dy = w.transform[ps].y - w.transform[cs].y;
-        const dz = w.transform[ps].z - w.transform[cs].z;
-        // 3D reach (R7, [rules.world] container_open_range, default 8 blocks):
-        // XZ-only allowed remote open through floors/ceilings.
-        const range = w.rules.world.container_open_range;
-        if (dx * dx + dy * dy + dz * dz > range * range) return false;
-    }
+    if (!withinContainerReach(w, ps, cs)) return false;
     w.inventory[ps].open_container = container_net;
     if (w.mask[cs].loot_bag) w.loot_bag[cs].open = true;
     markInv(w, ps);
     return true;
+}
+
+/// 3D reach between a player slot and a container slot
+/// ([rules.world] container_open_range, default 8 blocks). XZ-only would let a
+/// player reach through floors and ceilings.
+///
+/// Checked on open AND on every take/put: holding `open_container` is not a
+/// licence to keep looting after walking away, and a client controls when it
+/// sends the close. An entity with no transform (test fixtures) passes.
+fn withinContainerReach(w: *const World, ps: Slot, cs: Slot) bool {
+    if (!w.mask[ps].transform or !w.mask[cs].transform) return true;
+    const dx = w.transform[ps].x - w.transform[cs].x;
+    const dy = w.transform[ps].y - w.transform[cs].y;
+    const dz = w.transform[ps].z - w.transform[cs].z;
+    const range = w.rules.world.container_open_range;
+    return dx * dx + dy * dy + dz * dz <= range * range;
 }
 
 pub fn closeContainer(w: *World, peer: usize) void {
@@ -430,6 +438,7 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16, out_e
     if (cid < 0) return false;
     const cs = w.slotOfNetId(cid) orelse return false;
     if (!w.mask[cs].inventory) return false;
+    if (!withinContainerReach(w, ps, cs)) return false;
     if (cont_slot >= c.max_inv_slots) return false;
     const holding_before = w.inventory[cs].holding;
     const taken = w.inventory[cs].takeFromSlot(cont_slot, if (qty == 0) w.inventory[cs].slots[cont_slot].count else qty) orelse return false;
@@ -464,6 +473,7 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
     if (cid < 0) return false;
     const cs = w.slotOfNetId(cid) orelse return false;
     if (!w.mask[cs].inventory) return false;
+    if (!withinContainerReach(w, ps, cs)) return false;
     if (player_slot >= c.max_inv_slots) return false;
     const holding_before = w.inventory[ps].holding;
     const taken = w.inventory[ps].takeFromSlot(player_slot, if (qty == 0) w.inventory[ps].slots[player_slot].count else qty) orelse return false;

@@ -14906,3 +14906,53 @@ test "scenario draining a death bag clears the backpack marker" {
     try std.testing.expect(!g.clients[c.slot].has_backpack);
     std.debug.print("PASS backpack marker: draining a death bag reports the emptied bag\n", .{});
 }
+
+test "scenario walking away from an open container stops the looting" {
+    // openContainer range-checks ([rules.world] container_open_range), but
+    // take and put trusted the stored open_container id and never re-checked.
+    // The client decides when to send close, so a player could open a chest,
+    // walk off, and keep pulling from it across the map.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_creach");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_creach", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.inventory[ps] = .{};
+
+    // A loot bag at the player's feet with two stacks.
+    const t = g.sim.transform[ps];
+    const bag = g.sim.spawnLootBag(t.x, t.y, t.z, 2, 5) orelse return error.TestUnexpectedResult;
+    const bs = g.sim.slotOfNetId(bag).?;
+    g.sim.inventory[bs].slots[1] = .{ .item_id = 2, .count = 5, .quality = 1 };
+
+    // In range: open and take the first stack.
+    try std.testing.expect(invsys.applyTransaction(&g.sim, c.slot, .open, 0, 0, 0, bag).ok);
+    try std.testing.expect(invsys.applyTransaction(&g.sim, c.slot, .take, 0, 0, 0, -1).ok);
+
+    // Walk far away without closing. The stored id still points at the bag,
+    // but the take must now be refused.
+    const far = g.sim.rules.world.container_open_range * 10;
+    g.sim.transform[ps].x = t.x + far;
+    try std.testing.expect(g.sim.slotOfNetId(bag) != null);
+    try std.testing.expect(!invsys.applyTransaction(&g.sim, c.slot, .take, 1, 0, 0, -1).ok);
+    // The bag keeps its contents.
+    try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[bs].slots[1].count);
+
+    // Put is gated the same way.
+    g.sim.inventory[ps].slots[0] = .{ .item_id = 2, .count = 1, .quality = 1 };
+    try std.testing.expect(!invsys.applyTransaction(&g.sim, c.slot, .put, 0, 0, 0, -1).ok);
+
+    // Walk back: it works again, so the gate is distance, not a broken id.
+    g.sim.transform[ps].x = t.x;
+    try std.testing.expect(invsys.applyTransaction(&g.sim, c.slot, .take, 1, 0, 0, -1).ok);
+    std.debug.print("PASS container reach: take and put re-check range, not just open\n", .{});
+}
