@@ -484,9 +484,35 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             try self.handleTrade(c, body);
             return true;
         }
-        systems.questOnTraderOpen(&self.sim, c.slot);
+        // Same reach gate as the trade and the TraderData echo. Opening the
+        // window advances trader_interact phases, turns in a ready quest and
+        // pays its rewards, so without this a player could farm every quest
+        // turn-in on the map by naming targets from spawn. The header decides
+        // what the leading bytes mean: an entity id when isEntity, otherwise
+        // the tile-entity position (a vending machine). The zdtd short open
+        // body carries neither, so it has no position to check.
+        if (packages.parseTraderDataToServer(body) catch null) |open| {
+            if (open.is_entity) {
+                const ni = self.sim.slotOfNetId(open.entity_id) orelse return true;
+                if (!self.sim.mask[ni].transform) return true;
+                const np = self.sim.transform[ni];
+                if (!self.inTradeReach(c, np.x, np.y, np.z)) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return true;
+                }
+            } else if (!self.inTradeReach(
+                c,
+                @floatFromInt(open.te_x),
+                @floatFromInt(open.te_y),
+                @floatFromInt(open.te_z),
+            )) {
+                self.harness.counters.inc(.bounds_rejects);
+                return true;
+            }
+        }
         // Stock trader quest offers (npc from open body when present).
         const npc_id: i32 = if (body.len >= 4) std.mem.readInt(i32, body[0..4], .little) else 0;
+        systems.questOnTraderOpen(&self.sim, c.slot);
         // Server-side catalog accept for loadgen/sim; stock UI uses NPCQuestList.
         if (self.sim.catalog.listById(self.traderQuestList(npc_id))) |list| {
             for (list.entries) |qid| {

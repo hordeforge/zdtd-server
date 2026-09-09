@@ -196,9 +196,11 @@ pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataT
     try replicate_te.broadcastVendingTe(self, td.te_x, td.te_y, td.te_z);
 }
 
-/// Squared-distance reach gate for trade echoes: the sender's player must be
-/// within trade_use_range of the target (see trade_use_range above).
-fn inTradeReach(self: *const Game, c: *const Client, bx: f32, by: f32, bz: f32) bool {
+/// Squared-distance reach gate for every trader interaction: the sender's
+/// player must be within trade_use_range of the target (see trade_use_range
+/// above). Shared by the trade, the TraderData echo, and the quest-giving
+/// open path, so one config key governs all three.
+pub fn inTradeReach(self: *const Game, c: *const Client, bx: f32, by: f32, bz: f32) bool {
     const ps = self.sim.playerByPeer(c.slot) orelse return false;
     const p = self.sim.transform[ps];
     const dx = p.x - bx;

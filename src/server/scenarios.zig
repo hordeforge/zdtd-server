@@ -2848,6 +2848,13 @@ test "scenario quest accept kill complete and trader buy" {
         _ = systems.questAccept(&g.sim, c.slot, 3); // visit_the_trader
         systems.questTickGoto(&g.sim, c.slot, v.tx, v.ty, v.tz); // phase 1
         try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
+        // Stand at the machine: opening a trade window is reach-gated on
+        // [sim] trader_use_range, so a body naming a distant TE is refused
+        // before the routing under test is reached.
+        const opener = g.sim.playerByPeer(c.slot).?;
+        g.sim.transform[opener].x = 100;
+        g.sim.transform[opener].y = 70;
+        g.sim.transform[opener].z = 100;
         var te_body: [14]u8 = @splat(0);
         te_body[0] = 0; // isEntity = false -> tile entity position follows
         std.mem.writeInt(i32, te_body[1..5], 100, .little); // te_x
@@ -14016,4 +14023,58 @@ test "scenario trade reach: a trader across the map cannot be traded with" {
     try std.testing.expectEqual(stock_before - 1, g.sim.trader_stock[ts].entries[0].count);
     try std.testing.expect(g.sim.wallet[ps].coins < coins_before);
     std.debug.print("PASS trade reach: the trade needs the player standing at the trader\n", .{});
+}
+
+test "scenario trader open reach: quest turn-in needs the player at the trader" {
+    // Opening the trade window is not passive: questOnTraderOpen advances
+    // trader_interact phases and completes a ready quest, which pays its
+    // rewards. The arm took the trader from the body and never checked where
+    // the player stood, so a peer could farm every quest turn-in on the map
+    // by naming trader ids from spawn. Reach is [sim] trader_use_range, the
+    // same key the trade and the TraderData echo use.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_topen");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_topen", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    // visit_the_trader (id 3): goto phase, then the interact phase the open
+    // advances. Without the catalog entry there is nothing to assert.
+    const v = g.sim.catalog.byId(3) orelse return error.SkipZigTest;
+    const far = g.trade_use_range * 4;
+    const tid = g.sim.spawnTrader("npcTraderJen", g.sim.transform[ps].x + far, 70, g.sim.transform[ps].z, 5, 5000).?;
+
+    _ = systems.questAccept(&g.sim, c.slot, 3);
+    systems.questTickGoto(&g.sim, c.slot, v.tx, v.ty, v.tz);
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
+
+    var open: [6]u8 = undefined;
+    open[0] = 1; // isEntity
+    std.mem.writeInt(i32, open[1..5], tid, .little);
+    open[5] = 0; // hasTraderData
+    var fb: [64]u8 = undefined;
+
+    // Too far: the quest does not advance and the reject is counted.
+    const bounds_before = g.harness.counters.get(.bounds_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", &open));
+    try std.testing.expectEqual(bounds_before + 1, g.harness.counters.get(.bounds_rejects));
+    try std.testing.expect(systems.questHasActive(&g.sim, c.slot, 3));
+
+    // Standing at the trader, the same body turns the quest in.
+    const ts = g.sim.slotOfNetId(tid).?;
+    g.sim.transform[ps].x = g.sim.transform[ts].x;
+    g.sim.transform[ps].y = g.sim.transform[ts].y;
+    g.sim.transform[ps].z = g.sim.transform[ts].z;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageTraderData", &open));
+    try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
+    std.debug.print("PASS trader open reach: the turn-in needs the player at the trader\n", .{});
 }

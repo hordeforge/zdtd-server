@@ -2021,6 +2021,9 @@ pub const Game = struct {
     pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         return game_trader_wire.handleTrade(self, c, body);
     }
+    pub fn inTradeReach(self: *const Game, c: *const Client, bx: f32, by: f32, bz: f32) bool {
+        return game_trader_wire.inTradeReach(self, c, bx, by, bz);
+    }
     pub fn applyTraderDataCopyFrom(self: *Game, c: *Client, td: packages.TraderDataToServer) !void {
         return game_trader_wire.applyTraderDataCopyFrom(self, c, td);
     }
