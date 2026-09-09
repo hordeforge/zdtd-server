@@ -1186,6 +1186,14 @@ const basket_record_max: usize =
 /// before baskets persisted still loads, it just has no type-4 records.
 const zen_rec_basket: u8 = 4;
 
+/// Record type for the owner name of the entity written just before it.
+/// Same reason as the basket record: appending to the turret record would
+/// have shifted a format older worlds still hold.
+const zen_rec_owner: u8 = 5;
+
+/// Bytes an owner record occupies: type byte, length byte, then the name.
+const owner_record_max: usize = 2 + ecs.components.max_owner_name;
+
 /// Write one inventory slot in the v12 shape. Shared so a second store
 /// persisting InvSlots cannot drift into its own narrower encoding.
 fn writeSaveSlot(w: *wire_binary.Writer, s: ecs.components.InvSlot) !void {
@@ -1220,9 +1228,10 @@ pub fn saveEntities(self: *Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
     // Vehicle/turret records (32 B each), one optional basket record per
-    // vehicle, plus the power-wire section (24 B per saved edge, 512 max).
+    // vehicle and one optional owner record per turret, plus the power-wire
+    // section (24 B per saved edge, 512 max).
     var buf: [
-        ecs.max_entities * (32 + basket_record_max) +
+        ecs.max_entities * (32 + basket_record_max + owner_record_max) +
             ecs.electric.max_wires * 2 * 24 + 16
     ]u8 = undefined;
     var w = wire_binary.Writer{ .buf = &buf };
@@ -1265,6 +1274,16 @@ pub fn saveEntities(self: *Game) !void {
             try w.writeF32(t.damage);
             try w.writeU16(t.ammo);
             count += 1;
+            // Trap kills pay the owner XP, quest progress and a kill count,
+            // so an owner lost on restart silently moves that reward to
+            // nobody. The client slot is per-session; the name is what can be
+            // saved, and the login path re-maps the slot from it.
+            if (t.owner_name_len > 0) {
+                try w.writeByte(zen_rec_owner);
+                try w.writeByte(t.owner_name_len);
+                try w.writeBytes(t.owner_name[0..t.owner_name_len]);
+                count += 1;
+            }
         }
     }
     // Power wire edges by endpoint position (node ids are per-session).
@@ -1338,10 +1357,13 @@ pub fn loadEntities(self: *Game) !void {
     // loader carries that slot forward. Null when the last record was not a
     // vehicle, or when the vehicle failed to spawn.
     var last_vehicle: ?ecs.Slot = null;
+    // Same carry for the owner record, which follows the turret it names.
+    var last_turret: ?ecs.Slot = null;
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const rec_type = r.readByte() catch return error.Truncated;
         if (rec_type != zen_rec_basket) last_vehicle = null;
+        if (rec_type != zen_rec_owner) last_turret = null;
         switch (rec_type) {
             1 => {
                 // VehicleKind is an exhaustive enum(u8), so @enumFromInt panics
@@ -1382,6 +1404,7 @@ pub fn loadEntities(self: *Game) !void {
                         self.sim.turret[ts].range = range;
                         self.sim.turret[ts].damage = damage;
                         self.sim.turret[ts].ammo = ammo;
+                        last_turret = ts;
                     }
                 }
             },
@@ -1415,6 +1438,19 @@ pub fn loadEntities(self: *Game) !void {
                     if (last_vehicle) |vs| self.sim.vehicle[vs].basket[bi] = s;
                 }
                 if (last_vehicle) |vs| self.sim.vehicle[vs].basket_n = n;
+            },
+            zen_rec_owner => {
+                const n = r.readByte() catch return error.Truncated;
+                if (n > ecs.components.max_owner_name) return error.BadRecord;
+                // Consume the name whether or not there is a turret to give
+                // it to: leftover bytes would shift every later record.
+                var nb: [ecs.components.max_owner_name]u8 = undefined;
+                var ni: usize = 0;
+                while (ni < n) : (ni += 1) nb[ni] = r.readByte() catch return error.Truncated;
+                // The slot stays -1 until that player logs in: entity ids and
+                // client slots are per-session, so the login re-map is what
+                // reconnects the name to a live slot.
+                if (last_turret) |ts| self.sim.turret[ts].setOwnerName(nb[0..n]);
             },
             else => return error.BadRecord,
         }

@@ -476,6 +476,11 @@ pub const max_seats: usize = 6;
 /// the C2S Bag blob parse has a hard bound (rule 20).
 pub const max_basket_slots: usize = 8;
 
+/// Owner-name field width for entities that outlive a session (vehicles,
+/// turrets). Matches the land-claim owner field, which solves the same
+/// problem: a client slot is per-session, so the name is what persists.
+pub const max_owner_name: usize = 32;
+
 /// Seat 0 is the driver: EntityVehicle::AttachEntityToSelf sets hasDriver only
 /// when the resolved slot is 0 (asm.il:542176 IL_008a).
 pub const driver_seat: u8 = 0;
@@ -506,6 +511,12 @@ pub const Vehicle = struct {
     /// (worldgen/admin spawns). The owner sees their parked vehicles on the
     /// map through NetPackageEntityWaypointList
     /// (VehicleManager.UpdateVehicleWaypointsForPlayer).
+    ///
+    ///
+    /// Not persisted: no production path sets it. Vehicles reach the world
+    /// through worldgen and the admin console, never through a player
+    /// placement package, so every live vehicle is unowned and the waypoint
+    /// list is empty until a placement path exists.
     owner_slot: i16 = -1,
 
     pub fn driverNetId(self: *const Vehicle) i32 {
@@ -539,8 +550,21 @@ pub const Turret = struct {
     target_id: i32 = -1,
     power_node: u16 = 0,
     /// Client slot that placed the turret; -1 = unowned (demo). Trap kills
-    /// credit this owner with quest progress, XP and the kill counter.
+    /// credit this owner with quest progress, XP and the kill counter. The
+    /// slot is per-session; `owner_name` is what survives a restart and the
+    /// login path re-maps the slot from it.
     owner_slot: i16 = -1,
+    owner_name: [max_owner_name]u8 = .{0} ** max_owner_name,
+    owner_name_len: u8 = 0,
+
+    /// Record the placing player's name alongside the slot. A name longer
+    /// than the field is truncated rather than rejected: the login re-map
+    /// compares the stored prefix, so a truncated name still matches itself.
+    pub fn setOwnerName(self: *Turret, name: []const u8) void {
+        const n = @min(name.len, max_owner_name);
+        @memcpy(self.owner_name[0..n], name[0..n]);
+        self.owner_name_len = @intCast(n);
+    }
 };
 
 pub const max_journal: usize = 8;

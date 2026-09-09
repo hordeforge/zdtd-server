@@ -132,7 +132,7 @@ STRUCTURAL_CONSTANTS = {
     "connecting_allow", "joined_allow", "director_defaults",
     "shocked", "on_fire", "harvest", "bleeding",
     "max_net_polls_per_tick", "max_info_polls_per_tick", "max_webui_polls_per_tick",
-    "basket_record_max", "zen_rec_basket",
+    "basket_record_max", "zen_rec_basket", "owner_record_max", "zen_rec_owner",
 }
 
 

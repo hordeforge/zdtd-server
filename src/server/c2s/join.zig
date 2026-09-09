@@ -220,6 +220,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Restored claims keyed by this login name get their live owner
         // entity re-mapped here (entity ids are reassigned per session).
         self.reclaimForName(c.name[0..c.name_len], eid);
+        self.reclaimTurretsForName(c.name[0..c.name_len], c.slot);
         c.joined = true;
         c.view_radius = self.view_radius;
         // PlayerDataFile::CopyTo clamps a not-yet-set bornAt down to the

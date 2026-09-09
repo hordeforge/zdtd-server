@@ -15183,3 +15183,73 @@ test "scenario a vehicle basket survives a restart" {
     }
     std.debug.print("PASS basket persist: stored items and their mods survive a restart\n", .{});
 }
+
+test "scenario a turret keeps its owner across a restart" {
+    // A turret's owner decides who gets the XP, quest progress and kill count
+    // for its trap kills. The owner was a client slot only, which is a
+    // per-session index, so it reached no save path: after a restart every
+    // placed turret was unowned and its kills paid nobody. The save carries
+    // the owner name, and login re-maps it to a live slot, the same way a
+    // land claim recovers its owner entity.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_turretowner");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const tx: f32 = 320;
+    const tz: f32 = 320;
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turretowner", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const tid = g.sim.spawnTurret(tx, 70, tz) orelse return error.TestUnexpectedResult;
+        const ts = g.sim.slotOfNetId(tid) orelse return error.TestUnexpectedResult;
+        g.sim.turret[ts].owner_slot = @intCast(c.slot);
+        g.sim.turret[ts].setOwnerName(c.name[0..c.name_len]);
+        try persist.saveEntities(g);
+    }
+
+    {
+        const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_turretowner", 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        try persist.loadEntities(g2);
+        var found: ?ecs.Slot = null;
+        var i: usize = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!g2.sim.alive[i] or g2.sim.kind[i] != .turret) continue;
+            if (g2.sim.transform[i].x == tx and g2.sim.transform[i].z == tz) {
+                found = @intCast(i);
+                break;
+            }
+        }
+        const ts = found orelse return error.TestUnexpectedResult;
+
+        // Before anyone logs in the turret is unowned: a slot means nothing
+        // until a session claims it, and guessing one would hand the kills to
+        // whoever happens to hold that index.
+        try std.testing.expectEqual(@as(i16, -1), g2.sim.turret[ts].owner_slot);
+        try std.testing.expect(g2.sim.turret[ts].owner_name_len > 0);
+
+        // The placer logs back in and the turret is theirs again.
+        var cap2: ln_peer.Capture = .{};
+        const c2 = try g2.attachJoinedClient(&cap2);
+        try std.testing.expectEqual(@as(i16, @intCast(c2.slot)), g2.sim.turret[ts].owner_slot);
+
+        // And the slot is released again on disconnect, so the next player to
+        // land on that index does not inherit someone else's turret.
+        const slot = c2.slot;
+        g2.dropClientSlot(slot, "scenario turret owner");
+        try std.testing.expectEqual(@as(i16, -1), g2.sim.turret[ts].owner_slot);
+        try std.testing.expect(g2.sim.turret[ts].owner_name_len > 0);
+    }
+    std.debug.print("PASS turret owner: survives a restart, re-maps on login, releases on drop\n", .{});
+}

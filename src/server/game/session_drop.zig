@@ -5,6 +5,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
+const ecs = @import("../../ecs/world.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     std.debug.print("zdtd: player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
@@ -67,6 +68,16 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     // joins. Plugin leave already ran above; destroy itself has no side hooks.
     if (self.sim.playerByPeer(slot)) |ps| {
         self.sim.destroy(ps);
+    }
+    // Turrets hold the owning client slot, and slots are recycled, so a
+    // turret still naming this one would pay its trap kills to whoever joins
+    // next. The owner name stays: it is what the login re-map matches on.
+    var ti: usize = 0;
+    while (ti < ecs.max_entities) : (ti += 1) {
+        if (!self.sim.alive[ti] or self.sim.kind[ti] != .turret) continue;
+        if (self.sim.turret[ti].owner_slot == @as(i16, @intCast(slot))) {
+            self.sim.turret[ti].owner_slot = -1;
+        }
     }
     self.clients[slot] = .{};
     self.refreshInfoPlayers();

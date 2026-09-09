@@ -1205,6 +1205,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.spawnTurret(@floatFromInt(x), @floatFromInt(y), @floatFromInt(z))) |tid| {
             if (self.sim.slotOfNetId(tid)) |ts| {
                 self.sim.turret[ts].owner_slot = @intCast(c.slot);
+                // The slot dies with the session; the name is what lets a
+                // restart hand the turret back to whoever placed it.
+                self.sim.turret[ts].setOwnerName(c.name[0..c.name_len]);
                 var gi: ?u16 = null;
                 var i: usize = 0;
                 while (i < self.sim.power.node_n) : (i += 1) {

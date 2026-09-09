@@ -1868,6 +1868,21 @@ pub const Game = struct {
         }
     }
 
+    /// Re-map restored turrets to the client slot this player just took, so
+    /// trap kills pay the player who placed them rather than nobody. Same
+    /// shape as `reclaimForName`: the save carries a name because a slot is
+    /// per-session, and login is where a name becomes a slot again.
+    pub fn reclaimTurretsForName(self: *Game, name: []const u8, slot: usize) void {
+        var i: usize = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!self.sim.alive[i] or self.sim.kind[i] != .turret) continue;
+            const t = &self.sim.turret[i];
+            if (t.owner_name_len != name.len) continue;
+            if (!std.mem.eql(u8, t.owner_name[0..t.owner_name_len], name)) continue;
+            t.owner_slot = @intCast(slot);
+        }
+    }
+
     /// Process pending UDP events (acks free window; data delivered to onData).
     /// Reentrant calls (sendGame / pump_fn mid-onData) only drain control so the
     /// reliable window can free without nested onData corrupting join SM state.
