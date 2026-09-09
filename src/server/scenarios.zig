@@ -14667,3 +14667,46 @@ test "scenario container quarantine covers the bag path, not only tile entities"
     try std.testing.expectEqual(@as(u16, 0), g.sim.vehicle[vs].basket[0].item_id);
     std.debug.print("PASS bag quarantine: a container-quarantined peer cannot rewrite a basket\n", .{});
 }
+
+test "scenario a forged entity id builds guard evidence, not just a counter" {
+    // `ownership` is a server_only detector (evidence.decisionInputs), so a
+    // claimed entity id that is not the sender's is the guard's strongest
+    // class of signal, and AUTHORITY.md lists ownership among the ladder's
+    // inputs. Almost every reject site only bumped ownership_rejects and told
+    // the guard nothing, so a peer could spoof ids across the relays forever
+    // without building a case against itself.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_ownev");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ownev", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+
+    // A claims B's entity id on the audio relay.
+    var abuf: [128]u8 = undefined;
+    const spoof = try packages.buildAudioPlayBody(&abuf, .{
+        .entity_id = cb.entity_id,
+        .sound_group = "open_door",
+        .play = true,
+        .play_on_entity = true,
+    });
+    var fb: [192]u8 = undefined;
+
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    const ev_before = g.harness.counters.get(.evidence_events);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageAudio", spoof));
+
+    // Both move: the counter for the operator, the ring for the guard.
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(g.harness.counters.get(.evidence_events) > ev_before);
+    std.debug.print("PASS ownership evidence: a spoofed id reaches the guard ring\n", .{});
+}

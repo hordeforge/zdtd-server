@@ -144,10 +144,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         };
         // The owning entity must be the sender (a spoofed id would silence a
         // different player instead of the sender); NaN positions are forged.
-        if (snd.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (self.rejectIfNotSender(c, peer.local_id, snd.entity_id, .none)) return true;
         if (!std.math.isFinite(snd.pos[0]) or !std.math.isFinite(snd.pos[1]) or !std.math.isFinite(snd.pos[2])) {
             self.harness.counters.inc(.bounds_rejects);
             return true;
@@ -397,10 +394,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         };
         if (a.sound_group.len == 0) return true; // stock's IsNullOrEmpty early out
-        if (a.play_on_entity and a.entity_id != c.entity_id) {
-            self.harness.counters.inc(.ownership_rejects);
-            return true;
-        }
+        if (a.play_on_entity and self.rejectIfNotSender(c, peer.local_id, a.entity_id, .none)) return true;
         // signalOnly means "AI stimulus, do not play": stock skips the relay
         // loop entirely for those (Server.il.txt:29, `brtrue` past the loop).
         if (a.signal_only) return true;

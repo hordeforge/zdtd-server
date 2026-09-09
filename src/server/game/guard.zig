@@ -33,6 +33,39 @@ pub fn rejectIfBeyondEditRange(
     return true;
 }
 
+/// Count and report a claimed entity id that is not the sender's. Returns
+/// true when the caller should drop the package.
+///
+/// The counter and the evidence event belong together: `ownership` is a
+/// `server_only` detector (evidence.decisionInputs), so a forged id is the
+/// guard's strongest class of signal, and AUTHORITY.md lists ownership among
+/// the inputs the ladder weighs. Before this existed, 36 of the 37
+/// `ownership_rejects` sites incremented the counter and told the guard
+/// nothing, so a peer could spoof entity ids across every relay without ever
+/// building a case against itself.
+pub fn rejectIfNotSender(
+    self: *Game,
+    c: *Client,
+    peer_local: i32,
+    claimed_entity: i32,
+    surf: evidence_mod.Surface,
+) bool {
+    if (claimed_entity == c.entity_id) return false;
+    self.harness.counters.inc(.ownership_rejects);
+    noteEvidence(
+        self,
+        c,
+        peer_local,
+        claimed_entity,
+        .ownership,
+        .strong,
+        surf,
+        @floatFromInt(claimed_entity),
+        @floatFromInt(c.entity_id),
+    );
+    return true;
+}
+
 pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
     if (self.loadShedding() and (sev == .info or sev == .soft)) {
         self.harness.counters.inc(.load_shed_drops);

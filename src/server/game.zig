@@ -2223,6 +2223,16 @@ pub const Game = struct {
         return game_guard.rejectIfBeyondEditRange(self, c, peer_local, entity_id, surf, px, py, pz, bx, by, bz);
     }
 
+    pub fn rejectIfNotSender(
+        self: *Game,
+        c: *Client,
+        peer_local: i32,
+        claimed_entity: i32,
+        surf: evidence_mod.Surface,
+    ) bool {
+        return game_guard.rejectIfNotSender(self, c, peer_local, claimed_entity, surf);
+    }
+
     pub fn noteEvidence(self: *Game, c: *Client, peer_local: i32, entity_id: i32, det: evidence_mod.Detector, sev: evidence_mod.Severity, surf: evidence_mod.Surface, observed: f32, bound: f32) void {
         return game_guard.noteEvidence(self, c, peer_local, entity_id, det, sev, surf, observed, bound);
     }
