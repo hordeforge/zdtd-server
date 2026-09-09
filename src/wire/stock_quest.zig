@@ -53,14 +53,24 @@ pub const RewardWire = struct {
     item: stock_inv.StockSlot = .{},
 };
 
+/// Quest-area bounding box sent when no POI selector answered, so there is no
+/// real prefab bbox to report. zdtd-owned: the true value is the selected
+/// POI's own size, which fills these fields whenever a selector hits. It only
+/// shapes the client's quest-area marker; sim containment reads the POI rect
+/// in `ecs/components.PoiRect`, never these, so a fallback here cannot widen
+/// a StayWithin zone.
+pub const default_quest_size_x: f32 = 50;
+pub const default_quest_size_y: f32 = 20;
+pub const default_quest_size_z: f32 = 50;
+
 pub const QuestPacketEntry = struct {
     quest_id: []const u8,
     loc_x: f32 = 0,
     loc_y: f32 = 70,
     loc_z: f32 = 0,
-    size_x: f32 = 50,
-    size_y: f32 = 20,
-    size_z: f32 = 50,
+    size_x: f32 = default_quest_size_x,
+    size_y: f32 = default_quest_size_y,
+    size_z: f32 = default_quest_size_z,
     poi_name: []const u8 = "",
     trader_x: f32 = 0,
     trader_y: f32 = 70,
@@ -312,9 +322,9 @@ pub const SharedQuestShare = struct {
     pos_x: f32 = 0,
     pos_y: f32 = 70,
     pos_z: f32 = 0,
-    size_x: f32 = 50,
-    size_y: f32 = 20,
-    size_z: f32 = 50,
+    size_x: f32 = default_quest_size_x,
+    size_y: f32 = default_quest_size_y,
+    size_z: f32 = default_quest_size_z,
     return_x: f32 = 0,
     return_y: f32 = 70,
     return_z: f32 = 0,

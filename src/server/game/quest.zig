@@ -294,9 +294,9 @@ pub fn buildTraderQuestOffers(
         var loc_x = d.tx;
         var loc_y = d.ty;
         var loc_z = d.tz;
-        var size_x: f32 = 50;
-        var size_y: f32 = 20;
-        var size_z: f32 = 50;
+        var size_x: f32 = packages.stock_quest.default_quest_size_x;
+        var size_y: f32 = packages.stock_quest.default_quest_size_y;
+        var size_z: f32 = packages.stock_quest.default_quest_size_z;
         var poi_name = d.name;
         if (d.poi_select != .none) {
             // Anchor: the random path (GetRandomPOINearTrader) anchors on the
