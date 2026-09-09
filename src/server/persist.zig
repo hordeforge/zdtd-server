@@ -976,6 +976,23 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             while (fi < inv_n and fi < inv.len) : (fi += 1) {
                 if (fi < self.sim.inventory[ps].slots.len) self.sim.inventory[ps].slots[fi] = inv[fi];
             }
+            // Bring saved stacks down to the current items.xml cap, but only
+            // for items the catalog resolves. The file is server-written and
+            // was legal when saved; the cap can still move under it when a
+            // Stacknumber is lowered or the world is loaded against a
+            // different game-dir, and nothing else would ever correct that.
+            //
+            // Deliberately not clampInventoryStacks: that path uses
+            // itemStackFor, which fails closed to 1 for an id it cannot
+            // resolve. Failing closed is right against a client claim and
+            // destructive here, where an unresolved id (game-dir absent, mod
+            // removed) would silently crush a legitimate stack to 1 on every
+            // load. An unknown id keeps whatever the save recorded.
+            for (&self.sim.inventory[ps].slots) |*s| {
+                if (s.count == 0 or s.item_id == 0) continue;
+                const d = self.items.byId(s.item_id) orelse continue;
+                if (d.stack > 0) s.count = @min(s.count, d.stack);
+            }
         }
         if (self.sim.mask[ps].journal) {
             self.sim.journal[ps] = .{};

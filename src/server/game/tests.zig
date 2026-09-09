@@ -912,7 +912,10 @@ test "players save keeps a joined-but-not-writable client record" {
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
         g.sim.inventory[ps] = .{};
-        g.sim.inventory[ps].slots[3] = .{ .item_id = 9, .count = 7, .quality = 5, .meta = 1 };
+        // item 2 (resourceWood) stacks; item 9 is meleeClub, which caps at 1,
+        // so a count of 7 there was never a legal inventory and the load
+        // clamp now corrects it. The subject here is record carry-forward.
+        g.sim.inventory[ps].slots[3] = .{ .item_id = 2, .count = 7, .quality = 5, .meta = 1 };
         try g.savePlayers();
     }
 
@@ -943,7 +946,7 @@ test "players save keeps a joined-but-not-writable client record" {
         var capture: ln_peer.Capture = .{};
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
-        try std.testing.expectEqual(@as(u16, 9), g.sim.inventory[ps].slots[3].item_id);
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[3].item_id);
         try std.testing.expectEqual(@as(u16, 7), g.sim.inventory[ps].slots[3].count);
     }
 }

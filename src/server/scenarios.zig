@@ -14710,3 +14710,58 @@ test "scenario a forged entity id builds guard evidence, not just a counter" {
     try std.testing.expect(g.harness.counters.get(.evidence_events) > ev_before);
     std.debug.print("PASS ownership evidence: a spoofed id reaches the guard ring\n", .{});
 }
+
+test "scenario a saved stack over the current cap is corrected on load" {
+    // Every C2S inventory write clamps to the items.xml Stacknumber; the
+    // loader did not. A save is server-written and was legal when made, but
+    // the cap moves under it when a Stacknumber is lowered or the world is
+    // loaded against a different game-dir, and nothing else corrects that.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_loadclamp");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    // Save a legal stack of 40 food (builtin cap 50), plus an item the
+    // catalog will not resolve on reload.
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_loadclamp", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const ps = g.sim.playerByPeer(c.slot).?;
+        g.sim.inventory[ps].slots[3] = .{ .item_id = 2, .count = 40, .quality = 1 };
+        g.sim.inventory[ps].slots[4] = .{ .item_id = 4242, .count = 99, .quality = 1 };
+        try g.savePlayers();
+    }
+
+    // Reload with a lowered cap for that item: the saved 40 comes down to 5.
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_loadclamp", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        const idefs = [_]assets_items.ItemDef{
+            .{ .id = 2, .name = "food", .stack = 5 },
+        };
+        g.items.defs = idefs[0..];
+
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        const ps = g.sim.playerByPeer(c.slot).?;
+
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[3].item_id);
+        try std.testing.expectEqual(@as(u16, 5), g.sim.inventory[ps].slots[3].count);
+
+        // The unresolved item keeps what the save recorded. Failing closed to
+        // 1 here would silently destroy a real stack whenever a game-dir is
+        // missing or a mod was removed.
+        try std.testing.expectEqual(@as(u16, 4242), g.sim.inventory[ps].slots[4].item_id);
+        try std.testing.expectEqual(@as(u16, 99), g.sim.inventory[ps].slots[4].count);
+    }
+    std.debug.print("PASS load clamp: over-cap saved stacks come down, unknown items are left alone\n", .{});
+}
