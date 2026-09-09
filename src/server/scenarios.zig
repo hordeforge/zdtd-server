@@ -14765,3 +14765,52 @@ test "scenario a saved stack over the current cap is corrected on load" {
     }
     std.debug.print("PASS load clamp: over-cap saved stacks come down, unknown items are left alone\n", .{});
 }
+
+test "scenario saved container stacks are clamped on restart, not just player ones" {
+    // The C2S TE write clamps container and workstation stacks to the
+    // items.xml cap; their loaders did not. Both stores load before
+    // loadAssets, so the correction runs after the catalog is up: at the load
+    // site the cap lookup would resolve nothing and silently no-op.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_storeclamp");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const pos = containers_mod.PosKey{ .x = 120, .y = 70, .z = 120 };
+
+    // Save a container holding a stack that is legal under the builtin cap.
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_storeclamp", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        const cont = g.containers.getOrCreate(pos, 8, 1) orelse return error.TestUnexpectedResult;
+        cont.slots[0] = .{ .item_id = 2, .count = 40, .quality = 1 };
+        cont.slots[1] = .{ .item_id = 4242, .count = 99, .quality = 1 };
+        try g.containers.save(g.world.world_dir, gpa);
+    }
+
+    // Reload: the resolvable item comes down to its (lowered) cap, the
+    // unresolvable one keeps what the save recorded.
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_storeclamp", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        const idefs = [_]assets_items.ItemDef{
+            .{ .id = 2, .name = "food", .stack = 5 },
+        };
+        g.items.defs = idefs[0..];
+        g.clampSavedStoreStacksForTest();
+
+        const cont = g.containers.get(pos) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(@as(u16, 2), cont.slots[0].item_id);
+        try std.testing.expectEqual(@as(u16, 5), cont.slots[0].count);
+        try std.testing.expectEqual(@as(u16, 4242), cont.slots[1].item_id);
+        try std.testing.expectEqual(@as(u16, 99), cont.slots[1].count);
+    }
+    std.debug.print("PASS store clamp: saved container stacks respect the current cap\n", .{});
+}

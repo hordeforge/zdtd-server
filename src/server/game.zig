@@ -1067,6 +1067,49 @@ pub const Game = struct {
                 return e;
             }
         };
+        // Saved container and workstation stacks get the same items.xml cap
+        // the C2S TE writes apply (c2s/inv.zig clampStackSlots). Both stores
+        // load before loadAssets, so this runs here rather than at the load
+        // site, where the catalog is not up yet and the clamp would silently
+        // no-op. Same rule as the player loader: correct only what the
+        // catalog resolves, since an unknown id must keep what was saved
+        // rather than fail closed to 1 and destroy a real stack.
+        self.clampSavedStoreStacks();
+    }
+
+    /// Test hook: scenarios swap the item catalog after construction, so they
+    /// need to re-run the pass the constructor already did.
+    pub fn clampSavedStoreStacksForTest(self: *Game) void {
+        self.clampSavedStoreStacks();
+    }
+
+    /// Bring saved container / workstation stacks down to the current
+    /// items.xml cap. See the call site for why it runs after loadAssets.
+    fn clampSavedStoreStacks(self: *Game) void {
+        for (&self.containers.items, self.containers.used[0..]) |*cont, u| {
+            if (!u) continue;
+            const n = @min(@as(usize, cont.slot_count), cont.slots.len);
+            self.clampKnownStacks(cont.slots[0..n]);
+        }
+        for (&self.workstations.items, self.workstations.used[0..]) |*ws, u| {
+            if (!u) continue;
+            self.clampKnownStacks(ws.fuel[0..]);
+            self.clampKnownStacks(ws.input[0..]);
+            self.clampKnownStacks(ws.tools[0..]);
+            self.clampKnownStacks(ws.output[0..]);
+        }
+    }
+
+    /// Clamp only slots whose item the catalog resolves. Unlike
+    /// `clampStackSlots` (which fails closed to 1 through itemStackFor), an
+    /// unresolved id here keeps its saved count: failing closed is right
+    /// against a client claim and destructive against server-written state.
+    pub fn clampKnownStacks(self: *const Game, slots: []ecs.components.InvSlot) void {
+        for (slots) |*s| {
+            if (s.count == 0 or s.item_id == 0) continue;
+            const d = self.items.byId(s.item_id) orelse continue;
+            if (d.stack > 0) s.count = @min(s.count, d.stack);
+        }
     }
 
     /// True when Hard C2S rejects should apply (Correct mode). Observe keeps
