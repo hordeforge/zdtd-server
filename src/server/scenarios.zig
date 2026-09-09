@@ -14078,3 +14078,54 @@ test "scenario trader open reach: quest turn-in needs the player at the trader" 
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, 3));
     std.debug.print("PASS trader open reach: the turn-in needs the player at the trader\n", .{});
 }
+
+test "scenario npc quest list reach: offers and accepts need the player at the trader" {
+    // The list exchange reads the NPC from the body. Its remove_quest arm
+    // accepts the chosen offer into the journal (acceptQuestFor, which also
+    // shares it with the party), so an ungated exchange hands out quests from
+    // every trader on the map. Reach is [sim] trader_use_range, the same key
+    // the trade, the TraderData echo and the window open use.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_nqlr");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_nqlr", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    g.sim.journal[ps] = .{};
+    const qid = packages.idOf("NetPackageNPCQuestList").?;
+
+    const far = g.trade_use_range * 4;
+    const tid = g.sim.spawnTrader("npcTraderJen", g.sim.transform[ps].x + far, 70, g.sim.transform[ps].z, 5, 5000).?;
+
+    var fb: [16]u8 = undefined;
+    std.mem.writeInt(i32, fb[0..4], tid, .little);
+    std.mem.writeInt(i32, fb[4..8], c.entity_id, .little);
+    fb[8] = 0; // fetch_list
+    std.mem.writeInt(i32, fb[9..13], 1, .little);
+    var fbuf: [256]u8 = undefined;
+
+    // Too far: no list comes back and the reject is counted.
+    const bounds_before = g.harness.counters.get(.bounds_rejects);
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageNPCQuestList", fb[0..13]));
+    try std.testing.expectEqual(bounds_before + 1, g.harness.counters.get(.bounds_rejects));
+    try std.testing.expect(cap.findPkgId(qid) == null);
+
+    // Standing at the trader, the same body is answered with the offer list.
+    const ts = g.sim.slotOfNetId(tid).?;
+    g.sim.transform[ps].x = g.sim.transform[ts].x;
+    g.sim.transform[ps].y = g.sim.transform[ts].y;
+    g.sim.transform[ps].z = g.sim.transform[ts].z;
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fbuf, "NetPackageNPCQuestList", fb[0..13]));
+    try std.testing.expect(cap.findPkgId(qid) != null);
+    std.debug.print("PASS npc quest list reach: the exchange needs the player at the trader\n", .{});
+}

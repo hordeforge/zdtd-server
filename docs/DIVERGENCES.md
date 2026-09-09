@@ -289,6 +289,36 @@ entity shape for both trader kinds; it now keys off the type name the client
 sent. Re-check this table if a fourth context appears, or if zdtd ever
 synthesises a tail instead of echoing the client's.
 
+## 1a6. Reach audit on claimed entity ids (2026-09-09), trader paths closed
+
+The mirror of the relay audit above: not who receives a packet, but what a
+packet may reach. Bounds rule 20 already covered claimed *coordinates*;
+claimed *entity ids* were less consistent. Every `slotOfNetId` call in
+`server/c2s/` was checked for what stops the id naming something across the
+map. The four trader paths diverged, all in the same direction, and now
+share one rule from `[sim] trader_use_range` via `inTradeReach`.
+
+- **The trade itself.** `systems.trade` verified the id resolved to a trader
+  with stock, never where the player stood, so a peer could buy and sell
+  against every trader on the map from spawn.
+- **The window open** (`NetPackageTraderData`, short body). Not passive:
+  `questOnTraderOpen` advances `trader_interact` phases and completes a ready
+  quest, paying its rewards. Ungated, that farms every turn-in on the map.
+- **The quest-list exchange** (`NetPackageNPCQuestList`). Its `remove_quest`
+  arm accepts the chosen offer into the journal and shares it with the party.
+- The **TraderData echo** was already gated; it is what made the other three
+  visibly inconsistent.
+
+Note for anyone extending these: the leading i32 of a `NetPackageTraderData`
+body is an entity id **only** when the header's `isEntity` byte is set.
+Otherwise those bytes are a vending machine's tile-entity position. Parse the
+header and branch; do not index the body.
+
+Audited clean on this axis: the damage arms (ECS and host-bot branches both
+gate on interest range), `EntityCollect` loot bags, `Bag` for non-player
+inventories, `tryRefuelGenerator`, `tryRefuelVehicle`, and the `move.zig` id
+lookups (all sender-gated before the lookup).
+
 ## 1b. Block updates are interest-scoped, stock's are global
 
 `GameManager::SetBlocksOnClients` (`GameManager.il.txt:6841`) hands

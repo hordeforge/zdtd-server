@@ -391,6 +391,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 tx = self.sim.transform[ni].x;
                 ty = self.sim.transform[ni].y;
                 tz = self.sim.transform[ni].z;
+                // Same reach gate as the trade, the TraderData echo and the
+                // window open ([sim] trader_use_range): the remove_quest arm
+                // below accepts an offer into the journal, so an ungated list
+                // exchange hands out quests from every trader on the map.
+                // An id that names nothing keeps the fallback marker position
+                // and grants nothing, so only a resolved NPC is checked.
+                if (!self.inTradeReach(c, tx, ty, tz)) {
+                    self.harness.counters.inc(.bounds_rejects);
+                    return true;
+                }
             }
         }
         // max_quest_tier (quests.xml root): stock clamps the offered tier
