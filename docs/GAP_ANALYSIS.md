@@ -2755,12 +2755,38 @@ gamestage, no wandering hordes, and no screamers.
   broadcasts, credits quests and spawns the bag; `killall` sweeps zombies.
   *Anchors:* `src/server/game.zig`, ``, ``
 
-- **Parallel AI execution and LOD** `WORKS`
+- **Parallel AI execution and LOD** `PARTIAL`
   `systemZombieAi` runs over disjoint slot ranges above 64 live entities, damage is
   accumulated as atomic fixed-point and applied serially, and `lodScale` throttles
   `decision_cd` by distance with a documented ultra-far branch that skips task
   selection entirely.
-  *Anchors:* `src/ecs/systems.zig:1428-1449`, `:929-945`, `:42-46`
+
+  **Residual (found 2026-09-09): `active_scale` also multiplies movement
+  speed, not just the decision cadence.** `lodScale` returns 1.0 / 0.3 / 0.1
+  by distance to the *sensed* target (`systems.zig:1892`). That value drains
+  `decision_cd` (`:1959`), which is the documented LOD throttle, but it is
+  also passed as the `speed` argument to `chaseAlongPath` at six sites
+  (`:2276, :2314, :2423, :2545, :2594, :2627`), where it scales real
+  movement. The bands are 15 blocks (`mid_dist_sq` 225) and 64 blocks
+  (`full_dist_sq` 4096), while sense range is up to 48 blocks (`sense_dist_sq`
+  floor, `entityclasses.xml` SightRange wins per class; stock ships 27/30/40).
+  So a zombie that senses a player at 40 blocks closes at **30% of its class
+  speed** until it reaches 15 blocks, then jumps to full speed. Stock has no
+  such distance ramp: `EntityAlive` moves at its class speed whenever it is
+  simulated at all.
+
+  Only the no-sense 0.1x case is currently written down (the animal-flee row
+  below calls it a documented approximation); the 0.3x chase band is not, and
+  it is reachable in ordinary play.
+
+  Fixing it means separating the two concerns: keep `active_scale` for
+  `decision_cd`, and pass unscaled `cspd` to `chaseAlongPath`. That is a
+  balance-affecting change (zombies close faster than they do today), so it
+  wants a deliberate call plus a loadgen pass on the AI tick cost, not a
+  drive-by edit. The tick-budget reason the throttle exists is real; it is
+  the coupling to speed that is unintended.
+  *Anchors:* `src/ecs/systems.zig:1428-1449`, `:929-945`, `:24-28`, `:1892`,
+  `:1959`, `:2276`
 
 ---
 
