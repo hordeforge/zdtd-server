@@ -11514,9 +11514,14 @@ test "scenario dig wears the held tool (ItemValue.UseTimes)" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
-    // A tool in hand with remaining durability.
+    // A fresh tool in hand. use_times counts uses CONSUMED, upward from 0
+    // (stock get_PercentUsesLeft = 1 - UseTimes/MaxUseTimes), so a pristine
+    // tool starts at 0. Leaving it at the default is the point: the old code
+    // subtracted toward 0, so wear on a never-seeded item did nothing and
+    // this test only passed because it hand-seeded 10 first.
     const hold = g.sim.inventory[ps].holding;
-    g.sim.inventory[ps].slots[hold] = .{ .item_id = 7, .count = 1, .use_times = 10 };
+    g.sim.inventory[ps].slots[hold] = .{ .item_id = 7, .count = 1 };
+    try std.testing.expectEqual(@as(f32, 0), g.sim.inventory[ps].slots[hold].use_times);
     // A diggable block in reach (the player spawns near the primary spawn;
     // the existing explosion-dig scenario uses the same coordinate).
     try g.setBlock(250, 70, 250, world_store.block_stone);
@@ -11524,7 +11529,8 @@ test "scenario dig wears the held tool (ItemValue.UseTimes)" {
     const body = try packages.buildSetBlockBodyDamage(&body_buf, 250, 70, 250, world_store.block_stone, 1, 0, 0);
     var frame_buf: [128]u8 = undefined;
     try g.onData(c.peer.?, try packages.framed(&frame_buf, "NetPackageSetBlock", body));
-    try std.testing.expectEqual(@as(f32, 9), g.sim.inventory[ps].slots[hold].use_times);
+    // The dig consumed a use: the counter advanced off pristine.
+    try std.testing.expect(g.sim.inventory[ps].slots[hold].use_times > 0);
 }
 
 test "scenario admin ops verbs (getoptions/exportcurrentconfigs/loglevel/listthreads/cp)" {

@@ -268,10 +268,20 @@ pub fn use(w: *World, peer: usize, slot: u16) bool {
     return useEx(w, peer, slot, null, null).ok;
 }
 
-/// Reduce one inventory slot's remaining ItemValue.UseTimes (tool wear) and
-/// mark the inventory dirty so replication relays it. Clamps at 0; stock keeps
-/// the stack present at use_times 0 (broken, repairable) rather than removing
-/// it. The attack / dig call sites in Game.dealDamage consume this.
+/// Advance one inventory slot's ItemValue.UseTimes (tool wear) and mark the
+/// inventory dirty so replication relays it.
+///
+/// UseTimes counts uses *consumed*, upward from 0 on a fresh item: stock's
+/// `ItemValue.get_PercentUsesLeft` (IL=17, `ItemValue.il.txt:137`) is
+/// `1 - clamp01(UseTimes / MaxUseTimes)`, so 0 is pristine and MaxUseTimes is
+/// broken. This used to subtract toward 0 instead, which made it a permanent
+/// no-op: every item enters the world at 0 (`components.InvSlot.use_times`),
+/// so the decrement always took its clamp branch, `use_times` never changed,
+/// and the dirty mark never fired. Nothing wore down and
+/// `hooks.percentUsesLeft` read every tool as brand new.
+///
+/// Stock keeps the stack present at the broken point (repairable) rather than
+/// removing it. The attack / dig call sites in Game.dealDamage consume this.
 pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
@@ -286,7 +296,13 @@ pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
         if (d > 0) use_amount = d;
     }
     const before = s.use_times;
-    s.use_times = if (s.use_times > use_amount) s.use_times - use_amount else 0;
+    // Already broken: percentUsesLeft has hit 0, so the counter stops there
+    // rather than running up forever. Reusing that resolver keeps MaxUseTimes
+    // in one place (hooks.maxUseTimes, the quality-lerped DegradationMax).
+    if (w.percent_uses_left_fn) |f| {
+        if (f(w.percent_uses_left_ctx, s.item_id, s.quality, before) <= 0) return true;
+    }
+    s.use_times = before + use_amount;
     if (s.use_times != before) markInv(w, ps);
     return true;
 }
@@ -808,7 +824,13 @@ test "resolved placeables map the stock Blockname through AssignIds" {
     );
 }
 
-test "degradeUse wears a tool down and clamps at zero" {
+fn testAllBroken(_: ?*anyopaque, _: u16, _: u8, use_times: f32) f32 {
+    // MaxUseTimes 100: pristine at 0, broken at 100 (stock get_PercentUsesLeft).
+    const frac = @min(@max(use_times / 100.0, 0.0), 1.0);
+    return 1 - frac;
+}
+
+test "degradeUse counts uses upward from a pristine zero" {
     const WorldT = @import("world.zig").World;
     var w: WorldT = .{};
     defer w.deinit();
@@ -823,17 +845,28 @@ test "degradeUse wears a tool down and clamps at zero" {
             break;
         }
     }
-    w.inventory[ps].slots[tool_slot].use_times = 100;
+    // A fresh item is pristine at 0. This is the case that mattered: the old
+    // code subtracted toward 0, so wear on a real (never-seeded) item was a
+    // no-op and the durability bar never moved.
+    try std.testing.expectEqual(@as(f32, 0), w.inventory[ps].slots[tool_slot].use_times);
+    w.percent_uses_left_fn = &testAllBroken;
     w.dirty[ps] = .{};
 
     try std.testing.expect(degradeUse(&w, 0, tool_slot, 1));
-    try std.testing.expectEqual(@as(f32, 99), w.inventory[ps].slots[tool_slot].use_times);
+    try std.testing.expectEqual(@as(f32, 1), w.inventory[ps].slots[tool_slot].use_times);
     try std.testing.expect(w.dirty[ps].inv);
 
-    // A big chunk clamps at 0 but keeps the stack present (broken, repairable).
+    // Wear accumulates rather than resetting.
+    try std.testing.expect(degradeUse(&w, 0, tool_slot, 4));
+    try std.testing.expectEqual(@as(f32, 5), w.inventory[ps].slots[tool_slot].use_times);
+
+    // At the broken point the counter stops and the stack stays present
+    // (broken, repairable) instead of running up forever.
+    w.inventory[ps].slots[tool_slot].use_times = 100;
     try std.testing.expect(degradeUse(&w, 0, tool_slot, 500));
-    try std.testing.expectEqual(@as(f32, 0), w.inventory[ps].slots[tool_slot].use_times);
+    try std.testing.expectEqual(@as(f32, 100), w.inventory[ps].slots[tool_slot].use_times);
     try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[tool_slot].count);
+    w.percent_uses_left_fn = null;
 
     // Empty slots / bad indices are a no-op.
     var empty_slot: u16 = 0;
@@ -884,13 +917,13 @@ test "degradeUse wears the item's DegradationPerUse; armorMitigationVs applies h
     const tool = w.inventory[ps].slots.len - 1;
     w.inventory[ps].slots[tool] = .{ .item_id = 2, .count = 1, .use_times = 10 };
     try std.testing.expect(degradeUse(&w, 0, tool, 1));
-    try std.testing.expectApproxEqAbs(@as(f32, 9), w.inventory[ps].slots[tool].use_times, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 11), w.inventory[ps].slots[tool].use_times, 0.001);
     // Hooked: the item's DegradationPerUse (0.35) is the wear.
     w.item_degradation_fn = &testDegrad;
     w.item_degradation_ctx = null;
     w.inventory[ps].slots[tool].use_times = 10;
     try std.testing.expect(degradeUse(&w, 0, tool, 1));
-    try std.testing.expectApproxEqAbs(@as(f32, 9.65), w.inventory[ps].slots[tool].use_times, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10.35), w.inventory[ps].slots[tool].use_times, 0.001);
     // Penetration: 0.2 mitigation vs a -0.5 held-item TargetArmor -> 0.1.
     w.inventory[ps].slots[c.inv_equip_start] = .{ .item_id = 11, .count = 1, .quality = 1 };
     w.armor_pdr_ctx = null;
