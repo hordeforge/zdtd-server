@@ -14406,3 +14406,71 @@ test "scenario blood moon bonus loot survives the per-tick cadence re-push" {
     try std.testing.expect(awarded);
     std.debug.print("PASS blood moon bonus: the cadence counter is not reset by the per-tick re-push\n", .{});
 }
+
+test "scenario stock inventory transaction is all-or-nothing" {
+    // Stock applies the whole InventoryTransaction then checks
+    // ValidateFinalHashes (InventoryManager::TransactionRequestServer IL=46);
+    // a failure logs, force-unlocks and sends no response, so a rejected
+    // transaction never leaves half its ops applied. zdtd's SetAbsolute arm
+    // wrote straight into the live inventory, so an op that failed after an
+    // earlier one had landed left those stacks applied, unclamped (the clamp
+    // sits in the success branch) and unreplicated.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_invtx");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_invtx", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const resp_id = packages.idOf("NetPackageInventoryTransactionResponse").?;
+
+    // A known-good stack for op 1, then an unresolvable one for op 2. The
+    // second op is the T18 reject: a non-empty stack whose type resolves to
+    // no server catalog item fails the transaction.
+    const before = g.sim.inventory[ps].slots[0];
+
+    var body: [512]u8 = undefined;
+    var w = binary.Writer{ .buf = &body };
+    try w.writeI32(1); // one entry
+    var gi: u8 = 0;
+    while (gi < 16) : (gi += 1) try w.writeByte(0); // guid
+    try w.writeI32(0); // initial hash
+    try w.writeI32(0); // final hash
+    try w.writeI32(2); // two ops
+    // op 1: SetAbsolute at index 0, a resolvable item.
+    try w.writeI16(0);
+    try packages.stock_inv.writeItemStack(&w, .{
+        .type_id = packages.stock_inv.items_start_here + 2,
+        .count = 3,
+        .quality = 1,
+    });
+    try w.writeI32(0);
+    // op 2: SetAbsolute at index 1, a type no catalog resolves.
+    try w.writeI16(0);
+    try packages.stock_inv.writeItemStack(&w, .{
+        .type_id = packages.stock_inv.items_start_here + 30000,
+        .count = 1,
+        .quality = 1,
+    });
+    try w.writeI32(1);
+
+    var fb: [640]u8 = undefined;
+    cap.clear();
+    const rej_before = g.harness.counters.get(.c2s_rejects);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryTransactionRequest", w.written()));
+
+    // The transaction was rejected...
+    try std.testing.expect(g.harness.counters.get(.c2s_rejects) > rej_before);
+    // ...so slot 0 must NOT carry the first op's write, and no ack is sent
+    // (stock's failure path returns without a response).
+    try std.testing.expectEqualDeep(before, g.sim.inventory[ps].slots[0]);
+    try std.testing.expect(cap.findPkgId(resp_id) == null);
+    std.debug.print("PASS invtx: a rejected transaction applies none of its ops\n", .{});
+}

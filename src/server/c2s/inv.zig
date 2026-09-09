@@ -673,6 +673,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (self.sim.playerByPeer(c.slot)) |ps| {
                 if (self.sim.mask[ps].inventory) {
                     var ok = true;
+                    // Stage into a copy and commit only on success. Stock
+                    // applies the whole InventoryTransaction and then checks
+                    // ValidateFinalHashes (InventoryManager
+                    // TransactionRequestServer IL=46); a failure there force-
+                    // unlocks and sends nothing, so a rejected transaction
+                    // never leaves half its ops applied. The SetAbsolute /
+                    // SetRelative arm used to write straight into the live
+                    // inventory, so an op that failed after an earlier one had
+                    // landed left those stacks applied, unclamped (the clamp
+                    // sits in the success branch) and unreplicated.
+                    var staged = self.sim.inventory[ps].slots;
                     for (stx.entries[0..stx.entry_n]) |*en| {
                         for (en.ops[0..en.op_n]) |op| {
                             switch (op.op) {
@@ -695,7 +706,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                                         self.harness.counters.inc(.c2s_rejects);
                                         continue;
                                     }
-                                    self.sim.inventory[ps].slots[@intCast(op.index)] = slot;
+                                    staged[@intCast(op.index)] = slot;
                                 },
                                 2 => { // SetAll: replace the inventory array
                                     if (op.new_n > ecs.components.max_inv_slots) {
@@ -715,15 +726,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                                         }
                                         slots[si] = slot;
                                     }
-                                    if (ok) {
-                                        @memcpy(&self.sim.inventory[ps].slots, &slots);
-                                    }
+                                    if (ok) staged = slots;
                                 },
                                 else => ok = false,
                             }
                         }
                     }
                     if (ok) {
+                        self.sim.inventory[ps].slots = staged;
                         self.clampInventoryStacks(&self.sim.inventory[ps]);
                         self.sim.markDirty(ps, .{ .inv = true });
                         // Stock minimal ack: success true + count 0 (full
