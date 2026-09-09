@@ -207,12 +207,12 @@ section of `NetPackagePlayerInventory`, which goes through
 so the standalone package consumed a bool that was really the next slot's
 version byte.
 
-## 1a5. Relay audience audit (2026-09-09), four gaps closed
+## 1a5. Relay audience audit (2026-09-09), five gaps closed
 
 Separate question from the body shapes above: not *what* is forwarded but *to
 whom*, and on whose authority. Every `broadcast` / `broadcastExcept` /
 `relayBodyExcept` call in `server/c2s/` was checked against its stock
-`ProcessPackage` fan-out. Four diverged; all four are fixed.
+`ProcessPackage` fan-out. Five diverged; all five are fixed.
 
 - **`NetPackageWireToolActions`** was relayed after only a rate check.
   ProcessPackage (IL=254) opens with `ValidEntityIdForSender(entityID, false)`
@@ -229,6 +229,13 @@ whom*, and on whose authority. Every `broadcast` / `broadcastExcept` /
   `GameManager.QuestShareServer` (IL=37) sends with
   `_attachedToEntityId = sharedWithEntityID`: exactly one client, and an
   absent target receives nothing. The fallback is gone.
+- **`NetPackageItemActionEffects`** was relayed raw after only a rate check.
+  `GameManager.ItemActionEffectsServer` (IL=87) rebroadcasts with
+  `_allButAttachedToEntityId` = the *firing* entity, the same shape as
+  ItemReload, so a foreign id claimed another player's weapon effects. Now
+  parsed (read IL=39: entityId, slotIdx, actionIdx, firingState, a bool that
+  when set is followed by startPos and direction as Vector3, then userData),
+  sender-gated, and trimmed to the consumed length.
 - **`NetPackageSharedQuest` member events (2, 3).** Broadcast to every peer.
   ProcessPackage (IL=371) routes both back to `sharedByEntityID` alone
   (`_attachedToEntityId`, IL_028A) and only when that player holds a Party.
@@ -236,7 +243,10 @@ whom*, and on whose authority. Every `broadcast` / `broadcastExcept` /
 
 Audited clean in the same pass: `HoldingItem`, `Bag`, `EntityAliveFlags`,
 `EntitySpeeds`, `EntityTeleport`, `EntityAttach`, `VehicleDataSync` (stricter
-than stock: it also requires the sender to be the vehicle's driver).
+than stock: it also requires the sender to be the vehicle's driver),
+`GameMessage` (stock passes `_onlyClientsAttachedToAnEntity = true`, which the
+`joined` check already matches), and `EntityCollect` / `EntityRemove`, which
+are built from sim state rather than relayed.
 
 ## 1a4. `NetPackageSimpleChat` is upgraded, stock drops it
 

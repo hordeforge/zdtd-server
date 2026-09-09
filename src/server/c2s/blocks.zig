@@ -659,7 +659,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             self.harness.counters.inc(.c2s_throttle);
             return true;
         }
-        try self.broadcastExcept("NetPackageItemActionEffects", body, c.slot);
+        // GameManager.ItemActionEffectsServer (IL=87,
+        // il/full-v3.2.0/_global/GameManager.il.txt:8348) rebroadcasts with
+        // _allButAttachedToEntityId = the firing entity, so stock skips the
+        // shooter's own client, not "whoever sent the packet". Those agree
+        // only when the id is the sender's own. Re-encoding is unnecessary
+        // here (the parse consumes the whole body or fails), but the relay
+        // still forwards body[0..wire_len] so appended bytes never fan out.
+        const fx = packages.parseItemActionEffects(body) catch {
+            self.harness.counters.inc(.c2s_malformed);
+            return true;
+        };
+        if (fx.entity_id != c.entity_id) {
+            self.harness.counters.inc(.ownership_rejects);
+            return true;
+        }
+        try self.broadcastExcept("NetPackageItemActionEffects", body[0..fx.wire_len], c.slot);
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageCloseAllWindows")) {

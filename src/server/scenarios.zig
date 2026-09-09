@@ -13877,3 +13877,86 @@ test "scenario shared quest member events reach only the sharer, and only in a p
     try std.testing.expect(cap_c.findPkgId(sq_id) == null);
     std.debug.print("PASS shared quest members: addressed to the sharer, party-gated\n", .{});
 }
+
+test "scenario item action effects: only the firing player's own muzzle FX relays" {
+    // The body was forwarded raw after a rate check.
+    // GameManager.ItemActionEffectsServer (IL=87,
+    // il/full-v3.2.0/_global/GameManager.il.txt:8348) rebroadcasts with
+    // _allButAttachedToEntityId = the firing entity, so stock skips the
+    // shooter's client rather than "whoever sent the packet". Those agree
+    // only when the id is the sender's own, so a foreign id is a claim on
+    // another player's weapon effects.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_iafx");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_iafx", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const fx_id = packages.idOf("NetPackageItemActionEffects").?;
+
+    const Fx = struct {
+        fn body(buf: []u8, eid: i32, with_vectors: bool) ![]u8 {
+            var w = binary.Writer{ .buf = buf };
+            try w.writeI32(eid);
+            try w.writeByte(1); // slotIdx
+            try w.writeByte(2); // actionIdx
+            try w.writeByte(3); // firingState
+            try w.writeBool(with_vectors);
+            if (with_vectors) {
+                try w.writeF32(10);
+                try w.writeF32(70);
+                try w.writeF32(20);
+                try w.writeF32(0);
+                try w.writeF32(0);
+                try w.writeF32(1);
+            }
+            try w.writeI32(77); // userData
+            return w.written();
+        }
+    };
+    var bb: [64]u8 = undefined;
+    var fb: [128]u8 = undefined;
+
+    // Own id, vectors present: relayed to the other peer, not echoed back.
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemActionEffects", try Fx.body(&bb, ca.entity_id, true)));
+    const relayed = cap_b.findPkgId(fx_id) orelse return error.TestUnexpectedResult;
+    const parsed = try packages.parseItemActionEffects(relayed);
+    try std.testing.expectEqual(ca.entity_id, parsed.entity_id);
+    try std.testing.expectEqual(@as(u8, 3), parsed.firing_state);
+    try std.testing.expectEqual(@as(i32, 77), parsed.user_data);
+    try std.testing.expect(cap_a.findPkgId(fx_id) == null);
+
+    // The optional-vector branch: a false bool must not misread userData.
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemActionEffects", try Fx.body(&bb, ca.entity_id, false)));
+    const short = cap_b.findPkgId(fx_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 77), (try packages.parseItemActionEffects(short)).user_data);
+
+    // Another player's id: refused, nothing relayed.
+    const own_before = g.harness.counters.get(.ownership_rejects);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemActionEffects", try Fx.body(&bb, cb.entity_id, true)));
+    try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
+    try std.testing.expect(cap_b.findPkgId(fx_id) == null);
+
+    // Trailing bytes are not fanned out: the relay stops at wire_len.
+    cap_b.clear();
+    const honest = try Fx.body(&bb, ca.entity_id, true);
+    const padded_len = honest.len + 4;
+    @memset(bb[honest.len..padded_len], 0xAA);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageItemActionEffects", bb[0..padded_len]));
+    const trimmed = cap_b.findPkgId(fx_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(honest.len, trimmed.len);
+    std.debug.print("PASS item action effects: sender-gated and trimmed to the stock body\n", .{});
+}
