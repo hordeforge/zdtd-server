@@ -202,7 +202,14 @@ pub fn step(self: *Game) !void {
                 if ((b.distraction_tags & 1) == 0 or b.distraction_eat_ticks > 0) continue;
                 const lid = self.sim.network_id[bs].id;
                 if (packages.buildRemoveBodyReason(&self.body_buf, lid, .despawned)) |rm| {
-                    self.broadcast("NetPackageEntityRemove", rm) catch {};
+                    // Only the peers that were told about this bag. Stock's
+                    // NetEntityDistributionEntry::SendToPlayers walks
+                    // trackedPlayers, and the client logs
+                    // "NetPackageEntityRemove entity {0} missing"
+                    // (ProcessPackage IL=24) when asked to remove something it
+                    // never spawned. Sent before destroy, while the slot is
+                    // still the one known_entities refers to.
+                    self.broadcastKnown("NetPackageEntityRemove", rm, bs) catch {};
                 } else |_| {}
                 self.sim.destroy(bs);
             }

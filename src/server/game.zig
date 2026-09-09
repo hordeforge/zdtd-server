@@ -3425,6 +3425,10 @@ pub const Game = struct {
         return game_net.broadcastNear(self, name, body, wx, wz, range_blocks);
     }
 
+    pub fn broadcastKnown(self: *Game, name: []const u8, body: []const u8, slot: ecs.Slot) !void {
+        return game_net.broadcastKnown(self, name, body, slot);
+    }
+
     pub fn broadcastNearExcept(self: *Game, name: []const u8, body: []const u8, wx: f32, wz: f32, range_blocks: f32, skip_slot: usize) !void {
         return game_net.broadcastNearExcept(self, name, body, wx, wz, range_blocks, skip_slot);
     }

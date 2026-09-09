@@ -345,6 +345,18 @@ Both halves are deliberate, and both are visible at the edges:
 Re-check this row if `interest_range` ever stops being operator-tunable, or if
 a block path starts relying on the editor *not* receiving its own echo.
 
+**Entity removes are tracked-player scoped in stock.**
+`NetEntityDistributionEntry::SendToPlayers` walks `trackedPlayers`, not every
+client, and `NetPackageEntityRemove::ProcessPackage` (IL=24) logs
+`NetPackageEntityRemove entity {0} missing` when the client is told to remove
+something it never spawned. So a global remove writes an error line into every
+distant player's log on every despawn. `broadcastKnown` (2026-09-09) sends
+only to peers whose `known_entities` covers the slot, which is zdtd's
+`trackedPlayers`. It is used by the distraction-bag despawn, the one remove
+site that still holds a live slot; the kill and corpse sweeps hand back net
+ids after the entity is destroyed, so their slot is already gone and they stay
+global for now. Closing those needs the reap paths to report slots, not ids.
+
 **The storage TE went the other way, and was fixed 2026-09-09.**
 `NetPackageTileEntity::ProcessPackage` (IL=103,
 `il/netpackages-v3.2.0/NetPackageTileEntity_il.txt`) rebroadcasts with

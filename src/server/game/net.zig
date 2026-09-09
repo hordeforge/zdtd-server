@@ -22,6 +22,7 @@ const ln_packet = @import("../../litenet/packet.zig");
 const packages = @import("../../wire/packages.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
+const ecs = @import("../../ecs/root.zig");
 
 const window_fast_attempts = game_mod.window_fast_attempts;
 const window_retry_sleep_ns = game_mod.window_retry_sleep_ns;
@@ -235,6 +236,28 @@ pub fn sendFramedDroppable(self: *Game, peer: *ln_peer.Peer, framed: []const u8)
 
 pub fn broadcast(self: *Game, name: []const u8, body: []const u8) !void {
     try broadcastExcept(self, name, body, null);
+}
+
+/// Send an entity-scoped package only to peers that already know `slot`.
+/// Stock's equivalent is `NetEntityDistributionEntry::SendToPlayers`, which
+/// walks `trackedPlayers` rather than every client. It matters for
+/// `NetPackageEntityRemove`: the stock client logs
+/// `NetPackageEntityRemove entity {0} missing` (ProcessPackage IL=24) when it
+/// is told to remove something it never spawned, so a global broadcast writes
+/// an error line into every distant player's log.
+///
+/// `slot` must still be live in `known_entities` terms; callers that have
+/// already destroyed the entity should send before destroying it.
+pub fn broadcastKnown(self: *Game, name: []const u8, body: []const u8, slot: ecs.Slot) !void {
+    for (&self.clients) |*c| {
+        const p = c.peer orelse continue;
+        if (!c.joined) continue;
+        if (!c.known_entities.isSet(slot)) continue;
+        self.sendGame(p, name, body) catch |err| {
+            self.harness.counters.inc(.net_send_errors);
+            std.debug.print("zdtd: send {s} failed: {s}\n", .{ name, @errorName(err) });
+        };
+    }
 }
 
 /// `broadcastNear` that also skips one client slot. Stock's audio relay

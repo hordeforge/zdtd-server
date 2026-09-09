@@ -14184,3 +14184,47 @@ test "scenario storage te scope: a distant peer is not told about a chest edit" 
     try std.testing.expect(cap_far.findPkgId(te_id) != null);
     std.debug.print("PASS storage te scope: the chest TE goes to nearby peers only\n", .{});
 }
+
+test "scenario entity remove scope: a peer that never saw the bag is not told to remove it" {
+    // Stock removes go through NetEntityDistributionEntry::SendToPlayers,
+    // which walks trackedPlayers. It matters because the client logs
+    // "NetPackageEntityRemove entity {0} missing" (ProcessPackage IL=24) when
+    // told to remove something it never spawned, so a global broadcast writes
+    // an error line into every distant player's log for every despawn.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_rmscope");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_rmscope", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_known: ln_peer.Capture = .{};
+    var cap_unknown: ln_peer.Capture = .{};
+    const c_known = try g.attachJoinedClient(&cap_known);
+    const c_unknown = try g.attachJoinedClient(&cap_unknown);
+    const rm_id = packages.idOf("NetPackageEntityRemove").?;
+
+    // Spawn a zombie and mark only one peer as knowing it, which is what the
+    // replication pass does once the entity enters that peer's interest.
+    const ps = g.sim.playerByPeer(c_known.slot).?;
+    const zid = g.sim.spawnZombie(g.sim.transform[ps].x, 70, g.sim.transform[ps].z, 100) orelse
+        return error.TestUnexpectedResult;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.clients[c_known.slot].known_entities.set(zs);
+    g.clients[c_unknown.slot].known_entities.unset(zs);
+
+    var rb: [32]u8 = undefined;
+    const body = try packages.buildRemoveBodyReason(&rb, zid, .despawned);
+    cap_known.clear();
+    cap_unknown.clear();
+    try g.broadcastKnown("NetPackageEntityRemove", body, zs);
+
+    // The peer that spawned it is told; the one that never saw it is not.
+    try std.testing.expect(cap_known.findPkgId(rm_id) != null);
+    try std.testing.expect(cap_unknown.findPkgId(rm_id) == null);
+    std.debug.print("PASS entity remove scope: only peers that knew the entity are told\n", .{});
+}
