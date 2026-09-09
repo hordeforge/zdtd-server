@@ -74,10 +74,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (self.sim.playerByPeer(c.slot)) |ps| {
                     const pp = self.sim.transform[ps];
                     const bp = self.sim.transform[bs];
-                    if (!self.withinEditReach(pp.x, pp.y, pp.z, bp.x, bp.y, bp.z)) {
-                        self.harness.counters.inc(.bounds_rejects);
-                        return true;
-                    }
+                    if (self.rejectIfBeyondEditRange(
+                        c,
+                        peer.local_id,
+                        c.entity_id,
+                        .container,
+                        pp.x,
+                        pp.y,
+                        pp.z,
+                        bp.x,
+                        bp.y,
+                        bp.z,
+                    )) return true;
                     // Full deposit only: a partial one restores the player
                     // inventory and keeps the bag alive (ecs.inventory
                     // collectBagFull, the one transfer rule shared with

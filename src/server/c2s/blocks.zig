@@ -69,10 +69,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         var wi: usize = 0;
         while (wi < got.n) : (wi += 1) {
             const ch = changes[wi];
-            if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(ch.x), @floatFromInt(ch.y), @floatFromInt(ch.z))) {
-                self.harness.counters.inc(.bounds_rejects);
-                continue;
-            }
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                editor_ent,
+                .block,
+                ep.x,
+                ep.y,
+                ep.z,
+                @floatFromInt(ch.x),
+                @floatFromInt(ch.y),
+                @floatFromInt(ch.z),
+            )) continue;
             if (self.claimCovering(ch.x, ch.z)) |claim| {
                 if (claim.owner_entity != editor_ent) continue;
             }
@@ -117,9 +125,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         var i: usize = 0;
         while (i < n) : (i += 1) {
             const b = changes[i];
-            if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(b.x), @floatFromInt(b.y), @floatFromInt(b.z))) {
-                self.harness.counters.inc(.bounds_rejects);
-                self.noteEvidence(c, peer.local_id, editor_ent, .bounds, .strong, .block, 0, self.max_edit_range);
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                editor_ent,
+                .block,
+                ep.x,
+                ep.y,
+                ep.z,
+                @floatFromInt(b.x),
+                @floatFromInt(b.y),
+                @floatFromInt(b.z),
+            )) {
                 const rejects = self.harness.counters.get(.bounds_rejects);
                 if (rejects == 1 or rejects % 100 == 0) {
                     std.debug.print("zdtd: SetBlock out of reach n={d} ({d},{d},{d}) player=({d:.0},{d:.0},{d:.0})\n", .{ rejects, b.x, b.y, b.z, ep.x, ep.y, ep.z });
@@ -399,10 +416,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // still enforces reach and claims so a spoofed pickup cannot delete
         // distant or claimed blocks).
         const ep = self.sim.transform[ps];
-        if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(pk.x), @floatFromInt(pk.y), @floatFromInt(pk.z))) {
-            self.harness.counters.inc(.bounds_rejects);
-            return true;
-        }
+        if (self.rejectIfBeyondEditRange(
+            c,
+            peer.local_id,
+            editor_ent,
+            .block,
+            ep.x,
+            ep.y,
+            ep.z,
+            @floatFromInt(pk.x),
+            @floatFromInt(pk.y),
+            @floatFromInt(pk.z),
+        )) return true;
         if (self.claimCovering(pk.x, pk.z)) |claim| {
             if (claim.owner_entity != editor_ent) {
                 self.harness.counters.inc(.ownership_rejects);
@@ -469,10 +494,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         const ep = self.sim.transform[ps];
-        if (!self.withinEditReach(ep.x, ep.y, ep.z, @floatFromInt(st.x), @floatFromInt(st.y), @floatFromInt(st.z))) {
-            self.harness.counters.inc(.bounds_rejects);
-            return true;
-        }
+        if (self.rejectIfBeyondEditRange(
+            c,
+            peer.local_id,
+            editor_ent,
+            .block,
+            ep.x,
+            ep.y,
+            ep.z,
+            @floatFromInt(st.x),
+            @floatFromInt(st.y),
+            @floatFromInt(st.z),
+        )) return true;
         if (self.claimCovering(st.x, st.z)) |claim| {
             if (claim.owner_entity != editor_ent) {
                 self.harness.counters.inc(.ownership_rejects);

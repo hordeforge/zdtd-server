@@ -36,6 +36,7 @@ const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
+const evidence_mod = @import("evidence.zig");
 const persist = @import("persist.zig");
 const phase_gate = @import("phase_gate.zig");
 const util_log = @import("../util/log.zig");
@@ -10701,6 +10702,7 @@ test "scenario a bag write beyond reach is rejected" {
     const far_s = g.sim.slotOfNetId(far) orelse return error.TestUnexpectedResult;
     const before_id = g.sim.inventory[far_s].slots[bag_slot].item_id;
     const bounds_before = g.harness.counters.get(.bounds_rejects);
+    const evidence_before = g.evidence.total;
     {
         var inv = g.sim.inventory[far_s];
         inv.slots[3] = .{ .item_id = 7, .count = 64, .quality = 1 };
@@ -10709,7 +10711,21 @@ test "scenario a bag write beyond reach is rejected" {
     }
     try std.testing.expectEqual(before_id, g.sim.inventory[far_s].slots[bag_slot].item_id);
     try std.testing.expect(g.harness.counters.get(.bounds_rejects) > bounds_before);
-    std.debug.print("PASS bag-reach: near bag written, far bag rejected\n", .{});
+    // Counting the reject is not the same as building a case. A reach reject
+    // is client-informed evidence on the container surface, and the guard
+    // ladder can only weigh what reaches the ring: a gate that only bumps a
+    // counter lets a peer probe distant containers forever without ever
+    // accumulating against itself.
+    try std.testing.expect(g.evidence.total > evidence_before);
+    const ev = g.evidence.events[(g.evidence.head -% 1) % evidence_mod.max_ring];
+    try std.testing.expectEqual(evidence_mod.Detector.bounds, ev.detector);
+    try std.testing.expectEqual(evidence_mod.Surface.container, ev.surface);
+    // The observed distance is measured, not a placeholder zero.
+    try std.testing.expect(ev.observed > ev.bound);
+    std.debug.print(
+        "PASS bag-reach: far bag rejected and logged (obs {d:.1} > bound {d:.1})\n",
+        .{ ev.observed, ev.bound },
+    );
 }
 
 test "scenario wrench pickup applies to the world and honours reach and claims" {

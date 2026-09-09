@@ -337,10 +337,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             const ps = self.sim.playerByPeer(c.slot) orelse return true;
             const pp = self.sim.transform[ps];
             const bp = self.sim.transform[si];
-            if (!self.withinEditReach(pp.x, pp.y, pp.z, bp.x, bp.y, bp.z)) {
-                self.harness.counters.inc(.bounds_rejects);
-                return true;
-            }
+            if (self.rejectIfBeyondEditRange(
+                c,
+                peer.local_id,
+                c.entity_id,
+                .container,
+                pp.x,
+                pp.y,
+                pp.z,
+                bp.x,
+                bp.y,
+                bp.z,
+            )) return true;
             if (self.sim.mask[si].inventory) {
                 _ = packages.stock_inv.applyBagPackage(body, &self.sim.inventory[si], reverseItemType, self, false) catch return true;
                 self.clampInventoryStacks(&self.sim.inventory[si]);
@@ -414,10 +422,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }) |ve| {
                 const owner = self.sim.playerByPeer(c.slot) orelse return true;
                 const op = self.sim.transform[owner];
-                if (!self.withinEditReach(op.x, op.y, op.z, @floatFromInt(ve.world_x), @floatFromInt(ve.world_y), @floatFromInt(ve.world_z))) {
-                    self.harness.counters.inc(.bounds_rejects);
-                    return true;
-                }
+                if (self.rejectIfBeyondEditRange(
+                    c,
+                    peer.local_id,
+                    c.entity_id,
+                    .container,
+                    op.x,
+                    op.y,
+                    op.z,
+                    @floatFromInt(ve.world_x),
+                    @floatFromInt(ve.world_y),
+                    @floatFromInt(ve.world_z),
+                )) return true;
                 const vm = self.vending.get(.{ .x = ve.world_x, .y = ve.world_y, .z = ve.world_z }) orelse return true;
                 // Owner-editable surface (lock / password / allowed users).
                 // Only the machine's owner may edit; ownership and the
