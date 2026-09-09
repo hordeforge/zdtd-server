@@ -192,17 +192,40 @@ pub fn expireClaims(self: *Game) void {
     }
 }
 
+/// Generic block HP when the catalog is loaded but the id is unknown: fail
+/// closed to one soft value rather than guessing from the id.
+const loaded_catalog_generic_hp: u16 = 100;
+
+/// Offline-only block HP bands, used when no blocks.xml is loaded at all.
+/// The AssignIds id space groups by content, so the bands stand in for the
+/// block classes whose real MaxDamage lives in XML: terrain and the low pins
+/// below 256, containers around 18000 (`cnt_*`), and vegetation from 24000
+/// (`tree_*`, `plant_*`, which break in a hit or two). Approximations, not
+/// stock truth: with `--game-dir` the XML value wins before this is reached.
+const offline_terrain_max_id: u16 = 256;
+const offline_container_min_id: u16 = 18000;
+const offline_container_max_id: u16 = 20000;
+const offline_vegetation_min_id: u16 = 24000;
+const offline_terrain_hp: u16 = 100;
+const offline_container_hp: u16 = 500;
+const offline_vegetation_hp: u16 = 50;
+const offline_default_hp: u16 = 500;
+
 /// MaxDamage from blocks.xml+materials via maxdamage table. Generic floor when unknown.
 pub fn maxDamageForBlock(self: *const Game, block_id: u16) u16 {
     if (block_id == 0) return 1;
     if (self.maxdamage.maxDamage(block_id)) |hp| return hp;
     // Table loaded (by_id or name map): fail closed to soft generic, no pin id HP table.
-    if (self.maxdamage.by_id.count() > 0 or self.maxdamage.id_by_name.count() > 0) return 100;
+    if (self.maxdamage.by_id.count() > 0 or self.maxdamage.id_by_name.count() > 0) {
+        return loaded_catalog_generic_hp;
+    }
     // Offline / empty catalog only: soft defaults by id band (not stock truth).
-    if (block_id < 256) return 100;
-    if (block_id >= 18000 and block_id < 20000) return 500;
-    if (block_id >= 24000) return 50;
-    return 500;
+    if (block_id < offline_terrain_max_id) return offline_terrain_hp;
+    if (block_id >= offline_container_min_id and block_id < offline_container_max_id) {
+        return offline_container_hp;
+    }
+    if (block_id >= offline_vegetation_min_id) return offline_vegetation_hp;
+    return offline_default_hp;
 }
 
 /// materials.xml Experience for a broken block (harvest XP; stock
