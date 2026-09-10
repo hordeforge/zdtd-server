@@ -2019,6 +2019,15 @@ pub const Game = struct {
     pub fn releaseOtherLocksForPeer(self: *Game, peer_slot: usize, keep_ch: usize) void {
         return game_locks.releaseOtherLocksForPeer(self, peer_slot, keep_ch);
     }
+    /// True when this peer holds any lock channel (stock gate 1 validity check).
+    pub fn peerHoldsLock(self: *Game, peer_slot: usize) bool {
+        return game_locks.peerHoldsLock(self, peer_slot);
+    }
+    /// Force-unlock every channel this peer holds, to the peer (stock gate 1 /
+    /// ForceUnlockByPlayer). The caller then refuses the new request.
+    pub fn releaseAllLocksForPeer(self: *Game, peer_slot: usize) void {
+        return game_locks.releaseAllLocksForPeer(self, peer_slot);
+    }
 
     pub fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
         return game_locks.clearLocksForPeer(self, peer_slot);

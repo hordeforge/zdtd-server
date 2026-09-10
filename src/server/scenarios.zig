@@ -2985,6 +2985,19 @@ test "scenario quest turn-in and phase advance fire on the stock trader lock-ope
             try gg.injectFramed(cc, try packages.framed(&lfb, "NetPackageLockRequest", lr_body[0..lw.written().len]));
             const lock_id = packages.idOf("NetPackageLockResponse").?;
             _ = cap_p.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+            // The real client closes the trade window before the next open, and
+            // the close is the unlock request that clears the server entry.
+            // Without it the next open hits gate 1 and is refused.
+            cap_p.clear();
+            var ul_body: [32]u8 = undefined;
+            var uw: binary.Writer = .{ .buf = &ul_body };
+            try uw.writeBool(false); // unlocking
+            try uw.writeU16(1); // same trade channel
+            try uw.writeI32(0); // unlock reads no targets
+            try uw.writeString("");
+            var ufb: [128]u8 = undefined;
+            try gg.injectFramed(cc, try packages.framed(&ufb, "NetPackageLockRequest", ul_body[0..uw.written().len]));
+            try std.testing.expectEqual(@as(i32, -1), gg.lock_channel[1]);
         }
     }.f;
 
@@ -3358,6 +3371,30 @@ test "scenario trader close cycle force-unlocks the trade channel" {
     var rr: binary.Reader = .{ .data = resp };
     try std.testing.expectEqual(false, try rr.readBool()); // locking
     try std.testing.expectEqual(true, try rr.readBool()); // success
+
+    // Gate 4 (IL=239): EntityTrader::CanLockOnServer (IL=16) refuses a closed
+    // trader. It must run before the grant: the old deny path wrote the lock
+    // table first and then told the client the open failed, so a refused open
+    // pinned the channel server-side against every other player.
+    cap.clear();
+    var lr2: [128]u8 = undefined;
+    var lw2: binary.Writer = .{ .buf = &lr2 };
+    try lw2.writeBool(true); // locking
+    try lw2.writeU16(0);
+    try lw2.writeI32(1);
+    try lw2.writeByte(1); // present
+    try lw2.writeByte(2); // Entity target
+    try lw2.writeI32(trader_id);
+    try lw2.writeString("EntityTraderLockContext");
+    try lw2.writeString("trade");
+    try g.injectFramed(c, try packages.framed(&lfb, "NetPackageLockRequest", lr2[0..lw2.written().len]));
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[0]);
+    {
+        const denied = cap.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+        var dr: binary.Reader = .{ .data = denied };
+        try std.testing.expectEqual(true, try dr.readBool()); // locking
+        try std.testing.expectEqual(false, try dr.readBool()); // success = deny
+    }
 
     // Opening hours latch back open on the next cycle.
     g.sim.director.clock.hours = 8.0;
@@ -4741,18 +4778,18 @@ test "scenario a locked tile entity stays locked on a different channel" {
     try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[1]);
 
     // B, already holding channel 1, opens a third chest on channel 2. Stock's
-    // LockRequestServer gate 1 (IL=239, RE dedicated-leftovers.md:134) warns
-    // and force-unlocks a player's existing entry before granting the new one:
-    // a player has one container open at a time, and the old one has to close.
-    // zdtd granted the new channel and left the old one held, so walking chest
-    // to chest pinned a channel per chest and left them locked against every
-    // other player until the stale timeout expired.
+    // LockRequestServer gate 1 (IL=239) force-unlocks everything a player with
+    // an existing entry holds and then **returns** (IL_0067), so the new
+    // request is refused: the invalid state is healed, nothing is granted. The
+    // RE prose said "then continue"; the IL is the authority. zdtd both granted
+    // the new channel and left a channel per chest behind, pinned against every
+    // other player until the stale timeout.
     cap_b.clear();
     try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 2, 340, 70, 340)));
-    try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[2]);
-    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[1]);
-    // And B's client is told the old one released, or its UI keeps the first
-    // chest open behind the second.
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[2]); // refused
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[1]); // released by gate 1
+    // B's client is told the old one released, or its UI keeps the first chest
+    // open behind a request the server refused.
     {
         var found_unlock = false;
         var i: usize = 0;
@@ -4765,7 +4802,8 @@ test "scenario a locked tile entity stays locked on a different channel" {
                 if (pkgs[j].id != lock_id) continue;
                 var r: binary.Reader = .{ .data = pkgs[j].body };
                 const locking = try r.readBool();
-                if (locking) continue; // the grant for channel 2
+                // Gate 1 has only the unlock reply to send, never a grant.
+                try std.testing.expectEqual(false, locking);
                 try std.testing.expectEqual(true, try r.readBool()); // success
                 var s: [8]u8 = undefined;
                 _ = try r.readString(&s);
@@ -4777,6 +4815,12 @@ test "scenario a locked tile entity stays locked on a different channel" {
         }
         try std.testing.expect(found_unlock);
     }
+
+    // B is clean again, so a fresh open is granted normally: gate 1 refuses
+    // only the request that arrives while an entry is still held.
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 2, 340, 70, 340)));
+    try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[2]);
 
     // A disconnects while still holding channel 0. Clearing the slot lets the
     // next player take the chest, but B's client watched it get locked and
@@ -4826,7 +4870,58 @@ test "scenario a locked tile entity stays locked on a different channel" {
     }
     try std.testing.expectEqual(@as(i32, -1), g.lock_channel[2]);
 
-    std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed, re-lock and failed transaction force-unlock, disconnect force-unlocks\n", .{});
+    // Gate 2 (IL=239): six targets is past stock's hard cap of 5, and a span
+    // carrying a null target is refused too. Stock still replies with a
+    // NetPackageLockResponse carrying success=false (IL_0263); dropping the
+    // body left the client's pending lock unresolved. B holds nothing here, so
+    // gate 1 cannot be what produces the deny.
+    cap_b.clear();
+    {
+        var big: [256]u8 = undefined;
+        var bw: binary.Writer = .{ .buf = &big };
+        try bw.writeBool(true); // locking
+        try bw.writeU16(3);
+        try bw.writeI32(6);
+        var i: i32 = 0;
+        while (i < 6) : (i += 1) {
+            try bw.writeByte(1); // present
+            try bw.writeByte(0); // block target
+            try bw.writeI32(400 + i);
+            try bw.writeI32(70);
+            try bw.writeI32(400);
+        }
+        try bw.writeString("");
+        try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", bw.written()));
+    }
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[3]);
+    {
+        const body = cap_b.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+        var r: binary.Reader = .{ .data = body };
+        try std.testing.expectEqual(true, try r.readBool()); // locking
+        try std.testing.expectEqual(false, try r.readBool()); // success = deny
+    }
+
+    // A null target is gate 2's other reject and takes the same deny path.
+    cap_b.clear();
+    {
+        var nb: [64]u8 = undefined;
+        var nw: binary.Writer = .{ .buf = &nb };
+        try nw.writeBool(true);
+        try nw.writeU16(3);
+        try nw.writeI32(1);
+        try nw.writeByte(0); // present = 0 -> null target
+        try nw.writeString("");
+        try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", nw.written()));
+    }
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[3]);
+    {
+        const body = cap_b.findPkgId(lock_id) orelse return error.TestUnexpectedResult;
+        var r: binary.Reader = .{ .data = body };
+        try std.testing.expectEqual(true, try r.readBool());
+        try std.testing.expectEqual(false, try r.readBool());
+    }
+
+    std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed, gate 1 re-lock releases, failed transaction force-unlock, disconnect force-unlocks, over-cap and null spans denied\n", .{});
 }
 
 test "scenario SetBlock beyond edit reach is rejected" {

@@ -79,6 +79,24 @@ pub fn releaseOtherLocksForPeer(self: *Game, peer_slot: usize, keep_ch: usize) v
     }
 }
 
+/// True when `peer_slot` holds any lock channel. Stock's LockRequestServer
+/// gate 1 (IL=239, LockManager.il.txt) treats *any* existing entry for the
+/// player as invalid state, not just the requested channel.
+pub fn peerHoldsLock(self: *Game, peer_slot: usize) bool {
+    const ps: i32 = @intCast(peer_slot);
+    for (self.lock_channel) |h| if (h == ps) return true;
+    return false;
+}
+
+/// Force-unlock every channel `peer_slot` holds and tell that peer. Stock calls
+/// this from LockRequestServer gate 1 and then **returns**: the IL after
+/// `ForceUnlockByPlayer` is `ret` (IL_0067), so the new request is refused and
+/// nothing is granted. The prose in dedicated-leftovers.md:134 said "then
+/// continue"; the IL says otherwise.
+pub fn releaseAllLocksForPeer(self: *Game, peer_slot: usize) void {
+    self.releaseOtherLocksForPeer(peer_slot, keep_no_channel);
+}
+
 /// Release every lock held by a departing peer and tell the others. Clearing
 /// server-side alone lets the next player open the container, but the clients
 /// that watched it get locked are never told it opened again: stock sends the

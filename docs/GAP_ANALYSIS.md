@@ -1201,16 +1201,38 @@ parsed, and quest offering is unwired.
   `src/wire/packages.zig` (`buildLockResponseTrader`),
   `src/server/c2s/misc.zig` lock handler trader branch
 
+- **LockRequest gates 1, 2 and 4** `WORKS` `(2026-09-10)`
+  `LockRequestServer` (IL=239) runs ordered gates; zdtd diverged on three.
+  1. **Gate 1 refuses the request, it does not re-grant.** If the player already
+     holds a singleLocks/sharedLocks/keepOpenTimes entry, stock calls
+     `ForceUnlockByPlayer` and then **returns** (IL_0067), so the new request is
+     refused and nothing is granted. The earlier zdtd behaviour
+     (force-unlock, then grant the new channel) was taken from prose saying
+     "then continue"; the IL says otherwise. The client closes a window with
+     `UnlockRequestLocal` (`XUiC_LootWindowGroup::OnClose` IL=37), so this path
+     heals a desync only. The stale timeout stays as the backstop for a peer
+     that goes quiet without dropping.
+  2. **Gate 2 still replies.** A span longer than 5 (hard cap) or containing a
+     null target is refused, but stock sets errorMsg and falls through to a
+     `NetPackageLockResponse` with success=false (IL_0263). zdtd rejected the
+     over-cap body at parse time, which dropped the request and left the
+     client's pending lock unresolved. The parser now walks the span and the
+     C2S handler answers with the deny.
+  3. **Gate 4 runs before the lock table is written.** TEFeatureAbs, TileEntity
+     and TransactionalInventory return true; `EntityTrader::CanLockOnServer`
+     (IL=16) refuses a dead or closed trader. zdtd's trader-deny path wrote the
+     lock table first and then told the client the open failed, so a refused
+     open pinned the channel server-side against every other player.
+  *Anchors:* `src/server/c2s/misc.zig` (lock handler gates),
+  `src/wire/packages.zig` (`parseLockRequest`, `max_lock_targets_declared`),
+  `src/server/game/locks.zig` (`peerHoldsLock`, `releaseAllLocksForPeer`),
+  `src/server/scenarios.zig` (lock-sweep, trader close cycle)
+
 - **Force-unlock: re-lock, failed transaction, disconnect** `WORKS` `(2026-09-10)`
   Stock force-unlocks a player's held locks on three paths, all through
   `ForceUnlockByPlayer` (IL=11). zdtd had none of them on the wire.
-  1. **A new lock request while the player already holds one.**
-     `LockRequestServer` gate 1 (IL=239, RE dedicated-leftovers.md:134) warns
-     and force-unlocks the existing entry before granting, so a player holds one
-     container at a time. zdtd granted the new channel and left the old one
-     held, so walking chest to chest pinned a channel per chest and held each
-     against every other player until the stale timeout expired. The timeout
-     stays as the backstop for a peer that goes quiet without dropping.
+  1. **A new lock request while the player already holds one** (see gate 1
+     above; the request is refused, not re-granted).
   2. **A failed inventory transaction.** `TransactionRequestServer` (IL=46, RE
      protocol-packages.md:1245) logs and force-unlocks on a failed apply. The
      client's window is showing a transaction the server refused, so holding

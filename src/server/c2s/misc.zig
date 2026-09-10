@@ -918,42 +918,31 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 packLockPos(p.x, p.y, p.z)
             else
                 0;
-            // Same TE already locked on another channel by someone else → deny.
-            if (req.locking and pos_key != 0) {
-                for (self.lock_pos_key, 0..) |pk, oi| {
-                    if (oi == ch) continue;
-                    if (pk != pos_key) continue;
-                    const oh = self.lock_channel[oi];
-                    if (oh >= 0 and oh != @as(i32, @intCast(c.slot))) {
-                        const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
-                        try self.sendGame(peer, "NetPackageLockResponse", resp);
-                        return true;
-                    }
-                }
-            }
             if (req.locking) {
-                const holder = self.lock_channel[ch];
-                if (holder >= 0 and holder != @as(i32, @intCast(c.slot))) {
-                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
+                // Gate 1 (IL=239): any existing entry for this player is invalid
+                // state. Stock force-unlocks everything the player holds and
+                // returns without granting the new request (the ret at IL_0067).
+                // The RE prose said "then continue"; the IL is the authority and
+                // says otherwise.
+                if (self.peerHoldsLock(c.slot)) {
+                    self.releaseAllLocksForPeer(c.slot);
+                    return true;
+                }
+                // Gate 2 (IL=239): reject null targets and a span longer than 5.
+                // The refusal still replies: stock sets errorMsg and falls
+                // through to a NetPackageLockResponse with success=false
+                // (IL_0263), so the client's pending lock resolves instead of
+                // hanging on a body that was silently dropped here.
+                if (req.has_null_target or req.target_count > packages.max_lock_targets_declared) {
+                    const msg = if (req.has_null_target) "null target" else "too many targets";
+                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, msg);
                     try self.sendGame(peer, "NetPackageLockResponse", resp);
                     return true;
                 }
-                // Stock LockRequestServer gate 1 (IL=239, RE
-                // dedicated-leftovers.md:134): an existing entry for this
-                // player is force-unlocked before the new grant, so a player
-                // holds one lock at a time. Without it, walking chest to chest
-                // pinned a channel per chest and held each against everyone
-                // else until the stale timeout expired. After the deny check,
-                // so a refused request releases nothing.
-                self.releaseOtherLocksForPeer(c.slot, ch);
-                self.lock_channel[ch] = @intCast(c.slot);
-                self.lock_holder_entity[ch] = c.entity_id;
-                self.lock_granted_ns[ch] = clock.monoNs();
-                self.lock_pos_key[ch] = pos_key;
-                // Trader open: the LockResponse context carries server TraderData
-                // (stock serializes EntityTraderLockContext into the response;
-                // NetPackageTraderData is ToServer-only). Detect an entity target
-                // whose slot is a trader and build that context.
+                // Parse the targets once. An entity target that is a trader
+                // opens the trader window from the LockResponse context; a
+                // vending position opens the machine. Gate 4 needs this before
+                // the lock table is written.
                 var trader_slot: ?ecs.Slot = null;
                 var vending_pos: ?vending_mod.PosKey = null;
                 if (req.targets_blob.len >= 4) {
@@ -979,15 +968,43 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         }
                     }
                 }
+                // Gate 4 (IL=239): per-target CanLockOnServer. TEFeatureAbs,
+                // TileEntity and TransactionalInventory return true;
+                // EntityTrader refuses a dead or closed trader. It runs before
+                // the grant, so a refused open leaves no server-side lock: the
+                // old trader-deny path held the channel while telling the client
+                // the lock failed.
                 if (trader_slot) |ts| {
-                    // Stock EntityTrader opens the window only inside the
-                    // trader_info open hours (vending machines and traders
-                    // without hours are always open). Deny outside them.
-                    if (!self.traderIsOpen(ts)) {
+                    if (!self.sim.alive[ts] or !self.traderIsOpen(ts)) {
                         const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "closed");
                         try self.sendGame(peer, "NetPackageLockResponse", resp);
                         return true;
                     }
+                }
+                // Gate 3: the same TE already locked on another channel by
+                // another player, or this channel held by someone else. Gate 1
+                // cleared this player's own channels, so any holder is another.
+                if (pos_key != 0) {
+                    for (self.lock_pos_key, 0..) |pk, oi| {
+                        if (oi == ch) continue;
+                        if (pk != pos_key) continue;
+                        if (self.lock_channel[oi] >= 0) {
+                            const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
+                            try self.sendGame(peer, "NetPackageLockResponse", resp);
+                            return true;
+                        }
+                    }
+                }
+                if (self.lock_channel[ch] >= 0) {
+                    const resp = try packages.buildLockResponseDeny(&self.body_buf, req, "locked");
+                    try self.sendGame(peer, "NetPackageLockResponse", resp);
+                    return true;
+                }
+                self.lock_channel[ch] = @intCast(c.slot);
+                self.lock_holder_entity[ch] = c.entity_id;
+                self.lock_granted_ns[ch] = clock.monoNs();
+                self.lock_pos_key[ch] = pos_key;
+                if (trader_slot) |ts| {
                     // Stock restock is lazy, triggered by the open: rebuild the
                     // window with fresh rolls when the ResetInterval elapsed.
                     self.maybeRestockTrader(ts);
