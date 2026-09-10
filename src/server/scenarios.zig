@@ -14741,36 +14741,39 @@ test "scenario shared quest member events reach only the sharer, and only in a p
     var mb: [32]u8 = undefined;
 
     // No party yet: stock's Party check fails, so nothing is sent at all.
+    // The sender is the MEMBER B answering an owner-A share (sharedBy A,
+    // sharedWith B), which is how PartyQuests.AcceptSharedQuest and
+    // QuestJournal build event 2.
     cap_a.clear();
     cap_b.clear();
     cap_c.clear();
-    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, ca.entity_id, 2, cb.entity_id)));
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, ca.entity_id, 2, cb.entity_id)));
     try std.testing.expect(cap_a.findPkgId(sq_id) == null);
     try std.testing.expect(cap_b.findPkgId(sq_id) == null);
     try std.testing.expect(cap_c.findPkgId(sq_id) == null);
 
-    // A parties with B. Now A's own member event comes back to A alone.
+    // A parties with B. B's member event is delivered to the owner A alone.
     var pbody: [32]u8 = undefined;
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
     cap_a.clear();
     cap_b.clear();
     cap_c.clear();
-    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, ca.entity_id, 2, cb.entity_id)));
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, ca.entity_id, 2, cb.entity_id)));
     const back = cap_a.findPkgId(sq_id) orelse return error.TestUnexpectedResult;
     const head = try packages.stock_quest.parseSharedQuestHead(back);
     try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.add_shared_member, head.event);
     try std.testing.expectEqual(ca.entity_id, head.shared_by_entity_id);
-    // The party member and the bystander both see nothing: stock addresses
-    // the sharer only.
+    // The sender and the bystander both see nothing: stock addresses the
+    // owner (sharedByEntityID) only.
     try std.testing.expect(cap_b.findPkgId(sq_id) == null);
     try std.testing.expect(cap_c.findPkgId(sq_id) == null);
 
-    // Claiming to be another player is refused outright.
+    // A sender that does not name itself as sharedWith is refused outright.
     const own_before = g.harness.counters.get(.ownership_rejects);
     cap_a.clear();
     cap_b.clear();
     cap_c.clear();
-    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, cb.entity_id, 3, ca.entity_id)));
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSharedQuest", try Member.body(&mb, ca.entity_id, 3, ca.entity_id)));
     try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
     try std.testing.expect(cap_a.findPkgId(sq_id) == null);
     try std.testing.expect(cap_b.findPkgId(sq_id) == null);
