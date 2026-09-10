@@ -693,6 +693,7 @@ fn sendPlayerStatsTo(self: *Game, peer: *ln_peer.Peer, owner: *const Client, nid
         .level = owner.level,
         .exp_to_next = exp_to_next,
         .skill_points = @intCast(@min(owner.skill_points, 65535)),
+        .deaths = owner.deaths,
         .killed_zombies = owner.zombie_kills,
         .killed_players = owner.player_kills,
         .held_item = if (self.sim.playerByPeer(owner.slot)) |ops|

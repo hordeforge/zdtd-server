@@ -108,6 +108,7 @@ pub fn broadcastPlayerStats(self: *Game, slot: usize) void {
         .level = c.level,
         .exp_to_next = exp_to_next,
         .skill_points = @intCast(@min(c.skill_points, 65535)),
+        .deaths = c.deaths,
         .killed_zombies = c.zombie_kills,
         .killed_players = c.player_kills,
         // Stock fills the whole EntityNetworkStats from the entity, held

@@ -467,6 +467,12 @@ pub const Client = struct {
     /// own party's horde is alive, not for every player on a multi-party
     /// server.
     bloodmoon_music: bool = false,
+    /// Deaths this session. Stock's EntityNetworkStats.killed is filled from
+    /// EntityAlive.get_Died() (FillFromEntity IL=150), which OnEntityDeath
+    /// (IL=146) bumps through AddScore(1, 0, 0, -1, 0) on the victim. Separate
+    /// from the kill counters: the client's character sheet reads it as the
+    /// death count.
+    deaths: i32 = 0,
     /// Zombie kills this session, for the AddScoreClient character-sheet
     /// counter (stock EntityAlive.AddScore on kill).
     zombie_kills: u16 = 0,
@@ -544,6 +550,9 @@ pub const Client = struct {
     /// guards. `has_backpack` cannot: it stays set until the bag is
     /// collected, so gating on it made a second death drop nothing at all.
     bagged_this_death: bool = false,
+    /// Latched with `deaths` so the hp-replicate drain cannot count the same
+    /// corpse twice. Cleared on respawn alongside `bagged_this_death`.
+    death_counted: bool = false,
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),

@@ -58,6 +58,13 @@ pub const PlayerStatsArgs = struct {
     level: u16,
     exp_to_next: i32,
     skill_points: u16 = 0,
+    /// Stock `EntityNetworkStats.killed`, which `FillFromEntity` (IL=150)
+    /// fills from `EntityAlive.get_Died()` - the number of times this player
+    /// has DIED, not a kill count. `EntityAlive.OnEntityDeath` (IL=146) calls
+    /// `AddScore(1, 0, 0, -1, 0)` on the victim. No default: every send site
+    /// must supply the server's death ledger rather than silently reporting 0
+    /// (or, worse, a kill count).
+    deaths: i32,
     killed_zombies: i32 = 0,
     /// PvP kills (stock `EntityNetworkStats.killedPlayers`). Server-counted on
     /// the authoritative death path, same as `killed_zombies`.
@@ -96,7 +103,7 @@ pub fn buildPlayerStatsBody(buf: []u8, args: PlayerStatsArgs) ![]u8 {
     var w = binary.Writer{ .buf = buf };
     try w.writeI32(args.entity_id);
     // EntityNetworkStats fields, stock write order (IL=104).
-    try w.writeI32(args.killed_zombies); // killed
+    try w.writeI32(args.deaths); // killed (FillFromEntity: get_Died)
     if (args.held_item) |hi| {
         try stock_inv.writeItemStack(&w, hi);
     } else {
@@ -152,12 +159,16 @@ test "player stats body is the stock EntityNetworkStats shape" {
         .entity_name = "Bot",
         .level = 3,
         .exp_to_next = 1000,
+        .deaths = 2,
         .killed_zombies = 5,
         .held_item = null,
     });
     var r = binary.Reader{ .data = body };
     try std.testing.expectEqual(@as(i32, 42), try r.readI32()); // entityId
-    try std.testing.expectEqual(@as(i32, 5), try r.readI32()); // killed
+    // killed is the death count (FillFromEntity: get_Died), distinct from
+    // killedZombies. Writing the zombie count here made the client's death
+    // stat equal its zombie kills.
+    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // killed = deaths
     try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // empty ItemStack
     try std.testing.expectEqual(@as(u8, 0), try r.readByte()); // holdingItemIndex
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // deathHealth

@@ -3765,7 +3765,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   re-check against [DIVERGENCES](DIVERGENCES.md) §2)
   `zombie_kills` / `player_kills` are counted on the authoritative death path and
   ride `NetPackagePlayerStats` as the stock `killedZombies` / `killedPlayers`
-  fields. The five client-accrued accumulator stats (`totalItemsCrafted`,
+  fields. `killed` is **not** a kill count: `FillFromEntity` (IL=150) fills it
+  from `EntityAlive.get_Died()`, which `OnEntityDeath` (IL=146) bumps via
+  `AddScore(1, 0, 0, -1, 0)` on the victim. It now carries the server death
+  ledger (`Client.deaths`, counted once per corpse in the hp-replicate drain)
+  instead of the zombie count, which had made the client's death stat equal its
+  zombie kills. The five client-accrued accumulator stats (`totalItemsCrafted`,
   `distanceWalked`, `longestLife`, `currentLife`, `totalTimePlayed`) stay 0 by
   design: stock only ever relays the owning client's `EntityNetworkStats` blob,
   which zdtd drops on the authority rule. That residual lives in DIVERGENCES §2,

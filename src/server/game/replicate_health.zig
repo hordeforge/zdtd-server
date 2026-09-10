@@ -23,6 +23,14 @@ pub fn replicatePlayerHealth(self: *Game) void {
             const owner_slot = self.sim.player[i].peer_slot;
             if (owner_slot >= 0 and @as(usize, @intCast(owner_slot)) < self.clients.len) {
                 const oc = &self.clients[@intCast(owner_slot)];
+                // Death ledger: stock EntityAlive.OnEntityDeath (IL=146) bumps
+                // the victim's Died through AddScore(1, 0, 0, -1, 0), and
+                // EntityNetworkStats.killed is filled from get_Died()
+                // (FillFromEntity IL=150). Count each corpse once.
+                if (!oc.death_counted) {
+                    oc.deaths += 1;
+                    oc.death_counted = true;
+                }
                 // AI-inflicted deaths land here (the C2S kill path bags its own
                 // victims and latches `bagged_this_death`, so a death is never
                 // bagged twice): DropOnDeath modes 1..3 drop the victim's real

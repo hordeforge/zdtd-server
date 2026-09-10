@@ -13582,7 +13582,9 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     const sent = cap_b.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
     var r: binary.Reader = .{ .data = sent };
     _ = try r.readI32(); // entity_id
-    try std.testing.expectEqual(@as(i32, 2), try r.readI32()); // killed
+    // killed is EntityNetworkStats.killed, filled from get_Died (FillFromEntity
+    // IL=150): ca has killed but not died, so it is 0 here.
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // killed = deaths
 
     // killedPlayers is the same shape: the counter existed and fed
     // AddScoreClient, but PlayerStats hardcoded 0. PvP damage needs
@@ -13602,7 +13604,7 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     // counters rather than guessing offsets.
     var r2: binary.Reader = .{ .data = sent2 };
     _ = try r2.readI32(); // entity_id
-    try std.testing.expectEqual(@as(i32, 2), try r2.readI32()); // killed
+    try std.testing.expectEqual(@as(i32, 0), try r2.readI32()); // killed = deaths
     _ = try r2.readU16(); // held item: empty ItemStack (count 0)
     _ = try r2.readByte(); // holdingItemIndex
     _ = try r2.readI32(); // deathHealth
@@ -13613,6 +13615,17 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     _ = try r2.readBool(); // isPlayer
     try std.testing.expectEqual(@as(i32, 2), try r2.readI32()); // killedZombies
     try std.testing.expectEqual(@as(i32, 1), try r2.readI32()); // killedPlayers
+
+    // The death leg: cb died in the PvP exchange, and the hp-replicate drain
+    // counts that corpse once through get_Died. Observe cb's stats from ca.
+    g.replicatePlayerHealth();
+    try std.testing.expectEqual(@as(i32, 1), cb.deaths);
+    cap.n = 0;
+    game_player.broadcastPlayerStats(g, cb.slot);
+    const sent_death = cap.findPkgId(ps_id) orelse return error.TestUnexpectedResult;
+    var rd: binary.Reader = .{ .data = sent_death };
+    _ = try rd.readI32(); // entity_id
+    try std.testing.expectEqual(@as(i32, 1), try rd.readI32()); // killed = deaths
 
     // NetPackageEntityAddScoreClient carries both counters in one body (RE
     // protocol-packages.md 27: entityId, zombieKills i16, playerKills i16,

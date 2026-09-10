@@ -486,6 +486,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // marker keeps pointing at the uncollected bag, which is
                 // correct: it is still lying there.
                 c.bagged_this_death = false;
+                c.death_counted = false;
                 // Respawn confirm first (the client leaves the death screen
                 // and enters the spawned state), then position + HP so the
                 // post-respawn state cannot be discarded while still dead.
