@@ -6505,8 +6505,53 @@ test "scenario buff add relays to observers and expires on the server clock" {
     try std.testing.expect(!cleared.adding);
     try std.testing.expectEqualStrings("buffShocked", cleared.name);
 
+    // A client-driven removal must reach the observers too. Stock's
+    // ProcessPackage re-broadcasts the package and then applies it with
+    // netSync=false (RE buffs.md:230), so add and remove are the same path.
+    // zdtd gets there differently: the handler only marks `flags.remove`, and
+    // the tick that drains the mark is the tick that relays it, which is the
+    // same drain stock uses for its own Remove flag (RE buffs.md:194). That
+    // indirection is why this needed a test - the handler returns without
+    // relaying anything, so the behaviour is correct only as long as the drain
+    // stays wired to it.
+    const add3 = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = ca.entity_id,
+        .name = "buffShocked",
+        .duration = 30,
+        .adding = true,
+        .instigator_id = ca.entity_id,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    // Re-resolve: the respawn above may have moved the player to a new slot.
+    const ps2 = g.sim.playerByPeer(ca.slot).?;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", add3));
+    try std.testing.expect(g.sim.buffs[ps2].find(def_id) != null);
+    cap_a.clear();
+    cap_b.clear();
+    const drop = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = ca.entity_id,
+        .name = "buffShocked",
+        .duration = 0,
+        .adding = false,
+        .instigator_id = ca.entity_id,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", drop));
+    // `remove` marks; the tick drains it, exactly as stock's Remove flag does
+    // (RE buffs.md:194). One step is enough.
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps2].find(def_id) == null);
+    const drop_pkg = cap_b.findPkgIdEntity(pkg_id, ca.entity_id) orelse return error.NoBuffRemovalRelay;
+    const dropped = try packages.stock_buff.parseAddRemoveBuff(drop_pkg, &name_buf);
+    try std.testing.expect(!dropped.adding);
+    try std.testing.expectEqualStrings("buffShocked", dropped.name);
+
     std.debug.print(
-        "PASS buff lifecycle: entity={d} buffShocked relayed to observer, expired after {d} ticks, cleared on death\n",
+        "PASS buff lifecycle: entity={d} buffShocked relayed to observer, expired after {d} ticks, cleared on death, removal relayed\n",
         .{ ca.entity_id, t },
     );
 }
