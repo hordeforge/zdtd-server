@@ -461,12 +461,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const bed_surf = self.spawnSurface(rpx, rpz);
                 // Sanctioned respawn funnel: revive + heal + clear death
                 // buffs/IsBloodMoonDead + place + mark dirty in one call.
-                self.sim.respawnPlayer(
+                // The cleared death buffs have to reach the clients: stock's
+                // removals drain through the tick that emits the wire (RE
+                // buffs.md:194), so a silent clear leaves the icon on every
+                // HUD for the rest of the session.
+                var cleared: [ecs.components.max_buffs_per_entity]ecs.buff.Removed = undefined;
+                const cleared_n = self.sim.respawnPlayer(
                     si,
                     @floatFromInt(bed_surf.x),
                     @as(f32, @floatFromInt(bed_surf.y)) + 0.08,
                     @floatFromInt(bed_surf.z),
+                    cleared[0..],
                 );
+                for (cleared[0..@min(cleared_n, cleared.len)]) |rm| {
+                    const def = self.buffs.byId(rm.def_id) orelse continue;
+                    self.relayBuff(c.entity_id, def.name, false, -1, null) catch {};
+                }
                 // Arm the next death. The guard exists so one death cannot
                 // produce two bags (the C2S kill path and the hp-replicate
                 // detector both see the same corpse); it used to ride

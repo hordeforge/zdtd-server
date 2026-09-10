@@ -786,10 +786,14 @@ pub const World = struct {
     /// clear IsBloodMoonDead and place at (x, y, z) with yaw 0. The single
     /// sanctioned respawn funnel: c2s/join RequestToSpawn must not write
     /// alive[]/health/transform raw (reviveSlot keeps the kind group in sync).
-    pub fn respawnPlayer(self: *World, slot: Slot, x: f32, y: f32, z: f32) void {
-        if (slot >= max_entities or !self.mask[slot].kind) return;
+    /// `cleared` receives the buffs death removed, so the caller can relay them
+    /// (the ECS has no wire). Pass an empty slice when the removals are not
+    /// needed; they are cleared either way.
+    pub fn respawnPlayer(self: *World, slot: Slot, x: f32, y: f32, z: f32, cleared: []buff.Removed) u8 {
+        if (slot >= max_entities or !self.mask[slot].kind) return 0;
         self.reviveSlot(slot);
-        if (self.mask[slot].buffs) _ = buff.clearOnDeath(&self.buffs[slot]);
+        var cleared_n: u8 = 0;
+        if (self.mask[slot].buffs) cleared_n = buff.clearOnDeath(&self.buffs[slot], cleared);
         var h = self.health[slot];
         h.hp = 100;
         h.max_hp = 100;
@@ -804,6 +808,7 @@ pub const World = struct {
         if (self.mask[slot].player) self.player[slot].is_blood_moon_dead = false;
         self.transform[slot] = .{ .x = x, .y = y, .z = z, .yaw = 0 };
         self.markDirty(slot, .{ .pos = true, .hp = true });
+        return cleared_n;
     }
 
     /// Max A* replans admitted per tick. Each costs at most `path_max_expand`

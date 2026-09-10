@@ -6471,8 +6471,42 @@ test "scenario buff add relays to observers and expires on the server clock" {
     try std.testing.expect(!gone.adding);
     try std.testing.expectEqualStrings("buffShocked", gone.name);
     try std.testing.expect(cap_b.findPkgIdEntity(pkg_id, ca.entity_id) != null);
+    // Death clears the RemoveOnDeath buffs, and the clients have to hear about
+    // it. Stock's removals all drain through the same tick that emits the wire
+    // (`removeBuff` marks Remove=true, RE buffs.md:194); zdtd's death path
+    // cleared the set directly, so the server dropped the buff and every
+    // client kept showing its icon for the rest of the session - nothing else
+    // ever mentions that buff again.
+    cap_a.clear();
+    cap_b.clear();
+    const add2 = try packages.stock_buff.buildAddRemoveBuffBody(&body, .{
+        .entity_id = ca.entity_id,
+        .name = "buffShocked",
+        .duration = 30,
+        .adding = true,
+        .instigator_id = ca.entity_id,
+        .instigator_x = 0,
+        .instigator_y = 0,
+        .instigator_z = 0,
+    });
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAddRemoveBuff", add2));
+    try std.testing.expect(g.sim.buffs[ps].find(def_id) != null);
+    cap_a.clear();
+    cap_b.clear();
+    _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+    // Through the real respawn path (RequestToSpawnPlayer), which is where the
+    // death-buff clear happens for a live player.
+    var spawn_req: [2]u8 = undefined;
+    std.mem.writeInt(i16, spawn_req[0..2], 4, .little);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageRequestToSpawnPlayer", &spawn_req));
+    try std.testing.expect(g.sim.buffs[ps].find(def_id) == null);
+    const death_pkg = cap_b.findPkgIdEntity(pkg_id, ca.entity_id) orelse return error.NoDeathBuffRemoval;
+    const cleared = try packages.stock_buff.parseAddRemoveBuff(death_pkg, &name_buf);
+    try std.testing.expect(!cleared.adding);
+    try std.testing.expectEqualStrings("buffShocked", cleared.name);
+
     std.debug.print(
-        "PASS buff lifecycle: entity={d} buffShocked relayed to observer, expired after {d} ticks\n",
+        "PASS buff lifecycle: entity={d} buffShocked relayed to observer, expired after {d} ticks, cleared on death\n",
         .{ ca.entity_id, t },
     );
 }
@@ -15987,7 +16021,7 @@ test "scenario a second death still drops a bag while the first is uncollected" 
 
     // Respawn arms the next death. The marker stays: that first bag is still
     // lying there uncollected, so the client should still see it.
-    g.sim.respawnPlayer(ps, 256, 70, 256);
+    _ = g.sim.respawnPlayer(ps, 256, 70, 256, &.{});
     g.clients[c.slot].bagged_this_death = false;
     try std.testing.expect(g.clients[c.slot].backpack_n > 0);
 

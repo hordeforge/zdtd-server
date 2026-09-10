@@ -3681,7 +3681,7 @@ pub const Game = struct {
         return game_social.playerBuffBlob(self, peer_slot, buf);
     }
 
-    fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: bool, instigator_id: i32, except_slot: ?usize) !void {
+    pub fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: bool, instigator_id: i32, except_slot: ?usize) !void {
         return game_social.relayBuff(self, entity_id, buff_name, adding, instigator_id, except_slot);
     }
 

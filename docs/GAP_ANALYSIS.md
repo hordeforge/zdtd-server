@@ -3473,8 +3473,15 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   Validated then relayed, following stock's server branch: a peer may only drive
   its own player entity and only with a buff name the catalog resolves. The
   server can now push a buff onto a player and other clients see it.
-  *Anchors:* `src/server/game.zig`, `asm.il`,
-  `asm.il:202530-202566`
+  Since 2026-09-10 the death clear relays too. Stock's removals all drain
+  through the tick that emits the wire (`removeBuff` marks `Remove=true`, RE
+  buffs.md:194), but zdtd's respawn cleared the set directly and discarded the
+  count, so a `RemoveOnDeath` buff vanished server-side while every client kept
+  showing its icon - permanently, since nothing else ever mentions that buff
+  again. `clearOnDeath` now reports what it removed, `respawnPlayer` returns it,
+  and the respawn handler relays each as `adding=false`.
+  *Anchors:* `src/server/game.zig`, `src/server/c2s/join.zig` (respawn relay),
+  `src/ecs/buff.zig` `clearOnDeath`, `asm.il`, `asm.il:202530-202566`
 
 - **NetPackageEntityStatsBuff** `WORKS` (2026-08-06)
   Built and sent: the full buff list of every other joined player rides
