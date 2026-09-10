@@ -2161,7 +2161,14 @@ pub const Game = struct {
                 // destruction paths use, rather than a second copy of the
                 // list of stores a removal owes.
                 const new_id = world_store.typeId(raw);
-                if (prev_id != new_id) g.noteBlockRemoved(bx, by, bz, prev_id);
+                if (prev_id != new_id) {
+                    g.noteBlockRemoved(bx, by, bz, prev_id);
+                    // And the block the reset painted claims what its type
+                    // owns: a POI's authored generator or vending machine is
+                    // as real as a placed one, so restoring it has to restore
+                    // its node too, not just its block.
+                    g.noteBlockAdded(bx, by, bz, new_id);
+                }
                 if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
                     // Best-effort visual broadcast: the world store is already
                     // authoritative; a dropped SetBlock only delays the paint.

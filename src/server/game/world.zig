@@ -486,7 +486,12 @@ pub fn drainExplosions(self: *Game) void {
                         // a DowngradeBlock turns into it instead of breaking.
                         const down_raw = self.downgradeBreakRaw(wx, wy, wz, id);
                         if (down_raw != 0) {
+                            // The downgrade displaces the old block and lands
+                            // a new one, same pair as the other downgrade
+                            // arms: this one cleared neither side.
+                            self.noteBlockRemoved(wx, wy, wz, id);
                             _ = self.world.setBlockRawWorld(wx, wy, wz, down_raw) catch continue;
+                            self.noteBlockAdded(wx, wy, wz, world_store.typeId(down_raw));
                             self.clearBlockHp(wx, wy, wz);
                             self.clearBlockRaw(wx, wy, wz);
                             if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, down_raw, 0, -1, -1)) |sb| {

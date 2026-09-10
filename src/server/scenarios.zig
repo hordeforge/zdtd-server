@@ -15649,5 +15649,19 @@ test "scenario mining a powered block takes its node and container with it" {
     try std.testing.expect(g.sim.power.indexOfPosition(ax, wy, az) == null);
     g.noteBlockAdded(ax, wy, az, gen_id);
     try std.testing.expect(g.sim.power.indexOfPosition(ax, wy, az) != null);
+    // The explosion damage path is a sixth removal path I had not found: its
+    // downgrade arm cleared neither side, so a blast that downgraded a
+    // generator left the old node and gave the new block none.
+    const bxx: i32 = @intFromFloat(pp.x + 11);
+    const bzz: i32 = @intFromFloat(pp.z + 11);
+    try g.world.setBlockWorld(bxx, wy, bzz, stone);
+    _ = g.sim.power.addNodeAt(.generator, bxx, wy, bzz, 1000);
+    const bpos = containers_mod.PosKey{ .x = bxx, .y = wy, .z = bzz };
+    _ = g.containers.getOrCreate(bpos, 8, stone) orelse return error.TestUnexpectedResult;
+    // Both halves in one call, the shape every downgrade arm now runs.
+    g.noteBlockRemoved(bxx, wy, bzz, stone);
+    g.noteBlockAdded(bxx, wy, bzz, gen_id);
+    try std.testing.expect(g.containers.get(bpos) == null);
+    try std.testing.expect(g.sim.power.indexOfPosition(bxx, wy, bzz) != null);
     std.debug.print("PASS block stores: contents spill on every removal path, and a new block claims its own state\n", .{});
 }
