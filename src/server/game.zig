@@ -2143,6 +2143,7 @@ pub const Game = struct {
             g: *Game,
             fn put(ctx: ?*anyopaque, bx: i32, by: i32, bz: i32, raw: u32, tex: u64, dens: ?u8, dmg: u16) void {
                 const g: *Game = @ptrCast(@alignCast(ctx.?));
+                const prev_id = g.world.blockWorld(bx, by, bz) catch 0;
                 g.world.setBlockTexDensWorld(bx, by, bz, raw, tex, dens) catch return;
                 // POI reset restores the authored state: pre-damaged cells get
                 // their TTS damage back, pristine cells clear any wear.
@@ -2150,6 +2151,19 @@ pub const Game = struct {
                     g.setBlockHp(bx, by, bz, dmg) catch return;
                 } else {
                     g.clearBlockHp(bx, by, bz);
+                }
+                // The stores keyed by position are not part of the block plane,
+                // so a reset that only repaints blocks leaves the previous
+                // occupant's tile entity behind: a generator node with no
+                // generator block still feeding the grid, a looted container
+                // still holding its slots under whatever the POI bakes there.
+                // The normal SetBlock path maintains all three; do the same
+                // here for any cell whose block id actually changed.
+                const new_id = world_store.typeId(raw);
+                if (prev_id != new_id) {
+                    if (g.sim.power.removeAt(bx, by, bz)) g.sim.power.resolve();
+                    g.containers.remove(.{ .x = bx, .y = by, .z = bz });
+                    g.vending.removeAt(.{ .x = bx, .y = by, .z = bz });
                 }
                 if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
                     // Best-effort visual broadcast: the world store is already

@@ -2517,6 +2517,25 @@ test "POI reset restores baked blocks over player edits" {
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(t[0], t[1], t[2]));
     g.resetPoiBlocks(t[0], t[2]);
     try std.testing.expectEqual(orig, try g.world.blockWorld(t[0], t[1], t[2]));
+
+    // The stores keyed by position are not part of the block plane, so a
+    // reset that only repaints blocks leaves the previous occupant's tile
+    // entity behind: a power node with no block still feeding the grid, a
+    // container still holding its slots under whatever the POI bakes there.
+    // Plant both at the same cell the reset is about to repaint.
+    _ = g.sim.power.addNodeAt(.generator, t[0], t[1], t[2], 1000);
+    try std.testing.expect(g.sim.power.indexOfPosition(t[0], t[1], t[2]) != null);
+    const cpos = containers_mod.PosKey{ .x = t[0], .y = t[1], .z = t[2] };
+    const cont = g.containers.getOrCreate(cpos, 8, orig) orelse return error.TestUnexpectedResult;
+    cont.slots[0] = .{ .item_id = 7, .count = 5, .quality = 1 };
+    try std.testing.expect(g.containers.get(cpos) != null);
+
+    // Change the block so the reset actually rewrites this cell, then reset.
+    try g.setBlock(t[0], t[1], t[2], 0);
+    g.resetPoiBlocks(t[0], t[2]);
+    try std.testing.expectEqual(orig, try g.world.blockWorld(t[0], t[1], t[2]));
+    try std.testing.expect(g.sim.power.indexOfPosition(t[0], t[1], t[2]) == null);
+    try std.testing.expect(g.containers.get(cpos) == null);
 }
 
 test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {

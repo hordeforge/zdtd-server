@@ -2129,6 +2129,12 @@ can walk into every POI but none of them is the building TFP authored.
   the world raw+tex path. Residual: stock resets only quest-tagged blocks (a
   base built inside a POI survives stock's reset); zdtd re-paints the full
   prefab footprint, and lockout-expiry reset is not wired (only dedication).
+  Until 2026-09-10 the reset also repainted blocks without touching the stores
+  keyed by position, so a cell whose block changed kept the previous occupant's
+  tile entity: a power node with no block still feeding the grid, a looted
+  container still holding its slots under whatever the POI bakes there. The
+  normal SetBlock path maintains power, containers and vending on every block
+  change; the reset callback now does the same for each cell whose id changed.
   *Anchors:* `src/server/game.zig` (`resetPoiBlocks`, `handleQuestEvent`),
   `src/world/store.zig` (`setBlockTexDensWorld`), `src/world/tts.zig`
   (`paintDecoration`), `asm.il:945360-945387`
