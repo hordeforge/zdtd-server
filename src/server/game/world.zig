@@ -310,14 +310,16 @@ pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
 /// bedroll clears the owner's respawn point (the client falls back to the
 /// default spawn). Scans the fixed client table for the bed position.
 ///
-/// The three position-keyed stores (power grid, containers, vending) live
-/// outside the block plane, so a destruction path that only clears the plane
-/// leaves a node with no block still feeding the grid and a container still
-/// holding its slots at a cell that is now air.
+/// The four position-keyed stores (power grid, containers, vending, lights)
+/// live outside the block plane, so a destruction path that only clears the
+/// plane leaves a node with no block still feeding the grid, a container still
+/// holding its slots at a cell that is now air, and a light the chunk stream
+/// keeps shipping to every player who joins later.
 pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
     if (self.sim.power.removeAt(x, y, z)) self.sim.power.resolve();
     self.containers.remove(.{ .x = x, .y = y, .z = z });
     self.vending.removeAt(.{ .x = x, .y = y, .z = z });
+    self.light_te.removeAt(.{ .x = x, .y = y, .z = z });
     if (!self.isBedrollId(cur_id)) return;
     for (&self.clients) |*cl| {
         if (!cl.joined or !cl.has_bed) continue;

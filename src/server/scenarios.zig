@@ -38,6 +38,7 @@ const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const evidence_mod = @import("evidence.zig");
 const powerblocks_mod = @import("../ecs/powerblocks.zig");
+const light_te_mod = @import("../world/light_te.zig");
 const persist = @import("persist.zig");
 const phase_gate = @import("phase_gate.zig");
 const util_log = @import("../util/log.zig");
@@ -15574,5 +15575,21 @@ test "scenario mining a powered block takes its node and container with it" {
     try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageSetBlock", up));
     try std.testing.expectEqual(up_id, try g.world.blockWorld(rx, ry, rz));
     try std.testing.expect(g.sim.power.indexOfPosition(rx, ry, rz) == null);
-    std.debug.print("PASS block-removal stores: node and container go with the block, on break and on swap\n", .{});
+    // Lights are the fourth position-keyed store and had no remover at all.
+    // The chunk stream walks the live entries and ships one per joining
+    // player, so a destroyed lamp kept lighting the room for everyone who
+    // arrived later.
+    const lx: i32 = @intFromFloat(pp.x + 5);
+    const ly: i32 = @intFromFloat(pp.y);
+    const lz: i32 = @intFromFloat(pp.z + 5);
+    const lpos = light_te_mod.PosKey{ .x = lx, .y = ly, .z = lz };
+    try g.world.setBlockWorld(lx, ly, lz, stone);
+    _ = g.light_te.getOrCreate(lpos) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.light_te.get(lpos) != null);
+
+    const break_light = try packages.buildSetBlockBody(&sbuf, lx, ly, lz, 0);
+    try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageSetBlock", break_light));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(lx, ly, lz));
+    try std.testing.expect(g.light_te.get(lpos) == null);
+    std.debug.print("PASS block-removal stores: node, container and light go with the block\n", .{});
 }

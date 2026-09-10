@@ -127,6 +127,22 @@ pub const Store = struct {
         l.* = .{ .x = pos.x, .y = pos.y, .z = pos.z };
         return l;
     }
+
+    /// Drop the light at a position. Without this a light outlived the block
+    /// that carried it: the chunk stream walks the live entries and ships one
+    /// per joining player, so a destroyed lamp kept lighting the room for
+    /// everyone who arrived afterwards.
+    pub fn removeAt(self: *Store, pos: PosKey) void {
+        var i: usize = 0;
+        while (i < max_lights) : (i += 1) {
+            if (!self.used[i]) continue;
+            const l = &self.items[i];
+            if (l.x != pos.x or l.y != pos.y or l.z != pos.z) continue;
+            self.used[i] = false;
+            self.n -|= 1;
+            return;
+        }
+    }
 };
 
 test "parsePayload decodes a stock-format light payload" {

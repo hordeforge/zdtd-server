@@ -233,6 +233,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // the place_id != cur_id swap check further down.
                         self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.light_te.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.clearBlockHp(b.x, b.y, b.z);
                         self.clearBlockRaw(b.x, b.y, b.z);
                         place_down_raw = down_raw;
