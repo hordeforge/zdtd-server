@@ -9488,16 +9488,18 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     try std.testing.expectEqual(@as(i32, 100), try xr2.readI32());
     try std.testing.expectEqual(@as(i16, 0), try xr2.readI16());
 
-    // PvP kill (PlayerKillingMode 3 default): A kills B; AddScoreClient
-    // carries playerKills=1 while zombieKills stays at the earlier count.
+    // PvP kill (PlayerKillingMode 3 default): A kills B. AddScoreClient carries
+    // the increment for THIS kill, so playerKills=1 and zombieKills=0 (the
+    // client adds both to its own counters). Sending the running total here is
+    // what made a client re-add every earlier kill.
     cap_a.clear();
     const pdmg = try packages.buildDamageBody(&dmg, cb.entity_id, 0, 3, 100, true, ca.entity_id);
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", pdmg));
     const pscb = cap_a.findPkgIdEntity(score_id, ca.entity_id) orelse return error.TestUnexpectedResult;
     var psr = binary.Reader{ .data = pscb };
     try std.testing.expectEqual(ca.entity_id, try psr.readI32());
-    try std.testing.expectEqual(@as(i16, 2), try psr.readI16()); // zombieKills (2 total)
-    try std.testing.expectEqual(@as(i16, 1), try psr.readI16()); // playerKills
+    try std.testing.expectEqual(@as(i16, 0), try psr.readI16()); // zombieKills delta
+    try std.testing.expectEqual(@as(i16, 1), try psr.readI16()); // playerKills delta
     try std.testing.expectEqual(@as(i16, 0), try psr.readI16()); // otherTeamNumber
     try std.testing.expectEqual(@as(i32, 0), try psr.readI32()); // conditions
     // B's death screen gets the spawn list on the next hp-replicate pass.
@@ -13627,11 +13629,12 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     _ = try rd.readI32(); // entity_id
     try std.testing.expectEqual(@as(i32, 1), try rd.readI32()); // killed = deaths
 
-    // NetPackageEntityAddScoreClient carries both counters in one body (RE
-    // protocol-packages.md 27: entityId, zombieKills i16, playerKills i16,
-    // otherTeamNumber i16, conditions i32). A site that fills only
-    // zombie_kills lets the struct default playerKills to 0, so the next
-    // zombie kill contradicts the PvP count this client was already told.
+    // NetPackageEntityAddScoreClient carries the increment for THIS kill, not
+    // a running total: the client's ProcessPackage (IL=25) calls
+    // EntityAlive.AddScore(0, zombieKills, playerKills, ...), and AddScore
+    // (IL=97) ADDS each argument. Stock's EntityAlive.AwardKill (IL=66) sends
+    // 0/1 deltas. Sending the totals made the client re-add every earlier
+    // kill: after three kills it showed 1+2+3 = 6.
     const score_id = packages.idOf("NetPackageEntityAddScoreClient") orelse
         return error.TestUnexpectedResult;
     cap.n = 0;
@@ -13643,8 +13646,8 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     const score = cap.findPkgId(score_id) orelse return error.TestUnexpectedResult;
     var r3: binary.Reader = .{ .data = score };
     _ = try r3.readI32(); // entity_id
-    _ = try r3.readI16(); // zombieKills
-    try std.testing.expectEqual(@as(i16, 1), try r3.readI16()); // playerKills
+    try std.testing.expectEqual(@as(i16, 1), try r3.readI16()); // zombieKills delta
+    try std.testing.expectEqual(@as(i16, 0), try r3.readI16()); // playerKills delta
 
     std.debug.print("PASS kill-counter: zombie + PvP kills ride the PlayerStats wire\n", .{});
 }

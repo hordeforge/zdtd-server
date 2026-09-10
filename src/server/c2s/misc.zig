@@ -915,12 +915,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // AddScoreClient: the character-sheet zombie-kill counter.
                 // Stock EntityAlive.AddScore fires on every zombie kill.
                 if (c.zombie_kills < std.math.maxInt(u16)) c.zombie_kills += 1;
-                sendScoreUpdate(self, c);
+                sendScoreUpdate(self, c, 1, 0);
             } else if (target_is_player) {
                 // PvP kill (PlayerKillingMode != 0): the killer's playerKills
                 // counter, stock EntityAlive.AddScore.
                 if (c.player_kills < std.math.maxInt(u16)) c.player_kills += 1;
-                sendScoreUpdate(self, c);
+                sendScoreUpdate(self, c, 0, 1);
             }
             // Stock DroppedLootContainer ECD + bag; refill from loot.xml when known.
             if (dmg.loot_bag_id > 0) {
@@ -1358,13 +1358,19 @@ fn filteredChatText(self: *Game, c: *Client, msg: []const u8, native_buf: []u8, 
     return msg;
 }
 
-/// Push the killer's AddScoreClient (zombie + player kill counters).
-fn sendScoreUpdate(self: *Game, c: *Client) void {
+/// Push the killer's AddScoreClient. Stock's NetPackageEntityAddScoreClient
+/// carries the *increment* for this event, not a running total: the client's
+/// ProcessPackage (IL=25) calls EntityAlive.AddScore(0, zombieKills,
+/// playerKills, ...), and AddScore (IL=97) adds every argument to the entity's
+/// counters. EntityAlive.AwardKill (IL=66) therefore sends 0/1 deltas. Sending
+/// the totals made each receiving client re-add the whole count: after three
+/// kills it showed 1+2+3 = 6.
+fn sendScoreUpdate(self: *Game, c: *Client, zombie_delta: u16, player_delta: u16) void {
     const kpeer = c.peer orelse return;
     if (packages.stock_xp.buildAddScoreBody(self.body_buf[32..48], .{
         .entity_id = c.entity_id,
-        .zombie_kills = c.zombie_kills,
-        .player_kills = c.player_kills,
+        .zombie_kills = zombie_delta,
+        .player_kills = player_delta,
     })) |ab| {
         self.sendGame(kpeer, "NetPackageEntityAddScoreClient", ab) catch |err| {
             self.harness.counters.inc(.net_send_errors);

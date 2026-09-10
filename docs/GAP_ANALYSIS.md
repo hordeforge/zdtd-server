@@ -3770,7 +3770,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `AddScore(1, 0, 0, -1, 0)` on the victim. It now carries the server death
   ledger (`Client.deaths`, counted once per corpse in the hp-replicate drain)
   instead of the zombie count, which had made the client's death stat equal its
-  zombie kills. The five client-accrued accumulator stats (`totalItemsCrafted`,
+  zombie kills. `NetPackageEntityAddScoreClient` carries the per-kill
+  **delta**, not a running total: the client's ProcessPackage (IL=25) calls
+  `EntityAlive.AddScore`, which adds each argument (IL=97), and
+  `EntityAlive.AwardKill` (IL=66) sends 0/1. It had sent the totals, so a
+  receiving client re-added every earlier kill. The five client-accrued
+  accumulator stats (`totalItemsCrafted`,
   `distanceWalked`, `longestLife`, `currentLife`, `totalTimePlayed`) stay 0 by
   design: stock only ever relays the owning client's `EntityNetworkStats` blob,
   which zdtd drops on the authority rule. That residual lives in DIVERGENCES §2,

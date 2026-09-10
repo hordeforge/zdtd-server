@@ -207,9 +207,11 @@ test "player stats body is the stock EntityNetworkStats shape" {
 /// running zombie/player kill counters.
 pub const AddScoreArgs = struct {
     entity_id: i32,
-    /// Both kill counters ride one body (RE protocol-packages.md 27), so
-    /// neither has a default: a caller that fills only one would send a stale
-    /// 0 for the other and contradict what the client was already told.
+    /// Increments for THIS event, not running totals: the client's
+    /// ProcessPackage (IL=25) hands these to EntityAlive.AddScore, which adds
+    /// them. Stock's EntityAlive.AwardKill (IL=66) sends 0/1 per kill. A
+    /// sender that passed totals made every receiving client re-add the whole
+    /// count. No defaults: a caller must state both legs explicitly.
     zombie_kills: u16,
     player_kills: u16,
     other_team_number: u16 = 0,
