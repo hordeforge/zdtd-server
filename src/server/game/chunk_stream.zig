@@ -14,6 +14,7 @@ const packages = @import("../../wire/packages.zig");
 const containers_mod = @import("../../world/containers.zig");
 const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
+const workstations_mod = @import("../../world/workstations.zig");
 const world_store = @import("../../world/store.zig");
 const replicate_te = @import("../replicate_te.zig");
 const clock = @import("../../util/clock.zig");
@@ -57,6 +58,20 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
         const l = &self.light_te.items[li];
         if (l.x < x0 or l.x >= x1 or l.z < z0 or l.z >= z1) continue;
         try replicate_te.sendLightTe(self, peer, l.x, l.y, l.z);
+    }
+    // Workstations are the fourth tile entity in this chunk and were the only
+    // one this stream skipped: their state persists across a restart and is
+    // rebroadcast when it changes, but a joining client was never told the
+    // current one, so a burning forge read as idle until its next change.
+    // sendWorkstationTe holds the geometry gate, so a station whose real
+    // array lengths are still unknown stays unsent rather than resizing the
+    // client's grids.
+    var wi: usize = 0;
+    while (wi < workstations_mod.max_workstations) : (wi += 1) {
+        if (!self.workstations.used[wi]) continue;
+        const w = &self.workstations.items[wi];
+        if (w.x < x0 or w.x >= x1 or w.z < z0 or w.z >= z1) continue;
+        try replicate_te.sendWorkstationTe(self, peer, w.x, w.y, w.z);
     }
 }
 

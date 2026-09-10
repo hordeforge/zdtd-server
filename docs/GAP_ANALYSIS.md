@@ -6245,7 +6245,12 @@ is on main and gated; what follows "Open:" is the honest remainder.
    outputs craftable on the station's CraftingAreaRecipes survive, and per-craft
    count + duration come from the recipe, not the blob (2026-08-09). The Module
    gate is block-derived (non-burning workbench / cement mixer advance,
-   2026-08-08); no live-client playtest of the forge UI.
+   2026-08-08); no live-client playtest of the forge UI. Since 2026-09-10 the
+   station's current state also rides the chunk stream: it persists and is
+   rebroadcast on change, but a joining client was never sent the state it
+   walked into, so a burning forge read as idle until its next change. The
+   geometry gate still applies, so a station whose real array lengths are
+   unknown stays unsent rather than resizing the client's grids.
 
 ### P2: Multiplayer CPU (M11)
 

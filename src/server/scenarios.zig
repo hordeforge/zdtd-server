@@ -12406,7 +12406,29 @@ test "scenario light tile entities ride the chunk stream" {
     try g.sendContainersInChunk(c.peer.?, 20, 20);
     try std.testing.expect(!sawLightAt(&cap, te_id, inside.x, inside.y, inside.z));
     try std.testing.expect(!sawLightAt(&cap, te_id, outside.x, outside.y, outside.z));
-    std.debug.print("PASS light-te: in-chunk light streamed, out-of-chunk light withheld\n", .{});
+
+    // Workstations were the fourth store in this chunk and the only one the
+    // stream skipped: their state persists and is rebroadcast when it
+    // changes, so a joining client saw a burning forge as idle until its
+    // next change. The matcher is position-keyed, so it works for any TE.
+    const wx: i32 = 16 * 16 + 6;
+    const wy: i32 = 70;
+    const wz: i32 = 16 * 16 + 7;
+    const ws = g.workstations.getOrCreate(wx, wy, wz) orelse return error.TestUnexpectedResult;
+    ws.is_burning = true;
+    ws.burn_time_left = 12.5;
+    // Without the geometry gate satisfied the send is skipped by design: a
+    // guessed array length would resize the client's grids.
+    ws.geometry_known = true;
+    cap.clear();
+    try g.sendContainersInChunk(c.peer.?, 16, 16);
+    try std.testing.expect(sawLightAt(&cap, te_id, wx, wy, wz));
+    // A station whose real lengths are still unknown stays unsent.
+    ws.geometry_known = false;
+    cap.clear();
+    try g.sendContainersInChunk(c.peer.?, 16, 16);
+    try std.testing.expect(!sawLightAt(&cap, te_id, wx, wy, wz));
+    std.debug.print("PASS chunk-te stream: light and workstation ride it, out-of-chunk withheld\n", .{});
 }
 
 test "scenario a vending allow-list with a hole ships no empty identity" {
