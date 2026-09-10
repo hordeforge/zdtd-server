@@ -102,14 +102,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // RemoveSharedQuestByOwner IL=54), so an entry allocated
                     // with a fresh code would leave the member's objective
                     // mirrors unresolvable. Placement rides the sender's own
-                    // copy: both instances run the same POI.
-                    if (self.sim.catalog.byName(head.questId())) |d| {
-                        var poi: ecs.components.PoiRect = .{};
-                        if (systems.questFindByCode(&self.sim, c.slot, head.quest_code)) |own| poi = own.poi;
-                        if (systems.questAcceptWithCode(&self.sim, cl.slot, d.id, head.quest_code, poi)) {
-                            if (systems.questFindByCode(&self.sim, cl.slot, head.quest_code)) |ms| ms.is_shared = true;
-                        }
-                    }
+                    // copy: both instances run the same POI. Only the sender's
+                    // own live instance qualifies, so a code the sender does
+                    // not run (spoofed or stale) creates no member entry.
+                    const own = systems.questFindByCode(&self.sim, c.slot, head.quest_code) orelse {
+                        if (cl.peer) |tp| try self.sendGame(tp, "NetPackageSharedQuest", body);
+                        break;
+                    };
+                    _ = systems.questAcceptWithCode(&self.sim, cl.slot, own.def_id, head.quest_code, own.poi);
+                    if (systems.questFindByCode(&self.sim, cl.slot, head.quest_code)) |ms| ms.is_shared = true;
                     if (cl.peer) |tp| try self.sendGame(tp, "NetPackageSharedQuest", body);
                     break;
                 }
