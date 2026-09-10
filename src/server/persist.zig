@@ -1206,6 +1206,18 @@ const zen_rec_power: u8 = 6;
 /// fuel f32, delay u8, duration u8, target i32.
 const power_record_bytes: usize = 1 + 12 + 4 + 1 + 1 + 4;
 
+/// Record type for a loot bag on the ground. Stock protects dropped backpacks
+/// as a persisted category (RE save-region.md ProtectedPositionCache), and a
+/// death bag holds a whole player inventory, so losing it to a restart is the
+/// largest single loss in this family. Bags never expire in zdtd, so without
+/// this every one of them died at shutdown.
+const zen_rec_bag: u8 = 7;
+
+/// Bytes a bag record occupies at most: type byte, three f32 coordinates,
+/// slot count, then a v12-shaped slot per filled slot.
+const bag_record_max: usize =
+    1 + 12 + 1 + ecs.components.max_inv_slots * zpvSlotStride(12);
+
 /// Write one inventory slot in the v12 shape. Shared so a second store
 /// persisting InvSlots cannot drift into its own narrower encoding.
 fn writeSaveSlot(w: *wire_binary.Writer, s: ecs.components.InvSlot) !void {
@@ -1244,7 +1256,7 @@ pub fn saveEntities(self: *Game) !void {
     // section (24 B per saved edge, 512 max), and at most one node-state
     // record per power node.
     var buf: [
-        ecs.max_entities * (32 + basket_record_max + owner_record_max) +
+        ecs.max_entities * (32 + basket_record_max + owner_record_max + bag_record_max) +
             ecs.electric.max_wires * 2 * 24 +
             ecs.electric.max_nodes * power_record_bytes + 16
     ]u8 = undefined;
@@ -1298,6 +1310,25 @@ pub fn saveEntities(self: *Game) !void {
                 try w.writeBytes(t.owner_name[0..t.owner_name_len]);
                 count += 1;
             }
+        } else if (self.sim.kind[i] == .loot_bag and self.sim.mask[i].inventory) {
+            // A death bag holds a whole player inventory and never expires,
+            // so a restart used to be the one thing that could destroy it.
+            const inv = &self.sim.inventory[i];
+            var filled: u8 = 0;
+            for (inv.slots) |sl| {
+                if (sl.item_id != 0 and sl.count > 0) filled += 1;
+            }
+            if (filled == 0) continue;
+            try w.writeByte(zen_rec_bag);
+            try w.writeF32(self.sim.transform[i].x);
+            try w.writeF32(self.sim.transform[i].y);
+            try w.writeF32(self.sim.transform[i].z);
+            try w.writeByte(filled);
+            for (inv.slots) |sl| {
+                if (sl.item_id == 0 or sl.count == 0) continue;
+                try writeSaveSlot(&w, sl);
+            }
+            count += 1;
         }
     }
     // Power wire edges by endpoint position (node ids are per-session).
@@ -1500,6 +1531,30 @@ pub fn loadEntities(self: *Game) !void {
                     .duration_idx = r.readByte() catch return error.Truncated,
                     .target_type = r.readI32() catch return error.Truncated,
                 });
+            },
+            zen_rec_bag => {
+                const bx = r.readF32() catch return error.Truncated;
+                const by = r.readF32() catch return error.Truncated;
+                const bz = r.readF32() catch return error.Truncated;
+                const n = r.readByte() catch return error.Truncated;
+                if (n > ecs.components.max_inv_slots) return error.BadRecord;
+                // Read every slot the record claims even if the bag cannot be
+                // spawned: leftover bytes would shift every later record.
+                var inv: ecs.components.Inventory = .{};
+                var bi: usize = 0;
+                while (bi < n) : (bi += 1) {
+                    const sl = readSaveSlot(&r) catch return error.Truncated;
+                    if (bi < inv.slots.len) inv.slots[bi] = sl;
+                }
+                if (n > 0) {
+                    if (self.sim.spawnLootBagFrom(bx, by, bz, &inv, 0, n)) |nid| {
+                        // The marker on the owner's map is rebuilt from the
+                        // player record's own state, not from here: bags carry
+                        // no owner, so a restored bag is anyone's to collect,
+                        // which is what stock's unowned ground bag is.
+                        _ = nid;
+                    }
+                }
             },
             else => return error.BadRecord,
         }

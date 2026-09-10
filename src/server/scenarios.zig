@@ -15811,3 +15811,67 @@ test "scenario a second death still drops a bag while the first is uncollected" 
     try std.testing.expectEqual([3]i32{ 4, 5, 6 }, cl.backpacks[cl.backpack_n - 1]);
     std.debug.print("PASS two deaths: the second death bags, and both markers ride the wire\n", .{});
 }
+
+test "scenario a death bag and its contents survive a restart" {
+    // Stock protects dropped backpacks as a persisted category (RE
+    // save-region.md ProtectedPositionCache). zdtd bags never expire, so a
+    // restart was the one thing that could destroy one - and a death bag
+    // holds a whole player inventory, which makes it the largest single loss
+    // in the entities.zen family.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_bagpersist");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const bag_x: f32 = 300;
+    const bag_y: f32 = 70;
+    const bag_z: f32 = 300;
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagpersist", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var inv: quest_mod_components.Inventory = .{};
+        inv.slots[0] = .{ .item_id = 7, .count = 12, .quality = 3, .meta = 44, .use_times = 1.5, .seed = 21 };
+        inv.slots[1] = .{ .item_id = 9, .count = 2, .quality = 1 };
+        _ = g.sim.spawnLootBagFrom(bag_x, bag_y, bag_z, &inv, 0, 2) orelse
+            return error.TestUnexpectedResult;
+        try persist.saveEntities(g);
+    }
+
+    {
+        const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagpersist", 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        const bags_before = g2.sim.countKind(.loot_bag);
+        try persist.loadEntities(g2);
+        try std.testing.expect(g2.sim.countKind(.loot_bag) > bags_before);
+
+        // Find it by position: the default world seeds its own entities.
+        var found: ?ecs.Slot = null;
+        var i: usize = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!g2.sim.alive[i] or !g2.sim.mask[i].loot_bag) continue;
+            if (g2.sim.transform[i].x == bag_x and g2.sim.transform[i].z == bag_z) {
+                found = @intCast(i);
+                break;
+            }
+        }
+        const bs = found orelse return error.TestUnexpectedResult;
+        // The contents come back with every v12 slot field, not just an id.
+        const s0 = g2.sim.inventory[bs].slots[0];
+        try std.testing.expectEqual(@as(u16, 7), s0.item_id);
+        try std.testing.expectEqual(@as(u16, 12), s0.count);
+        try std.testing.expectEqual(@as(u8, 3), s0.quality);
+        try std.testing.expectEqual(@as(u16, 44), s0.meta);
+        try std.testing.expectEqual(@as(f32, 1.5), s0.use_times);
+        try std.testing.expectEqual(@as(u16, 21), s0.seed);
+        try std.testing.expectEqual(@as(u16, 9), g2.sim.inventory[bs].slots[1].item_id);
+    }
+    std.debug.print("PASS bag persist: a dropped bag and its stacks survive a restart\n", .{});
+}
