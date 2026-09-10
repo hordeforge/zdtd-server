@@ -1062,7 +1062,10 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
     try std.testing.expect(cap.n > n_before);
     const did = packages.idOf("NetPackagePlayerSetBackpackPosition").?;
     var found = false;
-    var i: usize = 0;
+    // Search from the drop, not from the start of the capture: the join
+    // bundle now sends this package too (with an empty list), and matching
+    // the first one would read that instead of the one under test.
+    var i: usize = n_before;
     while (i < cap.n and !found) : (i += 1) {
         const msg = cap.slots[i].data[0..cap.slots[i].len];
         var pkgs: [8]wire_frame.Package = undefined;
@@ -15913,6 +15916,18 @@ test "scenario dropped-bag markers survive a restart with the bags" {
         try std.testing.expectEqual(@as(u8, 2), c.backpack_n);
         try std.testing.expectEqual([3]i32{ 11, 70, 22 }, c.backpacks[0]);
         try std.testing.expectEqual([3]i32{ 33, 71, 44 }, c.backpacks[1]);
+
+        // And the join bundle ships them. Restored state that never reaches a
+        // client is the same as no state: the marker only existed on the
+        // server until the join send was added.
+        const did = packages.idOf("NetPackagePlayerSetBackpackPosition").?;
+        const sent = cap.findPkgId(did) orelse return error.TestUnexpectedResult;
+        var r: binary.Reader = .{ .data = sent };
+        try std.testing.expectEqual(c.entity_id, try r.readI32());
+        try std.testing.expectEqual(@as(u8, 2), try r.readByte());
+        try std.testing.expectEqual(@as(i32, 11), try r.readI32());
+        try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+        try std.testing.expectEqual(@as(i32, 22), try r.readI32());
     }
     std.debug.print("PASS bag markers: the map markers survive a restart with the bags\n", .{});
 }

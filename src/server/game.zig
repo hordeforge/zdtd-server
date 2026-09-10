@@ -2648,6 +2648,15 @@ pub const Game = struct {
             // The owner's parked vehicles for their map (stock
             // UpdateVehicleWaypointsForPlayer; no-op without owned vehicles).
             try self.sendVehicleWaypoints(peer, c.slot);
+            // This player's dropped-bag markers. They only ever went out on
+            // the events that change them (a death, a collect), so a marker
+            // restored from the player record never reached anyone and the
+            // bag sat on the map unmarked. Stock broadcasts this to every
+            // client rather than the owner alone (RE protocol-packages.md
+            // 2139), which is also what re-arms clients that were connected
+            // through the drop. An empty body is legitimate: it clears stale
+            // markers just as well.
+            try self.broadcastPlayerBackpack(c);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);
