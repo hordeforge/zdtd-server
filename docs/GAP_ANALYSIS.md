@@ -1201,6 +1201,23 @@ parsed, and quest offering is unwired.
   `src/wire/packages.zig` (`buildLockResponseTrader`),
   `src/server/c2s/misc.zig` lock handler trader branch
 
+- **Force-unlock on disconnect** `WORKS` `(2026-09-10)`
+  A peer that drops while holding a TE lock had its channels cleared
+  server-side (`clearLocksForPeer`), so the next player could open the
+  container - but nothing told the other clients. They watched it get locked
+  and never saw it released, so a chest read as held by a player no longer on
+  the server. Stock sends `NetPackageLockResponse` with `locking = false` and
+  `isForceUnlocked = true` from `ForceUnlockByPlayer` (IL=11) on exactly this
+  path, plus after a failed inventory transaction (RE
+  dedicated-leftovers.md:167). The `locking = false` branch routes the client
+  to `UnlockResponse(success, errorMsg, isForceUnlocked)` (ProcessPackage
+  IL=27), which reads neither the targets nor the context - so the release
+  needs only the channel and the server does not have to retain the original
+  request's target blob (it does not).
+  *Anchors:* `src/server/game/locks.zig` (`clearLocksForPeer`),
+  `src/wire/packages.zig` (`buildLockResponseForceUnlock`),
+  `../7dtd-engine-research/docs/dedicated-leftovers.md:150-170`
+
 - **TraderData v2 body encoding** `WORKS`
   `buildTraderDataStock` matches `TraderData::Read` / `ReadInventoryData` v2
   exactly, and the envelope matches `NetPackageTraderData::write`. Correct bytes
@@ -5524,7 +5541,7 @@ Bodies and handlers are **MISSING** unless noted PARTIAL (name known in RE only)
 | Craft / recipe / unlock | WORKS (2026-08-26 re-audit: InvTx crafting + workstation TEs ship; the PDF unlock list is stock-correct - stock UnlockRecipe adds to the GLOBAL CraftingManager.UnlockedRecipeList (all players share it) + sets the player's recipe cvar, the list rides every PDF (PlayerDataFile.Write IL_015E: u16 count + names), and zdtd writes the recipes.xml `always_unlocked` set (data-driven, builtin-only starter seed documented); per-player schematic learning is CLIENT-side cvars (ItemActionLearnRecipe.OnHoldingUpdate IL=121) with no C2S package, and stock quests.xml never uses RewardRecipe (0 rows), so there is no server-side per-player unlock state to miss) |
 | Toolbelt / bag / equipment slots | HAVE |
 | Item quality / mods / durability | PARTIAL (quality/meta in players.zsv; durability wear per use; mods round-trip SHIPPED 2026-08-26: the ItemValue wire captures + emits the Modifications array (stock ItemValue.Write IL=323; nested modifier items skip their own mod arrays per the isinst ItemClassModifier branch) and ZPV12 appends the 4 mod ids to each inventory slot record (stride 21), so a modded weapon survives a relog - tested at the wire + ECS-conversion + save levels. Mod attachment validation SHIPPED 2026-08-26: the item_modifiers.xml catalog (installable/blocked/modifier tags, RE items.md ParseModifier IL=63) + the item Tags + ModSlots quality curve (CalcModSlotCount IL=29) gate the C2S inventory write - the server clears mods that exceed the ModSlots budget or violate the tag gates (fail closed on unknown item/mod/missing data), scenario-tested. Remaining: per-mod quality (the round-trip is id-only; mod stats are client-side)) |
-| Loot container open/close | HAVE (LockRequest + TE stream) |
+| Loot container open/close | HAVE (LockRequest + TE stream; 2026-09-10 a departing holder's locks now force-unlock on the wire, not just server-side - see below) |
 
 #### Blocks / building
 | Package | Priority |

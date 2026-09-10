@@ -3233,6 +3233,44 @@ fn buildLockResponse(buf: []u8, req: LockRequestHead, success: bool, err_msg: []
     return w.written();
 }
 
+/// NetPackageLockResponse forcing a held lock open (RE write IL=74; field order
+/// in `buildLockResponseGrant`). `locking = false` selects the client's
+/// `LockManager.UnlockResponse(success, errorMsg, isForceUnlocked)` branch
+/// (ProcessPackage IL=27), which reads neither the targets nor the context - so
+/// this needs only the channel, and the server does not have to have kept the
+/// original request's target blob. Stock sends the same thing from
+/// `ForceUnlockByPlayer` (IL=11) on disconnect cleanup and after a failed
+/// inventory transaction.
+pub fn buildLockResponseForceUnlock(buf: []u8, channel: u16) ![]u8 {
+    var w: binary.Writer = .{ .buf = buf };
+    try w.writeBool(false); // locking = false -> UnlockResponse branch
+    try w.writeBool(true); // success
+    try w.writeString("");
+    try w.writeBool(true); // isForceUnlocked
+    try w.writeU16(channel);
+    try w.writeI32(0); // no targets: the unlock branch never reads them
+    try w.writeString("");
+    return w.written();
+}
+
+test "force-unlock lock response selects the unlock branch" {
+    // The two directions are different client calls (ProcessPackage IL=27), so
+    // `locking` is what routes it; a grant-shaped body with success=true would
+    // re-open the window instead of closing it.
+    var buf: [64]u8 = undefined;
+    const body = try buildLockResponseForceUnlock(&buf, 3);
+    var r: binary.Reader = .{ .data = body };
+    try std.testing.expectEqual(false, try r.readBool()); // locking
+    try std.testing.expectEqual(true, try r.readBool()); // success
+    var s: [8]u8 = undefined;
+    try std.testing.expectEqualStrings("", try r.readString(&s));
+    try std.testing.expectEqual(true, try r.readBool()); // isForceUnlocked
+    try std.testing.expectEqual(@as(u16, 3), try r.readU16());
+    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // target count
+    try std.testing.expectEqualStrings("", try r.readString(&s));
+    try std.testing.expectEqual(@as(usize, 0), r.remaining());
+}
+
 /// Grant a lock whose target is a trader. Stock serializes the target's lock
 /// context into the LockResponse, and the two trader-ish contexts do **not**
 /// share a layout:

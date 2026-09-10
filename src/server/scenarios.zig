@@ -4739,7 +4739,30 @@ test "scenario a locked tile entity stays locked on a different channel" {
     cap_b.clear();
     try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 1, 320, 70, 320)));
     try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[1]);
-    std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed\n", .{});
+
+    // A disconnects while still holding channel 0. Clearing the slot lets the
+    // next player take the chest, but B's client watched it get locked and
+    // nothing has told it otherwise, so the chest reads as held by a player
+    // who is no longer on the server. Stock sends the force-unlock from
+    // ForceUnlockByPlayer on exactly this path (RE dedicated-leftovers.md:167).
+    cap_b.clear();
+    const a_slot = ca.slot;
+    g.dropClientSlot(a_slot, "test-disconnect");
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[0]);
+    const unlock = cap_b.findPkgId(lock_id) orelse return error.NoForceUnlockOnDisconnect;
+    {
+        var r: binary.Reader = .{ .data = unlock };
+        // locking=false is what routes the client to UnlockResponse; a
+        // grant-shaped body would re-open the window instead of closing it.
+        try std.testing.expectEqual(false, try r.readBool());
+        try std.testing.expectEqual(true, try r.readBool()); // success
+        var s: [8]u8 = undefined;
+        _ = try r.readString(&s); // errorMsg
+        try std.testing.expectEqual(true, try r.readBool()); // isForceUnlocked
+        try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // channel 0
+    }
+
+    std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed, disconnect force-unlocks\n", .{});
 }
 
 test "scenario SetBlock beyond edit reach is rejected" {

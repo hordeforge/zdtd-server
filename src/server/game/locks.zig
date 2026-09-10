@@ -3,6 +3,7 @@
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
+const packages = @import("../../wire/packages.zig");
 
 pub fn packLockPos(x: i32, y: i32, z: i32) u64 {
     const ux: u64 = @as(u32, @bitCast(x));
@@ -44,9 +45,22 @@ pub fn clearLockSlot(self: *Game, ch: usize) void {
     self.lock_pos_key[ch] = 0;
 }
 
+/// Release every lock held by a departing peer and tell the others. Clearing
+/// server-side alone lets the next player open the container, but the clients
+/// that watched it get locked are never told it opened again: stock sends the
+/// force-unlock from `ForceUnlockByPlayer` (IL=11) on exactly this path (RE
+/// dedicated-leftovers.md:167). The holder's own peer is gone, so this goes to
+/// everyone else; `locking = false` routes the client to `UnlockResponse`,
+/// which reads only success/errorMsg/isForceUnlocked and never the targets.
 pub fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
     const ps: i32 = @intCast(peer_slot);
     for (&self.lock_channel, 0..) |*h, i| {
-        if (h.* == ps) self.clearLockSlot(i);
+        if (h.* != ps) continue;
+        self.clearLockSlot(i);
+        const body = packages.buildLockResponseForceUnlock(&self.body_buf, @intCast(i)) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        self.broadcastExcept("NetPackageLockResponse", body, peer_slot) catch {};
     }
 }
