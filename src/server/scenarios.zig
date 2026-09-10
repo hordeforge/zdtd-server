@@ -15665,3 +15665,72 @@ test "scenario mining a powered block takes its node and container with it" {
     try std.testing.expect(g.sim.power.indexOfPosition(bxx, wy, bzz) != null);
     std.debug.print("PASS block stores: contents spill on every removal path, and a new block claims its own state\n", .{});
 }
+
+test "scenario an explosion downgrade clears the old block's state and registers the new one" {
+    // The explosion damage path is a sixth block-removal path, and its
+    // downgrade arm touched neither half of the pair: the displaced block
+    // kept its node and container, and the block it turned into got none.
+    // The arm needs a real DowngradeBlock row, so the catalog carries one
+    // built here rather than depending on a stock install.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_blastdown");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_blastdown", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // A catalog with one downgrade pair. The arena owns the keys and values,
+    // and the table's deinit frees it, so nothing is allocated by the wrong
+    // owner (a mismatch here shows up only in the full suite).
+    const arena_holder = try gpa.create(std.heap.ArenaAllocator);
+    arena_holder.* = std.heap.ArenaAllocator.init(gpa);
+    var mt = maxdamage.Table.empty();
+    mt.arena_ptr = arena_holder;
+    const arena = arena_holder.allocator();
+    const strong_id: u16 = 19001;
+    const weak_id: u16 = 19002;
+    const strong_name = try arena.dupe(u8, "testWallStrong");
+    const weak_name = try arena.dupe(u8, "testWallWeak");
+    try mt.by_name.put(arena, strong_name, 100);
+    try mt.by_name.put(arena, weak_name, 100);
+    try mt.name_by_id.put(arena, strong_id, strong_name);
+    try mt.name_by_id.put(arena, weak_id, weak_name);
+    try mt.id_by_name.put(arena, strong_name, strong_id);
+    try mt.id_by_name.put(arena, weak_name, weak_id);
+    try mt.downgrade_to.put(arena, strong_name, weak_name);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+
+    const px = g.sim.transform[c.slot];
+    const bx: i32 = @as(i32, @trunc(px.x)) + 8;
+    const bz: i32 = @as(i32, @trunc(px.z)) + 8;
+    const by: i32 = @trunc(g.groundHeight(bx, bz));
+    try g.world.setBlockWorld(bx, by, bz, strong_id);
+
+    // The displaced block's state, which the downgrade arm never cleared.
+    const cpos = containers_mod.PosKey{ .x = bx, .y = by, .z = bz };
+    _ = g.containers.getOrCreate(cpos, 8, strong_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.containers.get(cpos) != null);
+
+    // Blast it: 1000 rule damage against 100 HP takes the downgrade arm.
+    const cop = g.sim.spawnZombie(@floatFromInt(bx), @floatFromInt(by), @floatFromInt(bz), 10) orelse
+        return error.TestUnexpectedResult;
+    const cop_slot = g.sim.slotOfNetId(cop) orelse return error.TestUnexpectedResult;
+    if (g.sim.explode_n >= quest_mod_components.explode_cap) return error.TestUnexpectedResult;
+    g.sim.explode_reqs[g.sim.explode_n] = .{ .slot = @intCast(cop_slot) };
+    g.sim.explode_n += 1;
+    try g.step();
+
+    // The swap happened, not a plain break: assert it before what follows,
+    // or a blast that did nothing would pass the rest by never running it.
+    try std.testing.expectEqual(weak_id, try g.world.blockWorld(bx, by, bz));
+    // Displaced block's container is gone with it.
+    try std.testing.expect(g.containers.get(cpos) == null);
+    std.debug.print("PASS blast downgrade: displaced block's state cleared on the explosion path\n", .{});
+}
