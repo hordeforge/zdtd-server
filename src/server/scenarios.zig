@@ -9733,9 +9733,45 @@ test "scenario air drop pushes a supply_drop NavObject marker" {
     try std.testing.expectEqual(@as(usize, 1), bags);
     try std.testing.expectEqual(@as(usize, 1), crates);
     var cap_c: ln_peer.Capture = .{};
-    _ = try g2.attachJoinedClient(&cap_c);
+    const cc = try g2.attachJoinedClient(&cap_c);
     try std.testing.expect(cap_c.findPkgId(nav_id) != null);
-    std.debug.print("PASS air-drop: supply_drop NavObject marker sent, replayed on join, survives restart\n", .{});
+
+    // Collecting the crate must take its marker back. The marker is a server
+    // push, so nothing on the client removes it when the entity despawns:
+    // stock broadcasts the removal from EntityAirDropCrate.OnEntityDeath (RE
+    // aidirector.md:84). Without it the map keeps an icon over bare ground
+    // for the rest of the session.
+    var crate2: ?ecs.Slot = null;
+    var k2: ecs.Slot = 0;
+    while (k2 < ecs.max_entities) : (k2 += 1) {
+        if (!g2.sim.alive[k2] or g2.sim.kind[k2] != .loot_bag) continue;
+        if (g2.sim.mask[k2].loot_bag and g2.sim.loot_bag[k2].supply_crate) {
+            crate2 = k2;
+            break;
+        }
+    }
+    const cs2 = crate2 orelse return error.NoRestoredCrate;
+    const crate_nid = g2.sim.network_id[cs2].id;
+    // Stand on the crate so the collect passes the edit-range gate.
+    const ps2 = g2.sim.playerByPeer(cc.slot).?;
+    g2.sim.transform[ps2].x = g2.sim.transform[cs2].x;
+    g2.sim.transform[ps2].y = g2.sim.transform[cs2].y;
+    g2.sim.transform[ps2].z = g2.sim.transform[cs2].z;
+    cap_c.clear();
+    var col_buf: [16]u8 = undefined;
+    const col = try packages.buildEntityCollectBody(&col_buf, crate_nid, cc.entity_id);
+    var col_frame: [64]u8 = undefined;
+    try g2.injectFramed(cc, try packages.framed(&col_frame, "NetPackageEntityCollect", col));
+    const rm_id = packages.idOf("NetPackageEntityMapMarkerRemove").?;
+    const rm = cap_c.findPkgId(rm_id) orelse return error.NoMapMarkerRemove;
+    var rr: binary.Reader = .{ .data = rm };
+    try std.testing.expectEqual(packages.map_marker_remove_by_entity, try rr.readI32());
+    try std.testing.expectEqual(crate_nid, try rr.readI32());
+    try std.testing.expectEqual(
+        @intFromEnum(packages.MapObjectType.supply_drop),
+        try rr.readI32(),
+    );
+    std.debug.print("PASS air-drop: supply_drop marker sent, replayed on join, survives restart, removed on collect\n", .{});
 }
 
 test "scenario bedroll ownership survives a restart" {

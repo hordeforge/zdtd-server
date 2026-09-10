@@ -557,8 +557,10 @@ against the RE package table; none is a live gap, for these reasons:
   non-client-visible.
 - **Needs a subsystem zdtd does not have.** `EditorPrefabInstance` and
   `EventPrefab` are editor/creative; `RegionMetaData`, `DeleteChunkData` and
-  `DecoResetWorldRect` are chunk-authoring paths; `POIWaypoint` and
-  `EntityMapMarkerRemove` are map-marker upkeep for markers we never set;
+  `DecoResetWorldRect` are chunk-authoring paths; `POIWaypoint` is map-marker
+  upkeep for markers we never set (`EntityMapMarkerRemove` sat here on the same
+  grounds until 2026-09-10, when the air-drop crate marker became one we do set;
+  it ships now, see GAP_ANALYSIS "Air-drop crate NavObject markers");
   `BlockLimitTracking` logs a discard server-side even in stock (Process
   IL=11); `OwnedEntitySync` tracks owned-entity lists (drones/turrets) zdtd
   does not keep; `EntitySetPartActive` is per-part vehicle damage state.

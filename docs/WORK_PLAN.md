@@ -877,13 +877,17 @@ likewise out of scope here.
 (`src/server/game/tick.zig`) broadcasts `NetPackageNavObject` with the
 shipped `nav_object_classes.xml` `supply_drop` class alongside the existing
 loot-bag spawn, entity_id tied to the bag's net id. Covered by scenario "air
-drop pushes a supply_drop NavObject marker". The former residual (no removal
-companion when the crate is looted or expires) is moot: the marker is an
-ENTITY-tied NavObject, and the client's NavObjectManager drops entity-tied
-nav objects when the tracked entity is removed - the bag's collect/expiry
-goes through the destroy path that sends EntityRemove, so the marker dies
-with the loot. `NetPackageEntityMapMarkerRemove` is the land-claim marker
-path (TEFeatureLandClaim / PersistentPlayerList), not the airdrop's.
+drop pushes a supply_drop NavObject marker".
+
+The residual (no removal companion when the crate is looted) was closed
+2026-09-10, and the reasoning that had dismissed it was wrong on the evidence.
+It argued the marker is entity-tied so the client's NavObjectManager drops it
+with the entity, and that `NetPackageEntityMapMarkerRemove` is the land-claim
+path only. `EntityAirDropCrate.OnEntityDeath` (IL=30) says otherwise: it calls
+`World.ObjectOnMapRemove(EnumMapObjectType 13, entityId)` **and** broadcasts
+`NetPackageEntityMapMarkerRemove(13, entityId)` on channel 192 (RE
+aidirector.md:84). Type 13 is SupplyDrop, not LandClaim. The collect path now
+sends the same removal.
 
 **Why:** `../../7dtd-engine-research/docs/map-objects.md` section 8: air-drop crates
 are stock's one server-push nav marker (`AIDirectorAirDropComponent.RefreshCrates`

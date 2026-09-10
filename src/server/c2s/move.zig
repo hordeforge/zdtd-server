@@ -95,7 +95,23 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const bx = self.sim.transform[bs].x;
                 const by = self.sim.transform[bs].y;
                 const bz = self.sim.transform[bs].z;
+                // An air-drop crate carries a server-pushed marker, so the
+                // server has to take it back: nothing on the client derives it
+                // from the entity going away. Stock does this in
+                // EntityAirDropCrate.OnEntityDeath (RE aidirector.md:84,
+                // ObjectOnMapRemove + the broadcast). Read before destroy: the
+                // slot's components are gone afterwards.
+                const was_crate = self.sim.mask[bs].loot_bag and self.sim.loot_bag[bs].supply_crate;
                 if (self.sim.alive[bs]) self.sim.destroy(bs);
+                if (was_crate) {
+                    if (packages.buildMapMarkerRemoveByEntity(
+                        self.body_buf[0..16],
+                        bag,
+                        .supply_drop,
+                    )) |mb| {
+                        try self.broadcast("NetPackageEntityMapMarkerRemove", mb);
+                    } else |_| {}
+                }
                 if (packages.buildEntityCollectBody(self.body_buf[0..16], bag, c.entity_id)) |cb| {
                     try self.broadcast("NetPackageEntityCollect", cb);
                 } else |_| {}

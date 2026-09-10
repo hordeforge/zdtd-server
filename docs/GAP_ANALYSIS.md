@@ -1090,9 +1090,20 @@ re-arms) with the population count as the quest target.
   sequence, RE protocol.md:317). `sendAirDropNavObjects` does the same, and the
   crate flag rides the save as a `zen_rec_supply_crate` tag record following its
   bag (a separate record, so older saves stay readable).
+  Collecting the crate sends the removal companion
+  (`NetPackageEntityMapMarkerRemove`, `removeByType` 0 + entityId +
+  `EnumMapObjectType.SupplyDrop` 13), which is what
+  `EntityAirDropCrate.OnEntityDeath` (IL=30) broadcasts on channel 192 (RE
+  aidirector.md:84). This was previously dismissed in WORK_PLAN as moot on the
+  theory that an entity-tied NavObject dies with its entity client-side and that
+  the removal package was the land-claim path only; the IL says the crate sends
+  type 13 explicitly, so the marker would otherwise sit over bare ground for the
+  rest of the session.
   *Anchors:* `src/server/game/join.zig` `sendAirDropNavObjects`,
-  `src/server/game/tick.zig` `tickAirDrop`, `src/server/persist.zig`
-  `zen_rec_supply_crate`, `src/ecs/components.zig` `LootBag.supply_crate`
+  `src/server/game/tick.zig` `tickAirDrop`, `src/server/c2s/move.zig`
+  (collect path), `src/wire/packages.zig` `buildMapMarkerRemoveByEntity`,
+  `src/server/persist.zig` `zen_rec_supply_crate`, `src/ecs/components.zig`
+  `LootBag.supply_crate`
 
 - **Client-known-name gate before writing a quest to the wire** `PARTIAL → CLOSED (2026-08-07)`
   `isStockClientQuestName` now accepts every stock quest-name family the
