@@ -9690,7 +9690,52 @@ test "scenario air drop pushes a supply_drop NavObject marker" {
     g.tickAirDrop();
     const nav_id = packages.idOf("NetPackageNavObject").?;
     try std.testing.expect(cap.findPkgId(nav_id) != null);
-    std.debug.print("PASS air-drop: supply_drop NavObject marker sent\n", .{});
+
+    // The crate marker is a server push (RE map-objects.md:306), not derived
+    // by the client from synced state, so a player who joins after the drop
+    // gets it only if the join bundle re-registers the live crates. Stock does
+    // exactly that as join step 11 (RefreshCrates, RE protocol.md:317). This
+    // went out once at drop time, so a later joiner saw an unmarked crate.
+    var cap_b: ln_peer.Capture = .{};
+    _ = try g.attachJoinedClient(&cap_b);
+    try std.testing.expect(cap_b.findPkgId(nav_id) != null);
+
+    // The crate bag persists, so the marker has to survive with it: a restart
+    // otherwise leaves a full crate on the map that nothing points at. Give
+    // the crate contents by hand: without a stock install the airDrop loot list
+    // rolls nothing, and an empty bag is deliberately not persisted.
+    var crate_slot: ?ecs.Slot = null;
+    {
+        var k: ecs.Slot = 0;
+        while (k < ecs.max_entities) : (k += 1) {
+            if (!g.sim.alive[k] or g.sim.kind[k] != .loot_bag) continue;
+            if (!g.sim.mask[k].loot_bag or !g.sim.loot_bag[k].supply_crate) continue;
+            crate_slot = k;
+            break;
+        }
+    }
+    const cs = crate_slot orelse return error.NoSupplyCrateSpawned;
+    g.sim.inventory[cs].slots[0] = .{ .item_id = 7, .count = 3, .quality = 1 };
+    _ = g.saveAllStores();
+    const g2 = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g2.deinit();
+        gpa.destroy(g2);
+    }
+    var crates: usize = 0;
+    var bags: usize = 0;
+    var si: ecs.Slot = 0;
+    while (si < ecs.max_entities) : (si += 1) {
+        if (!g2.sim.alive[si] or g2.sim.kind[si] != .loot_bag) continue;
+        bags += 1;
+        if (g2.sim.mask[si].loot_bag and g2.sim.loot_bag[si].supply_crate) crates += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), bags);
+    try std.testing.expectEqual(@as(usize, 1), crates);
+    var cap_c: ln_peer.Capture = .{};
+    _ = try g2.attachJoinedClient(&cap_c);
+    try std.testing.expect(cap_c.findPkgId(nav_id) != null);
+    std.debug.print("PASS air-drop: supply_drop NavObject marker sent, replayed on join, survives restart\n", .{});
 }
 
 test "scenario bedroll ownership survives a restart" {

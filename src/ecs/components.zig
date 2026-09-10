@@ -976,6 +976,13 @@ pub const LootBag = struct {
     /// Stock EntityItem.nextDistractionTick: 20-tick broadcast cadence
     /// (tickDistraction, asm.il EntityItem:1341-1349).
     next_distraction_tick: i32 = 0,
+    /// Air-drop supply crate: carries a server-pushed `supply_drop` nav marker
+    /// for as long as the bag lives. Stock re-registers the crate markers for
+    /// each joining player (`AIDirectorAirDropComponent.RefreshCrates(entityId)`
+    /// at join step 11, RE protocol.md:317), so the flag is what lets the join
+    /// bundle find the live crates. A death bag is not one of these: its marker
+    /// rides the owner's backpack list instead.
+    supply_crate: bool = false,
 };
 
 pub const Sleeper = struct {

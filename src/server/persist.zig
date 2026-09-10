@@ -1267,10 +1267,19 @@ const power_record_bytes: usize = 1 + 12 + 4 + 1 + 1 + 4;
 /// this every one of them died at shutdown.
 const zen_rec_bag: u8 = 7;
 
+/// Marks the preceding bag record as an air-drop supply crate. Its `supply_drop`
+/// nav marker is a server push (RE map-objects.md:306) re-registered for each
+/// joining player, so without this a crate restored from disk sat on the map
+/// full of loot with nothing pointing at it. A separate record rather than a
+/// field on the bag: old saves stay readable, exactly as `zen_rec_owner` tags
+/// the turret record before it.
+const zen_rec_supply_crate: u8 = 8;
+
 /// Bytes a bag record occupies at most: type byte, three f32 coordinates,
-/// slot count, then a v12-shaped slot per filled slot.
+/// slot count, a v12-shaped slot per filled slot, and the one-byte
+/// supply-crate tag that may follow it.
 const bag_record_max: usize =
-    1 + 12 + 1 + ecs.components.max_inv_slots * zpvSlotStride(12);
+    1 + 12 + 1 + ecs.components.max_inv_slots * zpvSlotStride(12) + 1;
 
 /// Write one inventory slot in the v12 shape. Shared so a second store
 /// persisting InvSlots cannot drift into its own narrower encoding.
@@ -1383,6 +1392,10 @@ pub fn saveEntities(self: *Game) !void {
                 try writeSaveSlot(&w, sl);
             }
             count += 1;
+            if (self.sim.loot_bag[i].supply_crate) {
+                try w.writeByte(zen_rec_supply_crate);
+                count += 1;
+            }
         }
     }
     // Power wire edges by endpoint position (node ids are per-session).
@@ -1479,11 +1492,14 @@ pub fn loadEntities(self: *Game) !void {
     var last_vehicle: ?ecs.Slot = null;
     // Same carry for the owner record, which follows the turret it names.
     var last_turret: ?ecs.Slot = null;
+    // Same carry for the supply-crate tag, which follows the bag it marks.
+    var last_bag: ?ecs.Slot = null;
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const rec_type = r.readByte() catch return error.Truncated;
         if (rec_type != zen_rec_basket) last_vehicle = null;
         if (rec_type != zen_rec_owner) last_turret = null;
+        if (rec_type != zen_rec_supply_crate) last_bag = null;
         switch (rec_type) {
             1 => {
                 // VehicleKind is an exhaustive enum(u8), so @enumFromInt panics
@@ -1606,9 +1622,15 @@ pub fn loadEntities(self: *Game) !void {
                         // player record's own state, not from here: bags carry
                         // no owner, so a restored bag is anyone's to collect,
                         // which is what stock's unowned ground bag is.
-                        _ = nid;
+                        last_bag = self.sim.slotOfNetId(nid);
                     }
                 }
+            },
+            zen_rec_supply_crate => {
+                // Tags the bag written just before it. A tag with no bag ahead
+                // of it means the bag failed to spawn (entity cap), so there is
+                // nothing to mark and the record is simply consumed.
+                if (last_bag) |bs| self.sim.loot_bag[bs].supply_crate = true;
             },
             else => return error.BadRecord,
         }

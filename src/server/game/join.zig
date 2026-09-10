@@ -512,6 +512,37 @@ pub fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, p
     }
 }
 
+/// Re-register the live air-drop crates for a joining player. Stock does this
+/// as its own join step (`AIDirectorAirDropComponent.RefreshCrates(entityId)`,
+/// step 11 of the join sequence, RE protocol.md:317) because the crate marker
+/// is a server push (RE map-objects.md:306), not client-derived like the quest
+/// and bedroll markers. zdtd sent it only at the moment of the drop, so a
+/// player who joined afterwards - or anyone at all after a restart, since the
+/// crate bag persists in `entities.zen` and the marker does not - saw no marker
+/// over a crate that was still sitting there full of loot.
+pub fn sendAirDropNavObjects(self: *Game, peer: *ln_peer.Peer) !void {
+    var i: ecs.Slot = 0;
+    while (i < ecs.max_entities) : (i += 1) {
+        if (!self.sim.alive[i] or self.sim.kind[i] != .loot_bag) continue;
+        if (!self.sim.mask[i].loot_bag or !self.sim.loot_bag[i].supply_crate) continue;
+        if (!self.sim.mask[i].network_id or !self.sim.mask[i].transform) continue;
+        const t = self.sim.transform[i];
+        const body = packages.buildNavObjectAdd(
+            self.body_buf[8192..8704],
+            "supply_drop",
+            "",
+            t.x,
+            t.y,
+            t.z,
+            @intCast(self.sim.network_id[i].id),
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        try self.sendGame(peer, "NetPackageNavObject", body);
+    }
+}
+
 /// Nearby non-player entities using stock NetPackageEntitySpawn + ECD networkWrite.
 /// Interest radius matches tick-path spawn-on-approach (`interest.inRange` + view_radius).
 pub fn sendStockEntitySpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, pz: i32) !void {

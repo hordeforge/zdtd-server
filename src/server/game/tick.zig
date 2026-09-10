@@ -402,6 +402,7 @@ pub fn tickAirDrop(self: *Game) void {
             // name needed). entity_id ties the marker to the bag so a future
             // NetPackageEntityMapMarkerRemove on crate death has something to
             // reference; not implemented yet, so the marker outlives the loot.
+            if (self.sim.slotOfNetId(bag_nid)) |bi| self.sim.loot_bag[bi].supply_crate = true;
             if (packages.buildNavObjectAdd(self.body_buf[8192..8704], "supply_drop", "", t.x, t.y + 2, t.z, @intCast(bag_nid))) |nb| {
                 self.broadcast("NetPackageNavObject", nb) catch {};
             } else |_| {}

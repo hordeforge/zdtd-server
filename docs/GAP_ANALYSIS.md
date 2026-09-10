@@ -1079,6 +1079,21 @@ re-arms) with the population count as the quest target.
   `src/assets/quests.zig` `buildPhaseGraph` (nav_object extraction),
   `asm.il:959379-959389`
 
+- **Air-drop crate NavObject markers** `WORKS` `(2026-09-10)`
+  The crate marker is one of the two server-push marker cases (RE
+  map-objects.md:306); every other marker family is client-derived from synced
+  state. zdtd pushed it once at the moment of the drop, so a player who joined
+  afterwards saw an unmarked crate, and after a restart nobody had a marker at
+  all: the crate bag persists in `entities.zen`, the marker did not. Stock
+  re-registers the live crates per joining player as its own join step
+  (`AIDirectorAirDropComponent.RefreshCrates(entityId)`, step 11 of the join
+  sequence, RE protocol.md:317). `sendAirDropNavObjects` does the same, and the
+  crate flag rides the save as a `zen_rec_supply_crate` tag record following its
+  bag (a separate record, so older saves stay readable).
+  *Anchors:* `src/server/game/join.zig` `sendAirDropNavObjects`,
+  `src/server/game/tick.zig` `tickAirDrop`, `src/server/persist.zig`
+  `zen_rec_supply_crate`, `src/ecs/components.zig` `LootBag.supply_crate`
+
 - **Client-known-name gate before writing a quest to the wire** `PARTIAL → CLOSED (2026-08-07)`
   `isStockClientQuestName` now accepts every stock quest-name family the
   client's quests.xml knows (`quest_`, `tier`, `intro_`, `test_`,

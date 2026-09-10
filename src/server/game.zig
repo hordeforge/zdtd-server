@@ -2646,6 +2646,10 @@ pub const Game = struct {
             }
             try self.sendItemIdMapping(peer);
             try self.sendQuestNavObjects(peer, c.slot, eid);
+            // Stock re-registers the live crates per joining player
+            // (RefreshCrates, join step 11); the crate marker is a server push,
+            // so nothing else would ever put it on this client's map.
+            try self.sendAirDropNavObjects(peer);
             try self.sendHoldingOnly(peer, c);
             try self.sendPlayerVitals(peer, c);
             // Latch IsSpawned before heavy chunk/entity stream (playtest saw
@@ -2725,6 +2729,7 @@ pub const Game = struct {
             try self.sendHoldingOnly(peer, c);
             try self.sendPlayerVitals(peer, c);
             try self.sendQuestNavObjects(peer, c.slot, eid);
+            try self.sendAirDropNavObjects(peer);
         }
         const wt = try packages.buildWorldTimeBody(self.body_buf[1024..1040], self.sim.director.clock.worldTimeBits());
         try self.sendGame(peer, "NetPackageWorldTime", wt);
@@ -2812,6 +2817,11 @@ pub const Game = struct {
     /// Map markers for active journal quests (stock class names only).
     fn sendQuestNavObjects(self: *Game, peer: *ln_peer.Peer, peer_slot: usize, player_eid: i32) !void {
         return game_join.sendQuestNavObjects(self, peer, peer_slot, player_eid);
+    }
+
+    /// Markers for the air-drop crates still on the map (game/join.zig).
+    pub fn sendAirDropNavObjects(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_join.sendAirDropNavObjects(self, peer);
     }
 
     /// True when quest id is likely present in stock client QuestClass.
