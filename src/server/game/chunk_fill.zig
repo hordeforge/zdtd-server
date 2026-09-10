@@ -320,6 +320,18 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                 // Authored Light TEs (type 18): store the parsed
                 // intensity/range/colour so the chunk stream emits the light.
                 if (te_type == te_types.light) {
+                    // The authored light is only real while its block is: a
+                    // destroyed lamp clears the store entry, but te_scanned is
+                    // per-session, so the next restart re-scanned this prefab
+                    // and put the lamp back on a cell that is now air. Same
+                    // block read the storage branch below does.
+                    const llx = wx - tc.base_x;
+                    const llz = wz - tc.base_z;
+                    const lblock: u16 = if (llx >= 0 and llx < 16 and llz >= 0 and llz < 16 and wy >= 0 and wy < tc.ch.y_dim)
+                        world_store.typeId(tc.ch.blocks.?[tc.ch.blockIndex(llx, wy, llz)])
+                    else
+                        0;
+                    if (lblock == 0) return;
                     const lpos = light_te_mod.PosKey{ .x = wx, .y = wy, .z = wz };
                     if (tc.g.light_te.get(lpos) == null) {
                         if (tc.g.light_te.getOrCreate(lpos)) |lt| {

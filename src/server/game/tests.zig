@@ -13,6 +13,7 @@ const platform_user = @import("../../wire/platform_user.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
+const light_te_mod = @import("../../world/light_te.zig");
 const ecs = @import("../../ecs/root.zig");
 const systems = @import("../../ecs/systems.zig");
 const game_hooks = @import("../game/hooks.zig");
@@ -4322,4 +4323,58 @@ test "a generator's remaining fuel survives a restart instead of refilling" {
         // state over what the sim has done since.
         try std.testing.expectEqual(@as(usize, 0), g.sim.power.pending_state_n);
     }
+}
+
+test "a destroyed authored light does not come back on the next TE scan" {
+    // Lights are rebuilt from prefab TE data on the chunk scan, and
+    // `te_scanned` is per-session. So a lamp a player destroyed cleared its
+    // store entry, and the next restart re-scanned the prefab and put it
+    // straight back on a cell that is now air - the chunk stream then shipped
+    // a light for a block nobody can see.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/light_rescan", 0, .{
+        .map_dir = map,
+        .game_dir = game_dir,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    // Find a chunk whose scan produces at least one light.
+    var found: ?struct { cx: i32, cz: i32, x: i32, y: i32, z: i32 } = null;
+    const pf = if (g.world.prefabs) |*p| p else return error.SkipZigTest;
+    for (pf.items) |d| {
+        if (world_store.prefabs.isPart(d.name)) continue;
+        const cx = @divFloor(d.x, 16);
+        const cz = @divFloor(d.z, 16);
+        const ch = g.world.getOrCreate(.{ .x = cx, .z = cz }) catch continue;
+        g.ensurePrefabStorageInChunk(ch, cx, cz);
+        var li: usize = 0;
+        while (li < light_te_mod.max_lights) : (li += 1) {
+            if (!g.light_te.used[li]) continue;
+            const l = &g.light_te.items[li];
+            if (@divFloor(l.x, 16) != cx or @divFloor(l.z, 16) != cz) continue;
+            found = .{ .cx = cx, .cz = cz, .x = l.x, .y = l.y, .z = l.z };
+            break;
+        }
+        if (found != null) break;
+    }
+    const f = found orelse return error.SkipZigTest;
+    const lpos = light_te_mod.PosKey{ .x = f.x, .y = f.y, .z = f.z };
+    try std.testing.expect(g.light_te.get(lpos) != null);
+
+    // Destroy the lamp the way any removal path does, then force a re-scan
+    // the way a restart does (te_scanned is runtime state).
+    try g.world.setBlockWorld(f.x, f.y, f.z, 0);
+    g.noteBlockRemoved(f.x, f.y, f.z, 0);
+    try std.testing.expect(g.light_te.get(lpos) == null);
+
+    const ch2 = try g.world.getOrCreate(.{ .x = f.cx, .z = f.cz });
+    ch2.te_scanned = false;
+    g.ensurePrefabStorageInChunk(ch2, f.cx, f.cz);
+    try std.testing.expect(g.light_te.get(lpos) == null);
 }
