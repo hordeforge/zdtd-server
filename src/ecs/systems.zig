@@ -909,6 +909,28 @@ fn failQuest(w: *World, ps: Slot, s: *c.QuestProgress) void {
 }
 
 pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
+    return questAcceptWithCode(w, peer_slot, def_id, 0, .{});
+}
+
+/// Accept `def_id` into `peer_slot`'s journal with an explicit stock quest
+/// code and POI placement.
+///
+/// `quest_code == 0` allocates the next code (what a first accept does);
+/// nonzero adopts the caller's code, which is how a party member's copy of a
+/// SHARED quest keeps the owner's code. Stock sends that code to every member
+/// in `NetPackageSharedQuest` (`SharedQuestData.questCode`,
+/// Quest.CodeAssignment = hash(unscaledTime, ID, owner entityId, giverId) -
+/// Quest::SetupQuestCode IL=48), and stock resolves shared-quest traffic by
+/// code alone: `QuestJournal.GetSharedQuest(Int32 questCode)` (IL=33) for
+/// add/remove_shared_member and `RemoveSharedQuestByOwner(Int32 questCode)`
+/// for the owner's remove fan-out. A member entry with a freshly allocated
+/// code could never satisfy those lookups, so the member's client saw the
+/// quest advance while the server journal silently stayed put.
+///
+/// `poi` reuses the owner's placement when valid so both copies of a shared
+/// quest sit in the same POI (the owner's client sends that POI's rect in the
+/// share packet); an unset rect falls through to the normal selection.
+pub fn questAcceptWithCode(w: *World, peer_slot: usize, def_id: u16, quest_code: i32, poi: c.PoiRect) bool {
     const ps = w.playerByPeer(peer_slot) orelse return false;
     if (!w.mask[ps].journal) return false;
     if (w.catalog.byId(def_id) == null) return false;
@@ -922,8 +944,11 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
     var j = &w.journal[ps];
     if (j.hasActive(def_id) or j.hasFailed(def_id)) return false;
     const s = j.findFree() orelse return false;
-    const code = w.next_quest_code;
-    w.next_quest_code +%= 1;
+    const code = if (quest_code != 0) quest_code else blk: {
+        const fresh = w.next_quest_code;
+        w.next_quest_code +%= 1;
+        break :blk fresh;
+    };
     s.* = .{
         .def_id = def_id,
         .quest_code = code,
@@ -932,6 +957,7 @@ pub fn questAccept(w: *World, peer_slot: usize, def_id: u16) bool {
         .ready_turn_in = false,
         .progress = 0,
         .phase = 1,
+        .poi = poi,
     };
     const d = w.catalog.byId(def_id).?;
     // Place the quest in a POI so rally objectives and the client's POI marker

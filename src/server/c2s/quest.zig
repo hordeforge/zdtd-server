@@ -94,6 +94,22 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // an id nobody holds.
                 for (&self.clients) |*cl| {
                     if (!cl.joined or cl.entity_id != with) continue;
+                    // Give the target a journal entry carrying the OWNER's
+                    // stock quest code and placement. The share packet already
+                    // told the target's client that code (SharedQuestData.
+                    // questCode), and stock resolves shared-quest traffic by
+                    // code alone (QuestJournal.GetSharedQuest IL=33,
+                    // RemoveSharedQuestByOwner IL=54), so an entry allocated
+                    // with a fresh code would leave the member's objective
+                    // mirrors unresolvable. Placement rides the sender's own
+                    // copy: both instances run the same POI.
+                    if (self.sim.catalog.byName(head.questId())) |d| {
+                        var poi: ecs.components.PoiRect = .{};
+                        if (systems.questFindByCode(&self.sim, c.slot, head.quest_code)) |own| poi = own.poi;
+                        if (systems.questAcceptWithCode(&self.sim, cl.slot, d.id, head.quest_code, poi)) {
+                            if (systems.questFindByCode(&self.sim, cl.slot, head.quest_code)) |ms| ms.is_shared = true;
+                        }
+                    }
                     if (cl.peer) |tp| try self.sendGame(tp, "NetPackageSharedQuest", body);
                     break;
                 }

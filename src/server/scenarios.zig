@@ -9695,6 +9695,78 @@ test "scenario party shared quest: accept shares to the party, disconnect remove
     try std.testing.expectEqual(a_entity, rh.shared_by_entity_id);
 }
 
+test "scenario shared quest member journal carries the owner code" {
+    // Stock resolves shared-quest traffic by quest code alone on both ends
+    // (QuestJournal.GetSharedQuest IL=33, RemoveSharedQuestByOwner IL=54), and
+    // the share packet already told the member's client the owner's code
+    // (SharedQuestData.questCode). The member's server journal therefore has
+    // to hold an entry under that same code, or every objective update the
+    // member's client sends resolves to nothing and the server journal never
+    // moves with the quest the player is actually running.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    var fbuf: [128]u8 = undefined;
+    var pbody: [32]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
+
+    // A accepts a non-starter def (the join already granted the starter); the
+    // accept shares it to the party.
+    var def_id: u16 = 0;
+    for (g.sim.catalog.defs) |d| {
+        if (d.id != g.sim.catalog.starter_id) {
+            def_id = d.id;
+            break;
+        }
+    }
+    try std.testing.expect(def_id != 0);
+    try std.testing.expect(g.acceptQuestFor(ca, def_id));
+
+    const owner = systems.questFindActive(&g.sim, ca.slot, def_id) orelse return error.TestUnexpectedResult;
+    const owner_code = owner.quest_code;
+    try std.testing.expect(owner_code != 0);
+
+    // B's own journal holds the shared copy under A's code, flagged shared.
+    const member = systems.questFindActive(&g.sim, cb.slot, def_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(owner_code, member.quest_code);
+    try std.testing.expect(member.is_shared);
+    // Placement matches the owner's instance, so both copies agree on the POI.
+    try std.testing.expectEqual(owner.poi.x, member.poi.x);
+    try std.testing.expectEqual(owner.poi.z, member.poi.z);
+
+    // B's client reports the block objective with the code it was handed; the
+    // member's server journal advances through that code.
+    var ob: [32]u8 = undefined;
+    var w = binary.Writer{ .buf = &ob };
+    try w.writeI32(cb.entity_id);
+    try w.writeI32(owner_code);
+    try w.writeByte(2); // block_activated
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try w.writeI32(0);
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageQuestObjectiveUpdate", w.written()));
+    const moved = systems.questFindByCode(&g.sim, cb.slot, owner_code) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(moved.active);
+    // The owner's copy is untouched by the member's report alone.
+    const still = systems.questFindActive(&g.sim, ca.slot, def_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(owner_code, still.quest_code);
+    std.debug.print("PASS shared-quest-code: member journal rides the owner quest code\n", .{});
+}
+
 test "scenario shared quest member add/remove reach the owner, not the sender" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

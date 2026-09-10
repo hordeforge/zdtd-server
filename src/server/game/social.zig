@@ -320,6 +320,24 @@ pub fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
     for (p.members[0..p.n]) |m| {
         if (m == c.entity_id) continue;
         if (clientByEntityId(self, m)) |member| {
+            // The member's copy rides the OWNER's stock quest code and POI
+            // placement. Stock's shared-quest traffic is code-keyed on both
+            // ends (QuestJournal.GetSharedQuest / RemoveSharedQuestByOwner),
+            // and the code is what the share packet already told the member's
+            // client to use, so the server journal entry has to match it or
+            // the member's objective updates resolve nowhere (see
+            // systems.questAcceptWithCode).
+            if (self.sim.playerByPeer(member.slot)) |ms| {
+                if (self.sim.mask[ms].journal) {
+                    _ = systems.questAcceptWithCode(&self.sim, member.slot, def_id, q.quest_code, q.poi);
+                    for (&self.sim.journal[ms].slots) |*mslot| {
+                        if (mslot.active and mslot.quest_code == q.quest_code) {
+                            mslot.is_shared = true;
+                            break;
+                        }
+                    }
+                }
+            }
             if (member.peer) |mp| {
                 var qb: [256]u8 = undefined;
                 const body = packages.stock_quest.buildSharedQuestShare(&qb, .{

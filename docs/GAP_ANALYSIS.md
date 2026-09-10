@@ -959,7 +959,19 @@ re-arms) with the population count as the quest target.
   All four heads parsed with truncation rejected (round-trip and truncation
   tests); accepted into the server journal; removal matched by QuestCode first
   with a def_id fallback; body forwarded to the named peer or broadcast.
-  *Anchors:* `src/wire/stock_quest.zig:328`, `src/server/game.zig`,
+  Member-journal code alignment closed 2026-09-11: stock keys shared-quest
+  traffic by quest code alone (`QuestJournal.GetSharedQuest` IL=33,
+  `RemoveSharedQuestByOwner` IL=54) and hands that code to the member's client
+  in `SharedQuestData.questCode` (`Quest::SetupQuestCode` IL=48 hashes
+  unscaledTime + ID + owner entityId + giverId), so the member's server journal
+  entry has to carry the OWNER's code and POI rect or every objective mirror
+  the member's client sends resolves nowhere while the client's quest advances.
+  `systems.questAcceptWithCode` allocates a fresh code only when none is given;
+  `Game.shareQuestWithParty` and the C2S `share_quest` handler both create the
+  member entry under the owner's code (`is_shared`). Scenario
+  `shared quest member journal carries the owner code`.
+  *Anchors:* `src/wire/stock_quest.zig:328`, `src/ecs/systems.zig`,
+  `src/server/game/social.zig`, `src/server/c2s/quest.zig`,
   `src/wire/stock_quest.zig:559`
 
 - **NetPackageQuestObjectiveUpdate handling** `WORKS` (2026-08-25):
