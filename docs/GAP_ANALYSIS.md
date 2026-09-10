@@ -358,9 +358,12 @@ area and the concrete work.
     owner's login name keys the restore, re-mapped to the new entity id on
     login; the preserved seen-day keeps offline expiry honest. Test covers
     keystone break, offline expiry, online-never-expires and the restart +
-    re-map round trip. Still open: the client lpBlocks overlay
-    (`src/server/game.zig` removeClaimAt/expireClaims,
-    `src/wire/stock_inv.zig:846`).
+    re-map round trip. Claim markers go off the wire with the claim: every
+    removal path routes through `dropClaimRow`
+    (`src/server/game/world.zig`), which broadcasts
+    `NetPackageEntityMapMarkerRemove` by position with `EnumMapObjectType`
+    `LandClaim` 15, matching `TEFeatureLandClaim.OnDestroy` (IL=28); the login
+    `PersistentPlayerState.lpBlocks` list carries the surviving claims.
 
 11. **DONE 2026-08-06.** Blood moon / world: fix the night window and the day
     encoding. `isBloodMoonNight` mirrors stock `IsBloodMoonTime`: dusk on

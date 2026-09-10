@@ -82,15 +82,37 @@ pub fn registerClaim(self: *Game, x: i32, y: i32, z: i32, owner_entity: i32) voi
     self.land_claims_n += 1;
 }
 
-/// A destroyed keystone no longer protects: drop the claim entirely. The
-/// in-memory-only table is a known gap (claims do not persist across a
-/// restart); removal still matters for the running session.
+/// Drop one claim row and take its map marker off the wire. Every claim
+/// removal routes here: the block-destroy path, offline expiry, and the
+/// wipeplayer release. Stock's TEFeatureLandClaim.OnDestroy (IL=28) calls
+/// PersistentPlayerList.RemoveLandProtectionBlock and then broadcasts
+/// NetPackageEntityMapMarkerRemove by position with EnumMapObjectType 15. The
+/// login PersistentPlayerState is rebuilt from land_claims, so dropping the row
+/// covers future joins; the broadcast covers clients already online, which
+/// otherwise keep the protection square until they rejoin.
+fn dropClaimRow(self: *Game, i: usize) void {
+    const x = self.land_claims[i].x;
+    const y = self.land_claims[i].y;
+    const z = self.land_claims[i].z;
+    self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
+    self.land_claims_n -= 1;
+    if (packages.buildMapMarkerRemoveByPosition(
+        self.body_buf[0..],
+        @floatFromInt(x),
+        @floatFromInt(y),
+        @floatFromInt(z),
+        .land_claim,
+    )) |mb| {
+        self.broadcast("NetPackageEntityMapMarkerRemove", mb) catch {};
+    } else |_| {}
+}
+
+/// A destroyed keystone no longer protects: drop the claim and its marker.
 pub fn removeClaimAt(self: *Game, x: i32, y: i32, z: i32) void {
     var i: usize = 0;
     while (i < self.land_claims_n) : (i += 1) {
         if (self.land_claims[i].x == x and self.land_claims[i].y == y and self.land_claims[i].z == z) {
-            self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-            self.land_claims_n -= 1;
+            dropClaimRow(self, i);
             return;
         }
     }
@@ -154,8 +176,7 @@ pub fn dropClaimsForName(self: *Game, name: []const u8) u32 {
     while (i < self.land_claims_n) {
         const claim = &self.land_claims[i];
         if (claim.owner_name_len == name.len and std.mem.eql(u8, claim.owner_name[0..claim.owner_name_len], name)) {
-            self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-            self.land_claims_n -= 1;
+            dropClaimRow(self, i);
             dropped += 1;
         } else {
             i += 1;
@@ -184,8 +205,7 @@ pub fn expireClaims(self: *Game) void {
     while (i < self.land_claims_n) {
         const claim = &self.land_claims[i];
         if (!claim.owner_online and (day - claim.owner_seen_day) > self.land_claim_expiry_days) {
-            self.land_claims[i] = self.land_claims[self.land_claims_n - 1];
-            self.land_claims_n -= 1;
+            dropClaimRow(self, i);
         } else {
             i += 1;
         }

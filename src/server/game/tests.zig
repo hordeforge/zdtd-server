@@ -1123,18 +1123,40 @@ test "land claim removed when keystone breaks and expires offline" {
     g.sim.director.clock.day = 30;
     g.registerClaim(250, 70, 250, cl.entity_id);
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-    // Breaking a non-keystone block does not remove the claim.
+    // Breaking a non-keystone block does not remove the claim, so it must not
+    // take a marker off the wire either.
+    cap.clear();
     g.removeClaimAt(249, 70, 250);
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
-    // Breaking the keystone removes it (claim disappears with its block).
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) == null);
+    // Breaking the keystone removes it and takes the map marker off the wire
+    // (TEFeatureLandClaim.OnDestroy IL=28 broadcasts the remove-by-position
+    // form with EnumMapObjectType 15).
+    cap.clear();
     g.removeClaimAt(250, 70, 250);
     try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
-    // Expiry: an offline claim past the window is released on the day roll.
+    {
+        const rm = cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqual(packages.map_marker_remove_by_position, std.mem.readInt(i32, rm[0..4], .little));
+        try std.testing.expectEqual(@as(f32, 250), @as(f32, @bitCast(std.mem.readInt(u32, rm[4..8], .little))));
+        try std.testing.expectEqual(@as(f32, 70), @as(f32, @bitCast(std.mem.readInt(u32, rm[8..12], .little))));
+        try std.testing.expectEqual(@as(f32, 250), @as(f32, @bitCast(std.mem.readInt(u32, rm[12..16], .little))));
+        try std.testing.expectEqual(
+            @intFromEnum(packages.MapObjectType.land_claim),
+            std.mem.readInt(i32, rm[16..20], .little),
+        );
+    }
+    // Expiry: an offline claim past the window is released on the day roll,
+    // and every removal path (expiry here, keystone break above) takes the
+    // marker off the wire through the same hook.
     g.registerClaim(250, 70, 250, cl.entity_id);
     g.markClaimsForEntity(cl.entity_id, false);
     g.land_claims[0].owner_seen_day = g.sim.director.clock.day - 10;
+    cap.clear();
     g.expireClaims();
     try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) != null);
     // Expiry disabled (0) keeps even a very old offline claim.
     g.registerClaim(250, 70, 250, cl.entity_id);
     g.land_claim_expiry_days = 0;
@@ -1156,7 +1178,9 @@ test "land claim removed when keystone breaks and expires offline" {
     @memcpy(owner[0..on], g.land_claims[0].owner_name[0..on]);
     try std.testing.expectEqual(@as(u32, 0), g.dropClaimsForName("someone-else"));
     try std.testing.expectEqual(@as(usize, 1), g.land_claims_n);
+    cap.clear();
     try std.testing.expectEqual(@as(u32, 1), g.dropClaimsForName(owner[0..on]));
+    try std.testing.expect(cap.findPkgId(packages.idOf("NetPackageEntityMapMarkerRemove").?) != null);
     try std.testing.expectEqual(@as(usize, 0), g.land_claims_n);
 }
 
