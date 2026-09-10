@@ -2141,7 +2141,11 @@ can walk into every POI but none of them is the building TFP authored.
   remover at all, and the light rebuild on the chunk TE scan had to be gated
   on the block still existing - `te_scanned` is per-session, so a restart
   re-scanned the prefab and put a destroyed lamp back on a cell that is now
-  air, so a destroyed lamp kept being streamed to every player who
+  air. The prefab container branch had the same hole and worse: it fell back
+  to the seed-chest id on an empty cell, so every prefab chest a player mined
+  out returned on the next restart with a fresh loot roll. Both branches now
+  skip a cell whose block is gone; the seed chest keeps its own placement in
+  init_world and never needed that fallback, so a destroyed lamp kept being streamed to every player who
   joined later and a destroyed forge kept broadcasting and saving its fuel and
   craft queue) plus the ground spill of whatever the block held: container
   slots, workstation groups and a vending machine's stock rows. A machine's

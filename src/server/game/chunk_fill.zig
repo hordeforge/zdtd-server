@@ -364,13 +364,18 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                     world_store.typeId(tc.ch.blocks.?[tc.ch.blockIndex(lx, wy, lz)])
                 else
                     0;
-                const id: u16 = if (block_id != 0) block_id else replicate_te.seedChestBlockId(tc.g);
-                const cont = tc.g.containers.getOrCreate(pos, 8, id) orelse return;
+                // The prefab container is only real while its block is. The
+                // scan re-runs after a restart (te_scanned is per-session), so
+                // creating one on an empty cell resurrected every prefab chest
+                // a player had mined out. The seed chest does not need this
+                // fallback: init_world places its own block and container.
+                if (block_id == 0) return;
+                const cont = tc.g.containers.getOrCreate(pos, 8, block_id) orelse return;
                 // World container (prefab TE, not player-placed).
                 cont.player_storage = false;
                 if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
                     // Fail closed (audit A31): no LootList, no invented loot.
-                    if (tc.g.maxdamage.lootListFor(id)) |ll| {
+                    if (tc.g.maxdamage.lootListFor(block_id)) |ll| {
                         tc.g.fillContainerFromLoot(cont, ll, lootSeedAt(wx, wy, wz));
                     }
                 }

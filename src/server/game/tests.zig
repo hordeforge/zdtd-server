@@ -4378,3 +4378,59 @@ test "a destroyed authored light does not come back on the next TE scan" {
     g.ensurePrefabStorageInChunk(ch2, f.cx, f.cz);
     try std.testing.expect(g.light_te.get(lpos) == null);
 }
+
+test "a mined-out prefab container does not come back on the next TE scan" {
+    // Same shape as the light case: prefab containers are rebuilt from TE data
+    // by the chunk scan, `te_scanned` is per-session, and the branch created
+    // one even when the cell held no block (falling back to the seed-chest id).
+    // So every prefab chest a player mined out returned on the next restart,
+    // with a fresh loot roll. The seed chest has its own placement in
+    // init_world and does not need that fallback.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    io_fs.mkdirPath(".zdtd_cfg_cache");
+    const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/cont_rescan", 0, .{
+        .map_dir = map,
+        .game_dir = game_dir,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    // Find a chunk whose scan produces a prefab container, rather than
+    // assuming a particular POI holds one.
+    var found: ?struct { cx: i32, cz: i32, pos: containers_mod.PosKey } = null;
+    const pf = if (g.world.prefabs) |*p| p else return error.SkipZigTest;
+    for (pf.items) |d| {
+        if (world_store.prefabs.isPart(d.name)) continue;
+        const cx = @divFloor(d.x, 16);
+        const cz = @divFloor(d.z, 16);
+        const ch = g.world.getOrCreate(.{ .x = cx, .z = cz }) catch continue;
+        g.ensurePrefabStorageInChunk(ch, cx, cz);
+        var ci: usize = 0;
+        while (ci < containers_mod.max_containers) : (ci += 1) {
+            if (!g.containers.used[ci]) continue;
+            const cont = &g.containers.items[ci];
+            if (cont.player_storage) continue;
+            if (@divFloor(cont.pos.x, 16) != cx or @divFloor(cont.pos.z, 16) != cz) continue;
+            found = .{ .cx = cx, .cz = cz, .pos = cont.pos };
+            break;
+        }
+        if (found != null) break;
+    }
+    const f = found orelse return error.SkipZigTest;
+    try std.testing.expect(g.containers.get(f.pos) != null);
+
+    // Mine it out through the shared removal hook, then force the re-scan a
+    // restart performs.
+    try g.world.setBlockWorld(f.pos.x, f.pos.y, f.pos.z, 0);
+    g.noteBlockRemoved(f.pos.x, f.pos.y, f.pos.z, 0);
+    try std.testing.expect(g.containers.get(f.pos) == null);
+
+    const ch2 = try g.world.getOrCreate(.{ .x = f.cx, .z = f.cz });
+    ch2.te_scanned = false;
+    g.ensurePrefabStorageInChunk(ch2, f.cx, f.cz);
+    try std.testing.expect(g.containers.get(f.pos) == null);
+}
