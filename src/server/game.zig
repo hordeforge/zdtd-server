@@ -3525,6 +3525,11 @@ pub const Game = struct {
             else => ecs.components.inv_equip_start,
         };
         if (self.sim.spawnLootBagFrom(t.x, t.y, t.z, &self.sim.inventory[victim_slot], start, end)) |bag_nid| {
+            // A death bag is the Backpack entity class, not the DroppedLootContainer
+            // the block spills use: stock's client creates EntityBackpack in
+            // EntityPlayerLocal.dropBackpack and the server broadcasts the class
+            // it spawned. Set before broadcastLootSpawn so the class is right.
+            if (self.sim.slotOfNetId(bag_nid)) |bs| self.sim.loot_bag[bs].backpack = true;
             // Stock DropOnDeath MOVES the range into the bag. The copy above
             // left the victim holding it too, so every death duplicated the
             // dropped slice: loot your own bag and you had it twice, and the

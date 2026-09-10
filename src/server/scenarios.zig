@@ -16446,13 +16446,27 @@ test "scenario a second death still drops a bag while the first is uncollected" 
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
 
-    // First death: a bag drops and the marker latches.
+    // First death: a bag drops and the marker latches. Clear the join bundle's
+    // own EntitySpawn traffic so the capture holds this death's spawn only.
+    cap.clear();
     g.sim.inventory[ps].slots[2] = .{ .item_id = 7, .count = 5 };
     _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
     g.replicatePlayerHealth();
     const bags_after_first = g.sim.countKind(.loot_bag);
     try std.testing.expect(bags_after_first > 0);
     try std.testing.expect(g.clients[c.slot].backpack_n > 0);
+    // The death bag is the Backpack entity class, not the DroppedLootContainer
+    // the block spills use: stock's client creates EntityBackpack for
+    // dropBackpack, and the server broadcasts the class it spawned.
+    {
+        const spawn_id = packages.idOf("NetPackageEntitySpawn").?;
+        const sp = cap.findPkgId(spawn_id) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(@as(u8, 36), sp[4]);
+        try std.testing.expectEqual(
+            packages.stock_entity.class_backpack,
+            std.mem.readInt(i32, sp[5..9], .little),
+        );
+    }
 
     // Respawn arms the next death. The marker stays: that first bag is still
     // lying there uncollected, so the client should still see it.
@@ -16552,6 +16566,11 @@ test "scenario a death bag and its contents survive a restart" {
         inv.slots[1] = .{ .item_id = 9, .count = 2, .quality = 1 };
         _ = g.sim.spawnLootBagFrom(bag_x, bag_y, bag_z, &inv, 0, 2) orelse
             return error.TestUnexpectedResult;
+        // A second bag marked as a death backpack: the class tag must survive
+        // with it, or a restart turns a Backpack into a ground DroppedLootContainer.
+        const pack_nid = g.sim.spawnLootBagFrom(bag_x + 4, bag_y, bag_z, &inv, 0, 1) orelse
+            return error.TestUnexpectedResult;
+        g.sim.loot_bag[g.sim.slotOfNetId(pack_nid).?].backpack = true;
         try persist.saveEntities(g);
     }
 
@@ -16585,6 +16604,21 @@ test "scenario a death bag and its contents survive a restart" {
         try std.testing.expectEqual(@as(f32, 1.5), s0.use_times);
         try std.testing.expectEqual(@as(u16, 21), s0.seed);
         try std.testing.expectEqual(@as(u16, 9), g2.sim.inventory[bs].slots[1].item_id);
+        try std.testing.expect(!g2.sim.loot_bag[bs].backpack);
+
+        // The backpack-tagged bag at bag_x + 4 comes back still tagged, so its
+        // broadcast class stays Backpack.
+        var found_pack: ?ecs.Slot = null;
+        i = 0;
+        while (i < ecs.max_entities) : (i += 1) {
+            if (!g2.sim.alive[i] or !g2.sim.mask[i].loot_bag) continue;
+            if (g2.sim.transform[i].x == bag_x + 4 and g2.sim.transform[i].z == bag_z) {
+                found_pack = @intCast(i);
+                break;
+            }
+        }
+        const pk = found_pack orelse return error.TestUnexpectedResult;
+        try std.testing.expect(g2.sim.loot_bag[pk].backpack);
     }
     std.debug.print("PASS bag persist: a dropped bag and its stacks survive a restart\n", .{});
 }

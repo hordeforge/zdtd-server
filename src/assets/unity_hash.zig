@@ -44,6 +44,12 @@ pub const class_npc_trader_hugh: i32 = unityStringHash("npcTraderHugh");
 pub const class_npc_trader_joel: i32 = unityStringHash("npcTraderJoel");
 pub const class_npc_trader_rekt: i32 = unityStringHash("npcTraderRekt");
 pub const class_dropped_loot_container: i32 = unityStringHash("DroppedLootContainer");
+/// Player death backpack (entityclasses.xml "Backpack", Class EntityBackpack).
+/// Stock's client creates this from EntityPlayerLocal.dropBackpack and spawns
+/// it via NetPackageRequestToSpawnEntity; the generic ground bag is
+/// DroppedLootContainer (EntityLootContainer). Same mesh/prefab, different
+/// class, and the server broadcasts whatever class it spawned.
+pub const class_backpack: i32 = unityStringHash("Backpack");
 pub const class_entity_loot_container: i32 = unityStringHash("EntityLootContainer");
 pub const class_item: i32 = unityStringHash("item");
 pub const class_falling_tree: i32 = unityStringHash("fallingTree");
@@ -55,4 +61,8 @@ test "stable hash goldens" {
     try std.testing.expectEqual(@as(i32, 731446478), getStableHashCode("TEFeatureStorage"));
     try std.testing.expectEqual(class_player_male, unityStringHash("playerMale"));
     try std.testing.expectEqual(class_zombie_boe, unityStringHash("zombieBoe"));
+    // Entity class ids are Mono legacy String.GetHashCode; pin the two bag
+    // classes so a change to the hash helper cannot move them together.
+    try std.testing.expectEqual(@as(i32, -2021142581), class_dropped_loot_container);
+    try std.testing.expectEqual(@as(i32, 84004336), class_backpack);
 }

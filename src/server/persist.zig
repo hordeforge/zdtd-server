@@ -1275,9 +1275,16 @@ const zen_rec_bag: u8 = 7;
 /// the turret record before it.
 const zen_rec_supply_crate: u8 = 8;
 
+/// Marks the preceding bag record as a player death backpack. Stock spawns the
+/// "Backpack" entity class (EntityBackpack) for the death drop and the generic
+/// "DroppedLootContainer" for a block spill; a restart that restored a backpack
+/// as a ground bag changed the wire class. One tag follows the bag, like
+/// `zen_rec_supply_crate` (a bag is never both).
+const zen_rec_backpack: u8 = 9;
+
 /// Bytes a bag record occupies at most: type byte, three f32 coordinates,
-/// slot count, a v12-shaped slot per filled slot, and the one-byte
-/// supply-crate tag that may follow it.
+/// slot count, a v12-shaped slot per filled slot, and the one-byte tag
+/// (supply-crate or backpack) that may follow it. A bag carries at most one.
 const bag_record_max: usize =
     1 + 12 + 1 + ecs.components.max_inv_slots * zpvSlotStride(12) + 1;
 
@@ -1395,6 +1402,9 @@ pub fn saveEntities(self: *Game) !void {
             if (self.sim.loot_bag[i].supply_crate) {
                 try w.writeByte(zen_rec_supply_crate);
                 count += 1;
+            } else if (self.sim.loot_bag[i].backpack) {
+                try w.writeByte(zen_rec_backpack);
+                count += 1;
             }
         }
     }
@@ -1499,7 +1509,7 @@ pub fn loadEntities(self: *Game) !void {
         const rec_type = r.readByte() catch return error.Truncated;
         if (rec_type != zen_rec_basket) last_vehicle = null;
         if (rec_type != zen_rec_owner) last_turret = null;
-        if (rec_type != zen_rec_supply_crate) last_bag = null;
+        if (rec_type != zen_rec_supply_crate and rec_type != zen_rec_backpack) last_bag = null;
         switch (rec_type) {
             1 => {
                 // VehicleKind is an exhaustive enum(u8), so @enumFromInt panics
@@ -1631,6 +1641,11 @@ pub fn loadEntities(self: *Game) !void {
                 // of it means the bag failed to spawn (entity cap), so there is
                 // nothing to mark and the record is simply consumed.
                 if (last_bag) |bs| self.sim.loot_bag[bs].supply_crate = true;
+            },
+            zen_rec_backpack => {
+                // Same carry as the supply-crate tag: a restored death bag must
+                // broadcast as the Backpack class, not the spill class.
+                if (last_bag) |bs| self.sim.loot_bag[bs].backpack = true;
             },
             else => return error.BadRecord,
         }

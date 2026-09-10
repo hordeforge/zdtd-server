@@ -26,6 +26,9 @@ pub const class_zombie_joe = unity_hash.class_zombie_joe;
 pub const class_zombie_default = unity_hash.class_zombie_default;
 /// Dropped ground loot bag (EntityLootContainer subclass).
 pub const class_dropped_loot_container = unity_hash.class_dropped_loot_container;
+/// Player death backpack (EntityBackpack). Same mesh as the ground bag but the
+/// class stock's client spawns for `EntityPlayerLocal.dropBackpack`.
+pub const class_backpack = unity_hash.class_backpack;
 /// Named loot container entity class (prefab / TE-style loot).
 pub const class_entity_loot_container = unity_hash.class_entity_loot_container;
 /// Dropped-item entity (EntityItem). EntityClass.itemClass = hash("item"); the

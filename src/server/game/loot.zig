@@ -62,9 +62,16 @@ pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
             }
         }
     }
+    // Death backpacks and block spills share the mesh but not the class: stock
+    // spawns EntityBackpack ("Backpack") for the player death drop and
+    // EntityLootContainer ("DroppedLootContainer") for a container spill.
+    const bag_class: i32 = if (self.sim.loot_bag[bi].backpack)
+        packages.stock_entity.class_backpack
+    else
+        packages.stock_entity.class_dropped_loot_container;
     const spb = try packages.stock_entity.buildEntitySpawnStock(&self.body_buf, .{
         .entity_id = net_id,
-        .entity_class = packages.stock_entity.class_dropped_loot_container,
+        .entity_class = bag_class,
         .x = self.sim.transform[bi].x,
         .y = self.sim.transform[bi].y,
         .z = self.sim.transform[bi].z,

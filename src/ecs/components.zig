@@ -983,6 +983,13 @@ pub const LootBag = struct {
     /// bundle find the live crates. A death bag is not one of these: its marker
     /// rides the owner's backpack list instead.
     supply_crate: bool = false,
+    /// Player death backpack: spawns as the "Backpack" entity class
+    /// (EntityBackpack, entityclasses.xml) rather than the generic
+    /// DroppedLootContainer the spills use. Stock's client creates it in
+    /// EntityPlayerLocal.dropBackpack and sends NetPackageRequestToSpawnEntity;
+    /// zdtd builds its own from the victim's inventory, so the class is a zdtd
+    /// choice and must match what the client would have created.
+    backpack: bool = false,
 };
 
 pub const Sleeper = struct {
