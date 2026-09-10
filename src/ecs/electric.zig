@@ -124,6 +124,20 @@ pub const WirePos = struct {
     bz: i32 = 0,
 };
 
+/// Player-set node state by world position, for persistence. Rides positions
+/// for the same reason `WirePos` does: the grid is rebuilt from blocks on
+/// chunk load and node ids are reassigned every session. The switch latch is
+/// deliberately absent - it already rides the block meta.
+pub const PendingNodeState = struct {
+    x: i32 = 0,
+    y: i32 = 0,
+    z: i32 = 0,
+    fuel_or_energy: f32 = 0,
+    delay_idx: u8 = 0,
+    duration_idx: u8 = 1,
+    target_type: i32 = 0,
+};
+
 /// Binary search a sorted (id << 16 | node_index) table for `id`.
 /// Returns the node index, or maxInt(u16) when the id is absent.
 fn findNodeIdx(sorted: []const u32, id: u16) u16 {
@@ -147,6 +161,11 @@ pub const PowerGrid = struct {
     /// lazily); reconnectPending drains them as the grid rebuilds.
     pending_wires: [max_wires]WirePos = [_]WirePos{.{}} ** max_wires,
     pending_wire_n: usize = 0,
+    /// Saved player-set node state waiting for its node to be rebuilt, the
+    /// same lazy-chunk problem the pending wires solve: `loadEntities` runs
+    /// before any chunk has been scanned, so there is nothing to apply to yet.
+    pending_state: [max_nodes]PendingNodeState = [_]PendingNodeState{.{}} ** max_nodes,
+    pending_state_n: usize = 0,
     next_id: u16 = 1,
     total_gen: f32 = 0,
     total_load: f32 = 0,
@@ -160,6 +179,7 @@ pub const PowerGrid = struct {
         self.node_n = 0;
         self.wire_n = 0;
         self.pending_wire_n = 0;
+        self.pending_state_n = 0;
         self.next_id = 1;
         self.total_gen = 0;
         self.total_load = 0;
@@ -188,6 +208,44 @@ pub const PowerGrid = struct {
             if (self.connectByPos(p.ax, p.ay, p.az, p.bx, p.by, p.bz)) {
                 self.pending_wires[i] = self.pending_wires[self.pending_wire_n - 1];
                 self.pending_wire_n -= 1;
+            } else i += 1;
+        }
+    }
+
+    /// Queue saved node state by position; last write per position wins.
+    pub fn addPendingState(self: *PowerGrid, st: PendingNodeState) void {
+        var i: usize = 0;
+        while (i < self.pending_state_n) : (i += 1) {
+            const p = &self.pending_state[i];
+            if (p.x == st.x and p.y == st.y and p.z == st.z) {
+                p.* = st;
+                return;
+            }
+        }
+        if (self.pending_state_n >= max_nodes) return;
+        self.pending_state[self.pending_state_n] = st;
+        self.pending_state_n += 1;
+    }
+
+    /// Apply every pending node state whose node now exists, dropping the
+    /// ones applied. Called after each chunk power scan, beside
+    /// `reconnectPending`: the grid rebuilds chunk by chunk, so a base in
+    /// unvisited chunks must keep waiting rather than lose its settings.
+    pub fn applyPendingState(self: *PowerGrid) void {
+        var i: usize = 0;
+        while (i < self.pending_state_n) {
+            const st = self.pending_state[i];
+            if (self.indexOfPosition(st.x, st.y, st.z)) |ni| {
+                const n = &self.nodes[ni];
+                // Clamp rather than trust: capacity comes from the current
+                // block properties, which a game-data change can lower below
+                // what the save recorded.
+                n.fuel_or_energy = @min(@max(st.fuel_or_energy, 0), n.capacity);
+                n.delay_idx = st.delay_idx;
+                n.duration_idx = st.duration_idx;
+                n.target_type = st.target_type;
+                self.pending_state[i] = self.pending_state[self.pending_state_n - 1];
+                self.pending_state_n -= 1;
             } else i += 1;
         }
     }

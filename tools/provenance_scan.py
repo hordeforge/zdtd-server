@@ -133,6 +133,7 @@ STRUCTURAL_CONSTANTS = {
     "shocked", "on_fire", "harvest", "bleeding",
     "max_net_polls_per_tick", "max_info_polls_per_tick", "max_webui_polls_per_tick",
     "basket_record_max", "zen_rec_basket", "owner_record_max", "zen_rec_owner",
+    "power_record_bytes", "zen_rec_power",
 }
 
 

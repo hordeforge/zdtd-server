@@ -1194,6 +1194,18 @@ const zen_rec_owner: u8 = 5;
 /// Bytes an owner record occupies: type byte, length byte, then the name.
 const owner_record_max: usize = 2 + ecs.components.max_owner_name;
 
+/// Record type for the player-set state of one power node, keyed by world
+/// position. The grid itself is rebuilt from the block plane on chunk load
+/// (`scanChunkPower`), which recovers the layout but resets everything the
+/// player configured: a generator comes back with a full tank, a trigger with
+/// default delay and duration, a motion sensor targeting nobody. A switch
+/// latch is not here because it already rides the block meta.
+const zen_rec_power: u8 = 6;
+
+/// Bytes a power-node record occupies: type byte, three i32 coordinates,
+/// fuel f32, delay u8, duration u8, target i32.
+const power_record_bytes: usize = 1 + 12 + 4 + 1 + 1 + 4;
+
 /// Write one inventory slot in the v12 shape. Shared so a second store
 /// persisting InvSlots cannot drift into its own narrower encoding.
 fn writeSaveSlot(w: *wire_binary.Writer, s: ecs.components.InvSlot) !void {
@@ -1228,11 +1240,13 @@ pub fn saveEntities(self: *Game) !void {
     var path: [512]u8 = undefined;
     const p = try std.fmt.bufPrint(&path, "{s}/entities.zen", .{self.world.world_dir});
     // Vehicle/turret records (32 B each), one optional basket record per
-    // vehicle and one optional owner record per turret, plus the power-wire
-    // section (24 B per saved edge, 512 max).
+    // vehicle and one optional owner record per turret, the power-wire
+    // section (24 B per saved edge, 512 max), and at most one node-state
+    // record per power node.
     var buf: [
         ecs.max_entities * (32 + basket_record_max + owner_record_max) +
-            ecs.electric.max_wires * 2 * 24 + 16
+            ecs.electric.max_wires * 2 * 24 +
+            ecs.electric.max_nodes * power_record_bytes + 16
     ]u8 = undefined;
     var w = wire_binary.Writer{ .buf = &buf };
     // Overflow must propagate (callers log persistence errors): a silent
@@ -1333,6 +1347,27 @@ pub fn saveEntities(self: *Game) !void {
             try w.writeBytes(ew.written());
             count += 1;
         }
+    }
+    // Player-set node state, keyed by position. Only nodes that differ from
+    // what a fresh scan would produce are written: a world of untouched
+    // default nodes should not grow the file, and a node whose block is gone
+    // by the next load simply finds no match.
+    var ni: usize = 0;
+    while (ni < self.sim.power.node_n) : (ni += 1) {
+        const n = self.sim.power.nodes[ni];
+        const fuel_default = n.capacity;
+        const configured = n.fuel_or_energy != fuel_default or
+            n.delay_idx != 0 or n.duration_idx != 1 or n.target_type != 0;
+        if (!configured) continue;
+        try w.writeByte(zen_rec_power);
+        try w.writeI32(n.x);
+        try w.writeI32(n.y);
+        try w.writeI32(n.z);
+        try w.writeF32(n.fuel_or_energy);
+        try w.writeByte(n.delay_idx);
+        try w.writeByte(n.duration_idx);
+        try w.writeI32(n.target_type);
+        count += 1;
     }
     const written = w.written();
     std.mem.writeInt(u16, written[4..6], count, .little);
@@ -1451,6 +1486,20 @@ pub fn loadEntities(self: *Game) !void {
                 // client slots are per-session, so the login re-map is what
                 // reconnects the name to a live slot.
                 if (last_turret) |ts| self.sim.turret[ts].setOwnerName(nb[0..n]);
+            },
+            zen_rec_power => {
+                // Queued, not applied: this runs before any chunk has been
+                // scanned, so the node does not exist yet. Same lazy-chunk
+                // problem the pending wires above solve the same way.
+                self.sim.power.addPendingState(.{
+                    .x = r.readI32() catch return error.Truncated,
+                    .y = r.readI32() catch return error.Truncated,
+                    .z = r.readI32() catch return error.Truncated,
+                    .fuel_or_energy = r.readF32() catch return error.Truncated,
+                    .delay_idx = r.readByte() catch return error.Truncated,
+                    .duration_idx = r.readByte() catch return error.Truncated,
+                    .target_type = r.readI32() catch return error.Truncated,
+                });
             },
             else => return error.BadRecord,
         }

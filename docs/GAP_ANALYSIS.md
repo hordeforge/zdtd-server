@@ -5096,9 +5096,16 @@ persists so little that a restart visibly damages a built base.
   latch is in the block meta the SetBlock path writes and the ZCH3 plane keeps,
   so every restart switched every powered base off while the clients still
   rendered the switches as on. The scan now reads the meta bit for switch
-  nodes. Still runtime-only and reset by a restart: trigger delay/duration
-  indices, motion-sensor TargetType, generator fuel and battery charge - none
-  of those has a block-meta home, so closing them needs a saved node record.
+  nodes. The rest of the player-set node state (trigger delay/duration indices,
+  motion-sensor TargetType, generator fuel and battery charge) has no block-meta
+  home and rides its own `entities.zen` kind-6 record since 2026-09-10, keyed by
+  world position because node ids are per-session. `loadEntities` runs before
+  any chunk is scanned, so a record is queued (`addPendingState`) and applied
+  when the scan rebuilds its node (`applyPendingState`), the same lazy-chunk
+  handling the wire edges already use. Only nodes differing from what a fresh
+  scan produces are written, and a restored level is clamped to the block's
+  current capacity, so lowering MaxFuel in game data cannot restore a tank
+  fuller than the block now allows.
   Since 2026-08-22 the wire **edges** between nodes persist too: `saveEntities`
   writes each live edge by its endpoint positions (node ids are per-session) as
   a kind-3 record, and `loadEntities` queues them as pending wires that

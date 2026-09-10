@@ -4204,3 +4204,101 @@ test "an owner receives their parked vehicles as a waypoint list" {
         }
     }
 }
+
+test "a generator's remaining fuel survives a restart instead of refilling" {
+    // The grid rebuilds from the block plane, and applyToNode sets a
+    // generator's tank to max_fuel because that is right for a freshly placed
+    // one. Nothing carried the burnt-down level across, so every restart was a
+    // free refuel, and a trigger's delay/duration and a motion sensor's
+    // TargetType came back at their defaults the same way. None of those has a
+    // block-meta home (the switch latch does), so they ride their own
+    // entities.zen record, queued at load and applied when the chunk scan
+    // rebuilds the node.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const PowerStub = struct {
+        power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+        pub fn idByName(_: *const @This(), name: []const u8) ?u16 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 20001;
+            return null;
+        }
+        pub fn wattsByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 1000;
+            return null;
+        }
+        pub fn maxFuelByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 1000;
+            return null;
+        }
+        pub fn outputPerFuelByName(_: *const @This(), name: []const u8) ?f32 {
+            if (std.mem.eql(u8, name, "generatorbank")) return 10;
+            return null;
+        }
+    };
+    const persist = @import("../persist.zig");
+    const gen_id: u16 = 20001;
+    const gx: i32 = 8;
+    const gy: i32 = 70;
+    const gz: i32 = 8;
+    const burnt_to: f32 = 250;
+
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var stub: PowerStub = .{};
+        try stub.power_class_by_name.put(std.testing.allocator, "generatorbank", "Generator");
+        defer stub.power_class_by_name.deinit(std.testing.allocator);
+        g.power_registry = ecs.powerblocks.Registry.build(&stub);
+
+        const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+        const blocks = ch.blocks.?;
+        blocks[@intCast(gx + gz * 16 + gy * 256)] = gen_id;
+        g.scanChunkPower(ch, 0, 0);
+        const ni = g.sim.power.indexOfPosition(gx, gy, gz) orelse return error.TestUnexpectedResult;
+        // A fresh scan fills the tank; run it down as play would.
+        try std.testing.expectApproxEqAbs(@as(f32, 1000), g.sim.power.nodes[ni].fuel_or_energy, 0.01);
+        g.sim.power.nodes[ni].fuel_or_energy = burnt_to;
+        g.sim.power.nodes[ni].delay_idx = 3;
+        g.sim.power.nodes[ni].duration_idx = 2;
+        g.sim.power.nodes[ni].target_type = 8;
+        try persist.saveEntities(g);
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var stub: PowerStub = .{};
+        try stub.power_class_by_name.put(std.testing.allocator, "generatorbank", "Generator");
+        defer stub.power_class_by_name.deinit(std.testing.allocator);
+        g.power_registry = ecs.powerblocks.Registry.build(&stub);
+
+        try persist.loadEntities(g);
+        // Queued, not applied: no chunk has been scanned, so the node this
+        // record names does not exist yet.
+        try std.testing.expect(g.sim.power.pending_state_n > 0);
+        try std.testing.expect(g.sim.power.indexOfPosition(gx, gy, gz) == null);
+
+        const ch = try g.world.getOrCreate(.{ .x = 0, .z = 0 });
+        const blocks = ch.blocks.?;
+        blocks[@intCast(gx + gz * 16 + gy * 256)] = gen_id;
+        g.scanChunkPower(ch, 0, 0);
+
+        const ni = g.sim.power.indexOfPosition(gx, gy, gz) orelse return error.TestUnexpectedResult;
+        try std.testing.expectApproxEqAbs(burnt_to, g.sim.power.nodes[ni].fuel_or_energy, 0.01);
+        try std.testing.expectEqual(@as(u8, 3), g.sim.power.nodes[ni].delay_idx);
+        try std.testing.expectEqual(@as(u8, 2), g.sim.power.nodes[ni].duration_idx);
+        try std.testing.expectEqual(@as(i32, 8), g.sim.power.nodes[ni].target_type);
+        // Applied records are dropped, so a second scan cannot re-apply stale
+        // state over what the sim has done since.
+        try std.testing.expectEqual(@as(usize, 0), g.sim.power.pending_state_n);
+    }
+}

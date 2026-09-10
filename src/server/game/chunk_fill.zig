@@ -234,6 +234,10 @@ pub fn scanChunkPower(self: *Game, ch: *world_store.Chunk, cx: i32, cz: i32) voi
             }
         }
     }
+    // Saved player-set node state (generator fuel, trigger delay/duration,
+    // motion TargetType) applies before resolve so the first tick after a
+    // restart runs on the restored values, not on the scan's defaults.
+    self.sim.power.applyPendingState();
     self.sim.power.resolve();
     // Restored wire edges whose endpoints are now both scanned reconnect.
     self.sim.power.reconnectPending();
