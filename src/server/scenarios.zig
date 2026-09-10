@@ -9695,6 +9695,66 @@ test "scenario party shared quest: accept shares to the party, disconnect remove
     try std.testing.expectEqual(a_entity, rh.shared_by_entity_id);
 }
 
+test "scenario shared quest member add/remove reach the owner, not the sender" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const sq_id = packages.idOf("NetPackageSharedQuest").?;
+    var fbuf: [128]u8 = undefined;
+    var pbody: [32]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackagePartyActions", try buildPartyActionBody(&pbody, 1, ca.entity_id, cb.entity_id)));
+
+    // Member B answers the owner's share: sharedBy = A, sharedWith = B,
+    // event 2 (add_shared_member). Stock ProcessPackage delivers it to the
+    // owner A, so B's own capture stays empty.
+    var mb: [13]u8 = undefined;
+    std.mem.writeInt(i32, mb[0..4], ca.entity_id, .little);
+    mb[4] = 2; // add_shared_member
+    std.mem.writeInt(i32, mb[5..9], 7, .little);
+    std.mem.writeInt(i32, mb[9..13], cb.entity_id, .little);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSharedQuest", mb[0..13]));
+    const add = cap_a.findPkgId(sq_id) orelse return error.TestUnexpectedResult;
+    const ah = try packages.stock_quest.parseSharedQuestHead(add);
+    try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.add_shared_member, ah.event);
+    try std.testing.expectEqual(ca.entity_id, ah.shared_by_entity_id);
+    try std.testing.expectEqual(cb.entity_id, ah.shared_with_entity_id);
+    try std.testing.expect(cap_b.findPkgId(sq_id) == null);
+
+    // A spoofed sharedWith (B speaking for A) is rejected: A gets nothing.
+    std.mem.writeInt(i32, mb[9..13], ca.entity_id, .little);
+    cap_a.clear();
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSharedQuest", mb[0..13]));
+    try std.testing.expect(cap_a.findPkgId(sq_id) == null);
+
+    // remove_shared_member from B also reaches A only.
+    mb[4] = 3; // remove_shared_member
+    std.mem.writeInt(i32, mb[9..13], cb.entity_id, .little);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSharedQuest", mb[0..13]));
+    const rem = cap_a.findPkgId(sq_id) orelse return error.TestUnexpectedResult;
+    const rh2 = try packages.stock_quest.parseSharedQuestHead(rem);
+    try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.remove_shared_member, rh2.event);
+    try std.testing.expect(cap_b.findPkgId(sq_id) == null);
+    std.debug.print("PASS shared-member-fwd: member events reach the owner only\n", .{});
+}
+
 test "scenario party quest change fans objective deltas to the other members" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

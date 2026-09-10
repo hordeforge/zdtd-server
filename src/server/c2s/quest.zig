@@ -113,19 +113,31 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
             try self.sendGame(peer, "NetPackageSharedQuest", body);
         } else {
-            // add/remove_shared_member (events 2 and 3). ProcessPackage IL=371
-            // (il/netpackages-v3.2.0/NetPackageSharedQuest_il.txt:119) routes
-            // both back to sharedByEntityID alone (_attachedToEntityId =
-            // ldloc.1 at IL_028A), not to every peer, and only when that
-            // player holds a Party. Broadcasting them let one client push a
-            // party-membership event at the whole server.
+            // add_shared_member (2) / remove_shared_member (3). Stock sends
+            // these from the MEMBER's QuestJournal, not the owner's:
+            // QuestJournal.il passes sharedBy = Quest.SharedOwnerID and
+            // sharedWith = OwnerPlayer.entityId (RemoveQuest IL=74 and the
+            // accept path near IL=420), then ProcessPackage case 2/3
+            // (IL_019D/IL_0340) resolves sharedByEntityID, requires that
+            // player to hold a Party, and delivers the package to
+            // sharedByEntityID's client (SendPackage _attachedToEntityId =
+            // ldloc.1 at IL_028A), which applies Quest.AddSharedWith /
+            // RemoveSharedWith. zdtd required the sender to BE the owner and
+            // echoed the body back to the sender, so a member accepting or
+            // dropping a shared quest was counted ownership_rejects and the
+            // owner never heard about it. Gate on the sender naming itself as
+            // the member (sharedWith) and deliver to the owner (sharedBy).
             const by = head.shared_by_entity_id;
-            if (by != c.entity_id) {
+            if (head.shared_with_entity_id != c.entity_id) {
                 self.harness.counters.inc(.ownership_rejects);
                 return true;
             }
             if (self.parties.partyByMember(by) == null) return true;
-            try self.sendGame(peer, "NetPackageSharedQuest", body);
+            for (&self.clients) |*cl| {
+                if (!cl.joined or cl.entity_id != by) continue;
+                if (cl.peer) |op| try self.sendGame(op, "NetPackageSharedQuest", body);
+                break;
+            }
         }
         return true;
     }
