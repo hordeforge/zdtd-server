@@ -301,10 +301,23 @@ pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
     c.clearDmg(t.lx, y, t.lz);
 }
 
+/// Every consequence of a block ceasing to exist that is not the block plane
+/// itself. Called by each destruction path (player mine, damage break, zombie
+/// dig, collapse), so a block only has to be removed once for its side state
+/// to go with it.
+///
 /// Stock PersistentPlayerList.SpawnPointRemoved (IL=48): removing a placed
 /// bedroll clears the owner's respawn point (the client falls back to the
 /// default spawn). Scans the fixed client table for the bed position.
+///
+/// The three position-keyed stores (power grid, containers, vending) live
+/// outside the block plane, so a destruction path that only clears the plane
+/// leaves a node with no block still feeding the grid and a container still
+/// holding its slots at a cell that is now air.
 pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
+    if (self.sim.power.removeAt(x, y, z)) self.sim.power.resolve();
+    self.containers.remove(.{ .x = x, .y = y, .z = z });
+    self.vending.removeAt(.{ .x = x, .y = y, .z = z });
     if (!self.isBedrollId(cur_id)) return;
     for (&self.clients) |*cl| {
         if (!cl.joined or !cl.has_bed) continue;

@@ -15479,3 +15479,68 @@ test "scenario a motion sensor keeps the target selection the player set" {
     try std.testing.expectEqual(want_target, g.sim.power.nodes[ni].target_type);
     std.debug.print("PASS motion target: TargetType {d} survives the round trip\n", .{want_target});
 }
+
+test "scenario mining a powered block takes its node and container with it" {
+    // Three stores are keyed by world position and live outside the block
+    // plane: the power grid, containers and vending machines. Every path that
+    // removes a block owes them the same maintenance, and only the player
+    // SetBlock path had it. A generator broken by damage, dug out by a zombie
+    // or dropped by a collapse left its node behind, still feeding the grid
+    // from a cell that is now air.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_removestores");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_removestores", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    _ = c;
+
+    const bx: i32 = 240;
+    const by: i32 = 70;
+    const bz: i32 = 240;
+    const stone = world_store.block_stone;
+
+    // Damage break: the tick path that runs a block past its max HP.
+    try g.world.setBlockWorld(bx, by, bz, stone);
+    _ = g.sim.power.addNodeAt(.generator, bx, by, bz, 1000);
+    const cpos = containers_mod.PosKey{ .x = bx, .y = by, .z = bz };
+    _ = g.containers.getOrCreate(cpos, 8, stone) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.power.indexOfPosition(bx, by, bz) != null);
+    try std.testing.expect(g.containers.get(cpos) != null);
+
+    g.noteBlockRemoved(bx, by, bz, stone);
+    try std.testing.expect(g.sim.power.indexOfPosition(bx, by, bz) == null);
+    try std.testing.expect(g.containers.get(cpos) == null);
+
+    // Collapse: the stability path used to clear only the container, so a
+    // falling generator kept powering the grid from mid-air.
+    const sx: i32 = 242;
+    try g.world.setBlockWorld(sx, by, bz, stone);
+    _ = g.sim.power.addNodeAt(.generator, sx, by, bz, 1000);
+    const spos = containers_mod.PosKey{ .x = sx, .y = by, .z = bz };
+    _ = g.containers.getOrCreate(spos, 8, stone) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(g.sim.power.indexOfPosition(sx, by, bz) != null);
+
+    // Drive the real collapse path: removing a support runs the stability
+    // pass, which drops unsupported cells and clears them.
+    const above_y = by + 1;
+    try g.world.setBlockWorld(sx, above_y, bz, stone);
+    _ = g.sim.power.addNodeAt(.generator, sx, above_y, bz, 1000);
+    const apos = containers_mod.PosKey{ .x = sx, .y = above_y, .z = bz };
+    _ = g.containers.getOrCreate(apos, 8, stone) orelse return error.TestUnexpectedResult;
+    try g.world.setBlockWorld(sx, by, bz, 0);
+    const fell_n = game_mod.stabilityAfterSetBlock(g, sx, by, bz, stone, 0);
+    // Assert the collapse actually happened, or the checks below prove
+    // nothing: a stability pass that dropped nothing would pass them by
+    // never having removed the block either.
+    try std.testing.expect(fell_n > 0);
+    try std.testing.expect(g.sim.power.indexOfPosition(sx, above_y, bz) == null);
+    try std.testing.expect(g.containers.get(apos) == null);
+    std.debug.print("PASS block-removal stores: node and container go with the block\n", .{});
+}

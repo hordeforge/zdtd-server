@@ -2152,19 +2152,12 @@ pub const Game = struct {
                 } else {
                     g.clearBlockHp(bx, by, bz);
                 }
-                // The stores keyed by position are not part of the block plane,
-                // so a reset that only repaints blocks leaves the previous
-                // occupant's tile entity behind: a generator node with no
-                // generator block still feeding the grid, a looted container
-                // still holding its slots under whatever the POI bakes there.
-                // The normal SetBlock path maintains all three; do the same
-                // here for any cell whose block id actually changed.
+                // Repainting a cell displaces whatever stood there, so the
+                // previous occupant's side state goes with it. Same call the
+                // destruction paths use, rather than a second copy of the
+                // list of stores a removal owes.
                 const new_id = world_store.typeId(raw);
-                if (prev_id != new_id) {
-                    if (g.sim.power.removeAt(bx, by, bz)) g.sim.power.resolve();
-                    g.containers.remove(.{ .x = bx, .y = by, .z = bz });
-                    g.vending.removeAt(.{ .x = bx, .y = by, .z = bz });
-                }
+                if (prev_id != new_id) g.noteBlockRemoved(bx, by, bz, prev_id);
                 if (packages.buildSetBlockBodyRaw(g.body_buf[0..96], bx, by, bz, raw, 0, -1, -1)) |sb| {
                     // Best-effort visual broadcast: the world store is already
                     // authoritative; a dropped SetBlock only delays the paint.

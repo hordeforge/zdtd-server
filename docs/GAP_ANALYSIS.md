@@ -2133,8 +2133,11 @@ can walk into every POI but none of them is the building TFP authored.
   keyed by position, so a cell whose block changed kept the previous occupant's
   tile entity: a power node with no block still feeding the grid, a looted
   container still holding its slots under whatever the POI bakes there. The
-  normal SetBlock path maintains power, containers and vending on every block
-  change; the reset callback now does the same for each cell whose id changed.
+  same hole ran through the other non-SetBlock removal paths (damage break,
+  zombie dig, stability collapse), each of which cleared a different subset.
+  `noteBlockRemoved` now owns every consequence of a block ceasing to exist -
+  bedroll respawn plus the three position-keyed stores - and all five paths
+  call it, so a removal is defined in one place instead of five.
   *Anchors:* `src/server/game.zig` (`resetPoiBlocks`, `handleQuestEvent`),
   `src/world/store.zig` (`setBlockTexDensWorld`), `src/world/tts.zig`
   (`paintDecoration`), `asm.il:945360-945387`
