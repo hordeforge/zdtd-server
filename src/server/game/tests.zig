@@ -3493,6 +3493,24 @@ test "quest objective events mirror to party members" {
         }
     }
     try std.testing.expect(!leaked);
+
+    // treasure_radius_break: the relay is rebuilt with blockPos zeroed, the
+    // way stock's 3-arg Setup does (case 2 above keeps the raw position).
+    var body3: [64]u8 = undefined;
+    var w3: wire_binary.Writer = .{ .buf = &body3 };
+    try w3.writeI32(ca.entity_id);
+    try w3.writeI32(42);
+    try w3.writeByte(0); // TreasureRadiusBreak
+    try w3.writeI32(10);
+    try w3.writeI32(70);
+    try w3.writeI32(20);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w3.written()));
+    const rq = cap_b.findPkgId(ou_id) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u8, 0), rq[8]); // eventType
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, rq[9..13], .little)); // blockPos x zeroed
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, rq[13..17], .little));
+    try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, rq[17..21], .little));
 }
 
 test "poi lockout reports bedroll and land claim homes" {

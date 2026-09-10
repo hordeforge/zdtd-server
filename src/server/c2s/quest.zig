@@ -349,14 +349,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
             // Stock re-broadcasts to the sender's party only for the two
             // events whose HandlePlayer acts (ProcessPackage IL=180): case 0
-            // treasure_radius_break (3-arg Setup, no blockPos) and case 2
-            // block_activated (4-arg Setup, blockPos). Case 1
+            // treasure_radius_break and case 2 block_activated. Case 1
             // treasure_complete is server-local and does NOT fan out: the
             // server calls QuestEventManager.FinishTreasureQuest(questCode,
             // sender), and HandlePlayer ignores the event entirely (its
-            // switch falls through at IL_0074). Mirror only cases 0 and 2;
-            // zeroing blockPos for case 0 is a no-op because
-            // HandlePlayer's treasure arm never reads it.
+            // switch falls through at IL_0074). The two fan-out Setups differ
+            // on the wire: case 0 uses the 3-arg Setup, which resets blockPos
+            // to Vector3i.zero (Setup IL=14), while case 2 uses the 4-arg
+            // Setup and keeps it. Relaying the raw inbound body would leak the
+            // dig position into the case 0 relay, so rebuild that one.
             if (u.event_type != .treasure_complete) {
                 if (self.parties.partyByMember(c.entity_id)) |p| {
                     for (p.members[0..p.n]) |m| {
@@ -366,7 +367,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                             _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .block_activate);
                         }
                         if (member.peer) |mp| {
-                            self.sendGame(mp, "NetPackageQuestObjectiveUpdate", body) catch |err| {
+                            const relay: []const u8 = if (u.event_type == .treasure_radius_break)
+                                packages.buildQuestObjectiveUpdate(&self.body_buf, .{
+                                    .sender_entity_id = u.sender_entity_id,
+                                    .quest_code = u.quest_code,
+                                    .event_type = .treasure_radius_break,
+                                }) catch continue
+                            else
+                                body;
+                            self.sendGame(mp, "NetPackageQuestObjectiveUpdate", relay) catch |err| {
                                 self.harness.counters.inc(.net_send_errors);
                                 std.debug.print("zdtd: send QuestObjectiveUpdate relay failed: {s}\n", .{@errorName(err)});
                             };
