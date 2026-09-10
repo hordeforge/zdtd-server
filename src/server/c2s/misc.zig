@@ -40,6 +40,10 @@ const fatal_kill_amount: f32 = 9999;
 /// returns for anything else, so a higher op never reaches its rebroadcast.
 const wire_tool_max_op: u8 = 1;
 
+/// Exact stock NetPackageEntityPhysics body size: Flags u16 | EntityId i32 |
+/// 13xf32. `GetLength` (IL=2) returns 58, matching the read (IL=74).
+const entity_physics_body_len: usize = 58;
+
 /// True when `name` belongs to this domain and was handled.
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageChat") or std.mem.eql(u8, name, "NetPackageSimpleChat")) {
@@ -239,15 +243,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackageEntityPhysics")) {
-        // Stock NetPackageEntityPhysics (read IL=74): Flags u16, EntityId
-        // i32, then 14xf32 (pos 3, quat 4, velocity 3, angular 3, plus two
-        // more singles) = 62 bytes. The entity's physics master reports
-        // pos/rot/velocity so the server mirrors it (ProcessPackage gates on
-        // isPhysicsMaster). zdtd's movement, falling-block and vehicle sims
-        // are server-authoritative (broadcast PosAndRot / VehiclePositions /
-        // EntityVelocity), so the report is a redundant echo: validate the
-        // body and drop.
-        if (body.len < 62) {
+        // Stock NetPackageEntityPhysics (read IL=74, GetLength IL=2 = 58):
+        // Flags u16, EntityId i32, then 13xf32 (pos 3, quat 4, velocity 3,
+        // angular 3) = 58 bytes. The entity's physics master reports
+        // pos/rot/velocity so the server mirrors it (ProcessPackage IL=87
+        // gates on isPhysicsMaster). zdtd's movement, falling-block and
+        // vehicle sims are server-authoritative (broadcast PosAndRot /
+        // VehiclePositions / EntityVelocity), so the report is a redundant
+        // echo (DIVERGENCES.md 1.4): validate the body and drop. The gate was
+        // 62, so every valid 58-byte report was counted c2s_malformed.
+        if (body.len < entity_physics_body_len) {
             self.harness.counters.inc(.c2s_malformed);
             return true;
         }

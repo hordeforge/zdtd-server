@@ -4988,6 +4988,48 @@ test "scenario inventory keep-open refreshes the lock stale window" {
     std.debug.print("PASS lock-keepopen: keep-open refreshes the stale window\n", .{});
 }
 
+test "scenario entity physics body length matches the stock layout" {
+    // Stock NetPackageEntityPhysics body is Flags u16 | EntityId i32 | 13xf32
+    // (pos 3, quat 4, velocity 3, angular 3) = 58 bytes, and GetLength (IL=2)
+    // returns 58. The handler's malformed gate was 62 (the comment miscounted
+    // the floats), so every valid 58-byte report was counted c2s_malformed and
+    // logged every 100th.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    var body: [64]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+    try w.writeU16(0); // Flags
+    try w.writeI32(c.entity_id); // EntityId
+    var i: usize = 0;
+    while (i < 13) : (i += 1) try w.writeF32(0);
+    const exact = w.written();
+    try std.testing.expectEqual(@as(usize, 58), exact.len);
+
+    var fb: [128]u8 = undefined;
+    const mal_before = g.harness.counters.get(.c2s_malformed);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntityPhysics", exact));
+    try std.testing.expectEqual(mal_before, g.harness.counters.get(.c2s_malformed));
+
+    // One byte short is malformed, so the 58 gate is not a blanket accept.
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntityPhysics", exact[0..57]));
+    try std.testing.expectEqual(mal_before + 1, g.harness.counters.get(.c2s_malformed));
+
+    std.debug.print("PASS entity-physics: 58-byte stock body accepted, 57 truncated rejected\n", .{});
+}
+
 test "scenario SetBlock beyond edit reach is rejected" {
     // SetBlock carries its own coordinates, so nothing about the packet ties
     // the edit to where the player is standing except this check. Without it a
