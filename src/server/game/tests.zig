@@ -3446,23 +3446,25 @@ test "quest objective events mirror to party members" {
     const cb = try g.attachJoinedClient(&cap_b);
     try std.testing.expect(g.parties.acceptInvite(ca.entity_id, cb.entity_id) != null);
 
-    // A reports treasure_complete for quest 42; the server mirrors it to the
-    // party member B (stock ProcessPackage party fan-out).
+    // Stock re-broadcasts only case 0 (treasure_radius_break) and case 2
+    // (block_activated) to the party; case 1 (treasure_complete) is
+    // server-local (NetPackageQuestObjectiveUpdate.ProcessPackage IL=180
+    // calls FinishTreasureQuest and does not fan out).
+    const ou_id = packages.idOf("NetPackageQuestObjectiveUpdate").?;
+    var frame_buf: [128]u8 = undefined;
+    var pkgs: [8]wire_frame.Package = undefined;
+
+    // block_activated: mirrored to the party member B.
     var body: [64]u8 = undefined;
     var w: wire_binary.Writer = .{ .buf = &body };
     try w.writeI32(ca.entity_id);
     try w.writeI32(42);
-    try w.writeByte(1); // TreasureComplete
+    try w.writeByte(2); // BlockActivated
     try w.writeI32(10);
     try w.writeI32(70);
     try w.writeI32(20);
-    var frame_buf: [128]u8 = undefined;
-    const framed = try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w.written());
     cap_b.clear();
-    try g.injectFramed(ca, framed);
-
-    const ou_id = packages.idOf("NetPackageQuestObjectiveUpdate").?;
-    var pkgs: [8]wire_frame.Package = undefined;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w.written()));
     var b_got = false;
     for (cap_b.slots[0..cap_b.n]) |s| {
         const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
@@ -3471,6 +3473,26 @@ test "quest objective events mirror to party members" {
         }
     }
     try std.testing.expect(b_got);
+
+    // treasure_complete: server-local, so B gets no QuestObjectiveUpdate.
+    var body2: [64]u8 = undefined;
+    var w2: wire_binary.Writer = .{ .buf = &body2 };
+    try w2.writeI32(ca.entity_id);
+    try w2.writeI32(42);
+    try w2.writeByte(1); // TreasureComplete
+    try w2.writeI32(10);
+    try w2.writeI32(70);
+    try w2.writeI32(20);
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageQuestObjectiveUpdate", w2.written()));
+    var leaked = false;
+    for (cap_b.slots[0..cap_b.n]) |s| {
+        const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id == ou_id) leaked = true;
+        }
+    }
+    try std.testing.expect(!leaked);
 }
 
 test "poi lockout reports bedroll and land claim homes" {

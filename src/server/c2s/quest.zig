@@ -347,25 +347,30 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, c.slot, u.quest_code, .fetch_item),
                 .treasure_radius_break => questTreasureRadiusBreak(self, c.slot, u.quest_code),
             }
-            // Stock mirrors the objective event to the sender's party
-            // (NetPackageQuestObjectiveUpdate.ProcessPackage IL=180: the
-            // server re-broadcasts to every party member, whose HandlePlayer
-            // applies it to the shared quest), so a treasure/block objective
-            // advances for the whole party, not just the reporter.
-            if (self.parties.partyByMember(c.entity_id)) |p| {
-                for (p.members[0..p.n]) |m| {
-                    if (m == c.entity_id) continue;
-                    const member = self.clientByEntityId(m) orelse continue;
-                    switch (u.event_type) {
-                        .block_activated => _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .block_activate),
-                        .treasure_complete => _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .fetch_item),
-                        .treasure_radius_break => {},
-                    }
-                    if (member.peer) |mp| {
-                        self.sendGame(mp, "NetPackageQuestObjectiveUpdate", body) catch |err| {
-                            self.harness.counters.inc(.net_send_errors);
-                            std.debug.print("zdtd: send QuestObjectiveUpdate relay failed: {s}\n", .{@errorName(err)});
-                        };
+            // Stock re-broadcasts to the sender's party only for the two
+            // events whose HandlePlayer acts (ProcessPackage IL=180): case 0
+            // treasure_radius_break (3-arg Setup, no blockPos) and case 2
+            // block_activated (4-arg Setup, blockPos). Case 1
+            // treasure_complete is server-local and does NOT fan out: the
+            // server calls QuestEventManager.FinishTreasureQuest(questCode,
+            // sender), and HandlePlayer ignores the event entirely (its
+            // switch falls through at IL_0074). Mirror only cases 0 and 2;
+            // zeroing blockPos for case 0 is a no-op because
+            // HandlePlayer's treasure arm never reads it.
+            if (u.event_type != .treasure_complete) {
+                if (self.parties.partyByMember(c.entity_id)) |p| {
+                    for (p.members[0..p.n]) |m| {
+                        if (m == c.entity_id) continue;
+                        const member = self.clientByEntityId(m) orelse continue;
+                        if (u.event_type == .block_activated) {
+                            _ = systems.questObjectiveEvent(&self.sim, member.slot, u.quest_code, .block_activate);
+                        }
+                        if (member.peer) |mp| {
+                            self.sendGame(mp, "NetPackageQuestObjectiveUpdate", body) catch |err| {
+                                self.harness.counters.inc(.net_send_errors);
+                                std.debug.print("zdtd: send QuestObjectiveUpdate relay failed: {s}\n", .{@errorName(err)});
+                            };
+                        }
                     }
                 }
             }
