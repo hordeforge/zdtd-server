@@ -1020,6 +1020,41 @@ pub fn readItemDrop(body: []const u8) binary.ReadError!ItemDropParsed {
 /// Stock PersistentPlayerList entry reason enum: Login = 0 (RE: save-persistence.md).
 pub const persistent_reason_login: u8 = 0;
 
+/// Longest name the join path keeps (`Client.name` is a fixed 32-byte field),
+/// so the largest name this body can ever carry.
+pub const persistent_player_name_max_len: usize = 32;
+
+/// How many of a player's land-protection blocks ride the overlay. Bounded by
+/// what the body's own buffer holds beside a worst-case header, so the list can
+/// never be the reason the package fails to build: the caller drops the body on
+/// error, and a dropped body costs the joining player their name on every other
+/// client, not just the claim markers.
+pub const max_lp_blocks_on_wire: usize = 24;
+
+/// How many rented-machine positions ride the overlay. Stock lets a player hold
+/// one rental at a time (`CanRent` case 2, `checkAlreadyRentingVM`), and the
+/// rent handler enforces the same rule, so one is the whole list.
+pub const max_vending_positions_on_wire: usize = 1;
+
+/// Buffer a caller must provide for the worst-case body: both identities and
+/// the name at their caps, with a full claim and rental list. Everything else
+/// in the body is fixed-width.
+pub const persistent_player_state_max_len: usize = blk: {
+    const puid = 2 + platform_user.max_stream_len;
+    break :blk 1 // reason
+    + puid * 3 // PrimaryId, NativeId, AuthoredText author
+    + 1 // playGroup
+    + 1 + 1 + persistent_player_name_max_len // AuthoredText present + string
+    + 8 // lastLogin i64
+    + 12 // pos
+    + 4 // entityId
+    + 4 + max_lp_blocks_on_wire * 12 // lpCount + Vector3i list
+    + 4 // backpacks count
+    + 12 // bedroll
+    + 4 // questPositions count
+    + 4 + max_vending_positions_on_wire * 12; // vending count + Vector3i list
+};
+
 /// Build NetPackagePersistentPlayerState body (reason=Login) so clients can map
 /// entityId → player name (GameMessage shows '' otherwise).
 ///
@@ -1042,6 +1077,13 @@ pub fn buildPersistentPlayerState(
     /// server-lifecycle.md 6.1, PersistentPlayerData.Write IL=205). Empty is
     /// the correct value for a player with no claims.
     lp_blocks: []const [3]i32,
+    /// Positions of the vending machines this player currently rents, in the
+    /// stock `OwnedVendingMachinePositions` count + Vector3i shape (RE
+    /// save-region.md, PersistentPlayerData.Write IL=205 fields 25-28). The
+    /// client draws a map marker per entry, so an empty list is what an
+    /// un-renting player gets and a stale one leaves a marker on a machine
+    /// whose rental has lapsed.
+    vending_positions: []const [3]i32,
 ) ![]u8 {
     var w: binary.Writer = .{ .buf = buf };
     try w.writeByte(persistent_reason_login);
@@ -1070,7 +1112,12 @@ pub fn buildPersistentPlayerState(
     try w.writeI32(std.math.maxInt(i32));
     try w.writeI32(0);
     try w.writeI32(0); // questPositions count
-    try w.writeI32(0); // vending count
+    try w.writeI32(@intCast(vending_positions.len));
+    for (vending_positions) |p| {
+        try w.writeI32(p[0]);
+        try w.writeI32(p[1]);
+        try w.writeI32(p[2]);
+    }
     return w.written();
 }
 
@@ -1079,7 +1126,8 @@ test "persistent player state body layout" {
     const primary: platform_user.Id = .{ .platform = "EOS", .id = "0123456789abcdef" };
     const native: platform_user.Id = .{ .platform = "Steam", .id = "76561190000000000" };
     const lp = [_][3]i32{ .{ 10, 64, -20 }, .{ 300, 70, 512 } };
-    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449, &lp);
+    const vm = [_][3]i32{.{ -44, 68, 91 }};
+    const body = try buildPersistentPlayerState(&buf, 107, "maci", primary, native, -273, 61, 449, &lp, &vm);
     var r: binary.Reader = .{ .data = body };
     try std.testing.expectEqual(persistent_reason_login, try r.readByte());
     // PrimaryId PUID
@@ -1126,14 +1174,20 @@ test "persistent player state body layout" {
     try std.testing.expectEqual(std.math.maxInt(i32), try r.readI32()); // y: unset
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // bedroll z
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // questPositions
-    try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // vending
+    // OwnedVendingMachinePositions: count then Vector3i list (PPD.Write
+    // fields 25-28). This was a hardcoded 0, so a player who rented a machine
+    // lost its map marker on every rejoin.
+    try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // vending count
+    try std.testing.expectEqual(@as(i32, -44), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 68), try r.readI32());
+    try std.testing.expectEqual(@as(i32, 91), try r.readI32());
     try std.testing.expectEqual(@as(usize, 0), r.remaining());
 }
 
 test "persistent player state with no claims writes an empty lpBlocks list" {
     var buf: [512]u8 = undefined;
     const primary: platform_user.Id = .{ .platform = "EOS", .id = "abc" };
-    const body = try buildPersistentPlayerState(&buf, 7, "solo", primary, primary, 0, 0, 0, &.{});
+    const body = try buildPersistentPlayerState(&buf, 7, "solo", primary, primary, 0, 0, 0, &.{}, &.{});
     // Walk to the count: the empty list must still write a 0, not vanish.
     var r: binary.Reader = .{ .data = body };
     _ = try r.readByte(); // reason
@@ -1154,6 +1208,35 @@ test "persistent player state with no claims writes an empty lpBlocks list" {
     _ = try r.readI64(); // lastLogin
     for (0..4) |_| _ = try r.readI32(); // x, y, z, entity_id
     try std.testing.expectEqual(@as(i32, 0), try r.readI32()); // lpBlockCount
+}
+
+test "persistent player state fits a full claim list at max identity length" {
+    // The caller builds into a fixed slice of body_buf and drops the package on
+    // error, so an overflow here is silent: the joining player's name never
+    // reaches the other clients ("Player '' joined") and no claim overlay is
+    // drawn. Both identity strings and the name are at their caps, with both
+    // lists full, which is the largest body the join path can produce.
+    var buf: [persistent_player_state_max_len]u8 = undefined;
+    const long_id = "0123456789" ** 6 ++ "0123"; // 64 = platform_user.max_id_len
+    const long_platform = "0123456789abcdef"; // 16 = platform_user.max_platform_len
+    const primary: platform_user.Id = .{ .platform = long_platform, .id = long_id };
+    var lp: [max_lp_blocks_on_wire][3]i32 = undefined;
+    for (&lp, 0..) |*b, i| b.* = .{ @intCast(i), 64, @intCast(i) };
+    var vm: [max_vending_positions_on_wire][3]i32 = undefined;
+    for (&vm, 0..) |*p, i| p.* = .{ @intCast(i), 68, @intCast(i) };
+    const body = try buildPersistentPlayerState(
+        &buf,
+        107,
+        "0123456789abcdef0123456789abcdef", // 32 = the join name cap
+        primary,
+        primary,
+        -273,
+        61,
+        449,
+        &lp,
+        &vm,
+    );
+    try std.testing.expect(body.len <= persistent_player_state_max_len);
 }
 
 // --- NetPackageBag: entityId i32 | u16 blob_len | Bag.Write ---

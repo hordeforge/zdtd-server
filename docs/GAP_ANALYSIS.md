@@ -1445,6 +1445,13 @@ parsed, and quest offering is unwired.
   (currentDay > rentalEndDay) returns to Unowned on the day roll; `removing`
   clears ownership only (the block identity and stock survive). Scenario
   `vending-rent` covers rent/deny/extend/clear/expire/one-per-player.
+  **Owned-machine map markers ship 2026-09-10**: the join
+  PersistentPlayerState carries the renter's machine in
+  `OwnedVendingMachinePositions` (PPD.Write fields 25-28, RE
+  `save-region.md:982`), which was a hardcoded `0` count, so the client
+  redrew its map without a marker for the machine the player was still
+  paying for. Expired rentals are excluded by the same day check the rent
+  path applies. The same scenario asserts it on a rejoin.
   **Real-client trade CopyFrom (2026-08-07, hardened + restored 2026-08-22)**:
   the stock NetPackageTraderData ToServer body (isEntity | entityId/tePosition
   | hasTraderData | TraderData::Write, asm.il 843046) is parsed and mirrored
@@ -4343,9 +4350,13 @@ a finer server encoding.
   by that many `Vector3i`, so the shape is cited, not invented. The join-time
   PersistentPlayerState overlay now carries the player's own claim positions
   (matched on `owner_entity`, which `reclaimForName` re-maps at login), bounded
-  by `max_lp_blocks_on_wire` to what the PPD body slice holds. Enforcement is
-  unchanged and still reads `land_claims`, so a player past the wire cap keeps
-  every claim; only the client overlay tail is dropped.
+  by `max_lp_blocks_on_wire`. The body buffer is now derived from that cap
+  (`persistent_player_state_max_len`) rather than a fixed 512 bytes, which the
+  worst-case body overflowed: both identities and the name at their caps with a
+  full claim list needs 640, and the caller drops the body on error, so a player
+  at the cap lost the whole package, name included. Enforcement is unchanged and
+  still reads `land_claims`, so a player past the wire cap keeps every claim;
+  only the client overlay tail is dropped.
   *Anchors:* `src/server/c2s/blocks.zig:claimCovering`, `src/wire/stock_inv.zig:846-885`,
   `../7dtd-engine-research/il/realearth-surfaces-v3.1.0/PersistentPlayerData_Write_BinaryWriter_il.txt:IL_008E-00D7`
 

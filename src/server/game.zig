@@ -130,12 +130,10 @@ pub fn bitOfPeerSlot(peer_slot: i32) ObsMask {
 
 pub const max_land_claims = game_types.max_land_claims;
 /// How many of a player's land-protection blocks ride the PersistentPlayerState
-/// overlay. The PPD body builds into a 512-byte slice of `body_buf` and each
-/// entry is a Vector3i (12 B), so this bounds the list to what the slice can
-/// hold beside the fixed header, name and tail. A player with more claims keeps
-/// every one of them server-side (enforcement reads `land_claims`, not this
-/// list); only the client-side overlay tail is dropped.
-pub const max_lp_blocks_on_wire: usize = 24;
+/// overlay; the body writer owns the cap and the buffer size derived from it. A
+/// player with more claims keeps every one of them server-side (enforcement
+/// reads `land_claims`, not this list); only the overlay tail is dropped.
+pub const max_lp_blocks_on_wire = packages.stock_inv.max_lp_blocks_on_wire;
 pub const max_quest_position_data = @import("game/constants.zig").max_quest_position_data;
 pub const max_player_coord = @import("game/constants.zig").max_player_coord;
 pub const coordInRange = @import("game/constants.zig").coordInRange;
@@ -2611,8 +2609,24 @@ pub const Game = struct {
                     lp_buf[lp_n] = .{ claim.x, claim.y, claim.z };
                     lp_n += 1;
                 }
+                // OwnedVendingMachinePositions: the machines this player still
+                // rents, so the client re-draws their map markers on rejoin
+                // (RE save-region.md, PPD.Write fields 25-28). An expired
+                // rental is not owned any more, so the day check here matches
+                // the one the rent path applies before it clears a machine.
+                var vm_buf: [packages.stock_inv.max_vending_positions_on_wire][3]i32 = undefined;
+                var vm_n: usize = 0;
+                const today: i32 = @intCast(self.sim.director.clock.day);
+                for (&self.vending.items, self.vending.used) |*vm, used| {
+                    if (!used or vm.rental_end_day <= 0) continue;
+                    if (today > vm.rental_end_day) continue;
+                    if (!vm.owner.matches(primary_id)) continue;
+                    if (vm_n >= vm_buf.len) break;
+                    vm_buf[vm_n] = .{ vm.pos.x, vm.pos.y, vm.pos.z };
+                    vm_n += 1;
+                }
                 if (packages.stock_inv.buildPersistentPlayerState(
-                    self.body_buf[8704..9216],
+                    self.body_buf[9728..][0..packages.stock_inv.persistent_player_state_max_len],
                     eid,
                     c.name[0..c.name_len],
                     primary_id,
@@ -2621,6 +2635,7 @@ pub const Game = struct {
                     sy2,
                     sz2,
                     lp_buf[0..lp_n],
+                    vm_buf[0..vm_n],
                 )) |pps| {
                     try self.broadcast("NetPackagePersistentPlayerState", pps);
                 } else |_| {}

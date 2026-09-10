@@ -7758,6 +7758,41 @@ test "scenario vending rent state machine (loot-economy §6)" {
     try sendAccess(g, c, 10, 20, false);
     try std.testing.expectEqual(before + info.rent_time, vm.rental_end_day);
 
+    // A rejoin must carry the rented machine in the PersistentPlayerData
+    // OwnedVendingMachinePositions list (RE save-region.md, PPD.Write fields
+    // 25-28), or the client redraws its map without the marker for the machine
+    // the player is still paying for. This was a hardcoded 0 on the wire.
+    {
+        var cap_re: ln_peer.Capture = .{};
+        const c_re = try g.attachJoinedClientAs(&cap_re, puid);
+        _ = c_re;
+        const pps_id = packages.idOf("NetPackagePersistentPlayerState").?;
+        const pps = cap_re.findPkgId(pps_id) orelse return error.NoPersistentPlayerState;
+        var r: binary.Reader = .{ .data = pps };
+        _ = try r.readByte(); // reason
+        var plat: [platform_user.max_platform_len]u8 = undefined;
+        var pid: [platform_user.max_id_len]u8 = undefined;
+        for (0..2) |_| _ = try platform_user.read(&r, &plat, &pid); // primary, native
+        _ = try r.readByte(); // playGroup
+        _ = try r.readBool(); // AuthoredText present
+        var name_buf: [64]u8 = undefined;
+        _ = try r.readString(&name_buf);
+        _ = try platform_user.read(&r, &plat, &pid); // author
+        _ = try r.readI64(); // lastLogin
+        for (0..4) |_| _ = try r.readI32(); // pos xyz, entityId
+        const lp_n = try r.readI32();
+        for (0..@intCast(lp_n)) |_| for (0..3) |_| {
+            _ = try r.readI32();
+        };
+        _ = try r.readI32(); // backpacks count
+        for (0..3) |_| _ = try r.readI32(); // bedroll
+        _ = try r.readI32(); // questPositions count
+        try std.testing.expectEqual(@as(i32, 1), try r.readI32()); // vending count
+        try std.testing.expectEqual(@as(i32, 10), try r.readI32());
+        try std.testing.expectEqual(@as(i32, 70), try r.readI32());
+        try std.testing.expectEqual(@as(i32, 20), try r.readI32());
+    }
+
     // Another identity cannot clear or re-rent the machine.
     const other: platform_user.Id = .{ .platform = "Steam", .id = "9002" };
     var cap2: ln_peer.Capture = .{};

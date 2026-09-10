@@ -49,6 +49,13 @@ pub const max_id_len = 64;
 /// whitelist gate used to fail OPEN (the bufPrint catch skipped the gate).
 pub const max_composite_len = max_platform_len + 1 + max_id_len;
 
+/// Bytes a present identity takes on the wire: two length-prefixed strings at
+/// their caps. Both caps are under 128, so each 7-bit length prefix is one
+/// byte. Callers sizing a body buffer add the two leading marker bytes
+/// (`present`, version) themselves; `write` emits those for an absent identity
+/// too, so they are not part of the string payload this bounds.
+pub const max_stream_len = (1 + max_platform_len) + (1 + max_id_len);
+
 pub const Id = struct {
     /// EPlatformIdentifier name; the client resolves it via FromPlatformAndId
     /// (asm.il 30960) and drops the whole identity when it does not parse.
