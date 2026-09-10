@@ -3463,11 +3463,8 @@ pub const Game = struct {
             self.sim.markDirty(victim_slot, .{ .inv = true });
             self.broadcastLootSpawn(bag_nid) catch {};
             if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
-                vic.has_backpack = true;
                 vic.bagged_this_death = true;
-                vic.backpack_x = @trunc(t.x);
-                vic.backpack_y = @trunc(t.y);
-                vic.backpack_z = @trunc(t.z);
+                vic.addBackpack(@trunc(t.x), @trunc(t.y), @trunc(t.z));
                 self.broadcastPlayerBackpack(vic) catch {};
             }
         }

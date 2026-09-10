@@ -24,6 +24,11 @@ pub const AuthorityMode = server_config.AuthorityMode;
 /// (GAP 12: 256 silently dropped the 257th claim on register).
 pub const max_land_claims: usize = 1024;
 
+/// Dropped bags tracked per player. Stock's PersistentPlayerData keeps three
+/// and evicts the oldest on a fourth (AddDroppedBackpack IL=69, RE
+/// save-region.md), which is what the client's marker list expects.
+pub const max_tracked_backpacks: usize = 3;
+
 /// Default trader AvailableMoney display value. Stock AvailableMoney is a
 /// per-day dukes pool that regenerates and is spent on player sells; zdtd has
 /// no trader economy, so trade() credits the player wallet directly. Bucket B:
@@ -521,14 +526,14 @@ pub const Client = struct {
     map_middle_z: i32 = 0,
     map_middle_set: bool = false,
     map_chunks_sent: [map_window_n]u8 = [_]u8{0} ** map_window_n,
-    /// Dropped-backpack marker (RE EntityBackpack / PersistentPlayerData
-    /// SetDroppedBackpackPositions): set at the death position when
-    /// DropOnDeath drops a bag, cleared when the bag is collected; the
-    /// broadcast drives the client's backpack markers.
-    backpack_x: i32 = 0,
-    backpack_y: i32 = 0,
-    backpack_z: i32 = 0,
-    has_backpack: bool = false,
+    /// Dropped-backpack markers (RE EntityBackpack / PersistentPlayerData
+    /// SetDroppedBackpackPositions): a position per bag this player has on
+    /// the ground, oldest first. Stock caps the tracking at
+    /// `max_tracked_backpacks` and evicts the oldest when a fourth drops
+    /// (AddDroppedBackpack IL=69, save-region.md), so a player can be shown
+    /// several at once and only loses the oldest marker.
+    backpacks: [max_tracked_backpacks][3]i32 = [_][3]i32{.{ 0, 0, 0 }} ** max_tracked_backpacks,
+    backpack_n: u8 = 0,
     /// True from the moment a death produced a bag until the player respawns.
     /// One death must not produce two bags (the C2S kill path and the
     /// hp-replicate detector both see the same corpse), which is what this
@@ -598,4 +603,34 @@ pub const Client = struct {
     /// Cleared for free by `clients[slot] = .{}` on kick/disconnect.
     puid_primary: platform_user.Stored = .{},
     puid_native: platform_user.Stored = .{},
+
+    /// Track a bag this player just dropped. At the cap the oldest marker is
+    /// evicted rather than the new one dropped, matching stock's
+    /// timestamp-ordered eviction: the bags a player is most likely to still
+    /// reach are the recent ones.
+    pub fn addBackpack(self: *Client, x: i32, y: i32, z: i32) void {
+        if (self.backpack_n == max_tracked_backpacks) {
+            var i: usize = 1;
+            while (i < max_tracked_backpacks) : (i += 1) self.backpacks[i - 1] = self.backpacks[i];
+            self.backpacks[max_tracked_backpacks - 1] = .{ x, y, z };
+            return;
+        }
+        self.backpacks[self.backpack_n] = .{ x, y, z };
+        self.backpack_n += 1;
+    }
+
+    /// Drop the marker at a position, if one is tracked there. Returns true
+    /// when a marker was removed, so callers only rebroadcast on a change.
+    pub fn removeBackpackAt(self: *Client, x: i32, y: i32, z: i32) bool {
+        var i: usize = 0;
+        while (i < self.backpack_n) : (i += 1) {
+            const b = self.backpacks[i];
+            if (b[0] != x or b[1] != y or b[2] != z) continue;
+            var j = i + 1;
+            while (j < self.backpack_n) : (j += 1) self.backpacks[j - 1] = self.backpacks[j];
+            self.backpack_n -= 1;
+            return true;
+        }
+        return false;
+    }
 };

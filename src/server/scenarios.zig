@@ -39,6 +39,7 @@ const ally_mod = @import("ally.zig");
 const evidence_mod = @import("evidence.zig");
 const powerblocks_mod = @import("../ecs/powerblocks.zig");
 const light_te_mod = @import("../world/light_te.zig");
+const game_types = @import("game/types.zig");
 const persist = @import("persist.zig");
 const phase_gate = @import("phase_gate.zig");
 const util_log = @import("../util/log.zig");
@@ -1055,10 +1056,7 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
     const c = try g.attachJoinedClient(&cap);
     g.clients[c.slot].entered = true;
     // Drop: the marker broadcast carries the position.
-    g.clients[c.slot].has_backpack = true;
-    g.clients[c.slot].backpack_x = 12;
-    g.clients[c.slot].backpack_y = 60;
-    g.clients[c.slot].backpack_z = -34;
+    g.clients[c.slot].addBackpack(12, 60, -34);
     const n_before = cap.n;
     try g.broadcastPlayerBackpack(&g.clients[c.slot]);
     try std.testing.expect(cap.n > n_before);
@@ -1086,7 +1084,7 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
     try std.testing.expect(found);
     // Collect: the cleared marker broadcasts an empty list.
     const n_first = cap.n;
-    g.clients[c.slot].has_backpack = false;
+    try std.testing.expect(g.clients[c.slot].removeBackpackAt(12, 60, -34));
     try g.broadcastPlayerBackpack(&g.clients[c.slot]);
     found = false;
     i = n_first;
@@ -14927,11 +14925,15 @@ test "scenario draining a death bag clears the backpack marker" {
     g.sim.inventory[ps] = .{};
     g.sim.inventory[ps].slots[0] = .{ .item_id = 2, .count = 3, .quality = 1 };
     g.spawnDeathBag(ps);
-    try std.testing.expect(g.clients[c.slot].has_backpack);
+    try std.testing.expect(g.clients[c.slot].backpack_n > 0);
 
     const bags = g.sim.kind_groups.slice(.loot_bag);
     const bag_slot = bags[bags.len - 1];
     const bag_id = g.sim.network_id[bag_slot].id;
+    const bag_t = g.sim.transform[bag_slot];
+    const bag_x: i32 = @intFromFloat(@trunc(bag_t.x));
+    const bag_y: i32 = @intFromFloat(@trunc(bag_t.y));
+    const bag_z: i32 = @intFromFloat(@trunc(bag_t.z));
 
     // Open it and take the only stack: the bag empties and despawns.
     try std.testing.expect(invsys.applyTransaction(&g.sim, c.slot, .open, 0, 0, 0, bag_id).ok);
@@ -14941,10 +14943,10 @@ test "scenario draining a death bag clears the backpack marker" {
     try std.testing.expect(g.sim.slotOfNetId(bag_id) == null);
 
     // The Game side clears the marker on that signal.
-    if (r.ok and r.emptied_bag > 0 and g.clients[c.slot].has_backpack) {
-        g.clients[c.slot].has_backpack = false;
+    if (r.ok and r.emptied_bag > 0) {
+        _ = g.clients[c.slot].removeBackpackAt(bag_x, bag_y, bag_z);
     }
-    try std.testing.expect(!g.clients[c.slot].has_backpack);
+    try std.testing.expectEqual(@as(u8, 0), g.clients[c.slot].backpack_n);
     std.debug.print("PASS backpack marker: draining a death bag reports the emptied bag\n", .{});
 }
 
@@ -15778,18 +15780,34 @@ test "scenario a second death still drops a bag while the first is uncollected" 
     g.replicatePlayerHealth();
     const bags_after_first = g.sim.countKind(.loot_bag);
     try std.testing.expect(bags_after_first > 0);
-    try std.testing.expect(g.clients[c.slot].has_backpack);
+    try std.testing.expect(g.clients[c.slot].backpack_n > 0);
 
     // Respawn arms the next death. The marker stays: that first bag is still
     // lying there uncollected, so the client should still see it.
     g.sim.respawnPlayer(ps, 256, 70, 256);
     g.clients[c.slot].bagged_this_death = false;
-    try std.testing.expect(g.clients[c.slot].has_backpack);
+    try std.testing.expect(g.clients[c.slot].backpack_n > 0);
 
     // Second death with a fresh inventory: it must bag too.
     g.sim.inventory[ps].slots[2] = .{ .item_id = 9, .count = 3 };
     _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
     g.replicatePlayerHealth();
     try std.testing.expect(g.sim.countKind(.loot_bag) > bags_after_first);
-    std.debug.print("PASS two deaths: the second death bags instead of losing the inventory\n", .{});
+    // Both bags are on the map at once. Tracking one marker meant the second
+    // death overwrote the first, so a player could see only the newest bag
+    // even though both were lying there. Stock tracks three.
+    try std.testing.expectEqual(@as(u8, 2), g.clients[c.slot].backpack_n);
+
+    // Past the cap the oldest marker is evicted, not the new one refused:
+    // the bags a player can still reach are the recent ones.
+    const cl = &g.clients[c.slot];
+    cl.addBackpack(1, 2, 3);
+    cl.addBackpack(4, 5, 6);
+    try std.testing.expectEqual(@as(u8, game_types.max_tracked_backpacks), cl.backpack_n);
+    try std.testing.expectEqual([3]i32{ 4, 5, 6 }, cl.backpacks[cl.backpack_n - 1]);
+    // Collecting one of them closes the gap rather than leaving a hole.
+    try std.testing.expect(cl.removeBackpackAt(1, 2, 3));
+    try std.testing.expectEqual(@as(u8, game_types.max_tracked_backpacks - 1), cl.backpack_n);
+    try std.testing.expectEqual([3]i32{ 4, 5, 6 }, cl.backpacks[cl.backpack_n - 1]);
+    std.debug.print("PASS two deaths: the second death bags, and both markers ride the wire\n", .{});
 }

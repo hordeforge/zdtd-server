@@ -143,13 +143,7 @@ pub fn tickPlayerPositions(self: *Game) void {
 /// RE EntityBackpack / PersistentPlayerData): one position when the death bag
 /// is live, empty when collected.
 pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {
-    var positions: [1][3]i32 = undefined;
-    var n: usize = 0;
-    if (c.has_backpack) {
-        positions[0] = .{ c.backpack_x, c.backpack_y, c.backpack_z };
-        n = 1;
-    }
-    if (packages.buildPlayerSetBackpackPositionBody(&self.body_buf, c.entity_id, positions[0..n])) |body| {
+    if (packages.buildPlayerSetBackpackPositionBody(&self.body_buf, c.entity_id, c.backpacks[0..c.backpack_n])) |body| {
         try self.broadcast("NetPackagePlayerSetBackpackPosition", body);
     } else |_| {
         self.harness.counters.inc(.encode_errors);

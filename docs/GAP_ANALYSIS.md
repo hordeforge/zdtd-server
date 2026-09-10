@@ -3111,9 +3111,10 @@ unvalidated, and durability, mods and repair do not exist.
   *collected*, so a player who died again before collecting dropped nothing at
   all and lost the inventory outright. Respawn now arms the next death, and the
   map marker keeps pointing at the uncollected bag because it is still there).
-  Remaining gap: stock tracks up to three dropped bags per player
-  (PersistentPlayerData, RE save-region.md); zdtd tracks one, so a third death
-  overwrites the marker of the second. Scenario
+  Since 2026-09-10 zdtd tracks `max_tracked_backpacks` (3) markers per player
+  like stock's PersistentPlayerData (AddDroppedBackpack IL=69, RE
+  save-region.md), evicting the oldest on a fourth drop rather than refusing
+  the new one, and the marker broadcast ships the whole list. Scenario
   `AI kill drops the player's real inventory` proves the AI path; unit test
   pins the range copy.
   *Anchors:* `src/server/game.zig` spawnDeathBag,

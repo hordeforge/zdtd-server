@@ -787,6 +787,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         const tx = packages.parseInvTxRequest(body) catch return true;
         var r: invsys.Result = .{};
+        var bag_pos: ?[3]i32 = null;
         // Captured before apply: a rejected place must refund what it consumed.
         const place_item_id: u16 = blk: {
             if (tx.op != @intFromEnum(invsys.Op.place) and tx.op != @intFromEnum(invsys.Op.use)) break :blk 0;
@@ -816,17 +817,36 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 .place => if (self.quarantineDenies(c, .block)) return true,
                 else => {},
             }
+            // The open bag's position, read while it still exists: a drain
+            // that empties it destroys the entity, and the marker is keyed by
+            // position.
+            if (op == .take) {
+                if (self.sim.playerByPeer(c.slot)) |tps| {
+                    const cid = self.sim.inventory[tps].open_container;
+                    if (cid > 0) {
+                        if (self.sim.slotOfNetId(cid)) |bs| {
+                            if (self.sim.mask[bs].transform) {
+                                const bt = self.sim.transform[bs];
+                                bag_pos = .{ @trunc(bt.x), @trunc(bt.y), @trunc(bt.z) };
+                            }
+                        }
+                    }
+                }
+            }
             // ItemActionEat: resolve food/water/hp from items.xml via eatProps.
             r = invsys.applyTransactionEx(&self.sim, c.slot, op, tx.a, tx.b, tx.qty, tx.entity_id, eatProps, self);
         }
         // Draining a death bag slot-by-slot destroys it the same way
         // collecting the whole bag does, so the backpack marker must clear on
-        // both. Left latched, `has_backpack` suppresses every later death bag
-        // for this player (replicate_health gates on it) and strands a map
-        // marker on a bag that no longer exists.
-        if (r.ok and r.emptied_bag > 0 and c.has_backpack) {
-            c.has_backpack = false;
-            self.broadcastPlayerBackpack(c) catch {};
+        // both, or the map keeps a marker on a bag that no longer exists.
+        // The position has to be read before the drain: the entity is gone by
+        // the time `emptied_bag` reports it.
+        if (r.ok and r.emptied_bag > 0) {
+            if (bag_pos) |bp| {
+                if (c.removeBackpackAt(bp[0], bp[1], bp[2])) {
+                    self.broadcastPlayerBackpack(c) catch {};
+                }
+            }
         }
         if (r.ok and r.place_block != 0) {
             // Land claim is authoritative on every apply path (ADR 0004); the
