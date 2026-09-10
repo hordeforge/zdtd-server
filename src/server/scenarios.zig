@@ -15751,3 +15751,45 @@ test "scenario an explosion downgrade clears the old block's state and registers
     try std.testing.expect(g.containers.get(cpos) == null);
     std.debug.print("PASS blast downgrade: displaced block's state cleared on the explosion path\n", .{});
 }
+
+test "scenario a second death still drops a bag while the first is uncollected" {
+    // The no-double-bag guard rode `has_backpack`, which stays set until the
+    // bag is collected rather than until the player respawns. So a player who
+    // died again before walking back to the first bag dropped nothing at all
+    // and lost the inventory outright - the guard against one death producing
+    // two bags was suppressing the second death's bag entirely.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_twodeaths");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_twodeaths", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+
+    // First death: a bag drops and the marker latches.
+    g.sim.inventory[ps].slots[2] = .{ .item_id = 7, .count = 5 };
+    _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+    g.replicatePlayerHealth();
+    const bags_after_first = g.sim.countKind(.loot_bag);
+    try std.testing.expect(bags_after_first > 0);
+    try std.testing.expect(g.clients[c.slot].has_backpack);
+
+    // Respawn arms the next death. The marker stays: that first bag is still
+    // lying there uncollected, so the client should still see it.
+    g.sim.respawnPlayer(ps, 256, 70, 256);
+    g.clients[c.slot].bagged_this_death = false;
+    try std.testing.expect(g.clients[c.slot].has_backpack);
+
+    // Second death with a fresh inventory: it must bag too.
+    g.sim.inventory[ps].slots[2] = .{ .item_id = 9, .count = 3 };
+    _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+    g.replicatePlayerHealth();
+    try std.testing.expect(g.sim.countKind(.loot_bag) > bags_after_first);
+    std.debug.print("PASS two deaths: the second death bags instead of losing the inventory\n", .{});
+}

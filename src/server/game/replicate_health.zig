@@ -27,7 +27,7 @@ pub fn replicatePlayerHealth(self: *Game) void {
                 // victims and latches has_backpack, so a death is never bagged
                 // twice): DropOnDeath modes 1..3 drop the victim's real
                 // inventory range as a bag at the death position.
-                if (!oc.has_backpack) self.spawnDeathBag(i);
+                if (!oc.bagged_this_death) self.spawnDeathBag(i);
                 if (oc.peer) |op| {
                     // Stock EntityPlayer.HandleClientDeath (IL=71) switches on
                     // GameStats DeathPenalty and runs the matching

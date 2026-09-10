@@ -467,6 +467,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     @as(f32, @floatFromInt(bed_surf.y)) + 0.08,
                     @floatFromInt(bed_surf.z),
                 );
+                // Arm the next death. The guard exists so one death cannot
+                // produce two bags (the C2S kill path and the hp-replicate
+                // detector both see the same corpse); it used to ride
+                // `has_backpack`, which stays set until the bag is collected,
+                // so a player who died again before collecting dropped
+                // nothing at all and lost the inventory outright. The map
+                // marker keeps pointing at the uncollected bag, which is
+                // correct: it is still lying there.
+                c.bagged_this_death = false;
                 // Respawn confirm first (the client leaves the death screen
                 // and enters the spawned state), then position + HP so the
                 // post-respawn state cannot be discarded while still dead.

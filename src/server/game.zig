@@ -3464,6 +3464,7 @@ pub const Game = struct {
             self.broadcastLootSpawn(bag_nid) catch {};
             if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
                 vic.has_backpack = true;
+                vic.bagged_this_death = true;
                 vic.backpack_x = @trunc(t.x);
                 vic.backpack_y = @trunc(t.y);
                 vic.backpack_z = @trunc(t.z);

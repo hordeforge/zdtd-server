@@ -529,6 +529,12 @@ pub const Client = struct {
     backpack_y: i32 = 0,
     backpack_z: i32 = 0,
     has_backpack: bool = false,
+    /// True from the moment a death produced a bag until the player respawns.
+    /// One death must not produce two bags (the C2S kill path and the
+    /// hp-replicate detector both see the same corpse), which is what this
+    /// guards. `has_backpack` cannot: it stays set until the bag is
+    /// collected, so gating on it made a second death drop nothing at all.
+    bagged_this_death: bool = false,
     /// Entity slots this client has received an ECD EntitySpawn for
     /// (spawn-on-approach; cleared when the entity dies or slot recycles).
     known_entities: std.StaticBitSet(ecs.max_entities) = std.StaticBitSet(ecs.max_entities).initEmpty(),

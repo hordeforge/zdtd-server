@@ -3106,7 +3106,14 @@ unvalidated, and durability, mods and repair do not exist.
   source slots into the bag at preserved offsets instead of a single
   placeholder unit, then latches the dropped-backpack marker. Both kill paths
   bag: the C2S damage kill and the hp-replicate AI-kill detector (coordinated
-  through `Client.has_backpack` so a death is never bagged twice). Scenario
+  through `Client.bagged_this_death` so one death is never bagged twice; that
+  guard rode `has_backpack` until 2026-09-10, which stays set until the bag is
+  *collected*, so a player who died again before collecting dropped nothing at
+  all and lost the inventory outright. Respawn now arms the next death, and the
+  map marker keeps pointing at the uncollected bag because it is still there).
+  Remaining gap: stock tracks up to three dropped bags per player
+  (PersistentPlayerData, RE save-region.md); zdtd tracks one, so a third death
+  overwrites the marker of the second. Scenario
   `AI kill drops the player's real inventory` proves the AI path; unit test
   pins the range copy.
   *Anchors:* `src/server/game.zig` spawnDeathBag,
