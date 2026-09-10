@@ -10240,7 +10240,84 @@ test "scenario air drop pushes a supply_drop NavObject marker" {
         @intFromEnum(packages.MapObjectType.supply_drop),
         try rr.readI32(),
     );
-    std.debug.print("PASS air-drop: supply_drop marker sent, replayed on join, survives restart, removed on collect\n", .{});
+    // Stock b10 also unregisters the crate's NavObject
+    // (AIDirectorAirDropComponent.RemoveSupplyCrate IL=54 reaches it from
+    // EntitySupplyCrate.OnEntityUnload IL=17). Without it the compass marker
+    // outlives the collected crate.
+    {
+        const navrm_id = packages.idOf("NetPackageNavObject").?;
+        const navrm = cap_c.findPkgId(navrm_id) orelse return error.NoNavObjectRemove;
+        var nr: binary.Reader = .{ .data = navrm };
+        var nb: [8]u8 = undefined;
+        try std.testing.expectEqualStrings("", try nr.readString(&nb)); // class
+        try std.testing.expectEqualStrings("", try nr.readString(&nb)); // name
+        _ = try nr.readF32();
+        _ = try nr.readF32();
+        _ = try nr.readF32(); // position
+        try std.testing.expectEqual(false, try nr.readBool()); // isAdd = remove
+        _ = try nr.readBool(); // useOverrideColor
+        _ = try nr.readU32(); // colour
+        _ = try nr.readBool(); // usingLocalizationId
+        try std.testing.expectEqual(crate_nid, try nr.readI32());
+    }
+    std.debug.print("PASS air-drop: supply_drop marker sent, replayed on join, survives restart, MapObject + NavObject removed on collect\n", .{});
+}
+
+test "scenario a destroyed supply crate takes back both markers" {
+    // A crate killed by damage is destroyed inside damageFrom (a non-Alive
+    // entity gets no corpse dwell), so the marker teardown must run on the
+    // damage path. Stock sends both NetPackageEntityMapMarkerRemove
+    // (EntitySupplyCrate.OnEntityDeath IL=30) and the NetPackageNavObject
+    // remove form (EntitySupplyCrate.OnEntityUnload IL=17 ->
+    // AIDirectorAirDropComponent.RemoveSupplyCrate IL=54). Sending neither left
+    // a marker over loot that no longer existed.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_cratedestroy");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_cratedestroy", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    const t = g.sim.transform[ps];
+    const crate = g.sim.spawnLootBag(t.x, t.y, t.z, 7, 1) orelse return error.TestUnexpectedResult;
+    g.sim.loot_bag[g.sim.slotOfNetId(crate).?].supply_crate = true;
+
+    cap.clear();
+    var body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    const dmg = try packages.buildDamageBody(&body, crate, 0, 0, 50, true, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dmg));
+    try std.testing.expect(g.sim.slotOfNetId(crate) == null); // destroyed
+
+    const rm_id = packages.idOf("NetPackageEntityMapMarkerRemove").?;
+    const rm = cap.findPkgId(rm_id) orelse return error.NoMapMarkerRemove;
+    var rr: binary.Reader = .{ .data = rm };
+    try std.testing.expectEqual(packages.map_marker_remove_by_entity, try rr.readI32());
+    try std.testing.expectEqual(crate, try rr.readI32());
+    try std.testing.expectEqual(@intFromEnum(packages.MapObjectType.supply_drop), try rr.readI32());
+
+    const navrm_id = packages.idOf("NetPackageNavObject").?;
+    const navrm = cap.findPkgId(navrm_id) orelse return error.NoNavObjectRemove;
+    var nr: binary.Reader = .{ .data = navrm };
+    var nb: [8]u8 = undefined;
+    _ = try nr.readString(&nb);
+    _ = try nr.readString(&nb);
+    _ = try nr.readF32();
+    _ = try nr.readF32();
+    _ = try nr.readF32();
+    try std.testing.expectEqual(false, try nr.readBool()); // isAdd
+    _ = try nr.readBool();
+    _ = try nr.readU32();
+    _ = try nr.readBool();
+    try std.testing.expectEqual(crate, try nr.readI32());
+
+    std.debug.print("PASS crate-destroy: a killed crate drops both markers\n", .{});
 }
 
 test "scenario bedroll ownership survives a restart" {

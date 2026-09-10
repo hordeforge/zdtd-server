@@ -767,6 +767,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // attackerEntityId (::read, asm.il:810693) and EAISetAsTargetIfHurt
         // turns it into the victim's attack target. The actor is already
         // validated above, so use its net id rather than the claimed field.
+        // A damage-killed supply crate must take its MapObject and NavObject
+        // markers back (EntitySupplyCrate.OnEntityDeath IL=30 +
+        // OnEntityUnload/RemoveSupplyCrate IL=54). damageFrom destroys the
+        // non-Alive entity, so read the flag before the call.
+        const target_was_crate = if (self.sim.slotOfNetId(d.entity_id)) |ts|
+            self.sim.mask[ts].loot_bag and self.sim.loot_bag[ts].supply_crate
+        else
+            false;
         const dmg = self.sim.damageFrom(d.entity_id, amount, self.sim.network_id[actor_slot].id);
         // Dismember roll (RE CheckDismember IL=125): the claimed body part
         // feeds the region/leg gates; the weapon chance comes off the
@@ -861,6 +869,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             }
         }
         if (dmg.killed) {
+            // The crate is destroyed inside damageFrom, so its marker teardown
+            // runs here on the captured flag (a killed non-Alive entity never
+            // reaches the corpse sweep).
+            if (target_was_crate) self.broadcastSupplyCrateMarkerRemove(d.entity_id);
             // Dead players keep the entity (client runs its own death →
             // respawn flow); EntityRemove would delete the local player.
             const target_is_player = if (self.sim.slotOfNetId(d.entity_id)) |ti| self.sim.mask[ti].player else false;

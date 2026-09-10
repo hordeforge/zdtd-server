@@ -82,6 +82,24 @@ pub fn broadcastLootSpawn(self: *Game, net_id: i32) !void {
     try self.broadcastNear("NetPackageEntitySpawn", spb, self.sim.transform[bi].x, self.sim.transform[bi].z, self.interest_range);
 }
 
+/// Take back a supply crate's two client-side markers. Stock b10 does both on
+/// crate death: EntitySupplyCrate.OnEntityDeath (IL=30) removes the map object
+/// and broadcasts NetPackageEntityMapMarkerRemove, and
+/// EntitySupplyCrate.OnEntityUnload (IL=17, reason Killed) calls
+/// AIDirectorAirDropComponent.RemoveSupplyCrate (IL=54), which broadcasts
+/// NetPackageNavObject in its remove form (client:
+/// NavObjectManager.UnRegisterNavObjectByEntityID). zdtd's collect path sent
+/// only the first marker package, and a damage-killed crate sent neither, so
+/// the marker outlived the loot.
+pub fn broadcastSupplyCrateMarkerRemove(self: *Game, crate_entity_id: i32) void {
+    if (packages.buildMapMarkerRemoveByEntity(self.body_buf[0..], crate_entity_id, .supply_drop)) |mb| {
+        self.broadcast("NetPackageEntityMapMarkerRemove", mb) catch {};
+    } else |_| {}
+    if (packages.buildNavObjectRemove(self.body_buf[0..], crate_entity_id)) |nb| {
+        self.broadcast("NetPackageNavObject", nb) catch {};
+    } else |_| {}
+}
+
 pub fn broadcastItemDropSpawn(self: *Game, net_id: i32, stack: packages.stock_inv.StockSlot, belongs_player_id: i32, client_entity_id: i32) !void {
     const bi = self.sim.slotOfNetId(net_id) orelse return;
     if (self.sim.mask[bi].inventory) {

@@ -3503,6 +3503,11 @@ pub const Game = struct {
         try game_loot.broadcastLootSpawn(self, net_id);
     }
 
+    /// Take back a dead supply crate's MapObject and NavObject markers.
+    pub fn broadcastSupplyCrateMarkerRemove(self: *Game, crate_entity_id: i32) void {
+        game_loot.broadcastSupplyCrateMarkerRemove(self, crate_entity_id);
+    }
+
     /// Stock DropOnDeath (0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete):
     /// spawn the victim's death bag at their position holding the real
     /// inventory range (not a placeholder unit) and mark the dropped-backpack

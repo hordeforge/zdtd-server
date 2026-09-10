@@ -1090,18 +1090,24 @@ re-arms) with the population count as the quest target.
   sequence, RE protocol.md:317). `sendAirDropNavObjects` does the same, and the
   crate flag rides the save as a `zen_rec_supply_crate` tag record following its
   bag (a separate record, so older saves stay readable).
-  Collecting the crate sends the removal companion
+  A dead crate takes back **two** markers (round 5, 2026-09-10):
+  `EntitySupplyCrate.OnEntityDeath` (IL=30) removes the MapObject
   (`NetPackageEntityMapMarkerRemove`, `removeByType` 0 + entityId +
-  `EnumMapObjectType.SupplyDrop` 13), which is what
-  `EntityAirDropCrate.OnEntityDeath` (IL=30) broadcasts on channel 192 (RE
-  aidirector.md:84). This was previously dismissed in WORK_PLAN as moot on the
-  theory that an entity-tied NavObject dies with its entity client-side and that
-  the removal package was the land-claim path only; the IL says the crate sends
-  type 13 explicitly, so the marker would otherwise sit over bare ground for the
-  rest of the session.
+  `EnumMapObjectType.SupplyDrop` 13, channel 192; RE aidirector.md:84), and
+  `EntitySupplyCrate.OnEntityUnload` (IL=17, reason Killed) ->
+  `AIDirectorAirDropComponent.RemoveSupplyCrate` (IL=54) unregisters the
+  NavObject (`NetPackageNavObject` `Setup(Int32)` remove form, client
+  `NavObjectManager.UnRegisterNavObjectByEntityID`). zdtd sent only the first,
+  and only on collect: a damage-killed crate is destroyed inside `damageFrom`
+  (a non-Alive entity gets no corpse dwell) so the sweep never reported it.
+  Both paths now share `broadcastSupplyCrateMarkerRemove`. The earlier WORK_PLAN
+  dismissal (an entity-tied NavObject dies with its entity) was still wrong for
+  the damage path, and the NavObject leg was missing on collect.
   *Anchors:* `src/server/game/join.zig` `sendAirDropNavObjects`,
   `src/server/game/tick.zig` `tickAirDrop`, `src/server/c2s/move.zig`
-  (collect path), `src/wire/packages.zig` `buildMapMarkerRemoveByEntity`,
+  (collect path), `src/server/c2s/misc.zig` (damage-kill path),
+  `src/wire/packages.zig` `buildMapMarkerRemoveByEntity` / `buildNavObjectRemove`,
+  `src/server/game/loot.zig` `broadcastSupplyCrateMarkerRemove`,
   `src/server/persist.zig` `zen_rec_supply_crate`, `src/ecs/components.zig`
   `LootBag.supply_crate`
 
