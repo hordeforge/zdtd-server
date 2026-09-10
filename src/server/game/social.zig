@@ -133,6 +133,14 @@ pub fn relayBuff(self: *Game, entity_id: i32, buff_name: []const u8, adding: boo
         return;
     };
     try self.broadcastExcept("NetPackageAddRemoveBuff", b, except_slot);
+    // Every buff the server applies or drops passes through here - the C2S
+    // request, the tick expiry drain and the death clear on respawn all relay
+    // from this one function - so hooking it is what makes the observer see
+    // the whole set rather than the one path that happened to be wired.
+    // Wasm-first (AGENTS rule 29): reacting to a buff is behaviour, so it
+    // belongs on the plugin boundary rather than in a native special case.
+    self.plugins.buff(entity_id, buff_name, adding);
+    self.wasm_plugins.buff(entity_id, buff_name, adding);
 }
 
 pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {

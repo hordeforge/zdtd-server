@@ -58,6 +58,11 @@ pub const PluginVTable = struct {
     /// stat (hp/food/water/stamina) and on XP awards (level/XP). Pure
     /// observer - the sim stays the authority; plugins react/announce.
     on_stat_changed: ?*const fn (*const Host, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void = null,
+    /// Buff observer (on_buff): fired for every buff applied or dropped,
+    /// whatever caused it (C2S request, tick expiry, death clear on respawn).
+    /// The name is the stable key; the numeric def_id is a per-load catalog
+    /// index. Pure observer - the buff is already applied and relayed.
+    on_buff: ?*const fn (*const Host, entity: i32, name: []const u8, adding: bool) void = null,
     /// Evidence observer (on_evidence, T21): the guard's evidence-ring event,
     /// streamed read-only (floats as f32 bits, severity post-ceiling). Never
     /// a gate: the host already applied the T20 severity ceiling and the

@@ -40,6 +40,7 @@ pub const Hook = enum(u8) {
     on_stat_changed = 20,
     on_game_event = 21,
     on_evidence = 22,
+    on_buff = 23,
 
     pub const names = [_][]const u8{
         "on_enable",        "on_tick",          "on_player_join",   "on_shutdown",
@@ -47,7 +48,7 @@ pub const Hook = enum(u8) {
         "on_admin_command", "on_chat",          "on_player_login",  "on_player_leave",
         "on_player_damage", "on_quest_accept",  "on_craft_request", "on_loot_roll",
         "on_trader_event",  "on_mcp_frame",     "on_trade_price",   "on_perk_spend",
-        "on_stat_changed",  "on_game_event",    "on_evidence",
+        "on_stat_changed",  "on_game_event",    "on_evidence",      "on_buff",
     };
 };
 
@@ -489,6 +490,30 @@ pub const Plugin = struct {
         self.instance.call(fn (i32, i32, i32, i32, i32, i32, i32) void, "on_stat_changed", .{ player, hp, food, water, stamina, level, xp }) catch |err| {
             self.disabled = true;
             std.debug.print("zdtd: plugin '{s}' on_stat_changed disabled: {s}\n", .{ self.name, @errorName(err) });
+        };
+    }
+
+    /// on_buff(entity: i32, name_ptr: i32, name_len: i32, adding: i32) -
+    /// observer. Fires for every buff the server applies or drops, whatever
+    /// caused it: a C2S request, the tick expiry drain, or the death clear on
+    /// respawn. The buff name is copied into the guest's scratch (the stable
+    /// key; the numeric def_id is a per-load catalog index and must not cross
+    /// the boundary). Pure observer - the sim stays the authority, and the
+    /// return is discarded, so a plugin cannot veto a buff the server has
+    /// already applied and relayed.
+    pub fn callBuff(self: *Plugin, entity: i32, name: []const u8, adding: bool) void {
+        if (self.disabled) return;
+        if (!self.hook_present[@intFromEnum(Hook.on_buff)]) return;
+        const mem = self.instance.memory() orelse return;
+        const off = self.reserveScratch(mem, name.len) orelse return;
+        @memcpy(mem.slice()[off..][0..name.len], name);
+        self.instance.call(
+            fn (i32, i32, i32, i32) void,
+            "on_buff",
+            .{ entity, @intCast(off), @intCast(name.len), @intFromBool(adding) },
+        ) catch |err| {
+            self.disabled = true;
+            std.debug.print("zdtd: plugin '{s}' on_buff disabled: {s}\n", .{ self.name, @errorName(err) });
         };
     }
 
@@ -1140,6 +1165,12 @@ pub const WasmHost = struct {
     /// Player stat observer (ADR 0034): notify every plugin exporting it.
     pub fn statChanged(self: *WasmHost, player: i32, hp: i32, food: i32, water: i32, stamina: i32, level: i32, xp: i32) void {
         for (0..self.n) |i| self.slots[i].callStatChanged(player, hp, food, water, stamina, level, xp);
+    }
+
+    /// Buff observer: notify every plugin exporting on_buff. Read-only, so
+    /// every slot is called and no return is collected.
+    pub fn buff(self: *WasmHost, entity: i32, name: []const u8, adding: bool) void {
+        for (0..self.n) |i| self.slots[i].callBuff(entity, name, adding);
     }
 
     /// Evidence observer (T21): notify every plugin exporting on_evidence.

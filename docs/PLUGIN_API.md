@@ -35,6 +35,7 @@ A native ABI could promise neither.
 | Perk verdict (ADR 0033) | `on_perk_spend(player, skill, level, cost)`: `<0` deny the purchase, `0` keep, `>0` scales the skill-point cost by percent; first non-zero wins |
 | GameEvent verdict (ADR 0035) | `on_game_event(player, event, target, var_count)`: `<0` deny, `0` keep, `>0` keep (first non-keep wins); the stock IL=211 sender/party gate lands native before the verdict |
 | Stat observer (ADR 0034) | `on_stat_changed(player, hp, food, water, stamina, level, xp)`: pure observer fired when the survival pass or an XP award changed a tracked stat; void, no verdict |
+| Buff observer | `on_buff(entity, name, adding)`: pure observer fired for every buff applied or dropped, whatever caused it (C2S request, tick expiry, death clear on respawn). Hooked at `relayBuff`, the one function every buff move already passes through, so a plugin sees the whole set rather than one wired path. Void, no verdict: the buff is applied and relayed before the hook runs |
 | Player lifecycle observers | `on_player_join(peer_slot, entity_id)` / `on_player_leave(peer_slot, entity_id)`: void observers at join and disconnect |
 | Trader observer | `on_trader_event(player, trader_entity, kind)`: void observer on trade open / sell / buy |
 | Quest accept verdict | `on_quest_accept(player, def_id)`: first non-zero wins (deny / keep / scale) |

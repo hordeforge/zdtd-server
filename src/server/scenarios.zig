@@ -52,6 +52,15 @@ const assets_traders = @import("../assets/traders.zig");
 // vtable fn cannot close over locals).
 var ev_seen: [8]i32 = .{0} ** 8;
 
+/// Buff observer capture (module scope: the vtable fn cannot close over
+/// locals). Records the last event plus a per-direction tally, so a test can
+/// tell "the hook fired for the removal" from "the hook fired at all".
+var buff_seen_adds: u32 = 0;
+var buff_seen_removes: u32 = 0;
+var buff_seen_name: [32]u8 = .{0} ** 32;
+var buff_seen_name_len: usize = 0;
+var buff_seen_entity: i32 = 0;
+
 /// Scenario worlds must start fresh: persisted state (entities.zen, *.zch)
 /// from a previous run leaks into the next one, and vehicles/turrets have
 /// accumulated enough across runs to exhaust the entity table (join failure)
@@ -6410,6 +6419,28 @@ test "scenario buff add relays to observers and expires on the server clock" {
     const cb = try g.attachJoinedClient(&cap_b);
     _ = cb;
 
+    // Wasm-first (ADR 0020): reacting to a buff is behaviour, so it rides the
+    // plugin boundary. The observer is registered here to watch all three ways
+    // a buff can move below - the C2S grant, the tick expiry, and the death
+    // clear on respawn - because a hook wired to only one of them looks
+    // correct until a plugin misses the other two.
+    buff_seen_adds = 0;
+    buff_seen_removes = 0;
+    const buff_obs = plugin_api.PluginVTable{
+        .name = "buffobs",
+        .on_buff = struct {
+            fn f(_: *const plugin_api.Host, entity: i32, name: []const u8, adding: bool) void {
+                buff_seen_entity = entity;
+                const n = @min(name.len, buff_seen_name.len);
+                @memcpy(buff_seen_name[0..n], name[0..n]);
+                buff_seen_name_len = n;
+                if (adding) buff_seen_adds += 1 else buff_seen_removes += 1;
+            }
+        }.f,
+    };
+    try std.testing.expect(g.plugins.register(&buff_obs));
+    g.plugins.enableAll();
+
     // buffShocked: stack_type=duration, duration 4 s (80 stock ticks).
     const def_id = g.buffs.indexOfName("buffShocked").?;
     var body: [128]u8 = undefined;
@@ -6550,9 +6581,19 @@ test "scenario buff add relays to observers and expires on the server clock" {
     try std.testing.expect(!dropped.adding);
     try std.testing.expectEqualStrings("buffShocked", dropped.name);
 
+    // The observer saw every move, not just the grant. Three adds (the first
+    // grant, the one before the death clear, the one before this removal) and
+    // three removals (expiry, death clear, C2S drop) have run above; each is a
+    // different code path into relayBuff, which is why the count matters more
+    // than the last event.
+    try std.testing.expectEqual(@as(u32, 3), buff_seen_adds);
+    try std.testing.expectEqual(@as(u32, 3), buff_seen_removes);
+    try std.testing.expectEqualStrings("buffShocked", buff_seen_name[0..buff_seen_name_len]);
+    try std.testing.expectEqual(ca.entity_id, buff_seen_entity);
+
     std.debug.print(
-        "PASS buff lifecycle: entity={d} buffShocked relayed to observer, expired after {d} ticks, cleared on death, removal relayed\n",
-        .{ ca.entity_id, t },
+        "PASS buff lifecycle: entity={d} buffShocked relayed to observer, expired after {d} ticks, cleared on death, removal relayed, {d} adds / {d} removes seen by the plugin hook\n",
+        .{ ca.entity_id, t, buff_seen_adds, buff_seen_removes },
     );
 }
 
