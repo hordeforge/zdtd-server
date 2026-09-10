@@ -15591,5 +15591,37 @@ test "scenario mining a powered block takes its node and container with it" {
     try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageSetBlock", break_light));
     try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(lx, ly, lz));
     try std.testing.expect(g.light_te.get(lpos) == null);
-    std.debug.print("PASS block-removal stores: node, container and light go with the block\n", .{});
+    // Workstations are the fifth position-keyed store and also had no
+    // remover. A destroyed forge kept broadcasting its dirty state and kept
+    // round-tripping through workstations.zws, so it came back on every
+    // restart still holding its fuel. It holds items, so breaking it has to
+    // spill them like a container rather than delete them.
+    const wx: i32 = @intFromFloat(pp.x - 3);
+    const wy: i32 = @intFromFloat(pp.y);
+    const wz: i32 = @intFromFloat(pp.z - 3);
+    try g.world.setBlockWorld(wx, wy, wz, stone);
+    const ws = g.workstations.getOrCreate(wx, wy, wz) orelse return error.TestUnexpectedResult;
+    ws.fuel[0] = .{ .item_id = 7, .count = 9, .quality = 1 };
+    ws.output[0] = .{ .item_id = 8, .count = 2, .quality = 1 };
+    try std.testing.expect(g.workstations.get(wx, wy, wz) != null);
+    const bags_before = g.sim.countKind(.loot_bag);
+
+    const break_ws = try packages.buildSetBlockBody(&sbuf, wx, wy, wz, 0);
+    try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageSetBlock", break_ws));
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(wx, wy, wz));
+    try std.testing.expect(g.workstations.get(wx, wy, wz) == null);
+    // The fuel and finished output reached the ground instead of vanishing.
+    try std.testing.expect(g.sim.countKind(.loot_bag) > bags_before);
+    // The player break path spills first, which also drops the entry, so it
+    // cannot show whether noteBlockRemoved carries the workstation. The other
+    // four removal paths have no spill step and rely on it alone.
+    const dx: i32 = @intFromFloat(pp.x - 5);
+    const dz: i32 = @intFromFloat(pp.z - 5);
+    try g.world.setBlockWorld(dx, wy, dz, stone);
+    const ws2 = g.workstations.getOrCreate(dx, wy, dz) orelse return error.TestUnexpectedResult;
+    ws2.fuel[0] = .{ .item_id = 7, .count = 3, .quality = 1 };
+    try std.testing.expect(g.workstations.get(dx, wy, dz) != null);
+    g.noteBlockRemoved(dx, wy, dz, stone);
+    try std.testing.expect(g.workstations.get(dx, wy, dz) == null);
+    std.debug.print("PASS block-removal stores: node, container, light and workstation go with the block\n", .{});
 }

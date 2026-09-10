@@ -670,6 +670,20 @@ pub const WorkstationStore = struct {
         return null;
     }
 
+    /// Drop the workstation at a position. Without this one outlived the block
+    /// that carried it: the entry stayed live, kept broadcasting its dirty
+    /// state to nearby peers and kept round-tripping through workstations.zws,
+    /// so a destroyed forge came back on every restart still holding its fuel
+    /// and craft queue.
+    pub fn removeAt(self: *WorkstationStore, x: i32, y: i32, z: i32) void {
+        for (self.items[0..], self.used[0..], 0..) |*w, u, i| {
+            if (!u or w.x != x or w.y != y or w.z != z) continue;
+            self.used[i] = false;
+            w.* = .{};
+            return;
+        }
+    }
+
     /// Persist all live workstations to {dir}/workstations.zws (ZWS1): pos,
     /// block, fuel-module flag, burning state, the four slot groups, lastInput,
     /// the recipe queue (blob included) and the craft-complete list. Records

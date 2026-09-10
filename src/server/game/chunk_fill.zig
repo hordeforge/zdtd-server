@@ -499,6 +499,37 @@ pub fn tryContainerSpill(self: *Game, x: i32, y: i32, z: i32) void {
     }
 }
 
+/// Spill a broken workstation's four slot groups as a ground bag, then drop
+/// the store entry. Same rule as `tryContainerSpill`: the block is gone, so
+/// what it held has to go somewhere the player can reach, or breaking a
+/// forge silently destroys its fuel, inputs, tools and finished output.
+pub fn tryWorkstationSpill(self: *Game, x: i32, y: i32, z: i32) void {
+    const ws = self.workstations.get(x, y, z) orelse return;
+    var drop_inv: ecs.components.Inventory = .{};
+    var n: usize = 0;
+    for ([_][]const ecs.components.InvSlot{
+        ws.fuel[0..],
+        ws.input[0..],
+        ws.tools[0..],
+        ws.output[0..],
+    }) |group| {
+        for (group) |s| {
+            if (s.count == 0 or s.item_id == 0) continue;
+            if (n >= ecs.components.max_inv_slots) break;
+            drop_inv.slots[n] = s;
+            n += 1;
+        }
+    }
+    self.workstations.removeAt(x, y, z);
+    if (n == 0) return;
+    const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+    const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
+    const fz: f32 = @as(f32, @floatFromInt(z)) + 0.5;
+    if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, n)) |bag_nid| {
+        self.broadcastLootSpawn(bag_nid) catch {};
+    }
+}
+
 /// Roll the broken block's Harvest drop rows (RE Block.DropItemsOnEvent
 /// IL=246 + GameUtils.HarvestOnAttack IL=623) into the breaker's inventory:
 /// per row, count = RandomRange(min, max+1), skip 0, drop when

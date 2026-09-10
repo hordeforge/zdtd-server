@@ -2136,9 +2136,11 @@ can walk into every POI but none of them is the building TFP authored.
   same hole ran through the other non-SetBlock removal paths (damage break,
   zombie dig, stability collapse), each of which cleared a different subset.
   `noteBlockRemoved` now owns every consequence of a block ceasing to exist -
-  bedroll respawn plus the four position-keyed stores (power grid, containers,
-  vending, lights; the light store had no remover at all, so a destroyed lamp
-  kept being streamed to every player who joined later) - and all five paths
+  bedroll respawn plus the five position-keyed stores (power grid, containers,
+  vending, lights, workstations; the light and workstation stores had no
+  remover at all, so a destroyed lamp kept being streamed to every player who
+  joined later and a destroyed forge kept broadcasting and saving its fuel and
+  craft queue) - and all five paths
   call it, so a removal is defined in one place instead of five.
   *Anchors:* `src/server/game.zig` (`resetPoiBlocks`, `handleQuestEvent`),
   `src/world/store.zig` (`setBlockTexDensWorld`), `src/world/tts.zig`

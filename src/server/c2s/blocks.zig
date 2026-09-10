@@ -175,6 +175,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (cur_id != 0) {
                     self.noteBlockBreak(c);
                     self.removeClaimAt(b.x, b.y, b.z);
+                    // Spill before the stores are dropped: noteBlockRemoved
+                    // clears the container and workstation entries, so the
+                    // contents have to be taken out first or breaking the
+                    // block silently destroys them.
+                    chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
+                    chunk_fill.tryWorkstationSpill(self, b.x, b.y, b.z);
                     // A removed bedroll clears the owner's respawn point
                     // (stock PersistentPlayerList.SpawnPointRemoved).
                     self.noteBlockRemoved(b.x, b.y, b.z, cur_id);
@@ -193,8 +199,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         }
                         if (count > 0) self.awardXp(c.slot, hxp *| count);
                     }
-                    // A broken container spills its pre-filled contents.
-                    chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                 }
             } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
                 const wire_abs = b.damage;
@@ -234,12 +238,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.light_te.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.workstations.removeAt(b.x, b.y, b.z);
                         self.clearBlockHp(b.x, b.y, b.z);
                         self.clearBlockRaw(b.x, b.y, b.z);
                         place_down_raw = down_raw;
                     } else {
                         self.noteBlockBreak(c);
                         self.removeClaimAt(b.x, b.y, b.z);
+                        // Spill first: noteBlockRemoved drops the container
+                        // and workstation entries this block carried.
+                        chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
+                        chunk_fill.tryWorkstationSpill(self, b.x, b.y, b.z);
                         // A removed bedroll clears the owner's respawn point.
                         self.noteBlockRemoved(b.x, b.y, b.z, base_cur);
                         // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):
@@ -253,8 +262,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                             }
                             if (count > 0) self.awardXp(c.slot, hxp *| count);
                         }
-                        // A broken container spills its pre-filled contents.
-                        chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
                         place_id = 0;
                         out_dmg = 0;
                         self.clearBlockHp(b.x, b.y, b.z);
