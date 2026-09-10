@@ -2525,7 +2525,10 @@ test "POI reset restores baked blocks over player edits" {
     // reset that only repaints blocks leaves the previous occupant's tile
     // entity behind: a power node with no block still feeding the grid, a
     // container still holding its slots under whatever the POI bakes there.
-    // Plant both at the same cell the reset is about to repaint.
+    // Clear the block first so the reset actually rewrites this cell, then
+    // plant both stores. Planting them before the break would let the break's
+    // own spill consume them, and the reset would find nothing to displace.
+    try g.setBlock(t[0], t[1], t[2], 0);
     _ = g.sim.power.addNodeAt(.generator, t[0], t[1], t[2], 1000);
     try std.testing.expect(g.sim.power.indexOfPosition(t[0], t[1], t[2]) != null);
     const cpos = containers_mod.PosKey{ .x = t[0], .y = t[1], .z = t[2] };
@@ -2533,12 +2536,15 @@ test "POI reset restores baked blocks over player edits" {
     cont.slots[0] = .{ .item_id = 7, .count = 5, .quality = 1 };
     try std.testing.expect(g.containers.get(cpos) != null);
 
-    // Change the block so the reset actually rewrites this cell, then reset.
-    try g.setBlock(t[0], t[1], t[2], 0);
+    const bags_before = g.sim.countKind(.loot_bag);
     g.resetPoiBlocks(t[0], t[2]);
     try std.testing.expectEqual(orig, try g.world.blockWorld(t[0], t[1], t[2]));
     try std.testing.expect(g.sim.power.indexOfPosition(t[0], t[1], t[2]) == null);
     try std.testing.expect(g.containers.get(cpos) == null);
+    // The reset restores the POI to its authored state; it does not mine it
+    // out. Spilling the displaced contents would let a player farm a POI by
+    // re-taking the quest that resets it.
+    try std.testing.expectEqual(bags_before, g.sim.countKind(.loot_bag));
 }
 
 test "biome spawn groups resolve per-biome spawning.xml rules on a stock map" {
@@ -4433,4 +4439,50 @@ test "a mined-out prefab container does not come back on the next TE scan" {
     ch2.te_scanned = false;
     g.ensurePrefabStorageInChunk(ch2, f.cx, f.cz);
     try std.testing.expect(g.containers.get(f.pos) == null);
+}
+
+test "a POI reset discards container contents instead of spilling them" {
+    // Stock's reset regenerates the chunk back to its prefab state (RE
+    // server-browser-prefabs.md 3.2 ResetBlocksAndRebuild), which discards
+    // what was there. Once noteBlockRemoved gained the ground spill, the reset
+    // inherited it and started dropping every displaced container as a bag -
+    // so a player could farm a POI by re-taking the quest that resets it.
+    // This covers the helper offline; "POI reset restores baked blocks over
+    // player edits" covers the reset call site, but needs a stock install.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+
+    const cx: i32 = 300;
+    const cy: i32 = 70;
+    const cz: i32 = 300;
+    const seedContainer = struct {
+        fn call(gm: *Game, x: i32, y: i32, z: i32) !void {
+            const cont = gm.containers.getOrCreate(.{ .x = x, .y = y, .z = z }, 8, 1) orelse
+                return error.TestUnexpectedResult;
+            cont.slots[0] = .{ .item_id = 7, .count = 9, .quality = 1 };
+        }
+    }.call;
+
+    // A reset displaces the container: the entry goes, the contents do not
+    // reach the ground.
+    try seedContainer(g, cx, cy, cz);
+    const bags_before_reset = g.sim.countKind(.loot_bag);
+    g.noteBlockRemovedEx(cx, cy, cz, 1, false);
+    try std.testing.expect(g.containers.get(.{ .x = cx, .y = cy, .z = cz }) == null);
+    try std.testing.expectEqual(bags_before_reset, g.sim.countKind(.loot_bag));
+
+    // A removal at the same cell still spills, so the two are genuinely
+    // different rather than the spill having been dropped everywhere.
+    try seedContainer(g, cx, cy, cz);
+    const bags_before_break = g.sim.countKind(.loot_bag);
+    g.noteBlockRemoved(cx, cy, cz, 1);
+    try std.testing.expect(g.containers.get(.{ .x = cx, .y = cy, .z = cz }) == null);
+    try std.testing.expect(g.sim.countKind(.loot_bag) > bags_before_break);
 }

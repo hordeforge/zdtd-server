@@ -1955,6 +1955,10 @@ pub const Game = struct {
         return game_world.noteBlockRemoved(self, x, y, z, cur_id);
     }
 
+    pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spill: bool) void {
+        return game_world.noteBlockRemovedEx(self, x, y, z, cur_id, spill);
+    }
+
     pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
         return game_world.noteBlockAdded(self, x, y, z, new_id);
     }
@@ -2162,7 +2166,11 @@ pub const Game = struct {
                 // list of stores a removal owes.
                 const new_id = world_store.typeId(raw);
                 if (prev_id != new_id) {
-                    g.noteBlockRemoved(bx, by, bz, prev_id);
+                    // No spill: the reset restores the POI to its authored
+                    // state, it does not mine it out. Dropping the displaced
+                    // contents would let a player farm a POI's containers by
+                    // re-taking the quest that resets it.
+                    g.noteBlockRemovedEx(bx, by, bz, prev_id, false);
                     // And the block the reset painted claims what its type
                     // owns: a POI's authored generator or vending machine is
                     // as real as a placed one, so restoring it has to restore
