@@ -262,7 +262,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVD", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
     }
     {
         // The record is carried, not rewritten (its name is not the harness
@@ -271,7 +271,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
         const persist = @import("../persist.zig");
-        _ = try persist.zpvRecordLen(data, 8, 12);
+        _ = try persist.zpvRecordLen(data, 8, 14);
         const tail_at = 8 + 1 + 3 + 16 + 1 + 0 + 1 + 0 + 1; // name, pos, inv_n=0, jn=0, prog
         try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[tail_at..][0..2], .little));
         std.debug.print("PASS zpv7->zpv8: carried tail gains full hp on save\n", .{});
@@ -475,12 +475,13 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     }
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'D'), data[3]);
-    // Record length via the v13 walker: name(7) + 16 + inv(1) + jn(1) +
+    try std.testing.expectEqual(@as(u8, 'E'), data[3]);
+    // Record length via the v14 walker: name(7) + 16 + inv(1) + jn(1) +
     // prog(1) + level(2) + xp(8) + stats(16) + hp(4) + born(8) + buff_n(1) +
-    // bed(1) + skills(5) + backpacks(1, an empty marker list) (the fixture
-    // has no inventory slots, so the ZPV12 slot widening changes nothing).
-    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1), game_mod.zpvRecordLen(data, 8, 13));
+    // bed(1) + skills(5) + backpacks(1, an empty marker list) + the v14
+    // counters(12) (the fixture has no inventory slots, so the ZPV12 slot
+    // widening changes nothing).
+    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12), game_mod.zpvRecordLen(data, 8, 14));
 }
 
 test "players zpv10 inventory slots widen to the ZPV12 stride" {
@@ -539,11 +540,11 @@ test "players zpv10 inventory slots widen to the ZPV12 stride" {
 
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'D'), data[3]); // carried to v13
+    try std.testing.expectEqual(@as(u8, 'E'), data[3]); // carried to v14
     // No prog tail on this fixture, so the ZPV13 marker list (which lives
     // inside the prog block) adds nothing to the length.
     const want = 1 + name.len + 16 + 1 + persist.zpvSlotStride(12) + 1 + 1;
-    try std.testing.expectEqual(want, game_mod.zpvRecordLen(data, 8, 13));
+    try std.testing.expectEqual(want, game_mod.zpvRecordLen(data, 8, 14));
     // The slot's leading fields survived the widening at their own offsets.
     const slot_at = 8 + 1 + name.len + 16 + 1;
     try std.testing.expectEqual(@as(u16, 42), std.mem.readInt(u16, data[slot_at..][0..2], .little));
@@ -608,7 +609,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVD", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
     }
     {
         // Carried, not rewritten, so the migrated tail is read from the file:
@@ -617,7 +618,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
         const persist = @import("../persist.zig");
-        _ = try persist.zpvRecordLen(data, 8, 12);
+        _ = try persist.zpvRecordLen(data, 8, 14);
         const tail_at = 8 + 1 + 3 + 16 + 1 + 1 + 1; // name, pos, inv_n=0, jn=0, prog
         try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[tail_at..][0..2], .little));
         const hp_at = tail_at + 2 + 8 + 16; // level, xp, four survival floats
@@ -702,7 +703,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVD", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
     }
     {
         // The carried record is not the harness client's, so verify it in the
@@ -718,7 +719,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
         try std.testing.expectEqual(@as(u16, 5), std.mem.readInt(u16, data[slot_at + 5 ..][0..2], .little));
         try std.testing.expectEqual(@as(f32, 3.14159), @as(f32, @bitCast(std.mem.readInt(u32, data[slot_at + 7 ..][0..4], .little))));
         // Walking the record with the v12 stride must land inside the file.
-        _ = try persist.zpvRecordLen(data, 8, 12);
+        _ = try persist.zpvRecordLen(data, 8, 14);
         std.debug.print("PASS zpv7->zpv12: carried slot widened to the current stride\n", .{});
     }
 }
@@ -775,7 +776,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVD", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
     }
     {
         // Carried, not rewritten, so the widened slot is checked in the file:
@@ -784,7 +785,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
         const persist = @import("../persist.zig");
-        _ = try persist.zpvRecordLen(data, 8, 12);
+        _ = try persist.zpvRecordLen(data, 8, 14);
         const slot_at = 8 + 1 + 3 + 16 + 1;
         try std.testing.expectEqual(@as(u16, 7), std.mem.readInt(u16, data[slot_at..][0..2], .little));
         try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, data[slot_at + 2 ..][0..2], .little));
@@ -1083,7 +1084,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVD", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.

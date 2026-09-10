@@ -2307,7 +2307,7 @@ when closing work; do not re-open a STATUS PASS from a stale GAP_ANALYSIS row.
 | Interest fan-out | **PASS** | broadcastNear 160 blocks for SetBlock/Explosion/loot spawn; pw19 kill soak Items:3, no near-skip misfires |
 | Player death → respawn | **PASS** | admin kill → EntityStatChanged hp=0; RequestToSpawnPlayer heal + PlayerSpawnedInWorld(died) + join bundle; playtest `player_respawn` PASS 2026-08-03 |
 | Entity spawn-on-approach | **PASS** | per-client known_entities bitset; ECD spawn on first range entry (director hordes, sleeper wakes, roaming); pw27 soak green |
-| Player persist v3+ | **PASS** | players.zsv **ZPV12** (quality/meta + journal + level/XP/food/water/buffs + skill points + game stage + hp; ZPV2-ZPV11 still read and upgraded in place); join PDF carries restored toolbelt/bag; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
+| Player persist v3+ | **PASS** | players.zsv **ZPV14** (quality/meta + journal + level/XP/food/water/buffs + skill points + game stage + hp + dropped-bag markers + kill/death counters; ZPV2-ZPV13 still read and upgraded in place); join PDF carries restored toolbelt/bag and the restored character-sheet counters; pw27 axe q1 persisted through restart+rejoin. Admin `wipeplayer <name>` erases offline records (and kicks online). Note: client inventory is client-authoritative (C2S PlayerData/PlayerInventory overwrite server sim), so only items the client actually holds persist; server-side `give` is a loot-bag drop for this reason |
 | TE/block persist | **PASS** | containers.zct + blockmeta.zbm save/load on save tick + shutdown; unit roundtrip test; pw19 restart rejoin green (files present, join CGO:25, 0 WRN) |
 | Player save merge | **PASS** | savePlayers keeps offline records (was TRUNC joined-only) |
 | Trader XML stock | **PASS** | per-trader traders.xml `<trader_info>` lists via npc.xml class→id (traderAlways fallback) + items.xml EconomicValue prices (group pick rolls deferred) |
@@ -2547,7 +2547,7 @@ bPersistent blob on join + HUD day from WorldTime.
 | `src/server/game.zig` | Orchestration + Game struct (thin façade over `src/server/game/*`) |
 | `src/server/game/*` | Per-domain game logic (join, tick, world, player, quest, social, trader, stability, replicate, net, loot, deco, weather, vehicle, sleeper, hooks, types) |
 | `src/server/c2s/*` | All 5 C2S domains (join, move, inv, quest, misc) |
-| `src/server/persist.zig` | zdtd-owned saves (players.zsv ZPV12, entities.zen, claims.zlc) |
+| `src/server/persist.zig` | zdtd-owned saves (players.zsv ZPV14, entities.zen, claims.zlc) |
 
 ---
 

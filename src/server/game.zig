@@ -2586,7 +2586,10 @@ pub const Game = struct {
         }
         if (first_join) {
             // PDF pads bag to CarryCapacity (45); leave headroom for unlocks/quests.
-            const pid = try packages.buildPlayerIdBodyInvLoaded(
+            // The character-sheet counters ride the PDF too: they are restored
+            // from players.zsv (ZPV14) so the join does not reset a returning
+            // player's kills/deaths, which stock keeps in PlayerDataFile.
+            const pid = try packages.buildPlayerIdBodyWithOpts(
                 self.body_buf[384..16384],
                 eid,
                 0,
@@ -2594,12 +2597,17 @@ pub const Game = struct {
                 sx2,
                 sy2,
                 sz2,
-                qbuf[0..qn],
-                unlock_names[0..unlock_n],
-                tb_slots[0..tb_n],
-                bag_slots[0..bag_n],
-                true,
-                c.game_stage_born_world_time,
+                .{
+                    .quests = qbuf[0..qn],
+                    .unlocked_recipes = unlock_names[0..unlock_n],
+                    .toolbelt = tb_slots[0..tb_n],
+                    .bag = bag_slots[0..bag_n],
+                    .b_loaded = true,
+                    .game_stage_born_at = c.game_stage_born_world_time,
+                    .player_kills = c.player_kills,
+                    .zombie_kills = c.zombie_kills,
+                    .deaths = c.deaths,
+                },
             );
             try self.sendGameCritical(peer, "NetPackagePlayerId", pid);
             // PersistentPlayerState(Login): entityId → name mapping. Without it the

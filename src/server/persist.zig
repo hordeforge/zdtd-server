@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV13), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV14), entities.zen
 //! (ZENT), claims.zlc (ZCLC), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -92,7 +92,10 @@ pub const Zpv2Drop = struct {
 /// the ids re-render the attachments). 13 (ZPV13, magic byte 'D') appends the
 /// dropped-bag marker list (`n:u8 | n x (x,y,z i32)`) after the skill tail, so
 /// a bag restored from entities.zen still shows on its owner's map instead of
-/// lying there unmarked. The bedroll field is
+/// lying there unmarked. 14 (ZPV14, magic byte 'E') appends the character-sheet
+/// kill/death counters (`deaths:i32 | zombieKills:u32 | playerKills:u32`) after
+/// the bag list, so a restart or relog keeps the sheet stock keeps in
+/// PlayerDataFile instead of re-deriving it from a session that is gone. The bedroll field is
 /// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
@@ -242,6 +245,25 @@ fn emitZpv13Backpacks(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl:
     }
 }
 
+/// ZPV14 stats tail: the kill/death counters the client's character sheet
+/// shows (`EntityNetworkStats` / `EntityAlive.AddScore`), which are otherwise
+/// session-only on zdtd. Stock keeps them in PlayerDataFile, so a restart or
+/// relog must carry them through players.zsv instead of re-deriving them from
+/// a live session that no longer exists. Layout: `deaths:i32 | zombieKills:u32
+/// | playerKills:u32`, size `zpv_stats_tail_len`.
+pub const zpv_stats_tail_len: usize = 12;
+
+fn emitZpv14Stats(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    const deaths: i32 = if (cl) |c| c.deaths else 0;
+    const zk: u32 = if (cl) |c| c.zombie_kills else 0;
+    const pk: u32 = if (cl) |c| c.player_kills else 0;
+    var buf: [zpv_stats_tail_len]u8 = undefined;
+    std.mem.writeInt(i32, buf[0..4], deaths, .little);
+    std.mem.writeInt(u32, buf[4..8], zk, .little);
+    std.mem.writeInt(u32, buf[8..12], pk, .little);
+    try out.appendSlice(allocator, &buf);
+}
+
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
     if (off >= data.len) return error.CorruptPlayersFile;
     const nl: usize = data[off];
@@ -301,6 +323,10 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
                 if (bp_n > game_types.max_tracked_backpacks) return error.CorruptPlayersFile;
                 if (p + bp_n * 12 > data.len) return error.CorruptPlayersFile;
                 p += bp_n * 12;
+            }
+            if (version >= 14) {
+                if (p + zpv_stats_tail_len > data.len) return error.CorruptPlayersFile;
+                p += zpv_stats_tail_len;
             }
         }
     }
@@ -399,9 +425,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D' and old_data[3] != 'E'))
             return error.CorruptPlayersFile;
-        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else if (old_data[3] == 'E') 14 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -414,7 +440,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'D', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'E', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -443,8 +469,12 @@ pub fn savePlayers(self: *Game) !void {
             }
             if (rewritten) continue;
             if (old_version >= 12) {
-                // Current shape: carried byte-for-byte.
+                // Current shape: carried byte-for-byte, then the v14 stats tail
+                // the older file did not carry (counters it never knew are 0).
                 try out.appendSlice(self.allocator, old_recs[rec_start..off]);
+                if (had_prog_tail and old_version < 14) {
+                    try emitZpv14Stats(&out, self.allocator, null);
+                }
                 written += 1;
                 continue;
             }
@@ -464,6 +494,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (old_version == 10 and had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -477,6 +508,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -493,6 +525,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 8);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -511,6 +544,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 7);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -527,6 +561,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 6);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -616,6 +651,7 @@ pub fn savePlayers(self: *Game) !void {
             }
             if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
             if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
+            if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
             written += 1;
         }
     }
@@ -807,6 +843,7 @@ pub fn savePlayers(self: *Game) !void {
         // way). Appending before the record would misalign the next record.
         if (tail_has_prog) try emitZpv11Skills(&out, self.allocator, cl);
         if (tail_has_prog) try emitZpv13Backpacks(&out, self.allocator, cl);
+        if (tail_has_prog) try emitZpv14Stats(&out, self.allocator, cl);
         written += 1;
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
@@ -845,12 +882,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -1222,6 +1259,21 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                         c.addBackpack(bx, by, bz);
                     }
                 }
+            }
+            // ZPV14 stats tail: the character-sheet counters stock keeps in
+            // PlayerDataFile. Restored before the join bundle so the PlayerId
+            // PDF (and the PlayerStats push) carry the surviving totals.
+            if (version >= 14 and off + zpv_stats_tail_len <= data.len) {
+                c.deaths = std.mem.readInt(i32, data[off..][0..4], .little);
+                c.zombie_kills = @intCast(@min(
+                    std.mem.readInt(u32, data[off + 4 ..][0..4], .little),
+                    std.math.maxInt(u16),
+                ));
+                c.player_kills = @intCast(@min(
+                    std.mem.readInt(u32, data[off + 8 ..][0..4], .little),
+                    std.math.maxInt(u16),
+                ));
+                off += zpv_stats_tail_len;
             }
         }
         return;
@@ -1941,9 +1993,9 @@ pub fn loadTraders(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E'))
         return error.CorruptPlayersFile;
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);

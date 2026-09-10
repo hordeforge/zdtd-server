@@ -3441,6 +3441,18 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   `src/server/persist.zig:407-414,709` (ZPV3), `src/server/game/net.zig:369-372`
   (reap save), `src/assets/entities.zig` (`ExperienceGain` parse)
 
+- **Kill / death counters persist across a restart** `WORKS` `(2026-09-11)`
+  `EntityNetworkStats.killed` / `killedZombies` / `killedPlayers` are
+  PlayerDataFile fields in stock, so a reconnect must not re-derive them from
+  a session that is gone. They ride a new ZPV14 tail (`deaths:i32 |
+  zombieKills:u32 | playerKills:u32`, magic byte 'E', after the ZPV13 bag
+  list), restore on login before the join bundle, and the join PlayerId PDF
+  now writes the restored totals instead of zeros. ZPV13 and older records
+  upgrade in place with zero counters. Scenario
+  `kill and death counters survive a restart (ZPV14)`.
+  *Anchors:* `src/server/persist.zig`, `src/server/game.zig` (PlayerId build),
+  `src/wire/packages.zig` (`PlayerIdOpts`)
+
 - **XP curve numeric parity with stock** `WORKS`
   `expForLevel` now mirrors `Progression.GetExpForNextLevel` bit-for-bit:
   `conv.r4 BaseExpToLevel * Mathf.Pow(ExpMultiplier, Clamp(level+1, 0,

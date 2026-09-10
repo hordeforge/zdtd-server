@@ -13807,6 +13807,43 @@ test "scenario zombie kills reach the client on the PlayerStats wire" {
     std.debug.print("PASS kill-counter: zombie + PvP kills ride the PlayerStats wire\n", .{});
 }
 
+test "scenario kill and death counters survive a restart (ZPV14)" {
+    // The character sheet's kill/death counters are stock PlayerDataFile
+    // fields, so a restart or relog has to carry them through players.zsv
+    // instead of re-deriving them from a session that is gone. zdtd held them
+    // only on the live Client, so every reconnect reset the sheet.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_killpersist");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_killpersist", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        c.zombie_kills = 7;
+        c.player_kills = 2;
+        c.deaths = 3;
+    }
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_killpersist", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        try std.testing.expectEqual(@as(u16, 7), c.zombie_kills);
+        try std.testing.expectEqual(@as(u16, 2), c.player_kills);
+        try std.testing.expectEqual(@as(i32, 3), c.deaths);
+        std.debug.print("PASS kill-persist: ZPV14 restores the character-sheet counters\n", .{});
+    }
+}
+
 test "scenario pvp_mode 0 drops a player-to-player damage claim" {
     // Stock PlayerKillingMode 0 ("no killing") is a server policy the client
     // cannot opt out of: a DamageEntity naming another player is dropped

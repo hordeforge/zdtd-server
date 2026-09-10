@@ -390,6 +390,14 @@ pub const PlayerIdOpts = struct {
     bag: []const stock_inv.StockSlot = &.{},
     b_loaded: bool = true,
     game_stage_born_at: u64 = game_stage_born_unset,
+    /// Character-sheet counters (`PlayerDataFile.playerKills/zombieKills/
+    /// deaths/score`). Stock carries these in the save, so a join that writes
+    /// 0 resets a returning player's sheet even though its own PlayerDataFile
+    /// held the totals; the restored values ride here.
+    player_kills: i32 = 0,
+    zombie_kills: i32 = 0,
+    deaths: i32 = 0,
+    score: i32 = 0,
 };
 
 /// NetPackagePlayerId with default options (see buildPlayerIdBodyWithOpts for
@@ -443,7 +451,7 @@ pub fn buildPlayerIdBodyWithOpts(
     var w: binary.Writer = .{ .buf = buf };
     try w.writeI32(entity_id);
     try w.writeI16(team);
-    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, opts.quests, opts.unlocked_recipes, opts.toolbelt, opts.bag, opts.b_loaded, opts.game_stage_born_at);
+    try writeEmptyPlayerDataFileNetwork(&w, entity_id, sx, sy, sz, opts);
     try w.writeI32(chunk_view_dim);
     return w.written();
 }
@@ -485,13 +493,14 @@ fn writeEmptyPlayerDataFileNetwork(
     sx: i32,
     sy: i32,
     sz: i32,
-    quests: []const stock_quest.StockQuestWrite,
-    unlocked_recipes: []const []const u8,
-    toolbelt: []const stock_inv.StockSlot,
-    bag: []const stock_inv.StockSlot,
-    b_loaded: bool,
-    game_stage_born_at: u64,
+    opts: PlayerIdOpts,
 ) !void {
+    const quests = opts.quests;
+    const unlocked_recipes = opts.unlocked_recipes;
+    const toolbelt = opts.toolbelt;
+    const bag = opts.bag;
+    const b_loaded = opts.b_loaded;
+    const game_stage_born_at = opts.game_stage_born_at;
     const px: f32 = @floatFromInt(sx);
     const py: f32 = @floatFromInt(sy);
     const pz: f32 = @floatFromInt(sz);
@@ -573,10 +582,10 @@ fn writeEmptyPlayerDataFileNetwork(
     try w.writeI32(sz);
     try w.writeF32(0);
     try w.writeI32(-1); // pdf id
-    try w.writeI32(0); // playerKills
-    try w.writeI32(0); // zombieKills
-    try w.writeI32(0); // deaths
-    try w.writeI32(0); // score
+    try w.writeI32(opts.player_kills);
+    try w.writeI32(opts.zombie_kills);
+    try w.writeI32(opts.deaths);
+    try w.writeI32(opts.score);
     // Equipment.Write: version 4, 12 empty ItemValues, 12 cosmetic i32 zeros, unlocked 0
     try w.writeByte(4);
     var i: usize = 0;
@@ -1024,7 +1033,7 @@ test "entity speeds body roundtrip" {
 test "player data ecd head from empty pdf write" {
     var buf: [4096]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
-    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, &.{}, &.{}, &.{}, &.{}, true, game_stage_born_unset);
+    try writeEmptyPlayerDataFileNetwork(&w, 106, -273, 61, 449, .{});
     const body = w.written();
     const h = try parsePlayerDataEcdHead(body);
     try std.testing.expectEqual(@as(i32, 106), h.entity_id);
