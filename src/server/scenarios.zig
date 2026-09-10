@@ -15623,5 +15623,20 @@ test "scenario mining a powered block takes its node and container with it" {
     try std.testing.expect(g.workstations.get(dx, wy, dz) != null);
     g.noteBlockRemoved(dx, wy, dz, stone);
     try std.testing.expect(g.workstations.get(dx, wy, dz) == null);
-    std.debug.print("PASS block-removal stores: node, container, light and workstation go with the block\n", .{});
+    // Stock fires OnBlockRemoved for any cleared cell whatever cleared it, so
+    // a container emptied by damage, a zombie dig or a collapse owes its
+    // contents to the ground exactly like a player break. Only the two player
+    // paths used to spill; the other three destroyed what was inside.
+    const ex: i32 = @intFromFloat(pp.x + 7);
+    const ez: i32 = @intFromFloat(pp.z + 7);
+    try g.world.setBlockWorld(ex, wy, ez, stone);
+    const epos = containers_mod.PosKey{ .x = ex, .y = wy, .z = ez };
+    const ec = g.containers.getOrCreate(epos, 8, stone) orelse return error.TestUnexpectedResult;
+    ec.slots[0] = .{ .item_id = 7, .count = 12, .quality = 1 };
+    const bags_before_dmg = g.sim.countKind(.loot_bag);
+    // Drive the shared hook the non-player removal paths use.
+    g.noteBlockRemoved(ex, wy, ez, stone);
+    try std.testing.expect(g.containers.get(epos) == null);
+    try std.testing.expect(g.sim.countKind(.loot_bag) > bags_before_dmg);
+    std.debug.print("PASS block-removal stores: contents spill on every removal path, not just a player break\n", .{});
 }

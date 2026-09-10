@@ -175,12 +175,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (cur_id != 0) {
                     self.noteBlockBreak(c);
                     self.removeClaimAt(b.x, b.y, b.z);
-                    // Spill before the stores are dropped: noteBlockRemoved
-                    // clears the container and workstation entries, so the
-                    // contents have to be taken out first or breaking the
-                    // block silently destroys them.
-                    chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
-                    chunk_fill.tryWorkstationSpill(self, b.x, b.y, b.z);
                     // A removed bedroll clears the owner's respawn point
                     // (stock PersistentPlayerList.SpawnPointRemoved).
                     self.noteBlockRemoved(b.x, b.y, b.z, cur_id);
@@ -245,10 +239,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     } else {
                         self.noteBlockBreak(c);
                         self.removeClaimAt(b.x, b.y, b.z);
-                        // Spill first: noteBlockRemoved drops the container
-                        // and workstation entries this block carried.
-                        chunk_fill.tryContainerSpill(self, b.x, b.y, b.z);
-                        chunk_fill.tryWorkstationSpill(self, b.x, b.y, b.z);
                         // A removed bedroll clears the owner's respawn point.
                         self.noteBlockRemoved(b.x, b.y, b.z, base_cur);
                         // Harvest drops + XP (RE items.md GameUtils.HarvestOnAttack):

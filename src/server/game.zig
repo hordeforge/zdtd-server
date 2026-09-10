@@ -3493,6 +3493,13 @@ pub const Game = struct {
         game_chunk_fill.ensurePrefabStorageInChunk(self, ch, cx, cz);
     }
 
+    /// Drop a broken block's stored items on the ground (game/chunk_fill.zig).
+    /// Called from `noteBlockRemoved`, which is where every removal path meets.
+    pub fn spillStoredItems(self: *Game, x: i32, y: i32, z: i32) void {
+        game_chunk_fill.tryContainerSpill(self, x, y, z);
+        game_chunk_fill.tryWorkstationSpill(self, x, y, z);
+    }
+
     pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
         game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed);
     }

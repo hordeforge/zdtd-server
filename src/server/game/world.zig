@@ -317,6 +317,12 @@ pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
 /// chunk stream keeps shipping to every player who joins later, and a
 /// workstation that keeps broadcasting and saving its fuel and craft queue.
 pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
+    // What the block held goes to the ground before the stores that hold it
+    // are dropped. Stock fires OnBlockRemoved for any cleared cell, whatever
+    // cleared it (RE blocks.md 4), so damage, a zombie dig and a collapse owe
+    // the contents the same as a player break - previously only the player
+    // paths spilled and the other three destroyed what was inside.
+    self.spillStoredItems(x, y, z);
     if (self.sim.power.removeAt(x, y, z)) self.sim.power.resolve();
     self.containers.remove(.{ .x = x, .y = y, .z = z });
     self.vending.removeAt(.{ .x = x, .y = y, .z = z });
