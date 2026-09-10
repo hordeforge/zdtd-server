@@ -15663,6 +15663,23 @@ test "scenario mining a powered block takes its node and container with it" {
     g.noteBlockAdded(bxx, wy, bzz, gen_id);
     try std.testing.expect(g.containers.get(bpos) == null);
     try std.testing.expect(g.sim.power.indexOfPosition(bxx, wy, bzz) != null);
+    // A vending machine's stock rows are the owner's goods, bought and
+    // stocked by a player. Clearing the store entry without spilling them
+    // destroys them, the same way it would for a container.
+    const vx: i32 = @intFromFloat(pp.x - 7);
+    const vz: i32 = @intFromFloat(pp.z - 7);
+    try g.world.setBlockWorld(vx, wy, vz, stone);
+    const vpos = vending_mod.PosKey{ .x = vx, .y = wy, .z = vz };
+    const vm = g.vending.getOrCreate(vpos, stone, 0) orelse return error.TestUnexpectedResult;
+    // A stock type the reverse resolver maps: offline the builtin table
+    // reads items_start_here + n as ECS id n (assets/items.zig), so this is
+    // an item the ground bag can actually hold.
+    vm.stock[0] = .{ .type_id = assets_items.items_start_here + 7, .count = 4, .quality = 1 };
+    vm.stock_n = 1;
+    const bags_before_vend = g.sim.countKind(.loot_bag);
+    g.noteBlockRemoved(vx, wy, vz, stone);
+    try std.testing.expect(g.vending.get(vpos) == null);
+    try std.testing.expect(g.sim.countKind(.loot_bag) > bags_before_vend);
     std.debug.print("PASS block stores: contents spill on every removal path, and a new block claims its own state\n", .{});
 }
 

@@ -3509,6 +3509,7 @@ pub const Game = struct {
     pub fn spillStoredItems(self: *Game, x: i32, y: i32, z: i32) void {
         game_chunk_fill.tryContainerSpill(self, x, y, z);
         game_chunk_fill.tryWorkstationSpill(self, x, y, z);
+        game_chunk_fill.tryVendingSpill(self, x, y, z);
     }
 
     pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {

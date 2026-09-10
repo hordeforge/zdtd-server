@@ -2140,7 +2140,10 @@ can walk into every POI but none of them is the building TFP authored.
   vending, lights, workstations; the light and workstation stores had no
   remover at all, so a destroyed lamp kept being streamed to every player who
   joined later and a destroyed forge kept broadcasting and saving its fuel and
-  craft queue) plus the ground spill of whatever the block held. Spilling used
+  craft queue) plus the ground spill of whatever the block held: container
+  slots, workstation groups and a vending machine's stock rows. A machine's
+  takings (`available_money`) are lost with it, deliberately: zdtd has no
+  money item to drop, and inventing a coin drop would be worse than the gap. Spilling used
   to sit in the two player break paths only, so a container emptied by damage,
   a zombie dig or a collapse destroyed its contents; stock fires OnBlockRemoved
   for any cleared cell whatever cleared it (RE blocks.md 4). The mirror case

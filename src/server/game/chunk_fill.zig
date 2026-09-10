@@ -16,6 +16,7 @@ const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
 const containers_mod = @import("../../world/containers.zig");
+const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
@@ -503,6 +504,42 @@ pub fn tryContainerSpill(self: *Game, x: i32, y: i32, z: i32) void {
 /// the store entry. Same rule as `tryContainerSpill`: the block is gone, so
 /// what it held has to go somewhere the player can reach, or breaking a
 /// forge silently destroys its fuel, inputs, tools and finished output.
+/// Spill a broken vending machine's stock as a ground bag, then drop the
+/// store entry. Same rule as the container and workstation spills: the stock
+/// rows are the owner's goods, bought and stocked by a player, so destroying
+/// the block must not destroy them. The takings (`available_money`) are not
+/// spillable - zdtd has no money item - so they are lost with the machine and
+/// that stays a documented gap rather than an invented coin drop.
+pub fn tryVendingSpill(self: *Game, x: i32, y: i32, z: i32) void {
+    const pos = vending_mod.PosKey{ .x = x, .y = y, .z = z };
+    const vm = self.vending.get(pos) orelse return;
+    var drop_inv: ecs.components.Inventory = .{};
+    var n: usize = 0;
+    var si: usize = 0;
+    while (si < vm.stock_n and si < vm.stock.len) : (si += 1) {
+        const e = vm.stock[si];
+        if (e.type_id == 0 or e.count <= 0) continue;
+        if (n >= ecs.components.max_inv_slots) break;
+        // Stock rows carry absolute wire types; the ground bag holds ECS ids.
+        const eid = Game.reverseItemType(self, e.type_id);
+        if (eid == 0) continue;
+        drop_inv.slots[n] = .{
+            .item_id = eid,
+            .count = @intCast(@min(e.count, 65535)),
+            .quality = e.quality,
+        };
+        n += 1;
+    }
+    self.vending.removeAt(pos);
+    if (n == 0) return;
+    const fx: f32 = @as(f32, @floatFromInt(x)) + 0.5;
+    const fy: f32 = @as(f32, @floatFromInt(y)) + 0.75;
+    const fz: f32 = @as(f32, @floatFromInt(z)) + 0.5;
+    if (self.sim.spawnLootBagFrom(fx, fy, fz, &drop_inv, 0, n)) |bag_nid| {
+        self.broadcastLootSpawn(bag_nid) catch {};
+    }
+}
+
 pub fn tryWorkstationSpill(self: *Game, x: i32, y: i32, z: i32) void {
     const ws = self.workstations.get(x, y, z) orelse return;
     var drop_inv: ecs.components.Inventory = .{};
