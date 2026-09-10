@@ -99,6 +99,20 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
         } else if (head.event == .remove_quest) {
+            // Event 1 is sent by the quest OWNER whose client dropped its own
+            // (non-shared) quest (QuestJournal.HandlePartyRemoveQuest client
+            // branch: Setup(questCode, OwnerPlayer.entityId)). Stock's
+            // ProcessPackage case 1 server branch (IL_0076) resolves
+            // sharedByEntityID, requires that player to hold a Party, and
+            // re-broadcasts the remove to every OTHER party member (remote ones
+            // get the package, local ones run RemoveSharedQuestByOwner/Entry);
+            // the sender is excluded. zdtd echoed the body back to the sender
+            // and told the party nothing. Refuse a sender naming someone else
+            // (anti-spoof) before any journal mutation, then fan out.
+            if (head.shared_by_entity_id != c.entity_id) {
+                self.harness.counters.inc(.ownership_rejects);
+                return true;
+            }
             // Prefer stock Quest.QuestCode; fall back to catalog def_id for old clients.
             if (head.quest_code != 0) {
                 if (systems.questFindByCode(&self.sim, c.slot, head.quest_code)) |s| {
@@ -111,7 +125,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                 }
             }
-            try self.sendGame(peer, "NetPackageSharedQuest", body);
+            if (self.parties.partyByMember(head.shared_by_entity_id)) |p| {
+                for (p.members[0..p.n]) |m| {
+                    if (m == head.shared_by_entity_id) continue;
+                    if (self.clientByEntityId(m)) |member| {
+                        if (member.peer) |mp| try self.sendGame(mp, "NetPackageSharedQuest", body);
+                    }
+                }
+            }
         } else {
             // add_shared_member (2) / remove_shared_member (3). Stock sends
             // these from the MEMBER's QuestJournal, not the owner's:

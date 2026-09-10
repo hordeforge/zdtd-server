@@ -9752,6 +9752,28 @@ test "scenario shared quest member add/remove reach the owner, not the sender" {
     const rh2 = try packages.stock_quest.parseSharedQuestHead(rem);
     try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.remove_shared_member, rh2.event);
     try std.testing.expect(cap_b.findPkgId(sq_id) == null);
+
+    // remove_quest (event 1): sent by the OWNER A when A drops its own quest.
+    // Stock fans it out to the other party members (B), so A does not get an
+    // echo of its own packet.
+    var rb: [9]u8 = undefined;
+    std.mem.writeInt(i32, rb[0..4], ca.entity_id, .little);
+    rb[4] = 1; // remove_quest
+    std.mem.writeInt(i32, rb[5..9], 7, .little);
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageSharedQuest", rb[0..9]));
+    const rq1 = cap_b.findPkgId(sq_id) orelse return error.TestUnexpectedResult;
+    const rh3 = try packages.stock_quest.parseSharedQuestHead(rq1);
+    try std.testing.expectEqual(packages.stock_quest.SharedQuestEvent.remove_quest, rh3.event);
+    try std.testing.expect(cap_a.findPkgId(sq_id) == null);
+
+    // A spoofed owner (B naming A) is rejected and reaches nobody.
+    cap_a.clear();
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fbuf, "NetPackageSharedQuest", rb[0..9]));
+    try std.testing.expect(cap_a.findPkgId(sq_id) == null);
+    try std.testing.expect(cap_b.findPkgId(sq_id) == null);
     std.debug.print("PASS shared-member-fwd: member events reach the owner only\n", .{});
 }
 
