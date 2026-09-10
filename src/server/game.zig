@@ -2015,6 +2015,11 @@ pub const Game = struct {
     pub fn clearLockSlot(self: *Game, ch: usize) void {
         return game_locks.clearLockSlot(self, ch);
     }
+    /// Force-unlock this peer's other channels before a new grant (game/locks.zig).
+    pub fn releaseOtherLocksForPeer(self: *Game, peer_slot: usize, keep_ch: usize) void {
+        return game_locks.releaseOtherLocksForPeer(self, peer_slot, keep_ch);
+    }
+
     pub fn clearLocksForPeer(self: *Game, peer_slot: usize) void {
         return game_locks.clearLocksForPeer(self, peer_slot);
     }

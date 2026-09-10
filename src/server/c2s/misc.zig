@@ -938,6 +938,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     try self.sendGame(peer, "NetPackageLockResponse", resp);
                     return true;
                 }
+                // Stock LockRequestServer gate 1 (IL=239, RE
+                // dedicated-leftovers.md:134): an existing entry for this
+                // player is force-unlocked before the new grant, so a player
+                // holds one lock at a time. Without it, walking chest to chest
+                // pinned a channel per chest and held each against everyone
+                // else until the stale timeout expired. After the deny check,
+                // so a refused request releases nothing.
+                self.releaseOtherLocksForPeer(c.slot, ch);
                 self.lock_channel[ch] = @intCast(c.slot);
                 self.lock_holder_entity[ch] = c.entity_id;
                 self.lock_granted_ns[ch] = clock.monoNs();

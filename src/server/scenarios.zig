@@ -4740,6 +4740,44 @@ test "scenario a locked tile entity stays locked on a different channel" {
     try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 1, 320, 70, 320)));
     try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[1]);
 
+    // B, already holding channel 1, opens a third chest on channel 2. Stock's
+    // LockRequestServer gate 1 (IL=239, RE dedicated-leftovers.md:134) warns
+    // and force-unlocks a player's existing entry before granting the new one:
+    // a player has one container open at a time, and the old one has to close.
+    // zdtd granted the new channel and left the old one held, so walking chest
+    // to chest pinned a channel per chest and left them locked against every
+    // other player until the stale timeout expired.
+    cap_b.clear();
+    try g.injectFramed(cb, try packages.framed(&fb, "NetPackageLockRequest", try buildReq(&rb, 2, 340, 70, 340)));
+    try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[2]);
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[1]);
+    // And B's client is told the old one released, or its UI keeps the first
+    // chest open behind the second.
+    {
+        var found_unlock = false;
+        var i: usize = 0;
+        while (i < cap_b.n and !found_unlock) : (i += 1) {
+            const msg = cap_b.slots[i].data[0..cap_b.slots[i].len];
+            var pkgs: [8]wire_frame.Package = undefined;
+            const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+            var j: usize = 0;
+            while (j < pn) : (j += 1) {
+                if (pkgs[j].id != lock_id) continue;
+                var r: binary.Reader = .{ .data = pkgs[j].body };
+                const locking = try r.readBool();
+                if (locking) continue; // the grant for channel 2
+                try std.testing.expectEqual(true, try r.readBool()); // success
+                var s: [8]u8 = undefined;
+                _ = try r.readString(&s);
+                try std.testing.expectEqual(true, try r.readBool()); // isForceUnlocked
+                try std.testing.expectEqual(@as(u16, 1), try r.readU16()); // the OLD channel
+                found_unlock = true;
+                break;
+            }
+        }
+        try std.testing.expect(found_unlock);
+    }
+
     // A disconnects while still holding channel 0. Clearing the slot lets the
     // next player take the chest, but B's client watched it get locked and
     // nothing has told it otherwise, so the chest reads as held by a player
@@ -4762,7 +4800,33 @@ test "scenario a locked tile entity stays locked on a different channel" {
         try std.testing.expectEqual(@as(u16, 0), try r.readU16()); // channel 0
     }
 
-    std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed, disconnect force-unlocks\n", .{});
+    // A failed inventory transaction also force-unlocks. Stock's
+    // TransactionRequestServer (IL=46, RE protocol-packages.md:1245) logs the
+    // failure and calls ForceUnlockByPlayer: the client's window is showing a
+    // transaction the server refused, so holding the lock keeps that window
+    // open over a container whose contents no longer match, and pins the
+    // channel against everyone else. B still holds channel 2 from above.
+    try std.testing.expectEqual(@as(i32, @intCast(cb.slot)), g.lock_channel[2]);
+    cap_b.clear();
+    {
+        // One entry, one SetAbsolute op at an out-of-range index: the handler
+        // stages, fails, and commits nothing.
+        var tx: [128]u8 = undefined;
+        var tw: binary.Writer = .{ .buf = &tx };
+        try tw.writeI32(1); // entry count
+        for (0..16) |_| try tw.writeByte(0); // guid
+        try tw.writeI32(0); // initial hash
+        try tw.writeI32(0); // final hash
+        try tw.writeI32(1); // op count
+        try tw.writeI16(0); // SetAbsolute
+        try tw.writeU16(0); // empty ItemStack (count 0, no ItemValue)
+        try tw.writeI32(9999); // index past max_inv_slots
+        var txf: [256]u8 = undefined;
+        try g.injectFramed(cb, try packages.framed(&txf, "NetPackageInventoryTransactionRequest", tw.written()));
+    }
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[2]);
+
+    std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed, re-lock and failed transaction force-unlock, disconnect force-unlocks\n", .{});
 }
 
 test "scenario SetBlock beyond edit reach is rejected" {

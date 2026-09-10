@@ -20,6 +20,7 @@ const vending_mod = @import("../../world/vending.zig");
 const clock = @import("../../util/clock.zig");
 const stock_te = packages.stock_te;
 const containers_mod = @import("../../world/containers.zig");
+const game_locks = @import("../game/locks.zig");
 const stabilityAfterSetBlock = game_mod.stabilityAfterSetBlock;
 const reverseItemType = game_mod.Game.reverseItemType;
 const resolveItemType = game_mod.Game.resolveItemType;
@@ -780,6 +781,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // stacks ride only for non-primary players).
                         var ack: [5]u8 = .{ 1, 0, 0, 0, 0 };
                         try self.sendGame(peer, "NetPackageInventoryTransactionResponse", &ack);
+                    } else {
+                        // Stock TransactionRequestServer (IL=46, RE
+                        // protocol-packages.md:1245): a failed apply logs and
+                        // calls LockManager.ForceUnlockByPlayer. The client's
+                        // window is showing a transaction the server refused,
+                        // so leaving the lock held keeps that window open over
+                        // a container whose contents no longer match, and pins
+                        // the channel against everyone else.
+                        self.harness.counters.inc(.c2s_rejects);
+                        self.releaseOtherLocksForPeer(c.slot, game_locks.keep_no_channel);
                     }
                 }
             }

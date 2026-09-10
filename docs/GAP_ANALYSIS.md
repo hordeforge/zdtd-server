@@ -1201,6 +1201,25 @@ parsed, and quest offering is unwired.
   `src/wire/packages.zig` (`buildLockResponseTrader`),
   `src/server/c2s/misc.zig` lock handler trader branch
 
+- **Force-unlock: re-lock, failed transaction, disconnect** `WORKS` `(2026-09-10)`
+  Stock force-unlocks a player's held locks on three paths, all through
+  `ForceUnlockByPlayer` (IL=11). zdtd had none of them on the wire.
+  1. **A new lock request while the player already holds one.**
+     `LockRequestServer` gate 1 (IL=239, RE dedicated-leftovers.md:134) warns
+     and force-unlocks the existing entry before granting, so a player holds one
+     container at a time. zdtd granted the new channel and left the old one
+     held, so walking chest to chest pinned a channel per chest and held each
+     against every other player until the stale timeout expired. The timeout
+     stays as the backstop for a peer that goes quiet without dropping.
+  2. **A failed inventory transaction.** `TransactionRequestServer` (IL=46, RE
+     protocol-packages.md:1245) logs and force-unlocks on a failed apply. The
+     client's window is showing a transaction the server refused, so holding
+     the lock keeps it open over a container whose contents no longer match.
+  3. **Disconnect**, below.
+  *Anchors:* `src/server/game/locks.zig` (`releaseOtherLocksForPeer`),
+  `src/server/c2s/misc.zig` (lock grant), `src/server/c2s/inv.zig` (stock
+  transaction failure branch)
+
 - **Force-unlock on disconnect** `WORKS` `(2026-09-10)`
   A peer that drops while holding a TE lock had its channels cleared
   server-side (`clearLocksForPeer`), so the next player could open the
