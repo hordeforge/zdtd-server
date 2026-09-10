@@ -1955,6 +1955,10 @@ pub const Game = struct {
         return game_world.noteBlockRemoved(self, x, y, z, cur_id);
     }
 
+    pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
+        return game_world.noteBlockAdded(self, x, y, z, new_id);
+    }
+
     /// Drain Demolition explode requests (entity + block AoE). Runs after the
     /// sim AI pass each tick (Game.step).
     pub fn drainExplosions(self: *Game) void {

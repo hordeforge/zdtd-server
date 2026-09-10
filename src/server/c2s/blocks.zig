@@ -324,27 +324,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             else
                 place_id;
             try self.world.setBlockRawWorld(b.x, b.y, b.z, place_raw);
-            if (place_id != 0 and self.blocks.isVending(place_id)) {
-                _ = self.vending.getOrCreate(.{ .x = b.x, .y = b.y, .z = b.z }, place_id, self.blocks.traderId(place_id));
-            } else if (place_id == 0) {
-                self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
-            }
             if (place_id != cur_id) {
                 // Replacing one block with another displaces the old one just
-                // as removing it would: a downgrade from a generator to its
-                // broken form, or any swap onto an occupied cell, must not
-                // leave the previous node feeding the grid. Only clearing on
-                // place_id == 0 caught removals and missed every swap.
+                // as removing it would, then the new one claims what its own
+                // type owns. Only clearing on place_id == 0 caught removals
+                // and missed every swap.
                 if (self.sim.power.removeAt(b.x, b.y, b.z)) self.sim.power.resolve();
+                self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
             }
-            if (place_id != 0) {
-                if (self.power_registry.lookup(place_id)) |pn| {
-                    if (self.sim.power.addNodeAt(pn.kind, b.x, b.y, b.z, pn.watts)) |nid| {
-                        if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
-                    }
-                    self.sim.power.resolve();
-                }
-            }
+            self.noteBlockAdded(b.x, b.y, b.z, place_id);
             if (place_id != 0 and b.raw != 0 and place_down_raw == 0) {
                 self.setBlockRaw(b.x, b.y, b.z, b.raw);
             } else if (place_id == 0) {

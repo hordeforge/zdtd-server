@@ -15638,5 +15638,16 @@ test "scenario mining a powered block takes its node and container with it" {
     g.noteBlockRemoved(ex, wy, ez, stone);
     try std.testing.expect(g.containers.get(epos) == null);
     try std.testing.expect(g.sim.countKind(.loot_bag) > bags_before_dmg);
-    std.debug.print("PASS block-removal stores: contents spill on every removal path, not just a player break\n", .{});
+    // The other half: a block appearing claims what its type owns. The two
+    // downgrade arms removed the old block and never registered the new one,
+    // so a block downgrading *into* a powered form had no node at all.
+    const ax: i32 = @intFromFloat(pp.x + 9);
+    const az: i32 = @intFromFloat(pp.z + 9);
+    const gen_id = g.maxdamage.idByName("generatorbank") orelse return error.SkipZigTest;
+    if (g.power_registry.lookup(gen_id) == null) return error.SkipZigTest;
+    try g.world.setBlockWorld(ax, wy, az, gen_id);
+    try std.testing.expect(g.sim.power.indexOfPosition(ax, wy, az) == null);
+    g.noteBlockAdded(ax, wy, az, gen_id);
+    try std.testing.expect(g.sim.power.indexOfPosition(ax, wy, az) != null);
+    std.debug.print("PASS block stores: contents spill on every removal path, and a new block claims its own state\n", .{});
 }

@@ -495,6 +495,9 @@ pub fn tickZombieBlockDamage(self: *Game) void {
                 // and vending entry go with it, same as a break.
                 self.noteBlockRemoved(bx, by, bz, id);
                 _ = self.world.setBlockRawWorld(bx, by, bz, down_raw) catch continue;
+                // ...and the block it turned into claims what its own type
+                // owns: a downgrade that lands a powered block needs a node.
+                self.noteBlockAdded(bx, by, bz, world_store.typeId(down_raw));
                 self.clearBlockHp(bx, by, bz);
                 self.clearBlockRaw(bx, by, bz);
                 if (packages.buildSetBlockBodyRaw(&self.body_buf, bx, by, bz, down_raw, 0, -1, -1)) |sb| {
@@ -649,6 +652,7 @@ pub fn drainDigRequests(self: *Game) void {
                 // displaced, so its side state goes with it.
                 self.noteBlockRemoved(d.x, d.y, d.z, id);
                 _ = self.world.setBlockRawWorld(d.x, d.y, d.z, down_raw) catch continue;
+                self.noteBlockAdded(d.x, d.y, d.z, world_store.typeId(down_raw));
                 self.clearBlockHp(d.x, d.y, d.z);
                 self.clearBlockRaw(d.x, d.y, d.z);
                 self.sim.zombie_ai[d.slot].digging = false;

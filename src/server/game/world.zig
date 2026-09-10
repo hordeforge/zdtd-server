@@ -338,6 +338,25 @@ pub fn noteBlockRemoved(self: *Game, x: i32, y: i32, z: i32, cur_id: u16) void {
     }
 }
 
+/// The other half of `noteBlockRemoved`: a block appearing at a cell claims
+/// the position-keyed state its type owns. Stock fires OnBlockAdded for any
+/// filled cell whatever filled it (RE blocks.md 4), so a downgrade swap that
+/// lands a powered block owes the grid a node exactly like a player placing
+/// one. Containers stay out: registering one broadcasts its TE, which can
+/// fail, and the placement path already owns that leg.
+pub fn noteBlockAdded(self: *Game, x: i32, y: i32, z: i32, new_id: u16) void {
+    if (new_id == 0) return;
+    if (self.blocks.isVending(new_id)) {
+        _ = self.vending.getOrCreate(.{ .x = x, .y = y, .z = z }, new_id, self.blocks.traderId(new_id));
+    }
+    if (self.power_registry.lookup(new_id)) |pn| {
+        if (self.sim.power.addNodeAt(pn.kind, x, y, z, pn.watts)) |nid| {
+            if (self.sim.power.indexOfId(nid)) |ni| pn.applyToNode(&self.sim.power.nodes[ni]);
+        }
+        self.sim.power.resolve();
+    }
+}
+
 /// Stock Block.OnBlockDamaged downgrade swap (RE IL_021D-030D): a block with
 /// a `DowngradeBlock` turns into that block (rotation/meta preserved via the
 /// SetBlockRPC swap) when destroyed by damage, instead of being removed.

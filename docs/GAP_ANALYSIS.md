@@ -2143,7 +2143,11 @@ can walk into every POI but none of them is the building TFP authored.
   craft queue) plus the ground spill of whatever the block held. Spilling used
   to sit in the two player break paths only, so a container emptied by damage,
   a zombie dig or a collapse destroyed its contents; stock fires OnBlockRemoved
-  for any cleared cell whatever cleared it (RE blocks.md 4). All five paths
+  for any cleared cell whatever cleared it (RE blocks.md 4). The mirror case
+  landed the same day: `noteBlockAdded` claims the power node and vending entry
+  a new block's type owns, so a downgrade swap that lands a powered block gets
+  a node instead of none (the two downgrade arms removed the old block and
+  registered nothing). All five paths
   call it, so a removal is defined in one place instead of five.
   *Anchors:* `src/server/game.zig` (`resetPoiBlocks`, `handleQuestEvent`),
   `src/world/store.zig` (`setBlockTexDensWorld`), `src/world/tts.zig`
