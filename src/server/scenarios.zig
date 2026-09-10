@@ -5604,7 +5604,68 @@ test "scenario plugin withdrawal despawns applied spawns" {
     try std.testing.expectEqual(@as(usize, 0), g.bots.n);
     try std.testing.expectEqual(@as(u32, 0), g.bots.floor);
 
-    std.debug.print("PASS plugin withdraw: applied spawns despawned per src\n", .{});
+    // Despawning server-side is only half the inverse: the clients that were
+    // told about the entity have to be told it is gone, or the model stands on
+    // their map forever. Every other destroy path in the tick sends
+    // EntityRemove first (the corpse sweep even refuses to destroy past its
+    // report cap, world.zig:1838), but the plugin paths - the `despawn` queue
+    // verb and this withdrawal - destroyed silently.
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    g.clients[c.slot].entered = true;
+    _ = g.sim.commands.pushSrc(3, .{ .spawn_zombie = .{ .x = 2, .y = 70, .z = 2, .hp = 40 } });
+    _ = g.sim.commands.drain(&g.sim);
+    // The client must know the entity before a removal for it means anything
+    // (stock logs "EntityRemove entity {0} missing" for an unknown id).
+    var zs: ?ecs.Slot = null;
+    var k: ecs.Slot = 0;
+    while (k < ecs.max_entities) : (k += 1) {
+        if (g.sim.alive[k] and g.sim.kind[k] == .zombie and g.sim.transform[k].x == 2) {
+            zs = k;
+            break;
+        }
+    }
+    const zslot = zs orelse return error.NoPluginSpawnedZombie;
+    const znid = g.sim.network_id[zslot].id;
+    g.clients[c.slot].known_entities.set(zslot);
+    cap.clear();
+    @import("game/step.zig").withdrawPluginSrc(g, 3);
+    try std.testing.expect(!g.sim.alive[zslot]);
+    const rm_id = packages.idOf("NetPackageEntityRemove").?;
+    const rm = cap.findPkgId(rm_id) orelse return error.NoRemoveOnWithdraw;
+    try std.testing.expectEqual(znid, std.mem.readInt(i32, rm[0..4], .little));
+
+    // The `despawn` queue verb has the same debt and a different route: it
+    // destroys inside the command drain, which is not a system, so its
+    // removals ride their own report list rather than the far-despawn sweep's.
+    // On the player, not out in the world: the far-despawn sweep culls distant
+    // mobs through its own reported path, which would remove this one for the
+    // wrong reason and hide whether the verb reports at all.
+    const pslot = g.sim.playerByPeer(c.slot).?;
+    const near_x = g.sim.transform[pslot].x;
+    const near_z = g.sim.transform[pslot].z;
+    _ = g.sim.commands.pushSrc(4, .{ .spawn_zombie = .{ .x = near_x, .y = 70, .z = near_z, .hp = 40 } });
+    _ = g.sim.commands.drain(&g.sim);
+    var zs2: ?ecs.Slot = null;
+    var k2: ecs.Slot = 0;
+    while (k2 < ecs.max_entities) : (k2 += 1) {
+        if (k2 == zslot) continue;
+        if (g.sim.alive[k2] and g.sim.kind[k2] == .zombie and g.sim.transform[k2].x == near_x) {
+            zs2 = k2;
+            break;
+        }
+    }
+    const zslot2 = zs2 orelse return error.NoPluginSpawnedZombie;
+    const znid2 = g.sim.network_id[zslot2].id;
+    g.clients[c.slot].known_entities.set(zslot2);
+    cap.clear();
+    _ = g.sim.commands.pushSrc(4, .{ .despawn = .{ .net_id = znid2 } });
+    try g.step();
+    try std.testing.expect(!g.sim.alive[zslot2]);
+    const rm2 = cap.findPkgId(rm_id) orelse return error.NoRemoveOnDespawnVerb;
+    try std.testing.expectEqual(znid2, std.mem.readInt(i32, rm2[0..4], .little));
+
+    std.debug.print("PASS plugin withdraw: applied spawns despawned per src, clients told on withdraw and on the despawn verb\n", .{});
 }
 
 test "scenario plugin disable withdraws pending commands before drain" {

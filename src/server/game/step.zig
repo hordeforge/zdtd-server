@@ -350,6 +350,17 @@ pub fn step(self: *Game) !void {
             // Destroyed by the sweep, so scope by the reported slot.
             try self.broadcastKnown("NetPackageEntityRemove", rm, r.despawned_slots[di]);
         }
+        // The plugin `despawn` verb destroys through the command drain, which
+        // is not a system, so its removals ride their own list. Without this
+        // the entity vanished server-side and stood on every client's map for
+        // the rest of the session.
+        var ci: u32 = 0;
+        while (ci < r.cmd_despawned_n) : (ci += 1) {
+            const cid = r.cmd_despawned_ids[ci];
+            if (cid <= 0) continue;
+            const rm = try packages.buildRemoveBodyReason(&self.body_buf, cid, .despawned);
+            try self.broadcastKnown("NetPackageEntityRemove", rm, @intCast(r.cmd_despawned_slots[ci]));
+        }
         if (r.buff_expired_n > 0) try self.broadcastBuffExpiries(&r);
         var li: u8 = 0;
         while (li < r.loot_n) : (li += 1) {
@@ -592,7 +603,19 @@ pub fn withdrawPluginSrc(self: *Game, src: i16) void {
     var spawn_out: [ecs.command.max_commands]i32 = undefined;
     const sn = self.sim.commands.dropFrom(src, &spawn_out);
     for (spawn_out[0..sn]) |id| {
-        if (self.sim.slotOfNetId(id)) |es| self.sim.destroy(es);
+        if (self.sim.slotOfNetId(id)) |es| {
+            // Tell the clients before destroying: they hold the model, and
+            // nothing else will ever mention this entity again. Sent while the
+            // slot is still the one `known_entities` refers to, and scoped to
+            // the peers that were told about it - stock logs "EntityRemove
+            // entity {0} missing" for an id a client never spawned.
+            if (packages.buildRemoveBodyReason(&self.body_buf, id, .despawned)) |rm| {
+                self.broadcastKnown("NetPackageEntityRemove", rm, es) catch {};
+            } else |_| {
+                self.harness.counters.inc(.encode_errors);
+            }
+            self.sim.destroy(es);
+        }
     }
     // Applied glide flags (ADR 0037) attributed to this src: a withdrawn
     // module must not leave the player envelope-exempt (paper 3.1).

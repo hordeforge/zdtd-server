@@ -36,6 +36,15 @@ pub const DrainResult = struct {
     damaged: u32 = 0,
     said: u32 = 0,
     dropped_before: u32 = 0,
+    /// Entities the `despawn` verb destroyed, reported so the net layer can
+    /// send EntityRemove: the clients hold the model and nothing else will
+    /// mention this entity again. `slots` is the pre-destroy slot, which is
+    /// what `known_entities` is keyed on. Saturating like the corpse sweep's
+    /// report - past the cap the op still applies, so the cap is sized to the
+    /// command buffer rather than guessed.
+    despawned_ids: [max_commands]i32 = .{0} ** max_commands,
+    despawned_slots: [max_commands]u32 = .{0} ** max_commands,
+    despawned_n: u32 = 0,
 };
 
 pub const Buffer = struct {
@@ -177,6 +186,11 @@ pub const Buffer = struct {
                 },
                 .despawn => |d| {
                     if (w.slotOfNetId(d.net_id)) |s| {
+                        if (r.despawned_n < r.despawned_ids.len) {
+                            r.despawned_ids[r.despawned_n] = d.net_id;
+                            r.despawned_slots[r.despawned_n] = s;
+                            r.despawned_n += 1;
+                        }
                         w.destroy(s);
                         r.despawned += 1;
                         r.applied += 1;
