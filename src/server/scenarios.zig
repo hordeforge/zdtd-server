@@ -4924,6 +4924,70 @@ test "scenario a locked tile entity stays locked on a different channel" {
     std.debug.print("PASS lock-sweep: same TE denied across channels, other TE allowed, gate 1 re-lock releases, failed transaction force-unlock, disconnect force-unlocks, over-cap and null spans denied\n", .{});
 }
 
+test "scenario inventory keep-open refreshes the lock stale window" {
+    // Stock LockManager.Update (IL=128) force-unlocks a keepOpenTimes stamp
+    // older than 10s. The client refreshes that stamp every 2.5s while a window
+    // is open by sending NetPackageInventoryKeepOpen, whose ProcessPackage
+    // (IL=6) calls LockManager.ProcessKeepOpen (IL=31). zdtd dropped the packet
+    // and used a 120s window, so a live lock was reaped server-side while the
+    // client still showed the window, and an abandoned lock lingered far past
+    // stock's 10s.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // Pin stock's 10s silence window.
+    try std.testing.expectEqual(@as(u64, 10_000_000_000), game_mod.default_lock_stale_ns);
+
+    const lockOne = struct {
+        fn call(gg: *game_mod.Game, cc: *game_mod.Client, rb: []u8, fb: []u8) !void {
+            var w: binary.Writer = .{ .buf = rb };
+            try w.writeBool(true); // locking
+            try w.writeU16(0);
+            try w.writeI32(1);
+            try w.writeByte(1); // present
+            try w.writeByte(0); // block target
+            try w.writeI32(300);
+            try w.writeI32(70);
+            try w.writeI32(300);
+            try w.writeString("");
+            try gg.injectFramed(cc, try packages.framed(fb, "NetPackageLockRequest", w.written()));
+        }
+    }.call;
+
+    var rb: [64]u8 = undefined;
+    var fb: [256]u8 = undefined;
+    try lockOne(g, c, &rb, &fb);
+    try std.testing.expectEqual(@as(i32, @intCast(c.slot)), g.lock_channel[0]);
+
+    // Baseline: a stamp older than the window is reaped.
+    g.lock_granted_ns[0] -%= g.lock_stale_ns + 1_000_000_000;
+    g.reapStaleLocks();
+    try std.testing.expectEqual(@as(i32, -1), g.lock_channel[0]);
+
+    // Re-lock, backdate again, then let the client keep-open. The stamp is
+    // refreshed to now, so the reaper leaves the live window alone.
+    try lockOne(g, c, &rb, &fb);
+    try std.testing.expectEqual(@as(i32, @intCast(c.slot)), g.lock_channel[0]);
+    g.lock_granted_ns[0] -%= g.lock_stale_ns + 1_000_000_000;
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageInventoryKeepOpen", &[_]u8{}));
+    g.reapStaleLocks();
+    try std.testing.expectEqual(@as(i32, @intCast(c.slot)), g.lock_channel[0]);
+
+    std.debug.print("PASS lock-keepopen: keep-open refreshes the stale window\n", .{});
+}
+
 test "scenario SetBlock beyond edit reach is rejected" {
     // SetBlock carries its own coordinates, so nothing about the packet ties
     // the edit to where the player is standing except this check. Without it a

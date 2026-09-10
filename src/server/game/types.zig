@@ -143,8 +143,12 @@ pub const default_join_rate_limit_ms: u64 = 500;
 /// governed; 20 bounds a single burst.
 pub const default_craft_max_times: u16 = 20;
 
-/// Container lock auto-release after this many ns (zdtd.toml [authority] lock_stale_ms).
-pub const default_lock_stale_ns: u64 = 120_000_000_000; // 120s
+/// Container lock auto-release after this many ns, measured from the last
+/// grant or keep-open refresh (zdtd.toml [authority] lock_stale_ms). Stock's
+/// LockManager.Update (IL=128) force-unlocks a keepOpenTimes stamp older than
+/// 10s, and the client refreshes it every 2.5s with NetPackageInventoryKeepOpen
+/// while its window is open, so 10s is the silence window, not a lock lifetime.
+pub const default_lock_stale_ns: u64 = 10_000_000_000; // 10s
 pub const default_deco_objects_per_join: usize = 8192;
 
 /// Reliable-window retry pacing - see game_net.zig for the policy comment.

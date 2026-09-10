@@ -2023,6 +2023,10 @@ pub const Game = struct {
     pub fn peerHoldsLock(self: *Game, peer_slot: usize) bool {
         return game_locks.peerHoldsLock(self, peer_slot);
     }
+    /// Refresh this peer's lock stale window (stock LockManager.ProcessKeepOpen).
+    pub fn refreshLocksForPeer(self: *Game, peer_slot: usize) void {
+        return game_locks.refreshLocksForPeer(self, peer_slot);
+    }
     /// Force-unlock every channel this peer holds, to the peer (stock gate 1 /
     /// ForceUnlockByPlayer). The caller then refuses the new request.
     pub fn releaseAllLocksForPeer(self: *Game, peer_slot: usize) void {

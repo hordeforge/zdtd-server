@@ -1223,10 +1223,42 @@ parsed, and quest offering is unwired.
      (IL=16) refuses a dead or closed trader. zdtd's trader-deny path wrote the
      lock table first and then told the client the open failed, so a refused
      open pinned the channel server-side against every other player.
+  **Gate 4 ownership branch is not reachable for zdtd's bags (checked
+  2026-09-10).** `Entity::CanLockOnServer` (IL=74) also refuses when
+  `spawnById > 0 and spawnById != lockingPlayerID and !spawnByAllowShare`.
+  zdtd's bags all carry no positive owner in stock: the zombie/item death bag
+  comes from `Entity::DropBagServer` (IL=99), which never sets `spawnById`;
+  the container/workstation/vending/vehicle/trap/power/collector spills call
+  `GameManager.DropContentInLootContainerServer` with `_droppedByID = -1`
+  (IL value `ldc.i4.m1` at each call site); and the client-driven
+  `NetPackageDropItemsContainer` path is dropped by design
+  (DIVERGENCES.md 1.10). Only the Twitch game-event drops
+  (`ActionDropHeldItem`/`ActionDropItems`, container
+  `DroppedLootContainerTwitch`) pass a real player id, and player death
+  backpacks are `EntityBackpack` (client-requested), not
+  `DroppedLootContainer`. So gate 4 for normal bags is public on both sides;
+  do not add an owner field to `LootBag` without a producer that matches.
   *Anchors:* `src/server/c2s/misc.zig` (lock handler gates),
   `src/wire/packages.zig` (`parseLockRequest`, `max_lock_targets_declared`),
-  `src/server/game/locks.zig` (`peerHoldsLock`, `releaseAllLocksForPeer`),
-  `src/server/scenarios.zig` (lock-sweep, trader close cycle)
+  `src/server/game/locks.zig` (`peerHoldsLock`, `releaseAllLocksForPeer`,
+  `refreshLocksForPeer`), `src/server/scenarios.zig` (lock-sweep, trader close
+  cycle, inventory keep-open)
+
+- **Inventory keep-open refreshes the lock window** `WORKS` `(2026-09-10)`
+  Stock's client sends `NetPackageInventoryKeepOpen` every 2.5s while it holds
+  a lock (`LockManager.Update` client branch, IL_0182); the server's
+  `ProcessPackage` (IL=6) calls `LockManager.ProcessKeepOpen` (IL=31), which
+  stamps `keepOpenTimes[player] = UtcNow`, and `LockManager.Update` (IL=128)
+  force-unlocks only a stamp older than 10s. zdtd dropped the packet and used a
+  120s window, so a live window was reaped server-side while the client still
+  showed it, and an abandoned lock lingered far past stock's 10s. Now handled:
+  `refreshLocksForPeer` restamps every channel the sender holds, and the
+  default `[authority] lock_stale_ms` is 10 000 (operator-overridable). The
+  packet has an empty body (read IL=1) and only refreshes a server-owned timer.
+  *Anchors:* `src/server/c2s/misc.zig` (keep-open arm),
+  `src/server/game/locks.zig` (`refreshLocksForPeer`),
+  `src/server/game/types.zig` (`default_lock_stale_ns`),
+  `src/server/scenarios.zig` (lock-keepopen)
 
 - **Force-unlock: re-lock, failed transaction, disconnect** `WORKS` `(2026-09-10)`
   Stock force-unlocks a player's held locks on three paths, all through

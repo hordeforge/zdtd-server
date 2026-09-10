@@ -5,6 +5,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
+const clock = @import("../../util/clock.zig");
 
 pub fn packLockPos(x: i32, y: i32, z: i32) u64 {
     const ux: u64 = @as(u32, @bitCast(x));
@@ -86,6 +87,22 @@ pub fn peerHoldsLock(self: *Game, peer_slot: usize) bool {
     const ps: i32 = @intCast(peer_slot);
     for (self.lock_channel) |h| if (h == ps) return true;
     return false;
+}
+
+/// Refresh the stale window for every channel `peer_slot` holds. Stock's
+/// `LockManager.ProcessKeepOpen` (IL=31) stamps `keepOpenTimes[player] = UtcNow`
+/// when the player holds a lock, and `LockManager.Update` (IL=128) later force-
+/// unlocks a stamp older than 10s. The stock client sends
+/// `NetPackageInventoryKeepOpen` from its own `LockManager.Update` every 2.5s
+/// while a window is open (client branch, IL_0182), so a live lock is never
+/// reaped. The packet carries no state (read IL=1); it only refreshes the
+/// server's timer, which is why handling it is not a trust-boundary change.
+pub fn refreshLocksForPeer(self: *Game, peer_slot: usize) void {
+    const ps: i32 = @intCast(peer_slot);
+    const now = clock.monoNs();
+    for (self.lock_channel, 0..) |h, i| {
+        if (h == ps) self.lock_granted_ns[i] = now;
+    }
 }
 
 /// Force-unlock every channel `peer_slot` holds and tell that peer. Stock calls

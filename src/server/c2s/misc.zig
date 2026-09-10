@@ -440,15 +440,25 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
     //   would let a client grant itself buffs (AGENTS rule 17). Known cost:
     //   client-local consume buffs never sync server-side, so the
     //   dysentery-dependent behaviours miss them - recorded in DIVERGENCES.md.
-    // - NetPackageInventoryKeepOpen: stock's own dedi handler is a thin
-    //   no-op/unused path (RE protocol-packages.md), so dropping it matches.
     // - NetPackagePlayerInventoryForAI: feeds stock's AIDirector smell/threat
     //   model from a client-reported bag (RE protocol-packages.md, Process
     //   IL=23). zdtd's AI reads its own sim state; a client must not be able to
     //   steer zombie targeting by declaring its inventory.
     // - NetPackageLobbyRegisterClient: matchmaking-lobby registration, which a
     //   self-hosted dedicated server does not participate in.
-    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackageInventoryKeepOpen") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
+    if (std.mem.eql(u8, name, "NetPackageInventoryKeepOpen")) {
+        // Stock NetPackageInventoryKeepOpen::ProcessPackage (IL=6) calls
+        // LockManager.ProcessKeepOpen(sender.entityId) (IL=31): a player holding
+        // a lock gets keepOpenTimes refreshed, and LockManager.Update (IL=128)
+        // reaps only a stamp older than 10s. The stock client sends this every
+        // 2.5s from its own LockManager.Update while a window is open (client
+        // branch IL_0182). Dropping it let the stale reaper expire a live
+        // window. The body is empty (read IL=1), so it refreshes a server-owned
+        // timer and carries no client state.
+        self.refreshLocksForPeer(c.slot);
+        return true;
+    }
+    if (std.mem.eql(u8, name, "NetPackageBossEvent") or std.mem.eql(u8, name, "NetPackageEntityStatsBuff") or std.mem.eql(u8, name, "NetPackagePlayerInventoryForAI") or std.mem.eql(u8, name, "NetPackageLobbyRegisterClient")) {
         return true;
     }
     if (std.mem.eql(u8, name, "NetPackagePlayerQuestPositions")) {
