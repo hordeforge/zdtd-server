@@ -3147,7 +3147,14 @@ unvalidated, and durability, mods and repair do not exist.
   Since 2026-09-10 zdtd tracks `max_tracked_backpacks` (3) markers per player
   like stock's PersistentPlayerData (AddDroppedBackpack IL=69, RE
   save-region.md), evicting the oldest on a fourth drop rather than refusing
-  the new one, and the marker broadcast ships the whole list. Scenario
+  the new one, and the marker broadcast ships the whole list. A joining client
+  is also sent the *other* players' lists (`sendOtherPlayerBackpacks`): the
+  marker package only goes out on the events that change a list, so every one
+  of them predates a late joiner's connection and its map showed no bag but its
+  own. Stock needs no equivalent send because the markers ride
+  PersistentPlayerData, which every client holds for every player; zdtd writes
+  that field's count as 0 and carries the markers in the dedicated package
+  instead, so the replay is what closes the same hole. Scenario
   `AI kill drops the player's real inventory` proves the AI path; unit test
   pins the range copy.
   *Anchors:* `src/server/game.zig` spawnDeathBag,

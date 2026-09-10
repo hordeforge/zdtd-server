@@ -1107,6 +1107,38 @@ test "scenario backpack marker broadcasts on drop and clears on collect" {
         }
     }
     try std.testing.expect(found);
+
+    // A player who joins later must learn the markers already on the map.
+    // The join bundle sent only the joiner's own list, so B's map had no
+    // marker for A's bag: the drop broadcast predates B's connection, and
+    // nothing replays it. Stock keeps the list in PersistentPlayerData, which
+    // every client holds for every player, so a late joiner is not a special
+    // case there.
+    g.clients[c.slot].addBackpack(12, 60, -34);
+    var cap_b: ln_peer.Capture = .{};
+    const cb = try g.attachJoinedClient(&cap_b);
+    g.clients[cb.slot].entered = true;
+    found = false;
+    i = 0;
+    while (i < cap_b.n and !found) : (i += 1) {
+        const msg = cap_b.slots[i].data[0..cap_b.slots[i].len];
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(msg, &pkgs);
+        var j: usize = 0;
+        while (j < pn) : (j += 1) {
+            if (pkgs[j].id != did) continue;
+            var r = binary.Reader{ .data = pkgs[j].body };
+            const owner = try r.readI32();
+            if (owner != c.entity_id) continue;
+            try std.testing.expectEqual(@as(u8, 1), try r.readByte());
+            try std.testing.expectEqual(@as(i32, 12), try r.readI32());
+            try std.testing.expectEqual(@as(i32, 60), try r.readI32());
+            try std.testing.expectEqual(@as(i32, -34), try r.readI32());
+            found = true;
+            break;
+        }
+    }
+    try std.testing.expect(found);
 }
 
 test "scenario ClientInfo broadcasts the player list every 5 s" {

@@ -1766,6 +1766,10 @@ pub const Game = struct {
         return game_map.broadcastPlayerBackpack(self, c);
     }
 
+    pub fn sendOtherPlayerBackpacks(self: *Game, peer: *ln_peer.Peer, joiner: *const Client) !void {
+        return game_map.sendOtherPlayerBackpacks(self, peer, joiner);
+    }
+
     /// Block id at world coords (0 = air / unloaded).
     pub fn blockIdAtWorld(self: *Game, x: i32, y: i32, z: i32) u16 {
         const t = world_store.World.worldToChunk(x, z);
@@ -2680,6 +2684,10 @@ pub const Game = struct {
             // through the drop. An empty body is legitimate: it clears stale
             // markers just as well.
             try self.broadcastPlayerBackpack(c);
+            // The markers already on the map: every other player's list went
+            // out on an event that predates this peer, so without a replay this
+            // client sees no bag but its own.
+            try self.sendOtherPlayerBackpacks(peer, c);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);

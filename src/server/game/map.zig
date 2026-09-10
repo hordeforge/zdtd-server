@@ -12,6 +12,7 @@ const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
 const packages = @import("../../wire/packages.zig");
+const ln_peer = @import("../../litenet/peer.zig");
 const map_atlas = @import("../../assets/map_atlas.zig");
 const world_store = @import("../../world/store.zig");
 
@@ -147,5 +148,28 @@ pub fn broadcastPlayerBackpack(self: *Game, c: *Client) !void {
         try self.broadcast("NetPackagePlayerSetBackpackPosition", body);
     } else |_| {
         self.harness.counters.inc(.encode_errors);
+    }
+}
+
+/// Replay the other players' dropped-bag markers to a joining peer. The marker
+/// package only ever goes out on the events that change a list (a death, a
+/// collect), so every one of those predates this peer's connection and its map
+/// would show no bag but its own. Stock has no equivalent send because the
+/// markers ride PersistentPlayerData, which every client holds for every
+/// player. An owner with no bags is skipped rather than sent an empty list:
+/// there is nothing stale on a map that has just been built.
+pub fn sendOtherPlayerBackpacks(self: *Game, peer: *ln_peer.Peer, joiner: *const Client) !void {
+    for (&self.clients) |*other| {
+        if (!other.joined or other.slot == joiner.slot) continue;
+        if (other.backpack_n == 0) continue;
+        const body = packages.buildPlayerSetBackpackPositionBody(
+            &self.body_buf,
+            other.entity_id,
+            other.backpacks[0..other.backpack_n],
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        try self.sendGame(peer, "NetPackagePlayerSetBackpackPosition", body);
     }
 }
