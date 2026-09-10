@@ -15498,8 +15498,7 @@ test "scenario mining a powered block takes its node and container with it" {
         gpa.destroy(g);
     }
     var cap: ln_peer.Capture = .{};
-    const c = try g.attachJoinedClient(&cap);
-    _ = c;
+    const cl = try g.attachJoinedClient(&cap);
 
     const bx: i32 = 240;
     const by: i32 = 70;
@@ -15542,5 +15541,38 @@ test "scenario mining a powered block takes its node and container with it" {
     try std.testing.expect(fell_n > 0);
     try std.testing.expect(g.sim.power.indexOfPosition(sx, above_y, bz) == null);
     try std.testing.expect(g.containers.get(apos) == null);
-    std.debug.print("PASS block-removal stores: node and container go with the block\n", .{});
+    // Replacement, not removal: setting a different block over an occupied
+    // cell displaces the old one just as breaking it would. The power branch
+    // only cleared on place_id == 0, so every swap left the old node behind.
+    // A block swap that is not a removal: an upgrade or downgrade replaces
+    // one block with another on an occupied cell. The power branch only
+    // dropped the old node when the incoming id was 0, so the swapped block
+    // kept the node of what it used to be, still feeding the grid.
+    const ps = g.sim.playerByPeer(cl.slot) orelse return error.TestUnexpectedResult;
+    const pp = g.sim.transform[ps];
+    const rx: i32 = @intFromFloat(pp.x + 3);
+    const ry: i32 = @intFromFloat(pp.y);
+    const rz: i32 = @intFromFloat(pp.z + 3);
+
+    // Register the upgrade pair the handler gates on. Insert through the
+    // table's own arena: its deinit frees keys and values from there, so an
+    // entry allocated anywhere else is freed by the wrong owner.
+    const arena = (g.maxdamage.arena_ptr orelse return error.SkipZigTest).allocator();
+    const base_name = g.maxdamage.idName(stone) orelse return error.SkipZigTest;
+    const up_id = g.maxdamage.idByName("terrDirt") orelse world_store.block_dirt;
+    const up_name = g.maxdamage.idName(up_id) orelse return error.SkipZigTest;
+    if (up_id == stone) return error.SkipZigTest;
+    try g.maxdamage.upgrade_to.put(arena, base_name, up_name);
+
+    try g.world.setBlockWorld(rx, ry, rz, stone);
+    _ = g.sim.power.addNodeAt(.generator, rx, ry, rz, 1000);
+    try std.testing.expect(g.sim.power.indexOfPosition(rx, ry, rz) != null);
+
+    var sbuf: [64]u8 = undefined;
+    var fbuf: [256]u8 = undefined;
+    const up = try packages.buildSetBlockBody(&sbuf, rx, ry, rz, up_id);
+    try g.injectFramed(cl, try packages.framed(&fbuf, "NetPackageSetBlock", up));
+    try std.testing.expectEqual(up_id, try g.world.blockWorld(rx, ry, rz));
+    try std.testing.expect(g.sim.power.indexOfPosition(rx, ry, rz) == null);
+    std.debug.print("PASS block-removal stores: node and container go with the block, on break and on swap\n", .{});
 }

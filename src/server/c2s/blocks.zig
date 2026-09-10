@@ -226,6 +226,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (down_raw != 0) {
                         place_id = world_store.typeId(down_raw);
                         out_dmg = 0;
+                        // The block did not break (no harvest, no claim
+                        // removal), but it was replaced, so a container or
+                        // vending entry keyed to the old one must not survive
+                        // under its downgrade. The power node is handled by
+                        // the place_id != cur_id swap check further down.
+                        self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.clearBlockHp(b.x, b.y, b.z);
                         self.clearBlockRaw(b.x, b.y, b.z);
                         place_down_raw = down_raw;
@@ -324,6 +331,14 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             } else if (place_id == 0) {
                 self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
             }
+            if (place_id != cur_id) {
+                // Replacing one block with another displaces the old one just
+                // as removing it would: a downgrade from a generator to its
+                // broken form, or any swap onto an occupied cell, must not
+                // leave the previous node feeding the grid. Only clearing on
+                // place_id == 0 caught removals and missed every swap.
+                if (self.sim.power.removeAt(b.x, b.y, b.z)) self.sim.power.resolve();
+            }
             if (place_id != 0) {
                 if (self.power_registry.lookup(place_id)) |pn| {
                     if (self.sim.power.addNodeAt(pn.kind, b.x, b.y, b.z, pn.watts)) |nid| {
@@ -331,8 +346,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     }
                     self.sim.power.resolve();
                 }
-            } else if (self.sim.power.removeAt(b.x, b.y, b.z)) {
-                self.sim.power.resolve();
             }
             if (place_id != 0 and b.raw != 0 and place_down_raw == 0) {
                 self.setBlockRaw(b.x, b.y, b.z, b.raw);

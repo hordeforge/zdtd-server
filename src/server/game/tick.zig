@@ -490,6 +490,10 @@ pub fn tickZombieBlockDamage(self: *Game) void {
             // DowngradeBlock turns into it instead of breaking.
             const down_raw = self.downgradeBreakRaw(bx, by, bz, id);
             if (down_raw != 0) {
+                // The downgrade replaces the block, so the old one is gone
+                // even though the cell stays occupied: its node, container
+                // and vending entry go with it, same as a break.
+                self.noteBlockRemoved(bx, by, bz, id);
                 _ = self.world.setBlockRawWorld(bx, by, bz, down_raw) catch continue;
                 self.clearBlockHp(bx, by, bz);
                 self.clearBlockRaw(bx, by, bz);
@@ -641,6 +645,9 @@ pub fn drainDigRequests(self: *Game) void {
             // DowngradeBlock turns into it instead of breaking.
             const down_raw = self.downgradeBreakRaw(d.x, d.y, d.z, id);
             if (down_raw != 0) {
+                // Same as the damage-break downgrade above: the old block is
+                // displaced, so its side state goes with it.
+                self.noteBlockRemoved(d.x, d.y, d.z, id);
                 _ = self.world.setBlockRawWorld(d.x, d.y, d.z, down_raw) catch continue;
                 self.clearBlockHp(d.x, d.y, d.z);
                 self.clearBlockRaw(d.x, d.y, d.z);
