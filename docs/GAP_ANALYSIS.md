@@ -2129,36 +2129,47 @@ can walk into every POI but none of them is the building TFP authored.
   the world raw+tex path. Residual: stock resets only quest-tagged blocks (a
   base built inside a POI survives stock's reset); zdtd re-paints the full
   prefab footprint, and lockout-expiry reset is not wired (only dedication).
-  Until 2026-09-10 the reset also repainted blocks without touching the stores
-  keyed by position, so a cell whose block changed kept the previous occupant's
+  Until 2026-09-10 the reset repainted blocks without touching the stores keyed
+  by world position, so a cell whose block changed kept the previous occupant's
   tile entity: a power node with no block still feeding the grid, a looted
   container still holding its slots under whatever the POI bakes there. The
-  same hole ran through the other non-SetBlock removal paths (damage break,
-  zombie dig, stability collapse), each of which cleared a different subset.
-  `noteBlockRemoved` now owns every consequence of a block ceasing to exist -
-  bedroll respawn plus the five position-keyed stores (power grid, containers,
-  vending, lights, workstations; the light and workstation stores had no
-  remover at all, and the light rebuild on the chunk TE scan had to be gated
-  on the block still existing - `te_scanned` is per-session, so a restart
-  re-scanned the prefab and put a destroyed lamp back on a cell that is now
-  air. The prefab container branch had the same hole and worse: it fell back
-  to the seed-chest id on an empty cell, so every prefab chest a player mined
-  out returned on the next restart with a fresh loot roll. Both branches now
-  skip a cell whose block is gone; the seed chest keeps its own placement in
-  init_world and never needed that fallback, so a destroyed lamp kept being streamed to every player who
-  joined later and a destroyed forge kept broadcasting and saving its fuel and
-  craft queue) plus the ground spill of whatever the block held: container
-  slots, workstation groups and a vending machine's stock rows. A machine's
-  takings (`available_money`) are lost with it, deliberately: zdtd has no
-  money item to drop, and inventing a coin drop would be worse than the gap. Spilling used
-  to sit in the two player break paths only, so a container emptied by damage,
-  a zombie dig or a collapse destroyed its contents; stock fires OnBlockRemoved
-  for any cleared cell whatever cleared it (RE blocks.md 4). The mirror case
-  landed the same day: `noteBlockAdded` claims the power node and vending entry
-  a new block's type owns, so a downgrade swap that lands a powered block gets
-  a node instead of none (the two downgrade arms removed the old block and
-  registered nothing). All five paths
-  call it, so a removal is defined in one place instead of five.
+  same hole ran through every other non-SetBlock removal path (damage break,
+  zombie dig, stability collapse, explosion), each clearing a different subset.
+
+  `noteBlockRemoved` now owns every consequence of a block ceasing to exist,
+  and every removal path calls it (eleven call sites: player break, wrench
+  pickup, upgrade/downgrade swap, POI reset, collapse, explosion break and
+  its downgrade arm, damage break and its downgrade arm, zombie dig and its
+  downgrade arm), so a removal is defined once instead of eleven times. What
+  it owns:
+
+  - The bedroll respawn point.
+  - The five position-keyed stores: power grid, containers, vending, lights,
+    workstations. The light and workstation stores had no remover at all, so a
+    destroyed lamp kept being streamed to every player who joined later and a
+    destroyed forge kept broadcasting and saving its fuel and craft queue.
+  - The ground spill of what the block held: container slots, workstation
+    groups, vending stock rows. Spilling used to sit in the two player break
+    paths only, so a container emptied by damage, a zombie dig or a collapse
+    destroyed its contents. Stock fires OnBlockRemoved for any cleared cell
+    whatever cleared it (RE blocks.md 4). A machine's takings
+    (`available_money`) are deliberately not spilled: zdtd has no money item,
+    and inventing a coin drop would be worse than the gap.
+
+  `noteBlockAdded` is the mirror and landed the same day: it claims the power
+  node and vending entry a new block's type owns, so a downgrade swap that
+  lands a powered block gets a node instead of none (the downgrade arms
+  removed the old block and registered nothing).
+
+  Data-driven rebuilds needed the matching gate, because `te_scanned` is
+  per-session and a restart re-scans every prefab. The light branch put a
+  destroyed lamp back on a cell that is now air; the prefab container branch
+  was worse, falling back to the seed-chest id on an empty cell so every
+  prefab chest a player mined out returned with a fresh loot roll. Both now
+  skip a cell whose block is gone, which is what `scanChunkPower` always did.
+  The seed chest keeps its own placement in `init_world` and never needed that
+  fallback.
+
   *Anchors:* `src/server/game.zig` (`resetPoiBlocks`, `handleQuestEvent`),
   `src/world/store.zig` (`setBlockTexDensWorld`), `src/world/tts.zig`
   (`paintDecoration`), `asm.il:945360-945387`
