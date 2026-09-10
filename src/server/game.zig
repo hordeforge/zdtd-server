@@ -2688,6 +2688,11 @@ pub const Game = struct {
             // out on an event that predates this peer, so without a replay this
             // client sees no bag but its own.
             try self.sendOtherPlayerBackpacks(peer, c);
+            // The ally pairs that already stand. Same reason as the markers
+            // above: the response only goes out on a transition, so pairs
+            // formed before this connection (or loaded from disk at boot)
+            // never reach this client.
+            try self.sendAllySnapshot(peer);
             if (self.wire_chunks) {
                 const r: i32 = if (c.view_radius < 1) self.chunk_stream_radius_min else @min(c.view_radius, self.chunk_stream_radius_max);
                 try self.sendSpawnArea(peer, sx2, sz2, r);
@@ -3801,6 +3806,10 @@ pub const Game = struct {
 
     pub fn handleAllyRequest(self: *Game, c: *Client, body: []const u8) !void {
         return @import("game/harness.zig").handleAllyRequest(self, c, body);
+    }
+
+    pub fn sendAllySnapshot(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_social.sendAllySnapshot(self, peer);
     }
 
     fn broadcastPartySnapshot(

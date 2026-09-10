@@ -6495,7 +6495,16 @@ LANDED (real, IL-grounded):
   (asm.il 885142) / `GetStatus` / `SetStatus` (asm.il 885392 / 885424) drive a
   real relationship table (`src/server/ally.zig`). The result goes out as
   `NetPackageAllyResponse` (asm.il 886390). A client-sent AllyResponse is dropped:
-  its direction is ToClient (asm.il 886358).
+  its direction is ToClient (asm.il 886358). Since 2026-09-10 a joining peer is
+  also sent the standing pairs (`sendAllySnapshot`, `AllyEvent.none` since the
+  enum only notifies what just happened). The response is the only thing that
+  drives a client's AllyStore and the server sends one only on a transition, so
+  every pair formed before that connection - including every pair loaded from
+  `allies.zal` at boot - used to be invisible: no allies in the social menu, and
+  an ally-only waypoint invite arriving from a player the client did not believe
+  it was allied with. Stock needs no equivalent send because the registry rides
+  the join snapshot (`PersistentPlayerList.NetworkCloneRelevantForPlayer`, RE
+  server-lifecycle.md:299), which zdtd does not reproduce field-for-field.
 
 HONEST GAPS:
 - **Party shared scope (partial).** `NetPackagePartyActions` (asm.il 829049)

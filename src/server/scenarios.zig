@@ -6358,6 +6358,36 @@ test "scenario ally invite accept and identity spoof reject" {
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAllyResponse", fake));
     try std.testing.expectEqual(rejects_pre_resp + 1, g.harness.counters.get(.ownership_rejects));
     try std.testing.expect(cap_a.findPkgId(resp_id) == null);
+
+    // A client that joins while a pair already stands must be told about it.
+    // AllyResponse is the only thing that drives the client's AllyStore, and it
+    // only fires on a change, so every pair formed before this connection (or
+    // restored from allies.zal at boot) is invisible to it. Stock has no such
+    // send because the whole registry rides the join snapshot
+    // (PersistentPlayerList.NetworkCloneRelevantForPlayer, RE
+    // server-lifecycle.md:299), which zdtd does not reproduce field-for-field.
+    {
+        const re_invite = try packages.buildAllyRequestBody(&body, id_a, id_b, true);
+        try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageAllyRequest", re_invite));
+        const re_accept = try packages.buildAllyRequestBody(&body, id_b, id_a, true);
+        try g.injectFramed(cb, try packages.framed(&frame_buf, "NetPackageAllyRequest", re_accept));
+        try std.testing.expect(g.allies.isAlly(id_a, id_b));
+
+        var cap_c: ln_peer.Capture = .{};
+        const id_c: platform_user.Id = .{ .platform = "Steam", .id = "1003" };
+        _ = try g.attachJoinedClientAs(&cap_c, id_c);
+        const seen = cap_c.findPkgId(resp_id) orelse return error.NoAllySnapshotOnJoin;
+        var r: binary.Reader = .{ .data = seen };
+        var plat: [platform_user.max_platform_len]u8 = undefined;
+        var pid: [platform_user.max_id_len]u8 = undefined;
+        const src = (try platform_user.read(&r, &plat, &pid)).?;
+        try std.testing.expectEqualStrings(id_a.id, src.id);
+        var plat2: [platform_user.max_platform_len]u8 = undefined;
+        var pid2: [platform_user.max_id_len]u8 = undefined;
+        const tgt = (try platform_user.read(&r, &plat2, &pid2)).?;
+        try std.testing.expectEqualStrings(id_b.id, tgt.id);
+        try std.testing.expectEqual(@intFromEnum(ally_mod.Status.allies), try r.readByte());
+    }
     std.debug.print("PASS ally: invite/accept/remove by identity; spoof and C2S AllyResponse rejected\n", .{});
 }
 

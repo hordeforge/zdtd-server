@@ -7,6 +7,7 @@ const Client = game_mod.Client;
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
+const ally_mod = @import("../ally.zig");
 const systems = @import("../../ecs/systems.zig");
 
 pub fn handleAddRemoveBuff(self: *Game, c: *Client, body: []const u8) !void {
@@ -325,6 +326,40 @@ pub fn shareQuestWithParty(self: *Game, c: *Client, def_id: u16) void {
                 };
             }
         }
+    }
+}
+
+/// Send the standing ally pairs to a joining peer. `AllyUpdateResponse` is the
+/// only thing that drives a client's AllyStore, and the server only sends one
+/// on a transition, so every pair formed before this connection - including
+/// every pair loaded from `allies.zal` at boot - is invisible to it: the social
+/// menu shows no allies and an ally-only waypoint invite arrives from a player
+/// the client does not believe it is allied with. Stock needs no such send
+/// because the whole registry rides the join snapshot
+/// (`PersistentPlayerList.NetworkCloneRelevantForPlayer`, RE
+/// server-lifecycle.md:299), which zdtd does not reproduce field-for-field.
+///
+/// `AllyEvent.none` is the right event for a state sync: the enum is purely a
+/// notification of what just happened (RE parties-factions.md 5.1), and nothing
+/// happened here. Pending invites ride along with their stored status, so a
+/// player who was invited while away still sees the invite.
+pub fn sendAllySnapshot(self: *Game, peer: *ln_peer.Peer) !void {
+    for (&self.allies.entries) |*e| {
+        if (!e.used or e.status == .not_allied) continue;
+        const a = e.a.get() orelse continue;
+        const b = e.b.get() orelse continue;
+        const resp = packages.buildAllyResponseBody(
+            self.body_buf[9216..9728],
+            a,
+            b,
+            @intFromEnum(e.status),
+            @intFromEnum(ally_mod.Event.none),
+            @intFromEnum(ally_mod.Event.none),
+        ) catch {
+            self.harness.counters.inc(.encode_errors);
+            continue;
+        };
+        try self.sendGame(peer, "NetPackageAllyResponse", resp);
     }
 }
 
