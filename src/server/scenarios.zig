@@ -15875,3 +15875,44 @@ test "scenario a death bag and its contents survive a restart" {
     }
     std.debug.print("PASS bag persist: a dropped bag and its stacks survive a restart\n", .{});
 }
+
+test "scenario dropped-bag markers survive a restart with the bags" {
+    // Bags persist as entities.zen records, but their map markers lived only
+    // in the Client, so a restored bag sat there unmarked until someone
+    // walked over it. ZPV13 appends the marker list to the player record.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_bagmarkers");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagmarkers", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        c.addBackpack(11, 70, 22);
+        c.addBackpack(33, 71, 44);
+        try std.testing.expectEqual(@as(u8, 2), c.backpack_n);
+        try g.savePlayers();
+    }
+
+    {
+        const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_bagmarkers", 0);
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        var cap: ln_peer.Capture = .{};
+        const c = try g.attachJoinedClient(&cap);
+        // Both markers come back, in the order they were dropped, so the
+        // eviction order after a restart is still oldest-first.
+        try std.testing.expectEqual(@as(u8, 2), c.backpack_n);
+        try std.testing.expectEqual([3]i32{ 11, 70, 22 }, c.backpacks[0]);
+        try std.testing.expectEqual([3]i32{ 33, 71, 44 }, c.backpacks[1]);
+    }
+    std.debug.print("PASS bag markers: the map markers survive a restart with the bags\n", .{});
+}

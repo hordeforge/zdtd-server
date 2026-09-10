@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV12), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV13), entities.zen
 //! (ZENT), claims.zlc (ZCLC), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -17,6 +17,7 @@ const ecs = @import("../ecs/root.zig");
 const clock = @import("../util/clock.zig");
 const assets_progression = @import("../assets/progression.zig");
 const util_sim = @import("../util/sim.zig");
+const game_types = @import("game/types.zig");
 const max_land_claims = game_mod.max_land_claims;
 
 pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
@@ -88,7 +89,10 @@ pub const Zpv2Drop = struct {
 /// attribute/perk levels survive a restart. 12 (ZPV12, magic byte 'C')
 /// appends the attached mod ids (4 x u16) to each inventory slot record so a
 /// modded weapon survives a restart (the mods' stat effects are client-side;
-/// the ids re-render the attachments). The bedroll field is
+/// the ids re-render the attachments). 13 (ZPV13, magic byte 'D') appends the
+/// dropped-bag marker list (`n:u8 | n x (x,y,z i32)`) after the skill tail, so
+/// a bag restored from entities.zen still shows on its owner's map instead of
+/// lying there unmarked. The bedroll field is
 /// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
@@ -219,6 +223,25 @@ fn emitZpv11Skills(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*
     }
 }
 
+/// ZPV13 tail: the player's dropped-bag markers. Written for every record so
+/// the version alone decides the shape; a carried record from an older file
+/// emits a zero count, which is what it knew.
+fn emitZpv13Backpacks(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    var n: u8 = 0;
+    if (cl) |c| n = @min(c.backpack_n, game_types.max_tracked_backpacks);
+    try out.append(allocator, n);
+    if (cl) |c| {
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            for (c.backpacks[i]) |v| {
+                var tmp: [4]u8 = undefined;
+                std.mem.writeInt(i32, &tmp, v, .little);
+                try out.appendSlice(allocator, &tmp);
+            }
+        }
+    }
+}
+
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
     if (off >= data.len) return error.CorruptPlayersFile;
     const nl: usize = data[off];
@@ -270,6 +293,14 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
                     if (snl > 63 or p + 1 + snl + 1 > data.len) return error.CorruptPlayersFile;
                     p += 1 + snl + 1;
                 }
+            }
+            if (version >= 13) {
+                if (p >= data.len) return error.CorruptPlayersFile;
+                const bp_n: usize = data[p];
+                p += 1;
+                if (bp_n > game_types.max_tracked_backpacks) return error.CorruptPlayersFile;
+                if (p + bp_n * 12 > data.len) return error.CorruptPlayersFile;
+                p += bp_n * 12;
             }
         }
     }
@@ -368,9 +399,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D'))
             return error.CorruptPlayersFile;
-        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -383,7 +414,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'C', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'D', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -432,6 +463,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv12Slots(&out, self.allocator, old_recs, inv_pos, inv_n);
                 try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (old_version == 10 and had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -444,6 +476,7 @@ pub fn savePlayers(self: *Game) !void {
                 try emitZpv12SlotsFrom(&out, self.allocator, old_recs, inv_pos, inv_n, 11);
                 try out.appendSlice(self.allocator, old_recs[slots_end..off]);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -459,6 +492,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 8);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -476,6 +510,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 7);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -491,6 +526,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.appendSlice(self.allocator, old_recs[slots_end..tail_start]);
                 try emitZpv9Tail(&out, self.allocator, old_recs, tail_start, off, 6);
                 if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+                if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -579,6 +615,7 @@ pub fn savePlayers(self: *Game) !void {
                 try out.append(self.allocator, 0);
             }
             if (had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
+            if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
             written += 1;
         }
     }
@@ -769,6 +806,7 @@ pub fn savePlayers(self: *Game) !void {
         // record bytes, only when prog == 1 (zpvRecordLen walks it the same
         // way). Appending before the record would misalign the next record.
         if (tail_has_prog) try emitZpv11Skills(&out, self.allocator, cl);
+        if (tail_has_prog) try emitZpv13Backpacks(&out, self.allocator, cl);
         written += 1;
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
@@ -807,12 +845,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -1166,6 +1204,22 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                         const rname = resolved orelse continue;
                         c.skill_levels[c.skill_level_n] = .{ .name = rname, .level = slevel };
                         c.skill_level_n += 1;
+                    }
+                }
+            }
+            if (version >= 13) {
+                if (off < data.len) {
+                    const bp_n: usize = data[off];
+                    off += 1;
+                    var bi: usize = 0;
+                    while (bi < bp_n and off + 12 <= data.len) : (bi += 1) {
+                        const bx = std.mem.readInt(i32, data[off..][0..4], .little);
+                        const by = std.mem.readInt(i32, data[off + 4 ..][0..4], .little);
+                        const bz = std.mem.readInt(i32, data[off + 8 ..][0..4], .little);
+                        off += 12;
+                        // addBackpack caps and evicts, so a file claiming more
+                        // markers than the cap cannot overrun the array.
+                        c.addBackpack(bx, by, bz);
                     }
                 }
             }
@@ -1850,9 +1904,9 @@ pub fn loadTraders(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D'))
         return error.CorruptPlayersFile;
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);

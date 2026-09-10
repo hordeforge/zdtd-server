@@ -3115,9 +3115,10 @@ unvalidated, and durability, mods and repair do not exist.
   (position + the filled slots in the v12 shape): stock protects dropped
   backpacks as a persisted category (ProtectedPositionCache, RE
   save-region.md) and zdtd bags never expire, so a restart was the only thing
-  that could destroy one. Remaining gap: the owner's *markers* are not saved,
-  so a restored bag is on the ground with no map marker until someone finds
-  it. Closing that needs a ZPV13 player-record field.
+  that could destroy one. The owner's markers ride the
+  player record since the same day (ZPV13, magic byte 'D': `n:u8 | n x (x,y,z
+  i32)` after the skill tail), so a restored bag still shows on its owner's
+  map instead of lying there unmarked.
   Since 2026-09-10 zdtd tracks `max_tracked_backpacks` (3) markers per player
   like stock's PersistentPlayerData (AddDroppedBackpack IL=69, RE
   save-region.md), evicting the oldest on a fourth drop rather than refusing
