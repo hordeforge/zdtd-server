@@ -3490,7 +3490,8 @@ pub const Game = struct {
     /// inventory range (not a placeholder unit) and mark the dropped-backpack
     /// marker for the death screen / map. Called from the C2S kill path and the
     /// hp-replicate AI-kill detector; the callers coordinate through
-    /// `Client.has_backpack` so a death is never bagged twice.
+    /// `Client.bagged_this_death`, which respawn clears, so one death is never
+    /// bagged twice and the next one still bags.
     pub fn spawnDeathBag(self: *Game, victim_slot: ecs.Slot) void {
         const dod = self.drop_on_death;
         if (dod < 1 or dod > 3) return;

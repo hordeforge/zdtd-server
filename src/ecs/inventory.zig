@@ -52,8 +52,7 @@ pub const Result = struct {
     /// Net id of a loot bag this op emptied and destroyed (-1 = none). The
     /// Game clears the owner's backpack marker on it: the ECS layer has no
     /// Client, and a death bag drained slot-by-slot through `take` would
-    /// otherwise leave `has_backpack` latched, which suppresses every later
-    /// death bag for that player and strands a map marker.
+    /// otherwise strand that marker on a bag that is already empty.
     emptied_bag: i32 = -1,
 };
 

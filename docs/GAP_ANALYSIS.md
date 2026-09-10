@@ -3611,8 +3611,9 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   DamageEntity death path and the hp-replicate AI-kill detector call
   `spawnDeathBag`, which drops the victim's real inventory range (DropOnDeath
   1 all / 2 toolbelt / 3 backpack) at the death position and broadcasts the
-  bag + the backpack map marker (`Client.has_backpack` coordinates the two
-  paths so a death is never bagged twice; scenario `AI kill drops the
+  bag + the backpack map marker (`Client.bagged_this_death` coordinates the two
+  paths so a death is never bagged twice, and respawn clears it so the next
+  death still bags; scenario `AI kill drops the
   player's real inventory as a death bag` pins the content). The client's
   `NetPackageRequestToSpawnEntity` ECD is still refused (the server bag makes
   it redundant and it proves no ownership), so the "single scrap" placeholder
@@ -5276,10 +5277,14 @@ pass. Everything below is a limit on the evidence, not a defect list.
 
 ### No live client observation exists for these claims
 
-- **Zombie melee never reaching the client.** Derived from two unambiguous code
-  facts (`Dirty.hp` has no consumer; the tick replicate pass sends no stat) plus
-  the stock IL that does send it. No playtest has a zombie kill a player: the
-  `finale/player_death` case used an admin kill.
+- **Zombie melee damage on the client HUD.** The defect this row described (no
+  consumer for `Dirty.hp`, so an AI hit never reached the client) is closed:
+  `src/server/game/replicate_health.zig` drains the bit into
+  `EntityStatChanged(health)` for players and AI alike, and the "Zombie health
+  replication to clients" row above records it as `WORKS`. What remains
+  unverified is only the observation: no playtest has a zombie kill a player,
+  since the `finale/player_death` case used an admin kill. The send is certain
+  from the code; the on-screen result is not witnessed.
 - **Respawn zeroing food and water on the client HUD.** The server-side zeroing
   and the send are certain; that the client applies `Stat.Value` to the local
   player is IL-derived (`asm.il:201999`). No screenshot or post-death client log.
@@ -5288,9 +5293,14 @@ pass. Everything below is a limit on the evidence, not a defect list.
   three independent code paths pointing the same way.
 - **The `tier1_*` "Failed loading objectives" prediction.** IL-derived from
   `Quest::Read`'s `ValidateSizeMarker` path; never observed on a client.
-- **The death backpack never appearing.** Grounded in zdtd refusing
-  `NetPackageRequestToSpawnEntity` and in `dropBackpack` ending at
-  `RequestToSpawnEntityServer`. Not observed in-client.
+- **The death backpack on the client.** The defect this row described (zdtd
+  refuses `NetPackageRequestToSpawnEntity`, and stock's `dropBackpack` ends at
+  `RequestToSpawnEntityServer`, so no bag entity ever appeared) is closed: zdtd
+  does not need the client's request, because `spawnDeathBag` creates the bag
+  server-side and `broadcastLootSpawn` ships it as a stock `NetPackageEntitySpawn`
+  to the peers in range. The refusal of the generic client spawn request stands
+  on its own merits (it proves neither item ownership nor a legal class). What
+  is unverified is only whether the bag renders and opens on a live client.
 - **On-screen consequences of the all-broken topsoil bitfield, the uniform light
   seed, the binary density and the missing water channel.** Inferred from the
   encoder plus the stock read path, not observed.
@@ -5368,7 +5378,7 @@ nobody re-opens a closed row from a stale one.
 | `GAP_ANALYSIS.md:535` and `:612`: traders.xml group refs are skipped | They are expanded recursively with a test against the real stock file (`src/assets/traders.zig:54-82`) |
 | `GAP_ANALYSIS.md:339`: "Player respawn rules | HAVE" | REFRESHED 2026-08-27: the respawn keeps food/water/stamina (the zeroing bug was fixed; `respawnPlayer` world.zig:764-782), a placed bedroll records the respawn point (c2s/inv.zig:714-721) and the death respawn honors it (hooks.zig:593, scenario-tested), so the HAVE row is accurate |
 | `GAP_ANALYSIS.md:340`: "Death / backpack | PARTIAL (DropOnDeath loot bag modes)" | REFRESHED 2026-08-27: `spawnDeathBag` ships the victim's real inventory range by DropOnDeath mode on both kill paths (STATUS DropOnDeath rows; the single-scrap placeholder and refused backpack request are both gone), so the WORKS row is accurate |
-| `STATUS.md:32`: "Player death to respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path that is actually broken |
+| `STATUS.md:32`: "Player death to respawn | PASS" | The gate passed on an admin kill, which does not exercise the AI-damage path. That path is no longer broken (the dirty-hp drain in `replicate_health.zig` sends `EntityStatChanged` for AI hits too), but the gate still does not cover it, so the PASS is narrower than it reads |
 | `GAP_ANALYSIS.md:889`: NetPackageHordeEvent line range 818538-818735 | Stale for the 2026-08-05 dump; the class is at asm.il:822185-822359 |
 | `src/ecs/quest.zig:68` comment: `Quest::AdvancePhase` at 982816 | Stale; that line is inside `ObjectiveTreasureChest` in this dump. AdvancePhase now ends at 986686, `refreshQuestCompletion` is 987390-987648, `Quest::Write` is 988813-989038 |
 | `src/wire/stock_quest.zig` `ObjectiveWriteKind` comment implying two non-default shapes | CLOSED 2026-09-08. Was correct: StayWithin was missing (fell through to Base) and ObjectiveTime was unmapped. The enum now carries `time` and the XML mapping routes both `StayWithin` and `POIStayWithin` to the zero-byte shape |
