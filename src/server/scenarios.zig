@@ -9441,6 +9441,7 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
 
     // A kills a zombie: Party.GetPartyXP = 100 * (1 - 0.1 * 1 in-range mate).
     const zid = g.sim.spawnZombie(258, 70, 258, 10).?;
+    const zclass = g.sim.class_id[g.sim.slotOfNetId(zid).?].hash;
     const dbody = try packages.buildDamageBody(&dmg, zid, 0, 3, 100, true, ca.entity_id);
     cap_b.clear();
     try g.injectFramed(ca, try packages.framed(&fbuf, "NetPackageDamageEntity", dbody));
@@ -9468,9 +9469,9 @@ test "scenario party shared kill XP splits and sends SharedPartyKill to the mate
     const sk_id = packages.idOf("NetPackageSharedPartyKill").?;
     const skb = cap_b.findPkgId(sk_id) orelse return error.TestUnexpectedResult;
     var r = binary.Reader{ .data = skb };
-    _ = try r.readI32(); // entityTypeID
+    try std.testing.expectEqual(zclass, try r.readI32()); // entityTypeID = killed class
     try std.testing.expectEqual(@as(i32, 90), try r.readI32()); // xp
-    try std.testing.expectEqual(ca.entity_id, try r.readI32()); // entityID (killer for the tooltip)
+    try std.testing.expectEqual(zid, try r.readI32()); // entityID = killed zombie
     try std.testing.expectEqual(ca.entity_id, try r.readI32()); // killerID
 
     // A solo kill (party broken by B leaving) awards the full 100.

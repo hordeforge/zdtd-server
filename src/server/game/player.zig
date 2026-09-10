@@ -151,7 +151,18 @@ pub fn xpGainFor(self: *Game, victim_nid: i32) u64 {
 /// (party_shared_kill_range, stock default 100); every other in-range
 /// member gets the same split XP through NetPackageSharedPartyKill so the
 /// client shows the shared-kill tooltip. Out of party the award is full.
-pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool) void {
+pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool, killed_entity_id: i32) void {
+    // Stock SharedKillServer (IL=162) builds every mate's
+    // NetPackageSharedPartyKill from the killed entity: entityTypeID =
+    // entityAlive.entityClass, entityID = entityAlive.entityId, killerID =
+    // the killer (Setup IL=14; the client SharedKillClient IL=65 resolves the
+    // class for the tooltip and fires EntityKilled on entityID). Read it from
+    // the corpse before the dwell sweep frees the slot; 0/unset falls back to
+    // the stock default zombie class, matching the spawn wire (replicate.zig).
+    const killed_class: i32 = if (self.sim.slotOfNetId(killed_entity_id)) |ks| blk: {
+        if (self.sim.mask[ks].class_id and self.sim.class_id[ks].hash != 0) break :blk self.sim.class_id[ks].hash;
+        break :blk packages.stock_entity.class_zombie_default;
+    } else packages.stock_entity.class_zombie_default;
     // on_entity_killed verdict >0 scales the kill XP (100 = keep). base is
     // xpGainFor-clamped to i32 range, so the u64 product cannot overflow.
     const base_scaled: u64 = base * scale_pct / 100;
@@ -206,9 +217,9 @@ pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, t
                 awardXpSilent(self, mate.slot, split);
                 if (mate.peer) |peer| {
                     if (packages.stock_party.buildSharedKillBody(&self.body_buf, .{
-                        .entity_type = 3, // zombieEntity (class hash name in stock; ECD carries the class)
+                        .entity_type = killed_class,
                         .xp = @intCast(@min(split, std.math.maxInt(i32))),
-                        .entity_id = killer.entity_id,
+                        .entity_id = killed_entity_id,
                         .killer_id = killer.entity_id,
                     })) |skb| {
                         self.sendGame(peer, "NetPackageSharedPartyKill", skb) catch |err| {
@@ -829,10 +840,11 @@ test "killXpAward scales by the on_entity_killed verdict percent" {
         g.deinit();
         gpa.destroy(g);
     }
-    // killXpAward(slot, base, scale, trap): 200 base x 150% = 300 (xp_multiplier
-    // default 100 keeps 1.0x).
+    // killXpAward(slot, base, scale, trap, killed): 200 base x 150% = 300
+    // (xp_multiplier default 100 keeps 1.0x). No corpse net id -> the shared
+    // kill class falls back to the stock default (unused here, no party).
     const before = g.clients[0].xp;
-    g.killXpAward(0, 200, 150, false);
+    g.killXpAward(0, 200, 150, false, 0);
     try std.testing.expectEqual(before + 300, g.clients[0].xp);
     std.debug.print("PASS kill-xp-scale: 200 x 150% = {d}\n", .{g.clients[0].xp - before});
 }

@@ -1629,8 +1629,8 @@ pub const Game = struct {
         return game_player.namedPassiveFold(self, slot, actor_sim_slot, name);
     }
 
-    pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool) void {
-        return game_player.killXpAward(self, killer_slot, base, scale_pct, trap_kill);
+    pub fn killXpAward(self: *Game, killer_slot: usize, base: u64, scale_pct: u32, trap_kill: bool, killed_entity_id: i32) void {
+        return game_player.killXpAward(self, killer_slot, base, scale_pct, trap_kill, killed_entity_id);
     }
 
     pub fn awardKillNotify(self: *Game, killer_slot: usize, killed_entity_id: i32) void {
