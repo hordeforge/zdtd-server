@@ -16015,6 +16015,47 @@ test "scenario a second death still drops a bag while the first is uncollected" 
     std.debug.print("PASS two deaths: the second death bags, and both markers ride the wire\n", .{});
 }
 
+test "scenario a kicked player's record is saved, not discarded" {
+    // dropClientSlot ends at `clients[slot] = .{}`, which drops the in-memory
+    // record the ZPV write reads from. The reap and quit paths saved before
+    // calling in; the admin kick and ban paths did not, so kicking a player
+    // threw away everything they had done since the last autosave - bag
+    // markers, bedroll, skills. The save belongs inside the drop, where a new
+    // caller cannot forget it.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_kicksave");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_kicksave", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // A marker is the cheapest piece of per-client state that rides the ZPV
+    // record and is wiped by the slot reset.
+    g.clients[c.slot].addBackpack(41, 62, -73);
+    try std.testing.expectEqual(@as(u8, 1), g.clients[c.slot].backpack_n);
+
+    // Kick, exactly as the admin verb does: no save at the call site.
+    g.dropClientSlot(c.slot, "kick");
+    try std.testing.expectEqual(@as(u8, 0), g.clients[c.slot].backpack_n);
+
+    // Reopen the world and rejoin: the marker must come back off disk.
+    const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_kicksave", 0);
+    defer {
+        g2.deinit();
+        gpa.destroy(g2);
+    }
+    var cap2: ln_peer.Capture = .{};
+    const c2 = try g2.attachJoinedClient(&cap2);
+    try std.testing.expectEqual(@as(u8, 1), g2.clients[c2.slot].backpack_n);
+    try std.testing.expectEqual([3]i32{ 41, 62, -73 }, g2.clients[c2.slot].backpacks[0]);
+    std.debug.print("PASS kick save: a kicked player's record survives the drop\n", .{});
+}
+
 test "scenario a death bag and its contents survive a restart" {
     // Stock protects dropped backpacks as a persisted category (RE
     // save-region.md ProtectedPositionCache). zdtd bags never expire, so a

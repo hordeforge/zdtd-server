@@ -6,6 +6,7 @@ const Game = game_mod.Game;
 const wire_binary = @import("../../wire/binary.zig");
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/world.zig");
+const persist = @import("../persist.zig");
 
 pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     std.debug.print("zdtd: player dropped slot={d} entity={d} reason={s}\n", .{ slot, self.clients[slot].entity_id, reason });
@@ -15,6 +16,16 @@ pub fn dropClientSlot(self: *Game, slot: usize, reason: []const u8) void {
     if (self.clients[slot].joined and self.clients[slot].entity_id > 0) {
         self.plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
         self.wasm_plugins.playerLeave(@intCast(slot), self.clients[slot].entity_id);
+    }
+    // Persist before anything here starts tearing the session down: this
+    // function ends at `clients[slot] = .{}`, which drops the in-memory record
+    // (bag markers, bedroll, skills) that the ZPV write reads from. The reap
+    // and quit paths save before calling in, but the admin kick and ban paths
+    // did not, so kicking a player discarded whatever they had done since the
+    // last autosave. Saving here instead of at each call site means a new
+    // caller cannot forget. Pre-join peers have no entity and nothing to save.
+    if (self.clients[slot].entity_id > 0) {
+        self.savePlayers() catch |e| persist.logPersistErr(self, "save players on drop", e);
     }
     if (self.clients[slot].peer) |p| p.alive = false;
     self.unseatRider(self.clients[slot].entity_id) catch |err| {

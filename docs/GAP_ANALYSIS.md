@@ -5230,13 +5230,19 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/game.zig`, ``, ``,
   `:2809-2827`
 
-- **Save on disconnect / kick** `WORKS` `(2026-08-21)`
-  `NetPackagePlayerDisconnect` saves then drops the slot immediately; admin
-  kick/ban/wipeplayer paths go through `dropClientSlot` after their own save;
-  the stale/dead-peer reaps (`reapStalePeers` both branches + the `clientFor`
-  dead-peer sweep) now also persist the player before clearing the slot, so a
-  hard disconnect is never lost to the autosave interval. Pre-join peers
-  (no entity) skip the write.
+- **Save on disconnect / kick** `WORKS` `(2026-08-21, corrected 2026-09-10)`
+  `NetPackagePlayerDisconnect` saves then drops the slot immediately; the
+  stale/dead-peer reaps (`reapStalePeers` both branches + the `clientFor`
+  dead-peer sweep) persist the player before clearing the slot, so a hard
+  disconnect is never lost to the autosave interval. Pre-join peers (no entity)
+  skip the write.
+  This row claimed until 2026-09-10 that the admin kick/ban/wipeplayer paths
+  save before `dropClientSlot`. They did not: they called it directly, and the
+  function ends at `clients[slot] = .{}`, which drops the in-memory record the
+  ZPV write reads from. Kicking a player therefore discarded everything since
+  the last autosave (bag markers, bedroll, skills). The save now lives inside
+  `dropClientSlot`, so no call site can omit it, and the reaps keep their own
+  (they clear the slot directly and never route through the drop).
   *Anchors:* `src/server/c2s/misc.zig:153-164`, `src/server/game/tick.zig`
   `reapStalePeers`, `src/server/game/net.zig` `clientFor`, `src/server/game/session_drop.zig:9-56`
 
