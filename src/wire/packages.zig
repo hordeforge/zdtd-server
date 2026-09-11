@@ -830,6 +830,16 @@ test "spawned-in-world body is reason, position and entity id in that order" {
     try std.testing.expectEqual(@as(i32, 61), std.mem.readInt(i32, body[8..12], .little));
     try std.testing.expectEqual(@as(i32, 449), std.mem.readInt(i32, body[12..16], .little));
     try std.testing.expectEqual(@as(i32, 106), std.mem.readInt(i32, body[16..20], .little));
+    // ...and the parser reads those same five positions back. The parse side
+    // had no test at all: only `entity_id` was exercised (the spawn-confirm
+    // scenario), so the mutant audit found reason/x/y/z interchangeable. Every
+    // value here is distinct, which is what pins the order.
+    const p = try parseSpawnedBody(body);
+    try std.testing.expectEqual(@as(i32, 4), p.reason);
+    try std.testing.expectEqual(@as(i32, -273), p.x);
+    try std.testing.expectEqual(@as(i32, 61), p.y);
+    try std.testing.expectEqual(@as(i32, 449), p.z);
+    try std.testing.expectEqual(@as(i32, 106), p.entity_id);
 }
 
 /// NetPackageEntityPosAndRot (RE protocol-packages.md 5.5.1, write IL=76):
