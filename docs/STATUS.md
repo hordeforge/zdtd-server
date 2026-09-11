@@ -87,9 +87,12 @@ This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full
 fraction of max (that is `StatComparePercCurrentToMax`). StatTypes 1..4 read
 `Stats.Health/Stamina/Water/Food.Value`, which the ctx carries as `frac * max`,
 so 16 stock rows resolve (13 Health, 3 Stamina). StatType 5 reads
-`Equipment::GetTotalPhysicalArmorRating`; the `Armor` branch stays unsupported
-and counted (8 stock rows) because that rating is produced by the VM fold later
-in the same tick, and a stale read would be worse than a counted refusal.
+`Equipment::GetTotalPhysicalArmorRating`, which `Ctx.armor_rating` now carries
+from the `coredamageresist` fold, so the 8 `stat="Armor"` rows behind check01's
+`buffStatusArmorLow/High/Broken` states resolve as well. That rating is produced
+by the same tick's VM pass, so those gates read the previous tick's value: one
+50 ms tick, documented at the field rather than hidden. The mod-max family still
+needs a mod-max on the ctx and stays counted.
 
 ---
 
