@@ -4427,6 +4427,15 @@ test "an owner receives their parked vehicles as a waypoint list" {
             try std.testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, p.body[0..2], .little));
             try std.testing.expectEqual(@as(i32, 1), std.mem.readInt(i32, p.body[2..6], .little));
             try std.testing.expectEqual(v, std.mem.readInt(i32, p.body[6..10], .little));
+            // The position follows the id, x/y/z in order. Only the id was
+            // asserted, so the wire-order audit found x, y and z
+            // interchangeable: a reorder would have parked a remote player's
+            // map marker at the wrong coordinates with the suite green. Read
+            // the sim's value so the assertion survives any spawn snapping.
+            const vpos = g.sim.transform[vs];
+            try std.testing.expectEqual(vpos.x, @as(f32, @bitCast(std.mem.readInt(u32, p.body[10..14], .little))));
+            try std.testing.expectEqual(vpos.y, @as(f32, @bitCast(std.mem.readInt(u32, p.body[14..18], .little))));
+            try std.testing.expectEqual(vpos.z, @as(f32, @bitCast(std.mem.readInt(u32, p.body[18..22], .little))));
             saw = true;
         }
     }
