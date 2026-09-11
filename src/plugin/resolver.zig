@@ -200,6 +200,28 @@ pub fn resolve(
         });
     }
 
+    // `requires` must name a module that actually loads. The blacklist pass
+    // above only vetoes a blacklisted dependency; an absent or disabled one
+    // used to pass silently, which is the fail-open shape ADR 0030 closed for
+    // capabilities - a module that cannot run without its dependency should not
+    // be loaded as if it could.
+    for (load.items) |rm| {
+        const reqs = rm.manifest.requires orelse continue;
+        var rit = std.mem.splitScalar(u8, reqs, ',');
+        while (rit.next()) |r_raw| {
+            const r = std.mem.trim(u8, r_raw, " \t");
+            if (r.len == 0) continue;
+            var present = false;
+            for (load.items) |other| {
+                if (std.mem.eql(u8, other.manifest.name.?, r)) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) return error.RequiresUnloaded;
+        }
+    }
+
     // Exclusive point claims: first claimant wins the point; a second is a
     // boot error naming both (R8). Slots are the final load order.
     var claims: std.StringHashMapUnmanaged(usize) = .empty;
@@ -382,6 +404,38 @@ test "resolve blacklist vetoes requires dependencies" {
     );
     // Without the blacklist entry the same set resolves.
     var r = try resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{});
+    defer r.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), r.modules.len);
+}
+
+test "resolve rejects a requires dependency that does not load" {
+    // Composability audit 2026-09-11 (suspicion confirmed): the blacklist pass
+    // only vetoed a blacklisted dependency, so an absent or disabled one
+    // resolved silently. A module that cannot run without its dependency must
+    // not be loaded as if it could.
+    var needy = mk("needy", "needy.wasm", null, null, null);
+    needy.requires = "absent";
+    const mods = [_]manifest.Manifest{needy};
+    try testing.expectError(
+        error.RequiresUnloaded,
+        resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{}),
+    );
+
+    // A dependency that is discovered but disabled does not count either.
+    const both = [_]manifest.Manifest{
+        mk("needy", "needy.wasm", null, null, null),
+        mk("absent", "absent.wasm", null, null, null),
+    };
+    var off = both;
+    off[0].requires = "absent";
+    off[1].enabled = false;
+    try testing.expectError(
+        error.RequiresUnloaded,
+        resolve(testing.allocator, &off, &.{}, &.{}, &.{}, &.{}),
+    );
+
+    // Disabled but force-enabled by `[mods] enabled` counts, so the pair loads.
+    var r = try resolve(testing.allocator, &off, &.{}, &.{}, &.{}, &.{"absent"});
     defer r.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 2), r.modules.len);
 }

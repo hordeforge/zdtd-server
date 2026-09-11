@@ -1,6 +1,6 @@
 # Architecture - zdtd
 
-> **What this is:** the map of how the Zig dedicated server is built, how it runs at 20 TPS, and how the pieces fit together. For the canonical RE behind the wire see [protocol.md](../../7dtd-engine-research/docs/protocol.md) and for the founding design [ZIG_CLONE.md](ZIG_CLONE.md). For what actually works today see [STATUS.md](STATUS.md).
+> **What this is:** the map of how the Zig dedicated server is built, how it runs at 20 TPS, and how the pieces fit together. For the canonical RE behind the wire see [protocol.md](../../7dtd-engine-research/docs/network/protocol.md) and for the founding design [ZIG_CLONE.md](ZIG_CLONE.md). For what actually works today see [STATUS.md](STATUS.md).
 
 > **How to read it:** start at the overview, then follow the runtime loop (tick), then the three planes that ride it - net, sim, and storage - plus the plugin and observability planes that cross-cut them. Every major section has a Mermaid diagram. When a diagram and code disagree, code wins.
 

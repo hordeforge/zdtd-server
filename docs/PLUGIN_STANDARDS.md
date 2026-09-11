@@ -103,7 +103,7 @@ tier = "official"                 # optional; "official" | "user" ("core" is an 
 override = "<other-mod-name>"     # optional; full replacement of that module (PRD 0005 R7)
 points = "damage.player_scale"    # optional; comma-separated core override points (PRD 0005 R5)
 claim_mode = "chain"              # reserved; rejected at load (RFC 0005 3.3) - omit it
-requires = "<other-mod-name>"     # optional; comma-separated mods that must load first
+requires = "<other-mod-name>"     # optional; comma-separated mods that must load first (a name that is absent, disabled, or blacklisted fails the load)
 ```
 
 ### Rules
