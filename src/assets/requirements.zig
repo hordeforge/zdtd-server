@@ -163,6 +163,13 @@ pub const Ctx = struct {
     /// Applies a row's `AddBuff`/`RemoveBuff` the moment the row passes (same
     /// stock ordering). Null = record the request only, as before.
     sink: ?TriggeredSink = null,
+    /// `Equipment::GetTotalPhysicalArmorRating`: the worn-armour rating the
+    /// `coredamageresist` passive query produces, which `StatCompareCurrent`
+    /// StatType 5 and `StatComparePercCurrentToModMax` read. zdtd folds the
+    /// rating in the same tick's VM pass, so a gate sees the previous tick's
+    /// value: one 50 ms tick stale, which is far closer than refusing the 8
+    /// stock `stat="Armor"` rows that drive the armour status buffs.
+    armor_rating: f32 = 0,
     /// The entity's custom variables (`assets/cvars.zig`). `CVarCompare`
     /// (IL=23) and passive rows whose `value="@name"` read them (a name that is
     /// not present reads 0, `EntityBuffs::GetCustomVar` IL=10), and the
@@ -452,6 +459,8 @@ fn evalStatCompareCurrent(r: Requirement, ctx: Ctx) Verdict {
         ctx.food_frac * ctx.food_max
     else if (eqIgnoreCase(r.arg, "Water"))
         ctx.water_frac * ctx.water_max
+    else if (eqIgnoreCase(r.arg, "Armor"))
+        ctx.armor_rating
     else
         return .unsupported;
     return verdict(compare(cur, r.op, operand(ctx, r)), r.negated);
@@ -793,10 +802,15 @@ test "StatCompareCurrent reads the stat's absolute value" {
     var vars: cvars.Set = .{};
     _ = vars.apply("$thirst", .set, 100);
     try testing.expect(all(&.{water}, .{ .water_frac = 1, .water_max = 100, .cvars = &vars }));
-    // The Armor branch reads the armor rating, which is not on the ctx yet.
+    // The Armor branch reads the worn-armour rating (IL=52 StatType 5,
+    // Equipment::GetTotalPhysicalArmorRating), which the VM fold produces.
     var counts: Counts = .{};
-    const armor = Requirement{ .kind = .stat_compare_current, .name = "StatCompareCurrent", .arg = "Armor", .op = .le, .value = 0.25 };
-    try testing.expectEqual(Verdict.unsupported, evaluate(&.{armor}, ctx, &counts));
+    const armor_low = Requirement{ .kind = .stat_compare_current, .name = "StatCompareCurrent", .arg = "Armor", .op = .le, .value = 0.25 };
+    try testing.expect(all(&.{armor_low}, .{ .armor_rating = 0 }));
+    try testing.expect(!all(&.{armor_low}, .{ .armor_rating = 0.5 }));
+    // A stat the ctx cannot read is still refused rather than guessed.
+    const stamina_none = Requirement{ .kind = .stat_compare_current, .name = "StatCompareCurrent", .arg = "Speed", .op = .le, .value = 1 };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{stamina_none}, ctx, &counts));
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 

@@ -313,6 +313,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .sandbox_groups = sandbox_groups,
                 .armor_groups = armorGroups(self, ps, &armor_group_buf),
                 .cvars = &c.cvars,
+                // The armour rating the previous tick's coredamageresist fold
+                // produced (see requirements.Ctx.armor_rating).
+                .armor_rating = self.sim.buff_phys_resist[ps],
                 .live_buff = &sink_impl,
                 .buff_active = BuffSink.has,
                 .sink = .{ .ctx = &sink_impl, .add_buff = BuffSink.add, .remove_buff = BuffSink.remove },
