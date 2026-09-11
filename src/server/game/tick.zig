@@ -196,6 +196,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     var armor_group_buf: [ecs.components.inv_equip_count * 2]requirements.ArmorGroup = undefined;
     // One Tags string per worn equipment item, for WornItems (IL=54).
     var worn_tags_buf: [ecs.components.inv_equip_count][]const u8 = undefined;
+    // Active def ids snapshotted for the lifecycle sweep (a row may add buffs).
+    var life_buf: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    var life_ids_n: usize = 0;
     for (&self.clients) |*c| {
         if (!c.joined) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -297,29 +300,31 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .water_max = h.water_max,
             };
             var req_counts: requirements.Counts = .{};
-            // onSelfEnteredGame: stock fires it when the player entity enters the
-            // game and the check buffs carry the rows (hazard timer CVars,
-            // `buffBiomeProgressionCheck`, the sandbox newbie-coat removal).
-            // Once per client session, before the first update pass, so the
-            // CVars it sets are visible to the same tick's gates.
+            // Buff lifecycle events, driven from the active set rather than by
+            // id (stock fires them from AddBuff / the entered-game path /
+            // RemoveBuff):
+            //   onSelfEnteredGame  once per instance, when the player enters
+            //   onSelfBuffStart    once per instance, right after it is added
+            //   onSelfBuffRemove   when the buff is flagged for removal
+            // Bounded: a snapshot of the active def ids, so a row that adds a
+            // buff cannot re-enter this loop.
             if (!c.entered_game_fired) {
                 c.entered_game_fired = true;
-                // entityclasses `Buffs=`: the class-level buff list stock applies
-                // to every instance as it enters the game (the player class
-                // carries buffStatusCheck01/02). Data-bound: the class comes from
-                // the same Unity hash the PlayerId wire carries.
+                // entityclasses `Buffs=`: the class-level buff list stock
+                // applies to every instance as it enters the game (the player
+                // class carries buffStatusCheck01/02). Data-bound: the class
+                // comes from the same Unity hash the PlayerId wire carries.
                 if (self.entities.byHash(assets_unity_hash.class_player_male)) |pdef| {
                     for (pdef.buffs) |bname| _ = addCatalogBuff(self, c.entity_id, ps, bname);
                 }
-                if (check01_id) |eg_id| {
-                    const eg = assets_buffs.evaluateTriggered(&self.buffs, eg_id, .entered_game, req_ctx, &req_counts);
+                life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
+                for (life_buf[0..life_ids_n]) |id| {
+                    const slot = self.sim.buffs[ps].find(id) orelse continue;
+                    if (slot.flags.entered_game_fired) continue;
+                    slot.flags.entered_game_fired = true;
+                    const eg = assets_buffs.evaluateTriggered(&self.buffs, id, .entered_game, req_ctx, &req_counts);
                     if (eg.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, eg.truncated);
                     applyTriggeredBuffs(self, c.entity_id, ps, &eg);
-                }
-                if (check02_id) |eg2_id| {
-                    const eg2 = assets_buffs.evaluateTriggered(&self.buffs, eg2_id, .entered_game, req_ctx, &req_counts);
-                    if (eg2.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, eg2.truncated);
-                    applyTriggeredBuffs(self, c.entity_id, ps, &eg2);
                 }
             }
             // Triggered-effect engine (P3): buffStatusCheck01's onSelfBuffUpdate

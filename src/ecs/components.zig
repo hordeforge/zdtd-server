@@ -1235,7 +1235,12 @@ pub const BuffFlags = packed struct(u8) {
     update: bool = false,
     invalid: bool = false,
     paused: bool = false,
-    _pad: u2 = 0,
+    /// The buff's own `onSelfBuffStart` rows have run (once per instance, fired
+    /// by the survival pass because stock runs them from AddBuff).
+    start_fired: bool = false,
+    /// The buff's `onSelfEnteredGame` rows have run (once per instance; stock
+    /// fires the event when the entity enters the game).
+    entered_game_fired: bool = false,
 };
 
 /// One entry of stock's EntityBuffs::ActiveBuffs (BuffValue, asm.il 733040).

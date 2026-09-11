@@ -3742,6 +3742,23 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `$PlayerLevelBonus = $LastPlayerLevel(0) - 1 = -1` and its own `HealthMax`
     row folds that (stock refreshes `$LastPlayerLevel` from
     `buffLevelUpTracking`, which zdtd does not apply yet).
+  - **Buff lifecycle: entered-game is data-driven (round 24, 2026-09-11).**
+    `onSelfEnteredGame` now fires per active buff instance instead of being
+    called for `buffStatusCheck01`/`buffStatusCheck02` by id: the class
+    `Buffs=` list is applied first, then every active buff's own entered-game
+    rows run once (tracked with a per-instance flag), so the event belongs to
+    the buff catalog rather than to a hardcoded pair. The same sweep for
+    `onSelfBuffStart`/`onSelfBuffRemove` was written and **reverted**: it works
+    (`buffShocked`'s start rows write `$buffShockedDamage` once) but it breaks
+    the survival stage chain. The reason is ordering, not the events: stock
+    applies `AddBuff` *during* the row scan, so a later row's `!HasBuff` gate
+    sees an earlier row's add, and the stage buffs' own start rows rely on that
+    (each stage's `onSelfBuffStart` removes the other stages, which makes the
+    highest stage added win). zdtd's engine collects the requests and applies
+    them after the scan, so all six stage rows pass and all six start events
+    fire, leaving the lower stages behind. The driver needs incremental
+    application (apply each AddBuff/RemoveBuff as the row passes, like the
+    `ModifyCVar` rows already do) before the start/remove events can land.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`
