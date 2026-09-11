@@ -57,6 +57,32 @@ fn applyTriggeredBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, res: *const as
     }
 }
 
+/// The live half of the triggered engine: applies a row's AddBuff/RemoveBuff as
+/// the row passes and answers HasBuff against the current set, so a later row's
+/// gate sees an earlier row's add (stock's ordering).
+const BuffSink = struct {
+    game: *Game,
+    entity_id: i32,
+    ps: ecs.Slot,
+
+    fn add(ctx: *const anyopaque, name: []const u8) void {
+        const s: *const BuffSink = @ptrCast(@alignCast(ctx));
+        _ = addCatalogBuff(s.game, s.entity_id, s.ps, name);
+    }
+
+    fn remove(ctx: *const anyopaque, name: []const u8) void {
+        const s: *const BuffSink = @ptrCast(@alignCast(ctx));
+        const def_id = s.game.buffs.indexOfName(name) orelse return;
+        _ = ecs.buff.remove(s.game.sim.buffsMut(s.ps), def_id);
+    }
+
+    fn has(ctx: *const anyopaque, name: []const u8) bool {
+        const s: *const BuffSink = @ptrCast(@alignCast(ctx));
+        const def_id = s.game.buffs.indexOfName(name) orelse return false;
+        return s.game.sim.buffs[s.ps].find(def_id) != null;
+    }
+};
+
 /// Add one catalog buff to the entity's set unless it is already active, and
 /// relay the add. Returns whether it was added. Unknown names are skipped (fail
 /// closed), like every other data-bound lookup.
@@ -278,6 +304,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
             const buff_lookup = BuffNameLookup{ .table = &self.buffs };
             const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
+            var sink_impl = BuffSink{ .game = self, .entity_id = c.entity_id, .ps = ps };
             const req_ctx = requirements.Ctx{
                 .levels = c.skill_levels[0..c.skill_level_n],
                 .player_level = c.level,
@@ -289,6 +316,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .sandbox_groups = sandbox_groups,
                 .armor_groups = armorGroups(self, ps, &armor_group_buf),
                 .cvars = &c.cvars,
+                .live_buff = &sink_impl,
+                .buff_active = BuffSink.has,
+                .sink = .{ .ctx = &sink_impl, .add_buff = BuffSink.add, .remove_buff = BuffSink.remove },
                 .worn_items = wornItemTags(self, ps, &worn_tags_buf),
                 .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
                 .hp_max = h.max_hp,

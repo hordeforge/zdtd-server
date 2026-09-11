@@ -1178,6 +1178,9 @@ pub fn evaluateTriggered(t: *const Table, def_id: u16, event: Trigger, ctx: requ
                 }
                 out.add_buffs[out.add_n] = tr.buff;
                 out.add_n += 1;
+                // Stock applies the add as the row passes, so a later row's
+                // HasBuff gate (through the live lookup) sees it.
+                if (ctx.sink) |sk| sk.add_buff(sk.ctx, tr.buff);
             },
             .remove_buff => {
                 if (tr.buff.len == 0) continue;
@@ -1187,6 +1190,7 @@ pub fn evaluateTriggered(t: *const Table, def_id: u16, event: Trigger, ctx: requ
                 }
                 out.remove_buffs[out.remove_n] = tr.buff;
                 out.remove_n += 1;
+                if (ctx.sink) |sk| sk.remove_buff(sk.ctx, tr.buff);
             },
             .modify_cvar => {
                 // Applied as the row is scanned, in document order, so a later
@@ -1388,6 +1392,94 @@ const TestNames = struct {
         return self.table.indexOfName(name);
     }
 };
+
+test "an AddBuff row is visible to a later row's HasBuff gate" {
+    // Stock applies AddBuff as the row passes, so the stage rows' chains work
+    // (each stage's onSelfBuffStart removes the others, and the highest stage
+    // added wins). The engine records the request either way; with a sink and a
+    // live lookup the later gate sees it in the same pass.
+    const xml_src =
+        \\<buffs>
+        \\<buff name="check">
+        \\<effect_group>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="AddBuff" buff="first"/>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="AddBuff" buff="second">
+        \\<requirement name="HasBuff" buff="first"/>
+        \\</triggered_effect>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="AddBuff" buff="third">
+        \\<requirement name="!HasBuff" buff="first"/>
+        \\</triggered_effect>
+        \\</effect_group>
+        \\</buff>
+        \\<buff name="first"/><buff name="second"/><buff name="third"/>
+        \\</buffs>
+    ;
+    const path = "worlds/zdtd_buffs_live.xml";
+    io_fs.mkdirPath("worlds");
+    try io_fs.writeFile(path, xml_src);
+    defer io_fs.deleteFile(path);
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const cid = t.indexOfName("check").?;
+    var counts: requirements.Counts = .{};
+    // Record only: the snapshot cannot show the add, so "second" is not
+    // requested and "third" is.
+    const plain = evaluateTriggered(&t, cid, .update, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 2), plain.add_n);
+    try std.testing.expectEqualStrings("first", plain.add_buffs[0]);
+    try std.testing.expectEqualStrings("third", plain.add_buffs[1]);
+    // Live: a sink applies "first" and the lookups see it.
+    var active: [4]u16 = undefined;
+    var active_n: usize = 0;
+    const Live = struct {
+        table: *const Table,
+        ids: []u16,
+        n: *usize,
+        fn add(ctx: *const anyopaque, name: []const u8) void {
+            const self: *@This() = @ptrCast(@alignCast(@constCast(ctx)));
+            const id = self.table.indexOfName(name) orelse return;
+            self.ids[self.n.*] = id;
+            self.n.* += 1;
+        }
+        fn remove(ctx: *const anyopaque, name: []const u8) void {
+            const self: *@This() = @ptrCast(@alignCast(@constCast(ctx)));
+            const id = self.table.indexOfName(name) orelse return;
+            var i: usize = 0;
+            while (i < self.n.*) : (i += 1) {
+                if (self.ids[i] != id) continue;
+                var j = i;
+                while (j + 1 < self.n.*) : (j += 1) self.ids[j] = self.ids[j + 1];
+                self.n.* -= 1;
+                return;
+            }
+        }
+        fn has(ctx: *const anyopaque, name: []const u8) bool {
+            const self: *const @This() = @ptrCast(@alignCast(ctx));
+            const id = self.table.indexOfName(name) orelse return false;
+            for (self.ids[0..self.n.*]) |a| if (a == id) return true;
+            return false;
+        }
+    };
+    var live = Live{ .table = &t, .ids = &active, .n = &active_n };
+    const live_ctx = requirements.Ctx{
+        .live_buff = &live,
+        .buff_active = Live.has,
+        .sink = .{ .ctx = &live, .add_buff = Live.add, .remove_buff = Live.remove },
+    };
+    const applied = evaluateTriggered(&t, cid, .update, live_ctx, &counts);
+    // Row 2 now passes (`first` landed during the scan) and row 3 is refused by
+    // `!HasBuff first`, which is the stock ordering the stage chain needs.
+    try std.testing.expectEqual(@as(u8, 2), applied.add_n);
+    try std.testing.expectEqualStrings("first", applied.add_buffs[0]);
+    try std.testing.expectEqualStrings("second", applied.add_buffs[1]);
+    // The sink ran in row order, so exactly those two are active.
+    try std.testing.expectEqual(@as(usize, 2), active_n);
+    try std.testing.expectEqual(t.indexOfName("first").?, active[0]);
+    try std.testing.expectEqual(t.indexOfName("second").?, active[1]);
+    try std.testing.expect(Live.has(&live, "first"));
+    try std.testing.expect(Live.has(&live, "second"));
+    try std.testing.expect(!Live.has(&live, "third"));
+}
 
 test "ModifyCVar applies in row order and a later row's gate sees it" {
     // Stock applies a ModifyCVar action as the row's requirements pass, so a

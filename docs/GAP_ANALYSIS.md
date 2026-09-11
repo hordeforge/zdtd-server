@@ -3756,9 +3756,16 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     (each stage's `onSelfBuffStart` removes the other stages, which makes the
     highest stage added win). zdtd's engine collects the requests and applies
     them after the scan, so all six stage rows pass and all six start events
-    fire, leaving the lower stages behind. The driver needs incremental
-    application (apply each AddBuff/RemoveBuff as the row passes, like the
-    `ModifyCVar` rows already do) before the start/remove events can land.
+    fire, leaving the lower stages behind. **Incremental application landed
+    (round 25)**: `requirements.Ctx` takes a `sink` (called with each
+    AddBuff/RemoveBuff as the row passes) plus a live `buff_active` lookup that
+    `HasBuff` prefers over the `active_buffs` snapshot, and the survival pass
+    wires both to the entity's BuffSet. A row's add is therefore visible to the
+    next row's gate in the same scan, which is stock's ordering; the recorded
+    `TriggeredResult` lists stay for the stage selection and the callers that
+    read them. A fixture proves the ordering (row 2's `HasBuff first` passes
+    after row 1 adds it, row 3's `!HasBuff first` is refused). What is left for
+    the start/remove sweep is firing it now that adds land in order.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`

@@ -147,6 +147,15 @@ pub const Ctx = struct {
     /// list (`WornItems` IL=54 walks `Equipment::GetSlotCount` and asks each
     /// item's `ItemClass::HasAnyTags`). Empty = nothing worn.
     worn_items: []const []const u8 = &.{},
+    /// Live buff lookup (by name), preferred over the `active_buffs` snapshot.
+    /// Stock applies `AddBuff`/`RemoveBuff` as the row passes, so a later row's
+    /// `HasBuff` gate sees an earlier row's add; a snapshot cannot show that.
+    /// `buff_names` still resolves the name when only the slice is available.
+    live_buff: ?*const anyopaque = null,
+    buff_active: ?*const fn (live: *const anyopaque, name: []const u8) bool = null,
+    /// Applies a row's `AddBuff`/`RemoveBuff` the moment the row passes (same
+    /// stock ordering). Null = record the request only, as before.
+    sink: ?TriggeredSink = null,
     /// The entity's custom variables (`assets/cvars.zig`). `CVarCompare`
     /// (IL=23) and passive rows whose `value="@name"` read them (a name that is
     /// not present reads 0, `EntityBuffs::GetCustomVar` IL=10), and the
@@ -168,6 +177,15 @@ pub const ArmorGroup = struct {
     name: []const u8 = "",
     quality: u8 = 0,
     count: u8 = 0,
+};
+
+/// A live sink for a row's AddBuff/RemoveBuff requests: `requirements.zig` may
+/// not know about the buff catalog or the ECS, so the caller supplies the two
+/// callbacks and the engine calls them as the row passes.
+pub const TriggeredSink = struct {
+    ctx: *const anyopaque,
+    add_buff: *const fn (ctx: *const anyopaque, name: []const u8) void,
+    remove_buff: *const fn (ctx: *const anyopaque, name: []const u8) void,
 };
 
 /// Gate accounting for one fold. Both counters are per requirement evaluated
@@ -273,6 +291,18 @@ fn levelOf(levels: []const NameLevel, name: []const u8) ?u8 {
 }
 
 fn evalHasBuff(r: Requirement, ctx: Ctx) Verdict {
+    // The live lookup wins when the caller can see the set changing during the
+    // scan (stock's ordering); the slice is the fallback for gate-only callers.
+    if (ctx.buff_active) |live| {
+        const holder = ctx.live_buff orelse return .unsupported;
+        var it = std.mem.splitScalar(u8, r.list, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            if (live(holder, name)) return verdict(true, r.negated);
+        }
+        return verdict(false, r.negated);
+    }
     // An empty active set decides the gate without a name catalog.
     if (ctx.active_buffs.len == 0) return verdict(false, r.negated);
     const names = ctx.buff_names orelse return .unsupported;
