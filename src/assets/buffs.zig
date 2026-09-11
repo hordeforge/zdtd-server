@@ -784,6 +784,10 @@ pub fn trackedDeltasAt(
             }
             break :blk null;
         } orelse continue;
+        // PassiveEffect::RequirementsMet (IL=180) matches the row's tags before
+        // it checks the requirement group, so a tag-scoped row stays out of a
+        // query whose tag set does not carry it.
+        if (!tagsMatch(p.tags, ctx.tags)) continue;
         if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
         const v = curveAt(p, level);
         switch (p.op) {
@@ -795,6 +799,26 @@ pub fn trackedDeltasAt(
         }
     }
     return out;
+}
+
+/// `PassiveEffect::hasMatchingTag` (IL=53) with the stock defaults (`MatchAnyTags`
+/// is true from the ctor, `InvertTagCheck` false; the shipped files set neither
+/// `match_all_tags` nor `invert_tag_check`). The query is the caller's GetValue
+/// tag list, so a row matches when any of its tags is in it, an untagged row
+/// always matches, and a tagged row never matches an empty query.
+pub fn tagsMatch(row_tags: []const u8, query: []const u8) bool {
+    if (row_tags.len == 0) return true;
+    if (query.len == 0) return false;
+    var it = std.mem.splitScalar(u8, row_tags, ',');
+    while (it.next()) |seg| {
+        const tag = std.mem.trim(u8, seg, " \t");
+        if (tag.len == 0) continue;
+        var qit = std.mem.splitScalar(u8, query, ',');
+        while (qit.next()) |qseg| {
+            if (std.mem.eql(u8, std.mem.trim(u8, qseg, " \t"), tag)) return true;
+        }
+    }
+    return false;
 }
 
 /// The level-1 (flat) variant, used by the buff VM.
@@ -1326,6 +1350,60 @@ test "trackedDeltasAt scales a perk curve to its level" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.25), l5.general_resist, 0.0001); // clamp
     const l0 = trackedDeltasAt(&passives, 0, .{}, &counts);
     try std.testing.expect(!l0.any());
+}
+
+test "the stock coredamageresist armor rows fold only under the armor query" {
+    // Equipment::GetTotalPhysicalArmorRating (IL=887) queries passive 41 with
+    // the `coredamageresist` tag. The `god` buff carries both an untagged 200
+    // point PhysicalDamageResist row and a `coredamageresist`-tagged one, so the
+    // untagged query sees 200 and the armor query sees both (400); the tick's
+    // armor leg must use the armor query.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const god = t.indexOfName("god").?;
+    var set: components.BuffSet = .{};
+    set.slots[0] = .{ .active = true, .def_id = god };
+    var counts: requirements.Counts = .{};
+    try std.testing.expectApproxEqAbs(@as(f32, 200), effectTotals(&t, &set, .{}, &counts).phys_resist, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 400), effectTotals(&t, &set, .{ .tags = "coredamageresist" }, &counts).phys_resist, 0.001);
+}
+
+test "tagsMatch follows PassiveEffect::hasMatchingTag with the stock defaults" {
+    // ctor: MatchAnyTags = true, InvertTagCheck = false; no shipped row sets
+    // match_all_tags or invert_tag_check.
+    try std.testing.expect(tagsMatch("", ""));
+    try std.testing.expect(tagsMatch("", "running")); // untagged row matches anything
+    try std.testing.expect(!tagsMatch("running", "")); // tagged row never matches untagged
+    try std.testing.expect(tagsMatch("running", "running"));
+    try std.testing.expect(tagsMatch("running", "walking,running")); // any-set
+    try std.testing.expect(tagsMatch("running,swimmingRun", "swimmingRun"));
+    try std.testing.expect(!tagsMatch("running", "walking"));
+    try std.testing.expect(tagsMatch("coredamageresist", "coredamageresist"));
+    // Whitespace and empty segments are tolerated on both sides.
+    try std.testing.expect(tagsMatch(" running , secondary ", "secondary"));
+    try std.testing.expect(tagsMatch("running", " running ,"));
+}
+
+test "a tagged passive folds only for a query that carries its tag" {
+    const passives = [_]Passive{
+        .{ .name = "StaminaChangeOT", .op = .perc_add, .value = 0.3, .tags = "running" },
+        .{ .name = "StaminaMax", .op = .base_add, .value = 25 },
+        .{ .name = "PhysicalDamageResist", .op = .base_add, .value = 200, .tags = "coredamageresist" },
+    };
+    var counts: requirements.Counts = .{};
+    const untagged = trackedDeltasAt(&passives, 1, .{}, &counts);
+    try std.testing.expectEqual(@as(f32, 0), untagged.stamina_ot);
+    try std.testing.expectApproxEqAbs(@as(f32, 25), untagged.stamina_max, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), untagged.phys_resist);
+    const running = trackedDeltasAt(&passives, 1, .{ .tags = "running" }, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), running.stamina_ot, 0.0001);
+    // The untagged row matches every query, including the tagged ones.
+    try std.testing.expectApproxEqAbs(@as(f32, 25), running.stamina_max, 0.0001);
+    const armor = trackedDeltasAt(&passives, 1, .{ .tags = "coredamageresist" }, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, 200), armor.phys_resist, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), armor.stamina_ot);
 }
 
 test "a requirement-gated row is folded only when its gates pass" {

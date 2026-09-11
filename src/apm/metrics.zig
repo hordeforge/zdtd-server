@@ -115,8 +115,9 @@ pub const CounterId = enum(u16) {
     /// passive-effects VM + triggered engine fold, bounded by the client
     /// table; watch with the 50 ms budget as player counts scale).
     survival_players,
-    /// Passive-effects VM recomputes (effectTotals + perkTotals folds) and
-    /// triggered-engine evaluations in the survival pass.
+    /// Passive-effects VM recomputes (the untagged stat folds, the
+    /// `coredamageresist` armor folds and the triggered engine) in the survival
+    /// pass: 1 + vm_recomputes_per_player per player per tick.
     vm_recomputes,
     /// `<requirement>` gates resolved on tracked passive rows in the VM folds
     /// (pass or fail). Rises with purchased levels and active buffs.

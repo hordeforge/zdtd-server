@@ -3622,13 +3622,24 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     recompute would flicker max HP every 50 ms, so it needs the roll pinned to
     a stable seed/period before it is evaluated at all.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
-    (`PassiveEffect::RequirementsMet` IL=17 calls `hasMatchingTag` before the
-    requirement group; an empty query tag set never matches a tagged row). The
-    VM's fold is an untagged query, so a tag-scoped row should not join it. Not
-    fixed here: `perkRuleOneCardio`'s `StaminaChangeOT tags="running,swimmingRun"`
-    currently joins the idle-regen total, and `buffStatusCheck02`/`god` carry
-    `tags="running"`/`tags="coredamageresist"` rows whose stock query tags are
-    not RE'd yet.
+    (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
+    requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`
+    is `hasMatchingTag` (IL=53) with the stock defaults (`MatchAnyTags` is true
+    from the ctor and no shipped row sets `match_all_tags`/`invert_tag_check`),
+    and `Ctx.tags` carries the tag set the caller's `GetValue` query passes, so
+    an untagged row matches every query and a tagged row never matches an empty
+    one. The tick now runs two queries like stock: the untagged max-stat/OT fold
+    and the `coredamageresist` armor fold
+    (`Equipment::GetTotalPhysicalArmorRating` IL=887 ORs that tag into its
+    passive-41 query, and `god` shows why the split matters: its untagged
+    PhysicalDamageResist row reads 200 untagged and 400 under the armor query
+    because the tagged row joins it).
+    Fixed by it: `perkRuleOneCardio`'s `StaminaChangeOT tags="running,swimmingRun"`
+    and the eight `walking`/`running` armor stamina rows in `buffStatusCheck02`
+    no longer inflate the **idle** regen total. Consumers still open: the sprint
+    leg should query `running` (zdtd uses the `Rules` drain floor there), and the
+    attacking item's `physicalDamageTypes` tags stay with the per-hit
+    `armorMitigation` leg rather than the per-tick cache.
   - **buffs.xml is the larger half of the same gap, measured 2026-09-11:**
     effect_group-scoped, 130 applied tracked rows and 63 of them gated, over 18
     kinds (`!HasBuff` 79, `CVarCompare` 76, `ProgressionLevel` 50, `PlayerLevel`

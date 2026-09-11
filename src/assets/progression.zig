@@ -953,7 +953,9 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
         try std.testing.expectApproxEqAbs(@as(f32, 100), d5.hp_max, 0.0001);
     }
     // `<book>` blocks parse into the same catalog: the Fireman's Almanac
-    // Complete passive is InBiome-gated, so it folds only in that biome.
+    // Complete passives are InBiome-gated AND tags="running", so they fold only
+    // for a running query in that biome (an untagged query never matches a
+    // tagged row).
     var book: ?PerkDef = null;
     for (t.perks) |pk| {
         if (std.mem.eql(u8, pk.name, "perkFiremansAlmanacComplete")) {
@@ -970,8 +972,10 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
         if (std.mem.eql(u8, p.name, "StaminaChangeOT") and p.reqs.len > 0) in_biome = true;
     }
     try std.testing.expect(in_biome);
-    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 1 }, &counts).stamina_ot);
-    try std.testing.expectApproxEqAbs(@as(f32, 0.2), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 8 }, &counts).stamina_ot, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 1, .tags = "running" }, &counts).stamina_ot);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 8, .tags = "running" }, &counts).stamina_ot, 0.0001);
+    // The same biome with an untagged query folds nothing: the row is tagged.
+    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 8 }, &counts).stamina_ot);
 }
 
 test "perkTotals folds purchased perk levels level-scaled and reverts" {

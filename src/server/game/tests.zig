@@ -4137,10 +4137,12 @@ test "perk max-stat deltas recompute max_hp revertibly" {
     try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
 }
 
-test "perk StaminaChangeOT joins the idle regen and StaminaMax applies" {
-    // perkRuleOneCardio: StaminaChangeOT .1,.2,.3,.3,.3 + StaminaMax 25,50
-    // (explicit 5-level anchors). At level 5 the max recomputes to 150 and
-    // the idle regen gains 0.3 x 150 / 100 = 0.45/s over the 8/s base.
+test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applies" {
+    // perkRuleOneCardio: StaminaChangeOT .1,.2,.3,.3,.3 tags="running,swimmingRun"
+    // + StaminaMax 25,50 (explicit 5-level anchors). At level 5 the max
+    // recomputes to 150. The tagged row is a sprint modifier: an untagged query
+    // never matches it (PassiveEffect::hasMatchingTag IL=53), so idle regen is
+    // the plain 8/s and the row no longer inflates it.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
@@ -4168,8 +4170,49 @@ test "perk StaminaChangeOT joins the idle regen and StaminaMax applies" {
     const before = g.sim.health[ps].stamina;
     try g.step();
     const gained = g.sim.health[ps].stamina - before;
-    // dt at 20 TPS = 0.05 s: (8 + 0.45) x 0.05 = 0.4225 per tick.
-    try std.testing.expect(gained > 0.4 and gained < 0.45);
+    // dt at 20 TPS = 0.05 s: 8 x 0.05 = 0.4 per tick, with no tagged bonus.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.4), gained, 0.01);
+    // The same rows DO fold when the query carries their tag: the tagged fold
+    // is what the sprint leg will consume.
+    var counts: requirements.Counts = .{};
+    const running = assets_progression.perkTotals(&g.progression_table, cl.skill_levels[0..cl.skill_level_n], .{ .tags = "running" }, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), running.stamina_ot, 0.0001);
+    const untagged = assets_progression.perkTotals(&g.progression_table, cl.skill_levels[0..cl.skill_level_n], .{}, &counts);
+    try std.testing.expectEqual(@as(f32, 0), untagged.stamina_ot);
+}
+
+test "the survival pass folds the armor query into buff_phys_resist" {
+    // god carries an untagged PhysicalDamageResist 200 row and a
+    // coredamageresist-tagged one. Equipment::GetTotalPhysicalArmorRating
+    // (IL=887) queries passive 41 with that tag, so the per-tick cache the
+    // armor fold fills is 400. Before the tag split it was the untagged 200.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const god = g.buffs.indexOfName("god").?;
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = god,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 400), g.sim.buff_phys_resist[ps], 0.001);
 }
 
 test "a gated perk row stops folding when its requirement fails" {

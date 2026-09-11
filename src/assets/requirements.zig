@@ -93,6 +93,11 @@ pub const Ctx = struct {
     /// Active buff def ids on the entity.
     active_buffs: []const u16 = &.{},
     buff_names: ?*const BuffNames = null,
+    /// The tag set the caller's `EffectManager.GetValue` query passes, as a
+    /// comma list. `PassiveEffect::RequirementsMet` (IL=180) matches it against
+    /// the row's `tags=` BEFORE the requirement group, and an empty query never
+    /// matches a tagged row (hasMatchingTag IL=53). Empty = untagged query.
+    tags: []const u8 = "",
 };
 
 /// Gate accounting for one fold. Both counters are per requirement evaluated

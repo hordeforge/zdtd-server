@@ -107,6 +107,13 @@ then back to `WORKS` once the gate became stock's own:
 purchasable level, with `CalculatedCostForLevel` (IL=423,
 `trunc(base * mult^level)`) and the seven stock `override_cost` tables as the
 cost side. `<book>` rows are refused as purchases (item-granted).
+The `tags=` gate landed too: `buffs.tagsMatch` is
+`PassiveEffect::hasMatchingTag` (IL=53) with the stock ctor defaults, and the
+survival pass now runs two queries like stock (untagged stats plus the
+`coredamageresist` armor query that `GetTotalPhysicalArmorRating` IL=887 uses),
+so `perkRuleOneCardio`'s `running` stamina bonus and the armor stamina rows no
+longer inflate the idle regen, while `god`'s tagged physical-resist row still
+reaches `buff_phys_resist` (200 untagged, 400 under the armor query).
 
 ---
 

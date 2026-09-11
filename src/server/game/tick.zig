@@ -34,6 +34,14 @@ const BuffNameLookup = struct {
     }
 };
 
+/// The tag `Equipment::GetTotalPhysicalArmorRating` (IL=887) adds to its
+/// passive-41 query; the attacking item's own tags ride the per-hit path.
+const armor_query_tags = "coredamageresist";
+
+/// Passive-effects VM recomputes per player per tick: the untagged stats query
+/// and the `coredamageresist` armor query, each over the buff and perk legs.
+const vm_recomputes_per_player = 4;
+
 /// Active buff def ids in `set`, into `out`; returns the used prefix. Bounded
 /// by the fixed `BuffSet` slot count, so no allocation.
 fn activeBuffIds(set: *const ecs.components.BuffSet, out: []u16) []const u16 {
@@ -76,7 +84,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         var h = &self.sim.health[ps];
         if (h.max_hp <= 0) continue;
         self.harness.counters.inc(.survival_players);
-        if (use_buff) self.harness.counters.add(.vm_recomputes, 3); // engine + effectTotals + perkTotals
+        // engine + the two stat folds + the two coredamageresist armor folds
+        if (use_buff) self.harness.counters.add(.vm_recomputes, 1 + vm_recomputes_per_player);
         // Drowning: stock drains the client's local O2 bar first, then the
         // server is authoritative for the hp loss. The head block being water
         // is the depth gate (a submerged body at y <= water surface).
@@ -167,16 +176,31 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .buff_names = &buff_names,
             };
             var req_counts: requirements.Counts = .{};
+            // Two queries, like stock: the max-stat/change-over-time consumers
+            // call EffectManager.GetValue with no tags, and
+            // Equipment::GetTotalPhysicalArmorRating (IL=887) queries passive 41
+            // with `coredamageresist`. A tagged row only joins the query whose
+            // tag set carries its tag (PassiveEffect::hasMatchingTag IL=53), so
+            // the `running`/`walking` StaminaChangeOT rows no longer land in the
+            // idle aggregate.
             const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], req_ctx, &req_counts);
             // Perk leg (level-scaled): purchased attribute/perk/book passives
             // fold through the same VM surface, revertible by
             // recompute-from-set and gated per row by its requirements.
             const pvm = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n], req_ctx, &req_counts);
+            const armor_ctx = blk: {
+                var ctx_armor = req_ctx;
+                ctx_armor.tags = armor_query_tags;
+                break :blk ctx_armor;
+            };
+            const vm_armor = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], armor_ctx, &req_counts);
+            const pvm_armor = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n], armor_ctx, &req_counts);
             self.harness.counters.add(.requirement_gates, req_counts.resolved);
             self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
             // Armor: buff + perk PhysicalDamageResist join the mitigation like
             // stock GetTotalPhysicalArmorRating sums passive 41 on the wearer.
-            self.sim.buff_phys_resist[ps] = vm.phys_resist + pvm.phys_resist;
+            // The attacking item's tags are per-hit and stay with `item_mit`.
+            self.sim.buff_phys_resist[ps] = vm_armor.phys_resist + pvm_armor.phys_resist;
             // Perk/buff max-stat deltas: unconditional recompute from the
             // bases every tick (revertible recompute-from-set - a zero delta
             // restores the spawn max; the values are stable so no churn).
