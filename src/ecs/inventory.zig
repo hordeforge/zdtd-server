@@ -133,8 +133,8 @@ fn itemIsArmor(w: *const World, item_id: u16) bool {
 /// PhysicalDamageResist percent from the passive-effects VM. The item leg is
 /// the equipped armor's summed PhysicalDamageResist percent at its quality
 /// (stock GetTotalPhysicalArmorRating sums passive 41 on the wearer;
-/// Equipment.CalcDamage reduces physical damage by rating/100, combat-
-/// damage.md). The pieces-rate floor stands only when no XML row resolved
+/// Equipment.CalcDamage reduces physical damage by rating/100, see
+/// combat-damage.md). The pieces-rate floor stands only when no XML row resolved
 /// (offline/builtin catalog).
 pub fn armorMitigation(w: *const World, peer: usize) f32 {
     const ps = w.playerByPeer(peer) orelse return 0;

@@ -6,7 +6,7 @@ const std = @import("std");
 const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 
 /// LiteNetLib protocol id 13 (game Managed LiteNetLib V3.1.0; Cecil-verified
-/// NetConstants.ProtocolId, pinned in ../../7dtd-engine-research/docs/network.md).
+/// NetConstants.ProtocolId, pinned in ../../7dtd-engine-research/docs/network/network.md).
 pub const protocol_id: i32 = 13;
 /// LiteNetLib `NetConstants.HeaderSize`: the property/connection byte every
 /// datagram opens with, so every later field is read at this offset. Named
@@ -19,7 +19,7 @@ pub const fragment_header_size: usize = 6;
 pub const fragmented_header_total: usize = channeled_header_size + fragment_header_size; // 10
 /// DIVERGES from stock: game Managed LiteNetLib PossibleMtu=[1024,1164,1392,
 /// 1404,1424,1432], MaxPacketSize=1432 (RVA-decoded; pinned in
-/// ../../7dtd-engine-research/docs/network.md). 1327 matches no stock entry - likely
+/// ../../7dtd-engine-research/docs/network/network.md). 1327 matches no stock entry - likely
 /// an older LiteNetLib list. Tracked in the provenance divergence register.
 ///
 /// It does not break discovery, and the earlier note here that negotiation

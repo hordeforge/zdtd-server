@@ -246,7 +246,7 @@ chunk_fill stream), not by a real client. Known bound: a dense non-stock
 chunk can exceed the fixed 512 KiB `body_buf` (fails loudly, not corrupts);
 profile-sized send buffers are follow-on. Proc worldgen stays 256-tall
 (fail-closed with non-stock); RealEarth's own dialect is RE-gated future
-work. Research cross-link: `7dtd-engine-research/docs/terrain-height.md`.
+work. Research cross-link: `7dtd-engine-research/docs/world/terrain-height.md`.
 Also (2026-08-29): the procedural shaping params moved to
 `[rules.worldgen]` (base_height/height_amp/min+max_surface/squash/
 noise_weight/y_scale/bedrock_h via `WorldGen.applyParams`; defaults = the

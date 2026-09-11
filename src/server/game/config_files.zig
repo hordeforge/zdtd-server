@@ -1,5 +1,5 @@
 //! Config-file S2C: stock `SendXmlsToClient` / `NetPackageConfigFile`
-//! (`../7dtd-engine-research/docs/mod-loading.md` §5.6, `protocol-packages.md`
+//! (`../7dtd-engine-research/docs/admin/mod-loading.md` §5.6, `protocol-packages.md`
 //! IL=25). Patched config bytes are Deflate-cached once at init
 //! (serialize-once, PRD R8); the join send streams name + len + blob per row.
 //!

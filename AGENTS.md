@@ -8,7 +8,7 @@ Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordefor
 |---|---|
 | Workspace | [`hordeforge/.github` AGENTS.md](https://github.com/hordeforge/.github/blob/main/AGENTS.md) |
 | Architecture | [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) |
-| Wire | [`../7dtd-engine-research/docs/protocol.md`](../7dtd-engine-research/docs/protocol.md) |
+| Wire | [`../7dtd-engine-research/docs/network/protocol.md`](../7dtd-engine-research/docs/network/protocol.md) |
 | **Status hub** | [`docs/STATUS.md`](docs/STATUS.md) |
 | Gaps / plan | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md), [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) |
 | Backlog | [`TODO.md`](TODO.md) |
@@ -282,4 +282,4 @@ When two correct approaches exist, pick the [Zig Zen](https://ziglang.org/docume
 
 ## Stock-game research -> 7dtd-engine-research
 
-Stock dedi research belongs in [`../7dtd-engine-research/`](../7dtd-engine-research/), not here: RE narratives (`docs/`), Mono.Cecil dump tooling (`tools/`), wire/protocol analysis, engine cost/loop RE. This repo is the Zig reimplementation; it doesn't host RE docs/dumpers. When RE is needed, add it under `../7dtd-engine-research/` and link back. How to RE: [`../7dtd-engine-research/docs/re-methodology.md`](../7dtd-engine-research/docs/re-methodology.md).
+Stock dedi research belongs in [`../7dtd-engine-research/`](../7dtd-engine-research/), not here: RE narratives (`docs/`), Mono.Cecil dump tooling (`tools/`), wire/protocol analysis, engine cost/loop RE. This repo is the Zig reimplementation; it doesn't host RE docs/dumpers. When RE is needed, add it under `../7dtd-engine-research/` and link back. How to RE: [`../7dtd-engine-research/docs/meta/re-methodology.md`](../7dtd-engine-research/docs/meta/re-methodology.md).

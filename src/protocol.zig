@@ -1,4 +1,4 @@
-//! Wire constants from ../../7dtd-engine-research/docs/protocol.md (V3.2.0 pin; V3.1.0/V3.0.1-era goldens still cited).
+//! Wire constants from ../../7dtd-engine-research/docs/network/protocol.md (V3.2.0 pin; V3.1.0/V3.0.1-era goldens still cited).
 //! Package IDs are dynamic (PackageIds map); never hard-code across builds.
 //! Decision: docs/adr/0009-dynamic-package-ids.md. Tick model: ticks_per_second / tick_ns.
 //!
@@ -30,7 +30,7 @@ pub const content_len_entity_rel_pos_and_rot_no_q: usize = 22;
 
 /// Wire geometry profile: the chunk-format constants a server+client pair must
 /// agree on (WorldConstants ChunkBlockYDim family; research
-/// 7dtd-engine-research/docs/terrain-height.md). `stock` = today's exact
+/// 7dtd-engine-research/docs/world/terrain-height.md). `stock` = today's exact
 /// values, byte-pinned by golden tests. A non-stock profile requires a paired
 /// client mod (RealEarth-style engine expand: stock clients cannot read it).
 /// XZ (`ChunkAreaDim`) never expands; only the column height grows.

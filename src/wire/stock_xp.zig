@@ -45,7 +45,7 @@ test "add exp client body is the 11-byte stock shape" {
 
 /// NetPackagePlayerStats body: entityId i32 + EntityNetworkStats snapshot
 /// (RE ../7dtd-engine-research/il/full-v3.1.0/_global/EntityAlive_EntityNetworkStats.il.txt
-/// write IL=104; read order in 7dtd-engine-research/docs/progression.md).
+/// write IL=104; read order in 7dtd-engine-research/docs/gameplay/progression.md).
 ///
 /// The snapshot carries the whole progression picture to peers (party panel
 /// level, tooltip name/kills). hasProgression=true with a minimal

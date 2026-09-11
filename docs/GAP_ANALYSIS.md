@@ -593,7 +593,7 @@ area and the concrete work.
     **Shipped** (`src/world/stability.zig`, commits 6daf9ca + 02a373a): the
     per-block byte plane (15 full / 1 non-support cap / 0 falls), reset +
     distribute on first touch, and the incremental removal/placement paths
-    from `StabilityCalculator`/`ChannelCalculator` (RE: `../../7dtd-engine-research/docs/stability.md`).
+    from `StabilityCalculator`/`ChannelCalculator` (RE: `../../7dtd-engine-research/docs/world/stability.md`).
     A C2S SetBlock that removes a support block fells the dependency chain and
     broadcasts the collapse; placing re-spreads from supported neighbours.
     Support/ignore membership resolves from the block tables, not hardcoded.
@@ -996,7 +996,7 @@ re-arms) with the population count as the quest target.
   party mirror), `7dtd-engine-research docs/protocol-packages.md`
   (NetPackageQuestObjectiveUpdate)
   *Anchors:* `src/server/game.zig`, ``, ``,
-  `../../7dtd-engine-research/docs/quests-challenges.md` §5 (client owns the quest)
+  `../../7dtd-engine-research/docs/content/quests-challenges.md` §5 (client owns the quest)
 
 - **Server-side journal: accept, phase advance, turn-in, coins** `WORKS`
   `questAccept` allocates a slot, assigns a monotonic quest_code, resolves a POI
@@ -1310,7 +1310,7 @@ parsed, and quest offering is unwired.
   request's target blob (it does not).
   *Anchors:* `src/server/game/locks.zig` (`clearLocksForPeer`),
   `src/wire/packages.zig` (`buildLockResponseForceUnlock`),
-  `../7dtd-engine-research/docs/dedicated-leftovers.md:150-170`
+  `../7dtd-engine-research/docs/meta/dedicated-leftovers.md:150-170`
 
 - **TraderData v2 body encoding** `WORKS`
   `buildTraderDataStock` matches `TraderData::Read` / `ReadInventoryData` v2
@@ -3365,7 +3365,7 @@ unvalidated, and durability, mods and repair do not exist.
   *Anchors:* `src/server/game/chunk_fill.zig:293-322,363-415`,
   `src/server/c2s/misc.zig:568` (LockRequest), `src/assets/loot.zig` parse,
   `src/world/containers.zig` loot_list,
-  `../../7dtd-engine-research/docs/loot-economy.md:454-456,458-465`
+  `../../7dtd-engine-research/docs/gameplay/loot-economy.md:454-456,458-465`
 
 - **Container capacity limits** `WORKS` `(2026-08-22 re-audit)`
   The world container store is 4096 entries (GAP 12 raised it from 256, and
@@ -3546,6 +3546,33 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   stats to track), not a blocked dependency.
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
+
+  **2026-09-11, newly measured: the rows that are folded are folded regardless
+  of their gates.** V3.2.0 `progression.xml` carries 913 `<requirement>`
+  elements over its 648 passive rows (518 `ProgressionLevel`, 79
+  `ItemHasTags`, 65 `CVarCompare`, 51 `PlayerLevel`, 50 `RandomRoll`, 23
+  `!HasBuff`, 18 `HoldingItemHasTags`, 17 `EntityTagCompare`, and the rest) and
+  `progression.zig`'s `scanPassives` parses no requirement at all: it walks to
+  the first `<passive_effect ` and never reads a `<requirement>` sibling, so a
+  gated row folds unconditionally. Two concrete consequences:
+  - `PlayerExpGain`. Stock multiplies through `EffectManager.GetValue(87 =
+    PlayerExpGain, ...)` inside `Progression::AddLevelExp` (IL=161) when
+    `useBonus` is set - true for the kill (`EntityPlayer.AddKillXP` IL=89
+    passes `ldc.i4.0`, so kill XP does NOT), harvest (GameUtils IL=2995
+    `ldc.i4.1`), magazine MinEvent (`_xpOther`, `ldc.i4.1`) and quest
+    (`RewardExp`, `ldc.i4.1`) paths. The stock perk rows are gated
+    (`HoldingItemHasTags tags="perkMiner69r"`, `ItemHasTags tags="miningTool"`,
+    `IsNight`), so unfolding them applies a tool- and time-conditional XP
+    modifier always. zdtd does not consume `PlayerExpGain` at all today.
+  - `RandomRoll` gates (50 rows) silently become unconditional.
+  Both need the same closing work: parse each row's `<requirement>` children
+  and evaluate them against the live player/context before folding. That is the
+  requirement-evaluator surface ADR 0023/0024 scoped, and it is the honest
+  blocker on this row rather than "which stats to track".
+  *Anchors (requirement sweep):* `src/assets/progression.zig` (`scanPassives`),
+  `src/assets/buffs.zig` (`Passive`/`trackedDeltasAt`),
+  `_global/Progression.il.txt:329` (`AddLevelExp`),
+  `_global/EntityPlayer.il.txt:3620` (`AddKillXP`)
 
 - **Crafting skills / magazines / recipe unlock by progression** `WORKS` `(2026-09-08)`
   `unlock_entry` gates parse from progression.xml. Magazines (`AddProgressionLevel`
@@ -4280,7 +4307,7 @@ a finer server encoding.
   *Anchors:* `src/server/config.zig` SandboxCode/SandboxPreset,
   `src/server/serverinfo_tcp.zig` `buildInfoText`, `src/server/game.zig` `gameStatsValues`,
   `src/wire/packages.zig:2039-2040`,
-  `../../7dtd-engine-research/docs/weather-environment.md` §4, `sandbox-options.md` §8
+  `../../7dtd-engine-research/docs/gameplay/weather-environment.md` §4, `sandbox-options.md` §8
 
 - **Day/night clock and NetPackageWorldTime broadcast** `WORKS`
   WorldClock advances hours from real dt scaled by DayNightLength, dawn fixed at
@@ -4360,7 +4387,7 @@ a finer server encoding.
   Known gaps: a placed block that would fall instantly still stands until a
   support change under it (stock seeds 15 everywhere too, so this matches stock);
   no `EntityFallingBlock` visual entity (the client collapses locally).
-  *Anchors:* `src/world/stability.zig`, `../../7dtd-engine-research/docs/stability.md`
+  *Anchors:* `src/world/stability.zig`, `../../7dtd-engine-research/docs/world/stability.md`
 
 - **Structural collapse / falling blocks** `BLOCKED (2026-08-07)`
   The stability plane and collapse removal are shipped (the server removes
@@ -5009,7 +5036,7 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/server/admin_console.zig` (`runBanCommand`, `saveAdminLists`),
   `src/server/c2s/join.zig:122`, `src/server/game/net.zig` (`banIp`/`unbanIp`),
   `src/server/game/tick.zig` (`tickServerAdminReload`),
-  `../7dtd-engine-research/docs/dedicated-misc-systems.md` (AdminBlacklist)
+  `../7dtd-engine-research/docs/meta/dedicated-misc-systems.md` (AdminBlacklist)
 
 - **Admin permission levels** `PARTIAL (waived: loopback-only admin)`
   In-game console is intentionally allowlisted read-only; mutating commands stay on
@@ -5252,7 +5279,7 @@ persists so little that a restart visibly damages a built base.
   default. Dropping a real stock serverconfig.xml onto zdtd now tunes the sim.
   *Anchors:* `src/server/config.zig` (`applySandboxCode`),
   `src/assets/sandbox.zig`, `src/assets/sandbox_data.zig`,
-  `../7dtd-engine-research/docs/sandbox-options.md §2.1/§3/§5`
+  `../7dtd-engine-research/docs/admin/sandbox-options.md §2.1/§3/§5`
 
 - **Chunk save format** `WORKS` `(non-client-visible, 2026-08-22 re-audit)`
   Works for zdtd: one file per chunk, `<world>/c_X_Z.zch`, magic ZCH3, with
@@ -6774,7 +6801,7 @@ HONEST GAPS:
 ### V3.1.0 wire note (2026-08-02)
 
 `NetPackageTileEntity` now writes `teBlockId:i32` after world pos and uses **i32**
-payload length (was u16). Stock RE: `../../7dtd-engine-research/docs/protocol-packages.md` §6.12
+payload length (was u16). Stock RE: `../../7dtd-engine-research/docs/network/protocol-packages.md` §6.12
 and the research topic docs.
 
 **Implemented** in `src/wire/stock_te.zig` (`writeOuterTeHeader` /
