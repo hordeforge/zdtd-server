@@ -705,6 +705,53 @@ test "player id body layout: header fields and non-empty pdf" {
     // its last spawn was somewhere it never stood.
 }
 
+test "player id PDF pins the drag-drop list, the score counters and the save marker" {
+    // Wire-order audit 2026-09-11: three adjacent same-width pairs in the join
+    // PDF survived every test in the suite. Swapping any of them changes what a
+    // joining client reads - different kill/death counters, a zero-length
+    // dragAndDropItem list, or a bDead of 88 - and the whole suite stayed
+    // green, so nothing was pinning the PDF's field order at those offsets.
+    var buf: [16384]u8 = undefined;
+    const body = try buildPlayerIdBodyWithOpts(&buf, 171, 0, 4, -273, 61, 449, .{
+        .player_kills = 11,
+        .zombie_kills = 22,
+        .deaths = 33,
+        .score = 44,
+    });
+
+    // pdf id (-1) then the four counters, in stock PlayerDataFile.Write order.
+    // Distinct values keep the run unique in the body.
+    var counters: [20]u8 = undefined;
+    std.mem.writeInt(i32, counters[0..4], -1, .little);
+    std.mem.writeInt(i32, counters[4..8], 11, .little); // playerKills
+    std.mem.writeInt(i32, counters[8..12], 22, .little); // zombieKills
+    std.mem.writeInt(i32, counters[12..16], 33, .little); // deaths
+    std.mem.writeInt(i32, counters[16..20], 44, .little); // score
+    try std.testing.expect(std.mem.find(u8, body, &counters) != null);
+
+    // dragAndDropItem is a one-element list whose single stack is empty, then
+    // alreadyCraftedList, the spawnPoints count, selectedSpawnPointKey, the two
+    // hardcoded fields and b_loaded. The long zero run followed by `01 00 01`
+    // is what makes this window unique enough to search for.
+    const drag_drop = [_]u8{
+        1, 0, // dragAndDropItem list count 1
+        0, 0, // its ItemStack.count 0 (no ItemValue)
+        0, 0, // alreadyCraftedList
+        0, // spawnPoints count
+        0, 0, 0, 0, 0, 0, 0, 0, // selectedSpawnPointKey
+        1, // stock hardcodes true
+        0, 0, // stock hardcodes 0
+        1, // b_loaded
+    };
+    try std.testing.expect(std.mem.find(u8, body, &drag_drop) != null);
+
+    // deathUpdateTime(0) + currentLife(0) then bDead false and the 88 stock
+    // format marker. The 88 byte is unique in the PDF, so this window pins the
+    // pair directly.
+    const dead_marker = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 88, 0, 1 };
+    try std.testing.expect(std.mem.find(u8, body, &dead_marker) != null);
+}
+
 test "gameStageBornAtWorldTime rides the same offset as the -1 sentinel" {
     var a: [16384]u8 = undefined;
     var b: [16384]u8 = undefined;
