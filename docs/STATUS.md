@@ -89,8 +89,10 @@ any of the row's `tags`. The tick now collects each worn item's `Tags` property
 next to the armor groups, so with `perkLightArmor` 1 and four `lightArmor`
 pieces buffStatusCheck02's update rows derive `.ArmorLightWorn=4`,
 `.ArmorLightLevel=1` and `.ArmorLightTotal=4` from the data, and without the
-perk the effect_group gate refuses the chain. Measured: the gated tracked-row
-split moves 31 resolve / 12 refuse to 34 / 9. The
+perk the effect_group gate refuses the chain. `WornItems` gates 70 stock rows
+(38 in `buffs.xml`, 32 in `items.xml`) and none of them is a tracked passive, so
+the gated tracked-row split stays 31 resolve / 12 refuse; what it unblocks is
+that triggered chain. The
 `PhysicalDamageResist = @.ArmorLightTotal` passive those rows feed lives on
 buffStatusCheck02 itself, so it starts folding once the entity class `Buffs=`
 list makes that check buff an active buff.

@@ -3717,8 +3717,11 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `perkLightArmor` 1 and four `lightArmor` pieces the chain now derives
     `.ArmorLightWorn=4`, `.ArmorLightLevel=1` and `.ArmorLightTotal=4` (the
     `set @.ArmorLightLevel` then `multiply @.ArmorLightWorn` rows), and without
-    the perk the effect_group gate refuses it. Measured: the gated tracked-row
-    split moves from 31 resolve / 12 refuse to **34 / 9**; the
+    the perk the effect_group gate refuses it. `WornItems` gates 70 stock rows
+    (38 in `buffs.xml`, 32 in `items.xml`) and none of them is a tracked
+    passive, so the gated **tracked**-row split is unchanged at 31 resolve / 12
+    refuse (measured: 0 tracked rows carry a `WornItems` gate); what it unblocks
+    is the triggered chain above. The
     `PhysicalDamageResist = @.ArmorLightTotal` passive that consumes the total
     still needs `buffStatusCheck02` to be an active buff (entity class
     `Buffs=`), which is the next step.
