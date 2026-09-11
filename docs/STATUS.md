@@ -58,8 +58,8 @@ a real client. Confirming the trader paths against a stock client remains
 open.
 `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 300 features: **297 `WORKS`,
-3 `PARTIAL`, 0 `MISSING`** (recounted 2026-08-30 from the per-feature markers;
+owns all C2S domains. `GAP_ANALYSIS.md` scores 300 features: **298 `WORKS`,
+2 `PARTIAL`, 0 `MISSING`** (recounted 2026-09-11 from the per-feature markers;
 see its scorecard for the per-area breakdown; 50 bullets carry ad-hoc labels
 and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
@@ -98,9 +98,15 @@ active. `<book>` blocks (152) joined the catalog - a book is a progression
 value items.xml grants, and it was previously invisible, so reading an almanac
 stored no level and folded no passive - which exposed `curveValueAtLevels`
 returning 0 for a single `level=` anchor (every book row and 148 progression
-rows). Perk purchase was re-scored: `skillCostOf`'s parent-skill prerequisite
-denies every perk (the parent is a `<skill>` name that is never leveled), so
-the row moved `WORKS` -> `PARTIAL`.
+rows). Perk purchase was re-scored: Perk purchase was re-scored: `skillCostOf`'s
+parent-skill prerequisite denied every perk (the parent is a `<skill>` name
+that is never leveled), so the row moved `WORKS` -> `PARTIAL` for one round,
+then back to `WORKS` once the gate became stock's own:
+`<level_requirements>` are parsed into the catalog and
+`ProgressionClass::GetCalculatedMaxLevel` (IL=343) decides the highest
+purchasable level, with `CalculatedCostForLevel` (IL=423,
+`trunc(base * mult^level)`) and the seven stock `override_cost` tables as the
+cost side. `<book>` rows are refused as purchases (item-granted).
 
 ---
 
@@ -998,7 +1004,7 @@ recount from the live markers corrected the scorecard: the running totals had
 drifted from the rows (the file carries no `MISSING` tags; "333 features / 38
 MISSING" was an older inventory projection). Recount: 291 canonical features,
 total **250/41/0**. (Current state, recounted 2026-08-30 from the live
-markers: 300 canonical features, **297 WORKS / 3 PARTIAL / 0 MISSING**; the
+markers: 300 canonical features, **298 WORKS / 2 PARTIAL / 0 MISSING**; the
 chunk-pointer stability gap closed 2026-08-30 by the pointer-stable chunk
 store, and the join-burst tick budget PARTIAL is paced to the 50 ms budget
 in ReleaseFast with its W2b residual recorded in the row.)

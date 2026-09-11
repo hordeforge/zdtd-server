@@ -220,10 +220,10 @@ wins on conflict about what shipped, not about the arithmetic).
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 40 | 0 | 0 | 40 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; starter population fill (2026-08-30) populates fresh worlds toward the cap at boot |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 26 | 2 | 0 | 28 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated spend (NetPackageEntitySetSkillLevelServer) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT) gated by each row's parsed `<requirement>` (src/assets/requirements.zig); `<book>` progression values load too; XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins. Two shortfalls: perk purchase is denied (the parent-skill prerequisite is wrong) and the requirement vocabulary is partial (unknown kinds fail closed, counted) |
+| [Player progression](#10-player-progression) | 27 | 1 | 0 | 28 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated spend (NetPackageEntitySetSkillLevelServer) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT) gated by each row's parsed `<requirement>` (src/assets/requirements.zig); `<book>` progression values load too; XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins. Two shortfalls: perk purchase is denied (the parent-skill prerequisite is wrong) and the requirement vocabulary is partial (unknown kinds fail closed, counted) |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **297** | **3** | **0** | **300** | Three PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10), perk purchase (§10, the parent-skill prerequisite denies every perk) and the join-burst tick budget (§11, 2026-08-29). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3409,14 +3409,14 @@ unvalidated, and durability, mods and repair do not exist.
 **Headline.** A player can join, eat, take client-reported damage, die by
 admin/self-report and respawn. Level, XP, survival stats and active buffs
 survive a restart (ZPV12 tail, server-side ledger). Spend is server-validated
-(`NetPackageEntitySetSkillLevelServer`); attributes purchase, but perks are
-denied because the parent-skill prerequisite is wrong (see the perk-purchase
-row). Both server-to-client pushes ship (`NetPackageEntityAddExpClient`,
+(`NetPackageEntitySetSkillLevelServer`): a perk buys up to the level its
+`<level_requirements>` allow, at the stock cost curve or the row's
+`override_cost` table. Both server-to-client pushes ship (`NetPackageEntityAddExpClient`,
 `NetPackageEntitySetSkillLevelClient`). The client's `NetPackagePlayerStats`
 blob is still dropped by design, so the server relays its own ledger rather
 than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 
-**26 WORKS · 2 PARTIAL · 0 MISSING**
+**27 WORKS · 1 PARTIAL · 0 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
@@ -3526,29 +3526,46 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   EffectManager VM, moved to the explicit non-goals list (the sim already
   applies the live effects: armour mitigation + survival buffs).
 
-- **Perk purchase / spend skill points** `PARTIAL` (was `WORKS` 2026-09-02;
-  corrected 2026-09-11)
+- **Perk purchase / spend skill points** `WORKS` (2026-09-11 round 12; it read
+  `PARTIAL` for one round after the parent-prerequisite defect was found)
   Server-authoritative spend via `NetPackageEntitySetSkillLevelServer`,
   validated against the catalog with the `on_perk_spend` verdict (ADR 0033)
   on top. The original waiver ("client owns spend, no server-side perk table")
-  was superseded when that shipped 2026-08-27. **Attribute purchases work;
-  perk purchases are denied.** `skillCostOf` (`src/server/game/player.zig`)
-  treats a perk's `parent_attr` as a purchase prerequisite and requires
-  `skillLevelOf(slot, parent) != 0`, but stock gives every perk
-  `parent="skill*"` naming one of the 16 `<skill>` rows
-  (`../7dtd-engine-research/docs/gameplay/progression.md` section 4), and no
-  `<skill>` name is ever in the catalog or the ledger (`internProgressionName`
-  accepts only attributes/perks/crafting_skills), so the check always fails and
-  the C2S is silently dropped (`src/server/c2s/misc.zig`). The existing
-  scenario buys an attribute, which is why the row read WORKS. Fix is the
-  ADR 0023 §2 shape: gate on the perk's `<level_requirements>`
-  (`ProgressionLevel`/`PlayerLevel`, both now implemented) and treat `parent`
-  as UI grouping.
+  was superseded when that shipped 2026-08-27.
+  - The purchase gate is now stock's own: `skillCostOf` resolves a row's
+    `<level_requirements>` through `Table.calculatedMaxLevel`
+    (`ProgressionClass::GetCalculatedMaxLevel`, IL=343: the highest level whose
+    gate passes) and refuses a target above it. It replaced a check that
+    required the perk's `parent_attr`, which is a `<skill>` grouping name
+    (`perkPummelPete parent="skillStrengthCombat"`) that is never levelled, so
+    every perk purchase used to be silently dropped. `parent` stays UI data.
+  - The cost is stock's too: `skillCostForLevel` now implements
+    `ProgressionClass::CalculatedCostForLevel` (IL=423),
+    `conv.i4(Mathf.Pow(CostMultiplier, level) * BaseCostToLevel)`, where the old
+    `round(base * mult^(level-1))` overcharged from level 5 (attributes are
+    base 1 / mult 1.14: level 5 costs 1, not 2). The seven stock rows with
+    `override_cost` (perkLightArmor, perkMediumArmor, perkHeavyArmor,
+    perkMasterChef, perkLivingOffTheLand, perkLockPicking, perkLuckyLooter) now
+    use their per-level table; a level past the table refuses instead of
+    falling back to the curve. The `<perks>` container defaults (max_level 5,
+    cost 1, mult 1) are parsed, so a row that omits them inherits them.
+  - `<book>` rows are refused as purchases: a book is granted by reading its
+    item (`SetProgressionLevel(-1)`), not bought with skill points. This is
+    stricter than the stock dedi, which applies the C2S verbatim with no
+    validation (`NetPackageEntitySetSkillLevelServer::ProcessPackage` IL=26);
+    the server-authoritative stance is AGENTS rule 17.
+  - Residual: standard-cheat/enforcement shape only. The stock client validates
+    against the same numbers, and zdtd refuses anything above them.
   *Anchors:* `src/server/c2s/misc.zig` (`NetPackageEntitySetSkillLevelServer`),
-  `src/server/game/player.zig` (`skillCostOf`/`purchaseSkillAtCost`),
-  `src/plugin/wasm.zig` (`on_perk_spend` hook),
-  `src/assets/requirements.zig` (the level gate it needs),
-  `src/assets/progression.zig` (`<level_requirements>` is not parsed yet)
+  `src/server/game/player.zig` (`skillCostOf`/`skillCostForLevel`/
+  `purchaseSkillAtCost`), `src/assets/progression.zig` (`LevelReq`,
+  `calculatedMaxLevel`, `override_cost`), `src/plugin/wasm.zig`
+  (`on_perk_spend` hook), `_global/ProgressionClass.il.txt:343`/`:423`,
+  `_global/ProgressionFromXml.il.txt:660`,
+  `_global/NetPackageEntitySetSkillLevelServer.il.txt:26`
+  *Scenarios:* `scenario perk purchase: the level requirement gates the spend`,
+  `skill ledger: level-up awards SP; purchase validates, level gate and spends`,
+  `override_cost replaces the curve and refuses past its end`
 
 - **Perk / attribute passive effects applied to gameplay** `PARTIAL`
   (re-evaluated 2026-09-02; the `(waived)` qualifier is dropped)

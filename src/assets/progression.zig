@@ -55,6 +55,15 @@ pub const LevelCurve = struct {
     }
 };
 
+/// One `<level_requirements level="N">` gate: the requirements to raise the
+/// value to level N. `ProgressionClass::GetCalculatedMaxLevel` (IL=343) takes
+/// the highest level whose gate passes, which is the level the stock skill UI
+/// lets a player buy up to.
+pub const LevelReq = struct {
+    level: u8 = 0,
+    reqs: []const requirements.Requirement = &.{},
+};
+
 pub const AttrDef = struct {
     name: []const u8 = "",
     min_level: u8 = 1,
@@ -65,6 +74,12 @@ pub const AttrDef = struct {
     /// folds the tracked subset (buffs.trackedDeltasFrom); attribute state is
     /// not applied yet (perk runtime open), parsed so the surface is data.
     passives: []const buffs.Passive = &.{},
+    /// `<level_requirements>` gates, one per block in file order (stock: every
+    /// attribute's levels 1..10, each gated on PlayerLevel).
+    level_reqs: []const LevelReq = &.{},
+    /// `override_cost="1,2,2"` per-level cost table (ProgressionClass
+    /// OverrideCost, IL=423). Empty = use CalculatedCostForLevel.
+    override_cost: []const u16 = &.{},
 };
 
 /// Perk catalog row; max_level default 5 before progression.xml loads (stock
@@ -75,13 +90,29 @@ pub const AttrDef = struct {
 pub const PerkDef = struct {
     name: []const u8 = "",
     max_level: u8 = 5,
-    /// Parent attribute/skill name if nested under one; empty if free.
+    /// Parent attribute/skill name if nested under one; empty if free. Stock
+    /// uses it for UI grouping (it is a `<skill>` name, which is never
+    /// levelled); the purchase gate is `level_reqs`, not this.
     parent_attr: []const u8 = "",
+    /// True when the row came from a `<book>` block: a book is granted by
+    /// reading its item, never bought with skill points.
+    book: bool = false,
+    /// Skill-point cost of the first level and the per-level multiplier. A
+    /// row's own attributes win over the `<perks>` container's (stock container:
+    /// 1 / 1; 7 stock perks replace both with `override_cost`).
+    base_cost: u16 = 1,
+    cost_mult: f32 = 1.0,
     /// passive_effect rows in the perk body (progression.xml). The VM folds
     /// the tracked subset (buffs.trackedDeltasFrom) gated by each row's
     /// requirements; perk state is not applied yet (perk runtime open), parsed
     /// so the effect surface is data.
     passives: []const buffs.Passive = &.{},
+    /// `<level_requirements>` gates, one per block in file order (50 stock
+    /// perks carry them, all gated on ProgressionLevel/PlayerLevel).
+    level_reqs: []const LevelReq = &.{},
+    /// `override_cost="1,2,2,2,3"` per-level cost table, replacing
+    /// CalculatedCostForLevel (ProgressionClass OverrideCost, IL=423).
+    override_cost: []const u16 = &.{},
 };
 
 /// One `<unlock_entry item="a,b" unlock_tier="N"/>` row: the named items'
@@ -105,6 +136,9 @@ pub const Table = struct {
     curve: LevelCurve = .{},
     attributes: []const AttrDef = &.{},
     perks: []const PerkDef = &.{},
+    /// `<perks>` cost defaults the rows inherited (stock 1 / 1).
+    perk_base_cost: u16 = 1,
+    perk_cost_mult: f32 = 1.0,
     /// crafting_skill blocks with their unlock_entry gates (progression.xml).
     crafting_skills: []const CraftingSkill = &.{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
@@ -121,6 +155,36 @@ pub const Table = struct {
             self.arena_ptr = null;
         }
         self.* = .{};
+    }
+
+    /// Stock `ProgressionClass::GetCalculatedMaxLevel` (IL=343) over a catalog
+    /// row's `<level_requirements>`: the highest level whose gate passes (a
+    /// block with no `<requirement>` children has a null RequirementGroup and
+    /// passes, `canRun` IL=286). A row with no level gates answers its catalog
+    /// `max_level`, which is the IL's non-attribute branch. Null for an unknown
+    /// name.
+    ///
+    /// The shipped gates use only `ProgressionLevel` and `PlayerLevel` (301
+    /// blocks: 250 + 51), so the context carries the ledger and the player
+    /// level. Any other kind fails closed and holds the level at 0, which
+    /// refuses the purchase rather than granting a level stock would gate.
+    pub fn calculatedMaxLevel(
+        self: *const Table,
+        levels: []const SkillLevel,
+        player_level: u16,
+        name: []const u8,
+    ) ?u8 {
+        const ctx = requirements.Ctx{ .levels = levels, .player_level = player_level };
+        var counts: requirements.Counts = .{};
+        for (self.attributes) |a| {
+            if (!std.mem.eql(u8, a.name, name)) continue;
+            return highestPassingLevel(a.level_reqs, a.max_level, ctx, &counts);
+        }
+        for (self.perks) |pk| {
+            if (!std.mem.eql(u8, pk.name, name)) continue;
+            return highestPassingLevel(pk.level_reqs, pk.max_level, ctx, &counts);
+        }
+        return null;
     }
 };
 
@@ -161,6 +225,23 @@ pub fn trackedDeltasAtLevel(
     counts: *requirements.Counts,
 ) buffs.TrackedDeltas {
     return buffs.trackedDeltasAt(def.passives, level, ctx, counts);
+}
+
+/// A row's highest passing `<level_requirements>` level, or `catalog_max` when
+/// the row carries no gates (see `Table.calculatedMaxLevel`).
+fn highestPassingLevel(
+    level_reqs: []const LevelReq,
+    catalog_max: u8,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+) u8 {
+    if (level_reqs.len == 0) return catalog_max;
+    var best: u8 = 0;
+    for (level_reqs) |lr| {
+        if (lr.reqs.len > 0 and requirements.evaluate(lr.reqs, ctx, counts) != .pass) continue;
+        if (lr.level > best) best = lr.level;
+    }
+    return best;
 }
 
 /// Combined tracked deltas over a player's purchased progression levels
@@ -239,6 +320,63 @@ fn scanRequirements(
         }
         i = elementEnd(body, lt);
     }
+}
+
+/// One body's direct `<level_requirements level="N">` children.
+/// `ProgressionFromXml` (IL=660) gives each block an `N` and a RequirementGroup
+/// built from its own direct `<requirement>` children (null when the block has
+/// no child elements), and `ProgressionClass::GetCalculatedMaxLevel` (IL=343)
+/// keeps the highest level whose group passes.
+fn scanLevelReqs(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    out: *std.ArrayList(LevelReq),
+) !void {
+    var i: usize = 0;
+    while (i < body.len) {
+        const lt = std.mem.findPos(u8, body, i, "<level_requirements") orelse break;
+        var level: u8 = 0;
+        if (xml.attr(body, lt, "level")) |v| level = std.fmt.parseInt(u8, v, 10) catch 0;
+        const gt = std.mem.findPos(u8, body, lt, ">") orelse break;
+        var reqs: std.ArrayList(requirements.Requirement) = .empty;
+        defer reqs.deinit(allocator);
+        if (!(gt > lt and body[gt - 1] == '/')) {
+            try scanRequirements(allocator, arena, body, lt, &reqs);
+        }
+        const slice = try arena.alloc(requirements.Requirement, reqs.items.len);
+        @memcpy(slice, reqs.items);
+        try out.append(allocator, .{ .level = level, .reqs = slice });
+        i = elementEnd(body, lt);
+    }
+}
+
+/// Clone an ArrayList's items into an arena slice (the catalog owns its data).
+fn arenaSlice(arena: std.mem.Allocator, comptime T: type, list: []const T) ![]const T {
+    const out = try arena.alloc(T, list.len);
+    @memcpy(out, list);
+    return out;
+}
+
+/// `<row override_cost="1,2,2,3"/>`: ProgressionClass.OverrideCost, a per-level
+/// cost table that replaces CalculatedCostForLevel (IL=423). Empty when the row
+/// has no override.
+fn parseOverrideCost(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    tag: usize,
+) ![]const u16 {
+    const s = xml.attr(body, tag, "override_cost") orelse return &.{};
+    var buf: std.ArrayList(u16) = .empty;
+    defer buf.deinit(allocator);
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |seg| {
+        const t = std.mem.trim(u8, seg, " \t");
+        if (t.len == 0) continue;
+        try buf.append(allocator, std.fmt.parseInt(u16, t, 10) catch 0);
+    }
+    return arenaSlice(arena, u16, buf.items);
 }
 
 /// Append the `<passive_effect>` whose open tag starts at `tag`, retaining the
@@ -364,13 +502,17 @@ fn scanPassives(
 
 /// One `<perk>`/`<book>` element body: catalog row plus its passive rows. Both
 /// element names carry the same attributes (name, max_level, parent) and the
-/// same `<effect_group>` children.
+/// same `<effect_group>`/`<level_requirements>` children.
 fn scanProgressionBlocks(
     allocator: std.mem.Allocator,
     arena: std.mem.Allocator,
     clean: []const u8,
     comptime open_tag: []const u8,
     comptime close_tag: []const u8,
+    book: bool,
+    def_max_level: u8,
+    def_base_cost: u16,
+    def_cost_mult: f32,
     list: *std.ArrayList(PerkDef),
     passives: *std.ArrayList(buffs.Passive),
     reqs: *std.ArrayList(requirements.Requirement),
@@ -385,8 +527,17 @@ fn scanProgressionBlocks(
             i = pi + open_tag.len;
             continue;
         };
-        var max_l: u8 = 5;
-        if (xml.attr(clean, pi, "max_level")) |v| max_l = std.fmt.parseInt(u8, v, 10) catch 5;
+        var max_l: u8 = def_max_level;
+        if (xml.attr(clean, pi, "max_level")) |v| max_l = std.fmt.parseInt(u8, v, 10) catch def_max_level;
+        // Cost: a row's own attributes win over the <perks> container's.
+        const row_base = if (xml.attr(clean, pi, "base_skill_point_cost")) |v|
+            std.fmt.parseInt(u16, v, 10) catch def_base_cost
+        else
+            def_base_cost;
+        const row_mult = if (xml.attr(clean, pi, "cost_multiplier_per_level")) |v|
+            std.fmt.parseFloat(f32, v) catch def_cost_mult
+        else
+            def_cost_mult;
         // parent: the row's own `parent` attribute (a skill/attribute name in
         // stock, e.g. parent="skillPerceptionCombat"). The old walk-back grabbed
         // the last <attribute> in the file, so every perk resolved to the same
@@ -398,12 +549,21 @@ fn scanProgressionBlocks(
             gt + 1
         else
             std.mem.findPos(u8, clean, gt, close_tag) orelse break;
+        const body = clean[gt + 1 .. close];
+        var lvl_buf: std.ArrayList(LevelReq) = .empty;
+        defer lvl_buf.deinit(allocator);
+        try scanLevelReqs(allocator, arena, body, &lvl_buf);
         const r0 = passives.items.len;
-        try scanPassives(allocator, arena, clean[gt + 1 .. close], passives, reqs, req_ranges);
+        try scanPassives(allocator, arena, body, passives, reqs, req_ranges);
         try list.append(allocator, .{
             .name = try arena.dupe(u8, name),
             .max_level = max_l,
             .parent_attr = parent,
+            .book = book,
+            .base_cost = row_base,
+            .cost_mult = row_mult,
+            .level_reqs = try arenaSlice(arena, LevelReq, lvl_buf.items),
+            .override_cost = try parseOverrideCost(allocator, arena, clean, pi),
         });
         try ranges.append(allocator, .{ r0, passives.items.len - r0 });
         i = pi + open_tag.len;
@@ -448,6 +608,18 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.attr(clean, ai, "cost_multiplier_per_level")) |v| def_mult = std.fmt.parseFloat(f32, v) catch def_mult;
     }
 
+    // Perk defaults from <perks ...> (stock max 5 / cost 1 / mult 1; the row's
+    // own attributes win). perkLuckyLooter is the stock row that takes its
+    // max_level from here rather than writing one.
+    var perk_max_level: u8 = 5;
+    var perk_base_cost: u16 = 1;
+    var perk_cost_mult: f32 = 1.0;
+    if (std.mem.find(u8, clean, "<perks ")) |pi| {
+        if (xml.attr(clean, pi, "max_level")) |v| perk_max_level = std.fmt.parseInt(u8, v, 10) catch perk_max_level;
+        if (xml.attr(clean, pi, "base_skill_point_cost")) |v| perk_base_cost = std.fmt.parseInt(u16, v, 10) catch perk_base_cost;
+        if (xml.attr(clean, pi, "cost_multiplier_per_level")) |v| perk_cost_mult = std.fmt.parseFloat(f32, v) catch perk_cost_mult;
+    }
+
     var attr_ranges: std.ArrayList([2]usize) = .empty;
     defer attr_ranges.deinit(allocator);
     var i: usize = 0;
@@ -463,6 +635,10 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
             agt + 1
         else
             std.mem.findPos(u8, clean, agt, "</attribute>") orelse break;
+        const abody = clean[agt + 1 .. aclose];
+        var alvl_buf: std.ArrayList(LevelReq) = .empty;
+        defer alvl_buf.deinit(allocator);
+        try scanLevelReqs(allocator, arena, abody, &alvl_buf);
         try attrs.append(allocator, .{
             .name = try arena.dupe(u8, aname),
             // Per-attribute overrides win over the <attributes> defaults
@@ -472,18 +648,21 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
             .max_level = if (xml.attr(clean, ai, "max_level")) |v| std.fmt.parseInt(u8, v, 10) catch def_max else def_max,
             .base_cost = if (xml.attr(clean, ai, "base_skill_point_cost")) |v| std.fmt.parseInt(u16, v, 10) catch def_cost else def_cost,
             .cost_mult = def_mult,
+            .level_reqs = try arenaSlice(arena, LevelReq, alvl_buf.items),
+            .override_cost = try parseOverrideCost(allocator, arena, clean, ai),
         });
         const ar0 = passives_list.items.len;
-        try scanPassives(allocator, arena, clean[agt + 1 .. aclose], &passives_list, &reqs_list, &req_ranges);
+        try scanPassives(allocator, arena, abody, &passives_list, &reqs_list, &req_ranges);
         try attr_ranges.append(allocator, .{ ar0, passives_list.items.len - ar0 });
         i = ai + 11;
     }
 
-    try scanProgressionBlocks(allocator, arena, clean, "<perk ", "</perk>", &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks); // `<book>` blocks share the perk shape (name, max_level, parent,
+    try scanProgressionBlocks(allocator, arena, clean, "<perk ", "</perk>", false, perk_max_level, perk_base_cost, perk_cost_mult, &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks);
+    // `<book>` blocks share the perk shape (name, max_level, parent,
     // effect_group passives) and are progression values in their own right:
     // items.xml grants them with SetProgressionLevel level="-1". Without them
     // in the catalog a read almanac stores no level and folds no passive.
-    try scanProgressionBlocks(allocator, arena, clean, "<book ", "</book>", &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks);
+    try scanProgressionBlocks(allocator, arena, clean, "<book ", "</book>", true, perk_max_level, perk_base_cost, perk_cost_mult, &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks);
 
     const passive_pool = try arena.alloc(buffs.Passive, passives_list.items.len);
     @memcpy(passive_pool, passives_list.items);
@@ -573,6 +752,8 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         .curve = curve,
         .attributes = aslice,
         .perks = pslice,
+        .perk_base_cost = perk_base_cost,
+        .perk_cost_mult = perk_cost_mult,
         .crafting_skills = sk_slice,
         .arena_ptr = arena_holder,
     };
@@ -870,8 +1051,10 @@ test "effect_group and row requirements attach to the right passives" {
         \\<progression>
         \\  <level max_level="10" exp_to_level="100" experience_multiplier="1.1" skill_points_per_level="1" clamp_exp_cost_at_level="5"/>
         \\  <attributes min_level="1" max_level="10" base_skill_point_cost="1" cost_multiplier_per_level="1"/>
-        \\  <perks>
-        \\    <perk name="perkGated" max_level="5" parent="skillTest">
+        \\  <perks min_level="0" max_level="7" base_skill_point_cost="2" cost_multiplier_per_level="1.5">
+        \\    <perk name="perkGated" max_level="5" parent="skillTest" override_cost="1,2">
+        \\      <level_requirements level="1"><requirement name="ProgressionLevel" progression_name="attStrength" operation="GTE" value="1"/></level_requirements>
+        \\      <level_requirements level="3"><requirement name="ProgressionLevel" progression_name="attStrength" operation="GTE" value="5"/></level_requirements>
         \\      <effect_group>
         \\        <requirement name="InBiome" biome="8"/>
         \\        <passive_effect name="StaminaMax" operation="base_add" level="1" value="25"/>
@@ -887,6 +1070,7 @@ test "effect_group and row requirements attach to the right passives" {
         \\        <passive_effect name="WaterMax" operation="base_add" level="1" value="5"/>
         \\      </effect_group>
         \\    </perk>
+        \\    <perk name="perkInherits" parent="skillTest"/>
         \\    <book name="perkBookTest" max_level="1" parent="skillTest">
         \\      <effect_group>
         \\        <requirement name="ProgressionLevel" progression_name="perkGated" operation="GTE" value="1"/>
@@ -920,6 +1104,40 @@ test "effect_group and row requirements attach to the right passives" {
     try std.testing.expectEqual(@as(usize, 1), p.passives[2].reqs.len);
     // WaterMax is in the second group, which has no requirement.
     try std.testing.expectEqual(@as(usize, 0), p.passives[3].reqs.len);
+    // The two `<level_requirements>` blocks parse onto the row, in file order,
+    // with their own nested requirements.
+    try std.testing.expectEqual(@as(usize, 2), p.level_reqs.len);
+    try std.testing.expectEqual(@as(u8, 1), p.level_reqs[0].level);
+    try std.testing.expectEqual(@as(u8, 3), p.level_reqs[1].level);
+    try std.testing.expectEqual(@as(usize, 1), p.level_reqs[1].reqs.len);
+    try std.testing.expectEqual(requirements.Kind.progression_level, p.level_reqs[1].reqs[0].kind);
+    try std.testing.expectEqualStrings("attStrength", p.level_reqs[1].reqs[0].arg);
+    try std.testing.expectEqual(@as(f32, 5), p.level_reqs[1].reqs[0].value);
+    // No gates pass with an empty ledger, so nothing is purchasable; a
+    // strength of 5 unlocks level 3.
+    var ledger = [_]SkillLevel{.{ .name = "attStrength", .level = 4 }};
+    try std.testing.expectEqual(@as(u8, 1), t.calculatedMaxLevel(&ledger, 1, "perkGated").?);
+    ledger[0].level = 5;
+    try std.testing.expectEqual(@as(u8, 3), t.calculatedMaxLevel(&ledger, 1, "perkGated").?);
+    try std.testing.expectEqual(@as(u8, 0), t.calculatedMaxLevel(&.{}, 1, "perkGated").?);
+    // The book has no level gates: its catalog max (1) is the answer, and the
+    // row is flagged as a book so the purchase path can refuse it.
+    try std.testing.expectEqual(@as(usize, 0), book.?.level_reqs.len);
+    try std.testing.expect(book.?.book);
+    try std.testing.expectEqual(@as(u8, 1), t.calculatedMaxLevel(&.{}, 1, "perkBookTest").?);
+    try std.testing.expect(t.calculatedMaxLevel(&.{}, 1, "notACatalogRow") == null);
+    // The row's own cost attributes and override table parse, and a row with
+    // neither inherits the <perks> container's defaults (max_level 7 here).
+    try std.testing.expectEqualSlices(u16, &.{ 1, 2 }, p.override_cost);
+    try std.testing.expectEqual(@as(u16, 2), p.base_cost);
+    try std.testing.expectEqual(@as(f32, 1.5), p.cost_mult);
+    const inh = for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkInherits")) break pk;
+    } else return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(u8, 7), inh.max_level);
+    try std.testing.expectEqual(@as(usize, 0), inh.override_cost.len);
+    try std.testing.expectEqual(@as(u16, 2), t.perk_base_cost);
+    try std.testing.expectEqual(@as(f32, 1.5), t.perk_cost_mult);
     var counts: requirements.Counts = .{};
     const in8 = buffs.trackedDeltasAt(p.passives, 1, .{ .biome_id = 8 }, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, 25), in8.stamina_max, 0.0001);
@@ -937,8 +1155,8 @@ test "effect_group and row requirements attach to the right passives" {
     const b = book.?;
     try std.testing.expectEqual(@as(usize, 1), b.passives.len);
     try std.testing.expectEqual(requirements.Kind.progression_level, b.passives[0].reqs[0].kind);
-    const ledger = [_]requirements.NameLevel{.{ .name = "perkGated", .level = 1 }};
-    try std.testing.expectApproxEqAbs(@as(f32, 0.5), buffs.trackedDeltasAt(b.passives, 1, .{ .levels = &ledger }, &counts).hp_ot, 0.0001);
+    const book_ledger = [_]requirements.NameLevel{.{ .name = "perkGated", .level = 1 }};
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), buffs.trackedDeltasAt(b.passives, 1, .{ .levels = &book_ledger }, &counts).hp_ot, 0.0001);
     try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{}, &counts).hp_ot);
 }
 
@@ -969,4 +1187,86 @@ test "a def stops at max_passives_per_def rows" {
     var counts: requirements.Counts = .{};
     const d = buffs.trackedDeltasAt(t.perks[0].passives, 1, .{ .biome_id = 8 }, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, @floatFromInt(max_passives_per_def)), d.stamina_max, 0.0001);
+}
+
+test "stock level_requirements parse and gate the calculated max level" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadTableFromPath(std.testing.allocator, path);
+    defer t.deinit();
+
+    // attPerception carries ten level blocks, each gated on PlayerLevel >= 1,
+    // so every attribute level is reachable from player level 1.
+    var att: ?AttrDef = null;
+    for (t.attributes) |a| {
+        if (std.mem.eql(u8, a.name, "attPerception")) att = a;
+    }
+    try std.testing.expect(att != null);
+    try std.testing.expectEqual(@as(usize, 10), att.?.level_reqs.len);
+    try std.testing.expectEqual(@as(u8, 10), t.calculatedMaxLevel(&.{}, 1, "attPerception").?);
+    try std.testing.expectEqual(@as(u8, 0), t.calculatedMaxLevel(&.{}, 0, "attPerception").?);
+
+    // A perk ladder: perkPummelPete wants attStrength 1/3/5/7/10 for levels
+    // 1..5, so the highest passing block is the purchasable level.
+    const pummel = for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkPummelPete")) break pk;
+    } else return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(usize, 5), pummel.level_reqs.len);
+    var lv = [_]SkillLevel{.{ .name = "attStrength", .level = 6 }};
+    try std.testing.expectEqual(@as(u8, 3), t.calculatedMaxLevel(&lv, 1, "perkPummelPete").?);
+    lv[0].level = 2;
+    try std.testing.expectEqual(@as(u8, 1), t.calculatedMaxLevel(&lv, 1, "perkPummelPete").?);
+    lv[0].level = 10;
+    try std.testing.expectEqual(@as(u8, 5), t.calculatedMaxLevel(&lv, 1, "perkPummelPete").?);
+
+    // Every book row is flagged and carries no level gates (books are
+    // item-granted), and the whole level-gate vocabulary is ProgressionLevel
+    // plus PlayerLevel, which is what the evaluator implements.
+    var books: usize = 0;
+    var prog: usize = 0;
+    var player: usize = 0;
+    for (t.perks) |pk| {
+        if (pk.book) {
+            books += 1;
+            try std.testing.expectEqual(@as(usize, 0), pk.level_reqs.len);
+        }
+        for (pk.level_reqs) |lr| {
+            for (lr.reqs) |r| {
+                switch (r.kind) {
+                    .progression_level => prog += 1,
+                    .player_level => player += 1,
+                    else => return error.UnexpectedRequirementKind,
+                }
+            }
+        }
+    }
+    for (t.attributes) |a| {
+        for (a.level_reqs) |lr| {
+            for (lr.reqs) |r| {
+                switch (r.kind) {
+                    .progression_level => prog += 1,
+                    .player_level => player += 1,
+                    else => return error.UnexpectedRequirementKind,
+                }
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 152), books);
+    try std.testing.expectEqual(@as(usize, 250), prog);
+    try std.testing.expectEqual(@as(usize, 51), player);
+
+    // Seven stock perks replace the cost curve with a per-level table, and
+    // perkLuckyLooter takes its max_level from the <perks> container.
+    const lucky = for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkLuckyLooter")) break pk;
+    } else return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(u8, 5), lucky.max_level);
+    try std.testing.expectEqualSlices(u16, &.{ 1, 2, 2, 2, 3 }, lucky.override_cost);
+    try std.testing.expectEqual(@as(u16, 1), t.perk_base_cost);
+    try std.testing.expectEqual(@as(f32, 1.0), t.perk_cost_mult);
+    var overrides: usize = 0;
+    for (t.perks) |pk| {
+        if (pk.override_cost.len > 0) overrides += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 7), overrides);
 }

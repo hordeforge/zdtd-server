@@ -527,60 +527,86 @@ pub fn skillLevelOf(self: *const Game, slot: usize, skill: []const u8) u8 {
     return 0;
 }
 
-/// CalculatedCostForLevel (stock ProgressionClass; the exact IL rounding is
-/// RE-tracked, formula shape from progression.xml base_skill_point_cost x
-/// cost_multiplier_per_level^(level-1), standard stock geometric cost).
+/// ProgressionClass::CalculatedCostForLevel (IL=423):
+/// `conv.i4(Mathf.Pow(CostMultiplier, level) * BaseCostToLevel)`. Mathf.Pow
+/// computes in double and casts back to float (the same shape as expForLevel),
+/// and `conv.i4` truncates toward zero, so the ladder is cheaper than the old
+/// `round(base * mult^(level-1))`: for stock attributes (1, 1.14) level 5 costs
+/// 1, not 2. Level 0 has no cost.
 fn skillCostForLevel(def_cost: u16, mult: f32, level: u8) u32 {
-    if (level <= 1) return def_cost;
-    var acc: f64 = @as(f64, @floatFromInt(def_cost));
-    var i: u8 = 1;
-    while (i < level) : (i += 1) acc *= @as(f64, mult);
-    const v: u64 = @round(acc);
-    return @intCast(@max(1, @min(v, 65535)));
+    if (level == 0) return 0;
+    const powf: f32 = @floatCast(std.math.pow(f64, mult, @floatFromInt(level)));
+    const v = @as(f32, @floatFromInt(def_cost)) * powf;
+    if (!(v > 0)) return 0; // NaN / <= 0; a zero-cost row is free like stock
+    if (v >= 65535) return 65535;
+    return @intFromFloat(@trunc(v));
 }
 
 /// Catalog-validated cost of buying `skill` at `target_level`, or null when
 /// the purchase would be denied (unknown skill, not the next level, already
-/// maxed, unmet parent attribute). Mirrors the validation inside
-/// purchaseSkillAtCost so the on_perk_spend verdict can scale the cost
-/// before the purchase applies (ADR 0033).
+/// maxed, above the level the `<level_requirements>` allow, a book). Mirrors
+/// the validation inside purchaseSkillAtCost so the on_perk_spend verdict can
+/// scale the cost before the purchase applies (ADR 0033).
+///
+/// The level gate is stock's own: `ProgressionClass::GetCalculatedMaxLevel`
+/// (IL=343) takes the highest `<level_requirements>` block whose gates pass.
+/// It replaced a check that required the perk's `parent` attribute, which is a
+/// `<skill>` grouping name (`perkPummelPete parent="skillStrengthCombat"`) that
+/// is never levelled, so every perk purchase was denied.
 pub fn skillCostOf(self: *const Game, slot: usize, skill: []const u8, target_level: u8) ?u32 {
     if (slot >= self.clients.len) return null;
+    const c = &self.clients[slot];
     const cur = self.skillLevelOf(slot, skill);
     if (target_level != cur + 1) return null; // one level per purchase
     const pt = self.progression_table;
-    // Resolve the skill: attributes first, then perks.
-    var is_attr = false;
+    // Resolve the skill: attributes first, then perks/books.
     var max_level: u8 = 0;
     var base_cost: u16 = 1;
     var cost_mult: f32 = 1.0;
+    var override_cost: []const u16 = &.{};
+    var found = false;
     for (pt.attributes) |a| {
         if (!std.mem.eql(u8, a.name, skill)) continue;
-        is_attr = true;
         max_level = a.max_level;
         base_cost = a.base_cost;
         cost_mult = a.cost_mult;
+        override_cost = a.override_cost;
+        found = true;
         break;
     }
-    if (!is_attr) {
-        var parent: []const u8 = "";
+    if (!found) {
         for (pt.perks) |pk| {
             if (!std.mem.eql(u8, pk.name, skill)) continue;
+            // A `<book>` is granted by reading its item, never bought.
+            if (pk.book) return null;
             max_level = pk.max_level;
-            parent = pk.parent_attr;
+            base_cost = pk.base_cost;
+            cost_mult = pk.cost_mult;
+            override_cost = pk.override_cost;
+            found = true;
             break;
         }
-        if (max_level == 0) return null; // unknown skill
-        if (parent.len > 0 and self.skillLevelOf(slot, parent) == 0) return null;
     }
+    if (!found or max_level == 0) return null; // unknown skill
     if (cur >= max_level) return null;
+    // Stock's purchase gate (ProgressionClass::GetCalculatedMaxLevel, IL=343).
+    const allowed = pt.calculatedMaxLevel(c.skill_levels[0..c.skill_level_n], c.level, skill) orelse max_level;
+    if (target_level > allowed) return null;
+    // ProgressionClass.OverrideCost replaces the curve when the row has one
+    // (IL=423). Stock indexes the table by `level - 1`; a level past its end
+    // refuses rather than falling back to the curve.
+    if (override_cost.len > 0) {
+        const idx = @as(usize, target_level) - 1;
+        if (idx >= override_cost.len) return null;
+        return override_cost[idx];
+    }
     return skillCostForLevel(base_cost, cost_mult, target_level);
 }
 
 /// Purchase one progression level (NetPackageEntitySetSkillLevelServer,
 /// RE progression.md §3 SpendSkillPoints). Validates: known skill, one level
-/// at a time, max level, SP balance >= cost, and (for perks) the parent
-/// attribute purchased. Applies server-side and echoes
+/// at a time, max level, the stock `<level_requirements>` gate for that level,
+/// SP balance >= cost. Applies server-side and echoes
 /// NetPackageEntitySetSkillLevelClient. Returns false when denied.
 pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
     return purchaseSkillAtCost(self, slot, skill, target_level, null);
@@ -788,20 +814,29 @@ pub fn barterSellScale(ctx: ?*anyopaque, slot: usize) f32 {
 }
 
 const assets_progression_test = @import("../../assets/progression.zig");
+const requirements_test = @import("../../assets/requirements.zig");
 
-test "skill ledger: level-up awards SP; purchase validates, prereqs and spends" {
+test "skill ledger: level-up awards SP; purchase validates, level gate and spends" {
     const gpa = std.testing.allocator;
     var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_ledger", 0);
     defer {
         g.deinit();
         gpa.destroy(g);
     }
-    // Minimal progression tree: one attribute + one perk gated on it.
+    // Minimal progression tree: one attribute + one perk whose level 1 is
+    // gated on the attribute (stock's shape: the gate is `<level_requirements>`
+    // on a progression name, not the perk's `parent` grouping name).
+    const gate_l1 = [_]requirements_test.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 1, .arg = "attGeneral" }};
+    const gate_l2 = [_]requirements_test.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 3, .arg = "attGeneral" }};
+    const lvl_reqs = [_]assets_progression_test.LevelReq{
+        .{ .level = 1, .reqs = &gate_l1 },
+        .{ .level = 2, .reqs = &gate_l2 },
+    };
     const attrs = [_]assets_progression_test.AttrDef{
         .{ .name = "attGeneral", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
     };
     const perks = [_]assets_progression_test.PerkDef{
-        .{ .name = "perkLightEater", .max_level = 5, .parent_attr = "attGeneral" },
+        .{ .name = "perkLightEater", .max_level = 5, .parent_attr = "skillGeneral", .level_reqs = &lvl_reqs },
     };
     g.progression_table.attributes = &attrs;
     g.progression_table.perks = &perks;
@@ -813,24 +848,90 @@ test "skill ledger: level-up awards SP; purchase validates, prereqs and spends" 
     try std.testing.expectEqual(@as(u16, 2), g.clients[0].level);
     try std.testing.expectEqual(@as(u32, 1), g.clients[0].skill_points);
 
-    // Perk without the parent attribute: prereq denies.
+    // Perk with unmet level gate: denied, no SP spent.
     try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 1));
+    try std.testing.expectEqual(@as(u32, 1), g.clients[0].skill_points);
     // Unknown skill denies.
     try std.testing.expect(!g.purchaseSkill(0, "notASkill", 1));
-    // Buy the attribute first (cost 1 = base), then the perk.
+    // Buy the attribute first (cost 1 = base), then the perk level 1.
     try std.testing.expect(g.purchaseSkill(0, "attGeneral", 1));
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "attGeneral"));
     try std.testing.expectEqual(@as(u32, 0), g.clients[0].skill_points);
     // Second level would cost base x mult (1.14 -> round 1): still 0 SP.
     try std.testing.expect(!g.purchaseSkill(0, "attGeneral", 2));
-    // Perk buys at base cost 1.
+    // Perk buys at base cost 1 now that its level-1 gate passes.
     g.clients[0].skill_points = 1;
     try std.testing.expect(g.purchaseSkill(0, "perkLightEater", 1));
     try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(0, "perkLightEater"));
     try std.testing.expectEqual(@as(u32, 0), g.clients[0].skill_points);
     // Re-purchase of the same level denies (one level per request).
     try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 1));
-    std.debug.print("PASS skill-ledger: SP award, cost, prereq, echo state\n", .{});
+    // Level 2 needs attGeneral >= 3, which the ledger does not hold yet.
+    g.clients[0].skill_points = 5;
+    try std.testing.expect(!g.purchaseSkill(0, "perkLightEater", 2));
+    try std.testing.expectEqual(@as(u32, 5), g.clients[0].skill_points);
+    g.clients[0].skill_levels[0] = .{ .name = "attGeneral", .level = 3 };
+    try std.testing.expect(g.purchaseSkill(0, "perkLightEater", 2));
+    try std.testing.expectEqual(@as(u8, 2), g.skillLevelOf(0, "perkLightEater"));
+    std.debug.print("PASS skill-ledger: SP award, cost, level gate, echo state\n", .{});
+}
+
+test "skill cost follows CalculatedCostForLevel and the row override table" {
+    // IL=423: conv.i4(Mathf.Pow(CostMultiplier, level) * BaseCostToLevel), with
+    // Mathf.Pow in double cast back to float and conv.i4 truncating. Stock
+    // attributes are base 1 / mult 1.14, so the goldens are 1,1,1,1,1,2,2,2,3,3
+    // (the old round(base*mult^(level-1)) gave 2 at level 5 and 3 at level 8).
+    const goldens = [_]u32{ 1, 1, 1, 1, 1, 2, 2, 2, 3, 3 };
+    for (goldens, 0..) |want, i| {
+        try std.testing.expectEqual(want, skillCostForLevel(1, 1.14, @intCast(i + 1)));
+    }
+    // A flat multiplier (stock perks: mult 1) costs the base at every level.
+    try std.testing.expectEqual(@as(u32, 1), skillCostForLevel(1, 1.0, 5));
+    try std.testing.expectEqual(@as(u32, 3), skillCostForLevel(3, 1.0, 4));
+    // A zero-cost row is free (stock conv.i4 of 0); level 0 has no cost.
+    try std.testing.expectEqual(@as(u32, 0), skillCostForLevel(0, 1.14, 3));
+    try std.testing.expectEqual(@as(u32, 0), skillCostForLevel(1, 1.14, 0));
+}
+
+test "override_cost replaces the curve and refuses past its end" {
+    const gpa = std.testing.allocator;
+    var g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_cost", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const attrs = [_]assets_progression_test.AttrDef{
+        .{ .name = "attPerception", .max_level = 10, .base_cost = 1, .cost_mult = 1.14 },
+    };
+    const gate = [_]requirements_test.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 1, .arg = "attPerception" }};
+    const lvl = [_]assets_progression_test.LevelReq{
+        .{ .level = 1, .reqs = &gate },
+        .{ .level = 2, .reqs = &gate },
+    };
+    // Stock shape: perkPummelPete carries override_cost="1,2,2,3".
+    const perks = [_]assets_progression_test.PerkDef{
+        .{ .name = "perkPummelPete", .max_level = 4, .level_reqs = &lvl, .override_cost = &.{ 1, 2 } },
+    };
+    g.progression_table.attributes = &attrs;
+    g.progression_table.perks = &perks;
+    g.clients[0].skill_levels[0] = .{ .name = "attPerception", .level = 4 };
+    g.clients[0].skill_level_n = 1;
+    g.clients[0].skill_points = 10;
+    // The attribute ladder: level 5 costs 1 under the stock formula.
+    try std.testing.expectEqual(@as(?u32, 1), g.skillCostOf(0, "attPerception", 5));
+    // The override table wins for the perk.
+    try std.testing.expectEqual(@as(?u32, 1), g.skillCostOf(0, "perkPummelPete", 1));
+    try std.testing.expect(g.purchaseSkill(0, "perkPummelPete", 1));
+    try std.testing.expectEqual(@as(u32, 9), g.clients[0].skill_points);
+    try std.testing.expectEqual(@as(?u32, 2), g.skillCostOf(0, "perkPummelPete", 2));
+    try std.testing.expect(g.purchaseSkill(0, "perkPummelPete", 2));
+    try std.testing.expectEqual(@as(u32, 7), g.clients[0].skill_points);
+    // Level 3 has no override entry: stock would index past the table, so the
+    // purchase refuses instead of falling back to the curve.
+    try std.testing.expect(g.skillCostOf(0, "perkPummelPete", 3) == null);
+    try std.testing.expect(!g.purchaseSkill(0, "perkPummelPete", 3));
+    try std.testing.expectEqual(@as(u32, 7), g.clients[0].skill_points);
+    std.debug.print("PASS perk cost: stock curve + row override_cost\n", .{});
 }
 
 test "killXpAward scales by the on_entity_killed verdict percent" {

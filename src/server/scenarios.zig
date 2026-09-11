@@ -32,6 +32,7 @@ const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
 const assets_items = @import("../assets/items.zig");
 const assets_progression = @import("../assets/progression.zig");
+const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
@@ -14726,6 +14727,108 @@ test "scenario skill purchase: the ledger keeps catalog memory, not the packet b
     try std.testing.expectEqual(@as(u32, 4), g.clients[c.slot].skill_points);
     try std.testing.expectEqual(@as(usize, 1), g.clients[c.slot].skill_level_n);
     std.debug.print("PASS skill purchase: ledger name interned from the catalog\n", .{});
+}
+
+test "scenario perk purchase: the level requirement gates the spend" {
+    // Stock's purchase gate is `ProgressionClass::GetCalculatedMaxLevel`
+    // (IL=343): the highest `<level_requirements>` block whose gates pass. The
+    // server used to require the perk's `parent`, which is a `<skill>` grouping
+    // name (perkPummelPete parent="skillStrengthCombat") that is never
+    // levelled, so the C2S was silently dropped for every perk.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_perkbuy");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_perkbuy", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    // perkPummelPete's real ladder: attStrength 1/3/5/7/10 for levels 1..5.
+    const g1 = [_]requirements.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 1, .arg = "attStrength" }};
+    const g2 = [_]requirements.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 3, .arg = "attStrength" }};
+    const g5 = [_]requirements.Requirement{.{ .kind = .progression_level, .op = .ge, .value = 10, .arg = "attStrength" }};
+    const lvl_reqs = [_]assets_progression.LevelReq{
+        .{ .level = 1, .reqs = &g1 },
+        .{ .level = 2, .reqs = &g2 },
+        .{ .level = 5, .reqs = &g5 },
+    };
+    const attrs = [_]assets_progression.AttrDef{
+        .{ .name = "attStrength", .max_level = 10, .base_cost = 1, .cost_mult = 1.0 },
+    };
+    const perks = [_]assets_progression.PerkDef{
+        .{ .name = "perkPummelPete", .max_level = 5, .parent_attr = "skillStrengthCombat", .level_reqs = &lvl_reqs },
+        .{ .name = "perkFiremansAlmanacComplete", .max_level = 1, .book = true },
+    };
+    g.progression_table.attributes = &attrs;
+    g.progression_table.perks = &perks;
+    g.clients[c.slot].skill_points = 10;
+    g.clients[c.slot].level = 20;
+
+    var body: [256]u8 = undefined;
+    var fb: [320]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body };
+
+    // attStrength is 0, so no level of the perk passes its gate.
+    try w.writeI32(c.entity_id);
+    try w.writeString("perkPummelPete");
+    try w.writeI32(1);
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntitySetSkillLevelServer", w.written()));
+    try std.testing.expectEqual(@as(u8, 0), g.skillLevelOf(c.slot, "perkPummelPete"));
+    try std.testing.expectEqual(@as(u32, 10), g.clients[c.slot].skill_points);
+    const echo_id = packages.idOf("NetPackageEntitySetSkillLevelClient").?;
+    try std.testing.expect(cap.findPkgId(echo_id) == null);
+
+    // attStrength 6: levels 1 and 2 pass, level 3 does not. The parent
+    // `<skill>` name must not be what blocks it.
+    g.clients[c.slot].skill_levels[0] = .{ .name = "attStrength", .level = 6 };
+    g.clients[c.slot].skill_level_n = 1;
+    try std.testing.expectEqual(@as(?u8, 2), g.progression_table.calculatedMaxLevel(
+        g.clients[c.slot].skill_levels[0..1],
+        g.clients[c.slot].level,
+        "perkPummelPete",
+    ));
+    try w.writeI32(c.entity_id);
+    try w.writeString("perkPummelPete");
+    try w.writeI32(1);
+    cap.clear();
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntitySetSkillLevelServer", w.written()));
+    try std.testing.expectEqual(@as(u8, 1), g.skillLevelOf(c.slot, "perkPummelPete"));
+    try std.testing.expectEqual(@as(u32, 9), g.clients[c.slot].skill_points);
+    try std.testing.expect(cap.findPkgId(echo_id) != null);
+
+    // One level at a time is enforced, then the level-2 gate passes and the
+    // level-3 gate refuses.
+    w = .{ .buf = &body };
+    try w.writeI32(c.entity_id);
+    try w.writeString("perkPummelPete");
+    try w.writeI32(2);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntitySetSkillLevelServer", w.written()));
+    try std.testing.expectEqual(@as(u8, 2), g.skillLevelOf(c.slot, "perkPummelPete"));
+    try std.testing.expectEqual(@as(u32, 8), g.clients[c.slot].skill_points);
+    var w3: binary.Writer = .{ .buf = &body };
+    try w3.writeI32(c.entity_id);
+    try w3.writeString("perkPummelPete");
+    try w3.writeI32(3);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntitySetSkillLevelServer", w3.written()));
+    try std.testing.expectEqual(@as(u8, 2), g.skillLevelOf(c.slot, "perkPummelPete"));
+    try std.testing.expectEqual(@as(u32, 8), g.clients[c.slot].skill_points);
+
+    // A book is granted by reading its item, never bought with points.
+    var w4: binary.Writer = .{ .buf = &body };
+    try w4.writeI32(c.entity_id);
+    try w4.writeString("perkFiremansAlmanacComplete");
+    try w4.writeI32(1);
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageEntitySetSkillLevelServer", w4.written()));
+    try std.testing.expectEqual(@as(u8, 0), g.skillLevelOf(c.slot, "perkFiremansAlmanacComplete"));
+    try std.testing.expectEqual(@as(u32, 8), g.clients[c.slot].skill_points);
+    std.debug.print("PASS perk purchase: the level requirement gates the spend\n", .{});
 }
 
 test "scenario wire tool: a claimed foreign entity id is dropped, not relayed" {
