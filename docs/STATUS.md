@@ -81,6 +81,18 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (`StatCompareCurrent`)
+
+`StatCompareCurrent` IL=52 compares a stat's current value rather than a
+fraction of max (that is `StatComparePercCurrentToMax`). StatTypes 1..4 read
+`Stats.Health/Stamina/Water/Food.Value`, which the ctx carries as `frac * max`,
+so 16 stock rows resolve (13 Health, 3 Stamina). StatType 5 reads
+`Equipment::GetTotalPhysicalArmorRating`; the `Armor` branch stays unsupported
+and counted (8 stock rows) because that rating is produced by the VM fold later
+in the same tick, and a stale read would be worse than a counted refusal.
+
+---
+
 ## 2026-09-11 (`value="@cvar"` operands, and the general update event)
 
 The requirement parser read every `value` attribute as a float, so an `@name`

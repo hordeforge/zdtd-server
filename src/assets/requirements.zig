@@ -68,6 +68,8 @@ pub const Kind = enum(u8) {
     armor_group_lowest_quality,
     armor_group_count,
     stat_compare_perc_current_to_max,
+    /// `StatCompareCurrent` IL=52: the stat's current VALUE (not a fraction).
+    stat_compare_current,
     /// `CVarCompare` IL=23: the entity's custom variable against `value`
     /// (a missing name reads 0).
     cvar_compare,
@@ -215,6 +217,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "ArmorGroupLowestQuality")) return .armor_group_lowest_quality;
     if (std.mem.eql(u8, name, "ArmorGroupCount")) return .armor_group_count;
     if (std.mem.eql(u8, name, "StatComparePercCurrentToMax")) return .stat_compare_perc_current_to_max;
+    if (std.mem.eql(u8, name, "StatCompareCurrent")) return .stat_compare_current;
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
     return .unsupported;
@@ -436,6 +439,24 @@ fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
     return true;
 }
 
+/// `StatCompareCurrent::Compare` IL=52: the named stat's CURRENT value against
+/// the row's operand (Health, Stamina, Water and Food are StatTypes 1..4; the
+/// `Armor` branch reads `Equipment::GetTotalPhysicalArmorRating`, which is not
+/// on the ctx yet, so it stays unsupported and counted).
+fn evalStatCompareCurrent(r: Requirement, ctx: Ctx) Verdict {
+    const cur = if (eqIgnoreCase(r.arg, "Health"))
+        ctx.hp_frac * ctx.hp_max
+    else if (eqIgnoreCase(r.arg, "Stamina"))
+        ctx.stamina_frac * ctx.stamina_max
+    else if (eqIgnoreCase(r.arg, "Food"))
+        ctx.food_frac * ctx.food_max
+    else if (eqIgnoreCase(r.arg, "Water"))
+        ctx.water_frac * ctx.water_max
+    else
+        return .unsupported;
+    return verdict(compare(cur, r.op, operand(ctx, r)), r.negated);
+}
+
 /// `WornItems::IsValid` IL=54: `compareValues(count, op, value)` where `count`
 /// is the number of equipment slots whose item carries ANY of the row's tags
 /// (`ItemClass::HasAnyTags`), negated by `invert`.
@@ -522,6 +543,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
         .armor_group_count => return evalArmorGroupCount(r, ctx),
         .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
+        .stat_compare_current => return evalStatCompareCurrent(r, ctx),
         .cvar_compare => return evalCvarCompare(r, ctx),
         .worn_items => return evalWornItems(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
@@ -754,6 +776,28 @@ test "ArmorGroupLowestQuality reads the worn group's lowest quality" {
     try testing.expect(all(&.{gte6}, ctx));
     const gte7 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 7 };
     try testing.expect(!all(&.{gte7}, ctx));
+}
+
+test "StatCompareCurrent reads the stat's absolute value" {
+    // StatCompareCurrent IL=52 compares the current value, unlike
+    // StatComparePercCurrentToMax which compares a fraction of max.
+    const ctx = Ctx{ .hp_frac = 0.5, .hp_max = 200, .water_frac = 1, .water_max = 100 };
+    const hp_lte_100 = Requirement{ .kind = .stat_compare_current, .name = "StatCompareCurrent", .arg = "Health", .op = .le, .value = 100 };
+    const hp_lte_99 = Requirement{ .kind = .stat_compare_current, .name = "StatCompareCurrent", .arg = "Health", .op = .le, .value = 99 };
+    try testing.expect(all(&.{hp_lte_100}, ctx));
+    try testing.expect(!all(&.{hp_lte_99}, ctx));
+    // Names are case-insensitive like the other stat gates.
+    const water = Requirement{ .kind = .stat_compare_current, .name = "StatCompareCurrent", .arg = "water", .op = .ge, .value = 100 };
+    try testing.expect(all(&.{water}, ctx));
+    // An @cvar operand is resolved (round 29).
+    var vars: cvars.Set = .{};
+    _ = vars.apply("$thirst", .set, 100);
+    try testing.expect(all(&.{water}, .{ .water_frac = 1, .water_max = 100, .cvars = &vars }));
+    // The Armor branch reads the armor rating, which is not on the ctx yet.
+    var counts: Counts = .{};
+    const armor = Requirement{ .kind = .stat_compare_current, .name = "StatCompareCurrent", .arg = "Armor", .op = .le, .value = 0.25 };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{armor}, ctx, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
 test "a value=\"@cvar\" operand is read live, not parsed as 0" {

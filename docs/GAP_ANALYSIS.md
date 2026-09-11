@@ -3634,8 +3634,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   - Implemented kinds: `ProgressionLevel`, `PlayerLevel`, `HasBuff`,
     `IsAlive`, `IsAttachedToEntity`, `InBiome`, `HoldingItemHasTags`,
     `SandboxOptionBool`, `ArmorGroupLowestQuality`, `ArmorGroupCount`,
-    `StatComparePercCurrentToMax`, `CVarCompare`, `WornItems`, plus the
-    `requirement_group` AND/OR nodes. The rest (measured vocabulary:
+    `StatComparePercCurrentToMax`, `StatCompareCurrent`, `CVarCompare`,
+    `WornItems`, plus the `requirement_group` AND/OR nodes. The rest (measured vocabulary:
     `ItemHasTags`, `CVarCompare`, `RandomRoll`,
     `EntityTagCompare`, `EntityHasMovementTag`, `IsNight`, `IsIndoors`,
     `StatComparePercCurrentToModMax`, `HitLocation`, ...) **fail closed** and are
@@ -3787,6 +3787,15 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     sets `$LastPlayerLevel` to 1 and closes its own guard, check01 sets
     `$PlayerLevelBonus` to 1 and its `PlayerLevel LT 2` row subtracts 1, so
     `HealthMax` gains 0.
+  - **`StatCompareCurrent` SHIPPED (round 30, 2026-09-11).** `StatCompareCurrent`
+    IL=52 compares a stat's current *value*, not a fraction of max: StatTypes
+    1..4 read `Stats.Health/Stamina/Water/Food.Value`, which the ctx carries as
+    `frac * max`, and StatType 5 reads
+    `Equipment::GetTotalPhysicalArmorRating`. The four tracked stats resolve (16
+    stock rows: 13 Health, 3 Stamina); the `Armor` branch stays unsupported and
+    counted (8 stock rows) until the armour rating is on the ctx, because that
+    value is produced by the VM fold later in the same tick and a stale read
+    would be worse than a counted refusal.
   - **`onSelfBuffUpdate` is a general per-buff event (round 29).** The last
     hardcoded pair in the survival pass is gone: every active buff fires its own
     update rows when `buff.tick` marks the due tick (`<update_rate>` is seconds,
