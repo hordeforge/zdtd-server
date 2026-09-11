@@ -4345,7 +4345,12 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     // (Yes): the same server code the GameStats echo carries.
     g.sandbox_code = "AALB";
     try g.step();
-    try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].max_hp, 0.001);
+    // 149, not 150: with the option on, buffStatusCheck01's own update rows fold
+    // too, and they set `$PlayerLevelBonus = $LastPlayerLevel(0)` then `add -1`
+    // (the `PlayerLevel LT 2` row), so its `HealthMax base_add @$PlayerLevelBonus`
+    // contributes -1. Stock does the same until buffLevelUpTracking refreshes
+    // `$LastPlayerLevel`, which zdtd does not apply yet.
+    try std.testing.expectApproxEqAbs(@as(f32, 149), g.sim.health[ps].max_hp, 0.001);
 }
 
 test "the survival pass folds the armor query into buff_phys_resist" {
@@ -4458,6 +4463,51 @@ test "a gated perk row stops folding when its requirement fails" {
     try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
 }
 
+test "an entity can hold a full stock buff set, not just eight" {
+    // The stage machine alone needs the six hunger/thirst stages plus the level
+    // tracker, and a real player also carries the check buffs, an injury and a
+    // weather buff. At the old cap of 8 the thirst stages (added last) fell off
+    // the end of the fixed set and were re-added every tick.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const names = [_][]const u8{
+        "buffStatusHungry01",  "buffStatusHungry02",        "buffStatusHungry03",
+        "buffStatusThirsty01", "buffStatusThirsty02",       "buffStatusThirsty03",
+        "buffLevelUpTracking", "buffBiomeProgressionCheck", "buffCheckScreenEffects",
+        "buffSmellCheck",
+    };
+    for (names) |n| {
+        const id = g.buffs.indexOfName(n) orelse return error.SkipZigTest;
+        _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+            .def_id = id,
+            .duration = 0,
+            .stack_type = ecs_buff.StackType.ignore,
+            .update_rate_ticks = 20,
+            .remove_on_death = false,
+        }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    }
+    for (names) |n| {
+        const id = g.buffs.indexOfName(n).?;
+        try std.testing.expect(g.sim.buffs[ps].find(id) != null);
+    }
+    try std.testing.expectEqual(@as(u8, names.len), g.sim.buffs[ps].count());
+}
+
 test "the entity class Buffs list parses from entityclasses.xml" {
     // entityclasses.xml playerMale `Buffs="buffStatusCheck01,buffStatusCheck02"`.
     // The parsed list is the input stock applies to the class when it enters the
@@ -4483,6 +4533,19 @@ test "the entity class Buffs list parses from entityclasses.xml" {
     try std.testing.expectEqualStrings("buffStatusCheck02", pdef.buffs[1]);
     // Every name resolves in the buff catalog (fail closed otherwise).
     for (pdef.buffs) |b| try std.testing.expect(g.buffs.indexOfName(b) != null);
+    // The class list is applied when the player enters the game, so both check
+    // buffs are active from the first survival pass (their own passives then
+    // fold and the client is told about them).
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    for (pdef.buffs) |b| {
+        try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName(b).?) == null);
+    }
+    try g.step();
+    for (pdef.buffs) |b| {
+        try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName(b).?) != null);
+    }
 }
 
 test "the armor-perk chain derives its CVars from the worn items" {
@@ -4523,13 +4586,17 @@ test "the armor-perk chain derives its CVars from the worn items" {
     try std.testing.expectApproxEqAbs(@as(f32, 4), cl.cvars.get(".ArmorLightWorn"), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get(".ArmorLightLevel"), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 4), cl.cvars.get(".ArmorLightTotal"), 0.001);
-    // Without the perk the effect_group gate refuses the chain.
+    // buffStatusCheck02 is an active buff now (entity class Buffs=), so its own
+    // `PhysicalDamageResist base_add @.ArmorLightTotal` row folds: the armour
+    // rating gains exactly the derived total.
+    const with_perk_resist = g.sim.buff_phys_resist[ps];
+    try std.testing.expect(with_perk_resist >= 4);
+    // Without the perk the effect_group gate refuses the chain and the
+    // "remove if not in use" group drops the total.
     cl.skill_levels[0] = .{ .name = "perkLightArmor", .level = 0 };
-    _ = cl.cvars.remove(".ArmorLightWorn");
-    _ = cl.cvars.remove(".ArmorLightLevel");
-    _ = cl.cvars.remove(".ArmorLightTotal");
     try g.step();
     try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get(".ArmorLightTotal"), 0.001);
+    try std.testing.expectApproxEqAbs(with_perk_resist - 4, g.sim.buff_phys_resist[ps], 0.001);
 }
 
 test "the check buffs' entered-game rows set their CVars and add their buffs" {

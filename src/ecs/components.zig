@@ -1213,7 +1213,13 @@ pub const Dirty = packed struct(u8) {
 pub const buff_ticks_per_second: f32 = 20;
 /// Concurrent buffs per entity. Stock's ActiveBuffs list is unbounded; a fixed
 /// set keeps the component POD and bounds what one client can push at us.
-pub const max_buffs_per_entity: usize = 8;
+/// Measured need: a player carries the check buffs (buffStatusCheck01/02 plus
+/// buffSmellCheck), the six hunger/thirst stage buffs, the level tracker, the
+/// biome-screen checks and any injury/weather buff at once, which is already
+/// past 8 - the survival stage machine lost the thirst stages to the cap and
+/// re-added them every tick. 32 keeps headroom for a full injury set without
+/// changing the POD layout.
+pub const max_buffs_per_entity: usize = 32;
 
 /// BuffEffectStackTypes (asm.il 738358): what a repeat application of an
 /// already-active buff does. Absent stack_type in buffs.xml means Ignore

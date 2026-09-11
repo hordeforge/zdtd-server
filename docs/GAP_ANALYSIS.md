@@ -3726,10 +3726,22 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     still needs `buffStatusCheck02` to be an active buff (entity class
     `Buffs=`). The class list itself now parses (`EntityDef.buffs`, resolved by
     the Unity class hash the PlayerId wire already carries, plus
-    `EntityTable.byHash`); applying it at spawn is deferred because activating
-    check01 folds that buff's own passives and shifted the survival stage
-    machine's timing in the stage scenario by two ticks in a way that is not yet
-    explained, and a half-understood change is not landable.
+    `EntityTable.byHash`), and it is now applied at spawn: the check buffs are
+    real active buffs from the first survival pass, the client is relayed the
+    adds, and check02's own `PhysicalDamageResist base_add @.ArmorLightTotal`
+    folds, so the armour chain pays off end to end (the armour scenario reads
+    exactly +4 with `perkLightArmor` 1 and four light pieces, and drops back by
+    4 when the perk is removed). The two-tick stage-machine delay that blocked
+    round 22 was **`max_buffs_per_entity = 8`**: the stage machine alone holds
+    six stages plus the level tracker, so with the check buffs the thirst stages
+    (added last) fell off the end of the fixed set and were re-added every tick.
+    The cap is 32 now, with a scenario that holds ten stock buffs at once and
+    fails at 8. One expectation moved with it, and it is stock behaviour:
+    `the survival pass resolves a sandbox-gated row` reads 149 instead of 150,
+    because with `PlayerLevelBonusApplied` on, check01's update rows set
+    `$PlayerLevelBonus = $LastPlayerLevel(0) - 1 = -1` and its own `HealthMax`
+    row folds that (stock refreshes `$LastPlayerLevel` from
+    `buffLevelUpTracking`, which zdtd does not apply yet).
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`

@@ -12,6 +12,7 @@ const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
+const assets_unity_hash = @import("../../assets/unity_hash.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const requirements = @import("../../assets/requirements.zig");
 const sandbox = @import("../../assets/sandbox.zig");
@@ -303,6 +304,13 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // CVars it sets are visible to the same tick's gates.
             if (!c.entered_game_fired) {
                 c.entered_game_fired = true;
+                // entityclasses `Buffs=`: the class-level buff list stock applies
+                // to every instance as it enters the game (the player class
+                // carries buffStatusCheck01/02). Data-bound: the class comes from
+                // the same Unity hash the PlayerId wire carries.
+                if (self.entities.byHash(assets_unity_hash.class_player_male)) |pdef| {
+                    for (pdef.buffs) |bname| _ = addCatalogBuff(self, c.entity_id, ps, bname);
+                }
                 if (check01_id) |eg_id| {
                     const eg = assets_buffs.evaluateTriggered(&self.buffs, eg_id, .entered_game, req_ctx, &req_counts);
                     if (eg.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, eg.truncated);

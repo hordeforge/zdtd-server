@@ -81,6 +81,29 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (entity class `Buffs=`, and a buff-set cap of 8)
+
+The entity class's `Buffs="buffStatusCheck01,buffStatusCheck02"` list is applied
+at spawn now, so the check buffs are real active buffs from the first survival
+pass: the client is relayed their adds, their own passives fold, and
+buffStatusCheck02's `PhysicalDamageResist base_add @.ArmorLightTotal` closes the
+armour loop (with `perkLightArmor` 1 and four light pieces the armour rating
+gains exactly the derived 4, and loses it again when the perk goes).
+
+That activation exposed a real cap bug rather than a survival-rule one:
+`max_buffs_per_entity` was 8, and the stage machine alone needs the six
+hunger/thirst stages plus the level tracker, before the check buffs, the biome
+checks or any injury. The thirst stages (added last) fell off the end of the
+fixed set and were re-added every tick, which is what made round 22's stage
+scenario fail two ticks late; the cap is 32 with a scenario holding ten stock
+buffs at once that fails at 8. One expectation moved with it, as stock
+behaviour: the sandbox-gated row scenario reads 149 instead of 150, because with
+`PlayerLevelBonusApplied` on, check01 sets `$PlayerLevelBonus = $LastPlayerLevel(0) - 1`
+and its own `HealthMax` row folds the -1 (stock refreshes `$LastPlayerLevel`
+from `buffLevelUpTracking`, which zdtd does not apply yet).
+
+---
+
 ## 2026-09-11 (`WornItems` and the armor-perk chain)
 
 `WornItems` (IL=54) was the gate refusing check02's entire light/medium/heavy
