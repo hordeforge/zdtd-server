@@ -230,7 +230,7 @@ pub const Plugin = struct {
             .name = allocator.dupe(u8, name) catch return error.OutOfMemory,
         };
         p.probeHooks();
-        p.probeRequires(ctx.require_declaration);
+        p.probeRequires(ctx.require_declaration, ctx);
         if (ctx.require_declaration and p.requires_failed) {
             // Fail closed at the load boundary: the caller wanted a declared
             // contract and this module does not have one (or declared names it
@@ -263,7 +263,17 @@ pub const Plugin = struct {
         }
     }
 
-    fn isHostVerb(cap: []const u8) bool {
+    /// Is `cap` a host verb this context can actually serve? The mandatory
+    /// verbs (`log`/`tick`/`queue` and the JSON helpers) are always installed;
+    /// `sense` and `query` are optional callbacks, so a module that declares
+    /// one against an owner that never wired it would pass validation and then
+    /// silently read 0 bytes forever. That is the same never-fire shape the
+    /// capability check exists to prevent, so the two optional verbs are
+    /// accepted only when their callback is present. `ctx` is null only in
+    /// unit tests that build a Plugin without a host.
+    fn isHostVerb(cap: []const u8, ctx: ?*HostCtx) bool {
+        if (std.mem.eql(u8, cap, "sense")) return ctx != null and ctx.?.sense_fn != null;
+        if (std.mem.eql(u8, cap, "query")) return ctx != null and ctx.?.query_fn != null;
         for (host_verbs) |v| {
             if (std.mem.eql(u8, cap, v)) return true;
         }
@@ -274,7 +284,7 @@ pub const Plugin = struct {
     /// guest memory). Every name must be a hook the module exports or a host
     /// verb it imports; anything else fails the load with the offending name.
     /// Coeffect fail-closed: a typo'd hook never silently never-fires.
-    fn probeRequires(self: *Plugin, require_declaration: bool) void {
+    fn probeRequires(self: *Plugin, require_declaration: bool, ctx: *HostCtx) void {
         if (self.instance.exportFuncSig("_zdtd_requires") == null) {
             // A discovered mod must declare its contract; the raw load path
             // does not, because its callers are the in-repo test harness (the
@@ -321,7 +331,7 @@ pub const Plugin = struct {
         while (it.next()) |raw| {
             const cap = std.mem.trim(u8, raw, " \t\r\n");
             if (cap.len == 0) continue;
-            if (isHostVerb(cap)) continue;
+            if (isHostVerb(cap, ctx)) continue;
             var found = false;
             for (Hook.names, 0..) |hname, i| {
                 if (std.mem.eql(u8, cap, hname)) {
@@ -2271,12 +2281,32 @@ test "findByName matches display name and wasm stem suffix" {
 
 test "host_verbs is the _zdtd_requires vocabulary for host imports" {
     try std.testing.expectEqual(@as(usize, 10), host_verbs.len);
-    try std.testing.expect(Plugin.isHostVerb("log"));
-    try std.testing.expect(Plugin.isHostVerb("json_obj"));
-    try std.testing.expect(Plugin.isHostVerb("config"));
-    try std.testing.expect(!Plugin.isHostVerb("on_tick"));
-    try std.testing.expect(!Plugin.isHostVerb("bot"));
+    var ctx = HostCtx{ .log_fn = undefined, .tick_fn = undefined, .queue_fn = undefined };
+    try std.testing.expect(Plugin.isHostVerb("log", &ctx));
+    try std.testing.expect(Plugin.isHostVerb("json_obj", &ctx));
+    try std.testing.expect(Plugin.isHostVerb("config", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("on_tick", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("bot", &ctx));
+    // sense/query are optional callbacks: declaring one against an owner that
+    // never wired it would validate and then silently read 0 bytes, so the
+    // capability is only accepted when the callback exists.
+    try std.testing.expect(!Plugin.isHostVerb("sense", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("query", &ctx));
+    try std.testing.expect(!Plugin.isHostVerb("sense", null));
+    ctx.sense_fn = &TestSense.sense;
+    ctx.query_fn = &TestSense.query;
+    try std.testing.expect(Plugin.isHostVerb("sense", &ctx));
+    try std.testing.expect(Plugin.isHostVerb("query", &ctx));
 }
+
+const TestSense = struct {
+    fn sense(_: *HostCtx, _: []u8) usize {
+        return 0;
+    }
+    fn query(_: *HostCtx, _: []const u8, _: []u8) usize {
+        return 0;
+    }
+};
 
 test "Hook.names is the _zdtd_requires vocabulary for hooks" {
     try std.testing.expectEqual(@typeInfo(Hook).@"enum".fields.len, Hook.names.len);
@@ -2408,6 +2438,10 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
             std.mem.writeInt(i32, r[8..12], c, .little);
             std.mem.writeInt(u32, r[12..16], @bitCast(amount), .little);
         }
+        fn queryFn(_: *HostCtx, _: []const u8, _: []u8) usize {
+            return 0;
+        }
+
         fn senseFn(_: *HostCtx, out: []u8) usize {
             // header: magic 'ZBS4' (24 bytes: magic, count, tick, self,
             // world_time, blood_moon), records at base 24.
@@ -2466,6 +2500,11 @@ test "fps_bot.wasm integration: sense drives brain; aim/look, gating, memory-pur
         .tick_fn = &Cap.tickFn,
         .queue_fn = &Cap.queueFn,
         .sense_fn = &Cap.senseFn,
+        // The bot declares `sense,query,...` in its _zdtd_requires, and a
+        // declared optional capability is only accepted when the owner wired
+        // it (otherwise the guest would read 0 bytes forever). This test drives
+        // the sense path, so query answers nothing but must exist.
+        .query_fn = &Cap.queryFn,
     };
     var host: WasmHost = .{};
     host.loadAll(std.testing.allocator, &[_][]const u8{"mods/fps_bot/fps_bot.wasm"}, &ctx, .{});

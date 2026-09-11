@@ -124,7 +124,10 @@ A module declares the capabilities it needs with
 host verbs `log` / `tick` / `queue` / `sense` / `query` / `json_parse` /
 `json_str` / `json_raw` / `json_obj` / `config`. The host validates the list at
 load and **rejects the module loudly** when a capability is unknown or a
-declared hook is not actually exported.
+declared hook is not actually exported. `sense` and `query` are optional host
+callbacks, so they are accepted only when the owner wired them: a module that
+declares one against an owner that never installed it would otherwise validate
+and then read 0 bytes forever.
 
 **A discovered mod must export it.** A mod found through `manifest.toml` is a
 claim about capabilities, so a module that exports at least one hook and no
