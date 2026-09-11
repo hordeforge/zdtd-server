@@ -4221,16 +4221,24 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
         const def = g.items.byName(pc.name).?;
         g.sim.inventory[ps].slots[ecs.components.inv_equip_start + i] = .{ .item_id = def.id, .count = 1, .quality = pc.quality };
     }
-    try g.step();
+    try stepTicks(g, 46);
     try std.testing.expect(g.sim.buffs[ps].find(bonus) != null);
     try std.testing.expectApproxEqAbs(@as(f32, 3), g.sim.buff_phys_resist[ps], 0.001);
     // Losing one piece fires the LTE 3 RemoveBuff row. Stock marks the buff
     // Remove and the buff tick deletes it on the following tick, so the same
     // tick's armor fold still sees it.
     g.sim.inventory[ps].slots[ecs.components.inv_equip_start + 3] = .{};
-    try g.step();
-    try std.testing.expect(g.sim.buffs[ps].find(bonus).?.flags.remove);
-    try g.step();
+    // The revoke row fires on the status buff's own update rate, and the buff
+    // tick reaps a flagged instance on the following tick, so step until it is
+    // gone and record that it was flagged on the way.
+    var saw_flag = false;
+    var wait: usize = 0;
+    while (wait < 60) : (wait += 1) {
+        try g.step();
+        const inst = g.sim.buffs[ps].find(bonus) orelse break;
+        if (inst.flags.remove) saw_flag = true;
+    }
+    try std.testing.expect(saw_flag);
     try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
     // The client sees exactly one removal: the flagged buff is relayed by the
     // expiry drain, not by the row that flagged it (relaying both would send a
@@ -4252,7 +4260,7 @@ test "the armor-set bonus is granted from xml when the full set is worn" {
     // A different set's pieces do not grant the biker bonus.
     const nomad = g.items.byName("armorNomadHelmet").?;
     g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = nomad.id, .count = 1, .quality = 3 };
-    try g.step();
+    try stepTicks(g, 46);
     try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
 }
 
@@ -4339,17 +4347,22 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     cl.skill_level_n = 1;
     g.sim.health[ps].base_max_hp = 100;
     // No code: the option keeps its YesNo default (No) and the row refuses.
-    try g.step();
+    try stepTicks(g, 46);
     try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
     // "AALB" = version A, option AL (id 11 = PlayerLevelBonusApplied), index B
     // (Yes): the same server code the GameStats echo carries.
     g.sandbox_code = "AALB";
-    try g.step();
+    try stepTicks(g, 46);
     // 149, not 150: with the option on, buffStatusCheck01's own update rows fold
     // too, and they set `$PlayerLevelBonus = $LastPlayerLevel(0)` then `add -1`
     // (the `PlayerLevel LT 2` row), so its `HealthMax base_add @$PlayerLevelBonus`
     // contributes -1. Stock does the same until buffLevelUpTracking refreshes
-    // `$LastPlayerLevel`, which zdtd does not apply yet.
+    // `$LastPlayerLevel`, which zdtd does not apply yet. Note for the rate-driven
+    // update event: once the lifecycle driver runs every buff's update rows on
+    // its own rate, `buffLevelUpTracking` gets added (check01's
+    // `PlayerLevel GT @$LastPlayerLevel` row) and this expectation moves to 168,
+    // which is not yet accounted for row by row; understand that before landing
+    // the driver.
     try std.testing.expectApproxEqAbs(@as(f32, 149), g.sim.health[ps].max_hp, 0.001);
 }
 
@@ -4389,6 +4402,15 @@ test "the survival pass folds the armor query into buff_phys_resist" {
 
 /// Zero every active buff's elapsed counter so a measured tick sees fresh
 /// buffs (duration-anchored rows are time-scaled).
+/// Advance `n` ticks. The buff lifecycle events are rate-driven now (stock runs
+/// `onSelfBuffUpdate` on the buff's own `<update_rate>`, seconds * 20 ticks:
+/// check01 40, check02 44), so a scenario that expects a check buff's rows to
+/// have run must wait out that rate rather than assume one tick.
+fn stepTicks(g: *Game, n: usize) !void {
+    var i: usize = 0;
+    while (i < n) : (i += 1) try g.step();
+}
+
 fn resetBuffAges(set: *ecs.components.BuffSet) void {
     for (&set.slots) |*slot| {
         if (slot.active) slot.duration_ticks = 0;
@@ -4440,8 +4462,7 @@ test "a gated perk row stops folding when its requirement fails" {
     h.hp = 50;
     h.food = 0.4 * h.food_max;
     h.water = 0.01 * h.water_max;
-    try g.step();
-    try g.step();
+    try stepTicks(g, 46);
     const thirsty03 = g.buffs.indexOfName("buffStatusThirsty03").?;
     try std.testing.expect(g.sim.buffs[ps].find(thirsty03) != null);
 
@@ -4618,8 +4639,7 @@ test "the armor-perk chain derives its CVars from the worn items" {
         const def = g.items.byName(name).?;
         g.sim.inventory[ps].slots[ecs.components.inv_equip_start + i] = .{ .item_id = def.id, .count = 1, .quality = 1 };
     }
-    try g.step();
-    try g.step();
+    try stepTicks(g, 46);
     // level 1 * 4 worn pieces.
     try std.testing.expectApproxEqAbs(@as(f32, 4), cl.cvars.get(".ArmorLightWorn"), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get(".ArmorLightLevel"), 0.001);
@@ -4632,7 +4652,7 @@ test "the armor-perk chain derives its CVars from the worn items" {
     // Without the perk the effect_group gate refuses the chain and the
     // "remove if not in use" group drops the total.
     cl.skill_levels[0] = .{ .name = "perkLightArmor", .level = 0 };
-    try g.step();
+    try stepTicks(g, 46);
     try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get(".ArmorLightTotal"), 0.001);
     try std.testing.expectApproxEqAbs(with_perk_resist - 4, g.sim.buff_phys_resist[ps], 0.001);
 }
@@ -4722,9 +4742,7 @@ test "the survival stage buff tracks the thresholds and clears on recovery" {
     // Remove on the next tick and reaped on the one after.
     h.food = 0.01 * h.food_max;
     h.water = 0.01 * h.water_max;
-    try g.step();
-    try g.step();
-    try g.step();
+    try stepTicks(g, 46);
     try std.testing.expect(g.sim.buffs[ps].find(thirsty03) != null);
     try std.testing.expect(g.sim.buffs[ps].find(hungry03) != null);
     // The lower stages must not survive the transition.
@@ -4737,8 +4755,7 @@ test "the survival stage buff tracks the thresholds and clears on recovery" {
     }
     h.food = h.food_max;
     h.water = h.water_max;
-    try g.step();
-    try g.step();
+    try stepTicks(g, 46);
     try std.testing.expect(g.sim.buffs[ps].find(thirsty03) == null);
     try std.testing.expect(g.sim.buffs[ps].find(hungry03) == null);
 }
