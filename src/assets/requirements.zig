@@ -41,6 +41,10 @@ pub const Requirement = struct {
     /// `has_all_tags="true"` on a tag-list gate (HoldingItemHasTags/ItemHasTags):
     /// every listed tag must match instead of any one (IL=1C5).
     has_all: bool = false,
+    /// `<requirement_group>` children: the group's own requirements and any
+    /// nested groups, in document order (`RequirementGroup::groups`/`reqs`).
+    /// Empty for a leaf requirement.
+    children: []const Requirement = &.{},
 };
 
 /// The vocabulary this evaluator resolves. Everything else maps to
@@ -58,6 +62,14 @@ pub const Kind = enum(u8) {
     armor_group_lowest_quality,
     armor_group_count,
     stat_compare_perc_current_to_max,
+    /// `<requirement_group op="and">` (the default when `op` is absent or
+    /// unknown): every child must pass. An empty group passes
+    /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
+    group_and,
+    /// `<requirement_group op="or">`: one passing child is enough, and an empty
+    /// group fails (`RequirementGroup::EvalOr` IL=70 returns false with no
+    /// children).
+    group_or,
 };
 
 /// `RequirementBase/OperationTypes` (OperationTypes.il.txt), case-insensitive
@@ -186,7 +198,7 @@ pub fn parseTarget(s: []const u8) Target {
 /// Parse the `<requirement ...>` whose open tag begins at `tag_start` in `hay`.
 /// `arena` owns the retained slices; the returned value is not valid after the
 /// arena dies.
-pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) !Requirement {
+pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) std.mem.Allocator.Error!Requirement {
     var r: Requirement = .{};
     const raw = xml.attr(hay, tag_start, "name") orelse return r;
     var n = raw;
@@ -372,7 +384,20 @@ fn tagListHas(list: []const u8, tag: []const u8) bool {
     return false;
 }
 
-fn evalOne(r: Requirement, ctx: Ctx) Verdict {
+/// A leaf gate, counted once per evaluated requirement. A group node counts its
+/// own children instead: counting the group's aggregate verdict too would
+/// double-count every gate inside it.
+fn evalOne(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
+    if (r.kind == .group_and or r.kind == .group_or) return evalLeaf(r, ctx, counts);
+    const v = evalLeaf(r, ctx, counts);
+    switch (v) {
+        .pass, .fail => counts.resolved += 1,
+        .unsupported => counts.unsupported += 1,
+    }
+    return v;
+}
+
+fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
     // TargetedCompareRequirementBase::IsValid (IL=51) resolves `other` and
     // `instigator` from MinEventParams; zdtd's context carries self only, so a
     // foreign target refuses the gate rather than silently reading self.
@@ -399,28 +424,35 @@ fn evalOne(r: Requirement, ctx: Ctx) Verdict {
         .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
         .armor_group_count => return evalArmorGroupCount(r, ctx),
         .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
+        .group_and => return evalList(r.children, false, ctx, counts),
+        .group_or => return evalList(r.children, true, ctx, counts),
     }
 }
 
-/// AND over one row's gates (`RequirementGroup::EvalAnd`, the stock default;
-/// `op="or"` does not appear in the shipped files). Short-circuits on the first
-/// fail; an unsupported gate blocks the row and is counted.
+/// AND over one row's gates (`RequirementGroup::EvalAnd`, the stock default).
+/// Short-circuits on the first fail; an unsupported gate blocks the row and is
+/// counted, so a gate the evaluator cannot resolve never passes.
 pub fn evaluate(reqs: []const Requirement, ctx: Ctx, counts: *Counts) Verdict {
+    return evalList(reqs, false, ctx, counts);
+}
+
+/// AND/OR over a node's children. `or` returns pass as soon as one child
+/// passes, and only reports unsupported when nothing passed and some child was
+/// unsupported (an unresolved gate must not turn an OR into a pass). An empty
+/// group is `and` = pass, `or` = fail, like IL=66/IL=70.
+fn evalList(reqs: []const Requirement, or_mode: bool, ctx: Ctx, counts: *Counts) Verdict {
     var unsupported = false;
     for (reqs) |r| {
-        switch (evalOne(r, ctx)) {
-            .pass => counts.resolved += 1,
-            .fail => {
-                counts.resolved += 1;
-                return .fail;
-            },
-            .unsupported => {
-                counts.unsupported += 1;
-                unsupported = true;
-            },
+        switch (evalOne(r, ctx, counts)) {
+            .pass => if (or_mode) return .pass,
+            .fail => if (!or_mode) return .fail,
+            .unsupported => unsupported = true,
         }
     }
-    return if (unsupported) .unsupported else .pass;
+    if (unsupported) return .unsupported;
+    // No child passed: an OR fails (also when it is empty, IL=70), an AND
+    // passes (also when it is empty, IL=66).
+    return if (or_mode) .fail else .pass;
 }
 
 /// Whether every gate passes, discarding the accounting.
@@ -446,8 +478,33 @@ pub fn elementEnd(body: []const u8, open_at: usize) usize {
     @memcpy(close_buf[2..][0..name.len], name);
     close_buf[2 + name.len] = '>';
     const close_tag = close_buf[0 .. name.len + 3];
-    const close = std.mem.findPos(u8, body, gt, close_tag) orelse return body.len;
-    return close + close_tag.len;
+    var open_buf: [64]u8 = undefined;
+    open_buf[0] = '<';
+    @memcpy(open_buf[1..][0..name.len], name);
+    const open_tag = open_buf[0 .. name.len + 1];
+    // Depth-aware: an element of the same name may nest inside itself
+    // (`<requirement_group op="or">` does), and matching the first close tag
+    // would end the outer element early and re-scan its children.
+    var scan = gt;
+    var depth: usize = 1;
+    while (depth > 0) {
+        const close = std.mem.findPos(u8, body, scan, close_tag) orelse return body.len;
+        if (std.mem.findPos(u8, body, scan, open_tag)) |open| {
+            if (open < close) {
+                const after = open + open_tag.len;
+                const delim = after < body.len and
+                    (body[after] == '>' or body[after] == '/' or std.ascii.isWhitespace(body[after]));
+                const inner_gt = std.mem.findPos(u8, body, open, ">") orelse return body.len;
+                const empty = inner_gt > open and body[inner_gt - 1] == '/';
+                if (delim and !empty) depth += 1;
+                scan = if (inner_gt > open) inner_gt + 1 else after;
+                continue;
+            }
+        }
+        depth -= 1;
+        scan = close + close_tag.len;
+    }
+    return scan;
 }
 
 /// The element's direct `<requirement>` children, in document order.
@@ -460,19 +517,57 @@ pub fn scanRequirements(
     body: []const u8,
     open_at: usize,
     out: *std.ArrayList(Requirement),
-) !void {
+) std.mem.Allocator.Error!void {
     const gt = std.mem.findPos(u8, body, open_at, ">") orelse return;
     if (gt > open_at and body[gt - 1] == '/') return;
-    const end = elementEnd(body, open_at);
-    var i = gt + 1;
+    try scanChildren(allocator, arena, body, gt + 1, elementEnd(body, open_at), out);
+}
+
+/// The direct `<requirement>` / `<requirement_group>` children in `body[start..end)`,
+/// in document order. `MinEffectGroup::ParseXml` (IL=103) builds one
+/// RequirementGroup from an element's direct children, so an `<effect_group>`
+/// body is scanned with this range form.
+pub fn scanChildren(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    start: usize,
+    end: usize,
+    out: *std.ArrayList(Requirement),
+) std.mem.Allocator.Error!void {
+    var i = start;
     while (i < end) {
-        const lt = std.mem.findPos(u8, body, i, "<") orelse break;
+        const lt = std.mem.findPos(u8, body[0..end], i, "<") orelse break;
         if (lt >= end or std.mem.startsWith(u8, body[lt..], "</")) break;
-        if (std.mem.startsWith(u8, body[lt..], "<requirement")) {
+        if (std.mem.startsWith(u8, body[lt..], "<requirement_group")) {
+            try out.append(allocator, try parseGroup(allocator, arena, body, lt));
+        } else if (std.mem.startsWith(u8, body[lt..], "<requirement")) {
             try out.append(allocator, try parse(body, lt, arena));
         }
         i = elementEnd(body, lt);
     }
+}
+
+/// One `<requirement_group op="and|or">` with its direct children (gates and
+/// nested groups). `RequirementGroup/Op` IL=?? is `{ And = 0, Or = 1 }`, and
+/// `RequirementGroup::IsValid` IL=25 falls back to AND for any other value.
+/// The group itself is a node in the flat AND list its parent evaluates.
+pub fn parseGroup(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    hay: []const u8,
+    tag_start: usize,
+) std.mem.Allocator.Error!Requirement {
+    const op = xml.attr(hay, tag_start, "op") orelse "and";
+    var r: Requirement = .{
+        .kind = if (std.ascii.eqlIgnoreCase(op, "or")) .group_or else .group_and,
+        .name = if (std.ascii.eqlIgnoreCase(op, "or")) "requirement_group:or" else "requirement_group:and",
+    };
+    var kids: std.ArrayList(Requirement) = .empty;
+    defer kids.deinit(allocator);
+    try scanRequirements(allocator, arena, hay, tag_start, &kids);
+    r.children = try arena.dupe(Requirement, kids.items);
+    return r;
 }
 
 const testing = std.testing;
@@ -619,6 +714,62 @@ test "SandboxOptionBool reads the decoded option or its default" {
     const unknown = Requirement{ .kind = .sandbox_option_bool, .arg = "NotAnOption" };
     try testing.expectEqual(Verdict.unsupported, evaluate(&.{unknown}, .{}, &counts));
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "requirement_group evaluates with the stock AND/OR semantics" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const src = "<effect_group>" ++
+        "<requirement_group op=\"or\">" ++
+        "<requirement name=\"InBiome\" biome=\"8\"/>" ++
+        "<requirement name=\"PlayerLevel\" operation=\"GTE\" value=\"5\"/>" ++
+        "<requirement_group op=\"and\">" ++
+        "<requirement name=\"InBiome\" biome=\"2\"/>" ++
+        "<requirement name=\"IsAlive\"/>" ++
+        "</requirement_group>" ++
+        "</requirement_group>" ++
+        "</effect_group>";
+    const g0 = std.mem.find(u8, src, "<effect_group").?;
+    var out: std.ArrayList(Requirement) = .empty;
+    defer out.deinit(testing.allocator);
+    try scanRequirements(testing.allocator, a, src, g0, &out);
+    try testing.expectEqual(@as(usize, 1), out.items.len);
+    const g = out.items[0];
+    try testing.expectEqual(Kind.group_or, g.kind);
+    try testing.expectEqual(@as(usize, 3), g.children.len);
+    try testing.expectEqual(Kind.group_and, g.children[2].kind);
+    try testing.expectEqual(@as(usize, 2), g.children[2].children.len);
+    // One passing child is enough for the OR.
+    try testing.expect(all(&.{g}, .{ .player_level = 5 }));
+    try testing.expect(all(&.{g}, .{ .biome_id = 8 }));
+    // The nested AND needs both of its children.
+    try testing.expect(!all(&.{g}, .{ .player_level = 4, .biome_id = 2, .alive = false }));
+    try testing.expect(all(&.{g}, .{ .player_level = 4, .biome_id = 2, .alive = true }));
+    // A gate the evaluator cannot resolve must not turn the OR into a pass.
+    var counts: Counts = .{};
+    const unresolved = Requirement{ .kind = .group_or, .name = "requirement_group:or", .children = &.{
+        .{ .kind = .unsupported, .name = "Nope" },
+    } };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{unresolved}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    // An empty group is AND = pass, OR = fail (RequirementGroup IL=66/IL=70).
+    const empty_and = Requirement{ .kind = .group_and, .name = "requirement_group:and", .children = &.{} };
+    const empty_or = Requirement{ .kind = .group_or, .name = "requirement_group:or", .children = &.{} };
+    try testing.expect(all(&.{empty_and}, .{}));
+    try testing.expect(!all(&.{empty_or}, .{}));
+    // A group with no `op` attribute is AND (RequirementGroup::IsValid IL=25
+    // falls back to EvalAnd for every value but Or).
+    const src_and = "<effect_group><requirement_group>" ++
+        "<requirement name=\"InBiome\" biome=\"2\"/>" ++
+        "<requirement name=\"PlayerLevel\" operation=\"GTE\" value=\"5\"/>" ++
+        "</requirement_group></effect_group>";
+    var out2: std.ArrayList(Requirement) = .empty;
+    defer out2.deinit(testing.allocator);
+    try scanRequirements(testing.allocator, a, src_and, 0, &out2);
+    try testing.expectEqual(Kind.group_and, out2.items[0].kind);
+    try testing.expect(!all(out2.items, .{ .biome_id = 2, .player_level = 4 }));
+    try testing.expect(all(out2.items, .{ .biome_id = 2, .player_level = 5 }));
 }
 
 test "compare matches the six stock operation spellings" {

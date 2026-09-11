@@ -81,6 +81,26 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (`requirement_group` AND/OR and effect_group gates)
+
+The requirement evaluator's own comment claimed `op="or"` groups never ship.
+They ship 61 times (37 in `buffs.xml`, 24 in `items.xml`, 6 nested) and every
+one was skipped whole, which is the worst polarity available: the gate was
+dropped, so a row gated on `A or B` ran as if it were ungated. Groups are now
+nodes in the gate tree (`RequirementGroup::EvalAnd` IL=66, `EvalOr` IL=70: an
+empty AND passes, an empty OR fails, unsupported children are reported without
+turning an OR into a pass), `elementEnd` is depth-aware so a nested group no
+longer ends its parent early, and `scanChildren` reads a range's direct gates.
+The triggered-row walk is two levels like the passive walk now, so a triggered
+row carries its effect_group's gates: 52 of `buffStatusCheck02`'s 128 rows sit
+inside a gated effect_group and were ungated before. Measured blast radius is
+zero for the paths zdtd drives today (0 tracked passives and 0 driven
+AddBuff/RemoveBuff rows sit in a group-gated effect_group in stock `buffs.xml`),
+so this changes no folded value yet; it is the gate layer the CVar rows need.
+Also fixed: consecutive self-closing `<buff/>` rows dropped every second one.
+
+---
+
 ## 2026-09-11 (buff row gates + armor-set activation chain)
 
 Buff triggered rows were only half gated: `evaluateTriggered` read the row's

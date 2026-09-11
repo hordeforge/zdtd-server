@@ -456,15 +456,7 @@ fn scanEffectGroup(
 ) !void {
     var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
     defer group_reqs.deinit(allocator);
-    var rj: usize = 0;
-    while (rj < g.len) {
-        const rl = std.mem.findPos(u8, g, rj, "<") orelse break;
-        if (std.mem.startsWith(u8, g[rl..], "</")) break;
-        if (std.mem.startsWith(u8, g[rl..], "<requirement")) {
-            try group_reqs.append(allocator, try requirements.parse(g, rl, arena));
-        }
-        rj = requirements.elementEnd(g, rl);
-    }
+    try requirements.scanChildren(allocator, arena, g, 0, g.len, &group_reqs);
     var pj: usize = 0;
     while (pj < g.len and passives.items.len < budget) {
         const pl = std.mem.findPos(u8, g, pj, "<") orelse break;
@@ -473,6 +465,58 @@ fn scanEffectGroup(
             try appendGatedPassive(allocator, arena, g, pl, group_reqs.items, passives, req_pool, req_ranges);
         }
         pj = requirements.elementEnd(g, pl);
+    }
+}
+
+/// The `<triggered_effect>` rows in `body[start..end)` (one buff body at the
+/// top level, or one `<effect_group>` body). Each row's gate list is the
+/// region's gates first, then the row's own direct children, so a group gate
+/// applies to every row inside it. `budget` is the absolute pool index the
+/// per-buff cap ends at; `seen` accumulates the rows taken this buff.
+fn scanTriggeredRows(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    start: usize,
+    end: usize,
+    group_reqs: []const requirements.Requirement,
+    triggered: *std.ArrayList(Triggered),
+    reqs_list: *std.ArrayList(requirements.Requirement),
+    trig_req_ranges: *std.ArrayList(struct { usize, usize }),
+    budget: usize,
+    seen: *usize,
+) !void {
+    var j = start;
+    while (j < end and triggered.items.len < budget) {
+        const ri = std.mem.findPos(u8, body[0..end], j, "<triggered_effect ") orelse break;
+        if (ri >= end) break;
+        const trig_s = xml.attr(body, ri, "trigger") orelse {
+            j = ri + 18;
+            continue;
+        };
+        const act_s = xml.attr(body, ri, "action") orelse {
+            j = ri + 18;
+            continue;
+        };
+        const row_end = requirements.elementEnd(body, ri);
+        if (row_end == 0 or row_end > end) break;
+        const tr: Triggered = .{
+            .trigger = parseTrigger(trig_s),
+            .action = parseTriggeredAction(act_s),
+            .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
+            .stat = try arena.dupe(u8, xml.attr(body, ri, "stat") orelse ""),
+            .op = parseOp(xml.attr(body, ri, "operation") orelse "add"),
+            .value = firstF32(xml.attr(body, ri, "value") orelse "0"),
+        };
+        const rq0 = reqs_list.items.len;
+        for (group_reqs) |g| try reqs_list.append(allocator, g);
+        // The row's own `<requirement>` children, through the shared evaluator
+        // (RequirementBase::ParseRequirementGroup IL=148 reads direct children).
+        try requirements.scanRequirements(allocator, arena, body, ri, reqs_list);
+        try trig_req_ranges.append(allocator, .{ rq0, reqs_list.items.len - rq0 });
+        try triggered.append(allocator, tr);
+        seen.* += 1;
+        j = row_end;
     }
 }
 
@@ -626,51 +670,37 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             tn += 1;
         }
 
-        // Full onSelf* surface: trigger/action/stat/buff + the nested
-        // StatComparePercCurrentToMax requirement (LT/GT).
+        // Full onSelf* surface: trigger/action/stat/buff, gated by the row's own
+        // `<requirement>` children AND the enclosing `<effect_group>`'s direct
+        // gates (`MinEffectGroup::ParseXml` IL=103 builds one RequirementGroup
+        // for the element), so the walk is two levels like the passive scan.
         const tr0 = triggered_list.items.len;
-        var trj: usize = 0;
+        const tr_budget = @min(tr0 + max_triggered_per_buff, max_triggered_total);
         var trn: usize = 0;
-        while (trj < body.len and trn < max_triggered_per_buff and triggered_list.items.len < max_triggered_total) {
-            const ri = std.mem.findPos(u8, body, trj, "<triggered_effect ") orelse break;
-            const trig_s = xml.attr(body, ri, "trigger") orelse {
-                trj = ri + 18;
+        var trj: usize = 0;
+        while (trj < body.len and triggered_list.items.len < tr_budget) {
+            const lt = std.mem.findPos(u8, body, trj, "<") orelse break;
+            if (std.mem.startsWith(u8, body[lt..], "</")) break;
+            if (std.mem.startsWith(u8, body[lt..], "<effect_group")) {
+                const ggt = std.mem.findPos(u8, body, lt, ">") orelse break;
+                if (ggt > lt and body[ggt - 1] == '/') {
+                    trj = ggt + 1;
+                    continue;
+                }
+                const gclose = std.mem.findPos(u8, body, ggt, "</effect_group>") orelse break;
+                var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
+                defer group_reqs.deinit(allocator);
+                try requirements.scanChildren(allocator, arena, body, ggt + 1, gclose, &group_reqs);
+                try scanTriggeredRows(allocator, arena, body, ggt + 1, gclose, group_reqs.items, &triggered_list, &reqs_list, &trig_req_ranges, tr_budget, &trn);
+                trj = gclose + "</effect_group>".len;
                 continue;
-            };
-            const act_s = xml.attr(body, ri, "action") orelse {
-                trj = ri + 18;
-                continue;
-            };
-            const close = std.mem.findPos(u8, body, ri, "</triggered_effect>");
-            const sc = std.mem.findPos(u8, body, ri, "/>");
-            const row_end = if (sc != null and (close == null or sc.? < close.?))
-                sc.? + 2
-            else if (close) |c2|
-                c2
-            else blk: {
-                trj = ri + 18;
-                break :blk 0;
-            };
-            if (row_end == 0) break;
-            const tr: Triggered = .{
-                .trigger = parseTrigger(trig_s),
-                .action = parseTriggeredAction(act_s),
-                .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
-                .stat = try arena.dupe(u8, xml.attr(body, ri, "stat") orelse ""),
-                .op = parseOp(xml.attr(body, ri, "operation") orelse "add"),
-                .value = firstF32(xml.attr(body, ri, "value") orelse "0"),
-            };
-            // The row's own `<requirement>` children, through the shared
-            // evaluator (RequirementBase::ParseRequirementGroup IL=148 reads
-            // direct children).
-            const rq0 = reqs_list.items.len;
-            try requirements.scanRequirements(allocator, arena, body, ri, &reqs_list);
-            try trig_req_ranges.append(allocator, .{ rq0, reqs_list.items.len - rq0 });
-            try triggered_list.append(allocator, tr);
-            trn += 1;
-            trj = row_end;
+            }
+            if (std.mem.startsWith(u8, body[lt..], "<triggered_effect")) {
+                try scanTriggeredRows(allocator, arena, body, lt, requirements.elementEnd(body, lt), &.{}, &triggered_list, &reqs_list, &trig_req_ranges, tr_budget, &trn);
+            }
+            trj = requirements.elementEnd(body, lt);
         }
-        if (trn == max_triggered_per_buff) truncated_triggered += 1;
+        if (triggered_list.items.len >= tr_budget and tr_budget < max_triggered_total) truncated_triggered += 1;
         try trig_ranges.append(allocator, .{ tr0, triggered_list.items.len - tr0 });
 
         const p0 = passives_list.items.len;
@@ -679,7 +709,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         try ranges.append(allocator, .{ p0, passives_list.items.len - p0 });
         try mod_ranges.append(allocator, .{ m0, mods_list.items.len - m0 });
         try thr_ranges.append(allocator, .{ t0, thresholds_list.items.len - t0 });
-        i = body_end + 1;
+        // `body_end` is already past the row (the `>` of a self-closing buff, or
+        // the `<` of `</buff>`); the old `+ 1` resumed one char late, which
+        // dropped every second self-closing `<buff/>` in a run.
+        i = body_end;
     }
 
     const pool = try arena.alloc(Passive, passives_list.items.len);
@@ -1292,6 +1325,85 @@ test "parsed buff fields: stack, duration, update rate, remove_on_death" {
     const nostack = t.byName("buffNoStack").?;
     try std.testing.expectEqual(StackType.ignore, nostack.stack_type);
     try std.testing.expectEqual(default_update_rate_ticks, nostack.update_rate_ticks);
+}
+
+/// Test-local name resolver for `requirements.BuffNames` (the same shape the
+/// server's per-tick lookup uses).
+const TestNames = struct {
+    table: *const Table,
+    fn resolve(ctx: *const anyopaque, name: []const u8) ?u16 {
+        const self: *const TestNames = @ptrCast(@alignCast(ctx));
+        return self.table.indexOfName(name);
+    }
+};
+
+test "an effect_group gate applies to its triggered rows and its passives" {
+    // Before this the parser read only bare `<requirement>` children: a
+    // `<requirement_group op="or">` was skipped whole (turning the gate OFF), a
+    // nested group ended its parent early (elementEnd matched the first close
+    // tag), and a triggered row took no effect_group gate at all, so the row
+    // fired with every branch false.
+    const xml_src =
+        \\<buffs>
+        \\<buff name="check">
+        \\<effect_group>
+        \\<requirement_group op="or">
+        \\<requirement name="HasBuff" buff="buffA"/>
+        \\<requirement_group op="and">
+        \\<requirement name="HasBuff" buff="buffB"/>
+        \\<requirement name="IsAlive"/>
+        \\</requirement_group>
+        \\</requirement_group>
+        \\<requirement name="HasBuff" buff="buffC"/>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="AddBuff" buff="target"/>
+        \\</effect_group>
+        \\<effect_group>
+        \\<requirement name="HasBuff" buff="buffD"/>
+        \\<passive_effect name="StaminaChangeOT" operation="base_add" value="0.5"/>
+        \\</effect_group>
+        \\</buff>
+        \\<buff name="buffA"/><buff name="buffB"/><buff name="buffC"/><buff name="buffD"/><buff name="target"/>
+        \\</buffs>
+    ;
+    const path = "worlds/zdtd_buffs_group.xml";
+    io_fs.mkdirPath("worlds");
+    try io_fs.writeFile(path, xml_src);
+    defer io_fs.deleteFile(path);
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // Every consecutive self-closing `<buff/>` loads (the walk used to resume
+    // one char late and drop every second one).
+    try std.testing.expectEqual(@as(usize, 6), t.defs.len);
+    const cid = t.indexOfName("check").?;
+    const a_id = t.indexOfName("buffA").?;
+    const b_id = t.indexOfName("buffB").?;
+    const c_id = t.indexOfName("buffC").?;
+    const d_id = t.indexOfName("buffD").?;
+    const names = requirements.BuffNames{ .ctx = &TestNames{ .table = &t }, .resolve = TestNames.resolve };
+    var counts: requirements.Counts = .{};
+    // The effect_group gate is (A or (B and alive)) AND C.
+    const none = evaluateTriggered(&t, cid, .update, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 0), none.add_n);
+    const with_a = evaluateTriggered(&t, cid, .update, .{ .active_buffs = &.{a_id}, .buff_names = &names }, &counts);
+    try std.testing.expectEqual(@as(u8, 0), with_a.add_n);
+    const with_c = evaluateTriggered(&t, cid, .update, .{ .active_buffs = &.{c_id}, .buff_names = &names }, &counts);
+    try std.testing.expectEqual(@as(u8, 0), with_c.add_n);
+    const with_ac = evaluateTriggered(&t, cid, .update, .{ .active_buffs = &.{ a_id, c_id }, .buff_names = &names }, &counts);
+    try std.testing.expectEqual(@as(u8, 1), with_ac.add_n);
+    try std.testing.expectEqualStrings("target", with_ac.add_buffs[0]);
+    const with_bc = evaluateTriggered(&t, cid, .update, .{ .active_buffs = &.{ b_id, c_id }, .buff_names = &names }, &counts);
+    try std.testing.expectEqual(@as(u8, 1), with_bc.add_n);
+    // The nested AND still needs IsAlive.
+    const with_bc_dead = evaluateTriggered(&t, cid, .update, .{ .active_buffs = &.{ b_id, c_id }, .buff_names = &names, .alive = false }, &counts);
+    try std.testing.expectEqual(@as(u8, 0), with_bc_dead.add_n);
+    // The passive in the second group folds only under that group's gate.
+    var set: components.BuffSet = .{};
+    set.slots[0] = .{ .active = true, .def_id = cid };
+    try std.testing.expectApproxEqAbs(@as(f32, 0), effectTotals(&t, &set, .{}, &counts).stamina_ot, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), effectTotals(&t, &set, .{
+        .active_buffs = &.{d_id},
+        .buff_names = &names,
+    }, &counts).stamina_ot, 0.0001);
 }
 
 test "load buffs.xml when present" {

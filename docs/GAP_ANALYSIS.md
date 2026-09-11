@@ -3634,7 +3634,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   - Implemented kinds: `ProgressionLevel`, `PlayerLevel`, `HasBuff`,
     `IsAlive`, `IsAttachedToEntity`, `InBiome`, `HoldingItemHasTags`,
     `SandboxOptionBool`, `ArmorGroupLowestQuality`, `ArmorGroupCount`,
-    `StatComparePercCurrentToMax`. The rest (measured vocabulary:
+    `StatComparePercCurrentToMax`, plus the `requirement_group` AND/OR nodes. The rest (measured vocabulary:
     `ItemHasTags`, `CVarCompare`, `RandomRoll`,
     `EntityTagCompare`, `EntityHasMovementTag`, `IsNight`, `IsIndoors`,
     `StatComparePercCurrentToModMax`, `HitLocation`, ...) **fail closed** and are
@@ -3643,6 +3643,29 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     the way the pure state reads can: a chance gate re-rolled on the max-stat
     recompute would flicker max HP every 50 ms, so it needs the roll pinned to
     a stable seed/period before it is evaluated at all.
+  - **`requirement_group` AND/OR + effect_group gates (round 19, 2026-09-11).**
+    This section's own note used to claim `op="or"` never ships; it ships **61**
+    times (37 in `buffs.xml`, 24 in `items.xml`, all `op="or"`, 6 of them nested
+    inside another group) and every one was skipped whole, which turned that
+    gate OFF instead of failing it closed. `Requirement` now models a group node
+    (`group_and`/`group_or` carrying `children`), parsed by `parseGroup`, with
+    `RequirementGroup::EvalAnd` (IL=66) and `EvalOr` (IL=70) semantics: an empty
+    AND passes, an empty OR fails, and a child the evaluator cannot resolve is
+    reported unsupported without ever turning an OR into a pass. `elementEnd` is
+    depth-aware now (it matched the first close tag, so a nested group ended its
+    parent early and the parent's later gates were dropped). `scanChildren`
+    reads a range's direct gates, so an `<effect_group>` body is scanned with
+    groups included, for passives AND for triggered rows: the triggered walk is
+    two levels like the passive walk, and a row's gate list is its
+    effect_group's gates followed by its own (52 of `buffStatusCheck02`'s 128
+    rows sit inside a gated effect_group and were ungated before). Measured
+    blast radius: **0** tracked passives and **0** driven AddBuff/RemoveBuff
+    rows sit inside a group-gated effect_group in stock `buffs.xml`, so no fold
+    or set-bonus value changes today; what the fix gates is the
+    `ModifyCVar`/`RemoveCVar` rows (actions still unimplemented) and untracked
+    rows. Also fixed here: consecutive self-closing `<buff/>` rows dropped every
+    second one (the walk resumed one char late; stock ships none, so this is a
+    modlet/fixture correctness fix).
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`

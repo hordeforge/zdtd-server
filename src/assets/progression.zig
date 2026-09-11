@@ -403,16 +403,8 @@ fn scanEffectGroup(
 ) !void {
     var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
     defer group_reqs.deinit(allocator);
+    try requirements.scanChildren(allocator, arena, g, 0, g.len, &group_reqs);
     var i: usize = 0;
-    while (i < g.len) {
-        const lt = std.mem.findPos(u8, g, i, "<") orelse break;
-        if (std.mem.startsWith(u8, g[lt..], "</")) break;
-        if (std.mem.startsWith(u8, g[lt..], "<requirement")) {
-            try group_reqs.append(allocator, try requirements.parse(g, lt, arena));
-        }
-        i = requirements.elementEnd(g, lt);
-    }
-    i = 0;
     while (i < g.len and pool.items.len < passive_limit) {
         const lt = std.mem.findPos(u8, g, i, "<") orelse break;
         if (std.mem.startsWith(u8, g[lt..], "</")) break;
