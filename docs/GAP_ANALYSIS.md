@@ -3724,7 +3724,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     is the triggered chain above. The
     `PhysicalDamageResist = @.ArmorLightTotal` passive that consumes the total
     still needs `buffStatusCheck02` to be an active buff (entity class
-    `Buffs=`), which is the next step.
+    `Buffs=`). The class list itself now parses (`EntityDef.buffs`, resolved by
+    the Unity class hash the PlayerId wire already carries, plus
+    `EntityTable.byHash`); applying it at spawn is deferred because activating
+    check01 folds that buff's own passives and shifted the survival stage
+    machine's timing in the stage scenario by two ticks in a way that is not yet
+    explained, and a half-understood change is not landable.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`

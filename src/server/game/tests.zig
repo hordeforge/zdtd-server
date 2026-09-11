@@ -21,6 +21,7 @@ const clock = @import("../../util/clock.zig");
 const util_sim = @import("../../util/sim.zig");
 const wire_frame = @import("../../wire/frame.zig");
 const wire_stock_buff = @import("../../wire/stock_buff.zig");
+const assets_unity_hash = @import("../../assets/unity_hash.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const replicate_te = @import("../replicate_te.zig");
@@ -4455,6 +4456,33 @@ test "a gated perk row stops folding when its requirement fails" {
     cl.skill_level_n = 0;
     try g.step();
     try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
+}
+
+test "the entity class Buffs list parses from entityclasses.xml" {
+    // entityclasses.xml playerMale `Buffs="buffStatusCheck01,buffStatusCheck02"`.
+    // The parsed list is the input stock applies to the class when it enters the
+    // game; activating it in the server (and the survival dynamics that shift
+    // with check01's own passives folding) is the next step, not this one.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const pdef = g.entities.byHash(assets_unity_hash.class_player_male) orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(usize, 2), pdef.buffs.len);
+    try std.testing.expectEqualStrings("buffStatusCheck01", pdef.buffs[0]);
+    try std.testing.expectEqualStrings("buffStatusCheck02", pdef.buffs[1]);
+    // Every name resolves in the buff catalog (fail closed otherwise).
+    for (pdef.buffs) |b| try std.testing.expect(g.buffs.indexOfName(b) != null);
 }
 
 test "the armor-perk chain derives its CVars from the worn items" {

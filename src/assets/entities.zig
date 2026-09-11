@@ -131,6 +131,10 @@ pub const EntityDef = struct {
     /// <property class="Explosion"> blast params (radius/damages/bonuses),
     /// Extends-resolved per field. Unset fields stay 0 -> Rules floor.
     explosion: ExplosionDef = .{},
+    /// entityclasses `Buffs="a,b"`: buffs stock applies to every instance of the
+    /// class when it enters the game (`EntityClass` ctor + the class's
+    /// onSelfEnteredGame rows). The player class carries the status checks.
+    buffs: []const []const u8 = &.{},
     /// ExperienceGain kill XP (stock ships 130 rabbit .. 2500 zombieBear;
     /// most zombies resolve through the `^xpNormal01`-style replace_properties
     /// ladder). 0 = unset, which leaves the award at the caller's flat floor.
@@ -154,6 +158,16 @@ pub const EntityTable = struct {
 
     pub fn builtin() EntityTable {
         return .{ .defs = &builtin_defs, .source = .builtin };
+    }
+
+    /// The class whose Unity name hash matches (the PlayerId/EntityClass wire
+    /// keys are these hashes; see unity_hash.zig).
+    pub fn byHash(self: *const EntityTable, hash: i32) ?EntityDef {
+        if (hash == 0) return null;
+        for (self.defs) |d| {
+            if (d.hash == hash) return d;
+        }
+        return null;
     }
 
     pub fn byName(self: *const EntityTable, name: []const u8) ?EntityDef {
@@ -654,6 +668,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (bl.len > 0) loot = bl;
             }
         }
+        // entityclasses `Buffs="a,b"`: the class-level buff list. Names are
+        // resolved against the buff catalog by the caller (fail closed: an
+        // unknown name is skipped there).
+        var class_buffs: []const []const u8 = &.{};
+        if (resolveProp(&classes, name, "Buffs", 0)) |bl| {
+            if (bl.len > 0) class_buffs = try nameList(arena, bl);
+        }
         var drop_prob: f32 = 1.0;
         if (resolveProp(&classes, name, "LootDropProb", 0)) |lp| {
             if (xml.parseF32(lp)) |f| {
@@ -867,6 +888,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .leg_cripple_scale = cripple_scale,
             .leg_crawler_threshold = crawler_threshold,
             .explosion = expl orelse .{},
+            .buffs = class_buffs,
             .xp_gain = xp_gain,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
@@ -887,6 +909,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         .arena_ptr = arena_holder,
         .source = .xml,
     };
+}
+
+/// One comma list into an arena-owned slice of trimmed names.
+fn nameList(arena: std.mem.Allocator, value: []const u8) ![]const []const u8 {
+    var out: std.ArrayList([]const u8) = .empty;
+    defer out.deinit(arena);
+    var it = std.mem.splitScalar(u8, value, ',');
+    while (it.next()) |seg| {
+        const n = std.mem.trim(u8, seg, " \t");
+        if (n.len == 0) continue;
+        try out.append(arena, try arena.dupe(u8, n));
+    }
+    return out.toOwnedSlice(arena);
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?EntityTable {

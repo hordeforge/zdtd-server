@@ -52,19 +52,27 @@ fn applyTriggeredBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, res: *const as
         _ = ecs.buff.remove(set, def_id);
     }
     for (res.add_buffs[0..res.add_n]) |name| {
-        const def_id = self.buffs.indexOfName(name) orelse continue;
-        const set = self.sim.buffsMut(ps);
-        const def = self.buffs.byId(def_id) orelse continue;
-        if (set.find(def_id) != null) continue;
-        _ = ecs.buff.add(set, .{
-            .def_id = def_id,
-            .duration = def.duration,
-            .stack_type = def.stack_type,
-            .update_rate_ticks = def.update_rate_ticks,
-            .remove_on_death = def.remove_on_death,
-        }, ecs.buff.duration_from_class, -1, 0, 0, 0);
-        game_social.relayBuff(self, entity_id, def.name, true, -1, null) catch {};
+        _ = addCatalogBuff(self, entity_id, ps, name);
     }
+}
+
+/// Add one catalog buff to the entity's set unless it is already active, and
+/// relay the add. Returns whether it was added. Unknown names are skipped (fail
+/// closed), like every other data-bound lookup.
+fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8) bool {
+    const def_id = self.buffs.indexOfName(name) orelse return false;
+    const def = self.buffs.byId(def_id) orelse return false;
+    const set = self.sim.buffsMut(ps);
+    if (set.find(def_id) != null) return false;
+    _ = ecs.buff.add(set, .{
+        .def_id = def_id,
+        .duration = def.duration,
+        .stack_type = def.stack_type,
+        .update_rate_ticks = def.update_rate_ticks,
+        .remove_on_death = def.remove_on_death,
+    }, ecs.buff.duration_from_class, -1, 0, 0, 0);
+    game_social.relayBuff(self, entity_id, def.name, true, -1, null) catch {};
+    return true;
 }
 
 /// One entry per worn equipment item: its `Tags` property (comma list), the
