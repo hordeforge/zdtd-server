@@ -220,10 +220,10 @@ wins on conflict about what shipped, not about the arithmetic).
 | [POIs and prefabs](#7-pois-and-prefabs) | 30 | 0 | 0 | 30 | Ids, rotation and height now correct; POI water planes wet; trader compounds ship their areas; parts paint and carry their sleeper volumes; sleeper volume coverage spans the whole map; multi-block children regenerate; authored block damage lands in the chunk plane; POI pads flatten to the stock deco.y-1 level; TileEntityType constants match stock; authored sleeper spawns use the full Class=Sleeper set; sleeper volumes rotate stock-clockwise; prefab TE scan seeds containers |
 | [Entities and AI](#8-entities-and-ai) | 40 | 0 | 0 | 40 | Real fights with real stakes and real A*; per-class sight cone + LOS sensing; 9 EAI task classes; all stock entitygroups + gamestage sleeper resolution; per-biome wildlife variety; timid animals flee; spawns ground-snap and quest ambushes resolve gamestage; starter population fill (2026-08-30) populates fresh worlds toward the cap at boot |
 | [Items, crafting, loot](#9-items-crafting-and-loot) | 28 | 0 | 0 | 28 | Containers roll their own tables and render their real grid size; items stack like stock; death bags carry the real inventory; recipes enforce craft_area and their exp data is all-zero; Extends inheritance complete; tool durability wears + quality rolls by loot stage; workstation fuel burn matches FuelValue; world containers are 4096 with eviction; stock InvTx applies to the player inventory; InventoryDataRequest loop is closed |
-| [Player progression](#10-player-progression) | 26 | 1 | 0 | 27 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated perk spend (NetPackageEntitySetSkillLevelServer, parent/cost/max gates) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT); XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins |
+| [Player progression](#10-player-progression) | 26 | 2 | 0 | 28 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated spend (NetPackageEntitySetSkillLevelServer) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT) gated by each row's parsed `<requirement>` (src/assets/requirements.zig); `<book>` progression values load too; XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins. Two shortfalls: perk purchase is denied (the parent-skill prerequisite is wrong) and the requirement vocabulary is partial (unknown kinds fail closed, counted) |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **297** | **2** | **0** | **299** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **297** | **3** | **0** | **300** | Three PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10), perk purchase (§10, the parent-skill prerequisite denies every perk) and the join-burst tick budget (§11, 2026-08-29). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3408,18 +3408,20 @@ unvalidated, and durability, mods and repair do not exist.
 
 **Headline.** A player can join, eat, take client-reported damage, die by
 admin/self-report and respawn. Level, XP, survival stats and active buffs
-survive a restart (ZPV12 tail, server-side ledger). Perk spending is
-server-validated (`NetPackageEntitySetSkillLevelServer`, parent/cost/max gates)
-and both server-to-client pushes ship (`NetPackageEntityAddExpClient`,
+survive a restart (ZPV12 tail, server-side ledger). Spend is server-validated
+(`NetPackageEntitySetSkillLevelServer`); attributes purchase, but perks are
+denied because the parent-skill prerequisite is wrong (see the perk-purchase
+row). Both server-to-client pushes ship (`NetPackageEntityAddExpClient`,
 `NetPackageEntitySetSkillLevelClient`). The client's `NetPackagePlayerStats`
 blob is still dropped by design, so the server relays its own ledger rather
 than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 
-**26 WORKS · 1 PARTIAL · 0 MISSING**
+**26 WORKS · 2 PARTIAL · 0 MISSING**
 
 - **progression.xml `<level>` curve parse** `WORKS`
   Parsed on boot and logged. Live: `progression max_level=300 exp_to_level=10000
-  attrs=8 perks=57`, matching `progression.xml:8`.
+  attrs=8 perks=209`, matching `progression.xml` (57 `<perk>` + 152 `<book>`
+  rows share the catalog shape).
   *Anchors:* `src/assets/progression.zig:92-106`, `:123-130`,
   `src/server/game.zig`, `server-orch.log`
 
@@ -3524,16 +3526,29 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   EffectManager VM, moved to the explicit non-goals list (the sim already
   applies the live effects: armour mitigation + survival buffs).
 
-- **Perk purchase / spend skill points** `WORKS` (was `PARTIAL (waived)`;
-  re-evaluated 2026-09-02)
+- **Perk purchase / spend skill points** `PARTIAL` (was `WORKS` 2026-09-02;
+  corrected 2026-09-11)
   Server-authoritative spend via `NetPackageEntitySetSkillLevelServer`,
-  validated against the catalog (parent/cost/max gates) with the
-  `on_perk_spend` verdict (ADR 0033) on top. The original waiver ("client owns
-  spend, no server-side perk table") was superseded when that shipped
-  2026-08-27; the row kept the waived label afterwards.
+  validated against the catalog with the `on_perk_spend` verdict (ADR 0033)
+  on top. The original waiver ("client owns spend, no server-side perk table")
+  was superseded when that shipped 2026-08-27. **Attribute purchases work;
+  perk purchases are denied.** `skillCostOf` (`src/server/game/player.zig`)
+  treats a perk's `parent_attr` as a purchase prerequisite and requires
+  `skillLevelOf(slot, parent) != 0`, but stock gives every perk
+  `parent="skill*"` naming one of the 16 `<skill>` rows
+  (`../7dtd-engine-research/docs/gameplay/progression.md` section 4), and no
+  `<skill>` name is ever in the catalog or the ledger (`internProgressionName`
+  accepts only attributes/perks/crafting_skills), so the check always fails and
+  the C2S is silently dropped (`src/server/c2s/misc.zig`). The existing
+  scenario buys an attribute, which is why the row read WORKS. Fix is the
+  ADR 0023 §2 shape: gate on the perk's `<level_requirements>`
+  (`ProgressionLevel`/`PlayerLevel`, both now implemented) and treat `parent`
+  as UI grouping.
   *Anchors:* `src/server/c2s/misc.zig` (`NetPackageEntitySetSkillLevelServer`),
-  `src/server/game/player.zig` (`purchase`), `src/plugin/wasm.zig`
-  (`on_perk_spend` hook), `src/server/game/tests.zig` (spend scenario)
+  `src/server/game/player.zig` (`skillCostOf`/`purchaseSkillAtCost`),
+  `src/plugin/wasm.zig` (`on_perk_spend` hook),
+  `src/assets/requirements.zig` (the level gate it needs),
+  `src/assets/progression.zig` (`<level_requirements>` is not parsed yet)
 
 - **Perk / attribute passive effects applied to gameplay** `PARTIAL`
   (re-evaluated 2026-09-02; the `(waived)` qualifier is dropped)
@@ -3542,54 +3557,91 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   revertibly like buffs. The original waiver said "waived until a progression
   runtime exists" - that runtime now exists, so this is an ordinary partial
   with a named shortfall rather than a waiver: the VM covers the tracked stats,
-  not all 649 `passive_effect` rows. Closing it is a scope question (which
+  not every `passive_effect` row. Closing it is a scope question (which
   stats to track), not a blocked dependency.
   *Anchors:* `src/assets/progression.zig` (passive rows + curves),
   `src/ecs/inventory.zig` (`armorMitigation` fold)
 
-  **2026-09-11, newly measured: the rows that are folded are folded regardless
-  of their gates.** V3.2.0 `progression.xml` carries 913 `<requirement>`
-  elements over its 648 passive rows (518 `ProgressionLevel`, 79
-  `ItemHasTags`, 65 `CVarCompare`, 51 `PlayerLevel`, 50 `RandomRoll`, 23
-  `!HasBuff`, 18 `HoldingItemHasTags`, 17 `EntityTagCompare`, and the rest) and
-  `progression.zig`'s `scanPassives` parses no requirement at all: it walks to
-  the first `<passive_effect ` and never reads a `<requirement>` sibling, so a
-  gated row folds unconditionally. Two concrete consequences:
-  - `PlayerExpGain`. Stock multiplies through `EffectManager.GetValue(87 =
-    PlayerExpGain, ...)` inside `Progression::AddLevelExp` (IL=161) when
-    `useBonus` is set - true for the kill (`EntityPlayer.AddKillXP` IL=89
-    passes `ldc.i4.0`, so kill XP does NOT), harvest (GameUtils IL=2995
-    `ldc.i4.1`), magazine MinEvent (`_xpOther`, `ldc.i4.1`) and quest
-    (`RewardExp`, `ldc.i4.1`) paths. The stock perk rows are gated
+  **2026-09-11 (round 11): the gates are parsed and evaluated.** V3.2.0
+  `progression.xml` carries 881 `<requirement>` elements (490
+  `ProgressionLevel`, 77 `ItemHasTags`, 65 `CVarCompare`, 51 `PlayerLevel`,
+  50 `RandomRoll`, 23 `!HasBuff`, 18 `HoldingItemHasTags`, 17
+  `EntityTagCompare`, 16 `IsAlive`, 13 `!IsAttachedToEntity`, ...). Counting
+  the whole file overstates the VM's own surface: of the 631 `passive_effect`
+  rows, only **15** carry a name the tracked fold consumes and **11** of those
+  are gated, and **6** of the 15 use a name the tick actually reads
+  (`HealthMax`/`StaminaMax`/`HealthChangeOT`/`StaminaChangeOT`), of which 3 are
+  gated. Both numbers are now data, not prose: `src/assets/requirements.zig`
+  parses a row's gates (the enclosing `<effect_group>`'s direct
+  `<requirement>` children plus the row's own, `MinEffectGroup::ParseXml`
+  IL=103 / `PassiveEffect::ParsePassiveEffect` IL=423) into
+  `buffs.Passive.reqs`, and `buffs.trackedDeltasAt` refuses a row whose gates
+  do not evaluate true. Attachment is wired for `progression.xml` only:
+  `buffs.zig`'s passive scan is still a flat walk over the buff body with no
+  effect_group context, so buff rows carry no gates yet (see the buffs.xml
+  measurement below).
+  - Fixed by it: `perkHealingFactor`'s `HealthChangeOT` row is gated
+    `!HasBuff buffStatusHungry03,buffStatusThirsty03`, and it folded
+    unconditionally before, so a starving or dehydrated player regenerated HP.
+    Scenario `a gated perk row stops folding when its requirement fails` runs
+    the real survival pass both ways.
+  - `PlayerExpGain` still is not consumed at all. Stock multiplies through
+    `EffectManager.GetValue(87 = PlayerExpGain, ...)` inside
+    `Progression::AddLevelExp` (IL=161) when `useBonus` is set - true for
+    harvest (GameUtils IL=2995), magazine MinEvent (`_xpOther`) and quest
+    (`RewardExp`), false for the kill (`EntityPlayer.AddKillXP` IL=89 passes
+    `ldc.i4.0`). The stock perk rows are gated
     (`HoldingItemHasTags tags="perkMiner69r"`, `ItemHasTags tags="miningTool"`,
-    `IsNight`), so unfolding them applies a tool- and time-conditional XP
-    modifier always. zdtd does not consume `PlayerExpGain` at all today.
-  - `RandomRoll` gates (50 rows) silently become unconditional.
-  Both need the same closing work: parse each row's `<requirement>` children
-  and evaluate them against the live player/context before folding. That is the
-  requirement-evaluator surface ADR 0023/0024 scoped, and it is the honest
-  blocker on this row rather than "which stats to track".
-
-  **Scope measured 2026-09-11 (round 10).** The 913 elements are not the
-  evaluator's vocabulary: only 15 passive rows carry a name the tracked VM
-  actually folds, and 12 of those 15 are gated. Filtering to *those* groups
-  gives the requirement kinds an evaluator must cover to fix the VM:
-  `!HasBuff` 11, `ProgressionLevel` 8, `!IsAttachedToEntity` 6, `RandomRoll` 5,
-  `IsAlive` 5, `InBiome` 2, `EntityHasMovementTag`/`CVarCompare`/
-  `EntityTagCompare`/`IsIndoors` 1 each. So the VM's own gated surface is
-  twelve rows, not six hundred and forty-eight - most `ProgressionLevel` rows
-  gate weapon/damage/craft passives that the client or a verdict plugin owns.
-  Two consequences for whoever implements it: (a) five of the ten kinds are
-  pure state reads the sim already holds (`ProgressionLevel`, `HasBuff`,
-  `IsAlive`, `IsAttachedToEntity`, `CVarCompare`), so they can land first
-  without new plumbing; (b) `RandomRoll` cannot be folded per tick the way the
-  other kinds can - a chance gate re-rolled on the max-stat recompute would
-  flicker a player's max HP every 50 ms, so it needs the roll pinned to a
-  stable seed/period before it is evaluated at all.
-  *Anchors (requirement sweep):* `src/assets/progression.zig` (`scanPassives`),
-  `src/assets/buffs.zig` (`Passive`/`trackedDeltasAt`),
+    `IsNight`), so the evaluator is a prerequisite for that row, not the row
+    itself.
+  - Implemented kinds: `ProgressionLevel`, `PlayerLevel`, `HasBuff`,
+    `IsAlive`, `IsAttachedToEntity`, `InBiome`. The rest (measured vocabulary:
+    `ItemHasTags`, `HoldingItemHasTags`, `CVarCompare`, `RandomRoll`,
+    `EntityTagCompare`, `EntityHasMovementTag`, `IsNight`, `IsIndoors`,
+    `StatComparePercCurrentToMax`, `HitLocation`, ...) **fail closed** and are
+    counted in `apm` `requirement_unsupported`, so the gap is visible instead
+    of silently passing. `RandomRoll` additionally cannot be folded per tick
+    the way the pure state reads can: a chance gate re-rolled on the max-stat
+    recompute would flicker max HP every 50 ms, so it needs the roll pinned to
+    a stable seed/period before it is evaluated at all.
+  - The `tags=` attribute on a `passive_effect` is a second, separate gate
+    (`PassiveEffect::RequirementsMet` IL=17 calls `hasMatchingTag` before the
+    requirement group; an empty query tag set never matches a tagged row). The
+    VM's fold is an untagged query, so a tag-scoped row should not join it. Not
+    fixed here: `perkRuleOneCardio`'s `StaminaChangeOT tags="running,swimmingRun"`
+    currently joins the idle-regen total, and `buffStatusCheck02`/`god` carry
+    `tags="running"`/`tags="coredamageresist"` rows whose stock query tags are
+    not RE'd yet.
+  - **buffs.xml is the larger half of the same gap, measured 2026-09-11:**
+    effect_group-scoped, 130 applied tracked rows and 63 of them gated, over 18
+    kinds (`!HasBuff` 79, `CVarCompare` 76, `ProgressionLevel` 50, `PlayerLevel`
+    44, `HoldingItemHasTags` 27, `StatComparePercCurrentToMax` 25, ...). There
+    is no effect_group nesting in stock buffs.xml (max depth 1), so the same
+    `scanEffectGroup` shape applies once the buff parser stops being a flat
+    walk; the evaluator then needs the stat-comparison kinds
+    (`StatComparePercCurrentToMax`/`StatCompareCurrent`) that the triggered
+    engine already resolves for its own gate.
+  - `<book>` blocks (152) joined the catalog this round: a book is a
+    progression value items.xml grants with `SetProgressionLevel level="-1"`,
+    and before this a read almanac stored no level and folded no passive. This
+    exposed a second defect: `curveValueAtLevels` returned 0 for a row with a
+    single `level=` anchor (`PassiveEffect::ModValue` IL=161 applies
+    `values[0]` when `FloorToInt(level) == FloorToInt(levels[0])`), which is
+    the shape of every book row and 148 progression rows.
+  *Anchors (requirement sweep):* `src/assets/requirements.zig` (parser +
+  evaluator), `src/assets/progression.zig` (`scanEffectGroup`/`scanRequirements`),
+  `src/assets/buffs.zig` (`Passive.reqs`/`trackedDeltasAt`/`curveValueAtLevels`),
+  `src/server/game/tick.zig` (`req_ctx`),
+  `_global/MinEffectGroup.il.txt:244` (`ParseXml`),
+  `_global/PassiveEffect.il.txt:180` (`RequirementsMet`),
+  `_global/PassiveEffect.il.txt:254` (`ParsePassiveEffect`),
+  `_global/RequirementBase.il.txt:100` (`compareValues`),
+  `_global/RequirementBase.il.txt:217` (`ParseRequirementGroup`),
+  `_global/RequirementGroup.il.txt:105` (`EvalAnd`),
+  `_global/HasBuff.il.txt:5`, `_global/InBiome.il.txt:5`,
+  `_global/ProgressionLevel.il.txt:5`,
   `_global/Progression.il.txt:329` (`AddLevelExp`),
-  `_global/EntityPlayer.il.txt:3620` (`AddKillXP`)
+  `_global/EntityPlayer.il.txt:3608` (`AddKillXP`)
 
 - **Crafting skills / magazines / recipe unlock by progression** `WORKS` `(2026-09-08)`
   `unlock_entry` gates parse from progression.xml. Magazines (`AddProgressionLevel`

@@ -1,7 +1,8 @@
-//! progression.xml: level curve + attribute/perk catalog (names, max levels,
-//! costs) + the perk/attribute passive_effect rows (the 649-row surface the
-//! passive-effects VM folds over its tracked stats). Perk requirement graphs
-//! and effect application are progressive; the catalog + effect rows are loaded.
+//! progression.xml: level curve + attribute/perk/book catalog (names, max
+//! levels, costs) + the perk/attribute/book passive_effect rows (the surface
+//! the passive-effects VM folds over its tracked stats) with the `<requirement>`
+//! gates stock applies to each row. Requirement evaluation lives in
+//! `requirements.zig`; effect application is progressive.
 
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
@@ -9,6 +10,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const buffs = @import("buffs.zig");
+const requirements = @import("requirements.zig");
 
 // zdtd storage bounds, not stock rules; stock has no limit on either. Measured
 // against V3.2.0 `Data/Config` (2026-09-04): progression.xml defines 8
@@ -66,15 +68,19 @@ pub const AttrDef = struct {
 };
 
 /// Perk catalog row; max_level default 5 before progression.xml loads (stock
-/// XML ships per-perk max levels via <perk max_level="...">).
+/// XML ships per-perk max levels via <perk max_level="...">). A `<book>` block
+/// parses into the same row: same attributes, same `<effect_group>` children,
+/// and a book is a progression value items.xml grants via
+/// SetProgressionLevel(-1).
 pub const PerkDef = struct {
     name: []const u8 = "",
     max_level: u8 = 5,
-    /// Parent attribute name if nested under one; empty if free.
+    /// Parent attribute/skill name if nested under one; empty if free.
     parent_attr: []const u8 = "",
     /// passive_effect rows in the perk body (progression.xml). The VM folds
-    /// the tracked subset (buffs.trackedDeltasFrom); perk state is not applied
-    /// yet (perk runtime open), parsed so the effect surface is data.
+    /// the tracked subset (buffs.trackedDeltasFrom) gated by each row's
+    /// requirements; perk state is not applied yet (perk runtime open), parsed
+    /// so the effect surface is data.
     passives: []const buffs.Passive = &.{},
 };
 
@@ -138,33 +144,42 @@ fn parseCurve(clean: []const u8) LevelCurve {
     return c;
 }
 
-/// One purchased progression value (attribute/perk) on a player. Shared with
-/// the server Client ledger (server/game/types.zig) so the VM can fold the
-/// player's perk levels directly.
-pub const SkillLevel = struct {
-    name: []const u8 = "",
-    level: u8 = 0,
-};
+/// One purchased progression value (attribute/perk/book) on a player. Shared
+/// with the server Client ledger (server/game/types.zig) so the VM can fold the
+/// player's perk levels directly, and with the requirement evaluator, whose
+/// `ProgressionLevel` gate reads exactly this shape.
+pub const SkillLevel = requirements.NameLevel;
 
 /// Level-scaled tracked deltas for one purchased progression value: folds its
-/// passive rows at `level` (curve segment i applies at level i+1). Revertible
-/// by recompute-from-set like the buff VM (removing the level drops its
-/// deltas exactly).
-pub fn trackedDeltasAtLevel(def: anytype, level: u8) buffs.TrackedDeltas {
-    return buffs.trackedDeltasAt(def.passives, level);
+/// passive rows at `level` (curve segment i applies at level i+1), gated by the
+/// row requirements. Revertible by recompute-from-set like the buff VM
+/// (removing the level drops its deltas exactly).
+pub fn trackedDeltasAtLevel(
+    def: anytype,
+    level: u8,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+) buffs.TrackedDeltas {
+    return buffs.trackedDeltasAt(def.passives, level, ctx, counts);
 }
 
 /// Combined tracked deltas over a player's purchased progression levels
-/// (attributes + perks). No allocation; the fold is bounded by the 64-skill
-/// ledger cap.
-pub fn perkTotals(pt: *const Table, skill_levels: []const SkillLevel) buffs.TrackedDeltas {
+/// (attributes + perks + books). No allocation; the fold is bounded by the
+/// skill-level ledger cap. `ctx` carries the live player state the row gates
+/// read; `counts` accumulates the gate accounting for the caller's counters.
+pub fn perkTotals(
+    pt: *const Table,
+    skill_levels: []const SkillLevel,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+) buffs.TrackedDeltas {
     var out: buffs.TrackedDeltas = .{};
     for (skill_levels) |sl| {
         if (sl.level == 0) continue;
         var found = false;
         for (pt.attributes) |a| {
             if (std.mem.eql(u8, a.name, sl.name)) {
-                out = buffs.deltasPlus(out, trackedDeltasAtLevel(&a, sl.level));
+                out = buffs.deltasPlus(out, trackedDeltasAtLevel(&a, sl.level, ctx, counts));
                 found = true;
                 break;
             }
@@ -172,7 +187,7 @@ pub fn perkTotals(pt: *const Table, skill_levels: []const SkillLevel) buffs.Trac
         if (found) continue;
         for (pt.perks) |pk| {
             if (std.mem.eql(u8, pk.name, sl.name)) {
-                out = buffs.deltasPlus(out, trackedDeltasAtLevel(&pk, sl.level));
+                out = buffs.deltasPlus(out, trackedDeltasAtLevel(&pk, sl.level, ctx, counts));
                 break;
             }
         }
@@ -180,43 +195,219 @@ pub fn perkTotals(pt: *const Table, skill_levels: []const SkillLevel) buffs.Trac
     return out;
 }
 
-/// Scan a perk/attribute body for `<passive_effect name operation value>`
-/// rows (mirror of buffs.zig's parse; curve values keep their first segment).
+/// End index (exclusive) of the element whose open tag starts at `open_at`,
+/// including its close tag unless it is self-closing. Stock XML does not nest
+/// same-name elements, so the first close tag ends it.
+fn elementEnd(body: []const u8, open_at: usize) usize {
+    const gt = std.mem.findPos(u8, body, open_at, ">") orelse return body.len;
+    if (gt > open_at and body[gt - 1] == '/') return gt + 1;
+    var name_end = open_at + 1;
+    while (name_end < gt and !std.ascii.isWhitespace(body[name_end]) and
+        body[name_end] != '/' and body[name_end] != '>') name_end += 1;
+    const name = body[open_at + 1 .. name_end];
+    if (name.len == 0 or name.len + 3 > 64) return gt + 1;
+    var close_buf: [64]u8 = undefined;
+    close_buf[0] = '<';
+    close_buf[1] = '/';
+    @memcpy(close_buf[2..][0..name.len], name);
+    close_buf[2 + name.len] = '>';
+    const close_tag = close_buf[0 .. name.len + 3];
+    const close = std.mem.findPos(u8, body, gt, close_tag) orelse return body.len;
+    return close + close_tag.len;
+}
+
+/// The element's direct `<requirement>` children, in document order.
+/// `RequirementBase::ParseRequirementGroup` (IL=148) reads
+/// `Elements("requirement")`, i.e. direct children only: a requirement nested
+/// in a triggered_effect or in a passive_effect is not a group gate.
+fn scanRequirements(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    open_at: usize,
+    out: *std.ArrayList(requirements.Requirement),
+) !void {
+    const gt = std.mem.findPos(u8, body, open_at, ">") orelse return;
+    if (gt > open_at and body[gt - 1] == '/') return;
+    const end = elementEnd(body, open_at);
+    var i = gt + 1;
+    while (i < end) {
+        const lt = std.mem.findPos(u8, body, i, "<") orelse break;
+        if (lt >= end or std.mem.startsWith(u8, body[lt..], "</")) break;
+        if (std.mem.startsWith(u8, body[lt..], "<requirement")) {
+            try out.append(allocator, try requirements.parse(body, lt, arena));
+        }
+        i = elementEnd(body, lt);
+    }
+}
+
+/// Append the `<passive_effect>` whose open tag starts at `tag`, retaining the
+/// curve rows. Only called for a tag whose `name` exists.
+fn appendPassive(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    tag: usize,
+    pool: *std.ArrayList(buffs.Passive),
+) !void {
+    const en = xml.attr(body, tag, "name") orelse return;
+    const op_s = xml.attr(body, tag, "operation") orelse "base_add";
+    const val_s = xml.attr(body, tag, "value") orelse "0";
+    var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+    const curve_len = buffs.parseCurveValue(val_s, &curve);
+    var curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
+    const curve_levels_len = if (xml.attr(body, tag, "level")) |lv|
+        buffs.parseCurveLevels(lv, &curve_levels)
+    else
+        0;
+    try pool.append(allocator, .{
+        .name = try arena.dupe(u8, en),
+        .op = buffs.parseOp(op_s),
+        .value = curve[0],
+        .tags = try arena.dupe(u8, xml.attr(body, tag, "tags") orelse ""),
+        .curve = curve,
+        .curve_len = curve_len,
+        .curve_levels = curve_levels,
+        .curve_levels_len = curve_levels_len,
+    });
+}
+
+/// Append one gated passive row: the caller's accumulated group gates followed
+/// by the row's own nested ones, recorded as one contiguous range.
+fn appendGatedPassive(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    tag: usize,
+    group_reqs: []const requirements.Requirement,
+    pool: *std.ArrayList(buffs.Passive),
+    req_pool: *std.ArrayList(requirements.Requirement),
+    req_ranges: *std.ArrayList([2]usize),
+) !void {
+    if (xml.attr(body, tag, "name") == null) return;
+    const r0 = req_pool.items.len;
+    for (group_reqs) |r| try req_pool.append(allocator, r);
+    try scanRequirements(allocator, arena, body, tag, req_pool);
+    try req_ranges.append(allocator, .{ r0, req_pool.items.len - r0 });
+    try appendPassive(allocator, arena, body, tag, pool);
+}
+
+/// One `<effect_group>` body: the group's direct `<requirement>` children apply
+/// to every passive in it (MinEffectGroup::ParseXml IL=103 builds one
+/// RequirementGroup for the element, not a running per-row list), and each row
+/// may add its own. `passive_limit` is the absolute pool index the caller's
+/// `max_passives_per_def` budget ends at.
+fn scanEffectGroup(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    g: []const u8,
+    pool: *std.ArrayList(buffs.Passive),
+    req_pool: *std.ArrayList(requirements.Requirement),
+    req_ranges: *std.ArrayList([2]usize),
+    passive_limit: usize,
+) !void {
+    var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
+    defer group_reqs.deinit(allocator);
+    var i: usize = 0;
+    while (i < g.len) {
+        const lt = std.mem.findPos(u8, g, i, "<") orelse break;
+        if (std.mem.startsWith(u8, g[lt..], "</")) break;
+        if (std.mem.startsWith(u8, g[lt..], "<requirement")) {
+            try group_reqs.append(allocator, try requirements.parse(g, lt, arena));
+        }
+        i = elementEnd(g, lt);
+    }
+    i = 0;
+    while (i < g.len and pool.items.len < passive_limit) {
+        const lt = std.mem.findPos(u8, g, i, "<") orelse break;
+        if (std.mem.startsWith(u8, g[lt..], "</")) break;
+        if (std.mem.startsWith(u8, g[lt..], "<passive_effect")) {
+            try appendGatedPassive(allocator, arena, g, lt, group_reqs.items, pool, req_pool, req_ranges);
+        }
+        i = elementEnd(g, lt);
+    }
+}
+
+/// Scan a perk/attribute/book body for `<passive_effect>` rows with the gates
+/// stock applies to them. Rows inside an `<effect_group>` take that group's
+/// direct requirements; a row outside any group takes only its own.
 fn scanPassives(
     allocator: std.mem.Allocator,
     arena: std.mem.Allocator,
     body: []const u8,
     pool: *std.ArrayList(buffs.Passive),
-) !usize {
+    req_pool: *std.ArrayList(requirements.Requirement),
+    req_ranges: *std.ArrayList([2]usize),
+) !void {
     const p0 = pool.items.len;
-    var j: usize = 0;
-    while (j < body.len and pool.items.len - p0 < max_passives_per_def) {
-        const pi = std.mem.findPos(u8, body, j, "<passive_effect ") orelse break;
-        const en = xml.attr(body, pi, "name") orelse {
-            j = pi + 16;
+    var i: usize = 0;
+    while (i < body.len and pool.items.len - p0 < max_passives_per_def) {
+        const lt = std.mem.findPos(u8, body, i, "<") orelse break;
+        if (std.mem.startsWith(u8, body[lt..], "</")) break;
+        if (std.mem.startsWith(u8, body[lt..], "<effect_group")) {
+            const gt = std.mem.findPos(u8, body, lt, ">") orelse break;
+            if (gt > lt and body[gt - 1] == '/') {
+                i = gt + 1;
+                continue;
+            }
+            const close = std.mem.findPos(u8, body, gt, "</effect_group>") orelse break;
+            try scanEffectGroup(allocator, arena, body[gt + 1 .. close], pool, req_pool, req_ranges, p0 + max_passives_per_def);
+            i = close + 16;
+            continue;
+        }
+        if (std.mem.startsWith(u8, body[lt..], "<passive_effect")) {
+            try appendGatedPassive(allocator, arena, body, lt, &.{}, pool, req_pool, req_ranges);
+        }
+        i = elementEnd(body, lt);
+    }
+}
+
+/// One `<perk>`/`<book>` element body: catalog row plus its passive rows. Both
+/// element names carry the same attributes (name, max_level, parent) and the
+/// same `<effect_group>` children.
+fn scanProgressionBlocks(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    clean: []const u8,
+    comptime open_tag: []const u8,
+    comptime close_tag: []const u8,
+    list: *std.ArrayList(PerkDef),
+    passives: *std.ArrayList(buffs.Passive),
+    reqs: *std.ArrayList(requirements.Requirement),
+    req_ranges: *std.ArrayList([2]usize),
+    ranges: *std.ArrayList([2]usize),
+    limit: usize,
+) !void {
+    var i: usize = 0;
+    while (i < clean.len and list.items.len < limit) {
+        const pi = std.mem.findPos(u8, clean, i, open_tag) orelse break;
+        const name = xml.attr(clean, pi, "name") orelse {
+            i = pi + open_tag.len;
             continue;
         };
-        const op_s = xml.attr(body, pi, "operation") orelse "base_add";
-        const val_s = xml.attr(body, pi, "value") orelse "0";
-        var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
-        const curve_len = buffs.parseCurveValue(val_s, &curve);
-        var curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
-        const curve_levels_len = if (xml.attr(body, pi, "level")) |lv|
-            buffs.parseCurveLevels(lv, &curve_levels)
+        var max_l: u8 = 5;
+        if (xml.attr(clean, pi, "max_level")) |v| max_l = std.fmt.parseInt(u8, v, 10) catch 5;
+        // parent: the row's own `parent` attribute (a skill/attribute name in
+        // stock, e.g. parent="skillPerceptionCombat"). The old walk-back grabbed
+        // the last <attribute> in the file, so every perk resolved to the same
+        // wrong attribute.
+        var parent: []const u8 = "";
+        if (xml.attr(clean, pi, "parent")) |pn| parent = try arena.dupe(u8, pn);
+        const gt = std.mem.findPos(u8, clean, pi, ">") orelse break;
+        const close = if (gt > pi and clean[gt - 1] == '/')
+            gt + 1
         else
-            0;
-        try pool.append(allocator, .{
-            .name = try arena.dupe(u8, en),
-            .op = buffs.parseOp(op_s),
-            .value = curve[0],
-            .curve = curve,
-            .curve_len = curve_len,
-            .curve_levels = curve_levels,
-            .curve_levels_len = curve_levels_len,
+            std.mem.findPos(u8, clean, gt, close_tag) orelse break;
+        const r0 = passives.items.len;
+        try scanPassives(allocator, arena, clean[gt + 1 .. close], passives, reqs, req_ranges);
+        try list.append(allocator, .{
+            .name = try arena.dupe(u8, name),
+            .max_level = max_l,
+            .parent_attr = parent,
         });
-        j = pi + 16;
+        try ranges.append(allocator, .{ r0, passives.items.len - r0 });
+        i = pi + open_tag.len;
     }
-    return pool.items.len - p0;
 }
 
 pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
@@ -238,6 +429,10 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     defer perks.deinit(allocator);
     var passives_list: std.ArrayList(buffs.Passive) = .empty;
     defer passives_list.deinit(allocator);
+    var reqs_list: std.ArrayList(requirements.Requirement) = .empty;
+    defer reqs_list.deinit(allocator);
+    var req_ranges: std.ArrayList([2]usize) = .empty;
+    defer req_ranges.deinit(allocator);
     var perk_ranges: std.ArrayList([2]usize) = .empty;
     defer perk_ranges.deinit(allocator);
 
@@ -279,43 +474,16 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
             .cost_mult = def_mult,
         });
         const ar0 = passives_list.items.len;
-        _ = try scanPassives(allocator, arena, clean[agt + 1 .. aclose], &passives_list);
+        try scanPassives(allocator, arena, clean[agt + 1 .. aclose], &passives_list, &reqs_list, &req_ranges);
         try attr_ranges.append(allocator, .{ ar0, passives_list.items.len - ar0 });
         i = ai + 11;
     }
 
-    i = 0;
-    while (i < clean.len and perks.items.len < max_perks) {
-        const pi = std.mem.findPos(u8, clean, i, "<perk ") orelse break;
-        const pname = xml.attr(clean, pi, "name") orelse {
-            i = pi + 6;
-            continue;
-        };
-        var max_l: u8 = 5;
-        if (xml.attr(clean, pi, "max_level")) |v| {
-            max_l = std.fmt.parseInt(u8, v, 10) catch 5;
-        }
-        // parent: the perk row's own `parent` attribute (a skill/attribute
-        // name in stock, e.g. parent="skillPerceptionCombat"). The old
-        // walk-back grabbed the last <attribute> in the file, so every perk
-        // resolved to the same wrong attribute.
-        var parent: []const u8 = "";
-        if (xml.attr(clean, pi, "parent")) |pn| parent = try arena.dupe(u8, pn);
-        const pgt = std.mem.findPos(u8, clean, pi, ">") orelse break;
-        const pclose = if (pgt > pi and clean[pgt - 1] == '/')
-            pgt + 1
-        else
-            std.mem.findPos(u8, clean, pgt, "</perk>") orelse break;
-        const pr0 = passives_list.items.len;
-        _ = try scanPassives(allocator, arena, clean[pgt + 1 .. pclose], &passives_list);
-        try perks.append(allocator, .{
-            .name = try arena.dupe(u8, pname),
-            .max_level = max_l,
-            .parent_attr = parent,
-        });
-        try perk_ranges.append(allocator, .{ pr0, passives_list.items.len - pr0 });
-        i = pi + 6;
-    }
+    try scanProgressionBlocks(allocator, arena, clean, "<perk ", "</perk>", &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks); // `<book>` blocks share the perk shape (name, max_level, parent,
+    // effect_group passives) and are progression values in their own right:
+    // items.xml grants them with SetProgressionLevel level="-1". Without them
+    // in the catalog a read almanac stores no level and folds no passive.
+    try scanProgressionBlocks(allocator, arena, clean, "<book ", "</book>", &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks);
 
     const passive_pool = try arena.alloc(buffs.Passive, passives_list.items.len);
     @memcpy(passive_pool, passives_list.items);
@@ -328,6 +496,14 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     @memcpy(pslice, perks.items);
     for (pslice, perk_ranges.items) |*p, rg| {
         p.passives = passive_pool[rg[0] .. rg[0] + rg[1]];
+    }
+    // Every folded row has one range of gates in the pool (empty for ungated
+    // rows); a mismatch means the walk and the append drifted apart.
+    if (req_ranges.items.len != passive_pool.len) return error.MalformedProgression;
+    const req_pool = try arena.alloc(requirements.Requirement, reqs_list.items.len);
+    @memcpy(req_pool, reqs_list.items);
+    for (passive_pool, req_ranges.items) |*p, rg| {
+        p.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
     }
 
     // Crafting skills + unlock_entry gates (99 rows in stock): the item
@@ -535,9 +711,10 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
     // toughness perks, BlockDamage on SexRex); the parse must not truncate.
     var total: usize = 0;
     var tracked_hits: usize = 0;
+    var counts: requirements.Counts = .{};
     for (t.perks) |p| {
         total += p.passives.len;
-        const d = buffs.trackedDeltasFrom(p.passives);
+        const d = buffs.trackedDeltasFrom(p.passives, .{}, &counts);
         if (d.general_resist != 0 or d.phys_resist != 0 or d.hp_max != 0 or d.stamina_ot != 0) tracked_hits += 1;
     }
     for (t.attributes) |a| total += a.passives.len;
@@ -557,10 +734,26 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
     }
     if (heal) |h| {
         try std.testing.expect(h.passives.len > 0);
-        const d5 = buffs.trackedDeltasAt(h.passives, 5);
+        // The row is gated `!HasBuff buffStatusHungry03,buffStatusThirsty03`;
+        // with the buff catalog absent but no buffs active the gate is decided
+        // (empty set) so the regen folds.
+        try std.testing.expect(h.passives[0].reqs.len > 0);
+        const d5 = buffs.trackedDeltasAt(h.passives, 5, .{}, &counts);
         try std.testing.expectApproxEqAbs(@as(f32, 0.16), d5.hp_ot, 0.0001);
-        const d0 = buffs.trackedDeltasAt(h.passives, 0);
+        const d0 = buffs.trackedDeltasAt(h.passives, 0, .{}, &counts);
         try std.testing.expect(!d0.any());
+        // Starving for water: the row must not fold at all.
+        const starving_ids = [_]u16{3};
+        const names = requirements.BuffNames{ .ctx = undefined, .resolve = struct {
+            fn f(_: *const anyopaque, name: []const u8) ?u16 {
+                return if (std.ascii.eqlIgnoreCase(name, "buffStatusThirsty03")) 3 else null;
+            }
+        }.f };
+        const starving = buffs.trackedDeltasAt(h.passives, 5, .{
+            .active_buffs = &starving_ids,
+            .buff_names = &names,
+        }, &counts);
+        try std.testing.expectEqual(@as(f32, 0), starving.hp_ot);
     }
     // Explicit level= anchors: perkFortitudeMastery HealthMax is level="4,5"
     // value="50,100" - the fold applies nothing below level 4 (the old
@@ -573,11 +766,31 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
         }
     }
     if (fort) |f2| {
-        const d1 = buffs.trackedDeltasAt(f2.passives, 1);
+        const d1 = buffs.trackedDeltasAt(f2.passives, 1, .{}, &counts);
         try std.testing.expectEqual(@as(f32, 0), d1.hp_max);
-        const d5 = buffs.trackedDeltasAt(f2.passives, 5);
+        const d5 = buffs.trackedDeltasAt(f2.passives, 5, .{}, &counts);
         try std.testing.expectApproxEqAbs(@as(f32, 100), d5.hp_max, 0.0001);
     }
+    // `<book>` blocks parse into the same catalog: the Fireman's Almanac
+    // Complete passive is InBiome-gated, so it folds only in that biome.
+    var book: ?PerkDef = null;
+    for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkFiremansAlmanacComplete")) {
+            book = pk;
+            break;
+        }
+    }
+    try std.testing.expect(book != null);
+    const b = book.?;
+    try std.testing.expectEqual(@as(u8, 1), b.max_level);
+    try std.testing.expect(b.passives.len > 0);
+    var in_biome = false;
+    for (b.passives) |p| {
+        if (std.mem.eql(u8, p.name, "StaminaChangeOT") and p.reqs.len > 0) in_biome = true;
+    }
+    try std.testing.expect(in_biome);
+    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 1 }, &counts).stamina_ot);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 8 }, &counts).stamina_ot, 0.0001);
 }
 
 test "perkTotals folds purchased perk levels level-scaled and reverts" {
@@ -596,23 +809,164 @@ test "perkTotals folds purchased perk levels level-scaled and reverts" {
         },
     };
     const pt = Table{ .attributes = attrs[0..], .perks = perks[0..] };
+    var counts: requirements.Counts = .{};
     // No purchases: no deltas.
     var levels = [_]SkillLevel{.{}} ** 4;
-    try std.testing.expect(!perkTotals(&pt, &levels).any());
+    try std.testing.expect(!perkTotals(&pt, &levels, .{}, &counts).any());
     // Healing Factor level 1: small regen; level 5: the full curve value.
     levels[0] = .{ .name = "perkHealingFactor", .level = 1 };
-    try std.testing.expectApproxEqAbs(@as(f32, 0.011), perkTotals(&pt, &levels).hp_ot, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.011), perkTotals(&pt, &levels, .{}, &counts).hp_ot, 0.0001);
     levels[0].level = 5;
     levels[1] = .{ .name = "perkPackMule", .level = 3 };
-    const t5 = perkTotals(&pt, &levels);
+    const t5 = perkTotals(&pt, &levels, .{}, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, 0.16), t5.hp_ot, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 1), t5.general_resist, 0.0001);
     // Revertible: dropping the level drops its deltas exactly.
     levels[1].level = 0;
-    const back = perkTotals(&pt, &levels);
+    const back = perkTotals(&pt, &levels, .{}, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, 0), back.general_resist, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.16), back.hp_ot, 0.0001);
     // Unknown names are ignored (fail closed).
     levels[0].name = "notAPerk";
-    try std.testing.expect(!perkTotals(&pt, &levels).any());
+    try std.testing.expect(!perkTotals(&pt, &levels, .{}, &counts).any());
+    // The ProgressionLevel gate reads the same ledger the fold walks: a row
+    // gated on its own progression name folds only once that level is held.
+    const gated = [_]PerkDef{.{
+        .name = "perkFortitudeMastery",
+        .max_level = 5,
+        .passives = &.{.{
+            .name = "HealthMax",
+            .op = .base_add,
+            .curve = .{ 0, 0, 0, 50, 100, 0, 0, 0 },
+            .curve_len = 5,
+            .reqs = &.{.{
+                .kind = .progression_level,
+                .op = .ge,
+                .value = 1,
+                .arg = "perkFortitudeMastery",
+            }},
+        }},
+    }};
+    const gt = Table{ .perks = gated[0..] };
+    const held = [_]SkillLevel{.{ .name = "perkFortitudeMastery", .level = 5 }};
+    const gate_ctx = requirements.Ctx{ .levels = &held };
+    try std.testing.expectApproxEqAbs(@as(f32, 100), perkTotals(&gt, &held, gate_ctx, &counts).hp_max, 0.0001);
+    // The gate blocks when the ctx ledger does not corroborate the folded
+    // level (stock resolves the gate against the target's Progression, not
+    // against the level the caller happens to fold at).
+    try std.testing.expectEqual(@as(f32, 0), perkTotals(&gt, &held, .{
+        .levels = &.{.{ .name = "other", .level = 1 }},
+    }, &counts).hp_max);
+}
+
+test "effect_group and row requirements attach to the right passives" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/progression.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<progression>
+        \\  <level max_level="10" exp_to_level="100" experience_multiplier="1.1" skill_points_per_level="1" clamp_exp_cost_at_level="5"/>
+        \\  <attributes min_level="1" max_level="10" base_skill_point_cost="1" cost_multiplier_per_level="1"/>
+        \\  <perks>
+        \\    <perk name="perkGated" max_level="5" parent="skillTest">
+        \\      <effect_group>
+        \\        <requirement name="InBiome" biome="8"/>
+        \\        <passive_effect name="StaminaMax" operation="base_add" level="1" value="25"/>
+        \\        <passive_effect name="HealthMax" operation="base_add" level="1" value="50">
+        \\          <requirement name="!HasBuff" buff="buffBleeding"/>
+        \\        </passive_effect>
+        \\        <triggered_effect trigger="onSelfPrimaryActionEnd" action="ModifyStats" stat="Health" operation="add" value="1">
+        \\          <requirement name="PlayerLevel" operation="GTE" value="1"/>
+        \\        </triggered_effect>
+        \\        <passive_effect name="FoodMax" operation="base_add" level="1" value="10"/>
+        \\      </effect_group>
+        \\      <effect_group>
+        \\        <passive_effect name="WaterMax" operation="base_add" level="1" value="5"/>
+        \\      </effect_group>
+        \\    </perk>
+        \\    <book name="perkBookTest" max_level="1" parent="skillTest">
+        \\      <effect_group>
+        \\        <requirement name="ProgressionLevel" progression_name="perkGated" operation="GTE" value="1"/>
+        \\        <passive_effect name="HealthChangeOT" operation="base_add" level="1" value="0.5"/>
+        \\      </effect_group>
+        \\    </book>
+        \\  </perks>
+        \\</progression>
+    );
+    var t = try loadTableFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    var perk: ?PerkDef = null;
+    var book: ?PerkDef = null;
+    for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkGated")) perk = pk;
+        if (std.mem.eql(u8, pk.name, "perkBookTest")) book = pk;
+    }
+    try std.testing.expect(perk != null and book != null);
+    const p = perk.?;
+    // Four passives over the two groups. The triggered_effect's requirement is
+    // not a group gate and its row is not a passive.
+    try std.testing.expectEqual(@as(usize, 4), p.passives.len);
+    // StaminaMax: the group gate only.
+    try std.testing.expectEqual(@as(usize, 1), p.passives[0].reqs.len);
+    try std.testing.expectEqual(requirements.Kind.in_biome, p.passives[0].reqs[0].kind);
+    // HealthMax: the group gate plus its own nested requirement.
+    try std.testing.expectEqual(@as(usize, 2), p.passives[1].reqs.len);
+    try std.testing.expectEqual(requirements.Kind.has_buff, p.passives[1].reqs[1].kind);
+    try std.testing.expect(p.passives[1].reqs[1].negated);
+    // FoodMax still takes the group gate.
+    try std.testing.expectEqual(@as(usize, 1), p.passives[2].reqs.len);
+    // WaterMax is in the second group, which has no requirement.
+    try std.testing.expectEqual(@as(usize, 0), p.passives[3].reqs.len);
+    var counts: requirements.Counts = .{};
+    const in8 = buffs.trackedDeltasAt(p.passives, 1, .{ .biome_id = 8 }, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, 25), in8.stamina_max, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 50), in8.hp_max, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), in8.food_max, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), in8.water_max, 0.0001);
+    // Wrong biome: the gated rows drop, the ungated second group stays. The
+    // single `level="1"` anchor applies at level 1 (not interpolated).
+    const in1 = buffs.trackedDeltasAt(p.passives, 1, .{ .biome_id = 1 }, &counts);
+    try std.testing.expectEqual(@as(f32, 0), in1.stamina_max);
+    try std.testing.expectEqual(@as(f32, 0), in1.hp_max);
+    try std.testing.expectEqual(@as(f32, 0), in1.food_max);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), in1.water_max, 0.0001);
+    // The book row is gated on the perk's level, so it needs the ledger entry.
+    const b = book.?;
+    try std.testing.expectEqual(@as(usize, 1), b.passives.len);
+    try std.testing.expectEqual(requirements.Kind.progression_level, b.passives[0].reqs[0].kind);
+    const ledger = [_]requirements.NameLevel{.{ .name = "perkGated", .level = 1 }};
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), buffs.trackedDeltasAt(b.passives, 1, .{ .levels = &ledger }, &counts).hp_ot, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{}, &counts).hp_ot);
+}
+
+test "a def stops at max_passives_per_def rows" {
+    // The bound is a zdtd storage cap, not a stock rule; it must hold across
+    // the effect_group walk (a group-at-a-time scan must not lose the per-row
+    // check the flat scan had) or a pathological modded body grows the pool.
+    const a = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(a);
+    try buf.appendSlice(a, "<progression><attributes min_level=\"1\" max_level=\"10\"/><perks><perk name=\"perkMany\" max_level=\"5\"><effect_group><requirement name=\"InBiome\" biome=\"8\"/>");
+    var i: usize = 0;
+    while (i < max_passives_per_def + 8) : (i += 1) {
+        try buf.appendSlice(a, "<passive_effect name=\"StaminaMax\" operation=\"base_add\" level=\"1\" value=\"1\"/>");
+    }
+    try buf.appendSlice(a, "</effect_group></perk></perks></progression>");
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/progression.xml", .{dir});
+    try io_fs.writeFile(path, buf.items);
+    var t = try loadTableFromPath(a, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(usize, 1), t.perks.len);
+    try std.testing.expectEqual(max_passives_per_def, t.perks[0].passives.len);
+    var counts: requirements.Counts = .{};
+    const d = buffs.trackedDeltasAt(t.perks[0].passives, 1, .{ .biome_id = 8 }, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, @floatFromInt(max_passives_per_def)), d.stamina_max, 0.0001);
 }

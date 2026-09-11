@@ -31,6 +31,7 @@ const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const ecs_buff = @import("../../ecs/buff.zig");
 const assets_progression = @import("../../assets/progression.zig");
+const requirements = @import("../../assets/requirements.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
@@ -4095,7 +4096,8 @@ test "restored buffs re-apply through the effects VM (recompute-from-set)" {
         const cl = try g.attachJoinedClient(&capture);
         const ps = g.sim.playerByPeer(cl.slot).?;
         // The restored buff folds through the VM without any re-apply pass.
-        const totals = assets_buffs.effectTotals(&g.buffs, &g.sim.buffs[ps]);
+        var req_counts: requirements.Counts = .{};
+        const totals = assets_buffs.effectTotals(&g.buffs, &g.sim.buffs[ps], .{}, &req_counts);
         try std.testing.expectApproxEqAbs(@as(f32, 2), totals.hp_ot, 0.0001);
     }
 }
@@ -4170,8 +4172,62 @@ test "perk StaminaChangeOT joins the idle regen and StaminaMax applies" {
     try std.testing.expect(gained > 0.4 and gained < 0.45);
 }
 
-test "breaking a container spills its pre-filled contents" {
-    // 449 LootList blocks are CompositeTileEntity containers; their contents
+test "a gated perk row stops folding when its requirement fails" {
+    // perkHealingFactor's HealthChangeOT row is gated
+    // `!HasBuff buffStatusHungry03,buffStatusThirsty03` (progression.xml). The
+    // survival pass resolves that gate against the live BuffSet, so a starving
+    // or dehydrated player must not get the regen. Before the requirement
+    // evaluator existed the row folded unconditionally.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const h = &g.sim.health[ps];
+    h.base_max_hp = 100;
+    h.max_hp = 100;
+    cl.skill_levels[0] = .{ .name = "perkHealingFactor", .level = 5 };
+    cl.skill_level_n = 1;
+    // Stage 1 of both bars (40% of max): neither starving nor well fed, so the
+    // perk's HealthChangeOT is the only positive HP term.
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.4 * h.water_max;
+    try g.step();
+    try std.testing.expect(h.hp > 50);
+
+    // Dehydrated (1% of max -> stage 3): the stage buff goes active during the
+    // same pass, so the negated HasBuff gate refuses the regen.
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    try g.step();
+    const with_perk = h.hp;
+    try std.testing.expect(g.sim.buffs[ps].count() > 0);
+
+    // The same starved tick with the perk removed: an identical result is the
+    // proof the gated row contributed nothing.
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    cl.skill_level_n = 0;
+    try g.step();
+    try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
+}
+
+test "breaking a container spills its pre-filled contents" { // 449 LootList blocks are CompositeTileEntity containers; their contents
     // live in the sim container store and must drop on break (the eviction
     // path spilled them; the break path dropped nothing).
     var tmp = std.testing.tmpDir(.{});

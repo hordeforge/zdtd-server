@@ -58,8 +58,8 @@ a real client. Confirming the trader paths against a stock client remains
 open.
 `game.zig` delegates to 44 shards in
 `src/server/game/*.zig` aggregated through `src/server/root.zig`, and `c2s/*`
-owns all C2S domains. `GAP_ANALYSIS.md` scores 299 features: **296 `WORKS`,
-3 `PARTIAL`, 0 `MISSING`** (recounted 2026-09-04 from the per-feature markers;
+owns all C2S domains. `GAP_ANALYSIS.md` scores 300 features: **297 `WORKS`,
+3 `PARTIAL`, 0 `MISSING`** (recounted 2026-08-30 from the per-feature markers;
 see its scorecard for the per-area breakdown; 50 bullets carry ad-hoc labels
 and are not counted). Residuals are recorded
 inline per the "missing beats fake" rule - the honest frontier is the
@@ -80,6 +80,29 @@ check-xml-audit, check-release, make release) plus the release binary.
 
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
+
+## 2026-09-11 (progression `<requirement>` gates + `<book>` catalog)
+
+The passive-effects VM folded every tracked row regardless of its gates. The
+EffectManager `<requirement>` vocabulary now has one parser and evaluator
+(`src/assets/requirements.zig`, IL-anchored: `MinEffectGroup::ParseXml` reads
+the enclosing element's direct children, `PassiveEffect::ParsePassiveEffect`
+reads the row's own, `RequirementGroup::EvalAnd` ANDs them,
+`RequirementBase::compareValues` fixes the six relations). Six kinds evaluate
+against live player state (`ProgressionLevel`, `PlayerLevel`, `HasBuff`,
+`IsAlive`, `IsAttachedToEntity`, `InBiome`); everything else fails closed and
+increments the `apm` `requirement_unsupported` counter, so the vocabulary gap
+is measured, not silent. The fixed behaviour: `perkHealingFactor`'s regen no
+longer applies while a `buffStatusHungry03`/`buffStatusThirsty03` gate is
+active. `<book>` blocks (152) joined the catalog - a book is a progression
+value items.xml grants, and it was previously invisible, so reading an almanac
+stored no level and folded no passive - which exposed `curveValueAtLevels`
+returning 0 for a single `level=` anchor (every book row and 148 progression
+rows). Perk purchase was re-scored: `skillCostOf`'s parent-skill prerequisite
+denies every perk (the parent is a `<skill>` name that is never leveled), so
+the row moved `WORKS` -> `PARTIAL`.
+
+---
 
 ## Batch T 2026-08-30 (pointer-stable chunk store + join-burst pacing)
 

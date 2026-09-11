@@ -13,12 +13,39 @@ const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const assets_progression = @import("../../assets/progression.zig");
+const requirements = @import("../../assets/requirements.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
 const admin_cmds = @import("../admin_cmds.zig");
 const admin_xml = @import("../admin_xml.zig");
 const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
+
+/// Requirement-gate bridge: `HasBuff` resolves names through the loaded buffs
+/// table (`EntityBuffs::HasBuff` is case-insensitive). Living here keeps
+/// `assets/requirements.zig` free of a dependency on the buffs asset module,
+/// which imports it for `Passive.reqs`.
+const BuffNameLookup = struct {
+    table: *const assets_buffs.Table,
+
+    fn resolve(ctx: *const anyopaque, name: []const u8) ?u16 {
+        const self: *const BuffNameLookup = @ptrCast(@alignCast(ctx));
+        return self.table.indexOfName(name);
+    }
+};
+
+/// Active buff def ids in `set`, into `out`; returns the used prefix. Bounded
+/// by the fixed `BuffSet` slot count, so no allocation.
+fn activeBuffIds(set: *const ecs.components.BuffSet, out: []u16) []const u16 {
+    var n: usize = 0;
+    for (&set.slots) |*s| {
+        if (!s.active) continue;
+        if (n >= out.len) break;
+        out[n] = s.def_id;
+        n += 1;
+    }
+    return out[0..n];
+}
 
 /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
 /// Food/Water deplete with in-game time. Base drain is engine-driven
@@ -125,10 +152,28 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             const wanted = check_res.add_buffs[0..check_res.add_n];
             syncStageBuffs(self, c.entity_id, ps, wanted);
             const stages = assets_buffs.stagesFromWanted(wanted);
-            const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps]);
-            // Perk leg (level-scaled): purchased attribute/perk passives fold
-            // through the same VM surface, revertible by recompute-from-set.
-            const pvm = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n]);
+            // Requirement-gate context (ADR 0023 §2): the live player state a
+            // `<requirement>` reads. `attached_to_entity` stays false because
+            // the sim tracks no vehicle/attachment state yet.
+            var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+            const buff_lookup = BuffNameLookup{ .table = &self.buffs };
+            const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
+            const req_ctx = requirements.Ctx{
+                .levels = c.skill_levels[0..c.skill_level_n],
+                .player_level = c.level,
+                .alive = self.sim.alive[ps],
+                .biome_id = self.biomeIdAt(@trunc(self.sim.transform[ps].x), @trunc(self.sim.transform[ps].z)),
+                .active_buffs = activeBuffIds(&self.sim.buffs[ps], &buff_ids),
+                .buff_names = &buff_names,
+            };
+            var req_counts: requirements.Counts = .{};
+            const vm = assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], req_ctx, &req_counts);
+            // Perk leg (level-scaled): purchased attribute/perk/book passives
+            // fold through the same VM surface, revertible by
+            // recompute-from-set and gated per row by its requirements.
+            const pvm = assets_progression.perkTotals(&self.progression_table, c.skill_levels[0..c.skill_level_n], req_ctx, &req_counts);
+            self.harness.counters.add(.requirement_gates, req_counts.resolved);
+            self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
             // Armor: buff + perk PhysicalDamageResist join the mitigation like
             // stock GetTotalPhysicalArmorRating sums passive 41 on the wearer.
             self.sim.buff_phys_resist[ps] = vm.phys_resist + pvm.phys_resist;

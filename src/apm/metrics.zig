@@ -118,6 +118,13 @@ pub const CounterId = enum(u16) {
     /// Passive-effects VM recomputes (effectTotals + perkTotals folds) and
     /// triggered-engine evaluations in the survival pass.
     vm_recomputes,
+    /// `<requirement>` gates resolved on tracked passive rows in the VM folds
+    /// (pass or fail). Rises with purchased levels and active buffs.
+    requirement_gates,
+    /// `<requirement>` gates refused because the kind, target or operand is not
+    /// implemented. Every one fails its gate closed, so a non-zero value is
+    /// measured vocabulary gap, not a silent pass.
+    requirement_unsupported,
     _,
 };
 

@@ -5,6 +5,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
+const requirements = @import("requirements.zig");
 const components = @import("../ecs/components.zig");
 
 /// Storage cap on parsed buff defs, a zdtd bound rather than a stock rule.
@@ -62,6 +63,11 @@ pub const Passive = struct {
     /// piecewise-linear between (curveValueAtLevels). 0 anchors = implicit.
     curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len,
     curve_levels_len: u8 = 0,
+    /// `<requirement>` gates: the enclosing `<effect_group>`'s direct children
+    /// plus this row's own (MinEffectGroup::ParseXml IL=103 and
+    /// PassiveEffect::ParsePassiveEffect IL=423 both call
+    /// ParseRequirementGroup). Empty = ungated.
+    reqs: []const requirements.Requirement = &.{},
 };
 
 /// One `<triggered_effect action="ModifyStats" .../>` row. Stock drives
@@ -316,6 +322,13 @@ pub fn curveValueAt(level: u8, max_level: u8, curve: []const f32) f32 {
 pub fn curveValueAtLevels(level: u8, levels: []const f32, values: []const f32) f32 {
     if (level == 0 or levels.len == 0 or values.len != levels.len) return 0;
     const l: f32 = @floatFromInt(level);
+    // Single anchor: stock (PassiveEffect::ModValue IL=161) applies values[0]
+    // only when FloorToInt(level) == FloorToInt(levels[0]); it does not
+    // interpolate or extrapolate. This is the shape of every `<book>` passive
+    // row and 148 progression rows.
+    if (levels.len == 1) {
+        return if (@floor(l) == @floor(levels[0])) values[0] else 0;
+    }
     for (1..levels.len) |i| {
         const l0 = levels[i - 1];
         const l1 = levels[i];
@@ -751,7 +764,18 @@ fn addDeltas(a: *TrackedDeltas, b: TrackedDeltas) void {
 /// the pre-VM arithmetic, unchanged). `base_set` and any other op over a
 /// tracked name are omitted: without the per-entity base value the delta is
 /// not defined (recorded, not guessed).
-pub fn trackedDeltasAt(passives: []const Passive, level: u8) TrackedDeltas {
+///
+/// Each tracked row is gated first (ADR 0023 §2): its `<requirement>` list is
+/// evaluated against `ctx` and a row whose gates do not pass is not folded.
+/// `counts` accumulates the gate accounting for the caller's APM counters; the
+/// fold itself stays a pure recompute over the gated set, so removing a level
+/// still reverses its contribution exactly.
+pub fn trackedDeltasAt(
+    passives: []const Passive,
+    level: u8,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+) TrackedDeltas {
     var out: TrackedDeltas = .{};
     for (passives) |p| {
         const field = blk: {
@@ -760,6 +784,7 @@ pub fn trackedDeltasAt(passives: []const Passive, level: u8) TrackedDeltas {
             }
             break :blk null;
         } orelse continue;
+        if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
         const v = curveAt(p, level);
         switch (p.op) {
             .base_add => addTo(&out, field, v),
@@ -773,14 +798,14 @@ pub fn trackedDeltasAt(passives: []const Passive, level: u8) TrackedDeltas {
 }
 
 /// The level-1 (flat) variant, used by the buff VM.
-pub fn trackedDeltasFrom(passives: []const Passive) TrackedDeltas {
-    return trackedDeltasAt(passives, 1);
+pub fn trackedDeltasFrom(passives: []const Passive, ctx: requirements.Ctx, counts: *requirements.Counts) TrackedDeltas {
+    return trackedDeltasAt(passives, 1, ctx, counts);
 }
 
 /// Fold one buff's passive_effect rows over the tracked surface (the buff
 /// variant of trackedDeltasFrom).
-pub fn trackedDeltas(def: *const BuffDef) TrackedDeltas {
-    return trackedDeltasFrom(def.passives);
+pub fn trackedDeltas(def: *const BuffDef, ctx: requirements.Ctx, counts: *requirements.Counts) TrackedDeltas {
+    return trackedDeltasFrom(def.passives, ctx, counts);
 }
 
 /// Sum two delta sets (perk leg + buff leg, level-scaled).
@@ -792,12 +817,12 @@ pub fn deltasPlus(a: TrackedDeltas, b: TrackedDeltas) TrackedDeltas {
 
 /// Sum of the tracked deltas over an entity's active buffs (revertible by
 /// recomputation: removing a buff drops its contribution exactly).
-pub fn effectTotals(t: *const Table, set: *const components.BuffSet) TrackedDeltas {
+pub fn effectTotals(t: *const Table, set: *const components.BuffSet, ctx: requirements.Ctx, counts: *requirements.Counts) TrackedDeltas {
     var out: TrackedDeltas = .{};
     for (&set.slots) |*slot| {
         if (!slot.active) continue;
         if (t.byId(slot.def_id)) |def| {
-            addDeltas(&out, trackedDeltas(&def));
+            addDeltas(&out, trackedDeltas(&def, ctx, counts));
         }
     }
     return out;
@@ -1116,7 +1141,8 @@ test "survival numbers resolve from the shipped buffs.xml" {
     // lands in the tracked deltas and its stage-3 Health loss rate reads off
     // the def.
     const h3 = t.byName("buffStatusHungry03").?;
-    const d3 = trackedDeltas(&h3);
+    var counts: requirements.Counts = .{};
+    const d3 = trackedDeltas(&h3, .{}, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, -0.1), d3.stamina_ot, 0.001);
     try std.testing.expectApproxEqAbs(sv.starve_hp_per_s, hpLossPerSecond(&h3), 0.0001);
     // A starved player resolves to stage 3 for both bars.
@@ -1157,7 +1183,8 @@ test "trackedDeltas folds the tracked surface, omits base_set and untracked name
             .{ .name = "HarvestCount", .op = .base_add, .value = 3 }, // untracked
         },
     };
-    const d = trackedDeltas(&def);
+    var counts: requirements.Counts = .{};
+    const d = trackedDeltas(&def, .{}, &counts);
     try std.testing.expectEqual(@as(f32, 2), d.hp_ot);
     try std.testing.expectEqual(@as(f32, -0.1), d.stamina_ot);
     try std.testing.expectEqual(@as(f32, 8), d.phys_resist);
@@ -1178,21 +1205,22 @@ test "effectTotals sums active buffs and reverts exactly on removal" {
     const t = Table{ .defs = defs[0..] };
     var set: components.BuffSet = .{};
     set.slots[0] = .{ .active = true, .def_id = 0 };
-    const one = effectTotals(&t, &set);
+    var counts: requirements.Counts = .{};
+    const one = effectTotals(&t, &set, .{}, &counts);
     try std.testing.expectEqual(@as(f32, 2), one.hp_ot);
     try std.testing.expectEqual(@as(f32, 10), one.stamina_max);
     // A second active slot of the same def doubles the sum (additive deltas).
     set.slots[1] = .{ .active = true, .def_id = 0 };
-    const two = effectTotals(&t, &set);
+    const two = effectTotals(&t, &set, .{}, &counts);
     try std.testing.expectEqual(@as(f32, 4), two.hp_ot);
     try std.testing.expectEqual(@as(f32, 20), two.stamina_max);
     // Removal recomputes without it: reverts exactly (revertible effects).
     set.slots[1].active = false;
-    const back = effectTotals(&t, &set);
+    const back = effectTotals(&t, &set, .{}, &counts);
     try std.testing.expectEqual(@as(f32, 2), back.hp_ot);
     try std.testing.expectEqual(@as(f32, 10), back.stamina_max);
     set.slots[0].active = false;
-    try std.testing.expect(!effectTotals(&t, &set).any());
+    try std.testing.expect(!effectTotals(&t, &set, .{}, &counts).any());
 }
 
 test "addDeltas clamps pathological curve values to the sanity ceiling" {
@@ -1209,7 +1237,8 @@ test "addDeltas clamps pathological curve values to the sanity ceiling" {
     const t = Table{ .defs = defs[0..] };
     var set: components.BuffSet = .{};
     set.slots[0] = .{ .active = true, .def_id = 0 };
-    const totals = effectTotals(&t, &set);
+    var counts: requirements.Counts = .{};
+    const totals = effectTotals(&t, &set, .{}, &counts);
     try std.testing.expectEqual(tracked_delta_max, totals.hp_max);
     try std.testing.expectEqual(tracked_delta_max, totals.hp_ot);
     // NaN folds to 0 (fail closed), and a second huge buff still saturates.
@@ -1220,7 +1249,7 @@ test "addDeltas clamps pathological curve values to the sanity ceiling" {
     const defs2 = [_]BuffDef{ def, def2 };
     const t2 = Table{ .defs = defs2[0..] };
     set.slots[1] = .{ .active = true, .def_id = 1 };
-    const t2totals = effectTotals(&t2, &set);
+    const t2totals = effectTotals(&t2, &set, .{}, &counts);
     try std.testing.expectEqual(@as(f32, 0), t2totals.stamina_max);
     try std.testing.expectEqual(tracked_delta_max, t2totals.hp_max);
 }
@@ -1288,14 +1317,59 @@ test "trackedDeltasAt scales a perk curve to its level" {
         .{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5 },
         .{ .name = "GeneralDamageResist", .op = .base_add, .curve = .{ 0.05, 0.25, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 },
     };
-    const l1 = trackedDeltasAt(&passives, 1);
+    var counts: requirements.Counts = .{};
+    const l1 = trackedDeltasAt(&passives, 1, .{}, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, 0.011), l1.hp_ot, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.05), l1.general_resist, 0.0001);
-    const l5 = trackedDeltasAt(&passives, 5);
+    const l5 = trackedDeltasAt(&passives, 5, .{}, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, 0.16), l5.hp_ot, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0.25), l5.general_resist, 0.0001); // clamp
-    const l0 = trackedDeltasAt(&passives, 0);
+    const l0 = trackedDeltasAt(&passives, 0, .{}, &counts);
     try std.testing.expect(!l0.any());
+}
+
+test "a requirement-gated row is folded only when its gates pass" {
+    // The stock shape that matters: perkHealingFactor's HealthChangeOT row is
+    // gated `!HasBuff buffStatusHungry03,buffStatusThirsty03`, so a starving
+    // player must not get the regen.
+    const reqs = [_]requirements.Requirement{.{
+        .kind = .has_buff,
+        .negated = true,
+        .name = "HasBuff",
+        .list = "buffStatusHungry03,buffStatusThirsty03",
+    }};
+    const passives = [_]Passive{
+        .{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5, .reqs = &reqs },
+        .{ .name = "StaminaMax", .op = .base_add, .curve = .{ 25, 50, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 },
+    };
+    var counts: requirements.Counts = .{};
+    // No active buffs: the gate passes and the row folds.
+    const fed = trackedDeltasAt(&passives, 5, .{}, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.16), fed.hp_ot, 0.0001);
+    try std.testing.expectEqual(@as(u32, 1), counts.resolved);
+    // Starving: the negated HasBuff gate fails, so only the ungated row folds.
+    const starving_ids = [_]u16{3};
+    const names = requirements.BuffNames{ .ctx = undefined, .resolve = struct {
+        fn f(_: *const anyopaque, name: []const u8) ?u16 {
+            if (std.ascii.eqlIgnoreCase(name, "buffStatusThirsty03")) return 3;
+            if (std.ascii.eqlIgnoreCase(name, "buffStatusHungry03")) return 4;
+            return null;
+        }
+    }.f };
+    counts = .{};
+    const starving = trackedDeltasAt(&passives, 5, .{
+        .active_buffs = &starving_ids,
+        .buff_names = &names,
+    }, &counts);
+    try std.testing.expectEqual(@as(f32, 0), starving.hp_ot);
+    try std.testing.expectApproxEqAbs(@as(f32, 50), starving.stamina_max, 0.0001);
+    try std.testing.expectEqual(@as(u32, 1), counts.resolved);
+    // A gate the evaluator cannot resolve refuses the row and is counted.
+    const unsupported = [_]requirements.Requirement{.{ .kind = .unsupported, .name = "RandomRoll" }};
+    const gated = [_]Passive{.{ .name = "StaminaMax", .op = .base_add, .value = 50, .reqs = &unsupported }};
+    counts = .{};
+    try std.testing.expect(!trackedDeltasAt(&gated, 5, .{}, &counts).any());
+    try std.testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
 test "curveValueAt interpolates the stock quality curve (Q1..Q6)" {
@@ -1388,4 +1462,17 @@ test "explicit level= curve pairs evaluate piecewise-linearly" {
     try std.testing.expectEqual(@as(f32, 0), curveAt(p, 1));
     try std.testing.expectApproxEqAbs(@as(f32, 50), curveAt(p, 4), 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 100), curveAt(p, 5), 0.001);
+    // A single anchor applies at its own level only (PassiveEffect::ModValue
+    // IL=161 compares FloorToInt(level) to FloorToInt(levels[0]), it does not
+    // extrapolate). Every `<book>` row and 148 progression rows use this form,
+    // so a single anchor folding 0 made read almanacs and level-1 perks no-ops.
+    const one_anchor = Passive{
+        .curve = .{ 0.2, 0, 0, 0, 0, 0, 0, 0 },
+        .curve_len = 1,
+        .curve_levels = .{ 1, 0, 0, 0, 0, 0, 0, 0 },
+        .curve_levels_len = 1,
+    };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), curveAt(one_anchor, 1), 0.001);
+    try std.testing.expectEqual(@as(f32, 0), curveAt(one_anchor, 2));
+    try std.testing.expectEqual(@as(f32, 0), curveAt(one_anchor, 0));
 }

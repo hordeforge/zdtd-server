@@ -3181,11 +3181,18 @@ pub const Game = struct {
         return false;
     }
 
+    /// Biome id at (wx,wz) from the world's biome map (`biomes.xml` `<biomemap
+    /// id>`), or null when the world has no biome map. The `InBiome`
+    /// requirement gate reads exactly this id.
+    pub fn biomeIdAt(self: *const Game, wx: i32, wz: i32) ?u8 {
+        const bm = self.world.biomes orelse return null;
+        return bm.atWorld(wx, wz);
+    }
+
     /// True when the world biome at (wx,wz) is the stock radiated biome
     /// (biomes.xml <biomemap name="radiated"/>), which deals damage over time.
     pub fn isRadiatedAt(self: *const Game, wx: i32, wz: i32) bool {
-        const bm = self.world.biomes orelse return false;
-        const id = bm.atWorld(wx, wz) orelse return false;
+        const id = self.biomeIdAt(wx, wz) orelse return false;
         const name = self.world.biome_layers_table.names[id] orelse return false;
         return std.mem.find(u8, name, "radiat") != null;
     }
