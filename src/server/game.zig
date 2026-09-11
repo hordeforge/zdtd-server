@@ -210,6 +210,8 @@ pub const Client = game_types.Client;
 const game_wasm_host = @import("game/wasm_host.zig");
 pub const killVerdict = game_wasm_host.killVerdict;
 pub const withdrawDisabled = game_wasm_host.withdrawDisabled;
+/// World.op_src_withdrawn_fn: is the plugin that queued this op withdrawn?
+pub const opSrcWithdrawn = game_wasm_host.opSrcWithdrawn;
 const wasmLog = game_wasm_host.wasmLog;
 const wasmTick = game_wasm_host.wasmTick;
 const wasmQueue = game_wasm_host.wasmQueue;

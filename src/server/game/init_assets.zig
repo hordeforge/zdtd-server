@@ -543,6 +543,12 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // queued ops applied this tick.
         self.sim.pre_drain_ctx = self;
         self.sim.pre_drain_fn = &game_mod.withdrawDisabled;
+        // ...and again per op during the drain: a module can disable itself
+        // *while* an op is being applied (a `damage` op reaching an
+        // `on_entity_killed` verdict that traps), and its remaining ops are
+        // already in the snapshot the drain is walking.
+        self.sim.op_src_withdrawn_ctx = self;
+        self.sim.op_src_withdrawn_fn = &game_mod.opSrcWithdrawn;
         // Pre-trade price verdict (on_trade_price): routes the sim buy price
         // to the plugin + wasm host. Unset hook = no plugins.
         self.sim.trade_price_verdict_ctx = self;

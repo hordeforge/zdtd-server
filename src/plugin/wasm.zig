@@ -1386,6 +1386,18 @@ pub const WasmHost = struct {
         return self.n;
     }
 
+    /// Is the 1-based plugin slot `src` withdrawn (disabled or trapped)?
+    /// `World.drainCommands` asks this once per queued op so a module that
+    /// disables itself while an earlier op is being applied (an
+    /// `on_entity_killed` verdict that traps) cannot keep executing the ops it
+    /// queued before that. src 0 (native) is never withdrawn.
+    pub fn srcWithdrawn(self: *const WasmHost, src: i16) bool {
+        if (src <= 0) return false;
+        const idx: usize = @intCast(src - 1);
+        if (idx >= self.n) return false;
+        return self.slots[idx].disabled;
+    }
+
     pub fn disabledCount(self: *const WasmHost) usize {
         var c: usize = 0;
         for (0..self.n) |i| {

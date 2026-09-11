@@ -508,6 +508,14 @@ pub const World = struct {
     /// commands never execute (ADR 0030). Unset = drain as today.
     pre_drain_ctx: ?*anyopaque = null,
     pre_drain_fn: ?*const fn (?*anyopaque) void = null,
+    /// Is the source that queued an op (`src` = 1-based plugin slot) now
+    /// withdrawn? Asked once per op during the drain. A module can disable
+    /// itself *during* the drain (a `damage` op reaching an `on_entity_killed`
+    /// verdict that traps), and its remaining ops are already in the snapshot
+    /// the drain is walking, so the pre-drain pass alone cannot withdraw them.
+    /// Game wires this to the Wasm host; unset = no plugins, drain as today.
+    op_src_withdrawn_ctx: ?*anyopaque = null,
+    op_src_withdrawn_fn: ?*const fn (?*anyopaque, i16) bool = null,
     /// Pre-trade price verdict (on_trade_price): (ctx, player_net, item, unit)
     /// -> i32. <0 denies the trade, 0 keeps the price, >0 scales the unit
     /// price by percent. Game wires this to the plugin + wasm host; unset =
@@ -1857,10 +1865,15 @@ pub const World = struct {
 
     /// Apply and clear the ops queued at entry; ops pushed during drain stay for the next tick.
     /// `pre_drain_fn` runs first (plugin withdrawal) so a disabled module's
-    /// still-pending commands are dropped before they apply.
+    /// still-pending commands are dropped before they apply. Ops whose source
+    /// withdrew *during* this drain (a verdict that trapped mid-apply) are
+    /// skipped as they are reached, which the pre-drain pass cannot see.
     pub fn drainCommands(self: *World) command.DrainResult {
         if (self.pre_drain_fn) |f| f(self.pre_drain_ctx);
-        return self.commands.drain(self);
+        return self.commands.drainWith(self, .{
+            .ctx = self.op_src_withdrawn_ctx,
+            .fn_ = self.op_src_withdrawn_fn,
+        });
     }
 
     pub fn netId(self: *const World, slot: Slot) NetId {

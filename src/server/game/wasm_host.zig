@@ -77,6 +77,16 @@ pub fn withdrawDisabled(ctx: ?*anyopaque) void {
     game_step.withdrawDisabledPlugins(g);
 }
 
+/// World.op_src_withdrawn_fn: asked once per queued op during the drain, so a
+/// module that disabled itself while an earlier op was being applied cannot
+/// keep executing the ops it queued before that (ADR 0030 temporal
+/// composability). Traps are already latched as `disabled` by the hook call,
+/// so this sees them without waiting for the withdrawal pass.
+pub fn opSrcWithdrawn(ctx: ?*anyopaque, src: i16) bool {
+    const g = gameFromPtr(ctx orelse return false);
+    return g.wasm_plugins.srcWithdrawn(src);
+}
+
 pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void {
     const g = gameFromPtr(ctx.data orelse return);
     if (cmd.len > max_plugin_cmd_len) {

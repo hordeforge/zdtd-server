@@ -164,11 +164,33 @@ pub const Buffer = struct {
         return self.n;
     }
 
+    /// Live-source gate for one op during the drain. `fn_` is asked with the
+    /// op's 1-based plugin src after every apply, so a module that disabled
+    /// itself while an earlier op was being applied (a verdict hook that
+    /// trapped) cannot keep executing the ops it queued before that.
+    pub const SrcGate = struct {
+        ctx: ?*anyopaque = null,
+        fn_: ?*const fn (?*anyopaque, i16) bool = null,
+
+        fn withdrew(self: SrcGate, src: i16) bool {
+            if (src == 0) return false; // native ops are never withdrawn
+            const f = self.fn_ orelse return false;
+            return f(self.ctx, src);
+        }
+    };
+
     /// Apply the ops queued at entry, then clear them; ops pushed during
     /// drain stay for the next tick. Safe to call with empty buffer.
     /// Profiling: ecs must not import apm (cycle). Callers may time around
     /// drain via apm sections; `applied` / Buffer.dropped counters suffice.
     pub fn drain(self: *Buffer, w: *World) DrainResult {
+        return self.drainWith(w, .{});
+    }
+
+    /// `drain` with a live per-op source gate (see SrcGate). An op whose source
+    /// withdrew during this same drain is skipped and counted as applied
+    /// nothing, exactly as if the pre-drain pass had dropped it.
+    pub fn drainWith(self: *Buffer, w: *World, gate: SrcGate) DrainResult {
         var r: DrainResult = .{ .dropped_before = self.dropped };
         // Snapshot the count: ops applied below can push more commands.
         // Those stay deferred to the next tick instead of running in this
@@ -176,6 +198,7 @@ pub const Buffer = struct {
         const count = self.n;
         var i: usize = 0;
         while (i < count) : (i += 1) {
+            if (gate.withdrew(self.srcs[i])) continue;
             switch (self.ops[i]) {
                 .spawn_zombie => |z| {
                     if (w.spawnZombie(z.x, z.y, z.z, z.hp)) |nid| {
@@ -256,6 +279,89 @@ test "command buffer spawn damage despawn" {
     const dr2 = w.commands.drain(&w);
     try std.testing.expectEqual(@as(u32, 1), dr2.despawned);
     try std.testing.expect(w.slotOfNetId(zid) == null);
+}
+
+/// Test double for the mid-drain withdrawal case: `say` stands in for the op
+/// whose apply reaches a verdict hook, and flips the disabled flag the gate
+/// reads.
+const DrainGateCtx = struct {
+    withdrawn_src: i16 = 2,
+    disabled: bool = false,
+    said: u32 = 0,
+
+    fn say(ctx: ?*anyopaque, _: []const u8) void {
+        const c: *DrainGateCtx = @ptrCast(@alignCast(ctx.?));
+        c.said += 1;
+        // The verdict hook trapped on the first op this src produced.
+        c.disabled = true;
+    }
+
+    fn gate(ctx: ?*anyopaque, src: i16) bool {
+        const c: *const DrainGateCtx = @ptrCast(@alignCast(ctx.?));
+        return c.disabled and src == c.withdrawn_src;
+    }
+};
+
+test "a source that disables during the drain stops running its own later ops" {
+    // The mid-drain case the pre-drain pass cannot see (ADR 0030): the verdict
+    // reached from op 1 traps, so its module is withdrawn while ops 2 and 3
+    // (queued before the trap) are still in the snapshot being drained. The
+    // gate is asked per op, so only that module's later ops are withheld.
+    var ctx: DrainGateCtx = .{};
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    w.say_ctx = &ctx;
+    w.say_fn = &DrainGateCtx.say;
+    w.op_src_withdrawn_ctx = &ctx;
+    w.op_src_withdrawn_fn = &DrainGateCtx.gate;
+
+    try std.testing.expect(w.commands.pushSrc(2, .{ .say = .{ .text = undefined, .len = 0 } }));
+    try std.testing.expect(w.commands.pushSrc(2, .{ .say = .{ .text = undefined, .len = 0 } }));
+    try std.testing.expect(w.commands.pushSrc(3, .{ .say = .{ .text = undefined, .len = 0 } }));
+    const dr = w.drainCommands();
+    // src 2's first op ran and disabled it; its second op was withheld; src 3's
+    // op still ran, because the gate is per src and not a global stop. `said`
+    // counts applied ops, so it is 2 (src 2's first and src 3's), not 3.
+    try std.testing.expectEqual(@as(u32, 2), dr.said);
+    try std.testing.expectEqual(@as(u32, 2), ctx.said);
+}
+
+test "drainWith skips ops whose source withdrew, and nothing else" {
+    // Temporal composability (ADR 0030): a module can disable itself while an
+    // earlier op is being applied (a verdict hook that traps), and its
+    // remaining ops are already in the snapshot the drain is walking. The gate
+    // is asked per op, so exactly that src's ops are withheld while native
+    // (src 0) and other live sources still apply.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    var w2: World = .{};
+    defer w2.deinit();
+    try w2.ensureNetMap(std.testing.allocator);
+
+    const only_two = struct {
+        fn f(_: ?*anyopaque, src: i16) bool {
+            return src == 2;
+        }
+    }.f;
+
+    try std.testing.expect(w.commands.pushSrc(0, .{ .spawn_zombie = .{ .x = 1, .y = 70, .z = 1, .hp = 40 } }));
+    try std.testing.expect(w.commands.pushSrc(2, .{ .spawn_zombie = .{ .x = 4, .y = 70, .z = 4, .hp = 40 } }));
+    try std.testing.expect(w.commands.pushSrc(3, .{ .spawn_zombie = .{ .x = 7, .y = 70, .z = 7, .hp = 40 } }));
+    const gated = w.commands.drainWith(&w, .{ .fn_ = &only_two });
+    try std.testing.expectEqual(@as(u32, 2), gated.spawned);
+    try std.testing.expectEqual(@as(usize, 2), w.countKind(.zombie));
+
+    // src 0 (native) is never withdrawn even if the gate would say so.
+    const all_sources = struct {
+        fn f(_: ?*anyopaque, _: i16) bool {
+            return true;
+        }
+    }.f;
+    try std.testing.expect(w2.commands.pushSrc(0, .{ .spawn_zombie = .{ .x = 1, .y = 70, .z = 1, .hp = 40 } }));
+    _ = w2.commands.drainWith(&w2, .{ .fn_ = &all_sources });
+    try std.testing.expectEqual(@as(usize, 1), w2.countKind(.zombie));
 }
 
 test "command buffer drops at cap" {
