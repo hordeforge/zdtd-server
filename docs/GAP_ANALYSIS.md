@@ -3634,7 +3634,7 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   - Implemented kinds: `ProgressionLevel`, `PlayerLevel`, `HasBuff`,
     `IsAlive`, `IsAttachedToEntity`, `InBiome`, `HoldingItemHasTags`,
     `SandboxOptionBool`, `ArmorGroupLowestQuality`, `ArmorGroupCount`,
-    `StatComparePercCurrentToMax`, `CVarCompare`, plus the
+    `StatComparePercCurrentToMax`, `CVarCompare`, `WornItems`, plus the
     `requirement_group` AND/OR nodes. The rest (measured vocabulary:
     `ItemHasTags`, `CVarCompare`, `RandomRoll`,
     `EntityTagCompare`, `EntityHasMovementTag`, `IsNight`, `IsIndoors`,
@@ -3707,6 +3707,21 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `ModifyCVar`/`RemoveCVar` rows still need the buff/item lifecycle events
     that drive them (item `onSelfEquipStart`/`onSelfPrimaryActionEnd`, every
     buff's `onSelfBuffStart`/`Update`/`Remove`).
+  - **`WornItems` SHIPPED (round 21, 2026-09-11).** `WornItems::IsValid` IL=54
+    walks `Equipment::GetSlotCount` and counts the slots whose item's
+    `ItemClass::HasAnyTags(row tags)` holds, then compares that count with the
+    shared table. `Ctx.worn_items` is one `Tags` property per worn equipment
+    item (the tick collects it next to the armor groups), the row's `tags` are
+    any-of, and a slot with a two-tag list counts once. This is the row that was
+    refusing check02's whole light/medium/heavy armor chain: with
+    `perkLightArmor` 1 and four `lightArmor` pieces the chain now derives
+    `.ArmorLightWorn=4`, `.ArmorLightLevel=1` and `.ArmorLightTotal=4` (the
+    `set @.ArmorLightLevel` then `multiply @.ArmorLightWorn` rows), and without
+    the perk the effect_group gate refuses it. Measured: the gated tracked-row
+    split moves from 31 resolve / 12 refuse to **34 / 9**; the
+    `PhysicalDamageResist = @.ArmorLightTotal` passive that consumes the total
+    still needs `buffStatusCheck02` to be an active buff (entity class
+    `Buffs=`), which is the next step.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`

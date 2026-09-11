@@ -81,6 +81,22 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (`WornItems` and the armor-perk chain)
+
+`WornItems` (IL=54) was the gate refusing check02's entire light/medium/heavy
+armor chain: it walks the equipment slots and counts those whose item carries
+any of the row's `tags`. The tick now collects each worn item's `Tags` property
+next to the armor groups, so with `perkLightArmor` 1 and four `lightArmor`
+pieces buffStatusCheck02's update rows derive `.ArmorLightWorn=4`,
+`.ArmorLightLevel=1` and `.ArmorLightTotal=4` from the data, and without the
+perk the effect_group gate refuses the chain. Measured: the gated tracked-row
+split moves 31 resolve / 12 refuse to 34 / 9. The
+`PhysicalDamageResist = @.ArmorLightTotal` passive those rows feed lives on
+buffStatusCheck02 itself, so it starts folding once the entity class `Buffs=`
+list makes that check buff an active buff.
+
+---
+
 ## 2026-09-11 (per-entity CVars + `CVarCompare` + `ModifyCVar`)
 
 Stock keeps a per-entity `string -> float` map (`EntityBuffs::CVars`) that

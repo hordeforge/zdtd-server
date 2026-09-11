@@ -4457,6 +4457,53 @@ test "a gated perk row stops folding when its requirement fails" {
     try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
 }
 
+test "the armor-perk chain derives its CVars from the worn items" {
+    // buffStatusCheck02's light-armor chain, all data: `WornItems tags="lightArmor"
+    // Equals N` picks `.ArmorLightWorn`, `ProgressionLevel perkLightArmor` picks
+    // `.ArmorLightLevel`, and `.ArmorLightTotal` is `set @.ArmorLightLevel` then
+    // `multiply @.ArmorLightWorn`. Before WornItems existed the first row refused
+    // closed, so the whole chain (and the `PhysicalDamageResist = @.ArmorLightTotal`
+    // passive it feeds) read 0.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.skill_levels[0] = .{ .name = "perkLightArmor", .level = 1 };
+    cl.skill_level_n = 1;
+    // Four light-armor pieces (items.xml Tags carry `lightArmor`).
+    const pieces = [_][]const u8{ "armorPrimitiveHelmet", "armorPrimitiveOutfit", "armorPrimitiveGloves", "armorPrimitiveBoots" };
+    for (pieces, 0..) |name, i| {
+        const def = g.items.byName(name).?;
+        g.sim.inventory[ps].slots[ecs.components.inv_equip_start + i] = .{ .item_id = def.id, .count = 1, .quality = 1 };
+    }
+    try g.step();
+    try g.step();
+    // level 1 * 4 worn pieces.
+    try std.testing.expectApproxEqAbs(@as(f32, 4), cl.cvars.get(".ArmorLightWorn"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), cl.cvars.get(".ArmorLightLevel"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 4), cl.cvars.get(".ArmorLightTotal"), 0.001);
+    // Without the perk the effect_group gate refuses the chain.
+    cl.skill_levels[0] = .{ .name = "perkLightArmor", .level = 0 };
+    _ = cl.cvars.remove(".ArmorLightWorn");
+    _ = cl.cvars.remove(".ArmorLightLevel");
+    _ = cl.cvars.remove(".ArmorLightTotal");
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get(".ArmorLightTotal"), 0.001);
+}
+
 test "the check buffs' entered-game rows set their CVars and add their buffs" {
     // buffStatusCheck01 carries the entered-game rows: stock writes the hazard
     // durations as CVars and adds buffBiomeProgressionCheck/buffCheckScreenEffects.

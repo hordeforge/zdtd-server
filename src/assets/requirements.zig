@@ -66,6 +66,9 @@ pub const Kind = enum(u8) {
     /// `CVarCompare` IL=23: the entity's custom variable against `value`
     /// (a missing name reads 0).
     cvar_compare,
+    /// `WornItems` IL=54: how many equipment slots hold an item carrying any
+    /// of the row's `tags`.
+    worn_items,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -140,6 +143,10 @@ pub const Ctx = struct {
     food_max: f32 = 0,
     water_frac: f32 = 0,
     water_max: f32 = 0,
+    /// One entry per worn equipment item: the item's `Tags` property as a comma
+    /// list (`WornItems` IL=54 walks `Equipment::GetSlotCount` and asks each
+    /// item's `ItemClass::HasAnyTags`). Empty = nothing worn.
+    worn_items: []const []const u8 = &.{},
     /// The entity's custom variables (`assets/cvars.zig`). `CVarCompare`
     /// (IL=23) and passive rows whose `value="@name"` read them (a name that is
     /// not present reads 0, `EntityBuffs::GetCustomVar` IL=10), and the
@@ -186,6 +193,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "ArmorGroupCount")) return .armor_group_count;
     if (std.mem.eql(u8, name, "StatComparePercCurrentToMax")) return .stat_compare_perc_current_to_max;
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
+    if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
     return .unsupported;
 }
 
@@ -387,6 +395,24 @@ fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
     return true;
 }
 
+/// `WornItems::IsValid` IL=54: `compareValues(count, op, value)` where `count`
+/// is the number of equipment slots whose item carries ANY of the row's tags
+/// (`ItemClass::HasAnyTags`), negated by `invert`.
+fn evalWornItems(r: Requirement, ctx: Ctx) Verdict {
+    var count: f32 = 0;
+    for (ctx.worn_items) |item_tags| {
+        var it = std.mem.splitScalar(u8, r.list, ',');
+        while (it.next()) |t| {
+            if (t.len == 0) continue;
+            if (tagListHas(item_tags, t)) {
+                count += 1;
+                break;
+            }
+        }
+    }
+    return verdict(compare(count, r.op, r.value), r.negated);
+}
+
 /// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
 /// negated by `invert`.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
@@ -449,6 +475,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .armor_group_count => return evalArmorGroupCount(r, ctx),
         .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
         .cvar_compare => return evalCvarCompare(r, ctx),
+        .worn_items => return evalWornItems(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
         .group_or => return evalList(r.children, true, ctx, counts),
     }
@@ -679,6 +706,34 @@ test "ArmorGroupLowestQuality reads the worn group's lowest quality" {
     try testing.expect(all(&.{gte6}, ctx));
     const gte7 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 7 };
     try testing.expect(!all(&.{gte7}, ctx));
+}
+
+test "WornItems counts the slots whose item carries any of the row's tags" {
+    // WornItems IL=54: Equipment::GetSlotCount walk, each item's
+    // ItemClass::HasAnyTags(equipmentTags), compared with the shared table.
+    const worn = [_][]const u8{
+        "head,armor,armorHead,lightArmor,lightArmorDeg",
+        "upperbody,chest,armor,armorChest,lightArmor,lightArmorDeg",
+        "lowerbody,feet,armor,armorFeet,heavyArmor",
+        "hands,armor",
+    };
+    const ctx = Ctx{ .worn_items = &worn };
+    // Any-of on the row's tags, not all-of.
+    const light4 = Requirement{ .kind = .worn_items, .name = "WornItems", .list = "lightArmor", .op = .eq, .value = 4 };
+    try testing.expect(!all(&.{light4}, ctx));
+    const light2 = Requirement{ .kind = .worn_items, .name = "WornItems", .list = "lightArmor", .op = .eq, .value = 2 };
+    try testing.expect(all(&.{light2}, ctx));
+    // A two-tag list counts a slot once even when it carries both.
+    const light_or_heavy = Requirement{ .kind = .worn_items, .name = "WornItems", .list = "lightArmor,heavyArmor", .op = .eq, .value = 3 };
+    try testing.expect(all(&.{light_or_heavy}, ctx));
+    // Ordering and negation go through the same comparison table.
+    const gte3 = Requirement{ .kind = .worn_items, .name = "WornItems", .list = "armor", .op = .ge, .value = 3 };
+    try testing.expect(all(&.{gte3}, ctx));
+    const not_light = Requirement{ .kind = .worn_items, .name = "WornItems", .list = "lightArmor", .op = .gt, .value = 0, .negated = true };
+    try testing.expect(!all(&.{not_light}, ctx));
+    // Nothing worn: the count is 0.
+    const none = Requirement{ .kind = .worn_items, .name = "WornItems", .list = "lightArmor", .op = .eq, .value = 0 };
+    try testing.expect(all(&.{none}, .{}));
 }
 
 test "CVarCompare reads the entity's custom variables, missing as 0" {

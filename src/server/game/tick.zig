@@ -67,6 +67,26 @@ fn applyTriggeredBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, res: *const as
     }
 }
 
+/// One entry per worn equipment item: its `Tags` property (comma list), the
+/// input `WornItems` (IL=54) counts. Empty tags are kept as an empty entry so
+/// the slot count matches `Equipment::GetSlotCount` semantics, but no tag can
+/// match it.
+fn wornItemTags(self: *const Game, ps: ecs.Slot, out: *[ecs.components.inv_equip_count][]const u8) []const []const u8 {
+    if (!self.sim.mask[ps].inventory) return out[0..0];
+    const inv = &self.sim.inventory[ps];
+    var n: usize = 0;
+    var i: usize = ecs.components.inv_equip_start;
+    const end = @min(i + ecs.components.inv_equip_count, inv.slots.len);
+    while (i < end) : (i += 1) {
+        const sl = inv.slots[i];
+        if (sl.count == 0 or sl.item_id == 0) continue;
+        const def = self.items.byId(sl.item_id) orelse continue;
+        out[n] = def.tags;
+        n += 1;
+    }
+    return out[0..n];
+}
+
 /// Worn armor groups and their lowest worn quality, into `out`; returns the
 /// used prefix. `Equipment::ResetArmorGroups` (IL=51) walks the equipment slots,
 /// keeps each `ItemClassArmor` item's `ArmorGroup` names and tracks the minimum
@@ -165,6 +185,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     // Worn armor groups for the ArmorGroupLowestQuality gate; stock caps this
     // at one entry per worn item (12 equipment slots, one group name each).
     var armor_group_buf: [ecs.components.inv_equip_count * 2]requirements.ArmorGroup = undefined;
+    // One Tags string per worn equipment item, for WornItems (IL=54).
+    var worn_tags_buf: [ecs.components.inv_equip_count][]const u8 = undefined;
     for (&self.clients) |*c| {
         if (!c.joined) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -255,6 +277,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .sandbox_groups = sandbox_groups,
                 .armor_groups = armorGroups(self, ps, &armor_group_buf),
                 .cvars = &c.cvars,
+                .worn_items = wornItemTags(self, ps, &worn_tags_buf),
                 .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
                 .hp_max = h.max_hp,
                 .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
