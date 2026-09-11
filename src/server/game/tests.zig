@@ -4521,6 +4521,36 @@ test "every active buff fires its onSelfBuffStart rows once" {
     try std.testing.expectApproxEqAbs(@as(f32, -5), cl.cvars.get("$buffShockedDamage"), 0.001);
 }
 
+test "the armour status buffs gate on the worn-armour rating" {
+    // check01's buffStatusArmorLow/High/Broken rows read
+    // `StatCompareCurrent stat="Armor"`, which resolves since the rating reached
+    // the gate ctx. A bare player (rating 0) is "broken armour": the LTE 0.1 row
+    // applies, the 0.25/0.75 ones do not.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const broken = g.buffs.indexOfName("buffStatusArmorBroken") orelse return error.SkipZigTest;
+    const low = g.buffs.indexOfName("buffStatusArmorLow") orelse return error.SkipZigTest;
+    try stepTicks(g, 46);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_phys_resist[ps], 0.001);
+    try std.testing.expect(g.sim.buffs[ps].find(broken) != null);
+    try std.testing.expect(g.sim.buffs[ps].find(low) == null);
+}
+
 test "an entity can hold a full stock buff set, not just eight" {
     // The stage machine alone needs the six hunger/thirst stages plus the level
     // tracker, and a real player also carries the check buffs, an injury and a
