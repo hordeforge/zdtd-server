@@ -357,6 +357,23 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                     applyTriggeredBuffs(self, c.entity_id, ps, &eg);
                 }
             }
+            // onSelfBuffStart / onSelfBuffRemove for every active buff, now that
+            // the engine applies add/remove requests as the rows pass (so a
+            // stage's start rows see the other stages and the highest wins).
+            life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
+            for (life_buf[0..life_ids_n]) |id| {
+                const slot = self.sim.buffs[ps].find(id) orelse continue;
+                if (!slot.flags.start_fired) {
+                    slot.flags.start_fired = true;
+                    const st = assets_buffs.evaluateTriggered(&self.buffs, id, .start, req_ctx, &req_counts);
+                    if (st.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, st.truncated);
+                    continue;
+                }
+                if (slot.flags.remove) {
+                    const rm = assets_buffs.evaluateTriggered(&self.buffs, id, .remove, req_ctx, &req_counts);
+                    if (rm.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, rm.truncated);
+                }
+            }
             // Triggered-effect engine (P3): buffStatusCheck01's onSelfBuffUpdate
             // AddBuff rows carry the stage adds, gated by their own requirements
             // (StatComparePercCurrentToMax and the `!HasBuff` self gates).

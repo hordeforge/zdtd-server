@@ -3764,8 +3764,15 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     next row's gate in the same scan, which is stock's ordering; the recorded
     `TriggeredResult` lists stay for the stage selection and the callers that
     read them. A fixture proves the ordering (row 2's `HasBuff first` passes
-    after row 1 adds it, row 3's `!HasBuff first` is refused). What is left for
-    the start/remove sweep is firing it now that adds land in order.
+    after row 1 adds it, row 3's `!HasBuff first` is refused). With that in
+    place the sweep itself landed: every active buff fires `onSelfBuffStart`
+    once per instance (per-instance flag) and `onSelfBuffRemove` when it is
+    flagged, so 444 stock start rows now run - `buffShocked` writes
+    `$buffShockedDamage` from its start rows, which is the first CVar a buff
+    other than the two checks drives. The two survival scenarios that blocked
+    round 24 pass unchanged, and the stage chain now behaves like stock (each
+    stage's start removes the others, highest added wins) because the adds land
+    in document order.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`

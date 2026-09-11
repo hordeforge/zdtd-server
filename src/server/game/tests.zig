@@ -4463,6 +4463,44 @@ test "a gated perk row stops folding when its requirement fails" {
     try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
 }
 
+test "every active buff fires its onSelfBuffStart rows once" {
+    // buffShocked's onSelfBuffStart rows write $buffShockedDamage (the row that
+    // matches its gates) and $buffShockedDisplay. Before the lifecycle sweep only
+    // buffStatusCheck01/02 were driven at all, so no other buff's start rows ran.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const shocked = g.buffs.indexOfName("buffShocked") orelse return error.SkipZigTest;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), cl.cvars.get("$buffShockedDamage"), 0.001);
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = shocked,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    try g.step();
+    // The ungated `set -5` row applies at the default state.
+    try std.testing.expectApproxEqAbs(@as(f32, -5), cl.cvars.get("$buffShockedDamage"), 0.001);
+    // Fired once, not every tick: a second pass leaves the value alone.
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, -5), cl.cvars.get("$buffShockedDamage"), 0.001);
+}
+
 test "an entity can hold a full stock buff set, not just eight" {
     // The stage machine alone needs the six hunger/thirst stages plus the level
     // tracker, and a real player also carries the check buffs, an injury and a

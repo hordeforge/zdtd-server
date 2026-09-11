@@ -81,6 +81,26 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (buff lifecycle: start/remove for every active buff)
+
+Stock applies a triggered row's `AddBuff`/`RemoveBuff` during the scan, so a
+later row's `HasBuff` gate sees an earlier row's add. zdtd collected the
+requests and applied them after the scan, which is exactly why round 24's
+lifecycle sweep broke the survival stages: all six stage rows passed against
+the snapshot, then every stage's `onSelfBuffStart` removed the others.
+`requirements.Ctx` now carries a sink (called as each add/remove row passes)
+and a live `buff_active` lookup that `HasBuff` prefers over the snapshot. A
+fixture pins the ordering.
+
+With that, every active buff fires its own lifecycle rows: `onSelfBuffStart`
+once per instance and `onSelfBuffRemove` when flagged, so the 444 stock start
+rows run - `buffShocked` writes `$buffShockedDamage` from its start rows, the
+first CVar driven by a buff other than the two checks. `onSelfEnteredGame` was
+already generalised to the active set. The survival stage chain now behaves
+like stock, and the two scenarios that blocked the last round pass unchanged.
+
+---
+
 ## 2026-09-11 (entity class `Buffs=`, and a buff-set cap of 8)
 
 The entity class's `Buffs="buffStatusCheck01,buffStatusCheck02"` list is applied
