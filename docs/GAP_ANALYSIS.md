@@ -3569,6 +3569,23 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   and evaluate them against the live player/context before folding. That is the
   requirement-evaluator surface ADR 0023/0024 scoped, and it is the honest
   blocker on this row rather than "which stats to track".
+
+  **Scope measured 2026-09-11 (round 10).** The 913 elements are not the
+  evaluator's vocabulary: only 15 passive rows carry a name the tracked VM
+  actually folds, and 12 of those 15 are gated. Filtering to *those* groups
+  gives the requirement kinds an evaluator must cover to fix the VM:
+  `!HasBuff` 11, `ProgressionLevel` 8, `!IsAttachedToEntity` 6, `RandomRoll` 5,
+  `IsAlive` 5, `InBiome` 2, `EntityHasMovementTag`/`CVarCompare`/
+  `EntityTagCompare`/`IsIndoors` 1 each. So the VM's own gated surface is
+  twelve rows, not six hundred and forty-eight - most `ProgressionLevel` rows
+  gate weapon/damage/craft passives that the client or a verdict plugin owns.
+  Two consequences for whoever implements it: (a) five of the ten kinds are
+  pure state reads the sim already holds (`ProgressionLevel`, `HasBuff`,
+  `IsAlive`, `IsAttachedToEntity`, `CVarCompare`), so they can land first
+  without new plumbing; (b) `RandomRoll` cannot be folded per tick the way the
+  other kinds can - a chance gate re-rolled on the max-stat recompute would
+  flicker a player's max HP every 50 ms, so it needs the roll pinned to a
+  stable seed/period before it is evaluated at all.
   *Anchors (requirement sweep):* `src/assets/progression.zig` (`scanPassives`),
   `src/assets/buffs.zig` (`Passive`/`trackedDeltasAt`),
   `_global/Progression.il.txt:329` (`AddLevelExp`),
