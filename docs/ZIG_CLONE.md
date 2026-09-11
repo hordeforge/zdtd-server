@@ -13,15 +13,15 @@ comments are the authority, not this document.
 **Not:** redistributing game IL/DLL; not a shipping product plan; not “drop-in replace Steam dedi tomorrow.”  
 **Not:** **mod host** (no Harmony/ModAPI/modlets) or **7dtd-server-apm target** (APM assumes stock Mono dedi).  
 **Hub:** [INDEX.md](../../7dtd-engine-research/docs/INDEX.md).  
-**Stock ceilings:** [engine-limitations.md](../../7dtd-engine-research/docs/engine-limitations.md) (why stock hits walls; measured on stock, not on zdtd).  
+**Stock ceilings:** [engine-limitations.md](../../7dtd-engine-research/docs/meta/engine-limitations.md) (why stock hits walls; measured on stock, not on zdtd).  
 **Live scale walls:** [measured-scaling.md](../../7dtd-server-optimizer/docs/measured-scaling.md) (stock APM ladders; design against these shapes).  
 **Ranked bottlenecks + bang-for-buck:** [bottlenecks.md](../../7dtd-server-optimizer/docs/bottlenecks.md) (what the clone must beat, and the structural theme: missing spatial index + serial stages).  
 **Every hot algorithm:** [algorithms.md](../../7dtd-server-optimizer/docs/algorithms.md).  
 **Allocation strategy (why the clone uses arenas, no GC):** [allocation-reuse.md](../../7dtd-server-optimizer/docs/allocation-reuse.md) - stock's Boehm STW measured **479 ms** on a ~7 GB heap (megapause); the clone must never STW.  
-**Wire details:** [protocol.md](../../7dtd-engine-research/docs/protocol.md).  
-**Loop:** [loop.md](../../7dtd-engine-research/docs/loop.md).  
-**World/save:** [world-chunks.md](../../7dtd-engine-research/docs/world-chunks.md), [save-region.md](../../7dtd-engine-research/docs/save-region.md).  
-**Entities:** [entity-ai.md](../../7dtd-engine-research/docs/entity-ai.md).  
+**Wire details:** [protocol.md](../../7dtd-engine-research/docs/network/protocol.md).  
+**Loop:** [loop.md](../../7dtd-engine-research/docs/loop/loop.md).  
+**World/save:** [world-chunks.md](../../7dtd-engine-research/docs/world/world-chunks.md), [save-region.md](../../7dtd-engine-research/docs/world/save-region.md).  
+**Entities:** [entity-ai.md](../../7dtd-engine-research/docs/entities/entity-ai.md).  
 **Golden wire / join bots:** sibling [`../../7dtd-loadgen/`](../../7dtd-loadgen) (`PackageCodec`, `JoinStateMachine`).  
 **Implementation:** [`../../zdtd-server-server-server-server/`](..).
 
@@ -190,7 +190,7 @@ fn serverLoop(s: *Server) void {
 }
 ```
 
-Stock hot path reference: [loop.md](../../7dtd-engine-research/docs/loop.md), [loop-gmupdate.md](../../7dtd-engine-research/docs/loop-gmupdate.md).  
+Stock hot path reference: [loop.md](../../7dtd-engine-research/docs/loop/loop.md), [loop-gmupdate.md](../../7dtd-engine-research/docs/loop/loop-gmupdate.md).  
 **Critical:** stock `ConnectionManager.Update` is a **peer** of gmUpdate. In Zig, **explicitly schedule** net before/after sim; never “accidentally” serialize packages inside per-entity AI.
 
 ---
@@ -205,7 +205,7 @@ Stock hot path reference: [loop.md](../../7dtd-engine-research/docs/loop.md), [l
 | `NetEntityDistribution.OnUpdateEntities` | ~O(N².26) | Per-entity × per-player rebuild |
 | Entity AI | ~O(N) | Volume, well-behaved |
 
-Detail: [measured-scaling.md](../../7dtd-server-optimizer/docs/measured-scaling.md), [network.md](../../7dtd-engine-research/docs/network.md) §4b.
+Detail: [measured-scaling.md](../../7dtd-server-optimizer/docs/measured-scaling.md), [network.md](../../7dtd-engine-research/docs/network/network.md) §4b.
 
 **Stock reality (verified RE 2026-07-20, corrects earlier drafts):** `updatePlayerList`
 already **builds each package once**, broadcasts via `SendToPlayers`, and **change-gates**
@@ -240,7 +240,7 @@ Interest (the real stock wall - O(N^2.26) all-pairs, no spatial index):
 
 ### 4.3 Framing (must match clients)
 
-See [protocol.md](../../7dtd-engine-research/docs/protocol.md). Summary:
+See [protocol.md](../../7dtd-engine-research/docs/network/protocol.md). Summary:
 
 ```text
 LiteNetLib reliable ordered (delivery 2)
@@ -313,7 +313,7 @@ Implemented and size-checked in loadgen `PackageCodec` (IL-backed):
 | Heightmaps | byte[256] | x + z×16 |
 | Density channels | layer bands | 1024 bytes/layer pattern |
 
-Index: [terrain-height.md](../../7dtd-engine-research/docs/terrain-height.md), [world-chunks.md](../../7dtd-engine-research/docs/world-chunks.md), [save-region.md](../../7dtd-engine-research/docs/save-region.md).
+Index: [terrain-height.md](../../7dtd-engine-research/docs/world/terrain-height.md), [world-chunks.md](../../7dtd-engine-research/docs/world/world-chunks.md), [save-region.md](../../7dtd-engine-research/docs/world/save-region.md).
 
 ```text
 block index:
@@ -367,7 +367,7 @@ Dual path: Unity MB Update may still run if GO enabled (residual on pure dedi). 
 | Melee damage pulse | combat smoke |
 | Despawn if no observers | capacity |
 
-Stock AI LOD bands (distSq full / mid / far) are hints: [entity-ai.md](../../7dtd-engine-research/docs/entity-ai.md).
+Stock AI LOD bands (distSq full / mid / far) are hints: [entity-ai.md](../../7dtd-engine-research/docs/entities/entity-ai.md).
 
 ### 6.3 Data layout
 
@@ -535,15 +535,15 @@ Parallel RE tracks (feed packages/):
 
 | Doc | Role |
 |---|---|
-| [protocol.md](../../7dtd-engine-research/docs/protocol.md) | Wire framing, join, golden bodies |
-| [engine-limitations.md](../../7dtd-engine-research/docs/engine-limitations.md) | Stock ceilings |
-| [loop.md](../../7dtd-engine-research/docs/loop.md) | Sim orchestration |
-| [network.md](../../7dtd-engine-research/docs/network.md) | Replication + O(N²) mechanism |
-| [entity-ai.md](../../7dtd-engine-research/docs/entity-ai.md) | Authority AI path |
-| [world-chunks.md](../../7dtd-engine-research/docs/world-chunks.md) | Chunk pipeline |
-| [save-region.md](../../7dtd-engine-research/docs/save-region.md) | Disk layout |
+| [protocol.md](../../7dtd-engine-research/docs/network/protocol.md) | Wire framing, join, golden bodies |
+| [engine-limitations.md](../../7dtd-engine-research/docs/meta/engine-limitations.md) | Stock ceilings |
+| [loop.md](../../7dtd-engine-research/docs/loop/loop.md) | Sim orchestration |
+| [network.md](../../7dtd-engine-research/docs/network/network.md) | Replication + O(N²) mechanism |
+| [entity-ai.md](../../7dtd-engine-research/docs/entities/entity-ai.md) | Authority AI path |
+| [world-chunks.md](../../7dtd-engine-research/docs/world/world-chunks.md) | Chunk pipeline |
+| [save-region.md](../../7dtd-engine-research/docs/world/save-region.md) | Disk layout |
 | [measured-scaling.md](../../7dtd-server-optimizer/docs/measured-scaling.md) | Stock APM ladders (design input only; not a zdtd tool) |
-| [residuals.md](../../7dtd-engine-research/docs/residuals.md) | Non-IL gaps |
+| [residuals.md](../../7dtd-engine-research/docs/meta/residuals.md) | Non-IL gaps |
 | Loadgen | [`../../7dtd-loadgen/docs/README.md`](../../7dtd-loadgen/docs/README.md) (zdtd validation) |
 | HOST_TUNING | [`../../7dtd-server-optimizer/docs/HOST_TUNING.md`](../../7dtd-server-optimizer/docs/HOST_TUNING.md) (host ops ideas) |
 | SIM_PARALLELISM | [`../../7dtd-server-optimizer/docs/SIM_PARALLELISM.md`](../../7dtd-server-optimizer/docs/SIM_PARALLELISM.md) (stock MT limits) |

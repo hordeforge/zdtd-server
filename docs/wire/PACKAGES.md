@@ -26,7 +26,7 @@ and NetPackagePlayerLogin. See `src/wire/platform_user.zig` for the real fields.
 The table below is pinned to the V3.1.0 b14 parity snapshot (regenerate via
 `7dtd-engine-research/tools/parity` against the 3.2.0 DLL to fold these rows
 in). The 3.2.0 changes are implemented in `src/wire/packages.zig` and
-grounded in `7dtd-engine-research/docs/changelog-3.2.0.md`:
+grounded in `7dtd-engine-research/docs/releases/changelog-3.2.0.md`:
 
 | Package | Change |
 |---|---|

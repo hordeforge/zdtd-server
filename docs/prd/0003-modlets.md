@@ -15,9 +15,9 @@ mod host).
 config sync, extending the existing `src/assets/xml_patch.zig` / `paths.zig`
 machinery.
 **Behavioural reference:** stock dedicated V3.1.0, per
-`../../../7dtd-engine-research/docs/mod-loading.md` (ModManager / XmlPatcher / SendXmlsToClient),
+`../../../7dtd-engine-research/docs/admin/mod-loading.md` (ModManager / XmlPatcher / SendXmlsToClient),
 `../../../7dtd-engine-research/docs/inventories/xmlsToLoad.md` (49-row config table),
-`../../../7dtd-engine-research/docs/protocol-packages.md` (NetPackageConfigFile IL=25,
+`../../../7dtd-engine-research/docs/network/protocol-packages.md` (NetPackageConfigFile IL=25,
 NetPackageLocalization IL=30).
 **Related:** [RFC 0003](../rfc/0003-modlets-plan.md) (implementation plan) · [ASSETS.md](../ASSETS.md) · [AUTHORITY.md](../AUTHORITY.md) (join gate)
 
@@ -72,7 +72,7 @@ and nothing else.
    stock order, feeding the same patched bytes zdtd already serves to its
    catalogs.
 2. Full coverage of the **verified stock `XmlPatchMethods` catalog**
-   (`../../../7dtd-engine-research/docs/mod-loading.md` §5.3): set/setattribute
+   (`../../../7dtd-engine-research/docs/admin/mod-loading.md` §5.3): set/setattribute
    (byxpath), append/prepend (byxpath), insertafter/insertbefore (byxpath),
    remove/removeattribute (byxpath), csvoperations, conditional, include with
    `@modfolder:` / `@modfolder(Name):` token rewrite.
