@@ -81,6 +81,27 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (`value="@cvar"` operands, and the general update event)
+
+The requirement parser read every `value` attribute as a float, so an `@name`
+operand became a constant 0 - 255 stock requirement rows are written that way.
+The visible damage was the level-bonus chain: `buffLevelUpTracking`'s
+`PlayerLevel GT value="@$LastPlayerLevel"` guard always passed, `$LastPlayerLevel`
+climbed on every 0.1 s update, and check01's `$PlayerLevelBonus` became an
+unbounded max-HP bonus (168 where the data accounts for 150). `operand(ctx, r)`
+now resolves `value_cvar` through the entity's CVars, and every comparison kind
+reads through it.
+
+With that, the last hardcoded pair in the survival pass is gone: every active
+buff fires its own `onSelfBuffUpdate` rows on its own rate (`<update_rate>` is
+seconds * 20 ticks: check01 40, check02 44), `survivalCheckId`/`armorCheckId`
+are unused by the server, `syncStageBuffs` is removal-only, and the check-buff
+scenarios wait the real rates. At level 1 the accounted max HP is 150: the
+tracker sets `$LastPlayerLevel` to 1, check01 sets `$PlayerLevelBonus` to 1 and
+subtracts 1, so `HealthMax` gains 0.
+
+---
+
 ## 2026-09-11 (buff lifecycle: start/remove for every active buff)
 
 Stock applies a triggered row's `AddBuff`/`RemoveBuff` during the scan, so a

@@ -36,6 +36,11 @@ pub const Requirement = struct {
     arg: []const u8 = "",
     /// Comma list operand: `buff`, `tags`.
     list: []const u8 = "",
+    /// `value="@name"`: the operand is the entity's custom variable at
+    /// evaluation time, not a literal (`RequirementBase::ParseXAttribute` keeps
+    /// the string and `IsValid` reads it through the entity's CVars; a missing
+    /// name is 0). `@:`-prefixed values are localization keys, never operands.
+    value_cvar: []const u8 = "",
     /// `InBiome biome="N"`. -1 = absent.
     num: i32 = -1,
     target: Target = .self,
@@ -247,7 +252,13 @@ pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) std.me
     r.name = try arena.dupe(u8, n);
     r.kind = kindOf(n);
     if (xml.attr(hay, tag_start, "operation")) |o| r.op = parseCompare(o);
-    if (xml.attr(hay, tag_start, "value")) |v| r.value = std.fmt.parseFloat(f32, v) catch 0;
+    if (xml.attr(hay, tag_start, "value")) |v| {
+        if (v.len > 1 and v[0] == '@' and v[1] != ':') {
+            r.value_cvar = try arena.dupe(u8, v[1..]);
+        } else {
+            r.value = std.fmt.parseFloat(f32, v) catch 0;
+        }
+    }
     if (xml.attr(hay, tag_start, "target")) |t| r.target = parseTarget(t);
     if (xml.attr(hay, tag_start, "biome")) |b| r.num = std.fmt.parseInt(i32, b, 10) catch -1;
     if (xml.attr(hay, tag_start, "has_all_tags")) |v| r.has_all = std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
@@ -376,7 +387,7 @@ fn evalArmorGroupLowestQuality(r: Requirement, ctx: Ctx) Verdict {
         quality = @floatFromInt(g.quality);
         break;
     }
-    return verdict(compare(quality, r.op, r.value), r.negated);
+    return verdict(compare(quality, r.op, operand(ctx, r)), r.negated);
 }
 
 /// `ArmorGroupCount::IsValid` (via `Equipment.GetArmorGroupCount`): the number
@@ -388,7 +399,7 @@ fn evalArmorGroupCount(r: Requirement, ctx: Ctx) Verdict {
         count = @floatFromInt(g.count);
         break;
     }
-    return verdict(compare(count, r.op, r.value), r.negated);
+    return verdict(compare(count, r.op, operand(ctx, r)), r.negated);
 }
 
 /// `StatComparePercCurrentToMax::Compare` (IL=120): the named stat's value as a
@@ -416,7 +427,7 @@ fn evalStatComparePercCurrentToMax(r: Requirement, ctx: Ctx) Verdict {
     else
         ctx.water_max;
     if (!(max > 0)) return .fail;
-    return verdict(compare(frac, r.op, r.value), r.negated);
+    return verdict(compare(frac, r.op, operand(ctx, r)), r.negated);
 }
 
 fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
@@ -440,13 +451,20 @@ fn evalWornItems(r: Requirement, ctx: Ctx) Verdict {
             }
         }
     }
-    return verdict(compare(count, r.op, r.value), r.negated);
+    return verdict(compare(count, r.op, operand(ctx, r)), r.negated);
 }
 
 /// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
 /// negated by `invert`.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
-    return verdict(compare(cvarValue(ctx, r.arg), r.op, r.value), r.negated);
+    return verdict(compare(cvarValue(ctx, r.arg), r.op, operand(ctx, r)), r.negated);
+}
+
+/// The right-hand operand of a comparison: the literal `value`, or the entity's
+/// custom variable when the row wrote `value="@name"` (255 stock rows do).
+fn operand(ctx: Ctx, r: Requirement) f32 {
+    if (r.value_cvar.len > 0) return cvarValue(ctx, r.value_cvar);
+    return r.value;
 }
 
 /// `EntityBuffs::GetCustomVar` IL=10: a missing name is 0.
@@ -493,9 +511,9 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
             // ProgressionLevel::IsValid returns false when the target has no
             // such progression value, before `invert` is read.
             const lvl = levelOf(ctx.levels, r.arg) orelse return .fail;
-            return verdict(compare(@floatFromInt(lvl), r.op, r.value), r.negated);
+            return verdict(compare(@floatFromInt(lvl), r.op, operand(ctx, r)), r.negated);
         },
-        .player_level => return verdict(compare(@floatFromInt(ctx.player_level), r.op, r.value), r.negated),
+        .player_level => return verdict(compare(@floatFromInt(ctx.player_level), r.op, operand(ctx, r)), r.negated),
         .has_buff => return evalHasBuff(r, ctx),
         .is_alive => return verdict(ctx.alive, r.negated),
         .is_attached_to_entity => return verdict(ctx.attached_to_entity, r.negated),
@@ -736,6 +754,38 @@ test "ArmorGroupLowestQuality reads the worn group's lowest quality" {
     try testing.expect(all(&.{gte6}, ctx));
     const gte7 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 7 };
     try testing.expect(!all(&.{gte7}, ctx));
+}
+
+test "a value=\"@cvar\" operand is read live, not parsed as 0" {
+    // buffLevelUpTracking gates its `add $LastPlayerLevel 1` row on
+    // `PlayerLevel GT value="@$LastPlayerLevel"`. Parsing that operand as 0 made
+    // the guard always pass, so the counter climbed on every 0.1 s update.
+    var vars: cvars.Set = .{};
+    const src = "<effect_group><requirement name=\"PlayerLevel\" operation=\"GT\" value=\"@$LastPlayerLevel\"/></effect_group>";
+    const tag = std.mem.find(u8, src, "<requirement").?;
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const r = try parse(src, tag, arena.allocator());
+    try testing.expectEqualStrings("$LastPlayerLevel", r.value_cvar);
+    try testing.expectEqual(@as(f32, 0), r.value);
+    const ctx0 = Ctx{ .player_level = 1, .cvars = &vars };
+    // Level 1 vs an unset counter (0): passes.
+    try testing.expect(all(&.{r}, ctx0));
+    _ = vars.apply("$LastPlayerLevel", .set, 1);
+    // Level 1 vs the counter at 1: the guard closes.
+    try testing.expect(!all(&.{r}, ctx0));
+    const ctx5 = Ctx{ .player_level = 5, .cvars = &vars };
+    try testing.expect(all(&.{r}, ctx5));
+    // The other comparison kinds take the same operand path.
+    const worn = Requirement{ .kind = .worn_items, .name = "WornItems", .list = "lightArmor", .op = .eq, .value_cvar = ".wornTarget" };
+    var wornvars: cvars.Set = .{};
+    _ = wornvars.apply(".wornTarget", .set, 0);
+    try testing.expect(all(&.{worn}, .{ .cvars = &wornvars }));
+    _ = wornvars.apply(".wornTarget", .set, 2);
+    const two = Ctx{ .cvars = &wornvars, .worn_items = &.{ "a,lightArmor", "b,lightArmor" } };
+    try testing.expect(all(&.{worn}, two));
+    _ = wornvars.apply(".wornTarget", .set, 3);
+    try testing.expect(!all(&.{worn}, two));
 }
 
 test "WornItems counts the slots whose item carries any of the row's tags" {

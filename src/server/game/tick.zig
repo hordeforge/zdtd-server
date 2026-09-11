@@ -207,8 +207,6 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     const prog = self.sim.rules.progression;
     const sv = assets_buffs.survival(&self.buffs);
     const use_buff = sv.ok();
-    const check01_id = assets_buffs.survivalCheckId(&self.buffs);
-    const check02_id = assets_buffs.armorCheckId(&self.buffs);
     if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
     if (self.sim.director.clock.seconds_per_hour <= 0) return;
     const game_hours = dt / self.sim.director.clock.seconds_per_hour;
@@ -297,7 +295,6 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // total. Revertible: removing a stage buff recomputes the deltas
             // without it (additive deltas, recompute-from-set).
             //
-            const cid = check01_id orelse continue;
             // Requirement-gate context (ADR 0023 §2): the live player state a
             // `<requirement>` reads. `attached_to_entity` stays false because
             // the sim tracks no vehicle/attachment state yet.
@@ -374,32 +371,21 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                     if (rm.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, rm.truncated);
                 }
             }
-            // Triggered-effect engine (P3): buffStatusCheck01's onSelfBuffUpdate
-            // AddBuff rows carry the stage adds, gated by their own requirements
-            // (StatComparePercCurrentToMax and the `!HasBuff` self gates).
-            // Evaluated by id every tick (stock fires on the buff's update rate;
-            // the effects are idempotent).
-            const check_res = assets_buffs.evaluateTriggered(&self.buffs, cid, .update, req_ctx, &req_counts);
-            if (check_res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, check_res.truncated);
-            const wanted = check_res.add_buffs[0..check_res.add_n];
-            // The *kept* stage comes from the thresholds (buffs.xml's zones via
-            // buffs.survival), not from the row requests: the stage rows are
-            // gated on their own stage buff (`!HasBuff buffStatusThirsty03`), so
-            // deriving the state from them drops the active stage the moment it
-            // is applied and the set oscillates every tick. The requests still
-            // drive the adds (data), and syncStageBuffs removes only stages the
-            // thresholds no longer hold.
-            const stages = assets_buffs.survivalStages(sv, h);
-            syncStageBuffs(self, c.entity_id, ps, wanted, stages);
-            // The armor-status buff's update rows grant and revoke the armor-set
-            // bonus buffs, gated on ArmorGroupCount (stock wires this through
-            // the entity class's Buffs list + the buff lifecycle; zdtd drives it
-            // by id like check01).
-            if (check02_id) |c2id| {
-                const armor_res = assets_buffs.evaluateTriggered(&self.buffs, c2id, .update, req_ctx, &req_counts);
-                if (armor_res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, armor_res.truncated);
-                applyTriggeredBuffs(self, c.entity_id, ps, &armor_res);
+            // onSelfBuffUpdate for every active buff, due on the buff's own
+            // update rate (`<update_rate>` is seconds * 20 ticks; buff.tick
+            // resets update_ticks on the due tick). A row's AddBuff/RemoveBuff
+            // lands through the sink as it passes.
+            life_ids_n = activeBuffIds(&self.sim.buffs[ps], &life_buf).len;
+            for (life_buf[0..life_ids_n]) |id| {
+                const slot = self.sim.buffs[ps].find(id) orelse continue;
+                if (slot.flags.remove or slot.flags.paused) continue;
+                if (!slot.flags.started or slot.update_ticks != 0) continue;
+                const up = assets_buffs.evaluateTriggered(&self.buffs, id, .update, req_ctx, &req_counts);
+                if (up.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, up.truncated);
             }
+            // Survival stage state: the thresholds decide which stage stays; the
+            // engine's own rows brought them in above, so this only reaps.
+            syncStageBuffs(self, c.entity_id, ps, assets_buffs.survivalStages(sv, h));
             // Two queries, like stock: the max-stat/change-over-time consumers
             // call EffectManager.GetValue with no tags, and
             // Equipment::GetTotalPhysicalArmorRating (IL=887) queries passive 41
@@ -440,6 +426,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             h.water_max = @max(1, 100 + mwater);
             const mstam = vm.stamina_max + pvm.stamina_max;
             h.stamina_max = @max(1, 100 + mstam);
+            const stages = assets_buffs.survivalStages(sv, h);
             const starving = stages.hungry == 3;
             const dehydrated = stages.thirsty == 3;
             if (starving or dehydrated) {
@@ -553,7 +540,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
 /// stock client shows the same HUD state. Revertible: a stage change removes
 /// the stale buff (flagged; the buff tick relays the removal) and the VM
 /// recomputes its deltas without it. No-op when the stages already match.
-fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, wanted: []const []const u8, keep: assets_buffs.SurvivalStages) void {
+fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, keep: assets_buffs.SurvivalStages) void {
+    _ = entity_id;
     const set = self.sim.buffsMut(ps);
     var remove_ids: [assets_buffs.max_triggered_removes]u16 = undefined;
     var n_rem: usize = 0;
@@ -574,22 +562,6 @@ fn syncStageBuffs(self: *Game, entity_id: i32, ps: ecs.Slot, wanted: []const []c
     }
     for (remove_ids[0..n_rem]) |id| {
         _ = ecs.buff.remove(set, id);
-    }
-    // The engine may select several stage buffs at once (boundary fractions
-    // pass two hungry + two thirsty rows); each is added unless already
-    // active (buff.zig stacking keeps repeats idempotent).
-    for (wanted) |name| {
-        const def_id = self.buffs.indexOfName(name) orelse continue;
-        if (set.find(def_id) != null) continue;
-        const def = self.buffs.byId(def_id) orelse continue;
-        _ = ecs.buff.add(set, .{
-            .def_id = def_id,
-            .duration = def.duration,
-            .stack_type = def.stack_type,
-            .update_rate_ticks = def.update_rate_ticks,
-            .remove_on_death = def.remove_on_death,
-        }, ecs.buff.duration_from_class, -1, 0, 0, 0);
-        game_social.relayBuff(self, entity_id, def.name, true, -1, null) catch {};
     }
 }
 

@@ -4353,17 +4353,16 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     // (Yes): the same server code the GameStats echo carries.
     g.sandbox_code = "AALB";
     try stepTicks(g, 46);
-    // 149, not 150: with the option on, buffStatusCheck01's own update rows fold
-    // too, and they set `$PlayerLevelBonus = $LastPlayerLevel(0)` then `add -1`
-    // (the `PlayerLevel LT 2` row), so its `HealthMax base_add @$PlayerLevelBonus`
-    // contributes -1. Stock does the same until buffLevelUpTracking refreshes
-    // `$LastPlayerLevel`, which zdtd does not apply yet. Note for the rate-driven
-    // update event: once the lifecycle driver runs every buff's update rows on
-    // its own rate, `buffLevelUpTracking` gets added (check01's
-    // `PlayerLevel GT @$LastPlayerLevel` row) and this expectation moves to 168,
-    // which is not yet accounted for row by row; understand that before landing
-    // the driver.
-    try std.testing.expectApproxEqAbs(@as(f32, 149), g.sim.health[ps].max_hp, 0.001);
+    // 150 = base 100 + the synthetic perk's 50, with the level bonus at zero.
+    // Accounted row by row now that `value="@cvar"` operands are live:
+    // buffStatusCheck01 adds buffLevelUpTracking (`PlayerLevel GT
+    // @$LastPlayerLevel`, 1 > 0), whose update row sets `$LastPlayerLevel` to 1
+    // and then closes its own guard; check01's update sets
+    // `$PlayerLevelBonus = @$LastPlayerLevel` (1) and its `PlayerLevel LT 2` row
+    // subtracts 1, so `HealthMax base_add @$PlayerLevelBonus` contributes 0. The
+    // -1 this scenario used to see came from the operand being a constant 0,
+    // which kept `$LastPlayerLevel` at 0 forever.
+    try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].max_hp, 0.001);
 }
 
 test "the survival pass folds the armor query into buff_phys_resist" {

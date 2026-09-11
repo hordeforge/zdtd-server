@@ -3773,6 +3773,27 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     round 24 pass unchanged, and the stage chain now behaves like stock (each
     stage's start removes the others, highest added wins) because the adds land
     in document order.
+  - **`value="@cvar"` operands are live (round 29, 2026-09-11).** A requirement's
+    `value` attribute was always parsed as a float, so an `@name` operand became
+    a constant 0: 255 stock requirement rows are written that way. The visible
+    damage was the level-bonus chain - `buffLevelUpTracking`'s
+    `PlayerLevel GT value="@$LastPlayerLevel"` guard always passed, so
+    `$LastPlayerLevel` climbed on every 0.1 s update and check01's
+    `$PlayerLevelBonus = @$LastPlayerLevel` turned into an unbounded max-HP
+    bonus (measured: 168 where the chain accounts for 150). `Requirement`
+    carries `value_cvar`, `operand(ctx, r)` resolves it through the entity's
+    CVars (a missing name is 0, like `GetCustomVar` IL=10) and every comparison
+    kind reads the operand through it. Accounted result at level 1: the tracker
+    sets `$LastPlayerLevel` to 1 and closes its own guard, check01 sets
+    `$PlayerLevelBonus` to 1 and its `PlayerLevel LT 2` row subtracts 1, so
+    `HealthMax` gains 0.
+  - **`onSelfBuffUpdate` is a general per-buff event (round 29).** The last
+    hardcoded pair in the survival pass is gone: every active buff fires its own
+    update rows when `buff.tick` marks the due tick (`<update_rate>` is seconds,
+    `* 20` ticks; check01 40, check02 44), so `survivalCheckId`/`armorCheckId`
+    are no longer used by the server. `syncStageBuffs` is removal-only, the
+    engine's own rows supply the stage adds, and the check-buff scenarios wait
+    the real rates through `stepTicks`.
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`
