@@ -224,7 +224,7 @@ pub fn trackedDeltasAtLevel(
     ctx: requirements.Ctx,
     counts: *requirements.Counts,
 ) buffs.TrackedDeltas {
-    return buffs.trackedDeltasAt(def.passives, level, ctx, counts);
+    return buffs.trackedDeltasAt(def.passives, .{ .level = level }, ctx, counts);
 }
 
 /// A row's highest passing `<level_requirements>` level, or `catalog_max` when
@@ -348,10 +348,13 @@ fn appendPassive(
     var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
     const curve_len = buffs.parseCurveValue(val_s, &curve);
     var curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
-    const curve_levels_len = if (xml.attr(body, tag, "level")) |lv|
+    var curve_levels_len = if (xml.attr(body, tag, "level")) |lv|
         buffs.parseCurveLevels(lv, &curve_levels)
     else
         0;
+    // `duration="0,20"` fills the same Levels array and is parsed after
+    // `level=` (PassiveEffect::ParsePassiveEffect IL=305), so it wins.
+    if (xml.attr(body, tag, "duration")) |dv| curve_levels_len = buffs.parseCurveLevels(dv, &curve_levels);
     try pool.append(allocator, .{
         .name = try arena.dupe(u8, en),
         .op = buffs.parseOp(op_s),
@@ -873,9 +876,9 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
         // with the buff catalog absent but no buffs active the gate is decided
         // (empty set) so the regen folds.
         try std.testing.expect(h.passives[0].reqs.len > 0);
-        const d5 = buffs.trackedDeltasAt(h.passives, 5, .{}, &counts);
+        const d5 = buffs.trackedDeltasAt(h.passives, .{ .level = 5 }, .{}, &counts);
         try std.testing.expectApproxEqAbs(@as(f32, 0.16), d5.hp_ot, 0.0001);
-        const d0 = buffs.trackedDeltasAt(h.passives, 0, .{}, &counts);
+        const d0 = buffs.trackedDeltasAt(h.passives, .{ .level = 0 }, .{}, &counts);
         try std.testing.expect(!d0.any());
         // Starving for water: the row must not fold at all.
         const starving_ids = [_]u16{3};
@@ -884,7 +887,7 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
                 return if (std.ascii.eqlIgnoreCase(name, "buffStatusThirsty03")) 3 else null;
             }
         }.f };
-        const starving = buffs.trackedDeltasAt(h.passives, 5, .{
+        const starving = buffs.trackedDeltasAt(h.passives, .{ .level = 5 }, .{
             .active_buffs = &starving_ids,
             .buff_names = &names,
         }, &counts);
@@ -901,9 +904,9 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
         }
     }
     if (fort) |f2| {
-        const d1 = buffs.trackedDeltasAt(f2.passives, 1, .{}, &counts);
+        const d1 = buffs.trackedDeltasAt(f2.passives, .{ .level = 1 }, .{}, &counts);
         try std.testing.expectEqual(@as(f32, 0), d1.hp_max);
-        const d5 = buffs.trackedDeltasAt(f2.passives, 5, .{}, &counts);
+        const d5 = buffs.trackedDeltasAt(f2.passives, .{ .level = 5 }, .{}, &counts);
         try std.testing.expectApproxEqAbs(@as(f32, 100), d5.hp_max, 0.0001);
     }
     // `<book>` blocks parse into the same catalog: the Fireman's Almanac
@@ -926,10 +929,10 @@ test "perk/attribute passive_effect rows parse (the 649-row surface)" {
         if (std.mem.eql(u8, p.name, "StaminaChangeOT") and p.reqs.len > 0) in_biome = true;
     }
     try std.testing.expect(in_biome);
-    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 1, .tags = "running" }, &counts).stamina_ot);
-    try std.testing.expectApproxEqAbs(@as(f32, 0.2), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 8, .tags = "running" }, &counts).stamina_ot, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, .{ .level = 1 }, .{ .biome_id = 1, .tags = "running" }, &counts).stamina_ot);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), buffs.trackedDeltasAt(b.passives, .{ .level = 1 }, .{ .biome_id = 8, .tags = "running" }, &counts).stamina_ot, 0.0001);
     // The same biome with an untagged query folds nothing: the row is tagged.
-    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{ .biome_id = 8 }, &counts).stamina_ot);
+    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, .{ .level = 1 }, .{ .biome_id = 8 }, &counts).stamina_ot);
 }
 
 test "perkTotals folds purchased perk levels level-scaled and reverts" {
@@ -939,7 +942,7 @@ test "perkTotals folds purchased perk levels level-scaled and reverts" {
             .name = "perkHealingFactor",
             .max_level = 5,
             .parent_attr = "attFortitude",
-            .passives = &.{.{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5 }},
+            .passives = &.{.{ .name = "HealthChangeOT", .op = .base_add, .curve = .{ 0.011, 0.022, 0.05, 0.1, 0.16, 0, 0, 0 }, .curve_len = 5, .curve_levels = .{ 1, 2, 3, 4, 5, 0, 0, 0 }, .curve_levels_len = 5 }},
         },
         .{
             .name = "perkPackMule",
@@ -976,8 +979,10 @@ test "perkTotals folds purchased perk levels level-scaled and reverts" {
         .passives = &.{.{
             .name = "HealthMax",
             .op = .base_add,
-            .curve = .{ 0, 0, 0, 50, 100, 0, 0, 0 },
-            .curve_len = 5,
+            .curve = .{ 50, 100, 0, 0, 0, 0, 0, 0 },
+            .curve_len = 2,
+            .curve_levels = .{ 4, 5, 0, 0, 0, 0, 0, 0 },
+            .curve_levels_len = 2,
             .reqs = &.{.{
                 .kind = .progression_level,
                 .op = .ge,
@@ -1026,6 +1031,7 @@ test "effect_group and row requirements attach to the right passives" {
         \\      </effect_group>
         \\      <effect_group>
         \\        <passive_effect name="WaterMax" operation="base_add" level="1" value="5"/>
+        \\        <passive_effect name="HealthChangeOT" operation="base_add" duration="0,5" value="1,2"/>
         \\      </effect_group>
         \\    </perk>
         \\    <perk name="perkInherits" parent="skillTest"/>
@@ -1048,9 +1054,9 @@ test "effect_group and row requirements attach to the right passives" {
     }
     try std.testing.expect(perk != null and book != null);
     const p = perk.?;
-    // Four passives over the two groups. The triggered_effect's requirement is
+    // Five passives over the two groups. The triggered_effect's requirement is
     // not a group gate and its row is not a passive.
-    try std.testing.expectEqual(@as(usize, 4), p.passives.len);
+    try std.testing.expectEqual(@as(usize, 5), p.passives.len);
     // StaminaMax: the group gate only.
     try std.testing.expectEqual(@as(usize, 1), p.passives[0].reqs.len);
     try std.testing.expectEqual(requirements.Kind.in_biome, p.passives[0].reqs[0].kind);
@@ -1062,6 +1068,9 @@ test "effect_group and row requirements attach to the right passives" {
     try std.testing.expectEqual(@as(usize, 1), p.passives[2].reqs.len);
     // WaterMax is in the second group, which has no requirement.
     try std.testing.expectEqual(@as(usize, 0), p.passives[3].reqs.len);
+    // The second group's HealthChangeOT row carries only duration anchors.
+    try std.testing.expectEqual(@as(usize, 0), p.passives[4].reqs.len);
+    try std.testing.expectEqual(@as(u8, 2), p.passives[4].curve_levels_len);
     // The two `<level_requirements>` blocks parse onto the row, in file order,
     // with their own nested requirements.
     try std.testing.expectEqual(@as(usize, 2), p.level_reqs.len);
@@ -1071,6 +1080,17 @@ test "effect_group and row requirements attach to the right passives" {
     try std.testing.expectEqual(requirements.Kind.progression_level, p.level_reqs[1].reqs[0].kind);
     try std.testing.expectEqualStrings("attStrength", p.level_reqs[1].reqs[0].arg);
     try std.testing.expectEqual(@as(f32, 5), p.level_reqs[1].reqs[0].value);
+    // `duration=` fills the same anchors as `level=` (the IL parses it second).
+    // No stock progression row uses it, but a modded one must not fall into the
+    // anchor-less branch.
+    var dur_ok = false;
+    for (p.passives) |pp| {
+        if (std.mem.eql(u8, pp.name, "HealthChangeOT") and pp.curve_levels_len == 2) {
+            dur_ok = true;
+            try std.testing.expectApproxEqAbs(@as(f32, 5), pp.curve_levels[1], 0.001);
+        }
+    }
+    try std.testing.expect(dur_ok);
     // No gates pass with an empty ledger, so nothing is purchasable; a
     // strength of 5 unlocks level 3.
     var ledger = [_]SkillLevel{.{ .name = "attStrength", .level = 4 }};
@@ -1097,14 +1117,14 @@ test "effect_group and row requirements attach to the right passives" {
     try std.testing.expectEqual(@as(u16, 2), t.perk_base_cost);
     try std.testing.expectEqual(@as(f32, 1.5), t.perk_cost_mult);
     var counts: requirements.Counts = .{};
-    const in8 = buffs.trackedDeltasAt(p.passives, 1, .{ .biome_id = 8 }, &counts);
+    const in8 = buffs.trackedDeltasAt(p.passives, .{ .level = 1 }, .{ .biome_id = 8 }, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, 25), in8.stamina_max, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 50), in8.hp_max, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 10), in8.food_max, 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 5), in8.water_max, 0.0001);
     // Wrong biome: the gated rows drop, the ungated second group stays. The
     // single `level="1"` anchor applies at level 1 (not interpolated).
-    const in1 = buffs.trackedDeltasAt(p.passives, 1, .{ .biome_id = 1 }, &counts);
+    const in1 = buffs.trackedDeltasAt(p.passives, .{ .level = 1 }, .{ .biome_id = 1 }, &counts);
     try std.testing.expectEqual(@as(f32, 0), in1.stamina_max);
     try std.testing.expectEqual(@as(f32, 0), in1.hp_max);
     try std.testing.expectEqual(@as(f32, 0), in1.food_max);
@@ -1114,8 +1134,8 @@ test "effect_group and row requirements attach to the right passives" {
     try std.testing.expectEqual(@as(usize, 1), b.passives.len);
     try std.testing.expectEqual(requirements.Kind.progression_level, b.passives[0].reqs[0].kind);
     const book_ledger = [_]requirements.NameLevel{.{ .name = "perkGated", .level = 1 }};
-    try std.testing.expectApproxEqAbs(@as(f32, 0.5), buffs.trackedDeltasAt(b.passives, 1, .{ .levels = &book_ledger }, &counts).hp_ot, 0.0001);
-    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, 1, .{}, &counts).hp_ot);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), buffs.trackedDeltasAt(b.passives, .{ .level = 1 }, .{ .levels = &book_ledger }, &counts).hp_ot, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), buffs.trackedDeltasAt(b.passives, .{ .level = 1 }, .{}, &counts).hp_ot);
 }
 
 test "a def stops at max_passives_per_def rows" {
@@ -1143,7 +1163,7 @@ test "a def stops at max_passives_per_def rows" {
     try std.testing.expectEqual(@as(usize, 1), t.perks.len);
     try std.testing.expectEqual(max_passives_per_def, t.perks[0].passives.len);
     var counts: requirements.Counts = .{};
-    const d = buffs.trackedDeltasAt(t.perks[0].passives, 1, .{ .biome_id = 8 }, &counts);
+    const d = buffs.trackedDeltasAt(t.perks[0].passives, .{ .level = 1 }, .{ .biome_id = 8 }, &counts);
     try std.testing.expectApproxEqAbs(@as(f32, @floatFromInt(max_passives_per_def)), d.stamina_max, 0.0001);
 }
 

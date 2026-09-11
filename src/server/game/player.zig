@@ -1047,7 +1047,7 @@ test "dismemberSelfChance folds perk levels and active buffs, 0 when absent" {
         .{
             .name = "perkSkullCrusher",
             .max_level = 5,
-            .passives = &.{.{ .name = "DismemberSelfChance", .op = .base_add, .curve = .{ 0.1, 0.2, 0.3, 0, 0, 0, 0, 0 }, .curve_len = 3 }},
+            .passives = &.{.{ .name = "DismemberSelfChance", .op = .base_add, .curve = .{ 0.1, 0.2, 0.3, 0, 0, 0, 0, 0 }, .curve_len = 3, .curve_levels = .{ 1, 2, 3, 0, 0, 0, 0, 0 }, .curve_levels_len = 3 }},
         },
     };
     g.progression_table.perks = &perks;
@@ -1095,8 +1095,8 @@ test "barter scales discount buying and bonus selling off the same fold" {
             .name = "perkBetterBarter",
             .max_level = 5,
             .passives = &.{
-                .{ .name = "BarteringBuying", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 },
-                .{ .name = "BarteringSelling", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2 },
+                .{ .name = "BarteringBuying", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2, .curve_levels = .{ 1, 2, 0, 0, 0, 0, 0, 0 }, .curve_levels_len = 2 },
+                .{ .name = "BarteringSelling", .op = .base_add, .curve = .{ 0.05, 0.1, 0, 0, 0, 0, 0, 0 }, .curve_len = 2, .curve_levels = .{ 1, 2, 0, 0, 0, 0, 0, 0 }, .curve_levels_len = 2 },
             },
         },
     };

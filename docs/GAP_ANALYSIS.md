@@ -3673,11 +3673,29 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     where stock picks the one matching the held weapon's perk and that perk's
     level (round 15: a hunting rifle plus perkDeadEye 5 folds only the
     `Equals 5` row, so the buff reads -2.2 instead of -2.5 or -1.75).
+  - **`duration=` curves evaluate on the buff's elapsed time (round 17).**
+    Stock calls `PassiveEffect.ModValue` with the purchased level for
+    perk/attribute passives and with `BuffValue.DurationInSeconds` for buff
+    passives (`BuffClass::ModifyValue` IL=105), and `level=`/`duration=` fill the
+    same `Levels` array. Neither parser read `duration=` at all, and the fold had
+    no duration axis, so the 18 tracked buff rows anchored on durations were
+    evaluated at a fixed axis 1. `Axis{level,duration}` now selects the axis
+    (`effectTotals` passes the slot's `durationSeconds()`), `curveAtAxis` is the
+    f32-axis interpolator, and the anchor-less branch follows ModValue IL=3C4
+    (one value flat, two averaged, more applies nothing). Fixed by it:
+    `buffInternalBleeding`'s HealthChangeOT `duration="0,3,60" value="1,5,200"`
+    ramps 1 -> 5 hp/s over 3 s and to 200 hp/s by 60 s instead of folding a
+    constant, and `buffDrowning03`/`buffRadiation03`/`buffRingOfFireEffect` ramp
+    the same way; `buffHoldBreathAiming01`'s two duration rows are mutually
+    exclusive instead of summing.
     Residual for the next pass: the stat-comparison kinds
     (`StatComparePercCurrentToMax`/`StatCompareCurrent`/`StatComparePercCurrentToModMax`)
     need the entity's live stat fractions on the ctx (1 tracked row), and
     `CVarCompare` needs per-entity CVar state, which is also what unblocks the
-    `@cvar` passive values (10 tracked rows whose value is currently 0).
+    `@cvar` passive values (10 tracked rows whose value is currently 0). Buff
+    lifecycle events (`onSelfBuffStart`/`Update`/`Remove`) are still only driven
+    for `buffStatusCheck01`, so `ModifyCVar` (1204 rows) and the other buff
+    triggered actions do not fire yet.
   - `<book>` blocks (152) joined the catalog this round: a book is a
     progression value items.xml grants with `SetProgressionLevel level="-1"`,
     and before this a read almanac stored no level and folded no passive. This

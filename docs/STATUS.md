@@ -123,7 +123,12 @@ item's Tags each tick (buffHoldBreathAiming01 now picks the row matching the
 held weapon's perk and its rank) and `SandboxOptionBool` reads the decoded
 `SandboxCode` from serverconfig, and `ArmorGroupLowestQuality` reads the worn
 armor groups' lowest quality (items.xml `ArmorGroup`), so 24 of the 43 gated
-tracked buff rows resolve and 19 refuse closed.
+tracked buff rows resolve and 19 refuse closed. Buff passive curves now
+evaluate on the buff's elapsed duration when the row is anchored with
+`duration=` (`BuffClass::ModifyValue` IL=105), so `buffInternalBleeding`,
+`buffDrowning03` and `buffRadiation03` ramp their damage over time instead of
+folding a constant, and the anchor-less branch follows `ModValue` IL=3C4 (one
+value flat, two averaged, more applies nothing).
 
 ---
 

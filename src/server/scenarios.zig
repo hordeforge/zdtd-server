@@ -4035,7 +4035,7 @@ test "scenario vehicle enter drive and turret kills with power" {
             .{
                 .name = "perkAdvancedEngineering",
                 .max_level = 5,
-                .passives = &.{.{ .name = "ElectricalTrapXP", .op = .base_set, .curve = .{ 0.15, 0.3, 0.45, 0, 0, 0, 0, 0 }, .curve_len = 3 }},
+                .passives = &.{.{ .name = "ElectricalTrapXP", .op = .base_set, .curve = .{ 0.15, 0.3, 0.45, 0, 0, 0, 0, 0 }, .curve_len = 3, .curve_levels = .{ 1, 2, 3, 0, 0, 0, 0, 0 }, .curve_levels_len = 3 }},
             },
         };
         g.progression_table.perks = &perks;
