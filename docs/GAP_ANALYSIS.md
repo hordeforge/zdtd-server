@@ -223,7 +223,7 @@ wins on conflict about what shipped, not about the arithmetic).
 | [Player progression](#10-player-progression) | 27 | 1 | 0 | 28 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated spend (NetPackageEntitySetSkillLevelServer) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT) gated by each row's parsed `<requirement>` (src/assets/requirements.zig); `<book>` progression values load too; XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins. Two shortfalls: perk purchase is denied (the parent-skill prerequisite is wrong) and the requirement vocabulary is partial (unknown kinds fail closed, counted) |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Round 18 (2026-09-11) closed the armor-set activation chain inside §10 (`ArmorGroupCount` + the full triggered-row gate + buffStatusCheck02 driven from data); what keeps it PARTIAL is the remaining gate vocabulary (`CVarCompare`/`EntityTagCompare`/`StatComparePercCurrentToModMax`), the `@cvar` passive values and the entity-class `Buffs=` lifecycle. Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -521,7 +521,27 @@ area and the concrete work.
     (ModifyStats/AddBuff/RemoveBuff) requirement-gated with no allocation;
     the survival stage selection now runs through it (buffStatusCheck01's
     update rows pick the stage buffs, replacing the hand-rolled selector).
-    Residual: the untracked effect classes
+    **FULL ROW GATING + ARMOR-SET CHAIN 2026-09-11 (round 18)**: every
+    triggered row is gated through the shared requirement evaluator (before
+    this only the StatComparePercCurrentToMax leg was read), and
+    buffStatusCheck02's `onSelfBuffUpdate` rows run each tick, so the 15
+    armor-set bonus buffs are granted and revoked entirely from data - the
+    grant rows are `ArmorGroupCount group_name=... Equals 4` + `!HasBuff`, the
+    revoke rows `LTE 3` + `HasBuff`, and each bonus buff's own tier rows are
+    `ArmorGroupLowestQuality Equals N`. `buffBikerSetBonus` is never added by
+    name anywhere in zdtd; the end-to-end scenario wears a full biker set at
+    qualities 5/4/4/3, sees the tier value 3 fold, loses a piece, and sees the
+    buff reaped. Two kinds landed: `ArmorGroupCount` (pieces per worn group, 0
+    when unworn) and `StatComparePercCurrentToMax` (fraction of max for
+    Health/Stamina/Food/Water; a max that is not positive fails both
+    polarities, IL=120). The stage machine takes its *state* from the
+    thresholds (`buffs.survival`) rather than from the row requests: the stage
+    rows are gated `!HasBuff` on their own stage, so a state derived from the
+    requests drops the stage the moment it lands and oscillates every tick.
+    The bounded triggered result now sits above the stock maxima (AddBuff 16 /
+    RemoveBuff 16 = buffStatusCheck02, ModifyStats 1) and counts anything past
+    the cap in `apm` `triggered_rows_dropped` instead of silently shortening
+    the list. Residual: the untracked effect classes
     (RecipeTagUnlocked/LootProb/CraftingTier...) and the other triggered
     actions (ModifyCVar/PlaySound/...) stay recorded. **Perk/buff stamina-OT
     SHIPPED 2026-08-25**: the VM's StaminaChangeOT total (perkRuleOneCardio
@@ -3612,10 +3632,12 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     `IsNight`), so the evaluator is a prerequisite for that row, not the row
     itself.
   - Implemented kinds: `ProgressionLevel`, `PlayerLevel`, `HasBuff`,
-    `IsAlive`, `IsAttachedToEntity`, `InBiome`. The rest (measured vocabulary:
-    `ItemHasTags`, `HoldingItemHasTags`, `CVarCompare`, `RandomRoll`,
+    `IsAlive`, `IsAttachedToEntity`, `InBiome`, `HoldingItemHasTags`,
+    `SandboxOptionBool`, `ArmorGroupLowestQuality`, `ArmorGroupCount`,
+    `StatComparePercCurrentToMax`. The rest (measured vocabulary:
+    `ItemHasTags`, `CVarCompare`, `RandomRoll`,
     `EntityTagCompare`, `EntityHasMovementTag`, `IsNight`, `IsIndoors`,
-    `StatComparePercCurrentToMax`, `HitLocation`, ...) **fail closed** and are
+    `StatComparePercCurrentToModMax`, `HitLocation`, ...) **fail closed** and are
     counted in `apm` `requirement_unsupported`, so the gap is visible instead
     of silently passing. `RandomRoll` additionally cannot be folded per tick
     the way the pure state reads can: a chance gate re-rolled on the max-stat
@@ -3688,14 +3710,17 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     constant, and `buffDrowning03`/`buffRadiation03`/`buffRingOfFireEffect` ramp
     the same way; `buffHoldBreathAiming01`'s two duration rows are mutually
     exclusive instead of summing.
-    Residual for the next pass: the stat-comparison kinds
-    (`StatComparePercCurrentToMax`/`StatCompareCurrent`/`StatComparePercCurrentToModMax`)
-    need the entity's live stat fractions on the ctx (1 tracked row), and
+    Residual for the next pass: `StatComparePercCurrentToMax` landed in round
+    18 for Health/Stamina/Food/Water (the ctx carries the fractions and maxes,
+    and the stage rows plus the armor-status rows read them), leaving
+    `StatCompareCurrent`/`StatComparePercCurrentToModMax` (1 tracked row); and
     `CVarCompare` needs per-entity CVar state, which is also what unblocks the
-    `@cvar` passive values (10 tracked rows whose value is currently 0). Buff
-    lifecycle events (`onSelfBuffStart`/`Update`/`Remove`) are still only driven
-    for `buffStatusCheck01`, so `ModifyCVar` (1204 rows) and the other buff
-    triggered actions do not fire yet.
+    `@cvar` passive values (10 tracked rows whose value is currently 0) and
+    `ModifyCVar` (1204 rows). Buff lifecycle events
+    (`onSelfBuffStart`/`Update`/`Remove`) are still only driven for
+    `buffStatusCheck01`/`buffStatusCheck02` by id, so the entity classes'
+    `Buffs=` list never applies the checks and the remaining buff triggered
+    actions do not fire yet.
   - `<book>` blocks (152) joined the catalog this round: a book is a
     progression value items.xml grants with `SetProgressionLevel level="-1"`,
     and before this a read almanac stored no level and folded no passive. This

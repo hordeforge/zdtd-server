@@ -126,6 +126,12 @@ pub const CounterId = enum(u16) {
     /// implemented. Every one fails its gate closed, so a non-zero value is
     /// measured vocabulary gap, not a silent pass.
     requirement_unsupported,
+    /// Triggered-effect requests dropped because one buff's AddBuff /
+    /// RemoveBuff / ModifyStats outcome for a single event exceeded the
+    /// engine's bounded result array. Non-zero is data whose effect did not
+    /// run (sized above the stock maximum; a modlet can exceed it), not a
+    /// silent pass.
+    triggered_rows_dropped,
     _,
 };
 

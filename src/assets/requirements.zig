@@ -56,6 +56,8 @@ pub const Kind = enum(u8) {
     holding_item_has_tags,
     sandbox_option_bool,
     armor_group_lowest_quality,
+    armor_group_count,
+    stat_compare_perc_current_to_max,
 };
 
 /// `RequirementBase/OperationTypes` (OperationTypes.il.txt), case-insensitive
@@ -112,6 +114,16 @@ pub const Ctx = struct {
     /// Decoded sandbox code groups (`SandboxOptions.SandboxOptionManager`, see
     /// `assets/sandbox.zig`); `SandboxOptionBool` (IL=18) reads a bool option.
     sandbox_groups: []const sandbox.Group = &.{},
+    /// Live stat fractions and maxes for the StatCompare gates (0..1 fractions;
+    /// a non-positive max fails the gate like the IL).
+    hp_frac: f32 = 0,
+    hp_max: f32 = 0,
+    stamina_frac: f32 = 0,
+    stamina_max: f32 = 0,
+    food_frac: f32 = 0,
+    food_max: f32 = 0,
+    water_frac: f32 = 0,
+    water_max: f32 = 0,
     /// Worn-armor groups and their lowest worn quality
     /// (`Equipment::ResetArmorGroups` IL=51 / `GetArmorGroupLowestQuality`),
     /// for `ArmorGroupLowestQuality` (IL=34). A group that is not worn is
@@ -119,10 +131,13 @@ pub const Ctx = struct {
     armor_groups: []const ArmorGroup = &.{},
 };
 
-/// One worn armor group's lowest quality (0..6).
+/// One worn armor group: how many items of it are worn and the lowest quality
+/// among them (`Equipment::AddArmorGroup` IL=0 counts and minimises in one
+/// pass).
 pub const ArmorGroup = struct {
     name: []const u8 = "",
     quality: u8 = 0,
+    count: u8 = 0,
 };
 
 /// Gate accounting for one fold. Both counters are per requirement evaluated
@@ -145,6 +160,8 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "HoldingItemHasTags")) return .holding_item_has_tags;
     if (std.mem.eql(u8, name, "SandboxOptionBool")) return .sandbox_option_bool;
     if (std.mem.eql(u8, name, "ArmorGroupLowestQuality")) return .armor_group_lowest_quality;
+    if (std.mem.eql(u8, name, "ArmorGroupCount")) return .armor_group_count;
+    if (std.mem.eql(u8, name, "StatComparePercCurrentToMax")) return .stat_compare_perc_current_to_max;
     return .unsupported;
 }
 
@@ -300,6 +317,52 @@ fn evalArmorGroupLowestQuality(r: Requirement, ctx: Ctx) Verdict {
     return verdict(compare(quality, r.op, r.value), r.negated);
 }
 
+/// `ArmorGroupCount::IsValid` (via `Equipment.GetArmorGroupCount`): the number
+/// of worn items in the group, 0 when the group is not worn.
+fn evalArmorGroupCount(r: Requirement, ctx: Ctx) Verdict {
+    var count: f32 = 0;
+    for (ctx.armor_groups) |g| {
+        if (!std.mem.eql(u8, g.name, r.arg)) continue;
+        count = @floatFromInt(g.count);
+        break;
+    }
+    return verdict(compare(count, r.op, r.value), r.negated);
+}
+
+/// `StatComparePercCurrentToMax::Compare` (IL=120): the named stat's value as a
+/// fraction of its max, compared against `value`; a stat whose max is not
+/// positive fails the gate in both polarities (the IL returns false before
+/// reading `invert`). Health, Stamina, Food and Water are the StatTypes the
+/// shipped rows use.
+fn evalStatComparePercCurrentToMax(r: Requirement, ctx: Ctx) Verdict {
+    const frac = if (eqIgnoreCase(r.arg, "Health"))
+        ctx.hp_frac
+    else if (eqIgnoreCase(r.arg, "Stamina"))
+        ctx.stamina_frac
+    else if (eqIgnoreCase(r.arg, "Food"))
+        ctx.food_frac
+    else if (eqIgnoreCase(r.arg, "Water"))
+        ctx.water_frac
+    else
+        return .unsupported;
+    const max = if (eqIgnoreCase(r.arg, "Health"))
+        ctx.hp_max
+    else if (eqIgnoreCase(r.arg, "Stamina"))
+        ctx.stamina_max
+    else if (eqIgnoreCase(r.arg, "Food"))
+        ctx.food_max
+    else
+        ctx.water_max;
+    if (!(max > 0)) return .fail;
+    return verdict(compare(frac, r.op, r.value), r.negated);
+}
+
+fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| if (std.ascii.toLower(x) != std.ascii.toLower(y)) return false;
+    return true;
+}
+
 /// Whether a comma tag list carries `tag` (case-sensitive, like FastTags).
 fn tagListHas(list: []const u8, tag: []const u8) bool {
     var it = std.mem.splitScalar(u8, list, ',');
@@ -334,6 +397,8 @@ fn evalOne(r: Requirement, ctx: Ctx) Verdict {
         .holding_item_has_tags => return evalHoldingItemHasTags(r, ctx),
         .sandbox_option_bool => return evalSandboxOptionBool(r, ctx),
         .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
+        .armor_group_count => return evalArmorGroupCount(r, ctx),
+        .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
     }
 }
 
@@ -494,6 +559,45 @@ test "ArmorGroupLowestQuality reads the worn group's lowest quality" {
     try testing.expect(all(&.{gte6}, ctx));
     const gte7 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 7 };
     try testing.expect(!all(&.{gte7}, ctx));
+}
+
+test "ArmorGroupCount counts the worn pieces of the group, 0 when unworn" {
+    const groups = [_]ArmorGroup{
+        .{ .name = "groupBiker", .quality = 3, .count = 4 },
+        .{ .name = "groupNomad", .quality = 5, .count = 2 },
+    };
+    const ctx = Ctx{ .armor_groups = &groups };
+    // The armor-set rows are `Equals 4` (grant) and `LTE 3` (revoke).
+    try testing.expect(all(&.{.{ .kind = .armor_group_count, .arg = "groupBiker", .op = .eq, .value = 4 }}, ctx));
+    try testing.expect(!all(&.{.{ .kind = .armor_group_count, .arg = "groupNomad", .op = .eq, .value = 4 }}, ctx));
+    try testing.expect(all(&.{.{ .kind = .armor_group_count, .arg = "groupNomad", .op = .le, .value = 3 }}, ctx));
+    // An unworn group is 0, exactly like Equipment.GetArmorGroupCount.
+    try testing.expect(all(&.{.{ .kind = .armor_group_count, .arg = "groupRogue", .op = .eq, .value = 0 }}, ctx));
+    try testing.expect(!all(&.{.{ .kind = .armor_group_count, .arg = "groupRogue", .op = .eq, .value = 4 }}, ctx));
+}
+
+test "StatComparePercCurrentToMax reads the stat fraction against its max" {
+    const water_lt_2 = Requirement{ .kind = .stat_compare_perc_current_to_max, .arg = "Water", .op = .le, .value = 0.02 };
+    const ctx = Ctx{ .water_frac = 0.01, .water_max = 100 };
+    try testing.expect(all(&.{water_lt_2}, ctx));
+    const hydrated = Ctx{ .water_frac = 0.5, .water_max = 100 };
+    try testing.expect(!all(&.{water_lt_2}, hydrated));
+    // The stat name is case-insensitive (stock compares the enum's name).
+    const health = Requirement{ .kind = .stat_compare_perc_current_to_max, .arg = "health", .op = .ge, .value = 0.5 };
+    try testing.expect(all(&.{health}, .{ .hp_frac = 0.75, .hp_max = 100 }));
+    // A max that is not positive fails in both polarities: the IL returns
+    // false before it reads the negated flag, so the positive gate fails even
+    // though its comparison holds, and a negated gate fails even though its
+    // polarity would hold.
+    const dry = Ctx{ .water_frac = 0.01, .water_max = 0 };
+    try testing.expect(!all(&.{water_lt_2}, dry));
+    const dry_negated = Requirement{ .kind = .stat_compare_perc_current_to_max, .arg = "Water", .op = .ge, .value = 0.5, .negated = true };
+    try testing.expect(!all(&.{dry_negated}, dry));
+    // A stat the shipped rows never use is an unsupported kind, not a guess.
+    var counts: Counts = .{};
+    const other = Requirement{ .kind = .stat_compare_perc_current_to_max, .arg = "Speed", .op = .le, .value = 0.5 };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{other}, ctx, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
 test "SandboxOptionBool reads the decoded option or its default" {

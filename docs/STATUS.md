@@ -81,6 +81,43 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (buff row gates + armor-set activation chain)
+
+Buff triggered rows were only half gated: `evaluateTriggered` read the row's
+`StatComparePercCurrentToMax` child and ignored the rest, and the armor-set
+bonus buffs were never applied at all because nothing parsed the entity
+classes' `Buffs=` list. Now every triggered row is gated through the shared
+requirement evaluator, and `buffStatusCheck02`'s `onSelfBuffUpdate` rows run
+each tick, so the 15 armor-set bonus buffs are granted and revoked entirely
+from data: grant rows are `ArmorGroupCount group_name=... Equals 4` +
+`!HasBuff`, revoke rows `LTE 3` + `HasBuff`, and each bonus buff's own tier
+rows are `ArmorGroupLowestQuality Equals N`. `buffBikerSetBonus` is never
+added by name anywhere in zdtd. Two kinds landed (`ArmorGroupCount` counts the
+worn pieces per group, 0 when unworn; `StatComparePercCurrentToMax` reads the
+Health/Stamina/Food/Water fraction of max and fails both polarities when the
+max is not positive, IL=120). Measured with the loaded catalog: the tracked
+passive surface stays 43 gated rows / 24 resolve / 19 refuse (these kinds gate
+the triggered rows, not the tracked folds), while the triggered surface is 282
+AddBuff rows (127 gated, 51 resolvable) and 577 RemoveBuff rows (118 gated, 38
+resolvable), with the rest still refusing on `CVarCompare`/`EntityTagCompare`
+and friends. Scenario: a full biker set at qualities
+5/4/4/3 folds tier 3, losing a piece flags the bonus buff Remove and the next
+tick reaps it, and a nomad helmet grants nothing.
+
+Two defects fell out of it. The stage machine took its *state* from the row
+requests, but the stage rows are gated `!HasBuff` on their own stage, so the
+state dropped the stage the moment it landed and the buff set oscillated every
+tick (the stage-3 starvation gate flickered, folding the gated
+`perkHealingFactor` regen on alternate ticks); the state now comes from the
+thresholds in buffs.xml (`buffs.survival`), while the row requests still drive
+the adds. And the triggered result's bounded arrays were `[4]`, below
+`buffStatusCheck02`'s 16 AddBuff and 16 RemoveBuff rows, so most set bonuses
+could never be granted and the six stage adds were truncated to four; the caps
+now sit above the stock maxima and anything past them is counted in the `apm`
+`triggered_rows_dropped` counter instead of silently shortening the list.
+
+---
+
 ## 2026-09-11 (progression `<requirement>` gates + `<book>` catalog)
 
 The passive-effects VM folded every tracked row regardless of its gates. The

@@ -13,7 +13,10 @@ const components = @import("../ecs/components.zig");
 /// Measured against V3.2.0 `Data/Config` (2026-09-04): stock buffs.xml defines
 /// **483**, so this runs at 24%.
 pub const max_buffs: usize = 2048;
-pub const max_passives_per_buff: usize = 16;
+/// Measured against V3.2.0 `Data/Config` (2026-09-11): `buffShocked` carries the
+/// most effect_group-scoped passive rows at 26, so this cap has headroom. It was
+/// 16, which silently dropped 10 of that buff's rows.
+pub const max_passives_per_buff: usize = 32;
 pub const max_passives_total: usize = 8192;
 pub const max_stat_mods_per_buff: usize = 8;
 pub const max_stat_mods_total: usize = 2048;
@@ -86,7 +89,12 @@ pub const StatMod = struct {
 /// Triggered rows per buff and in total (the onSelf* surface; only
 /// ModifyStats/AddBuff/RemoveBuff are evaluated - the other actions are
 /// recorded and skipped).
-pub const max_triggered_per_buff: usize = 32;
+/// Measured against V3.2.0 `Data/Config` (2026-09-11): `buffStatusCheck02`
+/// carries the most triggered rows at 126, then `buffFarmerSetBonus` 78 and
+/// `buffStatusCheck01` 70; the file totals 3246. The old cap of 32 silently
+/// dropped 94 of check02's rows, which is why the armor-set bonus rows never
+/// parsed.
+pub const max_triggered_per_buff: usize = 256;
 pub const max_triggered_total: usize = 8192;
 
 /// Stock onSelf* trigger names (buffStatusCheck01 uses onSelfBuffUpdate).
@@ -108,7 +116,8 @@ pub const TriggeredAction = enum(u8) {
 };
 
 /// One `<triggered_effect trigger=... action=...>` row with its nested
-/// StatComparePercCurrentToMax requirement (the survival-surface gate).
+/// `<requirement>` children (stock reads them into the row's own
+/// RequirementGroup, checked before the action runs).
 pub const Triggered = struct {
     trigger: Trigger = .other,
     action: TriggeredAction = .other,
@@ -118,11 +127,9 @@ pub const Triggered = struct {
     value: f32 = 0,
     /// AddBuff/RemoveBuff target.
     buff: []const u8 = "",
-    /// Requirement gate (stock compares a fraction of max).
-    req_stat: []const u8 = "",
-    req_op: std.math.CompareOperator = .lt,
-    req_value: f32 = 0,
-    has_req: bool = false,
+    /// The row's direct `<requirement>` children, evaluated by the shared
+    /// evaluator (empty = ungated).
+    reqs: []const requirements.Requirement = &.{},
 };
 
 /// One `<requirement name="StatComparePercCurrentToMax" .../>` gate. Stock
@@ -481,7 +488,7 @@ fn scanPassives(
     passives: *std.ArrayList(Passive),
     req_pool: *std.ArrayList(requirements.Requirement),
     req_ranges: *std.ArrayList(struct { usize, usize }),
-) !void {
+) !bool {
     const p0 = passives.items.len;
     const budget = @min(p0 + max_passives_per_buff, max_passives_total);
     var i: usize = 0;
@@ -504,6 +511,9 @@ fn scanPassives(
         }
         i = requirements.elementEnd(body, lt);
     }
+    // Reaching the budget means the row count is at the cap; report so a
+    // truncated stock or modded buff is visible instead of silent.
+    return passives.items.len >= budget;
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
@@ -539,6 +549,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     defer reqs_list.deinit(allocator);
     var req_ranges: std.ArrayList(struct { usize, usize }) = .empty; // gate start,len per passive
     defer req_ranges.deinit(allocator);
+    // Triggered rows pool their gate ranges separately from the passive pool,
+    // but share the requirement pool.
+    var trig_req_ranges: std.ArrayList(struct { usize, usize }) = .empty; // gate start,len per triggered row
+    defer trig_req_ranges.deinit(allocator);
+
+    // Buffs whose row count reached a cap (the parse drops the excess). Printed
+    // once after the walk so a truncated file is visible.
+    var truncated_passives: usize = 0;
+    var truncated_triggered: usize = 0;
 
     var i: usize = 0;
     while (i < clean.len and metas.items.len < max_buffs) {
@@ -633,7 +652,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                 break :blk 0;
             };
             if (row_end == 0) break;
-            var tr: Triggered = .{
+            const tr: Triggered = .{
                 .trigger = parseTrigger(trig_s),
                 .action = parseTriggeredAction(act_s),
                 .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
@@ -641,25 +660,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                 .op = parseOp(xml.attr(body, ri, "operation") orelse "add"),
                 .value = firstF32(xml.attr(body, ri, "value") orelse "0"),
             };
-            // Nested requirement gate (StatComparePercCurrentToMax).
-            const row = body[ri..row_end];
-            if (std.mem.find(u8, row, "StatComparePercCurrentToMax")) |qi| {
-                const qtag = std.mem.findScalarLast(u8, row[0..qi], '<') orelse 0;
-                if (xml.attr(row, qtag, "stat")) |st| {
-                    tr.req_stat = try arena.dupe(u8, st);
-                    tr.req_value = firstF32(xml.attr(row, qtag, "value") orelse "0");
-                    tr.req_op = parseReqOp(xml.attr(row, qtag, "operation") orelse "LT");
-                    tr.has_req = true;
-                }
-            }
+            // The row's own `<requirement>` children, through the shared
+            // evaluator (RequirementBase::ParseRequirementGroup IL=148 reads
+            // direct children).
+            const rq0 = reqs_list.items.len;
+            try requirements.scanRequirements(allocator, arena, body, ri, &reqs_list);
+            try trig_req_ranges.append(allocator, .{ rq0, reqs_list.items.len - rq0 });
             try triggered_list.append(allocator, tr);
             trn += 1;
             trj = row_end;
         }
+        if (trn == max_triggered_per_buff) truncated_triggered += 1;
         try trig_ranges.append(allocator, .{ tr0, triggered_list.items.len - tr0 });
 
         const p0 = passives_list.items.len;
-        try scanPassives(allocator, arena, body, &passives_list, &reqs_list, &req_ranges);
+        if (try scanPassives(allocator, arena, body, &passives_list, &reqs_list, &req_ranges)) truncated_passives += 1;
         try metas.append(allocator, meta);
         try ranges.append(allocator, .{ p0, passives_list.items.len - p0 });
         try mod_ranges.append(allocator, .{ m0, mods_list.items.len - m0 });
@@ -683,6 +698,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     @memcpy(thr_pool, thresholds_list.items);
     const trig_pool = try arena.alloc(Triggered, triggered_list.items.len);
     @memcpy(trig_pool, triggered_list.items);
+    if (trig_req_ranges.items.len != trig_pool.len) return error.MalformedBuffs;
+    for (trig_pool, trig_req_ranges.items) |*tr, rg| {
+        tr.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
+    }
     const defs = try arena.alloc(BuffDef, metas.items.len);
     for (metas.items, ranges.items, 0..) |meta, rg, di| {
         defs[di] = meta;
@@ -693,6 +712,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         defs[di].thresholds = thr_pool[tr[0] .. tr[0] + tr[1]];
         const tg = trig_ranges.items[di];
         defs[di].triggered = trig_pool[tg[0] .. tg[0] + tg[1]];
+    }
+    if (truncated_passives > 0 or truncated_triggered > 0) {
+        std.debug.print(
+            "zdtd: buffs.xml hit a row cap (passives {d} buffs, triggered {d} buffs); rows past the cap were dropped (max_passives_per_buff={d}, max_triggered_per_buff={d})\n",
+            .{ truncated_passives, truncated_triggered, max_passives_per_buff, max_triggered_per_buff },
+        );
     }
     var name_index: std.StringHashMapUnmanaged(u16) = .{};
     try name_index.ensureTotalCapacity(arena, @intCast(defs.len));
@@ -1030,71 +1055,67 @@ fn parseTriggeredAction(s: []const u8) TriggeredAction {
     return .other;
 }
 
-/// StatComparePercCurrentToMax operation (LT/GT; unknown ops fail the gate).
-fn parseReqOp(s: []const u8) std.math.CompareOperator {
-    if (std.mem.eql(u8, s, "GT")) return .gt;
-    return .lt;
-}
-
-/// Requirement context for the engine's gates (fractions of max).
-pub const TriggeredCtx = struct {
-    food_frac: f32 = 0,
-    water_frac: f32 = 0,
-};
+/// Largest number of one action's rows any single stock buff fires for one
+/// event (buffs.xml): AddBuff 16 and RemoveBuff 16 (buffStatusCheck02's
+/// onSelfBuffUpdate armor-set rows), ModifyStats 1. Sized above the stock
+/// maximum for modlet headroom; past a cap the request is dropped and counted
+/// in `truncated` (never silently applied as a shorter list).
+pub const max_triggered_adds = 24;
+pub const max_triggered_removes = 24;
+pub const max_triggered_mods = 8;
 
 /// The engine's outcome for one buff event: the ModifyStats deltas and the
 /// AddBuff/RemoveBuff requests. Bounded arrays; the caller owns the BuffSet
-/// and the wire relay.
+/// and the wire relay. `truncated` counts requests dropped past a cap so a
+/// caller can surface the bound instead of losing them silently.
 pub const TriggeredResult = struct {
-    mods: [4]StatMod = [_]StatMod{.{}} ** 4,
+    mods: [max_triggered_mods]StatMod = [_]StatMod{.{}} ** max_triggered_mods,
     mod_n: u8 = 0,
-    add_buffs: [4][]const u8 = .{ "", "", "", "" },
-    remove_buffs: [4][]const u8 = .{ "", "", "", "" },
+    add_buffs: [max_triggered_adds][]const u8 = .{""} ** max_triggered_adds,
+    remove_buffs: [max_triggered_removes][]const u8 = .{""} ** max_triggered_removes,
     add_n: u8 = 0,
     remove_n: u8 = 0,
+    truncated: u8 = 0,
 };
 
 /// The triggered-effect engine: evaluate one buff's `onSelf*` rows for
-/// `event`, gated by the nested StatComparePercCurrentToMax requirements.
-/// Unknown triggers/actions/requirements are skipped (fail closed, recorded).
-/// Bounded: the result arrays cap the outcome; no allocation.
-pub fn evaluateTriggered(t: *const Table, def_id: u16, event: Trigger, ctx: TriggeredCtx) TriggeredResult {
+/// `event`, gated by the row's own `<requirement>` children through the shared
+/// evaluator (fail closed: a gate it cannot resolve refuses the row and is
+/// counted). Unknown triggers/actions are skipped. Bounded: the result arrays
+/// cap the outcome; no allocation.
+pub fn evaluateTriggered(t: *const Table, def_id: u16, event: Trigger, ctx: requirements.Ctx, counts: *requirements.Counts) TriggeredResult {
     var out: TriggeredResult = .{};
     const def = t.byId(def_id) orelse return out;
     for (def.triggered) |tr| {
         if (tr.trigger != event) continue;
-        if (tr.has_req) {
-            const frac = if (eqIgnoreCase(tr.req_stat, "Food"))
-                ctx.food_frac
-            else if (eqIgnoreCase(tr.req_stat, "Water"))
-                ctx.water_frac
-            else
-                continue; // unknown requirement stat: fail closed
-            const pass = switch (tr.req_op) {
-                .lt => frac < tr.req_value,
-                .gt => frac > tr.req_value,
-                else => continue,
-            };
-            if (!pass) continue;
-        }
+        if (tr.reqs.len > 0 and requirements.evaluate(tr.reqs, ctx, counts) != .pass) continue;
         switch (tr.action) {
             .modify_stats => {
-                if (tr.op != .unknown and out.mod_n < out.mods.len) {
-                    out.mods[out.mod_n] = .{ .stat = tr.stat, .op = tr.op, .value = tr.value };
-                    out.mod_n += 1;
+                if (tr.op == .unknown) continue;
+                if (out.mod_n >= out.mods.len) {
+                    out.truncated +|= 1;
+                    continue;
                 }
+                out.mods[out.mod_n] = .{ .stat = tr.stat, .op = tr.op, .value = tr.value };
+                out.mod_n += 1;
             },
             .add_buff => {
-                if (tr.buff.len > 0 and out.add_n < out.add_buffs.len) {
-                    out.add_buffs[out.add_n] = tr.buff;
-                    out.add_n += 1;
+                if (tr.buff.len == 0) continue;
+                if (out.add_n >= out.add_buffs.len) {
+                    out.truncated +|= 1;
+                    continue;
                 }
+                out.add_buffs[out.add_n] = tr.buff;
+                out.add_n += 1;
             },
             .remove_buff => {
-                if (tr.buff.len > 0 and out.remove_n < out.remove_buffs.len) {
-                    out.remove_buffs[out.remove_n] = tr.buff;
-                    out.remove_n += 1;
+                if (tr.buff.len == 0) continue;
+                if (out.remove_n >= out.remove_buffs.len) {
+                    out.truncated +|= 1;
+                    continue;
                 }
+                out.remove_buffs[out.remove_n] = tr.buff;
+                out.remove_n += 1;
             },
             .other => continue,
         }
@@ -1128,6 +1149,14 @@ pub fn survivalCheckId(t: *const Table) ?u16 {
     return t.indexOfName("buffStatusCheck01");
 }
 
+/// The armor-status buff the entity classes carry beside buffStatusCheck01
+/// (entityclasses.xml `Buffs=`): its `onSelfBuffUpdate` rows grant and revoke
+/// the armor-set bonuses (`ArmorGroupCount` gates, `ArmorGroupLowestQuality`
+/// tiers). Selection key only; every value stays in buffs.xml.
+pub fn armorCheckId(t: *const Table) ?u16 {
+    return t.indexOfName("buffStatusCheck02");
+}
+
 /// Health lost per real second by a buff's `ModifyStats Health subtract`
 /// triggered row (stock applies it once per update_rate; this is value / the
 /// update interval in seconds, the same conversion healthLossPerSecond used).
@@ -1152,13 +1181,15 @@ pub fn stage3HpLossPerSecond(t: *const Table, stages: SurvivalStages) f32 {
     var per_s: f32 = 0;
     if (stages.hungry == 3) {
         if (t.byName("buffStatusHungry03")) |d| {
-            const r = evaluateTriggered(t, t.indexOfName("buffStatusHungry03").?, .update, .{});
+            var tc: requirements.Counts = .{};
+            const r = evaluateTriggered(t, t.indexOfName("buffStatusHungry03").?, .update, .{}, &tc);
             per_s = @max(per_s, triggeredHealthPerSecond(&d, &r));
         }
     }
     if (stages.thirsty == 3) {
         if (t.byName("buffStatusThirsty03")) |d| {
-            const r = evaluateTriggered(t, t.indexOfName("buffStatusThirsty03").?, .update, .{});
+            var tc2: requirements.Counts = .{};
+            const r = evaluateTriggered(t, t.indexOfName("buffStatusThirsty03").?, .update, .{}, &tc2);
             per_s = @max(per_s, triggeredHealthPerSecond(&d, &r));
         }
     }
@@ -1303,11 +1334,12 @@ test "survival numbers resolve from the shipped buffs.xml" {
     // (the raw result also carries check01's other update AddBuff rows, so
     // assert the survival-relevant selection via stagesFromWanted).
     const cid = survivalCheckId(&t).?;
-    const well = evaluateTriggered(&t, cid, .update, .{ .food_frac = 0.6, .water_frac = 0.6 });
+    var tc3: requirements.Counts = .{};
+    const well = evaluateTriggered(&t, cid, .update, .{ .food_frac = 0.6, .water_frac = 0.6, .food_max = 100, .water_max = 100 }, &tc3);
     const well_st = stagesFromWanted(well.add_buffs[0..well.add_n]);
     try std.testing.expectEqual(@as(u8, 0), well_st.hungry);
     try std.testing.expectEqual(@as(u8, 0), well_st.thirsty);
-    const mid = evaluateTriggered(&t, cid, .update, .{ .food_frac = 0.4, .water_frac = 0.01 });
+    const mid = evaluateTriggered(&t, cid, .update, .{ .food_frac = 0.4, .water_frac = 0.01, .food_max = 100, .water_max = 100 }, &tc3);
     const mid_st = stagesFromWanted(mid.add_buffs[0..mid.add_n]);
     try std.testing.expectEqual(@as(u8, 1), mid_st.hungry);
     try std.testing.expectEqual(@as(u8, 3), mid_st.thirsty);
@@ -1763,13 +1795,55 @@ test "curveValueAt interpolates the stock quality curve (Q1..Q6)" {
     try std.testing.expectEqual(@as(f32, 0), curveValueAt(3, 6, &.{}));
 }
 
+test "a triggered action past the bounded result is counted, not silently dropped" {
+    // Stock's widest row set is buffStatusCheck02's 16 onSelfBuffUpdate AddBuff
+    // rows; the bound is above that on purpose, and anything past it must show
+    // up in `truncated` rather than disappear.
+    try std.testing.expect(max_triggered_adds >= 16);
+    try std.testing.expect(max_triggered_removes >= 16);
+    const over = max_triggered_adds + 3;
+    const rows = comptime blk: {
+        var r: [over]Triggered = undefined;
+        for (&r, 0..) |*e, i| e.* = .{
+            .trigger = .update,
+            .action = .add_buff,
+            .buff = if (i % 2 == 0) "setBonusA" else "setBonusB",
+        };
+        break :blk r;
+    };
+    const defs = [_]BuffDef{.{ .name = "check02", .triggered = &rows }};
+    const t = Table{ .defs = defs[0..] };
+    var counts: requirements.Counts = .{};
+    const r = evaluateTriggered(&t, 0, .update, .{}, &counts);
+    try std.testing.expectEqual(max_triggered_adds, r.add_n);
+    try std.testing.expectEqual(@as(u8, 3), r.truncated);
+    try std.testing.expectEqualStrings("setBonusA", r.add_buffs[0]);
+    try std.testing.expectEqualStrings("setBonusB", r.add_buffs[max_triggered_adds - 1]);
+}
+
 test "evaluateTriggered gates, filters events, and caps the bounded actions" {
+    // The stage rows are gated StatComparePercCurrentToMax on Food, now through
+    // the shared requirement evaluator.
+    const food_lt_50 = [_]requirements.Requirement{.{
+        .kind = .stat_compare_perc_current_to_max,
+        .name = "StatComparePercCurrentToMax",
+        .arg = "Food",
+        .op = .lt,
+        .value = 0.5,
+    }};
+    const food_lt_2 = [_]requirements.Requirement{.{
+        .kind = .stat_compare_perc_current_to_max,
+        .name = "StatComparePercCurrentToMax",
+        .arg = "Food",
+        .op = .lt,
+        .value = 0.02,
+    }};
     const defs = [_]BuffDef{
         .{
             .name = "check01",
             .triggered = &.{
-                .{ .trigger = .update, .action = .add_buff, .buff = "hungry01", .has_req = true, .req_stat = "Food", .req_op = .lt, .req_value = 0.5 },
-                .{ .trigger = .update, .action = .add_buff, .buff = "hungry03", .has_req = true, .req_stat = "Food", .req_op = .lt, .req_value = 0.02 },
+                .{ .trigger = .update, .action = .add_buff, .buff = "hungry01", .reqs = &food_lt_50 },
+                .{ .trigger = .update, .action = .add_buff, .buff = "hungry03", .reqs = &food_lt_2 },
                 .{ .trigger = .start, .action = .remove_buff, .buff = "sibling" },
                 .{ .trigger = .update, .action = .other }, // recorded action: skipped
             },
@@ -1783,21 +1857,22 @@ test "evaluateTriggered gates, filters events, and caps the bounded actions" {
         },
     };
     const t = Table{ .defs = defs[0..] };
+    var counts: requirements.Counts = .{};
     // Food 40%: hungry01 passes, hungry03 (2%) fails; event filter skips start.
-    const r1 = evaluateTriggered(&t, 0, .update, .{ .food_frac = 0.4 });
+    const r1 = evaluateTriggered(&t, 0, .update, .{ .food_frac = 0.4, .food_max = 100 }, &counts);
     try std.testing.expectEqual(@as(u8, 1), r1.add_n);
     try std.testing.expectEqualStrings("hungry01", r1.add_buffs[0]);
     try std.testing.expectEqual(@as(u8, 0), r1.remove_n);
     // Food 1%: both rows pass (bounded result keeps both).
-    const r2 = evaluateTriggered(&t, 0, .update, .{ .food_frac = 0.01 });
+    const r2 = evaluateTriggered(&t, 0, .update, .{ .food_frac = 0.01, .food_max = 100 }, &counts);
     try std.testing.expectEqual(@as(u8, 2), r2.add_n);
     // The start event fires the sibling removal only.
-    const r3 = evaluateTriggered(&t, 0, .start, .{});
+    const r3 = evaluateTriggered(&t, 0, .start, .{}, &counts);
     try std.testing.expectEqual(@as(u8, 0), r3.add_n);
     try std.testing.expectEqual(@as(u8, 1), r3.remove_n);
     try std.testing.expectEqualStrings("sibling", r3.remove_buffs[0]);
     // ModifyStats on the stage-3 buff's update.
-    const r4 = evaluateTriggered(&t, 1, .update, .{});
+    const r4 = evaluateTriggered(&t, 1, .update, .{}, &counts);
     try std.testing.expectEqual(@as(u8, 1), r4.mod_n);
     try std.testing.expectEqualStrings("Health", r4.mods[0].stat);
     try std.testing.expectApproxEqAbs(@as(f32, 0.25), r4.mods[0].value, 0.0001);

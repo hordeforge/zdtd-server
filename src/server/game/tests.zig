@@ -20,6 +20,7 @@ const game_hooks = @import("../game/hooks.zig");
 const clock = @import("../../util/clock.zig");
 const util_sim = @import("../../util/sim.zig");
 const wire_frame = @import("../../wire/frame.zig");
+const wire_stock_buff = @import("../../wire/stock_buff.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const sleepers_mod = @import("../../world/sleepers.zig");
 const replicate_te = @import("../replicate_te.zig");
@@ -4181,11 +4182,13 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     try std.testing.expectEqual(@as(f32, 0), untagged.stamina_ot);
 }
 
-test "the survival pass reads worn armor groups for ArmorGroupLowestQuality" {
-    // buffBikerSetBonus has six PhysicalDamageResist rows (values 1..6), each
-    // gated `ArmorGroupLowestQuality group_name="groupBiker" Equals N`. Stock
-    // folds only the row matching the lowest quality among the worn biker
-    // pieces; before the gate existed all six folded (1+2+3+4+5+6 = 21).
+test "the armor-set bonus is granted from xml when the full set is worn" {
+    // buffBikerSetBonus is never added by name anywhere in zdtd: it comes from
+    // buffStatusCheck02's onSelfBuffUpdate AddBuff row, gated
+    // `ArmorGroupCount group_name="groupBiker" Equals 4` + `!HasBuff`, and is
+    // revoked by the LTE 3 row. The tier value is the buff's own
+    // PhysicalDamageResist row gated on ArmorGroupLowestQuality. All of it is
+    // data: items.xml ArmorGroup, buffs.xml rows.
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
@@ -4203,29 +4206,53 @@ test "the survival pass reads worn armor groups for ArmorGroupLowestQuality" {
     var capture: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&capture);
     const ps = g.sim.playerByPeer(cl.slot).?;
-    const biker = g.buffs.indexOfName("buffBikerSetBonus").?;
-    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
-        .def_id = biker,
-        .duration = 0,
-        .stack_type = ecs_buff.StackType.ignore,
-        .update_rate_ticks = 20,
-        .remove_on_death = false,
-    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
-    const boots = g.items.byName("armorBikerBoots").?;
-    const gloves = g.items.byName("armorBikerGloves").?;
-    // Two pieces at quality 5 then 3: the group's lowest is 3, so the slot
-    // order must not decide it.
-    g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = boots.id, .count = 1, .quality = 5 };
-    g.sim.inventory[ps].slots[ecs.components.inv_equip_start + 1] = .{ .item_id = gloves.id, .count = 1, .quality = 3 };
+    const bonus = g.buffs.indexOfName("buffBikerSetBonus").?;
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
+    // Full set at qualities 5/4/4/3: count 4, lowest 3 (slot order must not
+    // decide the minimum).
+    const pieces = [_]struct { name: []const u8, quality: u8 }{
+        .{ .name = "armorBikerHelmet", .quality = 5 },
+        .{ .name = "armorBikerOutfit", .quality = 4 },
+        .{ .name = "armorBikerGloves", .quality = 4 },
+        .{ .name = "armorBikerBoots", .quality = 3 },
+    };
+    for (pieces, 0..) |pc, i| {
+        const def = g.items.byName(pc.name).?;
+        g.sim.inventory[ps].slots[ecs.components.inv_equip_start + i] = .{ .item_id = def.id, .count = 1, .quality = pc.quality };
+    }
     try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) != null);
     try std.testing.expectApproxEqAbs(@as(f32, 3), g.sim.buff_phys_resist[ps], 0.001);
-    // A non-biker item in the same slots leaves the group unworn: quality 0
-    // matches no tier, so nothing folds.
+    // Losing one piece fires the LTE 3 RemoveBuff row. Stock marks the buff
+    // Remove and the buff tick deletes it on the following tick, so the same
+    // tick's armor fold still sees it.
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start + 3] = .{};
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(bonus).?.flags.remove);
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
+    // The client sees exactly one removal: the flagged buff is relayed by the
+    // expiry drain, not by the row that flagged it (relaying both would send a
+    // second NetPackageAddRemoveBuff for the same buff).
+    var removes: u32 = 0;
+    const ar_id = packages.idOf("NetPackageAddRemoveBuff").?;
+    for (capture.slots[0..capture.n]) |sl| {
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != ar_id) continue;
+            var nb: [128]u8 = undefined;
+            const v = wire_stock_buff.parseAddRemoveBuff(p.body, &nb) catch continue;
+            if (!v.adding and std.mem.eql(u8, v.name, "buffBikerSetBonus")) removes += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(u32, 1), removes);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_phys_resist[ps], 0.001);
+    // A different set's pieces do not grant the biker bonus.
     const nomad = g.items.byName("armorNomadHelmet").?;
     g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = nomad.id, .count = 1, .quality = 3 };
-    g.sim.inventory[ps].slots[ecs.components.inv_equip_start + 1] = .{};
     try g.step();
-    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_phys_resist[ps], 0.001);
+    try std.testing.expect(g.sim.buffs[ps].find(bonus) == null);
 }
 
 test "the survival pass reads the held item's tags for HoldingItemHasTags" {
@@ -4354,6 +4381,14 @@ test "the survival pass folds the armor query into buff_phys_resist" {
     try std.testing.expectApproxEqAbs(@as(f32, 400), g.sim.buff_phys_resist[ps], 0.001);
 }
 
+/// Zero every active buff's elapsed counter so a measured tick sees fresh
+/// buffs (duration-anchored rows are time-scaled).
+fn resetBuffAges(set: *ecs.components.BuffSet) void {
+    for (&set.slots) |*slot| {
+        if (slot.active) slot.duration_ticks = 0;
+    }
+}
+
 test "a gated perk row stops folding when its requirement fails" {
     // perkHealingFactor's HealthChangeOT row is gated
     // `!HasBuff buffStatusHungry03,buffStatusThirsty03` (progression.xml). The
@@ -4390,23 +4425,92 @@ test "a gated perk row stops folding when its requirement fails" {
     try g.step();
     try std.testing.expect(h.hp > 50);
 
-    // Dehydrated (1% of max -> stage 3): the stage buff goes active during the
-    // same pass, so the negated HasBuff gate refuses the regen.
+    // Dehydrated (1% of max -> stage 3): the stage buffs go active during the
+    // pass, so the negated HasBuff gate refuses the regen. Settle first: a stage
+    // change marks the stale buff Remove and the buff tick reaps it on the next
+    // tick, and the stage rows are themselves gated on not already carrying a
+    // stage buff, so the two measured ticks must start from the same settled set
+    // with the same buff ages.
+    h.hp = 50;
+    h.food = 0.4 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    try g.step();
+    try g.step();
+    const thirsty03 = g.buffs.indexOfName("buffStatusThirsty03").?;
+    try std.testing.expect(g.sim.buffs[ps].find(thirsty03) != null);
+
+    resetBuffAges(g.sim.buffsMut(ps));
     h.hp = 50;
     h.food = 0.4 * h.food_max;
     h.water = 0.01 * h.water_max;
     try g.step();
     const with_perk = h.hp;
-    try std.testing.expect(g.sim.buffs[ps].count() > 0);
 
-    // The same starved tick with the perk removed: an identical result is the
+    // The same dehydrated tick with the perk removed: an identical result is the
     // proof the gated row contributed nothing.
+    resetBuffAges(g.sim.buffsMut(ps));
     h.hp = 50;
     h.food = 0.4 * h.food_max;
     h.water = 0.01 * h.water_max;
     cl.skill_level_n = 0;
     try g.step();
     try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
+}
+
+test "the survival stage buff tracks the thresholds and clears on recovery" {
+    // buffStatusCheck01's stage rows are gated on their own stage buff
+    // (`!HasBuff buffStatusThirsty03,...`), so the active stage cannot be read
+    // back out of the row requests: it comes from the thresholds in buffs.xml
+    // (buffs.survival). Starving and dehydrated to stage 3 must leave exactly the
+    // stage-3 buffs, and eating/drinking back to full must drop them again
+    // (stock clears the stages from the healing buffs' onSelfBuffStart rows;
+    // zdtd drives the same removal from the thresholds).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const h = &g.sim.health[ps];
+    h.base_max_hp = 100;
+    h.max_hp = 100;
+    const thirsty03 = g.buffs.indexOfName("buffStatusThirsty03").?;
+    const hungry03 = g.buffs.indexOfName("buffStatusHungry03").?;
+    // Stage 3 of both bars (<= 2% of max). The transition tick requests every
+    // passing stage row (nothing is active yet), so the lower stages are marked
+    // Remove on the next tick and reaped on the one after.
+    h.food = 0.01 * h.food_max;
+    h.water = 0.01 * h.water_max;
+    try g.step();
+    try g.step();
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(thirsty03) != null);
+    try std.testing.expect(g.sim.buffs[ps].find(hungry03) != null);
+    // The lower stages must not survive the transition.
+    for ([_][]const u8{
+        "buffStatusThirsty01", "buffStatusThirsty02",
+        "buffStatusHungry01",  "buffStatusHungry02",
+    }) |name| {
+        const id = g.buffs.indexOfName(name).?;
+        try std.testing.expect(g.sim.buffs[ps].find(id) == null);
+    }
+    h.food = h.food_max;
+    h.water = h.water_max;
+    try g.step();
+    try g.step();
+    try std.testing.expect(g.sim.buffs[ps].find(thirsty03) == null);
+    try std.testing.expect(g.sim.buffs[ps].find(hungry03) == null);
 }
 
 test "breaking a container spills its pre-filled contents" { // 449 LootList blocks are CompositeTileEntity containers; their contents
