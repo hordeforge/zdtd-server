@@ -14,6 +14,10 @@ pub const sample_hello = @import("sample_hello.zig");
 pub const manifest = @import("manifest.zig");
 pub const resolver = @import("resolver.zig");
 
+pub const WasmHost = wasm.WasmHost;
+pub const HostCtx = wasm.HostCtx;
+pub const Hook = wasm.Hook;
+
 pub const plugin_api_version = api.plugin_api_version;
 pub const Host = api.Host;
 pub const PluginVTable = api.PluginVTable;

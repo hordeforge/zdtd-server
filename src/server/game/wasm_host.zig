@@ -310,13 +310,9 @@ fn hasTag(tags: []const u8, tag: []const u8) bool {
 /// the HTTP; this is the boundary crossing (ADR 0031 D3).
 pub fn mcpFrameThunk(ctx: *anyopaque, frame: []const u8, out: []u8) usize {
     const g = gameFromPtr(ctx);
-    for (g.wasm_plugins.slots[0..g.wasm_plugins.n]) |*p| {
-        if (p.hook_present[@intFromEnum(plugin_mod.wasm.Hook.on_mcp_frame)]) {
-            const rep = p.callMcpFrame(frame, out) orelse return 0;
-            return rep.len;
-        }
-    }
-    return 0;
+    // Shared router: first LIVE exporter wins, not first exporter (a trapped
+    // module's null response used to drop the frame).
+    return g.wasm_plugins.routeMcpFrame(frame, out);
 }
 
 pub fn wasmQuery(ctx: *plugin_mod.wasm.HostCtx, req: []const u8, out: []u8) usize {

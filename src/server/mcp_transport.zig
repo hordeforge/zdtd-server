@@ -566,18 +566,12 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
     host.enable();
     try std.testing.expectEqual(@as(usize, 1), host.count());
 
-    // The Game-side frame handler: first plugin exporting on_mcp_frame wins
-    // (mirrors wasm_host.mcpFrameThunk).
+    // The Game-side frame handler is the shared router (wasm_host.mcpFrameThunk
+    // is a thin ctx adapter over it).
     const E2e = struct {
         var h: *plugin_mod.WasmHost = undefined;
         fn frameFn(_: *anyopaque, frame: []const u8, out: []u8) usize {
-            for (h.slots[0..h.n]) |*p| {
-                if (p.hook_present[@intFromEnum(plugin_mod.Hook.on_mcp_frame)]) {
-                    const rep = p.callMcpFrame(frame, out) orelse return 0;
-                    return rep.len;
-                }
-            }
-            return 0;
+            return h.routeMcpFrame(frame, out);
         }
     };
     E2e.h = &host;
@@ -624,4 +618,28 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
     try send(&t, "{nope", &req_buf);
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 200 ") != null);
     try std.testing.expect(std.mem.find(u8, t.testResp(), "-32700") != null);
+
+    // A disabled exporter must not own the frame. Composability audit
+    // 2026-09-11: the router ended the search on the first `hook_present`
+    // match, so a trapped module's null response dropped the frame instead of
+    // falling through to a later live exporter. Load the module twice, disable
+    // the first, and route directly. The response is not asserted for protocol
+    // content: the transport normally owns the session handshake, so a direct
+    // frame answers with the guest's own -32002; what matters here is that a
+    // LIVE module answered at all.
+    var host2: plugin_mod.WasmHost = .{};
+    defer host2.shutdown();
+    host2.loadAll(std.testing.allocator, &[_][]const u8{ "mods/mcp/mcp.wasm", "mods/mcp/mcp.wasm" }, &ctx, .{});
+    try std.testing.expectEqual(@as(usize, 2), host2.count());
+    host2.slots[0].disabled = true;
+    var out2: [4096]u8 = undefined;
+    const list_frame = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/list\"}";
+    const routed = host2.routeMcpFrame(list_frame, &out2);
+    try std.testing.expect(routed > 0);
+    try std.testing.expect(std.mem.find(u8, out2[0..routed], "\"jsonrpc\":\"2.0\"") != null);
+
+    // With every exporter disabled the router answers nothing, which is the
+    // pre-fix behaviour for the whole set rather than for the first match.
+    host2.slots[1].disabled = true;
+    try std.testing.expectEqual(@as(usize, 0), host2.routeMcpFrame(list_frame, &out2));
 }

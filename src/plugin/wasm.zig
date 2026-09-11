@@ -1396,6 +1396,23 @@ pub const WasmHost = struct {
         return self.n;
     }
 
+    /// Route one MCP JSON-RPC frame to the first LIVE exporter of
+    /// `on_mcp_frame` and return the response bytes it wrote (0 = no module
+    /// answered). `callMcpFrame` returns null for a module that is disabled,
+    /// has no memory, exhausted scratch, or trapped (which latches it
+    /// disabled); the first `hook_present` match used to end the search there,
+    /// so a trapped module dropped the frame even when a later one could
+    /// answer. A withdrawn module is already skipped by every other hook and
+    /// must not own this one either.
+    pub fn routeMcpFrame(self: *WasmHost, frame: []const u8, out: []u8) usize {
+        for (self.slots[0..self.n]) |*p| {
+            if (!p.hook_present[@intFromEnum(Hook.on_mcp_frame)]) continue;
+            const rep = p.callMcpFrame(frame, out) orelse continue;
+            return rep.len;
+        }
+        return 0;
+    }
+
     /// Is the 1-based plugin slot `src` withdrawn (disabled or trapped)?
     /// `World.drainCommands` asks this once per queued op so a module that
     /// disables itself while an earlier op is being applied (an
