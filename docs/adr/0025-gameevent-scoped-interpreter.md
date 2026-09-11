@@ -10,7 +10,7 @@
 
 ## Context
 
-`../../../7dtd-engine-research/docs/game-events.md` documents `GameEvent.*`: 187 types,
+`../../../7dtd-engine-research/docs/content/game-events.md` documents `GameEvent.*`: 187 types,
 1141 method bodies, "the most explicitly state-machine-shaped system in the
 assembly" per the research doc's own words. It is a tree of interpreters
 (sequence → phases → actions, with decisions and loops as actions that hold

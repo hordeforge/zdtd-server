@@ -85,7 +85,7 @@ Validation is **loadgen bots** + stock clients + **zdtd apm** dumps.
 | [`docs/GAP_ANALYSIS.md`](docs/GAP_ANALYSIS.md) | Gap inventory vs stock |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | M7–M16 post-playable stack |
 | [`docs/ECS_SYSTEMS.md`](docs/ECS_SYSTEMS.md) / [`docs/ZIG_CLONE.md`](docs/ZIG_CLONE.md) | Sim + architecture |
-| [`../7dtd-engine-research/docs/protocol.md`](../7dtd-engine-research/docs/protocol.md) | Envelope, join, goldens |
+| [`../7dtd-engine-research/docs/network/protocol.md`](../7dtd-engine-research/docs/network/protocol.md) | Envelope, join, goldens |
 
 Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).
 

@@ -73,7 +73,7 @@ Read first (in order):
 | `docs/GAP_ANALYSIS.md` | Known gaps vs stock |
 | `docs/GAME_OPTIONS.md` | Existing serverconfig / options surface |
 | `docs/WORLDGEN.md` | Proc gen is on-the-fly stream (if touching gen constants) |
-| `../7dtd-engine-research/docs/protocol.md` (+ package notes) | Wire ground truth |
+| `../7dtd-engine-research/docs/network/protocol.md` (+ package notes) | Wire ground truth |
 
 ### Hard constraints
 

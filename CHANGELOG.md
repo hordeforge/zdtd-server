@@ -469,7 +469,7 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   removes and broadcasts the fallen blocks, while a placement takes support
   from its neighbours and re-spreads. Support and ignore membership resolve
   from the block tables, not a hardcoded list. See
-  `../7dtd-engine-research/docs/stability.md` for the RE ground.
+  `../7dtd-engine-research/docs/world/stability.md` for the RE ground.
 - Land claims persist across restarts: keystone claims write to `claims.zlc`
   and re-map to the owner on login (entity ids are per-session), and the
   preserved seen-day keeps offline expiry past `LandClaimExpiryDays` honest.
