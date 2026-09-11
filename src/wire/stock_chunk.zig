@@ -541,12 +541,14 @@ pub fn encodeNetworkChunk(buf: []u8, opts: EncodeOpts) ![]u8 {
         var lower: [cells_per_layer]u8 = undefined;
         var upper: [cells_per_layer * 3]u8 = undefined;
         if (uniform) {
-            // These two bytes are indistinguishable for an all-air layer,
-            // where `first` is stock_air = 0 and both are 0. No test can pin
-            // their order from a normal chunk, and the swap-mutation audit
-            // reports the pair as a survivor for that reason. The order is
-            // held by ChunkBlockLayer.Read (presence bool, then the shared
-            // value), not by a test.
+            // These two bytes coincide only for an all-air layer, where
+            // `first` is stock_air = 0 and both are 0 - and this branch is not
+            // even reached then (the `any_solid` check continues above). A
+            // uniform solid layer makes them differ, and the order is what
+            // ChunkBlockLayer.Read expects (presence bool, then the shared
+            // value): swapping them tells the client a 1024-byte lower array
+            // follows. Pinned by "a uniform non-air layer writes the presence
+            // bool before the shared value".
             try w.writeBool(false); // no lower array → same value
             try w.writeByte(@truncate(first));
             if (need_upper) {
@@ -883,6 +885,34 @@ test "stock chunk encodes non-empty terrain" {
     try std.testing.expectEqual(@as(i32, -18), std.mem.readInt(i32, body[5..9], .little));
     try std.testing.expectEqual(@as(i32, 0), std.mem.readInt(i32, body[9..13], .little));
     try std.testing.expectEqual(@as(i32, 28), std.mem.readInt(i32, body[13..17], .little));
+}
+
+test "a uniform non-air layer writes the presence bool before the shared value" {
+    // Wire-order audit: the uniform-layer branch writes `false` (no lower
+    // array) then the shared value's low byte. The audit reported the pair as a
+    // survivor because the all-air case has both bytes at 0, so no test could
+    // tell them apart. A uniform SOLID layer makes them differ (0 vs the block
+    // id), and swapping them tells the client a 1024-byte lower array follows,
+    // which desyncs the whole layer walk. This pins the order on a uniform
+    // bedrock layer where the two bytes are 0 and the bedrock id.
+    const Ctx = struct {
+        fn at(_: ?*anyopaque, _: i32, y: i32, _: i32) u32 {
+            return if (y < 4) stock_terr_bedrock else stock_air;
+        }
+    };
+    var heights: [256]u8 = .{0} ** 256;
+    var raw: [524288]u8 = undefined;
+    const payload = try encodeNetworkChunk(&raw, .{
+        .cx = 0,
+        .cz = 0,
+        .heights = &heights,
+        .block_at = Ctx.at,
+    });
+    // Header is cx | cy | cz (i32 x3) | ticks (u64) = 20 bytes; layer 0 then
+    // records its presence bool, the uniform flag and the shared value.
+    try std.testing.expectEqual(@as(u8, 1), payload[20]); // layer has solid cells
+    try std.testing.expectEqual(@as(u8, 0), payload[21]); // no lower array (uniform)
+    try std.testing.expectEqual(@as(u8, stock_terr_bedrock), payload[22]); // shared value
 }
 
 test "stock chunk empty sky is smaller" {
