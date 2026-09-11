@@ -118,7 +118,11 @@ Buff passive rows now carry their effect_group gates too (the buff parser was a
 flat walk): 43 gated tracked buff rows, 10 resolve and 33 refuse closed with the
 gap counted, so `buffCoffee` no longer adds both of its `HasBuff`/`!HasBuff`
 StaminaChangeOT rows together and `buffBikerSetBonus` no longer sums all six
-armor-quality tiers.
+armor-quality tiers. Two more gates landed: `HoldingItemHasTags` reads the held
+item's Tags each tick (buffHoldBreathAiming01 now picks the row matching the
+held weapon's perk and its rank) and `SandboxOptionBool` reads the decoded
+`SandboxCode` from serverconfig, so 18 of the 43 gated tracked buff rows resolve
+and 25 refuse closed.
 
 ---
 

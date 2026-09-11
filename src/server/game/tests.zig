@@ -4181,6 +4181,98 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     try std.testing.expectEqual(@as(f32, 0), untagged.stamina_ot);
 }
 
+test "the survival pass reads the held item's tags for HoldingItemHasTags" {
+    // The tick fills the ctx from the held toolbelt slot, so a row gated
+    // HoldingItemHasTags (IL=37) folds only while a matching item is in hand.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const reqs = [_]requirements.Requirement{.{
+        .kind = .holding_item_has_tags,
+        .name = "HoldingItemHasTags",
+        .list = "perkDeadEye",
+    }};
+    const perks = [_]assets_progression.PerkDef{.{
+        .name = "perkHoldTest",
+        .max_level = 1,
+        .passives = &.{.{ .name = "HealthMax", .op = .base_add, .value = 50, .reqs = &reqs }},
+    }};
+    g.progression_table.perks = &perks;
+    cl.skill_levels[0] = .{ .name = "perkHoldTest", .level = 1 };
+    cl.skill_level_n = 1;
+    g.sim.health[ps].base_max_hp = 100;
+    // Empty hand: the gate refuses.
+    g.sim.inventory[ps].holding = ecs.components.inv_no_holding;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    // A hunting rifle carries perkDeadEye in its Tags property.
+    const rifle = g.items.byName("gunRifleT1HuntingRifle").?;
+    g.sim.inventory[ps].holding = 0;
+    g.sim.inventory[ps].slots[0] = .{ .item_id = rifle.id, .count = 1 };
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].max_hp, 0.001);
+}
+
+test "the survival pass resolves a sandbox-gated row from the server code" {
+    // The tick decodes Game.sandbox_code once and hands the groups to the
+    // requirement ctx, so SandboxOptionBool (IL=18) reads the operator's
+    // setting. A hand-built perk row with a literal value makes the gate
+    // visible in max_hp, unlike buffStatusCheck01's @cvar rows.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const reqs = [_]requirements.Requirement{.{
+        .kind = .sandbox_option_bool,
+        .name = "SandboxOptionBool",
+        .arg = "PlayerLevelBonusApplied",
+    }};
+    const perks = [_]assets_progression.PerkDef{.{
+        .name = "perkSandboxTest",
+        .max_level = 1,
+        .passives = &.{.{ .name = "HealthMax", .op = .base_add, .value = 50, .reqs = &reqs }},
+    }};
+    g.progression_table.perks = &perks;
+    cl.skill_levels[0] = .{ .name = "perkSandboxTest", .level = 1 };
+    cl.skill_level_n = 1;
+    g.sim.health[ps].base_max_hp = 100;
+    // No code: the option keeps its YesNo default (No) and the row refuses.
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    // "AALB" = version A, option AL (id 11 = PlayerLevelBonusApplied), index B
+    // (Yes): the same server code the GameStats echo carries.
+    g.sandbox_code = "AALB";
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].max_hp, 0.001);
+}
+
 test "the survival pass folds the armor query into buff_phys_resist" {
     // god carries an untagged PhysicalDamageResist 200 row and a
     // coredamageresist-tagged one. Equipment::GetTotalPhysicalArmorRating

@@ -6,6 +6,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const requirements = @import("requirements.zig");
+const sandbox = @import("sandbox.zig");
 const components = @import("../ecs/components.zig");
 
 /// Storage cap on parsed buff defs, a zdtd bound rather than a stock rule.
@@ -1472,6 +1473,77 @@ test "a buff passive folds only under its effect_group requirement" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.1), effectTotals(&t, &set, .{
         .active_buffs = &active_ids,
         .buff_names = &names,
+    }, &counts).stamina_ot, 0.0001);
+}
+
+test "SandboxOptionBool gates a passive on the decoded sandbox option" {
+    // PlayerLevelBonusApplied is a stock YesNo option (default No) that gates
+    // buffStatusCheck01's four max-stat rows; the decoded code supplies the
+    // value when it carries the option.
+    const passives = [_]Passive{.{
+        .name = "HealthMax",
+        .op = .base_add,
+        .value = 50,
+        .reqs = &.{.{
+            .kind = .sandbox_option_bool,
+            .name = "SandboxOptionBool",
+            .arg = "PlayerLevelBonusApplied",
+        }},
+    }};
+    var counts: requirements.Counts = .{};
+    try std.testing.expectEqual(@as(f32, 0), trackedDeltasAt(&passives, 1, .{}, &counts).hp_max);
+    try std.testing.expectEqual(@as(u32, 1), counts.resolved);
+    try std.testing.expectEqual(@as(u32, 0), counts.unsupported);
+    const on = [_]sandbox.Group{.{ .option_id = sandbox.optionByName("PlayerLevelBonusApplied").?.id, .index = 1 }};
+    try std.testing.expectApproxEqAbs(@as(f32, 50), trackedDeltasAt(&passives, 1, .{ .sandbox_groups = &on }, &counts).hp_max, 0.0001);
+}
+
+test "the stock SandboxOptionBool gates resolve instead of refusing" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const check = t.byName("buffStatusCheck01").?;
+    var counts: requirements.Counts = .{};
+    // Four max-stat rows, each gated SandboxOptionBool PlayerLevelBonusApplied.
+    // They fold 0 either way (the value is a CVar reference), so the counter is
+    // what proves the gate resolved rather than failed closed.
+    _ = trackedDeltasAt(check.passives, 1, .{}, &counts);
+    try std.testing.expectEqual(@as(u32, 4), counts.resolved);
+    try std.testing.expectEqual(@as(u32, 0), counts.unsupported);
+}
+
+test "HoldingItemHasTags gates the hold-breath stamina rows" {
+    // buffHoldBreathAiming01 has two untagged StaminaChangeOT rows (their
+    // `duration=` curves are a separate gap: the VM has no duration axis, so
+    // both fold at their first segment) plus four rows gated
+    // `HoldingItemHasTags tags="perkDeadEye"` with
+    // `ProgressionLevel Equals 3/4/5/1`. Before this round all four joined the
+    // untagged sum (+0.75); the group tag now keeps them out of an empty hand.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const p = t.byName("buffHoldBreathAiming01").?;
+    var counts: requirements.Counts = .{};
+    const empty = trackedDeltasAt(p.passives, 1, .{}, &counts);
+    try std.testing.expectApproxEqAbs(@as(f32, -2.5), empty.stamina_ot, 0.0001);
+    // perkDeadEye 5 in hand: the Equals-5 row joins (+0.3).
+    const lv5 = [_]requirements.NameLevel{.{ .name = "perkDeadEye", .level = 5 }};
+    try std.testing.expectApproxEqAbs(@as(f32, -2.2), trackedDeltasAt(p.passives, 1, .{
+        .held_tags = "T0,perkDeadEye",
+        .levels = &lv5,
+    }, &counts).stamina_ot, 0.0001);
+    // perkDeadEye 3: the Equals-3 row joins (+0.1).
+    const lv3 = [_]requirements.NameLevel{.{ .name = "perkDeadEye", .level = 3 }};
+    try std.testing.expectApproxEqAbs(@as(f32, -2.4), trackedDeltasAt(p.passives, 1, .{
+        .held_tags = "T0,perkDeadEye",
+        .levels = &lv3,
+    }, &counts).stamina_ot, 0.0001);
+    // A weapon without the perk tag still gets nothing.
+    try std.testing.expectApproxEqAbs(@as(f32, -2.5), trackedDeltasAt(p.passives, 1, .{
+        .held_tags = "T0,axe",
+        .levels = &lv5,
     }, &counts).stamina_ot, 0.0001);
 }
 

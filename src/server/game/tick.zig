@@ -14,6 +14,7 @@ const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const requirements = @import("../../assets/requirements.zig");
+const sandbox = @import("../../assets/sandbox.zig");
 const clock = @import("../../util/clock.zig");
 const persist = @import("../persist.zig");
 const admin_cmds = @import("../admin_cmds.zig");
@@ -37,6 +38,20 @@ const BuffNameLookup = struct {
 /// The tag `Equipment::GetTotalPhysicalArmorRating` (IL=887) adds to its
 /// passive-41 query; the attacking item's own tags ride the per-hit path.
 const armor_query_tags = "coredamageresist";
+
+/// The held item's `Tags` property, or "" for an empty hand.
+/// `HoldingItemHasTags::IsValid` (IL=37) reads
+/// `Inventory.get_holdingItem().HasAnyTags/HasAllTags`, and an empty hand
+/// matches no tag.
+fn heldItemTags(self: *const Game, ps: ecs.Slot) []const u8 {
+    if (!self.sim.mask[ps].inventory) return "";
+    const inv = &self.sim.inventory[ps];
+    if (inv.holding >= ecs.components.inv_toolbelt) return "";
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return "";
+    const def = self.items.byId(s.item_id) orelse return "";
+    return def.tags;
+}
 
 /// Passive-effects VM recomputes per player per tick: the untagged stats query
 /// and the `coredamageresist` armor query, each over the buff and perk legs.
@@ -77,6 +92,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     if (self.sim.director.clock.seconds_per_hour <= 0) return;
     const game_hours = dt / self.sim.director.clock.seconds_per_hour;
     const secs = dt;
+    // Sandbox gates: decode the server's code once per tick rather than per
+    // requirement (SandboxOptionBool reads it through SandboxOptionManager).
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
     for (&self.clients) |*c| {
         if (!c.joined) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -174,6 +193,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .biome_id = self.biomeIdAt(@trunc(self.sim.transform[ps].x), @trunc(self.sim.transform[ps].z)),
                 .active_buffs = activeBuffIds(&self.sim.buffs[ps], &buff_ids),
                 .buff_names = &buff_names,
+                .held_tags = heldItemTags(self, ps),
+                .sandbox_groups = sandbox_groups,
             };
             var req_counts: requirements.Counts = .{};
             // Two queries, like stock: the max-stat/change-over-time consumers

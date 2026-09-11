@@ -19,6 +19,7 @@
 
 const std = @import("std");
 const xml = @import("xml_util.zig");
+const sandbox = @import("sandbox.zig");
 
 /// One `<requirement name="..."/>` gate. The name may carry a leading `!`,
 /// which is stock's negation spelling (RequirementBase::invert).
@@ -37,6 +38,9 @@ pub const Requirement = struct {
     /// `InBiome biome="N"`. -1 = absent.
     num: i32 = -1,
     target: Target = .self,
+    /// `has_all_tags="true"` on a tag-list gate (HoldingItemHasTags/ItemHasTags):
+    /// every listed tag must match instead of any one (IL=1C5).
+    has_all: bool = false,
 };
 
 /// The vocabulary this evaluator resolves. Everything else maps to
@@ -49,6 +53,8 @@ pub const Kind = enum(u8) {
     is_alive,
     is_attached_to_entity,
     in_biome,
+    holding_item_has_tags,
+    sandbox_option_bool,
 };
 
 /// `RequirementBase/OperationTypes` (OperationTypes.il.txt), case-insensitive
@@ -98,6 +104,13 @@ pub const Ctx = struct {
     /// the row's `tags=` BEFORE the requirement group, and an empty query never
     /// matches a tagged row (hasMatchingTag IL=53). Empty = untagged query.
     tags: []const u8 = "",
+    /// The held item's `Tags` property, comma list (HoldingItemHasTags IL=5
+    /// reads `Inventory.get_holdingItem().HasAnyTags/HasAllTags`). Empty = an
+    /// empty hand, which matches no tag.
+    held_tags: []const u8 = "",
+    /// Decoded sandbox code groups (`SandboxOptions.SandboxOptionManager`, see
+    /// `assets/sandbox.zig`); `SandboxOptionBool` (IL=18) reads a bool option.
+    sandbox_groups: []const sandbox.Group = &.{},
 };
 
 /// Gate accounting for one fold. Both counters are per requirement evaluated
@@ -117,6 +130,8 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "IsAlive")) return .is_alive;
     if (std.mem.eql(u8, name, "IsAttachedToEntity")) return .is_attached_to_entity;
     if (std.mem.eql(u8, name, "InBiome")) return .in_biome;
+    if (std.mem.eql(u8, name, "HoldingItemHasTags")) return .holding_item_has_tags;
+    if (std.mem.eql(u8, name, "SandboxOptionBool")) return .sandbox_option_bool;
     return .unsupported;
 }
 
@@ -155,8 +170,10 @@ pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) !Requi
     if (xml.attr(hay, tag_start, "value")) |v| r.value = std.fmt.parseFloat(f32, v) catch 0;
     if (xml.attr(hay, tag_start, "target")) |t| r.target = parseTarget(t);
     if (xml.attr(hay, tag_start, "biome")) |b| r.num = std.fmt.parseInt(i32, b, 10) catch -1;
+    if (xml.attr(hay, tag_start, "has_all_tags")) |v| r.has_all = std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
     r.arg = try arena.dupe(u8, xml.attr(hay, tag_start, "progression_name") orelse
         xml.attr(hay, tag_start, "cvar") orelse
+        xml.attr(hay, tag_start, "option") orelse
         xml.attr(hay, tag_start, "stat") orelse
         xml.attr(hay, tag_start, "skill_name") orelse
         xml.attr(hay, tag_start, "key") orelse "");
@@ -211,6 +228,60 @@ fn evalHasBuff(r: Requirement, ctx: Ctx) Verdict {
     return verdict(false, r.negated);
 }
 
+/// `HoldingItemHasTags::IsValid` (IL=37): the held item's tag set is matched
+/// any-of by default and all-of with `has_all_tags="true"`. An empty hand
+/// carries no tags, so any-of is false and all-of is vacuously true only for an
+/// empty tag list (a malformed row).
+fn evalHoldingItemHasTags(r: Requirement, ctx: Ctx) Verdict {
+    var matched = r.has_all; // any-of starts false, all-of starts true
+    const held = ctx.held_tags;
+    var seen = false;
+    var it = std.mem.splitScalar(u8, r.list, ',');
+    while (it.next()) |seg| {
+        const tag = std.mem.trim(u8, seg, " \t");
+        if (tag.len == 0) continue;
+        seen = true;
+        const hit = held.len > 0 and tagListHas(held, tag);
+        if (r.has_all) {
+            if (!hit) {
+                matched = false;
+                break;
+            }
+        } else if (hit) {
+            matched = true;
+            break;
+        }
+    }
+    if (!seen) matched = r.has_all; // empty list: any-of false, all-of true
+    return verdict(matched, r.negated);
+}
+
+/// `SandboxOptionBool::IsValid` (IL=18): `SandboxOptionManager.GetBool` of the
+/// named option, which is the decoded sandbox code's index or the option
+/// default when the code does not carry it (the stock override list is empty:
+/// `sandbox_overrides.xml` ships no active entry). A name outside the option
+/// table or a non-bool option refuses the gate.
+fn evalSandboxOptionBool(r: Requirement, ctx: Ctx) Verdict {
+    const o = sandbox.optionByName(r.arg) orelse return .unsupported;
+    if (o.kind != .boolean) return .unsupported;
+    var value = o.default_i != 0;
+    for (ctx.sandbox_groups) |g| {
+        if (g.option_id != o.id) continue;
+        value = sandbox.valueB(o, g.index);
+        break;
+    }
+    return verdict(value, r.negated);
+}
+
+/// Whether a comma tag list carries `tag` (case-sensitive, like FastTags).
+fn tagListHas(list: []const u8, tag: []const u8) bool {
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |seg| {
+        if (std.mem.eql(u8, std.mem.trim(u8, seg, " \t"), tag)) return true;
+    }
+    return false;
+}
+
 fn evalOne(r: Requirement, ctx: Ctx) Verdict {
     // TargetedCompareRequirementBase::IsValid (IL=51) resolves `other` and
     // `instigator` from MinEventParams; zdtd's context carries self only, so a
@@ -233,6 +304,8 @@ fn evalOne(r: Requirement, ctx: Ctx) Verdict {
         .has_buff => return evalHasBuff(r, ctx),
         .is_alive => return verdict(ctx.alive, r.negated),
         .is_attached_to_entity => return verdict(ctx.attached_to_entity, r.negated),
+        .holding_item_has_tags => return evalHoldingItemHasTags(r, ctx),
+        .sandbox_option_bool => return evalSandboxOptionBool(r, ctx),
     }
 }
 
@@ -339,6 +412,58 @@ test "parse reads the negation, comparison, target and operands" {
     const rt = try parse(src, t, a);
     try testing.expectEqual(Compare.ne, rt.op);
     try testing.expectEqual(Target.other, rt.target);
+    // `option=` and `has_all_tags=` land on the fields the new kinds read.
+    const sandbox_src = "<effect_group><requirement name=\"SandboxOptionBool\" option=\"NewbieCoat\"/>" ++
+        "<requirement name=\"HoldingItemHasTags\" tags=\"a,b\" has_all_tags=\"true\"/></effect_group>";
+    const sb = std.mem.find(u8, sandbox_src, "<requirement name=\"SandboxOptionBool\"").?;
+    const rsb = try parse(sandbox_src, sb, a);
+    try testing.expectEqual(Kind.sandbox_option_bool, rsb.kind);
+    try testing.expectEqualStrings("NewbieCoat", rsb.arg);
+    const hh = std.mem.find(u8, sandbox_src, "<requirement name=\"HoldingItemHasTags\"").?;
+    const rhh = try parse(sandbox_src, hh, a);
+    try testing.expectEqual(Kind.holding_item_has_tags, rhh.kind);
+    try testing.expectEqualStrings("a,b", rhh.list);
+    try testing.expect(rhh.has_all);
+}
+
+test "HoldingItemHasTags matches the held item's tags" {
+    const any = Requirement{ .kind = .holding_item_has_tags, .list = "perkDeadEye,perkBrawler" };
+    const all_tags = Requirement{ .kind = .holding_item_has_tags, .list = "perkDeadEye,gun", .has_all = true };
+    const neg = Requirement{ .kind = .holding_item_has_tags, .negated = true, .list = "perkDeadEye" };
+    // An empty hand carries no tags: any-of false, all-of false, negation true.
+    try testing.expect(!all(&.{any}, .{}));
+    try testing.expect(!all(&.{all_tags}, .{}));
+    try testing.expect(all(&.{neg}, .{}));
+    const ctx = Ctx{ .held_tags = "T0,perkDeadEye,gun" };
+    try testing.expect(all(&.{any}, ctx));
+    try testing.expect(all(&.{all_tags}, ctx));
+    try testing.expect(!all(&.{neg}, ctx));
+    // all-of fails when one listed tag is missing.
+    try testing.expect(!all(&.{.{ .kind = .holding_item_has_tags, .list = "perkDeadEye,axe", .has_all = true }}, ctx));
+    // A tag is a whole segment, not a substring.
+    try testing.expect(!all(&.{.{ .kind = .holding_item_has_tags, .list = "perkDead" }}, ctx));
+    try testing.expect(all(&.{.{ .kind = .holding_item_has_tags, .list = " gun , T0 " }}, ctx));
+}
+
+test "SandboxOptionBool reads the decoded option or its default" {
+    const newbie = sandbox.optionByName("NewbieCoat").?;
+    const req_on = Requirement{ .kind = .sandbox_option_bool, .arg = "NewbieCoat" };
+    const req_off = Requirement{ .kind = .sandbox_option_bool, .arg = "NewbieCoat", .negated = true };
+    // Not in the code: the option default (YesNo default 0 = No).
+    try testing.expect(!all(&.{req_on}, .{}));
+    try testing.expect(all(&.{req_off}, .{}));
+    // Code index 1 = Yes.
+    const on = [_]sandbox.Group{.{ .option_id = newbie.id, .index = 1 }};
+    try testing.expect(all(&.{req_on}, .{ .sandbox_groups = &on }));
+    try testing.expect(!all(&.{req_off}, .{ .sandbox_groups = &on }));
+    // Code index 0 = No even though the option is carried.
+    const off = [_]sandbox.Group{.{ .option_id = newbie.id, .index = 0 }};
+    try testing.expect(!all(&.{req_on}, .{ .sandbox_groups = &off }));
+    // An unknown option name refuses rather than guessing.
+    var counts: Counts = .{};
+    const unknown = Requirement{ .kind = .sandbox_option_bool, .arg = "NotAnOption" };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{unknown}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
 test "compare matches the six stock operation spellings" {
