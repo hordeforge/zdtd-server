@@ -81,6 +81,35 @@ check-xml-audit, check-release, make release) plus the release binary.
 This is the hub for "what works now" vs [GAP_ANALYSIS.md](GAP_ANALYSIS.md) (full inventory) and
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (phased plan). Doc index: [INDEX.md](INDEX.md).
 
+## 2026-09-11 (per-entity CVars + `CVarCompare` + `ModifyCVar`)
+
+Stock keeps a per-entity `string -> float` map (`EntityBuffs::CVars`) that
+triggered rows write and gates read; zdtd had neither, so 1027 `CVarCompare`
+gates refused closed and every `value="@name"` passive folded 0. `src/assets/cvars.zig`
+now carries the store and the operations straight from the IL:
+`SetCustomVar` IL=130 (the six XML spellings plus `percentadd`/`percentsubtract`
+on the current value, and the IL_008A zero-divisor guard of 0.0001),
+`GetCustomVar` IL=10 (a missing name reads 0), `RemoveCustomVar` IL=21, and the
+prefix rule that decides networking (`.`/`_` never, `%` always). It is a fixed
+128-entry array per player client, passed to the engine through
+`requirements.Ctx.cvars`, so there is no tick allocation. `CVarCompare` landed
+as a kind, `value="@name"` passive rows read the store instead of the curve
+(58 in stock `buffs.xml`), and `ModifyCVar`/`RemoveCVar` apply **in document
+order during the scan**, which is what makes check02's `.ArmorLightTotal`
+(`set @.ArmorLightLevel` then `multiply @.ArmorLightWorn`) correct and visible
+to the rows that gate on it. The `randomint(...)`/`randomfloat(...)` and
+comma-list operands are refused rather than applied as 0 (6 stock rows).
+`onSelfEnteredGame` fires once per client session for the check buffs now, so
+`buffStatusCheck01`'s rows land: `$infectionMaxDuration=25200`,
+`$dysenteryMaxDuration=3600`, and the `buffBiomeProgressionCheck` /
+`buffCheckScreenEffects` adds reach the client on the wire. Measured: the gated
+tracked-row split moves 24 resolve / 19 refuse to 31 / 12. Stock's server does
+**not** push min-event CVar writes (`_netSync = IsLocal`, false on a dedi, since
+the owning client runs the same XML), so `NetPackageModifyCVar` stays unbuilt
+on purpose.
+
+---
+
 ## 2026-09-11 (`requirement_group` AND/OR and effect_group gates)
 
 The requirement evaluator's own comment claimed `op="or"` groups never ship.

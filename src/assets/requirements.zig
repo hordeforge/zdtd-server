@@ -20,6 +20,7 @@
 const std = @import("std");
 const xml = @import("xml_util.zig");
 const sandbox = @import("sandbox.zig");
+const cvars = @import("cvars.zig");
 
 /// One `<requirement name="..."/>` gate. The name may carry a leading `!`,
 /// which is stock's negation spelling (RequirementBase::invert).
@@ -62,6 +63,9 @@ pub const Kind = enum(u8) {
     armor_group_lowest_quality,
     armor_group_count,
     stat_compare_perc_current_to_max,
+    /// `CVarCompare` IL=23: the entity's custom variable against `value`
+    /// (a missing name reads 0).
+    cvar_compare,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -136,6 +140,13 @@ pub const Ctx = struct {
     food_max: f32 = 0,
     water_frac: f32 = 0,
     water_max: f32 = 0,
+    /// The entity's custom variables (`assets/cvars.zig`). `CVarCompare`
+    /// (IL=23) and passive rows whose `value="@name"` read them (a name that is
+    /// not present reads 0, `EntityBuffs::GetCustomVar` IL=10), and the
+    /// triggered engine's `ModifyCVar`/`RemoveCVar` rows write them in row
+    /// order, so a later row's gate sees an earlier row's write. Null = the
+    /// caller has no store (gates and values read 0, writes are dropped).
+    cvars: ?*cvars.Set = null,
     /// Worn-armor groups and their lowest worn quality
     /// (`Equipment::ResetArmorGroups` IL=51 / `GetArmorGroupLowestQuality`),
     /// for `ArmorGroupLowestQuality` (IL=34). A group that is not worn is
@@ -174,6 +185,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "ArmorGroupLowestQuality")) return .armor_group_lowest_quality;
     if (std.mem.eql(u8, name, "ArmorGroupCount")) return .armor_group_count;
     if (std.mem.eql(u8, name, "StatComparePercCurrentToMax")) return .stat_compare_perc_current_to_max;
+    if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     return .unsupported;
 }
 
@@ -375,6 +387,18 @@ fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
     return true;
 }
 
+/// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
+/// negated by `invert`.
+fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
+    return verdict(compare(cvarValue(ctx, r.arg), r.op, r.value), r.negated);
+}
+
+/// `EntityBuffs::GetCustomVar` IL=10: a missing name is 0.
+pub fn cvarValue(ctx: Ctx, name: []const u8) f32 {
+    const store = ctx.cvars orelse return 0;
+    return store.get(name);
+}
+
 /// Whether a comma tag list carries `tag` (case-sensitive, like FastTags).
 fn tagListHas(list: []const u8, tag: []const u8) bool {
     var it = std.mem.splitScalar(u8, list, ',');
@@ -424,6 +448,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
         .armor_group_count => return evalArmorGroupCount(r, ctx),
         .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
+        .cvar_compare => return evalCvarCompare(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
         .group_or => return evalList(r.children, true, ctx, counts),
     }
@@ -654,6 +679,27 @@ test "ArmorGroupLowestQuality reads the worn group's lowest quality" {
     try testing.expect(all(&.{gte6}, ctx));
     const gte7 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 7 };
     try testing.expect(!all(&.{gte7}, ctx));
+}
+
+test "CVarCompare reads the entity's custom variables, missing as 0" {
+    var vars: cvars.Set = .{};
+    _ = vars.apply(".ArmorLightWorn", .set, 4);
+    _ = vars.apply("$bleedAmount", .set, -0.5);
+    const ctx = Ctx{ .cvars = &vars };
+    const four = Requirement{ .kind = .cvar_compare, .name = "CVarCompare", .arg = ".ArmorLightWorn", .op = .eq, .value = 4 };
+    try testing.expect(all(&.{four}, ctx));
+    // Names are case-insensitive and the operand can be negative.
+    const bleeding = Requirement{ .kind = .cvar_compare, .name = "CVarCompare", .arg = "$BLEEDAMOUNT", .op = .lt, .value = 0 };
+    try testing.expect(all(&.{bleeding}, ctx));
+    // A missing name reads 0 (GetCustomVar IL=10).
+    const missing_zero = Requirement{ .kind = .cvar_compare, .name = "CVarCompare", .arg = ".nope", .op = .eq, .value = 0 };
+    try testing.expect(all(&.{missing_zero}, ctx));
+    const missing_four = Requirement{ .kind = .cvar_compare, .name = "CVarCompare", .arg = ".nope", .op = .eq, .value = 4 };
+    try testing.expect(!all(&.{missing_four}, ctx));
+    // `!CVarCompare` inverts the comparison.
+    const negated = Requirement{ .kind = .cvar_compare, .name = "CVarCompare", .arg = ".nope", .op = .eq, .value = 0, .negated = true };
+    try testing.expect(!all(&.{negated}, ctx));
+    try testing.expectApproxEqAbs(@as(f32, 4), cvarValue(ctx, ".ArmorLightWorn"), 0.0001);
 }
 
 test "ArmorGroupCount counts the worn pieces of the group, 0 when unworn" {

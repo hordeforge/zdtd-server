@@ -3634,7 +3634,8 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   - Implemented kinds: `ProgressionLevel`, `PlayerLevel`, `HasBuff`,
     `IsAlive`, `IsAttachedToEntity`, `InBiome`, `HoldingItemHasTags`,
     `SandboxOptionBool`, `ArmorGroupLowestQuality`, `ArmorGroupCount`,
-    `StatComparePercCurrentToMax`, plus the `requirement_group` AND/OR nodes. The rest (measured vocabulary:
+    `StatComparePercCurrentToMax`, `CVarCompare`, plus the
+    `requirement_group` AND/OR nodes. The rest (measured vocabulary:
     `ItemHasTags`, `CVarCompare`, `RandomRoll`,
     `EntityTagCompare`, `EntityHasMovementTag`, `IsNight`, `IsIndoors`,
     `StatComparePercCurrentToModMax`, `HitLocation`, ...) **fail closed** and are
@@ -3666,6 +3667,46 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     rows. Also fixed here: consecutive self-closing `<buff/>` rows dropped every
     second one (the walk resumed one char late; stock ships none, so this is a
     modlet/fixture correctness fix).
+  - **CVars SHIPPED (round 20, 2026-09-11).** Stock's EffectManager keeps a
+    per-entity `string -> float` map (`EntityBuffs::CVars`) that the triggered
+    rows write and the gates read; zdtd had neither. `src/assets/cvars.zig` is
+    the store and the operation set: `EntityBuffs::SetCustomVar` IL=130
+    (`set`/`setvalue`, `add`, `subtract`, `multiply`, `divide` with the IL_008A
+    zero-divisor guard of 0.0001, and `percentadd`/`percentsubtract` relative to
+    the current value, with `changed` false only for a `set` that writes the
+    value already there), `GetCustomVar` IL=10 (a missing name reads 0),
+    `RemoveCustomVar` IL=21, and the IL_0106-IL_0139 prefix rule for the
+    networking decision (`.`/`_` never networked, `%` always). Names are
+    case-insensitive like `CaseInsensitiveStringDictionary`. The store is a
+    fixed 128-entry array per player client (`Client.cvars`), no tick
+    allocation, and it is passed to the engine through `requirements.Ctx.cvars`.
+    Landed with it: the `CVarCompare` kind (IL=23, `compareValues(GetCustomVar(name),
+    op, value)` inverted by `!`), `value="@name"` passive rows (58 in stock
+    `buffs.xml`; the cvar replaces the curve), and the `ModifyCVar`/`RemoveCVar`
+    actions, applied **as the row is scanned, in document order**, so a later
+    row's gate sees an earlier row's write (check02's `.ArmorLightTotal` is
+    `set @.ArmorLightLevel` then `multiply @.ArmorLightWorn`). The
+    `randomint(...)`/`randomfloat(...)` operand forms and the comma valueList
+    are refused rather than applied as their unparsed 0 (6 stock rows).
+    `onSelfEnteredGame` now fires once per client session for the check buffs,
+    so `buffStatusCheck01`'s rows land: `$infectionMaxDuration=25200`,
+    `$dysenteryMaxDuration=3600` and the `buffBiomeProgressionCheck` /
+    `buffCheckScreenEffects` adds (relayed, so the client's buff set matches).
+    Measured: the gated tracked-row split moves from 24 resolve / 19 refuse to
+    **31 / 12** (the 7 `CVarCompare` rows resolve), 884 `CVarCompare` gates sit
+    on loaded triggered rows, and 58 passive rows carry an `@cvar` value.
+    **Not sent on the wire:** stock's `MinEventActionModifyCVar` passes
+    `_netSync = IsLocal` (IL_0163), which is false on a dedicated server because
+    the owning client runs the same XML locally, so the server does not push
+    min-event CVar writes; `NetPackageModifyCVar` stays unbuilt (the package id
+    is in the table, and the prefix rule above is what the sender will need for
+    the `%`/netSync paths such as `PlayerEntityStats`). Residual: CVars are
+    player-scoped (stock attaches them to any `EntityAlive`), they are not
+    persisted (stock saves them with the entity), `randomint`/`randomfloat` and
+    valueList operands are unimplemented, and the bulk of the 2915
+    `ModifyCVar`/`RemoveCVar` rows still need the buff/item lifecycle events
+    that drive them (item `onSelfEquipStart`/`onSelfPrimaryActionEnd`, every
+    buff's `onSelfBuffStart`/`Update`/`Remove`).
   - The `tags=` attribute on a `passive_effect` is a second, separate gate
     (`PassiveEffect::RequirementsMet` IL=180 calls `hasMatchingTag` before the
     requirement group). **Implemented 2026-09-11 (round 13):** `buffs.tagsMatch`
@@ -3737,9 +3778,10 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     18 for Health/Stamina/Food/Water (the ctx carries the fractions and maxes,
     and the stage rows plus the armor-status rows read them), leaving
     `StatCompareCurrent`/`StatComparePercCurrentToModMax` (1 tracked row); and
-    `CVarCompare` needs per-entity CVar state, which is also what unblocks the
-    `@cvar` passive values (10 tracked rows whose value is currently 0) and
-    `ModifyCVar` (1204 rows). Buff lifecycle events
+    `CVarCompare` landed in round 20 with the per-entity store, the
+    `@cvar` passive values and the `ModifyCVar`/`RemoveCVar` actions, so what is
+    left of that leg is the driving: most of the 2915 write rows hang off item
+    and buff lifecycle events zdtd does not fire yet. Buff lifecycle events
     (`onSelfBuffStart`/`Update`/`Remove`) are still only driven for
     `buffStatusCheck01`/`buffStatusCheck02` by id, so the entity classes'
     `Buffs=` list never applies the checks and the remaining buff triggered

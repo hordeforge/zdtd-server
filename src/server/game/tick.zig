@@ -254,6 +254,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .held_tags = heldItemTags(self, ps),
                 .sandbox_groups = sandbox_groups,
                 .armor_groups = armorGroups(self, ps, &armor_group_buf),
+                .cvars = &c.cvars,
                 .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
                 .hp_max = h.max_hp,
                 .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
@@ -264,6 +265,24 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .water_max = h.water_max,
             };
             var req_counts: requirements.Counts = .{};
+            // onSelfEnteredGame: stock fires it when the player entity enters the
+            // game and the check buffs carry the rows (hazard timer CVars,
+            // `buffBiomeProgressionCheck`, the sandbox newbie-coat removal).
+            // Once per client session, before the first update pass, so the
+            // CVars it sets are visible to the same tick's gates.
+            if (!c.entered_game_fired) {
+                c.entered_game_fired = true;
+                if (check01_id) |eg_id| {
+                    const eg = assets_buffs.evaluateTriggered(&self.buffs, eg_id, .entered_game, req_ctx, &req_counts);
+                    if (eg.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, eg.truncated);
+                    applyTriggeredBuffs(self, c.entity_id, ps, &eg);
+                }
+                if (check02_id) |eg2_id| {
+                    const eg2 = assets_buffs.evaluateTriggered(&self.buffs, eg2_id, .entered_game, req_ctx, &req_counts);
+                    if (eg2.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, eg2.truncated);
+                    applyTriggeredBuffs(self, c.entity_id, ps, &eg2);
+                }
+            }
             // Triggered-effect engine (P3): buffStatusCheck01's onSelfBuffUpdate
             // AddBuff rows carry the stage adds, gated by their own requirements
             // (StatComparePercCurrentToMax and the `!HasBuff` self gates).

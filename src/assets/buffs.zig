@@ -6,6 +6,7 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const requirements = @import("requirements.zig");
+const cvars = @import("cvars.zig");
 const sandbox = @import("sandbox.zig");
 const components = @import("../ecs/components.zig");
 
@@ -57,6 +58,11 @@ pub const Passive = struct {
     /// perks; the flat value for single-segment rows). Kept for the legacy
     /// readers; `curveAt` is the level-aware accessor.
     value: f32 = 0,
+    /// `value="@name"`: the row's value comes from the entity's custom
+    /// variable (`MinEventActionModifyCVar`'s `cvarRef`; a missing name is 0),
+    /// not from the curve. `@:`-prefixed values are localization keys and never
+    /// reach here.
+    value_cvar: []const u8 = "",
     tags: []const u8 = "",
     /// Per-level curve segments (stock `value="v1,v2,..."`: segment i applies
     /// at level i+1, clamped past the end). Filled for every parsed row.
@@ -112,6 +118,10 @@ pub const TriggeredAction = enum(u8) {
     modify_stats,
     add_buff,
     remove_buff,
+    /// `MinEventActionModifyCVar`: write one custom variable.
+    modify_cvar,
+    /// `MinEventActionRemoveCVar`: drop one.
+    remove_cvar,
     other,
 };
 
@@ -127,6 +137,14 @@ pub const Triggered = struct {
     value: f32 = 0,
     /// AddBuff/RemoveBuff target.
     buff: []const u8 = "",
+    /// ModifyCVar/RemoveCVar target (`cvar=`).
+    cvar: []const u8 = "",
+    /// ModifyCVar operation (`operation=`); `CVarOperation` defaults to set.
+    cvar_op: cvars.Operation = .set,
+    /// `value="@name"` on a ModifyCVar row: the operand is read from the
+    /// entity's custom variable at apply time (`MinEventActionModifyCVar`'s
+    /// `cvarRef`), not from `value`.
+    value_cvar: []const u8 = "",
     /// The row's direct `<requirement>` children, evaluated by the shared
     /// evaluator (empty = ungated).
     reqs: []const requirements.Requirement = &.{},
@@ -419,9 +437,11 @@ fn appendGatedPassive(
     const en = xml.attr(body, tag, "name").?;
     const op_s = xml.attr(body, tag, "operation") orelse "base_add";
     const val_s = xml.attr(body, tag, "value") orelse "0";
+    // `value="@name"` is a cvar reference (not a curve); `@:` is localization.
+    const val_cvar = if (val_s.len > 1 and val_s[0] == '@' and val_s[1] != ':') val_s[1..] else "";
     const tags = xml.attr(body, tag, "tags") orelse "";
     var curve: [max_curve_len]f32 = .{0} ** max_curve_len;
-    const curve_len = parseCurveValue(val_s, &curve);
+    const curve_len = if (val_cvar.len > 0) 0 else parseCurveValue(val_s, &curve);
     var curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len;
     var curve_levels_len = if (xml.attr(body, tag, "level")) |lv|
         parseCurveLevels(lv, &curve_levels)
@@ -434,6 +454,7 @@ fn appendGatedPassive(
         .name = try arena.dupe(u8, en),
         .op = parseOp(op_s),
         .value = curve[0],
+        .value_cvar = if (val_cvar.len > 0) try arena.dupe(u8, val_cvar) else "",
         .tags = try arena.dupe(u8, tags),
         .curve = curve,
         .curve_len = curve_len,
@@ -500,13 +521,26 @@ fn scanTriggeredRows(
         };
         const row_end = requirements.elementEnd(body, ri);
         if (row_end == 0 or row_end > end) break;
+        const act = parseTriggeredAction(act_s);
+        const val_s = xml.attr(body, ri, "value") orelse "0";
+        // ModifyCVar takes its operand from a cvar when `value` starts with `@`
+        // (MinEventActionModifyCVar::ParseXmlAttribute IL_0172 sets cvarRef and
+        // strips the sigil); `@:` is a localization key and never a cvar. The
+        // randomint(...)/randomfloat(...) forms are not implemented: a row that
+        // would roll is refused rather than applied as 0.
+        const val_cvar = if (act == .modify_cvar and val_s.len > 1 and val_s[0] == '@' and val_s[1] != ':') val_s[1..] else "";
+        const roll = act == .modify_cvar and (std.mem.startsWith(u8, val_s, "randomint(") or
+            std.mem.startsWith(u8, val_s, "randomfloat("));
         const tr: Triggered = .{
             .trigger = parseTrigger(trig_s),
-            .action = parseTriggeredAction(act_s),
+            .action = if (roll) .other else act,
             .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
             .stat = try arena.dupe(u8, xml.attr(body, ri, "stat") orelse ""),
+            .cvar = try arena.dupe(u8, xml.attr(body, ri, "cvar") orelse ""),
+            .cvar_op = cvars.Operation.parse(xml.attr(body, ri, "operation") orelse "set") orelse .set,
+            .value_cvar = if (val_cvar.len > 0) try arena.dupe(u8, val_cvar) else "",
             .op = parseOp(xml.attr(body, ri, "operation") orelse "add"),
-            .value = firstF32(xml.attr(body, ri, "value") orelse "0"),
+            .value = firstF32(val_s),
         };
         const rq0 = reqs_list.items.len;
         for (group_reqs) |g| try reqs_list.append(allocator, g);
@@ -972,7 +1006,9 @@ pub fn trackedDeltasAt(
         // query whose tag set does not carry it.
         if (!tagsMatch(p.tags, ctx.tags)) continue;
         if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
-        const v = curveAtAxis(p, a);
+        // A `value="@name"` row reads the entity's cvar instead of the curve
+        // (the cvar's own value already carries any scaling).
+        const v = if (p.value_cvar.len > 0) requirements.cvarValue(ctx, p.value_cvar) else curveAtAxis(p, a);
         switch (p.op) {
             .base_add => addTo(&out, field, v),
             .base_subtract => addTo(&out, field, -v),
@@ -1085,6 +1121,8 @@ fn parseTriggeredAction(s: []const u8) TriggeredAction {
     if (std.mem.eql(u8, s, "ModifyStats")) return .modify_stats;
     if (std.mem.eql(u8, s, "AddBuff")) return .add_buff;
     if (std.mem.eql(u8, s, "RemoveBuff")) return .remove_buff;
+    if (std.mem.eql(u8, s, "ModifyCVar")) return .modify_cvar;
+    if (std.mem.eql(u8, s, "RemoveCVar")) return .remove_cvar;
     return .other;
 }
 
@@ -1149,6 +1187,20 @@ pub fn evaluateTriggered(t: *const Table, def_id: u16, event: Trigger, ctx: requ
                 }
                 out.remove_buffs[out.remove_n] = tr.buff;
                 out.remove_n += 1;
+            },
+            .modify_cvar => {
+                // Applied as the row is scanned, in document order, so a later
+                // row's gate sees this write (check02's `.ArmorLightTotal` is
+                // `set @.ArmorLightLevel` then `multiply @.ArmorLightWorn`).
+                const store = ctx.cvars orelse continue;
+                if (tr.cvar.len == 0) continue;
+                const v = if (tr.value_cvar.len > 0) store.get(tr.value_cvar) else tr.value;
+                _ = store.apply(tr.cvar, tr.cvar_op, v);
+            },
+            .remove_cvar => {
+                const store = ctx.cvars orelse continue;
+                if (tr.cvar.len == 0) continue;
+                _ = store.remove(tr.cvar);
             },
             .other => continue,
         }
@@ -1336,6 +1388,56 @@ const TestNames = struct {
         return self.table.indexOfName(name);
     }
 };
+
+test "ModifyCVar applies in row order and a later row's gate sees it" {
+    // Stock applies a ModifyCVar action as the row's requirements pass, so a
+    // later row in the same pass reads the value an earlier row wrote
+    // (check02's `.ArmorLightTotal` is `set @.ArmorLightLevel` then
+    // `multiply @.ArmorLightWorn`, and the rows after it gate on the result).
+    const xml_src =
+        \\<buffs>
+        \\<buff name="check">
+        \\<effect_group>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="ModifyCVar" cvar=".total" operation="set" value="4"/>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="ModifyCVar" cvar=".total" operation="multiply" value="@.level"/>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="ModifyCVar" cvar=".count" operation="add" value="1"/>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="RemoveCVar" cvar=".gone"/>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="ModifyCVar" cvar=".rolled" operation="set" value="randomint(1,5)"/>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="AddBuff" buff="gated">
+        \\<requirement name="CVarCompare" cvar=".total" operation="Equals" value="12"/>
+        \\</triggered_effect>
+        \\</effect_group>
+        \\</buff>
+        \\<buff name="gated"/>
+        \\</buffs>
+    ;
+    const path = "worlds/zdtd_buffs_cvar.xml";
+    io_fs.mkdirPath("worlds");
+    try io_fs.writeFile(path, xml_src);
+    defer io_fs.deleteFile(path);
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const cid = t.indexOfName("check").?;
+    var store: cvars.Set = .{};
+    _ = store.apply(".level", .set, 3);
+    _ = store.apply(".gone", .set, 9);
+    _ = store.apply(".rolled", .set, 7);
+    var counts: requirements.Counts = .{};
+    const r = evaluateTriggered(&t, cid, .update, .{ .cvars = &store }, &counts);
+    // 4 * 3, with the multiply reading the value the set row just wrote.
+    try std.testing.expectApproxEqAbs(@as(f32, 12), store.get(".total"), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), store.get(".count"), 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), store.get(".gone"));
+    // The gated AddBuff row saw .total == 12 within the same pass.
+    try std.testing.expectEqual(@as(u8, 1), r.add_n);
+    try std.testing.expectEqualStrings("gated", r.add_buffs[0]);
+    // A `randomint(...)` operand is not implemented: the row is refused, so the
+    // sentinel survives instead of the row writing its unparsed 0.
+    try std.testing.expectApproxEqAbs(@as(f32, 7), store.get(".rolled"), 0.0001);
+    // Without a store the rows are gates-only and nothing is written.
+    const no_store = evaluateTriggered(&t, cid, .update, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 0), no_store.add_n);
+}
 
 test "an effect_group gate applies to its triggered rows and its passives" {
     // Before this the parser read only bare `<requirement>` children: a

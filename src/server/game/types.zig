@@ -7,6 +7,7 @@
 const std = @import("std");
 const ln_peer = @import("../../litenet/peer.zig");
 const ecs = @import("../../ecs/root.zig");
+const cvars = @import("../../assets/cvars.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const bot_mod = @import("bot.zig");
 const guard_policy = @import("../guard_policy.zig");
@@ -462,6 +463,15 @@ pub const Client = struct {
     /// when a mod removed the perk).
     skill_levels: [max_skill_levels]SkillLevel = [_]SkillLevel{.{}} ** max_skill_levels,
     skill_level_n: u8 = 0,
+    /// Per-player custom variables (`assets/cvars.zig`): written by the
+    /// EffectManager's ModifyCVar/RemoveCVar rows (the check buffs' entered-game
+    /// and update rows), read by `CVarCompare` gates and `value="@name"` passive
+    /// rows. Names point into the buff catalog's arena. Session-scoped: stock
+    /// saves CVars with the entity, which is a separate persistence gap.
+    cvars: cvars.Set = .{},
+    /// onSelfEnteredGame fired for this client (stock fires it when the player
+    /// entity enters the game; the buff catalog's check buffs carry the rows).
+    entered_game_fired: bool = false,
     /// Per-player blood-moon-music eligibility edge state (stock
     /// EntityPlayer.bloodMoonParty): the horde music plays while the player's
     /// own party's horde is alive, not for every player on a multi-party

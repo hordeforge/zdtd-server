@@ -31,6 +31,7 @@ pub const painting = @import("painting.zig");
 pub const spawning = @import("spawning.zig");
 pub const buffs = @import("buffs.zig");
 pub const requirements = @import("requirements.zig");
+pub const cvars = @import("cvars.zig");
 pub const progression = @import("progression.zig");
 pub const vehicles = @import("vehicles.zig");
 pub const storage_pairs = @import("storage_pairs.zig");
@@ -67,6 +68,7 @@ test {
     _ = spawning;
     _ = buffs;
     _ = requirements;
+    _ = cvars;
     _ = progression;
     _ = vehicles;
     _ = storage_pairs;

@@ -4457,6 +4457,56 @@ test "a gated perk row stops folding when its requirement fails" {
     try std.testing.expectApproxEqAbs(with_perk, h.hp, 0.0001);
 }
 
+test "the check buffs' entered-game rows set their CVars and add their buffs" {
+    // buffStatusCheck01 carries the entered-game rows: stock writes the hazard
+    // durations as CVars and adds buffBiomeProgressionCheck/buffCheckScreenEffects.
+    // zdtd fires the event once per client session now; before this the CVar
+    // store did not exist and onSelfEnteredGame never ran.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const prog = g.buffs.indexOfName("buffBiomeProgressionCheck") orelse return error.SkipZigTest;
+    try std.testing.expect(g.sim.buffs[ps].find(prog) == null);
+    try std.testing.expect(!cl.entered_game_fired);
+    try g.step();
+    try std.testing.expect(cl.entered_game_fired);
+    // Values are the stock XML's (buffs.xml onSelfEnteredGame rows).
+    try std.testing.expectApproxEqAbs(@as(f32, 25200), cl.cvars.get("$infectionMaxDuration"), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3600), cl.cvars.get("$dysenteryMaxDuration"), 0.001);
+    try std.testing.expect(g.sim.buffs[ps].find(prog) != null);
+    // The add is relayed so the client sees the same buff set.
+    const ar_id = packages.idOf("NetPackageAddRemoveBuff").?;
+    var saw_progression = false;
+    for (capture.slots[0..capture.n]) |sl| {
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(sl.data[0..sl.len], &pkgs);
+        for (pkgs[0..pn]) |p| {
+            if (p.id != ar_id) continue;
+            var nb: [128]u8 = undefined;
+            const v = wire_stock_buff.parseAddRemoveBuff(p.body, &nb) catch continue;
+            if (v.adding and std.mem.eql(u8, v.name, "buffBiomeProgressionCheck")) saw_progression = true;
+        }
+    }
+    try std.testing.expect(saw_progression);
+    // Fired once: a second pass leaves the same values.
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 25200), cl.cvars.get("$infectionMaxDuration"), 0.001);
+}
+
 test "the survival stage buff tracks the thresholds and clears on recovery" {
     // buffStatusCheck01's stage rows are gated on their own stage buff
     // (`!HasBuff buffStatusThirsty03,...`), so the active stage cannot be read
