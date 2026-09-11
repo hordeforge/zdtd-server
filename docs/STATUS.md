@@ -121,8 +121,9 @@ StaminaChangeOT rows together and `buffBikerSetBonus` no longer sums all six
 armor-quality tiers. Two more gates landed: `HoldingItemHasTags` reads the held
 item's Tags each tick (buffHoldBreathAiming01 now picks the row matching the
 held weapon's perk and its rank) and `SandboxOptionBool` reads the decoded
-`SandboxCode` from serverconfig, so 18 of the 43 gated tracked buff rows resolve
-and 25 refuse closed.
+`SandboxCode` from serverconfig, and `ArmorGroupLowestQuality` reads the worn
+armor groups' lowest quality (items.xml `ArmorGroup`), so 24 of the 43 gated
+tracked buff rows resolve and 19 refuse closed.
 
 ---
 

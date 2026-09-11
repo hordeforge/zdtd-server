@@ -3647,34 +3647,37 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     walks one `<effect_group>` level (stock keeps all 881 passive rows in
     groups and never nests one) plus a top-level fallback for hand-built or
     modded bodies. Authoritative count: **130 applied tracked rows, 43 gated**,
-    of which **18 resolve and 25 refuse** (the 10/33 split of round 14 became
-    18/25 in round 15):
+    of which **24 resolve and 19 refuse** (10/33 in round 14, 18/25 in round 15,
+    24/19 in round 16):
     - resolve: `HasBuff`/`!HasBuff` (10 rows: buffCoffee, buffBeer,
       buffBlackStrapCoffee, buffDesert_Storm_Stage01, buffSnow_Storm_Stage01),
       `HoldingItemHasTags` 4 (round 15: the held item's `Tags` property, read
-      each tick from the toolbelt slot, with `has_all_tags` supported) and
+      each tick from the toolbelt slot, with `has_all_tags` supported),
       `SandboxOptionBool` 4 (round 15: the decoded sandbox code's option value,
       i.e. the `serverconfig` `SandboxCode`, falling back to the option default
-      when the code does not carry it).
+      when the code does not carry it) and `ArmorGroupLowestQuality` 6 (round 16:
+      items.xml `ArmorGroup` plus the lowest worn quality per group, exactly
+      `Equipment::ResetArmorGroups` IL=51 / `GetArmorGroupLowestQuality`).
     - refuse (fail closed, counted): `EntityTagCompare` 8 + `!EntityTagCompare`
       3 (the attacker's tags: per-hit, not per-tick), `CVarCompare` 7,
-      `ArmorGroupLowestQuality` 6, `StatComparePercCurrentToModMax` 1. Ten of
-      the 33 originally-refused rows carry `@cvar` values that fold 0
-      regardless, so the living behaviour delta is smaller than the row count
-      suggests.
+      `StatComparePercCurrentToModMax` 1. Ten of the originally-refused rows
+      carry `@cvar` values that fold 0 regardless, so the living behaviour delta
+      is smaller than the row count suggests.
     Fixed by it: `buffCoffee` folded 0.2 **and** 0.1 StaminaChangeOT together
     (0.3) because its two rows are gated `!HasBuff buffHealWaterMax` and
     `HasBuff buffHealWaterMax`; `buffBikerSetBonus` summed all six
     ArmorGroupLowestQuality tiers (1+2+3+4+5+6 = 21 physical resist) because
-    every tier row folded; `buffHoldBreathAiming01` summed four rows (0.75)
+    every tier row folded (round 16: two worn biker pieces at quality 5 and 3
+    now fold only the `Equals 3` row, so the set reads 3 instead of 21);
+    `buffHoldBreathAiming01` summed four rows (0.75)
     where stock picks the one matching the held weapon's perk and that perk's
     level (round 15: a hunting rifle plus perkDeadEye 5 folds only the
     `Equals 5` row, so the buff reads -2.2 instead of -2.5 or -1.75).
     Residual for the next pass: the stat-comparison kinds
     (`StatComparePercCurrentToMax`/`StatCompareCurrent`/`StatComparePercCurrentToModMax`)
-    need the entity's live stat fractions on the ctx, `ArmorGroupLowestQuality`
-    needs the worn armor group + lowest quality, and `CVarCompare` needs
-    per-entity CVar state (the same work that unblocks the `@cvar` values).
+    need the entity's live stat fractions on the ctx (1 tracked row), and
+    `CVarCompare` needs per-entity CVar state, which is also what unblocks the
+    `@cvar` passive values (10 tracked rows whose value is currently 0).
   - `<book>` blocks (152) joined the catalog this round: a book is a
     progression value items.xml grants with `SetProgressionLevel level="-1"`,
     and before this a read almanac stored no level and folded no passive. This

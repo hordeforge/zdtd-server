@@ -39,6 +39,42 @@ const BuffNameLookup = struct {
 /// passive-41 query; the attacking item's own tags ride the per-hit path.
 const armor_query_tags = "coredamageresist";
 
+/// Worn armor groups and their lowest worn quality, into `out`; returns the
+/// used prefix. `Equipment::ResetArmorGroups` (IL=51) walks the equipment slots,
+/// keeps each `ItemClassArmor` item's `ArmorGroup` names and tracks the minimum
+/// quality per group, so a group that is not worn is absent (the lookup then
+/// reads 0). Bounded by the group count stock can reach (<= 12 worn items).
+fn armorGroups(self: *const Game, ps: ecs.Slot, out: []requirements.ArmorGroup) []const requirements.ArmorGroup {
+    if (!self.sim.mask[ps].inventory) return out[0..0];
+    const inv = &self.sim.inventory[ps];
+    var n: usize = 0;
+    var i: usize = ecs.components.inv_equip_start;
+    const end = @min(i + ecs.components.inv_equip_count, inv.slots.len);
+    while (i < end) : (i += 1) {
+        const s = inv.slots[i];
+        if (s.count == 0 or s.item_id == 0) continue;
+        const def = self.items.byId(s.item_id) orelse continue;
+        if (def.armor_group.len == 0) continue;
+        var it = std.mem.splitScalar(u8, def.armor_group, ',');
+        while (it.next()) |seg| {
+            const name = std.mem.trim(u8, seg, " \t");
+            if (name.len == 0) continue;
+            var hit = false;
+            for (out[0..n]) |*g| {
+                if (!std.mem.eql(u8, g.name, name)) continue;
+                if (s.quality < g.quality) g.quality = s.quality;
+                hit = true;
+                break;
+            }
+            if (hit) continue;
+            if (n >= out.len) return out[0..n];
+            out[n] = .{ .name = name, .quality = s.quality };
+            n += 1;
+        }
+    }
+    return out[0..n];
+}
+
 /// The held item's `Tags` property, or "" for an empty hand.
 /// `HoldingItemHasTags::IsValid` (IL=37) reads
 /// `Inventory.get_holdingItem().HasAnyTags/HasAllTags`, and an empty hand
@@ -96,6 +132,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     // requirement (SandboxOptionBool reads it through SandboxOptionManager).
     var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
     const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    // Worn armor groups for the ArmorGroupLowestQuality gate; stock caps this
+    // at one entry per worn item (12 equipment slots, one group name each).
+    var armor_group_buf: [ecs.components.inv_equip_count * 2]requirements.ArmorGroup = undefined;
     for (&self.clients) |*c| {
         if (!c.joined) continue;
         const ps = self.sim.playerByPeer(c.slot) orelse continue;
@@ -195,6 +234,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .buff_names = &buff_names,
                 .held_tags = heldItemTags(self, ps),
                 .sandbox_groups = sandbox_groups,
+                .armor_groups = armorGroups(self, ps, &armor_group_buf),
             };
             var req_counts: requirements.Counts = .{};
             // Two queries, like stock: the max-stat/change-over-time consumers

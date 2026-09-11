@@ -1547,12 +1547,12 @@ test "HoldingItemHasTags gates the hold-breath stamina rows" {
     }, &counts).stamina_ot, 0.0001);
 }
 
-test "a buff gate the evaluator cannot resolve refuses the row and is counted" {
-    // buffBikerSetBonus's six PhysicalDamageResist rows are gated on
-    // ArmorGroupLowestQuality (the worn armor's lowest quality in its group),
-    // which the VM has no state for. All six used to fold unconditionally, so a
-    // biker-set wearer read 1+2+3+4+5+6 = 21; now the rows refuse and the
-    // unsupported counter measures the gap.
+test "an unworn armor group refuses every biker tier" {
+    // buffBikerSetBonus's six PhysicalDamageResist rows are gated
+    // `ArmorGroupLowestQuality group_name="groupBiker" Equals 1..6`. With no
+    // armor worn the group reads quality 0 (the stock lookup's missing-key
+    // branch), so every tier refuses. All six used to fold unconditionally, so
+    // a bare player read 1+2+3+4+5+6 = 21.
     const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
     if (!io_fs.fileExists(path)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, path);
@@ -1563,7 +1563,8 @@ test "a buff gate the evaluator cannot resolve refuses the row and is counted" {
     var counts: requirements.Counts = .{};
     const totals = effectTotals(&t, &set, .{}, &counts);
     try std.testing.expectEqual(@as(f32, 0), totals.phys_resist);
-    try std.testing.expectEqual(@as(u32, 6), counts.unsupported);
+    try std.testing.expectEqual(@as(u32, 6), counts.resolved);
+    try std.testing.expectEqual(@as(u32, 0), counts.unsupported);
 }
 
 test "the stock coredamageresist armor rows fold only under the armor query" {

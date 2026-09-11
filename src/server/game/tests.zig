@@ -4181,6 +4181,53 @@ test "perk tagged StaminaChangeOT stays out of the idle regen; StaminaMax applie
     try std.testing.expectEqual(@as(f32, 0), untagged.stamina_ot);
 }
 
+test "the survival pass reads worn armor groups for ArmorGroupLowestQuality" {
+    // buffBikerSetBonus has six PhysicalDamageResist rows (values 1..6), each
+    // gated `ArmorGroupLowestQuality group_name="groupBiker" Equals N`. Stock
+    // folds only the row matching the lowest quality among the worn biker
+    // pieces; before the gate existed all six folded (1+2+3+4+5+6 = 21).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const biker = g.buffs.indexOfName("buffBikerSetBonus").?;
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = biker,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    const boots = g.items.byName("armorBikerBoots").?;
+    const gloves = g.items.byName("armorBikerGloves").?;
+    // Two pieces at quality 5 then 3: the group's lowest is 3, so the slot
+    // order must not decide it.
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = boots.id, .count = 1, .quality = 5 };
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start + 1] = .{ .item_id = gloves.id, .count = 1, .quality = 3 };
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 3), g.sim.buff_phys_resist[ps], 0.001);
+    // A non-biker item in the same slots leaves the group unworn: quality 0
+    // matches no tier, so nothing folds.
+    const nomad = g.items.byName("armorNomadHelmet").?;
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start] = .{ .item_id = nomad.id, .count = 1, .quality = 3 };
+    g.sim.inventory[ps].slots[ecs.components.inv_equip_start + 1] = .{};
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_phys_resist[ps], 0.001);
+}
+
 test "the survival pass reads the held item's tags for HoldingItemHasTags" {
     // The tick fills the ctx from the held toolbelt slot, so a row gated
     // HoldingItemHasTags (IL=37) folds only while a matching item is in hand.

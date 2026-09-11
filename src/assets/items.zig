@@ -131,6 +131,11 @@ pub const ItemDef = struct {
     /// blocked_tags is disjoint (RE items.md ItemClassModifier suitability).
     /// "" = untagged → no mods can attach (fail closed).
     tags: []const u8 = "",
+    /// items.xml `ArmorGroup` property (stock ships one name per armor item,
+    /// e.g. groupBiker). Equipment::ResetArmorGroups (IL=51) walks worn
+    /// ItemClassArmor slots and records each item's group + quality, so this is
+    /// the tag ArmorGroupLowestQuality matches. "" = not armor-grouped.
+    armor_group: []const u8 = "",
     /// items.xml ModSlots passive (quality curve: value "1,1,1,2,2,3" sits at
     /// quality 1..6; RE items.md CalcModSlotCount IL=29 =
     /// FastMin(255, EffectManager.GetValue(ModSlots, item, Quality-1))). The
@@ -918,6 +923,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_smelt_n.deinit(allocator);
     var stock_tags: std.ArrayList([]const u8) = .empty;
     defer stock_tags.deinit(allocator);
+    var stock_armor_group: std.ArrayList([]const u8) = .empty;
+    defer stock_armor_group.deinit(allocator);
     var stock_degrad_per_use: std.ArrayList(f32) = .empty;
     defer stock_degrad_per_use.deinit(allocator);
     var stock_stamina_loss: std.ArrayList(f32) = .empty;
@@ -1184,6 +1191,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             // Tags property: the mod-attachment tag surface (comma list).
             const tags = xml.propertyValue(body, "Tags") orelse "";
             try stock_tags.append(allocator, tags);
+            try stock_armor_group.append(allocator, xml.propertyValue(body, "ArmorGroup") orelse "");
             // DegradationPerUse (base_set): the per-use durability wear.
             // The 3 perc_add rows are the modifier form - recorded.
             var degrad_per_use: f32 = 0;
@@ -1576,6 +1584,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.elem_resist_curve = stock_edr_curves.items[idx];
                 def.elem_resist_n = stock_edr_n.items[idx];
                 def.tags = try arena.dupe(u8, stock_tags.items[idx]);
+                def.armor_group = try arena.dupe(u8, stock_armor_group.items[idx]);
                 def.mod_slots_curve = stock_mslots_curves.items[idx];
                 def.mod_slots_n = stock_mslots_n.items[idx];
                 def.crafting_smelt_time_curve = stock_smelt_curves.items[idx];
@@ -1656,6 +1665,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .elem_resist_curve = stock_edr_curves.items[idx],
             .elem_resist_n = stock_edr_n.items[idx],
             .tags = try arena.dupe(u8, stock_tags.items[idx]),
+            .armor_group = try arena.dupe(u8, stock_armor_group.items[idx]),
             .mod_slots_curve = stock_mslots_curves.items[idx],
             .mod_slots_n = stock_mslots_n.items[idx],
             .crafting_smelt_time_curve = stock_smelt_curves.items[idx],

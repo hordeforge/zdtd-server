@@ -55,6 +55,7 @@ pub const Kind = enum(u8) {
     in_biome,
     holding_item_has_tags,
     sandbox_option_bool,
+    armor_group_lowest_quality,
 };
 
 /// `RequirementBase/OperationTypes` (OperationTypes.il.txt), case-insensitive
@@ -111,6 +112,17 @@ pub const Ctx = struct {
     /// Decoded sandbox code groups (`SandboxOptions.SandboxOptionManager`, see
     /// `assets/sandbox.zig`); `SandboxOptionBool` (IL=18) reads a bool option.
     sandbox_groups: []const sandbox.Group = &.{},
+    /// Worn-armor groups and their lowest worn quality
+    /// (`Equipment::ResetArmorGroups` IL=51 / `GetArmorGroupLowestQuality`),
+    /// for `ArmorGroupLowestQuality` (IL=34). A group that is not worn is
+    /// absent and reads as quality 0, exactly like the stock lookup.
+    armor_groups: []const ArmorGroup = &.{},
+};
+
+/// One worn armor group's lowest quality (0..6).
+pub const ArmorGroup = struct {
+    name: []const u8 = "",
+    quality: u8 = 0,
 };
 
 /// Gate accounting for one fold. Both counters are per requirement evaluated
@@ -132,6 +144,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "InBiome")) return .in_biome;
     if (std.mem.eql(u8, name, "HoldingItemHasTags")) return .holding_item_has_tags;
     if (std.mem.eql(u8, name, "SandboxOptionBool")) return .sandbox_option_bool;
+    if (std.mem.eql(u8, name, "ArmorGroupLowestQuality")) return .armor_group_lowest_quality;
     return .unsupported;
 }
 
@@ -174,6 +187,7 @@ pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) !Requi
     r.arg = try arena.dupe(u8, xml.attr(hay, tag_start, "progression_name") orelse
         xml.attr(hay, tag_start, "cvar") orelse
         xml.attr(hay, tag_start, "option") orelse
+        xml.attr(hay, tag_start, "group_name") orelse
         xml.attr(hay, tag_start, "stat") orelse
         xml.attr(hay, tag_start, "skill_name") orelse
         xml.attr(hay, tag_start, "key") orelse "");
@@ -273,6 +287,19 @@ fn evalSandboxOptionBool(r: Requirement, ctx: Ctx) Verdict {
     return verdict(value, r.negated);
 }
 
+/// `ArmorGroupLowestQuality::IsValid` (IL=34): compares
+/// `Equipment.GetArmorGroupLowestQuality(group)` (the lowest quality among the
+/// worn items of that group, 0 when the group is not worn) against `value`.
+fn evalArmorGroupLowestQuality(r: Requirement, ctx: Ctx) Verdict {
+    var quality: f32 = 0;
+    for (ctx.armor_groups) |g| {
+        if (!std.mem.eql(u8, g.name, r.arg)) continue;
+        quality = @floatFromInt(g.quality);
+        break;
+    }
+    return verdict(compare(quality, r.op, r.value), r.negated);
+}
+
 /// Whether a comma tag list carries `tag` (case-sensitive, like FastTags).
 fn tagListHas(list: []const u8, tag: []const u8) bool {
     var it = std.mem.splitScalar(u8, list, ',');
@@ -306,6 +333,7 @@ fn evalOne(r: Requirement, ctx: Ctx) Verdict {
         .is_attached_to_entity => return verdict(ctx.attached_to_entity, r.negated),
         .holding_item_has_tags => return evalHoldingItemHasTags(r, ctx),
         .sandbox_option_bool => return evalSandboxOptionBool(r, ctx),
+        .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
     }
 }
 
@@ -443,6 +471,29 @@ test "HoldingItemHasTags matches the held item's tags" {
     // A tag is a whole segment, not a substring.
     try testing.expect(!all(&.{.{ .kind = .holding_item_has_tags, .list = "perkDead" }}, ctx));
     try testing.expect(all(&.{.{ .kind = .holding_item_has_tags, .list = " gun , T0 " }}, ctx));
+}
+
+test "ArmorGroupLowestQuality reads the worn group's lowest quality" {
+    const req = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupBiker", .op = .eq, .value = 3 };
+    const groups = [_]ArmorGroup{
+        .{ .name = "groupBiker", .quality = 3 },
+        .{ .name = "groupWinter", .quality = 6 },
+    };
+    const ctx = Ctx{ .armor_groups = &groups };
+    try testing.expect(all(&.{req}, ctx));
+    // A group that is not worn reads 0, exactly like
+    // Equipment.GetArmorGroupLowestQuality's missing-key branch.
+    const missing = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupNomad", .op = .eq, .value = 3 };
+    try testing.expect(!all(&.{missing}, ctx));
+    const zero = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupNomad", .op = .eq, .value = 0 };
+    try testing.expect(all(&.{zero}, ctx));
+    // Ordering works through the shared comparison table.
+    const gte5 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 5 };
+    try testing.expect(all(&.{gte5}, ctx));
+    const gte6 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 6 };
+    try testing.expect(all(&.{gte6}, ctx));
+    const gte7 = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupWinter", .op = .ge, .value = 7 };
+    try testing.expect(!all(&.{gte7}, ctx));
 }
 
 test "SandboxOptionBool reads the decoded option or its default" {
