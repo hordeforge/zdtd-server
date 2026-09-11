@@ -143,6 +143,13 @@ fn parseConfig(data: []const u8) void {
     }
 }
 
+// Declarative dependency spec (ADR 0030): absence is a load-time rejection
+// for a module that exports hooks. This one reads config, senses the player,
+// queues the glide verb and logs.
+comptime {
+    common.exportRequires("log,queue,sense,config,on_enable,on_tick,on_shutdown");
+}
+
 export fn on_enable() void {
     var cfg_buf: [1024]u8 = undefined;
     const n = common.config(@intCast(@intFromPtr(&cfg_buf)), @intCast(cfg_buf.len));

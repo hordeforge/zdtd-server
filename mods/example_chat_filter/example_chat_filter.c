@@ -18,3 +18,14 @@ int on_chat(int sender, int msg_ptr, int msg_len, int out_ptr, int out_cap) {
 }
 void on_enable(void) {}
 void on_shutdown(void) {}
+
+// Example chat filter: relays a rewritten message and logs.
+// Declarative dependency spec (ADR 0030) in the packed i64 ABI the host reads:
+// low 32 bits pointer, high 32 bits length. A module that exports hooks without
+// this is refused at load (fail closed), so the names it registers are checked
+// against the host vocabulary.
+static const char zdtd_requires_spec[] = "log,on_enable,on_chat,on_shutdown";
+__attribute__((visibility("default"))) long long _zdtd_requires(void) {
+    return (long long)((unsigned long long)(unsigned long)&zdtd_requires_spec[0] |
+                       ((unsigned long long)(sizeof(zdtd_requires_spec) - 1) << 32));
+}

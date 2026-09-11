@@ -18,3 +18,12 @@ void on_tick(void) {
 }
 
 void on_shutdown(void) {}
+
+// Declarative dependency spec (ADR 0030) in the host's packed i64 ABI (low 32
+// bits pointer, high 32 bits length). This fixture is loaded as a discovered
+// mod by tests, where a module that exports hooks must declare them.
+static const char zdtd_requires_spec[] = "log,on_enable,on_tick,on_shutdown";
+__attribute__((visibility("default"))) long long _zdtd_requires(void) {
+    return (long long)((unsigned long long)(unsigned long)&zdtd_requires_spec[0] |
+                       ((unsigned long long)(sizeof(zdtd_requires_spec) - 1) << 32));
+}

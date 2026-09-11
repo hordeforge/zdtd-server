@@ -119,14 +119,23 @@ Replacing a whole component means claiming all of its points.
 
 ### Declarative dependencies (`_zdtd_requires`)
 
-A module may export `_zdtd_requires() -> (ptr, len)` returning a comma-
-separated list of capabilities it needs (hook names + the host verbs
-`log` / `tick` / `queue` / `sense` / `query` / `json_parse` / `json_str` /
-`json_raw` / `json_obj` / `config`). The host validates the list at load and
-**rejects
-the module loudly** when a capability is unknown or a declared hook is not
-actually exported. This is fail-closed at load: a typo'd hook name cannot
-silently never fire.
+A module declares the capabilities it needs with
+`_zdtd_requires() -> (ptr, len)`, a comma-separated list of hook names plus the
+host verbs `log` / `tick` / `queue` / `sense` / `query` / `json_parse` /
+`json_str` / `json_raw` / `json_obj` / `config`. The host validates the list at
+load and **rejects the module loudly** when a capability is unknown or a
+declared hook is not actually exported.
+
+**A discovered mod must export it.** A mod found through `manifest.toml` is a
+claim about capabilities, so a module that exports at least one hook and no
+`_zdtd_requires` is refused with `error.RequiresUnmet` - otherwise nothing
+would ever check the hook names it believes it registered, and a typo'd hook
+would be a silent never-fire. A module that exports no hook at all (a pure
+verb or config-only module) has nothing to declare and is left alone. The
+in-repo test fixtures and the legacy `[plugin] modules` list load through the
+raw path, which stays permissive because `--export-all` fixtures export symbols
+they never meant to claim; anything an operator can enable through `Mods/`
+takes the strict path.
 
 ```c
 long long _zdtd_requires(void) {

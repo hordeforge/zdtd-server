@@ -99,6 +99,12 @@ pub const HostCtx = struct {
     /// Owner state (a *Game in the server); cast by the callbacks the owner
     /// installs. Keeps this layer free of a Game dependency.
     data: ?*anyopaque = null,
+    /// Set by the loader for the duration of a discovered-mod load: a mod's
+    /// manifest is a claim about its capabilities, so `_zdtd_requires` presence
+    /// is fail-closed for it. False on the raw load path (in-repo test
+    /// fixtures, legacy `[plugin] modules`), where `--export-all` fixtures
+    /// would otherwise be refused for exporting hooks they never meant to claim.
+    require_declaration: bool = false,
     log_fn: *const fn (ctx: *HostCtx, level: u8, msg: []const u8) void,
     tick_fn: *const fn (ctx: *HostCtx) u64,
     /// `src` is the 1-based wasm slot the queued command came from (0 = not
@@ -132,6 +138,10 @@ pub const LoadError = error{
     ImportForbidden,
     InstantiateFailed,
     OutOfMemory,
+    /// The loader required a `_zdtd_requires` declaration and the module did
+    /// not provide one it can honour (absent while exporting hooks, unknown
+    /// capability, or a declared hook it does not export).
+    RequiresUnmet,
 };
 
 /// A loaded plugin: one instance, its hook presence flags, and a disabled bit.
@@ -157,6 +167,9 @@ pub const Plugin = struct {
     config_bytes: []const u8 = "",
     /// Set when a hook traps or exhausts fuel: the module stops being called.
     disabled: bool = false,
+    /// Set on the host (not the slot) for the duration of a discovered-mod
+    /// load: probeRequires runs inside Plugin.load, before the slot exists.
+    require_declaration: bool = false,
     hook_present: [@typeInfo(Hook).@"enum".fields.len]bool = .{false} ** @typeInfo(Hook).@"enum".fields.len,
     /// Declarative dependency check (paper: reactive coeffects): `_zdtd_requires`
     /// returns a comma-separated list of capabilities (hook names + host verbs
@@ -185,14 +198,20 @@ pub const Plugin = struct {
         ctx: *HostCtx,
         budget: Budget,
     ) LoadError!Plugin {
+        // `adopted` lets the declaration failure below release the fully
+        // constructed Plugin with the same code the success path uses at
+        // shutdown. While it is false the guard errdefers own their own pieces
+        // and Plugin.deinit (which also destroys the engine) must not run, or
+        // the engine would be freed twice.
+        var adopted = false;
         const engine_ptr = allocator.create(zwasm.Engine) catch return error.OutOfMemory;
-        errdefer allocator.destroy(engine_ptr);
+        errdefer if (!adopted) allocator.destroy(engine_ptr);
         engine_ptr.* = zwasm.Engine.init(allocator, .{}) catch return error.OutOfMemory;
-        errdefer engine_ptr.deinit();
+        errdefer if (!adopted) engine_ptr.deinit();
         var module = engine_ptr.compile(wasm_bytes) catch return error.ParseFailed;
-        errdefer module.deinit();
+        errdefer if (!adopted) module.deinit();
         var linker = engine_ptr.linker();
-        errdefer linker.deinit();
+        errdefer if (!adopted) linker.deinit();
         defineImports(&linker, ctx) catch return error.ImportForbidden;
         var instance = linker.instantiate(&module, .{
             .fuel = .{ .limited = budget.fuel },
@@ -201,8 +220,8 @@ pub const Plugin = struct {
             std.debug.print("zdtd: wasm instantiate failed: {s}\n", .{@errorName(err)});
             return error.InstantiateFailed;
         };
-        errdefer instance.deinit();
-        var p = Plugin{
+        errdefer if (!adopted) instance.deinit();
+        var p: Plugin = .{
             .allocator = allocator,
             .engine = engine_ptr,
             .module = module,
@@ -211,7 +230,15 @@ pub const Plugin = struct {
             .name = allocator.dupe(u8, name) catch return error.OutOfMemory,
         };
         p.probeHooks();
-        p.probeRequires();
+        p.probeRequires(ctx.require_declaration);
+        if (ctx.require_declaration and p.requires_failed) {
+            // Fail closed at the load boundary: the caller wanted a declared
+            // contract and this module does not have one (or declared names it
+            // cannot honour). The message is already set for the caller to log.
+            adopted = true;
+            p.deinit();
+            return error.RequiresUnmet;
+        }
         return p;
     }
 
@@ -247,8 +274,29 @@ pub const Plugin = struct {
     /// guest memory). Every name must be a hook the module exports or a host
     /// verb it imports; anything else fails the load with the offending name.
     /// Coeffect fail-closed: a typo'd hook never silently never-fires.
-    fn probeRequires(self: *Plugin) void {
-        if (self.instance.exportFuncSig("_zdtd_requires") == null) return;
+    fn probeRequires(self: *Plugin, require_declaration: bool) void {
+        if (self.instance.exportFuncSig("_zdtd_requires") == null) {
+            // A discovered mod must declare its contract; the raw load path
+            // does not, because its callers are the in-repo test harness (the
+            // C fixtures export every symbol via --export-all, so "exports a
+            // hook" is not evidence of intent there) and the legacy
+            // `[plugin] modules` list. `require_declaration` is set by
+            // loadResolved for discovered manifests only.
+            //
+            // The hole this closes: nothing validated the hook names a mod
+            // believes it registered, so a typo was a silent never-fire. A mod
+            // that exports no hook at all is left alone - it has nothing to
+            // declare.
+            if (require_declaration) {
+                for (self.hook_present) |present| {
+                    if (present) {
+                        self.requiresFailed("exports hooks but has no _zdtd_requires");
+                        return;
+                    }
+                }
+            }
+            return;
+        }
         const ret64 = self.instance.call(fn () i64, "_zdtd_requires", .{}) catch {
             self.requiresFailed("_zdtd_requires trapped");
             return;
@@ -870,7 +918,16 @@ pub const WasmHost = struct {
             else
                 rm.manifest.wasm.?;
             defer if (rm.manifest.dir.len > 0) allocator.free(full_path);
-            self.loadInto(self.n, full_path) catch |err| {
+            // A discovered mod's manifest is a claim about capabilities, so its
+            // `_zdtd_requires` presence is fail-closed (ADR 0030). The flag is
+            // set on the host because the probe runs inside Plugin.load, before
+            // the slot is installed; restore it so the raw load path (test
+            // fixtures, legacy `[plugin] modules`) keeps its permissive rule.
+            const prev_require = ctx.require_declaration;
+            ctx.require_declaration = true;
+            const load_res = self.loadInto(self.n, full_path);
+            ctx.require_declaration = prev_require;
+            load_res catch |err| {
                 std.debug.print("zdtd: mod '{s}' load failed: {s}\n", .{ rm.manifest.name.?, @errorName(err) });
                 continue;
             };
@@ -990,6 +1047,18 @@ pub const WasmHost = struct {
             self.allocator.dupe(u8, self.slots[idx].display) catch ""
         else
             "";
+        // `config.toml` bytes are loaded by loadResolved/loadAll, not by
+        // loadInto, so a reload that only preserved tier/display silently
+        // dropped them: every module with a config reverts to its compiled
+        // defaults on `plugin reload` while on_enable still reports success
+        // (zdtd.config then returns 0 bytes). Copy them here for the same
+        // reason as the display name, and with the same ownership rule - the
+        // frame owns the copy until the reload succeeds, and frees it on the
+        // failure path.
+        const config_copy = if (self.slots[idx].config_bytes.len > 0)
+            self.allocator.dupe(u8, self.slots[idx].config_bytes) catch ""
+        else
+            "";
         _ = self.slots[idx].callHook(.on_shutdown);
         // Withdraw after on_shutdown and before deinit: shutdown may queue
         // (or spawn bots) that a pre-reload withdraw would miss, and those
@@ -1008,10 +1077,12 @@ pub const WasmHost = struct {
             // would run on undefined memory): drop it from the active range.
             self.dropDisposedSlot(idx);
             if (display_copy.len > 0) self.allocator.free(display_copy);
+            if (config_copy.len > 0) self.allocator.free(config_copy);
             return false;
         };
         self.slots[idx].tier = tier;
         self.slots[idx].display = display_copy;
+        self.slots[idx].config_bytes = config_copy;
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
@@ -2016,6 +2087,78 @@ test "plugin reload keeps a heap-owned display name valid" {
     try std.testing.expect(host.slots[0].hook_present[@intFromEnum(Hook.on_trader_event)]);
     // ...and freed exactly once at shutdown (the defer above); a double free
     // fails this test under std.testing.allocator.
+}
+
+test "plugin reload keeps the module's config bytes" {
+    // Regression (composability audit 2026-09-11): config.toml bytes are loaded
+    // by loadResolved/loadAll, not by loadInto, so reload's "preserve tier and
+    // display" left config_bytes empty. Every module with a config silently
+    // reverted to its compiled defaults on `plugin reload` while on_enable
+    // still logged "enabled", and the zdtd.config import then returned 0 bytes.
+    // The wasm.zig reload tests all load through loadAll, where config_bytes is
+    // already "", which is exactly why none of them caught it.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    host.loadAll(std.testing.allocator, &[_][]const u8{"plugins/core_tradefeed/core_tradefeed.wasm"}, &ctx, .{});
+    defer host.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    // A manifest-style config owned by the slot (the shape loadResolved leaves).
+    const cfg_text = "tradefeed_prefix = \"sold\"\n";
+    host.slots[0].config_bytes = try std.testing.allocator.dupe(u8, cfg_text);
+    const path = host.slots[0].name;
+    try std.testing.expect(host.reload(0, path));
+    // Readable after the reload, and the old copy was freed by deinit (a leak
+    // or double free fails this test under std.testing.allocator).
+    try std.testing.expectEqualStrings(cfg_text, host.slots[0].config_bytes);
+}
+
+test "a discovered mod must declare _zdtd_requires" {
+    // Composability audit 2026-09-11: probeRequires returned early when the
+    // export was absent, so a mod that exported hooks but declared nothing had
+    // its hook names validated by nobody - a typo'd hook was a silent
+    // never-fire. The presence rule is now fail-closed for a discovered mod
+    // (its manifest is a capability claim) while the raw load path stays
+    // permissive, because the in-repo C fixtures export every symbol through
+    // --export-all and so "exports a hook" is not evidence of intent there.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    // Hand-built module exporting only `on_tick` and declaring nothing: type
+    // ()->(), one function of that type, the export, an empty body.
+    const undeclared = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: () -> ()
+        0x03, 0x02, 0x01, 0x00, // function: one of type 0
+        0x07, 0x0b, 0x01, 0x07, 'o', 'n', '_', 't', 'i', 'c', 'k', // export "on_tick"
+        0x00, 0x00,
+        0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: empty body
+    };
+    // Same bytes on the raw path (no manifest claim) load: the rule is about a
+    // discovered mod's declaration, not about the module shape.
+    var p = try Plugin.load(std.testing.allocator, "undeclared.wasm", &undeclared, &ctx, .{});
+    defer p.deinit();
+    try std.testing.expect(p.hook_present[@intFromEnum(Hook.on_tick)]);
+    try std.testing.expect(!p.requires_failed);
+    // A discovered mod (manifest = capability claim) with the same export and
+    // no declaration is refused at the load boundary.
+    ctx.require_declaration = true;
+    try std.testing.expectError(
+        error.RequiresUnmet,
+        Plugin.load(std.testing.allocator, "undeclared.wasm", &undeclared, &ctx, .{}),
+    );
+    ctx.require_declaration = false;
 }
 
 test "plugin reload failure frees the display copy and reports false" {

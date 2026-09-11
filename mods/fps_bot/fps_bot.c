@@ -1474,3 +1474,14 @@ static long strtol_impl(const char *s) {
   while (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); s++; }
   return neg ? -v : v;
 }
+
+// FPS bot host contract (ADR 0026): the guest brain senses, queries and queues.
+// Declarative dependency spec (ADR 0030) in the packed i64 ABI the host reads:
+// low 32 bits pointer, high 32 bits length. A module that exports hooks without
+// this is refused at load (fail closed), so the names it registers are checked
+// against the host vocabulary.
+static const char zdtd_requires_spec[] = "log,queue,sense,query,tick,on_enable,on_tick,on_shutdown,on_admin_command";
+__attribute__((visibility("default"))) long long _zdtd_requires(void) {
+    return (long long)((unsigned long long)(unsigned long)&zdtd_requires_spec[0] |
+                       ((unsigned long long)(sizeof(zdtd_requires_spec) - 1) << 32));
+}

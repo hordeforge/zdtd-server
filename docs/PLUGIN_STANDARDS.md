@@ -78,7 +78,10 @@ sends as `NetPackageConfigFile` during join.
   new `on_*` export without adding the hook to the host first.
 - `_zdtd_requires` lists hooks + host verbs, comma-separated, matching what
   the module actually imports/exports; validated fail-closed at load (ADR
-  0030). A typo'd capability is a loud load rejection.
+  0030). A typo'd capability is a loud load rejection. **Required** for any
+  discovered mod that exports a hook: absence is `error.RequiresUnmet`, since
+  without it nothing validates the names the module believes it registered. A
+  module with no hook exports may omit it.
 - Log lines start with the module name: `"core_announce v2.0 enabled ..."`.
 
 ## manifest.toml format

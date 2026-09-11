@@ -23,6 +23,13 @@ var out: common.Buf = .{};
 var cfg: common.Config = .{};
 var log_level: i32 = 1;
 
+// Declarative dependency spec (ADR 0030): absence is now a load-time
+// rejection for a module that exports hooks, and this one registers observers
+// plus the two host verbs it calls.
+comptime {
+    common.exportRequires("log,config,on_enable,on_shutdown,on_player_join,on_player_leave,on_entity_killed,on_player_death,on_quest_complete");
+}
+
 export fn on_enable() void {
     cfg.load();
     if (cfg.get("log_level")) |v| {
