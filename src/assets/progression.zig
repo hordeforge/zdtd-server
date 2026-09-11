@@ -276,52 +276,6 @@ pub fn perkTotals(
     return out;
 }
 
-/// End index (exclusive) of the element whose open tag starts at `open_at`,
-/// including its close tag unless it is self-closing. Stock XML does not nest
-/// same-name elements, so the first close tag ends it.
-fn elementEnd(body: []const u8, open_at: usize) usize {
-    const gt = std.mem.findPos(u8, body, open_at, ">") orelse return body.len;
-    if (gt > open_at and body[gt - 1] == '/') return gt + 1;
-    var name_end = open_at + 1;
-    while (name_end < gt and !std.ascii.isWhitespace(body[name_end]) and
-        body[name_end] != '/' and body[name_end] != '>') name_end += 1;
-    const name = body[open_at + 1 .. name_end];
-    if (name.len == 0 or name.len + 3 > 64) return gt + 1;
-    var close_buf: [64]u8 = undefined;
-    close_buf[0] = '<';
-    close_buf[1] = '/';
-    @memcpy(close_buf[2..][0..name.len], name);
-    close_buf[2 + name.len] = '>';
-    const close_tag = close_buf[0 .. name.len + 3];
-    const close = std.mem.findPos(u8, body, gt, close_tag) orelse return body.len;
-    return close + close_tag.len;
-}
-
-/// The element's direct `<requirement>` children, in document order.
-/// `RequirementBase::ParseRequirementGroup` (IL=148) reads
-/// `Elements("requirement")`, i.e. direct children only: a requirement nested
-/// in a triggered_effect or in a passive_effect is not a group gate.
-fn scanRequirements(
-    allocator: std.mem.Allocator,
-    arena: std.mem.Allocator,
-    body: []const u8,
-    open_at: usize,
-    out: *std.ArrayList(requirements.Requirement),
-) !void {
-    const gt = std.mem.findPos(u8, body, open_at, ">") orelse return;
-    if (gt > open_at and body[gt - 1] == '/') return;
-    const end = elementEnd(body, open_at);
-    var i = gt + 1;
-    while (i < end) {
-        const lt = std.mem.findPos(u8, body, i, "<") orelse break;
-        if (lt >= end or std.mem.startsWith(u8, body[lt..], "</")) break;
-        if (std.mem.startsWith(u8, body[lt..], "<requirement")) {
-            try out.append(allocator, try requirements.parse(body, lt, arena));
-        }
-        i = elementEnd(body, lt);
-    }
-}
-
 /// One body's direct `<level_requirements level="N">` children.
 /// `ProgressionFromXml` (IL=660) gives each block an `N` and a RequirementGroup
 /// built from its own direct `<requirement>` children (null when the block has
@@ -342,12 +296,12 @@ fn scanLevelReqs(
         var reqs: std.ArrayList(requirements.Requirement) = .empty;
         defer reqs.deinit(allocator);
         if (!(gt > lt and body[gt - 1] == '/')) {
-            try scanRequirements(allocator, arena, body, lt, &reqs);
+            try requirements.scanRequirements(allocator, arena, body, lt, &reqs);
         }
         const slice = try arena.alloc(requirements.Requirement, reqs.items.len);
         @memcpy(slice, reqs.items);
         try out.append(allocator, .{ .level = level, .reqs = slice });
-        i = elementEnd(body, lt);
+        i = requirements.elementEnd(body, lt);
     }
 }
 
@@ -425,7 +379,7 @@ fn appendGatedPassive(
     if (xml.attr(body, tag, "name") == null) return;
     const r0 = req_pool.items.len;
     for (group_reqs) |r| try req_pool.append(allocator, r);
-    try scanRequirements(allocator, arena, body, tag, req_pool);
+    try requirements.scanRequirements(allocator, arena, body, tag, req_pool);
     try req_ranges.append(allocator, .{ r0, req_pool.items.len - r0 });
     try appendPassive(allocator, arena, body, tag, pool);
 }
@@ -453,7 +407,7 @@ fn scanEffectGroup(
         if (std.mem.startsWith(u8, g[lt..], "<requirement")) {
             try group_reqs.append(allocator, try requirements.parse(g, lt, arena));
         }
-        i = elementEnd(g, lt);
+        i = requirements.elementEnd(g, lt);
     }
     i = 0;
     while (i < g.len and pool.items.len < passive_limit) {
@@ -462,7 +416,7 @@ fn scanEffectGroup(
         if (std.mem.startsWith(u8, g[lt..], "<passive_effect")) {
             try appendGatedPassive(allocator, arena, g, lt, group_reqs.items, pool, req_pool, req_ranges);
         }
-        i = elementEnd(g, lt);
+        i = requirements.elementEnd(g, lt);
     }
 }
 
@@ -490,13 +444,13 @@ fn scanPassives(
             }
             const close = std.mem.findPos(u8, body, gt, "</effect_group>") orelse break;
             try scanEffectGroup(allocator, arena, body[gt + 1 .. close], pool, req_pool, req_ranges, p0 + max_passives_per_def);
-            i = close + 16;
+            i = close + "</effect_group>".len;
             continue;
         }
         if (std.mem.startsWith(u8, body[lt..], "<passive_effect")) {
             try appendGatedPassive(allocator, arena, body, lt, &.{}, pool, req_pool, req_ranges);
         }
-        i = elementEnd(body, lt);
+        i = requirements.elementEnd(body, lt);
     }
 }
 

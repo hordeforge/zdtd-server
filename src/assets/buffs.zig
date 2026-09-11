@@ -367,6 +367,121 @@ pub fn parseCurveLevels(s: []const u8, out: *[max_curve_len]f32) u8 {
     return n;
 }
 
+/// Append one `<passive_effect>` row with the gates stock applies to it: the
+/// enclosing `<effect_group>`'s direct `<requirement>` children plus the row's
+/// own nested ones (`MinEffectGroup::ParseXml` IL=103 and
+/// `PassiveEffect::ParsePassiveEffect` IL=423 each build one RequirementGroup,
+/// and `PassiveEffect::RequirementsMet` IL=180 checks them before the tag gate
+/// and the value fold).
+fn appendGatedPassive(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    tag: usize,
+    group_reqs: []const requirements.Requirement,
+    passives: *std.ArrayList(Passive),
+    req_pool: *std.ArrayList(requirements.Requirement),
+    req_ranges: *std.ArrayList(struct { usize, usize }),
+) !void {
+    if (xml.attr(body, tag, "name") == null) return;
+    const r0 = req_pool.items.len;
+    for (group_reqs) |r| try req_pool.append(allocator, r);
+    try requirements.scanRequirements(allocator, arena, body, tag, req_pool);
+    try req_ranges.append(allocator, .{ r0, req_pool.items.len - r0 });
+    const en = xml.attr(body, tag, "name").?;
+    const op_s = xml.attr(body, tag, "operation") orelse "base_add";
+    const val_s = xml.attr(body, tag, "value") orelse "0";
+    const tags = xml.attr(body, tag, "tags") orelse "";
+    var curve: [max_curve_len]f32 = .{0} ** max_curve_len;
+    const curve_len = parseCurveValue(val_s, &curve);
+    var curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len;
+    const curve_levels_len = if (xml.attr(body, tag, "level")) |lv|
+        parseCurveLevels(lv, &curve_levels)
+    else
+        0;
+    try passives.append(allocator, .{
+        .name = try arena.dupe(u8, en),
+        .op = parseOp(op_s),
+        .value = curve[0],
+        .tags = try arena.dupe(u8, tags),
+        .curve = curve,
+        .curve_len = curve_len,
+        .curve_levels = curve_levels,
+        .curve_levels_len = curve_levels_len,
+    });
+}
+
+/// One `<effect_group>` body: its direct `<requirement>` children gate every
+/// passive in it (`MinEffectGroup::ParseXml` IL=103 builds one RequirementGroup
+/// for the element, not a running per-row list), and a row may add its own.
+fn scanEffectGroup(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    g: []const u8,
+    passives: *std.ArrayList(Passive),
+    req_pool: *std.ArrayList(requirements.Requirement),
+    req_ranges: *std.ArrayList(struct { usize, usize }),
+    budget: usize,
+) !void {
+    var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
+    defer group_reqs.deinit(allocator);
+    var rj: usize = 0;
+    while (rj < g.len) {
+        const rl = std.mem.findPos(u8, g, rj, "<") orelse break;
+        if (std.mem.startsWith(u8, g[rl..], "</")) break;
+        if (std.mem.startsWith(u8, g[rl..], "<requirement")) {
+            try group_reqs.append(allocator, try requirements.parse(g, rl, arena));
+        }
+        rj = requirements.elementEnd(g, rl);
+    }
+    var pj: usize = 0;
+    while (pj < g.len and passives.items.len < budget) {
+        const pl = std.mem.findPos(u8, g, pj, "<") orelse break;
+        if (std.mem.startsWith(u8, g[pl..], "</")) break;
+        if (std.mem.startsWith(u8, g[pl..], "<passive_effect")) {
+            try appendGatedPassive(allocator, arena, g, pl, group_reqs.items, passives, req_pool, req_ranges);
+        }
+        pj = requirements.elementEnd(g, pl);
+    }
+}
+
+/// One buff body's `<passive_effect>` rows, each with its effect_group's gates.
+/// Every stock buff keeps its passives in `<effect_group>` blocks (881/881) and
+/// none nests a group, so the walk is one level deep; a hand-built or modded
+/// buff may put a row at the top level, which then carries only its own gates.
+/// `budget` is the absolute pool index `max_passives_per_buff` ends at.
+fn scanPassives(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    passives: *std.ArrayList(Passive),
+    req_pool: *std.ArrayList(requirements.Requirement),
+    req_ranges: *std.ArrayList(struct { usize, usize }),
+) !void {
+    const p0 = passives.items.len;
+    const budget = @min(p0 + max_passives_per_buff, max_passives_total);
+    var i: usize = 0;
+    while (i < body.len and passives.items.len < budget) {
+        const lt = std.mem.findPos(u8, body, i, "<") orelse break;
+        if (std.mem.startsWith(u8, body[lt..], "</")) break;
+        if (std.mem.startsWith(u8, body[lt..], "<effect_group")) {
+            const ggt = std.mem.findPos(u8, body, lt, ">") orelse break;
+            if (ggt > lt and body[ggt - 1] == '/') {
+                i = ggt + 1;
+                continue;
+            }
+            const gclose = std.mem.findPos(u8, body, ggt, "</effect_group>") orelse break;
+            try scanEffectGroup(allocator, arena, body[ggt + 1 .. gclose], passives, req_pool, req_ranges, budget);
+            i = gclose + "</effect_group>".len;
+            continue;
+        }
+        if (std.mem.startsWith(u8, body[lt..], "<passive_effect")) {
+            try appendGatedPassive(allocator, arena, body, lt, &.{}, passives, req_pool, req_ranges);
+        }
+        i = requirements.elementEnd(body, lt);
+    }
+}
+
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
@@ -396,6 +511,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     defer triggered_list.deinit(allocator);
     var trig_ranges: std.ArrayList(struct { usize, usize }) = .empty;
     defer trig_ranges.deinit(allocator);
+    var reqs_list: std.ArrayList(requirements.Requirement) = .empty;
+    defer reqs_list.deinit(allocator);
+    var req_ranges: std.ArrayList(struct { usize, usize }) = .empty; // gate start,len per passive
+    defer req_ranges.deinit(allocator);
 
     var i: usize = 0;
     while (i < clean.len and metas.items.len < max_buffs) {
@@ -516,37 +635,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         try trig_ranges.append(allocator, .{ tr0, triggered_list.items.len - tr0 });
 
         const p0 = passives_list.items.len;
-        var j: usize = 0;
-        var pn: usize = 0;
-        while (j < body.len and pn < max_passives_per_buff and passives_list.items.len < max_passives_total) {
-            const pi = std.mem.findPos(u8, body, j, "<passive_effect ") orelse break;
-            const en = xml.attr(body, pi, "name") orelse {
-                j = pi + 16;
-                continue;
-            };
-            const op_s = xml.attr(body, pi, "operation") orelse "base_add";
-            const val_s = xml.attr(body, pi, "value") orelse "0";
-            const tags = xml.attr(body, pi, "tags") orelse "";
-            var curve: [max_curve_len]f32 = .{0} ** max_curve_len;
-            const curve_len = parseCurveValue(val_s, &curve);
-            var curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len;
-            const curve_levels_len = if (xml.attr(body, pi, "level")) |lv|
-                parseCurveLevels(lv, &curve_levels)
-            else
-                0;
-            try passives_list.append(allocator, .{
-                .name = try arena.dupe(u8, en),
-                .op = parseOp(op_s),
-                .value = curve[0],
-                .tags = try arena.dupe(u8, tags),
-                .curve = curve,
-                .curve_len = curve_len,
-                .curve_levels = curve_levels,
-                .curve_levels_len = curve_levels_len,
-            });
-            pn += 1;
-            j = pi + 16;
-        }
+        try scanPassives(allocator, arena, body, &passives_list, &reqs_list, &req_ranges);
         try metas.append(allocator, meta);
         try ranges.append(allocator, .{ p0, passives_list.items.len - p0 });
         try mod_ranges.append(allocator, .{ m0, mods_list.items.len - m0 });
@@ -556,6 +645,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
 
     const pool = try arena.alloc(Passive, passives_list.items.len);
     @memcpy(pool, passives_list.items);
+    // Every passive row has one gate range (empty for ungated rows); a mismatch
+    // means the group walk and the append drifted apart.
+    if (req_ranges.items.len != pool.len) return error.MalformedBuffs;
+    const req_pool = try arena.alloc(requirements.Requirement, reqs_list.items.len);
+    @memcpy(req_pool, reqs_list.items);
+    for (pool, req_ranges.items) |*p, rg| {
+        p.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
+    }
     const mod_pool = try arena.alloc(StatMod, mods_list.items.len);
     @memcpy(mod_pool, mods_list.items);
     const thr_pool = try arena.alloc(StatThreshold, thresholds_list.items.len);
@@ -1350,6 +1447,51 @@ test "trackedDeltasAt scales a perk curve to its level" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.25), l5.general_resist, 0.0001); // clamp
     const l0 = trackedDeltasAt(&passives, 0, .{}, &counts);
     try std.testing.expect(!l0.any());
+}
+
+test "a buff passive folds only under its effect_group requirement" {
+    // buffCoffee carries StaminaChangeOT perc_add 0.2 gated
+    // `!HasBuff buffHealWaterMax` and 0.1 gated `HasBuff buffHealWaterMax`.
+    // Both folded before the buff parser honoured effect_group requirements, so
+    // a coffee drinker got 0.3 instead of one of the two rows.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const coffee = t.indexOfName("buffCoffee").?;
+    var set: components.BuffSet = .{};
+    set.slots[0] = .{ .active = true, .def_id = coffee };
+    const names = requirements.BuffNames{ .ctx = undefined, .resolve = struct {
+        fn f(_: *const anyopaque, name: []const u8) ?u16 {
+            return if (std.ascii.eqlIgnoreCase(name, "buffHealWaterMax")) 7 else null;
+        }
+    }.f };
+    var counts: requirements.Counts = .{};
+    try std.testing.expectApproxEqAbs(@as(f32, 0.2), effectTotals(&t, &set, .{}, &counts).stamina_ot, 0.0001);
+    const active_ids = [_]u16{7};
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1), effectTotals(&t, &set, .{
+        .active_buffs = &active_ids,
+        .buff_names = &names,
+    }, &counts).stamina_ot, 0.0001);
+}
+
+test "a buff gate the evaluator cannot resolve refuses the row and is counted" {
+    // buffBikerSetBonus's six PhysicalDamageResist rows are gated on
+    // ArmorGroupLowestQuality (the worn armor's lowest quality in its group),
+    // which the VM has no state for. All six used to fold unconditionally, so a
+    // biker-set wearer read 1+2+3+4+5+6 = 21; now the rows refuse and the
+    // unsupported counter measures the gap.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/buffs.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const biker = t.indexOfName("buffBikerSetBonus").?;
+    var set: components.BuffSet = .{};
+    set.slots[0] = .{ .active = true, .def_id = biker };
+    var counts: requirements.Counts = .{};
+    const totals = effectTotals(&t, &set, .{}, &counts);
+    try std.testing.expectEqual(@as(f32, 0), totals.phys_resist);
+    try std.testing.expectEqual(@as(u32, 6), counts.unsupported);
 }
 
 test "the stock coredamageresist armor rows fold only under the armor query" {

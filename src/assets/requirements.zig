@@ -263,6 +263,52 @@ pub fn all(reqs: []const Requirement, ctx: Ctx) bool {
     return evaluate(reqs, ctx, &counts) == .pass;
 }
 
+/// End index (exclusive) of the element whose open tag starts at `open_at`,
+/// including its close tag unless it is self-closing. Stock XML does not nest
+/// same-name elements, so the first close tag ends it.
+pub fn elementEnd(body: []const u8, open_at: usize) usize {
+    const gt = std.mem.findPos(u8, body, open_at, ">") orelse return body.len;
+    if (gt > open_at and body[gt - 1] == '/') return gt + 1;
+    var name_end = open_at + 1;
+    while (name_end < gt and !std.ascii.isWhitespace(body[name_end]) and
+        body[name_end] != '/' and body[name_end] != '>') name_end += 1;
+    const name = body[open_at + 1 .. name_end];
+    if (name.len == 0 or name.len + 3 > 64) return gt + 1;
+    var close_buf: [64]u8 = undefined;
+    close_buf[0] = '<';
+    close_buf[1] = '/';
+    @memcpy(close_buf[2..][0..name.len], name);
+    close_buf[2 + name.len] = '>';
+    const close_tag = close_buf[0 .. name.len + 3];
+    const close = std.mem.findPos(u8, body, gt, close_tag) orelse return body.len;
+    return close + close_tag.len;
+}
+
+/// The element's direct `<requirement>` children, in document order.
+/// `RequirementBase::ParseRequirementGroup` (IL=148) reads
+/// `Elements("requirement")`, i.e. direct children only: a requirement nested
+/// in a triggered_effect or in a passive_effect is not a group gate.
+pub fn scanRequirements(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    open_at: usize,
+    out: *std.ArrayList(Requirement),
+) !void {
+    const gt = std.mem.findPos(u8, body, open_at, ">") orelse return;
+    if (gt > open_at and body[gt - 1] == '/') return;
+    const end = elementEnd(body, open_at);
+    var i = gt + 1;
+    while (i < end) {
+        const lt = std.mem.findPos(u8, body, i, "<") orelse break;
+        if (lt >= end or std.mem.startsWith(u8, body[lt..], "</")) break;
+        if (std.mem.startsWith(u8, body[lt..], "<requirement")) {
+            try out.append(allocator, try parse(body, lt, arena));
+        }
+        i = elementEnd(body, lt);
+    }
+}
+
 const testing = std.testing;
 
 test "parse reads the negation, comparison, target and operands" {

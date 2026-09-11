@@ -3640,15 +3640,36 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     leg should query `running` (zdtd uses the `Rules` drain floor there), and the
     attacking item's `physicalDamageTypes` tags stay with the per-hit
     `armorMitigation` leg rather than the per-tick cache.
-  - **buffs.xml is the larger half of the same gap, measured 2026-09-11:**
-    effect_group-scoped, 130 applied tracked rows and 63 of them gated, over 18
-    kinds (`!HasBuff` 79, `CVarCompare` 76, `ProgressionLevel` 50, `PlayerLevel`
-    44, `HoldingItemHasTags` 27, `StatComparePercCurrentToMax` 25, ...). There
-    is no effect_group nesting in stock buffs.xml (max depth 1), so the same
-    `scanEffectGroup` shape applies once the buff parser stops being a flat
-    walk; the evaluator then needs the stat-comparison kinds
-    (`StatComparePercCurrentToMax`/`StatCompareCurrent`) that the triggered
-    engine already resolves for its own gate.
+  - **buffs.xml is the larger half of the same gap and is now wired too
+    (round 14, 2026-09-11).** The buff parser was a flat walk over the buff body
+    with no effect_group context, so buff rows carried no gates either.
+    `buffs.zig` now shares `requirements.elementEnd`/`scanRequirements` and
+    walks one `<effect_group>` level (stock keeps all 881 passive rows in
+    groups and never nests one) plus a top-level fallback for hand-built or
+    modded bodies. Authoritative count: **130 applied tracked rows, 43 gated**,
+    of which **10 resolve and 33 refuse**:
+    - resolve: `HasBuff`/`!HasBuff` (10 rows: buffCoffee, buffBeer,
+      buffBlackStrapCoffee, buffDesert_Storm_Stage01, buffSnow_Storm_Stage01)
+      plus `ProgressionLevel` where it appears alone.
+    - refuse (fail closed, counted): `EntityTagCompare` 8 + `!EntityTagCompare`
+      3 (the attacker's tags: per-hit, not per-tick), `CVarCompare` 7,
+      `ArmorGroupLowestQuality` 6, `HoldingItemHasTags` 4, `SandboxOptionBool` 4,
+      `StatComparePercCurrentToModMax` 1. Ten of the 33 carry `@cvar` values that
+      fold 0 regardless, so the living behaviour delta is smaller than the row
+      count suggests.
+    Fixed by it: `buffCoffee` folded 0.2 **and** 0.1 StaminaChangeOT together
+    (0.3) because its two rows are gated `!HasBuff buffHealWaterMax` and
+    `HasBuff buffHealWaterMax`; `buffBikerSetBonus` summed all six
+    ArmorGroupLowestQuality tiers (1+2+3+4+5+6 = 21 physical resist) because
+    every tier row folded; `buffHoldBreathAiming01` summed four rows (0.75).
+    The first two are now correct or missing, not wrong.
+    Residual for the next pass: the stat-comparison kinds
+    (`StatComparePercCurrentToMax`/`StatCompareCurrent`/`StatComparePercCurrentToModMax`)
+    need the entity's live stat fractions on the ctx, `HoldingItemHasTags` needs
+    the held item's tag list, `ArmorGroupLowestQuality` needs the worn armor
+    group + lowest quality, `SandboxOptionBool` reads the loaded sandbox
+    options (config), and `CVarCompare` needs per-entity CVar state (the same
+    work that unblocks the `@cvar` values).
   - `<book>` blocks (152) joined the catalog this round: a book is a
     progression value items.xml grants with `SetProgressionLevel level="-1"`,
     and before this a read almanac stored no level and folded no passive. This

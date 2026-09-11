@@ -114,6 +114,11 @@ survival pass now runs two queries like stock (untagged stats plus the
 so `perkRuleOneCardio`'s `running` stamina bonus and the armor stamina rows no
 longer inflate the idle regen, while `god`'s tagged physical-resist row still
 reaches `buff_phys_resist` (200 untagged, 400 under the armor query).
+Buff passive rows now carry their effect_group gates too (the buff parser was a
+flat walk): 43 gated tracked buff rows, 10 resolve and 33 refuse closed with the
+gap counted, so `buffCoffee` no longer adds both of its `HasBuff`/`!HasBuff`
+StaminaChangeOT rows together and `buffBikerSetBonus` no longer sums all six
+armor-quality tiers.
 
 ---
 
