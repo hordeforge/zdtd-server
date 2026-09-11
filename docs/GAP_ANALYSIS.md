@@ -5587,7 +5587,7 @@ but not at client parity, **MISSING** not implemented, **OUT** explicit non-goal
 | Permission / admin flags | WORKS (2026-08-26 re-audit: the admin TCP console ships with the serveradmin.xml `permission_level` (admin_xml.zig) + the per-command permission enforcement (ConsoleCmdCommandPermission levels, 0 = highest, denied before routing, admin_console.zig) + the in-game console routes through the same admin path - the 'no in-game permission levels' residual was stale) |
 | Kick / ban / whitelist | WORKS (2026-08-26 re-audit: kick/ban/unban on the admin console (consoleKickBan, runBanCommand matching stock ConsoleCmdBan asm.il 209578-210270) with `admins.zsv`/`whitelist.zsv`/`bans.zsv` persisting beside `players.zsv`; the row's own note admitted it was stale) |
 | `ClientInfo` / version gate strictness | WORKS (2026-08-26 re-audit: the login gate is HARD - the client's compatibilityVersion must equal `stock_wire_comp` (ordinal ignore-case) or the server denies with EKickReason.VersionMismatch(4) via NetPackagePlayerDenied, matching stock VersionAuthorizer; a different client build cannot join and desync silently) |
-| Reconnect resume | PARTIAL | players.zsv ZPV3 keyed **by login name** (ADR 0017), not by platform identity: a client can claim another player's save by picking their name. Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). Re-keying needs a save migration (ZPV4 or flagged extension); tracked in §10 |
+| Reconnect resume | WORKS | players.zsv **ZPV15** keys the row on the owner's platform identity (`puid_primary`, magic byte 'F') with the login name only as the legacy-row fallback, so a client can no longer claim another player's save by picking their name (closed 2026-09-11; ADR 0017 superseded). Stock keys the PDF on `PrimaryId.CombinedString` (asm.il 1884842). ZPV2-ZPV14 records upgrade in place: a legacy row matches by name once, gains an identity on the save, and is identity-only after that |
 | Crossplay platform users | PARTIAL | both identities decoded and stored per client; `InternalId` = crossplatform else native (asm.il 783909); no platform verification (EAC off) | |
 
 ---
@@ -6268,7 +6268,7 @@ Pattern for new loaders: `src/assets/<name>.zig` + fixture + `Game.init` resolve
 | Vehicle / turret persistence | WORKS (`entities.zen`; power wire edges persist by position; trader quest offers are derived from quest_list + journal, see appendix "Vehicle, turret, power and quest-NPC persistence") |
 | Atomic save / backup rotation | PARTIAL (temp+rename on chunks; no backup rotation) |
 | Multi-world / instance | PARTIAL - non-client-visible (ops; one world per process) |
-| Player save key | PARTIAL (login name per ADR 0017; stock uses `PrimaryId.CombinedString`, asm.il 1884842) |
+| Player save key | WORKS (platform identity per ZPV15; stock `PrimaryId.CombinedString`, asm.il 1884842. A legacy name-only row is matched once by name and re-keyed on save) |
 | Ally relationships | PARTIAL (`src/server/ally.zig` persists to `allies.zal`, ZAL1, like `claims.zlc`; this row was stale, landed 2026-08-08) |
 | World clock | HAVE (`clock.zcl` ZCL1) |
 | Weather storm SM | HAVE (`weather.zwt` ZWTH1) |

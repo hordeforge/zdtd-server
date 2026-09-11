@@ -20,6 +20,9 @@ pub const CounterId = enum(u16) {
     net_send_errors,
     reliable_window_drops,
     persistence_errors,
+    /// A player record was written without a platform identity, so it stays
+    /// keyed on the login name (ADR 0038). Counted once per process.
+    identity_less_saves,
     stale_peers_reaped,
     stream_errors,
     /// Main loop fell behind the 50 ms tick budget (run path only).

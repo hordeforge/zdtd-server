@@ -262,7 +262,7 @@ test "players zpv7 tail gains full hp on save (ZPV8 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVF", data[0..4]);
     }
     {
         // The record is carried, not rewritten (its name is not the harness
@@ -415,6 +415,148 @@ test "players zpv12 round-trips item mods across restart" {
     }
 }
 
+test "players v14 record gains an absent identity section on save (ZPV15 migration)" {
+    // A v14 ('E') file has no identity section. The save must append the absent
+    // marker byte so the v15 record walk stays aligned, and the upgrade must not
+    // invent an identity the client never presented: a legacy row keeps matching
+    // by name until its owner logs in with a platform id.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const persist_mod = @import("../persist.zig");
+    var buf: [1024]u8 = undefined;
+    var o: usize = 0;
+    @memcpy(buf[0..4], "ZPVE");
+    o += 4;
+    std.mem.writeInt(u32, buf[o..][0..4], 1, .little); // record count
+    o += 4;
+    // Named after the harness client ("Bot"), which presents no platform id:
+    // this is the migration path where a legacy row is the only key it has.
+    const name = "Bot";
+    buf[o] = @intCast(name.len);
+    o += 1;
+    @memcpy(buf[o..][0..name.len], name);
+    o += name.len;
+    @memset(buf[o..][0..16], 0); // x,y,z f32s + coins
+    o += 16;
+    buf[o] = 0; // inv_n
+    o += 1;
+    buf[o] = 0; // jn
+    o += 1;
+    buf[o] = 1; // prog 1
+    o += 1;
+    std.mem.writeInt(u16, buf[o..][0..2], 5, .little); // level
+    o += 2;
+    std.mem.writeInt(u64, buf[o..][0..8], 12345, .little); // xp
+    o += 8;
+    @memset(buf[o..][0..16], 0); // food/max/water/max
+    o += 16;
+    std.mem.writeInt(u32, buf[o..][0..4], @bitCast(@as(f32, 1.0)), .little); // hp (v8+)
+    o += 4;
+    @memset(buf[o..][0..8], 0); // born_world_time (v9+)
+    o += 8;
+    buf[o] = 0; // buff_n
+    o += 1;
+    buf[o] = 0; // bed_present 0
+    o += 1;
+    @memset(buf[o..][0..5], 0); // ZPV11 skill tail: points + skill_n
+    o += 5;
+    buf[o] = 0; // ZPV13 backpacks
+    o += 1;
+    @memset(buf[o..][0..persist_mod.zpv_stats_tail_len], 0); // ZPV14 counters
+    o += persist_mod.zpv_stats_tail_len;
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zsv = try std.fmt.bufPrint(&path_buf, "{s}/players.zsv", .{world_dir});
+    try io_fs.writeFile(zsv, buf[0..o]);
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClient(&capture);
+        // The legacy record restored by name, so level 5 came through.
+        try std.testing.expectEqual(@as(u16, 5), cl.level);
+        try g.savePlayers();
+    }
+
+    const data = try io_fs.readFileAll(std.testing.allocator, zsv);
+    defer std.testing.allocator.free(data);
+    try std.testing.expectEqualStrings("ZPVF", data[0..4]);
+    // The rewritten record walks cleanly under the v15 layout. The identity
+    // section is the absent marker because the harness client presented no
+    // platform id, so this row is still name-keyed (ADR 0038 notices it).
+    const rec_len = try persist_mod.zpvRecordLen(data, 8, 15);
+    try std.testing.expect(rec_len > 0 and rec_len < data.len);
+    const span = try persist_mod.zpvRecordSpan(data, 8, 15);
+    try std.testing.expect(span.identity_off != 0);
+    try std.testing.expectEqual(@as(u8, 0), data[span.identity_off]);
+}
+
+test "players restore matches on platform identity, not on a typed name (ZPV15)" {
+    // DIVERGENCES 1.6: saves were keyed by login name alone, so a client could
+    // load another player's inventory, level and XP by typing their name.
+    // Stock keys PlayerDataFile on PrimaryId.CombinedString (asm.il 1884842).
+    // This is the theft case: same name, different account.
+    const id_a: platform_user.Id = .{ .platform = "EOS", .id = "acct-a" };
+    const id_b: platform_user.Id = .{ .platform = "EOS", .id = "acct-b" };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClientAs(&capture, id_a);
+        try std.testing.expect(cl.puid_primary.get() != null);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        g.sim.inventory[ps] = .{};
+        g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1] =
+            .{ .item_id = 2, .count = 1, .quality = 4, .use_times = 7.5 };
+        cl.deaths = 4;
+        try g.savePlayers();
+    }
+
+    {
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClientAs(&capture, id_b);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        // Same display name ("Bot"), different account: nothing restored.
+        try std.testing.expectEqual(@as(u16, 0), g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1].item_id);
+        try std.testing.expectEqual(@as(i32, 0), cl.deaths);
+        try g.savePlayers();
+    }
+
+    {
+        // The owner reconnects: its row is still there, under its identity.
+        const g = try Game.create(std.testing.allocator, world_dir, 0);
+        defer {
+            g.deinit();
+            std.testing.allocator.destroy(g);
+        }
+        var capture: ln_peer.Capture = .{};
+        const cl = try g.attachJoinedClientAs(&capture, id_a);
+        const ps = g.sim.playerByPeer(cl.slot).?;
+        try std.testing.expectEqual(@as(u16, 2), g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1].item_id);
+        try std.testing.expectEqual(@as(f32, 7.5), g.sim.inventory[ps].slots[ecs.components.max_inv_slots - 1].use_times);
+        try std.testing.expectEqual(@as(i32, 4), cl.deaths);
+    }
+}
+
 test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" {
     // A v10 ('A') file has no skill tail; the save must append the empty
     // tail (skill_points 0, skill_n 0) so the v11 record walk stays aligned
@@ -475,13 +617,13 @@ test "players zpv10 record gains an empty skill tail on save (ZPV11 migration)" 
     }
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'E'), data[3]);
+    try std.testing.expectEqual(@as(u8, 'F'), data[3]);
     // Record length via the v14 walker: name(7) + 16 + inv(1) + jn(1) +
     // prog(1) + level(2) + xp(8) + stats(16) + hp(4) + born(8) + buff_n(1) +
     // bed(1) + skills(5) + backpacks(1, an empty marker list) + the v14
     // counters(12) (the fixture has no inventory slots, so the ZPV12 slot
     // widening changes nothing).
-    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12), game_mod.zpvRecordLen(data, 8, 14));
+    try std.testing.expectEqual(@as(usize, 1 + name.len + 16 + 1 + 1 + 1 + 2 + 8 + 16 + 4 + 8 + 1 + 1 + 5 + 1 + 12 + 1), game_mod.zpvRecordLen(data, 8, 15));
 }
 
 test "players zpv10 inventory slots widen to the ZPV12 stride" {
@@ -540,11 +682,11 @@ test "players zpv10 inventory slots widen to the ZPV12 stride" {
 
     const data = try io_fs.readFileAll(std.testing.allocator, zsv);
     defer std.testing.allocator.free(data);
-    try std.testing.expectEqual(@as(u8, 'E'), data[3]); // carried to v14
+    try std.testing.expectEqual(@as(u8, 'F'), data[3]); // carried to v15
     // No prog tail on this fixture, so the ZPV13 marker list (which lives
     // inside the prog block) adds nothing to the length.
     const want = 1 + name.len + 16 + 1 + persist.zpvSlotStride(12) + 1 + 1;
-    try std.testing.expectEqual(want, game_mod.zpvRecordLen(data, 8, 14));
+    try std.testing.expectEqual(want, game_mod.zpvRecordLen(data, 8, 15));
     // The slot's leading fields survived the widening at their own offsets.
     const slot_at = 8 + 1 + name.len + 16 + 1;
     try std.testing.expectEqual(@as(u16, 42), std.mem.readInt(u16, data[slot_at..][0..2], .little));
@@ -609,7 +751,7 @@ test "players zpv8 tail gains a zero born time on save (ZPV9 migration)" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVF", data[0..4]);
     }
     {
         // Carried, not rewritten, so the migrated tail is read from the file:
@@ -703,7 +845,7 @@ test "players zpv7 inventory + tail migrate to zpv9 on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVF", data[0..4]);
     }
     {
         // The carried record is not the harness client's, so verify it in the
@@ -776,7 +918,7 @@ test "players zpv6 inventory migrates to zpv7 slots on save" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVF", data[0..4]);
     }
     {
         // Carried, not rewritten, so the widened slot is checked in the file:
@@ -1084,7 +1226,7 @@ test "players zpv4 journal upgrades to zpv5 on save and round-trips" {
     {
         const data = try io_fs.readFileAll(std.testing.allocator, zsv);
         defer std.testing.allocator.free(data);
-        try std.testing.expectEqualStrings("ZPVE", data[0..4]);
+        try std.testing.expectEqualStrings("ZPVF", data[0..4]);
         try std.testing.expect(std.mem.find(u8, data, "clear_the_noise") != null);
     }
     // Restart: the re-encoded ZPV5 file round-trips the same active quest.

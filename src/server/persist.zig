@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV14), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV15), entities.zen
 //! (ZENT), claims.zlc (ZCLC), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -18,6 +18,7 @@ const clock = @import("../util/clock.zig");
 const assets_progression = @import("../assets/progression.zig");
 const util_sim = @import("../util/sim.zig");
 const game_types = @import("game/types.zig");
+const platform_user = @import("../wire/platform_user.zig");
 const max_land_claims = game_mod.max_land_claims;
 
 pub fn logPersistErr(self: *Game, what: []const u8, err: anyerror) void {
@@ -95,7 +96,16 @@ pub const Zpv2Drop = struct {
 /// lying there unmarked. 14 (ZPV14, magic byte 'E') appends the character-sheet
 /// kill/death counters (`deaths:i32 | zombieKills:u32 | playerKills:u32`) after
 /// the bag list, so a restart or relog keeps the sheet stock keeps in
-/// PlayerDataFile instead of re-deriving it from a session that is gone. The bedroll field is
+/// PlayerDataFile instead of re-deriving it from a session that is gone.
+/// 15 (ZPV15, magic byte 'F') appends the platform identity
+/// (`id_present:u8`, then the primary and native `puid_primary`/`puid_native`
+/// pairs as `present:u8 | plat_len:u8 | id_len:u8 | strings`), so restore and
+/// merge-write match on the account, not on the login display name: stock keys
+/// PlayerDataFile on `PrimaryId.CombinedString` (asm.il 1884842), and a name
+/// key let any client load another player's save by typing their name
+/// (DIVERGENCES 1.6). A record that carries an identity is owned by that
+/// account whatever the name; a legacy record with no identity is matched by
+/// name once and gains one on the next save. The bedroll field is
 /// **not** detected by "more
 /// bytes remain in the file": that is ambiguous whenever another record
 /// follows this one, since the next record's own name_len byte would be
@@ -264,7 +274,20 @@ fn emitZpv14Stats(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*c
     try out.appendSlice(allocator, &buf);
 }
 
+/// Where a record's optional ZPV15 identity section starts. `off` is 0 when the
+/// file version predates the section (a carried record keeps the version it was
+/// written under, so the offset has to come from the same walk that computed the
+/// record length, not from re-deriving the layout).
+pub const RecordSpan = struct {
+    len: usize,
+    identity_off: usize = 0,
+};
+
 pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!usize {
+    return (try zpvRecordSpan(data, off, version)).len;
+}
+
+pub fn zpvRecordSpan(data: []const u8, off: usize, version: u8) error{CorruptPlayersFile}!RecordSpan {
     if (off >= data.len) return error.CorruptPlayersFile;
     const nl: usize = data[off];
     if (nl > 32 or off + 1 + nl + 16 + 1 > data.len) return error.CorruptPlayersFile;
@@ -328,9 +351,137 @@ pub fn zpvRecordLen(data: []const u8, off: usize, version: u8) error{CorruptPlay
                 if (p + zpv_stats_tail_len > data.len) return error.CorruptPlayersFile;
                 p += zpv_stats_tail_len;
             }
+            if (version >= 15) {
+                const identity_off = p;
+                const end = try zpvIdentitySectionEnd(data, p);
+                return .{ .len = end - off, .identity_off = identity_off };
+            }
         }
     }
-    return p - off;
+    return .{ .len = p - off };
+}
+
+/// Max bytes the ZPV15 identity section occupies on top of its marker byte:
+/// `primary_platform_len:u8 | primary_id_len:u8 | native_platform_len:u8 |
+/// native_id_len:u8` plus the four strings at their caps. A present identity is
+/// written as two of them (`primary`, `native`), each its own present byte, so
+/// the section is `id_present | primary_present | plat_len | id_len | ... |
+/// native_present | ...`. Sized from the wire caps so a writer buffer and a
+/// reader bound cannot disagree.
+pub const max_zpv_identity_len: usize =
+    1 + 1 + (1 + platform_user.max_platform_len) + (1 + platform_user.max_id_len) +
+    1 + (1 + platform_user.max_platform_len) + (1 + platform_user.max_id_len);
+
+/// Advance past one identity (`present:u8 | plat_len:u8 | plat | id_len:u8 |
+/// id`); a zero present byte is the whole field, so an absent identity costs
+/// one byte.
+fn zpvSkipIdentity(data: []const u8, p_in: usize) error{CorruptPlayersFile}!usize {
+    var p = p_in;
+    if (p >= data.len) return error.CorruptPlayersFile;
+    const present = data[p];
+    p += 1;
+    if (present == 0) return p;
+    if (p + 2 > data.len) return error.CorruptPlayersFile;
+    const plat_len: usize = data[p];
+    const id_len: usize = data[p + 1];
+    p += 2;
+    if (plat_len > platform_user.max_platform_len or id_len > platform_user.max_id_len) return error.CorruptPlayersFile;
+    if (p + plat_len + id_len > data.len) return error.CorruptPlayersFile;
+    return p + plat_len + id_len;
+}
+
+/// End offset of the ZPV15 identity section: `id_present:u8`, then the primary
+/// and native identities when present. The marker distinguishes "this record
+/// carries identity" from "the file has no room for it" without a magic that a
+/// v14 reader would have to guess at, the same reason the ZPV11 skill tail and
+/// ZPV13 bag list have their own bytes.
+fn zpvIdentitySectionEnd(data: []const u8, p_in: usize) error{CorruptPlayersFile}!usize {
+    var p = p_in;
+    if (p >= data.len) return error.CorruptPlayersFile;
+    const id_present = data[p];
+    p += 1;
+    if (id_present == 0) return p;
+    p = try zpvSkipIdentity(data, p);
+    return try zpvSkipIdentity(data, p);
+}
+
+/// Identity section of one record (v15+) for the merge and restore matchers.
+/// Copies the strings into caller buffers so the returned `Id` does not alias a
+/// file buffer the caller is about to drop.
+const ZpvIdentity = struct {
+    present: bool = false,
+    primary: platform_user.Stored = .{},
+    native: platform_user.Stored = .{},
+
+    /// True when this record should restore into `cl`. An identity-bearing row
+    /// belongs to that account and nothing else: a matching name is not enough
+    /// once the row has an identity, and an absent or different identity never
+    /// inherits it (fail closed). A legacy row with no identity is still
+    /// matched by name so an existing world upgrades in place on the next save.
+    fn matchesClient(self: ZpvIdentity, cl: *const Client, name_matches: bool) bool {
+        if (!self.present) return name_matches;
+        const theirs = self.primary.get() orelse return false;
+        const mine = cl.puid_primary.get() orelse return false;
+        return platform_user.Id.eql(mine, theirs);
+    }
+};
+
+/// Read the v15 identity section into `out`. `p` must be the section offset as
+/// `zpvRecordLen` computed it; the bounds were checked there, so this re-checks
+/// only the copy.
+fn zpvIdentityFrom(data: []const u8, p: usize, out: *ZpvIdentity) void {
+    out.* = .{};
+    var q = p;
+    const id_present = data[q];
+    q += 1;
+    if (id_present == 0) return;
+    out.present = true;
+    const slots: [2]*platform_user.Stored = .{ &out.primary, &out.native };
+    for (slots) |slot| {
+        const present = data[q];
+        q += 1;
+        if (present == 0) continue;
+        const plat_len: usize = data[q];
+        const id_len: usize = data[q + 1];
+        q += 2;
+        const platform = data[q..][0..plat_len];
+        q += plat_len;
+        const id = data[q..][0..id_len];
+        q += id_len;
+        slot.set(.{ .platform = platform, .id = id }) catch {
+            // Over-cap identity: cannot be represented, so it matches nothing
+            // (fail closed). `zpvRecordLen` already bounded the lengths, so this
+            // is reachable only if the caps shrink between writer and reader.
+            out.present = false;
+            return;
+        };
+    }
+}
+
+/// Identity bytes a record writes: `1 | primary | native` with each identity a
+/// present byte plus its two length-prefixed strings. `cl` null writes the
+/// absent marker (a carried record whose owner is offline), which is one byte.
+fn emitZpv15Identity(out: *std.ArrayList(u8), allocator: std.mem.Allocator, cl: ?*const Client) !void {
+    const has = if (cl) |c| c.puid_primary.get() != null else false;
+    if (!has) {
+        try out.append(allocator, 0);
+        return;
+    }
+    try out.append(allocator, 1);
+    try emitZpvIdentity(out, allocator, cl.?.puid_primary.get());
+    try emitZpvIdentity(out, allocator, cl.?.puid_native.get());
+}
+
+fn emitZpvIdentity(out: *std.ArrayList(u8), allocator: std.mem.Allocator, v: ?platform_user.Id) !void {
+    const u = v orelse {
+        try out.append(allocator, 0);
+        return;
+    };
+    try out.append(allocator, 1);
+    try out.append(allocator, @intCast(u.platform.len));
+    try out.append(allocator, @intCast(u.id.len));
+    try out.appendSlice(allocator, u.platform);
+    try out.appendSlice(allocator, u.id);
 }
 
 /// Max quest id length persisted in a ZPV5 journal entry (stock ids stay well
@@ -425,9 +576,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D' and old_data[3] != 'E'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D' and old_data[3] != 'E' and old_data[3] != 'F'))
             return error.CorruptPlayersFile;
-        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else if (old_data[3] == 'E') 14 else old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else if (old_data[3] == 'E') 14 else if (old_data[3] == 'F') 15 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -440,14 +591,15 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'E', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'F', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
         var off: usize = 0;
         while (ri < old_count) : (ri += 1) {
             const rec_start = off;
-            const rec_len = zpvRecordLen(old_recs, off, old_version) catch return error.CorruptPlayersFile;
+            const rec_span = zpvRecordSpan(old_recs, off, old_version) catch return error.CorruptPlayersFile;
+            const rec_len = rec_span.len;
             const nl: usize = old_recs[off];
             const rec_name = old_recs[off + 1 ..][0..nl];
             const had_prog_tail = zpvRecordHasProgTail(old_recs, off, old_version);
@@ -460,9 +612,16 @@ pub fn savePlayers(self: *Game) !void {
             // loop below skips it. Match the write predicate exactly to avoid a
             // lost-update window on a connected-but-not-spawned player.
             var rewritten = false;
+            var rec_ident: ZpvIdentity = .{};
+            if (rec_span.identity_off != 0) {
+                // Identity of the carried record, so a rename (or a different
+                // name claiming the same account) still merges into one row.
+                zpvIdentityFrom(old_recs, rec_span.identity_off, &rec_ident);
+            }
             for (&self.clients) |*cl| {
                 if (!cl.joined or cl.entity_id <= 0 or cl.name_len == 0) continue;
-                if (cl.name_len != nl or !std.mem.eql(u8, cl.name[0..nl], rec_name)) continue;
+                const name_matches = cl.name_len == nl and std.mem.eql(u8, cl.name[0..nl], rec_name);
+                if (!rec_ident.matchesClient(cl, name_matches)) continue;
                 if (self.sim.playerByPeer(cl.slot) == null) continue;
                 rewritten = true;
                 break;
@@ -475,6 +634,9 @@ pub fn savePlayers(self: *Game) !void {
                 if (had_prog_tail and old_version < 14) {
                     try emitZpv14Stats(&out, self.allocator, null);
                 }
+                // The carried bytes are v12+ shaped, so a v15 file already
+                // holds its identity section; only older records need one.
+                if (old_version < 15) try emitZpv15Identity(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -495,6 +657,7 @@ pub fn savePlayers(self: *Game) !void {
                 if (old_version == 10 and had_prog_tail) try emitZpv11Skills(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv13Backpacks(&out, self.allocator, null);
                 if (had_prog_tail) try emitZpv14Stats(&out, self.allocator, null);
+                try emitZpv15Identity(&out, self.allocator, null);
                 written += 1;
                 continue;
             }
@@ -844,6 +1007,18 @@ pub fn savePlayers(self: *Game) !void {
         if (tail_has_prog) try emitZpv11Skills(&out, self.allocator, cl);
         if (tail_has_prog) try emitZpv13Backpacks(&out, self.allocator, cl);
         if (tail_has_prog) try emitZpv14Stats(&out, self.allocator, cl);
+        if (tail_has_prog) try emitZpv15Identity(&out, self.allocator, cl);
+        // Identity-keyed row with no identity to key on: the row falls back to
+        // the login name, so another client can still claim it (ADR 0038). A
+        // real client always presents one; the bots do not, which is why this
+        // is a counted notice rather than a write refusal.
+        if (tail_has_prog and cl.puid_primary.get() == null and self.harness.counters.get(.identity_less_saves) == 0) {
+            self.harness.counters.inc(.identity_less_saves);
+            std.debug.print(
+                "zdtd: player save has no platform identity; row stays name-keyed (ADR 0038)\n",
+                .{},
+            );
+        }
         written += 1;
     }
     std.mem.writeInt(u32, out.items[4..][0..4], written, .little);
@@ -882,12 +1057,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -907,6 +1082,17 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
         }
         const name_slice = data[off..][0..nl];
         off += nl;
+        // v15 identity, parsed from the record's own tail offset rather than
+        // the read cursor: the matcher below has to decide before the body is
+        // walked, and the tail layout does not depend on the cursor.
+        var rec_ident: ZpvIdentity = .{};
+        if (version >= 15) {
+            // The body walk below re-walks the same record for its fields; the
+            // length walk already validated it, so a failure here is the same
+            // corrupt tail the caller reports.
+            const sp = zpvRecordSpan(data, rec_start, version) catch RecordSpan{ .len = 0 };
+            if (sp.identity_off != 0) zpvIdentityFrom(data, sp.identity_off, &rec_ident);
+        }
         const rest = data[off..][0..16];
         off += 16;
         const inv_n: usize = data[off];
@@ -1041,7 +1227,13 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                 }
             }
         }
-        if (!(c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice))) {
+        // Identity wins over the name: a record that carries one belongs to
+        // that account, so a different player typing the same display name
+        // cannot load it (the stock PrimaryId.CombinedString key). A legacy
+        // record with no identity is still matched by name so it can be
+        // upgraded in place on the next save.
+        const name_match = c.name_len == nl and std.mem.eql(u8, c.name[0..nl], name_slice);
+        if (!rec_ident.matchesClient(c, name_match)) {
             // ZPV3 records carry a progression tail after the journal;
             // consume it for non-matching records too so the scan stays
             // aligned with the next record.
@@ -1993,9 +2185,9 @@ pub fn loadTraders(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F'))
         return error.CorruptPlayersFile;
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
