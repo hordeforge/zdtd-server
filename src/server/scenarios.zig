@@ -12842,6 +12842,47 @@ test "scenario mods AC4/AC5: exclusive core override point routes only to the cl
     std.debug.print("PASS mods AC4/AC5: exclusive claim routes alone, unclaimed keeps stock\n", .{});
 }
 
+test "scenario mods: a claim without the mapped hook is refused, not installed" {
+    // Composability audit 2026-09-11: the resolver rejects duplicate claims but
+    // never checks that the claimant exports the hook its point maps to (it
+    // never reads the wasm), and an installed claim routes the point to the
+    // claimant alone. A mod claiming loot.roll without on_loot_roll therefore
+    // loaded fine and silently killed that point for every other plugin and for
+    // the native path. plugin_hello exports no verdict hook, so it is the
+    // malformed claimant here.
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const mods = [_]plugin_mod.manifest.Manifest{
+        mkManifest("liar", "assets/fixtures/plugin_hello.wasm", "user", null, "loot.roll", null),
+    };
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{}, &.{});
+    defer plan.deinit(gpa);
+    // The resolver still records the claim; the export check happens at load.
+    try std.testing.expectEqual(@as(usize, 0), plan.point_claims.get("loot.roll").?);
+
+    freshScenarioDir("worlds/zdtd_sc_mods_claim_no_hook");
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim_no_hook", 0, .{
+        .enable_sample_plugin = false,
+        .plugin_plan = &plan,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    // The module loads (nothing else is wrong with it)...
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
+    // ...but its claim is kept off the table, so the point keeps the ordinary
+    // composition path instead of being answered by a module that cannot.
+    try std.testing.expectEqual(
+        @as(u8, 0xff),
+        g.wasm_plugins.claims[@intFromEnum(plugin_mod.manifest.OverridePoint.loot_roll)],
+    );
+    try std.testing.expectEqual(@as(i32, 0), g.wasm_plugins.lootRoll("someList", 10));
+    std.debug.print("PASS mods claim-nohook: a claim without its hook is refused\n", .{});
+}
+
 test "scenario mods AC6: override = name replaces the official mod" {
     // A user mod declaring override = "fps_bot" loads in its place; the
     // official module is not instantiated.

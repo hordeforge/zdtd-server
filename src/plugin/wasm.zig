@@ -874,6 +874,15 @@ const max_wasm_module_bytes: usize = 16 * 1024 * 1024;
 /// Fixed-table host for loaded .wasm plugins: ordered enable/tick/join/shutdown,
 /// same hook order as the static host. Load happens once at init (allocation is
 /// allowed there); the tick path only calls hooks, which are already budgeted.
+/// Index of `name` in the fixed hook table, or `Hook.names.len` when the name
+/// is not a hook (callers must fail closed on that).
+fn hookIndex(name: []const u8) usize {
+    for (Hook.names, 0..) |hname, i| {
+        if (std.mem.eql(u8, hname, name)) return i;
+    }
+    return Hook.names.len;
+}
+
 pub const WasmHost = struct {
     slots: [max_wasm_plugins]Plugin = undefined,
     n: usize = 0,
@@ -968,11 +977,26 @@ pub const WasmHost = struct {
             }
         }
         // Install exclusive point claims (load-fixed table; no per-tick cost).
+        // A claim routes the point to its claimant ALONE, so an installed claim
+        // whose module never exported the mapped hook would silently drop that
+        // point for every other plugin and for the native path. The resolver
+        // cannot see exports (it never reads the wasm), so the check is here:
+        // a claimant that does not export its hook keeps the claim off the
+        // table and reaches the ordinary composition loop instead, which
+        // degrades exactly the way an unloaded claimant does.
         self.claims = .{no_claim} ** manifest.OverridePoint.count;
         var it = plan.point_claims.iterator();
         while (it.next()) |entry| {
             const point = manifest.OverridePoint.parse(entry.key_ptr.*) orelse continue;
-            self.claims[@intFromEnum(point)] = @intCast(entry.value_ptr.*);
+            const slot: usize = @intCast(entry.value_ptr.*);
+            if (slot < self.n and !self.slots[slot].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
+                std.debug.print(
+                    "zdtd: mod '{s}' claims {s} but does not export {s}; claim refused\n",
+                    .{ self.slots[slot].display, manifest.OverridePoint.wire(point), manifest.OverridePoint.hook(point) },
+                );
+                continue;
+            }
+            self.claims[@intFromEnum(point)] = @intCast(slot);
         }
     }
 

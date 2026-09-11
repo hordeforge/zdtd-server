@@ -456,10 +456,17 @@ pub const BotManager = struct {
         self.n -|= 1;
     }
 
-    /// Despawn every bot.
-    pub fn removeAll(self: *BotManager) void {
-        for (&self.bots) |*b| b.* = .{};
-        self.n = 0;
+    /// Despawn every bot. Source-scoped: `bot remove all` issued by a plugin
+    /// (or the native console) must not touch another component's bots, or a
+    /// plugin could remove hosts it never created and the removal would be
+    /// neither attributed nor revertible (paper: temporal composability, ADR
+    /// 0030). Pass 0 for the native console's own bots.
+    pub fn removeAll(self: *BotManager, src: i16) void {
+        for (&self.bots) |*b| {
+            if (!b.alive or b.src != src) continue;
+            b.* = .{};
+            self.n -|= 1;
+        }
     }
 
     /// Withdraw (despawn) every live bot attributed to `src` and clear the
@@ -489,17 +496,28 @@ pub const BotManager = struct {
         if (self.floor_src > dropped) self.floor_src -= 1;
     }
 
-    /// Population floor: spawn at a small spread until the live count is >= n.
-    /// Spawn-only (matches the pre-refactor `bot count` behaviour); a target of
-    /// 0 is a no-op. Clamped to max_bots; stops early when the table fills.
-    pub fn applyCountFloor(self: *BotManager, g: *Game, n: u32) void {
+    /// Live bots attributed to `src` (src 0 = the native console's own bots).
+    fn countFor(self: *const BotManager, src: i16) u32 {
+        var n: u32 = 0;
+        for (&self.bots) |*b| {
+            if (b.alive and b.src == src) n += 1;
+        }
+        return n;
+    }
+
+    /// Population floor: spawn at a small spread until `src`'s live bots reach
+    /// n, removing that src's extras when over target (RFC 0001 `bot count` =
+    /// "keep n alive"; 0 clears them). Both directions are scoped to `src`, so
+    /// one component's floor neither counts nor removes another's bots, and
+    /// `dropFrom(src)` therefore restores the exact state that existed before
+    /// the command. Clamped to max_bots; stops early when the table fills.
+    pub fn applyCountFloor(self: *BotManager, g: *Game, n: u32, src: i16) void {
         const target = @min(n, @as(u32, max_bots));
         self.floor = target;
-        // The population floor is two-way: remove extras when over target
-        // (RFC 0001 `bot count` = "keep n alive"). `bot count 0` clears all.
-        while (self.n > target) {
+        self.floor_src = src;
+        while (self.countFor(src) > target) {
             var slot: usize = 0;
-            while (slot < max_bots and !self.bots[slot].alive) : (slot += 1) {}
+            while (slot < max_bots and !(self.bots[slot].alive and self.bots[slot].src == src)) : (slot += 1) {}
             if (slot >= max_bots) break;
             self.bots[slot] = .{};
             self.n -|= 1;
@@ -507,13 +525,13 @@ pub const BotManager = struct {
         self.maintainFloor(g);
     }
 
-    /// Spawn bots until the live count reaches the remembered floor. Called by
+    /// Spawn bots until `floor`'s owner reaches the remembered count. Called by
     /// tick as well as applyCountFloor, so a bot killed in combat is replaced
     /// automatically. No-op when no floor is set (`bot count` never used).
     pub fn maintainFloor(self: *BotManager, g: *Game) void {
         if (self.floor == 0) return;
         var spread: u32 = 1;
-        while (self.n < self.floor) : (spread += 1) {
+        while (self.countFor(self.floor_src) < self.floor) : (spread += 1) {
             const ix: f32 = @as(f32, @floatFromInt(spread)) * self.cfg.spawn_spread;
             const iz: f32 = @as(f32, @floatFromInt(spread % 3)) * self.cfg.spawn_spread;
             const id = self.spawn(g, ix, self.cfg.spawn_y, iz, bot_max_hp) orelse break;
@@ -598,7 +616,7 @@ pub const BotManager = struct {
             const arg = it.next() orelse return true;
             if (std.mem.eql(u8, arg, "all")) {
                 if (it.next() != null) return true;
-                self.removeAll();
+                self.removeAll(src);
             } else {
                 if (it.next() != null) return true;
                 self.remove(std.fmt.parseInt(i32, arg, 10) catch return true);
@@ -608,8 +626,7 @@ pub const BotManager = struct {
         if (std.mem.eql(u8, sub, "count")) {
             const n = it.next() orelse return true;
             if (it.next() != null) return true;
-            self.floor_src = src;
-            self.applyCountFloor(g, std.fmt.parseInt(u32, n, 10) catch return true);
+            self.applyCountFloor(g, std.fmt.parseInt(u32, n, 10) catch return true, src);
             return true;
         }
         return true;
@@ -782,7 +799,7 @@ test "BotManager find/move/look/remove/removeAll on hand-seeded bots" {
     m.remove(101);
     try std.testing.expectEqual(@as(usize, 1), m.n);
     try std.testing.expect(m.find(101) == null);
-    m.removeAll();
+    m.removeAll(0);
     try std.testing.expectEqual(@as(usize, 0), m.n);
     try std.testing.expect(m.find(100) == null);
 }
@@ -1049,6 +1066,42 @@ test "dropFrom withdraws a plugin's bots and its count floor" {
     m.dropFrom(2);
     try std.testing.expectEqual(@as(usize, 1), m.n);
     try std.testing.expect(m.bots[0].alive);
+}
+
+test "bot remove all is scoped to the issuing src" {
+    // Composability audit 2026-09-11: `bot remove all` blanked every slot and
+    // `applyCountFloor` trimmed to a global count, so one plugin could delete
+    // another plugin's or the console's bots with no attribution and no way
+    // back. Both verbs are now scoped to the issuing src, which also makes
+    // `dropFrom` restore the pre-command state exactly.
+    var m: BotManager = .{};
+    m.bots[0] = .{ .net_id = 10, .alive = true, .src = 0 };
+    m.bots[1] = .{ .net_id = 11, .alive = true, .src = 1 };
+    m.bots[2] = .{ .net_id = 12, .alive = true, .src = 1 };
+    m.bots[3] = .{ .net_id = 13, .alive = true, .src = 2 };
+    m.n = 4;
+
+    // remove all from plugin 1 leaves the console's and plugin 2's bots.
+    m.removeAll(1);
+    try std.testing.expectEqual(@as(usize, 2), m.n);
+    try std.testing.expect(m.bots[0].alive);
+    try std.testing.expect(!m.bots[1].alive);
+    try std.testing.expect(!m.bots[2].alive);
+    try std.testing.expect(m.bots[3].alive);
+
+    // countFor is what the floor reads, so it must count per owner.
+    try std.testing.expectEqual(@as(u32, 1), m.countFor(0));
+    try std.testing.expectEqual(@as(u32, 0), m.countFor(1));
+    try std.testing.expectEqual(@as(u32, 1), m.countFor(2));
+
+    // The native console clears its own bots without touching a plugin's.
+    var m3: BotManager = .{};
+    m3.bots[0] = .{ .net_id = 30, .alive = true, .src = 0 };
+    m3.bots[1] = .{ .net_id = 31, .alive = true, .src = 1 };
+    m3.n = 2;
+    m3.removeAll(0);
+    try std.testing.expectEqual(@as(usize, 1), m3.n);
+    try std.testing.expect(m3.bots[1].alive);
 }
 
 test "shiftSrcsAfter remaps remaining bot srcs after a slot drop" {
