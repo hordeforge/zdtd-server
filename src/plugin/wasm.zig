@@ -162,6 +162,11 @@ pub const Plugin = struct {
     /// PRD 0005: manifest name (duped at loadResolved; "" for legacy modules,
     /// which fall back to the path in `name`).
     display: []const u8 = "",
+    /// This slot was loaded from a `manifest.toml` (loadResolved). `reload`
+    /// preserves it so the module's declaration can be re-read: a legacy
+    /// `[plugin] modules` path has no manifest to reconcile and must not pick
+    /// up claims from a manifest.toml that happens to sit beside it.
+    manifest_loaded: bool = false,
     /// Self-contained default config (the mod's config.toml, raw text; "" when
     /// absent). Served to the guest via the zdtd.config import; owned here.
     config_bytes: []const u8 = "",
@@ -952,6 +957,10 @@ pub const WasmHost = struct {
             };
             self.slots[self.n].tier = rm.tier;
             self.slots[self.n].display = allocator.dupe(u8, rm.manifest.name.?) catch "";
+            // This slot came from a `manifest.toml`, so `reload` re-reads that
+            // declaration (paper 5.2.1) instead of treating the module as a
+            // legacy path with no points to reconcile.
+            self.slots[self.n].manifest_loaded = true;
             if (rm.manifest.config.len > 0) {
                 self.slots[self.n].config_bytes = allocator.dupe(u8, rm.manifest.config) catch "";
             } else if (rm.manifest.dir.len == 0) {
@@ -1093,6 +1102,7 @@ pub const WasmHost = struct {
             self.allocator.dupe(u8, self.slots[idx].config_bytes) catch ""
         else
             "";
+        const manifest_loaded = self.slots[idx].manifest_loaded;
         _ = self.slots[idx].callHook(.on_shutdown);
         // Withdraw after on_shutdown and before deinit: shutdown may queue
         // (or spawn bots) that a pre-reload withdraw would miss, and those
@@ -1117,9 +1127,55 @@ pub const WasmHost = struct {
         self.slots[idx].tier = tier;
         self.slots[idx].display = display_copy;
         self.slots[idx].config_bytes = config_copy;
+        self.slots[idx].manifest_loaded = manifest_loaded;
+        // Re-read the module's declaration before it goes live: a replaced
+        // module may have dropped or added a `points` claim on disk, and the
+        // install-time table is load-fixed (paper 5.2.1/5.2.2).
+        if (manifest_loaded) self.reconcileClaims(idx, path_owned);
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
+    }
+
+    /// Re-install slot `idx`'s exclusive point claims from its on-disk
+    /// `manifest.toml`. `loadResolved` builds the claim table once at boot, so
+    /// without this a reloaded module keeps exclusivity its replacement no
+    /// longer declares, and one that adds a claim never gets it. The slot's
+    /// existing claims are released first: the declaration on disk is the only
+    /// source of truth. A claim whose hook the module does not export, or whose
+    /// point another live module already holds, is refused with a log - the same
+    /// fail-closed rule the boot install applies. No manifest on disk means no
+    /// claims (a legacy `[plugin] modules` path).
+    fn reconcileClaims(self: *WasmHost, idx: usize, path: []const u8) void {
+        for (&self.claims) |*c| {
+            if (c.* == idx) c.* = no_claim;
+        }
+        const dir = std.fs.path.dirname(path) orelse return;
+        var m = manifest.bindManifest(self.allocator, dir) catch return;
+        defer manifest.free(self.allocator, &m);
+        const pts = m.points orelse return;
+        var it = std.mem.splitScalar(u8, pts, ',');
+        while (it.next()) |raw| {
+            const name = std.mem.trim(u8, raw, " \t");
+            if (name.len == 0) continue;
+            const point = manifest.OverridePoint.parse(name) orelse continue; // validate() rejected unknown names
+            const pi = @intFromEnum(point);
+            if (!self.slots[idx].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
+                std.debug.print(
+                    "zdtd: mod '{s}' claims {s} but does not export {s}; claim refused\n",
+                    .{ self.slots[idx].display, manifest.OverridePoint.wire(point), manifest.OverridePoint.hook(point) },
+                );
+                continue;
+            }
+            if (self.claims[pi] != no_claim and self.claims[pi] != idx) {
+                std.debug.print(
+                    "zdtd: mod '{s}' claims {s} but slot {d} already holds it; claim refused\n",
+                    .{ self.slots[idx].display, manifest.OverridePoint.wire(point), self.claims[pi] },
+                );
+                continue;
+            }
+            self.claims[pi] = @intCast(idx);
+        }
     }
 
     /// Remove an already-disposed (deinit'd) slot from the active range:
@@ -2276,6 +2332,111 @@ test "plugin reload failure frees the display copy and reports false" {
     // The survivor's claim followed it down; the dropped module's released.
     try std.testing.expectEqual(@as(u8, 0), host.claims[@intFromEnum(manifest.OverridePoint.craft_request)]);
     try std.testing.expectEqual(no_claim, host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)]);
+}
+
+test "reload reconciles the module's manifest point claims" {
+    // Paper 5.2.1/5.2.2: a reload reconciles the declarative configuration, not
+    // just the code. The claim table is built once by loadResolved, so before
+    // this a module replaced on disk kept exclusivity its new manifest had
+    // dropped (its hook was still exported, so nothing else caught it) and one
+    // that added a claim never got it.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    // Hand-built modules: one exports the loot.roll hook, one exports only
+    // on_tick, so the hook-present refusal is observable.
+    const with_hook = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+        0x01, 0x00, 0x07, 0x10, 0x01, 0x0c, 'o',  'n',
+        '_',  'l',  'o',  'o',  't',  '_',  'r',  'o',
+        'l',  'l',  0x00, 0x00, 0x0a, 0x04, 0x01, 0x02,
+        0x00, 0x0b,
+    };
+    const without_hook = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+        0x01, 0x00, 0x07, 0x0b, 0x01, 0x07, 'o',  'n',
+        '_',  't',  'i',  'c',  'k',  0x00, 0x00, 0x0a,
+        0x04, 0x01, 0x02, 0x00, 0x0b,
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const a = std.testing.allocator;
+
+    // m0 and m1 both export loot.roll; m2 does not.
+    const wasm0 = try std.fs.path.join(a, &.{ dir, "m0", "m.wasm" });
+    defer a.free(wasm0);
+    const wasm1 = try std.fs.path.join(a, &.{ dir, "m1", "m.wasm" });
+    defer a.free(wasm1);
+    const wasm2 = try std.fs.path.join(a, &.{ dir, "m2", "m.wasm" });
+    defer a.free(wasm2);
+    const man0 = try std.fs.path.join(a, &.{ dir, "m0", "manifest.toml" });
+    defer a.free(man0);
+    const man1 = try std.fs.path.join(a, &.{ dir, "m1", "manifest.toml" });
+    defer a.free(man1);
+    const man2 = try std.fs.path.join(a, &.{ dir, "m2", "manifest.toml" });
+    defer a.free(man2);
+    try io_fs.writeFile(wasm0, &with_hook);
+    try io_fs.writeFile(wasm1, &with_hook);
+    try io_fs.writeFile(wasm2, &without_hook);
+    try io_fs.writeFile(man0, "name = \"m0\"\nwasm = \"m.wasm\"\npoints = \"loot.roll\"\n");
+    try io_fs.writeFile(man1, "name = \"m1\"\nwasm = \"m.wasm\"\npoints = \"loot.roll\"\n");
+    try io_fs.writeFile(man2, "name = \"m2\"\nwasm = \"m.wasm\"\npoints = \"craft.request\"\n");
+
+    var host: WasmHost = .{};
+    host.allocator = a;
+    host.ctx = &ctx;
+    host.budget = .{};
+    defer host.shutdown();
+    try host.loadInto(0, wasm0);
+    try host.loadInto(1, wasm1);
+    try host.loadInto(2, wasm2);
+    host.n = 3;
+    for (0..3) |i| {
+        host.slots[i].manifest_loaded = true;
+        host.slots[i].display = try a.dupe(u8, if (i == 0) "m0" else if (i == 1) "m1" else "m2");
+    }
+
+    const loot = @intFromEnum(manifest.OverridePoint.loot_roll);
+    const craft = @intFromEnum(manifest.OverridePoint.craft_request);
+
+    // The declaration installs the claim (boot did this via the resolver).
+    host.reconcileClaims(0, wasm0);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[loot]);
+
+    // A second claimant with the hook exported is refused: the point is
+    // exclusive, and a reload must not steal it from a live module.
+    host.reconcileClaims(1, wasm1);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[loot]);
+
+    // The replaced module drops its claim on disk: reload re-reads the
+    // manifest and releases it instead of holding exclusivity forever.
+    try io_fs.writeFile(man0, "name = \"m0\"\nwasm = \"m.wasm\"\n");
+    try std.testing.expect(host.reload(0, wasm0));
+    try std.testing.expectEqual(no_claim, host.claims[loot]);
+    // ... and the freed point goes to the other module's declaration.
+    host.reconcileClaims(1, wasm1);
+    try std.testing.expectEqual(@as(u8, 1), host.claims[loot]);
+
+    // A claim whose hook the module does not export is refused (fail closed,
+    // like the boot install), and the point stays free.
+    host.reconcileClaims(2, wasm2);
+    try std.testing.expectEqual(no_claim, host.claims[craft]);
+
+    // A legacy `[plugin] modules` path has no manifest to reconcile, so a
+    // manifest.toml that happens to sit beside it must not mint or drop claims.
+    host.claims[craft] = 2;
+    host.slots[2].manifest_loaded = false;
+    try std.testing.expect(host.reload(2, wasm2));
+    try std.testing.expectEqual(@as(u8, 2), host.claims[craft]);
 }
 
 test "findByName matches display name and wasm stem suffix" {

@@ -112,3 +112,12 @@ safe runtime components:
   the config chain (zdtd.toml + mode packs + CLI merge lives in main.zig), so
   a budget edit takes effect on restart. Revisited if per-module config
   entries land.
+  Amended 2026-09-12 (F2): the *per-module declaration* half of §5.2.1 is
+  adopted. `plugin reload` re-reads the module's `manifest.toml` and rebuilds
+  its exclusive point claims (`WasmHost.reconcileClaims`), releasing a claim
+  the replacement no longer declares, installing one it adds, and refusing
+  (fail-closed, logged) a claim whose hook the module does not export or whose
+  point a live module already holds. A legacy `[plugin] modules` path is never
+  reconciled, so a manifest beside it can neither mint nor drop a claim. The
+  config-chain half stays as recorded above: zdtd.toml and mode packs are still
+  read once at startup.

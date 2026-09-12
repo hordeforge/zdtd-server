@@ -7,6 +7,18 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- `plugin reload` kept a stale exclusive override claim. The claim table is
+  built once at boot from the discovered `manifest.toml` files, and reload only
+  re-read the `.wasm`, so a module replaced on disk that dropped its `points`
+  claim held that verdict hook exclusively forever (its hook was still
+  exported, so nothing else noticed), while one that added a claim never got it.
+  Reload now re-reads the module's manifest and reconciles its claims with the
+  same rule the boot install uses: a claim whose hook the module does not export,
+  or whose point another live module already holds, is refused with a log. A
+  legacy `[plugin] modules` path carries no manifest and is never reconciled, so
+  a `manifest.toml` sitting beside it can neither mint nor drop a claim
+  (ADR 0030 §5.2.1, review F2).
+
 - World time ran faster than stock. The server advanced one in-game hour every
   `DayNightLength*60/24` real seconds (0.4 game-minutes per second at the default
   60-minute day), while stock advances `GameStats.TimeOfDayIncPerSec` =

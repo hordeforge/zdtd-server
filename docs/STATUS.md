@@ -8,7 +8,19 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Pregen world matrix re-run 2026-09-12**: the
+`lint-architecture: clean`). **Plugin reload claim reconciliation 2026-09-12
+(composability review F2)**: `plugin reload` now re-reads the module's
+`manifest.toml` and rebuilds its exclusive override-point claims, so a replaced
+module that dropped a `points` claim releases it (it used to hold the hook
+exclusively forever, since its export was still present) and one that added a
+claim gets it, under the boot install rule (missing hook or a point held by
+another live module = refused, logged). A legacy `[plugin] modules` path is
+never reconciled. Gated by the `plugin.wasm` test "reload reconciles the
+module's manifest point claims" (claim install, second-claimant refusal,
+drop-on-reload release, install after release, missing-hook refusal,
+legacy-path no-op) on temp dirs with hand-built modules; `zig build test` 1786
+passed / 1 skipped / 0 failed.
+**Pregen world matrix re-run 2026-09-12**: the
 open P1 "C2S payload decode Overflow on every pregen world" from 2026-08-12 does
 not reproduce. Pregen06k01 (dtm=6144x6144, 3469 prefabs) took 2 wander bots
 through 11 lives / 1200 ticks with `join_fail=0`, `net_payload_errors=0`,
