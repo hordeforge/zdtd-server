@@ -5,6 +5,23 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- Item mods now apply their stats on the server. `item_modifiers.xml` was
+  parsed only for the attachment tag gates, so a modded armour piece defended
+  no better than a bare one: `modArmorInsulatedLiner`/`modArmorCoolingMesh`'s
+  heat/electrical `ElementalDamageResist`, `modRadiationReady`'s +50% radiation
+  resist, the fittings' stamina rows and the admin shirt's `HealthMax` all did
+  nothing server-side. `ModDef` now carries each modifier's
+  `<passive_effect>` rows (through the shared buffs scanner, so their
+  `effect_group` gates come along), the per-tick item fold adds an item's
+  installed mods' rows alongside its own, and the tagged
+  `ElementalDamageResist` query folds them too. Stock's server-relevant
+  modifier rows are flat, so they apply without needing the mod's own quality;
+  tiered modifier rows and the `params.ItemValue`-scoped gates remain recorded
+  residuals (the client's damage packet already carries attacker-side numbers,
+  so those rows stay client-computed by design).
+
 ### Changed
 
 - The near-spawn demo hostiles are now configurable. A fresh zdtd world seeds

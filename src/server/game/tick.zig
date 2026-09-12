@@ -23,6 +23,7 @@ const admin_xml = @import("../admin_xml.zig");
 const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const inventory = @import("../../ecs/inventory.zig");
+const assets_items = @import("../../assets/items.zig");
 const protocol = @import("../../protocol.zig");
 
 /// Requirement-gate bridge: `HasBuff` resolves names through the loaded buffs
@@ -236,6 +237,37 @@ fn activeBuffIds(set: *const ecs.components.BuffSet, out: []u16) []const u16 {
 /// answers is refused (counted unsupported) rather than answered wrongly.
 /// Every stock passive-43 row is requirement-free (only `tags`/`tier`), so the
 /// fold is exact for stock data.
+/// One item's tracked deltas: its own `<passive_effect>` rows plus each
+/// installed mod's rows (`EffectManager.GetValue` layer 13: a modifier item's
+/// effects apply alongside the item's own, at the mod's tier). Stock's
+/// server-relevant modifier rows (armour resistances, max stats,
+/// HealthChangeOT) are flat, so folding them on the item's quality axis is
+/// exact; a tiered modifier row would need the mod's own quality, which the
+/// wire ItemValue carries but zdtd does not store yet (recorded residual), so
+/// those rows are approximated at the item's quality like the rest.
+/// Attacker-side rows (`EntityDamage` and friends) are not consumed here: the
+/// client's damage packet already carries the finished number.
+fn itemTrackedDeltas(
+    self: *Game,
+    def: *const assets_items.ItemDef,
+    mods: [4]u16,
+    quality: u8,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+) assets_buffs.TrackedDeltas {
+    const qmax: u8 = ecs.components.max_quality_tiers;
+    const axis: assets_buffs.Axis = .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
+    var out = assets_buffs.trackedDeltasAt(def.passives, axis, ctx, counts);
+    for (mods) |mod_id| {
+        if (mod_id == 0) continue;
+        const modef = self.items.byId(mod_id) orelse continue;
+        const md = self.item_mods.byName(modef.name) orelse continue;
+        if (md.passives.len == 0) continue;
+        out = assets_buffs.deltasPlus(out, assets_buffs.trackedDeltasAt(md.passives, axis, ctx, counts));
+    }
+    return out;
+}
+
 pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
     if (damage_tag.len == 0) return 0;
     if (!self.sim.mask[ps].inventory or !self.sim.mask[ps].health) return 0;
@@ -273,19 +305,12 @@ pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) 
     };
     var counts: requirements.Counts = .{};
     var total: f32 = 0;
-    const qmax: u8 = ecs.components.max_quality_tiers;
     var i: usize = ecs.components.inv_equip_start;
     while (i < ecs.components.max_inv_slots) : (i += 1) {
         const slot = self.sim.inventory[ps].slots[i];
         if (slot.count == 0) continue;
         const def = self.items.byId(slot.item_id) orelse continue;
-        if (def.passives.len == 0) continue;
-        total += assets_buffs.trackedDeltasAt(
-            def.passives,
-            .{ .quality = .{ .level = @min(slot.quality, qmax), .max = qmax } },
-            ctx,
-            &counts,
-        ).elem_resist;
+        total += itemTrackedDeltas(self, &def, slot.mods, slot.quality, ctx, &counts).elem_resist;
     }
     total += assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], ctx, &counts).elem_resist;
     total += assets_progression.perkTotals(&self.progression_table, ctx.levels, ctx, &counts).elem_resist;
@@ -543,20 +568,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // GetItems` does not include the holding slot).
             var ivm: assets_buffs.TrackedDeltas = .{};
             {
-                const qmax: u8 = ecs.components.max_quality_tiers;
                 var item_ctx = req_ctx;
                 const held = self.sim.inventory[ps].heldItem();
                 if (held.count > 0) {
                     item_ctx.item_equipped = false;
                     if (self.items.byId(held.item_id)) |def| {
-                        if (def.passives.len > 0) {
-                            ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(
-                                def.passives,
-                                .{ .quality = .{ .level = @min(held.quality, qmax), .max = qmax } },
-                                item_ctx,
-                                &req_counts,
-                            ));
-                        }
+                        ivm = assets_buffs.deltasPlus(ivm, itemTrackedDeltas(self, &def, held.mods, held.quality, item_ctx, &req_counts));
                     }
                 }
                 item_ctx.item_equipped = true;
@@ -565,13 +582,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                     const slot = self.sim.inventory[ps].slots[esi];
                     if (slot.count == 0) continue;
                     const def = self.items.byId(slot.item_id) orelse continue;
-                    if (def.passives.len == 0) continue;
-                    ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(
-                        def.passives,
-                        .{ .quality = .{ .level = @min(slot.quality, qmax), .max = qmax } },
-                        item_ctx,
-                        &req_counts,
-                    ));
+                    ivm = assets_buffs.deltasPlus(ivm, itemTrackedDeltas(self, &def, slot.mods, slot.quality, item_ctx, &req_counts));
                 }
                 // The two resist names stay owned by the items.xml quality-curve
                 // path (`armor_pdr_fn` -> armorMitigation): folding them here too

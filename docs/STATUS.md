@@ -8,7 +8,21 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Starter-hostile seeds configurable 2026-09-12**:
+`lint-architecture: clean`). **Item mod stats fold server-side 2026-09-12**:
+`item_modifiers.xml` now parses each modifier's effect rows (layer 13) through
+the shared buffs scanner, and the item fold adds an item's installed mods'
+rows alongside its own, so the flat defensive rows apply:
+`modArmorInsulatedLiner`/`modArmorCoolingMesh` (+1 ElementalDamageResist
+heat/electrical), `modRadiationReady` (+50% radiation), the fittings' stamina
+rows and the admin shirt's `HealthMax`. The tagged EDR query folds mod rows too
+(verified by the `server.game.tests` "equipped item mods fold their passives
+(layer 13, stock data)" test: +1 heat on the liner, >40% radiation on
+Radiation Ready, both tag-scoped and reverting when the mods are removed), and
+the parser test asserts an ungated fixture row plus an empty slice for a
+mod with no rows. Attacker-side modifier rows stay client-computed (the damage
+packet carries the finished number); tiered modifier rows and
+`params.ItemValue` gates remain recorded residuals.
+**Starter-hostile seeds configurable 2026-09-12**:
 the near-spawn demo seeds (2 zombies, sleeper, animal) are `[sim]
 starter_zombies` (default true, unchanged behaviour; `false` leaves a fresh
 world to the lazy AIDirector spawner like stock). The divergence is recorded in

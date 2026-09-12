@@ -5663,3 +5663,66 @@ test "starter_zombies gates the near-spawn demo hostiles" {
     try std.testing.expectEqual(@as(u32, 3), g_on.sim.countKind(.zombie));
     try std.testing.expectEqual(@as(u32, 1), g_on.sim.countKind(.animal));
 }
+
+test "equipped item mods fold their passives (layer 13, stock data)" {
+    // EffectManager.GetValue layer 13 applies a modifier item's effect rows
+    // alongside the item's own. Before this only the attachment tags were
+    // parsed, so a modded armour piece defended no better than a bare one:
+    // modArmorInsulatedLiner's `ElementalDamageResist +1 tags=heat,electrical`
+    // and modRadiationReady's `+50% tags=radiation` did nothing server-side.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot) orelse return error.TestUnexpectedResult;
+
+    const helmet = g.items.byName("armorPrimitiveHelmet") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, helmet.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == helmet.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    const eq: usize = ecs.components.inv_equip_start;
+
+    const heat_before = g.elementalDamageResist(ps, "heat");
+    try std.testing.expect(heat_before > 0.08); // the helmet's own 8..12.3 curve
+    try std.testing.expect(g.elementalDamageResist(ps, "radiation") < 0.01);
+
+    // The insulated liner's flat +1 heat/electrical joins the same tagged fold.
+    const liner = g.items.ecsIdByName("modArmorInsulatedLiner");
+    if (liner == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[eq].mods[0] = liner;
+    g.sim.inventory[ps].slots[eq].mod_n = 1;
+    try std.testing.expectApproxEqAbs(heat_before + 0.01, g.elementalDamageResist(ps, "heat"), 0.005);
+    try std.testing.expect(g.elementalDamageResist(ps, "cold") < 0.02); // tag-scoped
+
+    // Radiation Ready is a percentage row, still scoped to its own tag.
+    const rad = g.items.ecsIdByName("modRadiationReady");
+    if (rad == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[eq].mods[1] = rad;
+    g.sim.inventory[ps].slots[eq].mod_n = 2;
+    try std.testing.expect(g.elementalDamageResist(ps, "radiation") > 0.4);
+    try std.testing.expect(g.elementalDamageResist(ps, "heat") < heat_before + 0.02);
+
+    // Removing the mods drops their rows on the next read (no sticky state).
+    g.sim.inventory[ps].slots[eq].mods = .{0} ** 4;
+    g.sim.inventory[ps].slots[eq].mod_n = 0;
+    try std.testing.expectApproxEqAbs(heat_before, g.elementalDamageResist(ps, "heat"), 0.005);
+}

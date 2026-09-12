@@ -3974,16 +3974,24 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     perkEnforcerApparel Equals 1`, so it folds only once the perk is owned.
     - Residuals, recorded: (a) the two resist names are deliberately NOT folded
       here because `armor_pdr_fn` (the items.xml quality-curve path feeding
-      `armorMitigation`) owns PhysicalDamageResist and the event-tagged EDR fold
-      (see the round-22 EDR row above) owns ElementalDamageResist, so folding
-      them here too would double-count; (b) the 83
+      `armorMitigation`) owns the item's own PhysicalDamageResist and the
+      event-tagged EDR fold (see the round-22 EDR row above) owns
+      ElementalDamageResist, so folding them here too would double-count; the
+      *mod* side of EDR is folded in that event fold, while a modifier's
+      PhysicalDamageResist (modArmorPlatingBasic +1, Reinforced +2) is parsed but
+      still unconsumed - wiring it means the physical-resist ownership moves to
+      this fold (or `armorMitigation` learns to read mod rows); (b) the 83
       item `StaminaChangeOT` rows are all `tags="running"`/`"walking"`, so they
       need the sprint leg to run a `running`-tagged query before they apply (the
-      current sprint drain uses the `Rules` floor); (c) `Equipment` mod items
-      (layer 13, `ItemClassModifier` Effects applied at the mod's quality) and
-      the `params.ItemValue`-scoped gates (`ItemHasTags`, `CompareItemMetaFloat`,
-      `RequirementItemModTier`) are not modelled, so those rows still fail
-      closed and are counted.
+      current sprint drain uses the `Rules` floor); (c) the `Equipment` mod layer
+      (13) is now parsed and folded for the tracked surface and the tagged EDR
+      query (2026-09-12), so the flat defensive modifier rows apply; what remains
+      is the mod's own quality for *tiered* modifier rows (the wire ItemValue
+      carries it, zdtd stores only the ids) and the `params.ItemValue`-scoped
+      gates (`ItemHasTags`, `CompareItemMetaFloat`, `RequirementItemModTier`),
+      which still fail closed and are counted. Attacker-side modifier rows
+      (`EntityDamage`) are not server concerns: the client's damage packet
+      carries the finished number.
   - **`GeneralDamageResist` has a consumer, and the AI melee choke has the armor
     leg (round 22, 2026-09-12).** The tracked fold produced `general_resist` and
     `elem_resist` and **nothing read either**: `grep general_resist` found only

@@ -4,14 +4,21 @@
 //! `blocked_tags` / `modifier_tags`; it fits an item when its installable tags
 //! intersect the item's `Tags` and its blocked tags are disjoint, and the
 //! item's ModSlots quality curve caps the count (see items.zig modSlotsFor).
-//! The mods' stat effects themselves stay client-side (the wire round-trip is
-//! id-only); this catalog only gates what the server accepts.
+//! The catalog also carries each mod's `<passive_effect>` rows (`passives`), so
+//! a mod's *server-side* stats fold where they matter: `EffectManager.GetValue`
+//! layer 13 applies a modifier item's effects at the mod's tier, and the
+//! stock modifier rows that reach the server (armour resistances, max stats,
+//! HealthChangeOT) are flat, so the fold does not need the mod's quality.
+//! Attacker-side rows (EntityDamage and friends) stay client-computed: the
+//! client's `NetPackageDamageEntity` already carries the finished number.
 //!
 //! Lookup is by item name (the mod is a full item; the ECS mod ids resolve
 //! through items.zig byId → name). Fail closed: an unknown mod entry or empty
 //! installable tags reject the attachment.
 
 const std = @import("std");
+const buffs = @import("buffs.zig");
+const requirements = @import("requirements.zig");
 const xml = @import("xml_util.zig");
 const paths = @import("paths.zig");
 const io_fs = @import("../util/io_fs.zig");
@@ -29,6 +36,10 @@ pub const ModDef = struct {
     /// the pre-install random selection in stock; recorded, not gating the
     /// player attach path yet).
     modifier: []const u8 = "",
+    /// The modifier's `<passive_effect>` rows with their group gates, through
+    /// the shared buffs scanner (layer 13). Arena-owned like the other
+    /// strings; empty for a mod with no stat rows.
+    passives: []const buffs.Passive = &.{},
 };
 
 pub const ModTable = struct {
@@ -97,6 +108,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
     const arena = ap.allocator();
 
     var defs: std.ArrayList(ModDef) = .empty;
+    // Layer 13 rows: one shared pool in encounter order, with each mod's range
+    // recorded and patched after the walk (the scanner appends into the pool).
+    var passives_list: std.ArrayList(buffs.Passive) = .empty;
+    var reqs_list: std.ArrayList(requirements.Requirement) = .empty;
+    var req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    var ranges: std.ArrayList(struct { usize, usize }) = .empty;
     var i: usize = 0;
     while (i < clean.len) {
         const ii = std.mem.findPos(u8, clean, i, "<item_modifier ") orelse break;
@@ -107,6 +124,24 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
         const installable = xml.attr(clean, ii, "installable_tags") orelse "";
         const modifier = xml.attr(clean, ii, "modifier_tags") orelse "";
         const blocked = xml.attr(clean, ii, "blocked_tags") orelse "";
+        // Inner body only: the scanner's unknown-tag branch skips a whole
+        // element, so passing `<item_modifier ...>` itself would skip its rows.
+        const gt = std.mem.findPos(u8, clean, ii, ">") orelse {
+            i = ii + 15;
+            continue;
+        };
+        const end = requirements.elementEnd(clean, ii);
+        const p0 = passives_list.items.len;
+        _ = buffs.scanPassives(
+            arena,
+            arena,
+            clean[gt + 1 .. end],
+            &passives_list,
+            &reqs_list,
+            &req_ranges,
+            std.math.maxInt(usize),
+        ) catch {};
+        try ranges.append(arena, .{ p0, passives_list.items.len - p0 });
         try defs.append(arena, .{
             .name = try arena.dupe(u8, name),
             .installable = try arena.dupe(u8, installable),
@@ -115,8 +150,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
         });
         i = ii + 15;
     }
+    // Freeze the pools and patch each row's gate slice, exactly like the buffs
+    // loader (the scanner appends ranges parallel to the passive list).
+    const pool = try arena.alloc(buffs.Passive, passives_list.items.len);
+    @memcpy(pool, passives_list.items);
+    if (req_ranges.items.len != pool.len) return error.MalformedModifiers;
+    const req_pool = try arena.alloc(requirements.Requirement, reqs_list.items.len);
+    @memcpy(req_pool, reqs_list.items);
+    for (pool, req_ranges.items) |*p, rg| {
+        p.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
+    }
     const out = try arena.alloc(ModDef, defs.items.len);
     @memcpy(out, defs.items);
+    for (out, ranges.items) |*d, rg| {
+        d.passives = pool[rg[0] .. rg[0] + rg[1]];
+    }
     return ModTable{ .defs = out, .arena_ptr = ap };
 }
 
@@ -139,11 +187,26 @@ test "item_modifiers parses installable/blocked/modifier gates" {
         \\<item_modifiers>
         \\  <item_modifier name="modMeleeCrafted04" installable_tags="melee,stabbing" modifier_tags="damage" blocked_tags="noMods,blunt" type="modification">
         \\  <item_modifier name="modGunBarrelExtender" installable_tags="barrelAttachments,turretRanged" modifier_tags="barrelAttachment" blocked_tags="noMods,shotgun" type="attachment">
+        \\  <item_modifier name="modTestLiner" installable_tags="armor" modifier_tags="armorMod" blocked_tags="" type="modification">
+        \\    <effect_group>
+        \\      <passive_effect name="ElementalDamageResist" operation="base_add" value="1" tags="heat,electrical"/>
+        \\    </effect_group>
+        \\  </item_modifier>
         \\</item_modifiers>
     );
     var t = try loadFromPath(std.testing.allocator, path);
     defer t.deinit();
-    try std.testing.expectEqual(@as(usize, 2), t.defs.len);
+    try std.testing.expectEqual(@as(usize, 3), t.defs.len);
+    // Layer 13 rows parse alongside the attachment gates.
+    const liner = t.byName("modTestLiner") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(usize, 1), liner.passives.len);
+    try std.testing.expectEqualStrings("ElementalDamageResist", liner.passives[0].name);
+    try std.testing.expectEqualStrings("heat,electrical", liner.passives[0].tags);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), liner.passives[0].value, 0.001);
+    try std.testing.expectEqual(@as(usize, 0), liner.passives[0].reqs.len);
+    // A mod with no effect rows keeps an empty slice, not a neighbour's rows.
+    const no_rows = t.byName("modMeleeCrafted04") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(usize, 0), no_rows.passives.len);
     const melee = t.byName("modMeleeCrafted04") orelse return error.TestExpectedEqual;
     try std.testing.expectEqualStrings("melee,stabbing", melee.installable);
     try std.testing.expectEqualStrings("noMods,blunt", melee.blocked);
