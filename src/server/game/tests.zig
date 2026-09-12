@@ -4104,6 +4104,70 @@ test "restored buffs re-apply through the effects VM (recompute-from-set)" {
     }
 }
 
+test "EntityTagCompare resolves the player-only burning rows from stock buffs.xml" {
+    // buffBurningFlamingArrow ships both halves of the pair: the player half is
+    // `passive_effect HealthChangeOT base_subtract 4,12.3,15` gated
+    // `EntityTagCompare tags="player"`, and a non-player half gated by the `!`
+    // twin. Before the gate kind existed both were refused (fail closed, counted
+    // in requirement_unsupported), so this buff dealt no health damage at all.
+    // The entity class `Tags` (entityclasses.xml, inherited through `extends`)
+    // now decide it and the tick feeds them through Ctx.entity_tags.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const def_id = g.buffs.indexOfName("buffBurningFlamingArrow") orelse return error.SkipZigTest;
+    const def = g.buffs.byId(def_id).?;
+    // Data level: the player tag set folds the row (duration 0 is the curve's
+    // first anchor, value 4), the zombie set folds the `!` twin (same value),
+    // and a caller with no tag set refuses instead of assuming one.
+    var pc: requirements.Counts = .{};
+    const player = assets_buffs.trackedDeltas(&def, 0, .{ .entity_tags = "entity,player,human" }, &pc);
+    try std.testing.expectApproxEqAbs(@as(f32, -4), player.hp_ot, 0.001);
+    try std.testing.expectEqual(@as(u32, 0), pc.unsupported);
+    var zc: requirements.Counts = .{};
+    const zomb = assets_buffs.trackedDeltas(&def, 0, .{ .entity_tags = "entity,zombie,walker" }, &zc);
+    try std.testing.expectApproxEqAbs(@as(f32, -4), zomb.hp_ot, 0.001);
+    try std.testing.expectEqual(@as(u32, 0), zc.unsupported);
+    var nc: requirements.Counts = .{};
+    const none = assets_buffs.trackedDeltas(&def, 0, .{}, &nc);
+    try std.testing.expectEqual(@as(f32, 0), none.hp_ot);
+    try std.testing.expect(nc.unsupported > 0);
+    // The loader keeps the class Tags the gate reads.
+    const pdef = g.entities.byHash(packages.stock_entity.class_player_male) orelse return error.SkipZigTest;
+    try std.testing.expect(std.mem.find(u8, pdef.tags, "player") != null);
+    // Tick level: the live player's class Tags reach the VM, so the burning row
+    // lands and the player loses health on the survival pass.
+    g.sim.health[ps].hp = 90;
+    g.sim.health[ps].max_hp = 100;
+    g.sim.health[ps].base_max_hp = 100;
+    g.sim.health[ps].food = 100;
+    g.sim.health[ps].water = 100;
+    _ = ecs_buff.add(g.sim.buffsMut(ps), .{
+        .def_id = def_id,
+        .duration = 0,
+        .stack_type = ecs_buff.StackType.ignore,
+        .update_rate_ticks = 20,
+        .remove_on_death = false,
+    }, ecs_buff.duration_from_class, -1, 0, 0, 0);
+    const before = g.sim.health[ps].hp;
+    try g.step();
+    try std.testing.expect(g.sim.health[ps].hp < before);
+}
+
 test "perk max-stat deltas recompute max_hp revertibly" {
     // perkFortitudeMastery HealthMax is level="4,5" value="50,100": with the
     // perk at level 5 the survival pass recomputes max_hp = 100 + 100 = 200;

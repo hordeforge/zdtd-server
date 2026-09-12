@@ -33,6 +33,12 @@ pub const EntityDef = struct {
     name: []const u8 = "",
     /// Unity Mono string.GetHashCode (EntityClass.list key).
     hash: i32 = 0,
+    /// The class `Tags` property (`EntityClass::PropTags`, read from the
+    /// resolved DynamicProperties at EntityClass.il IL_111F). Inherited through
+    /// `extends` exactly like `EntityClass::CopyFrom` IL=171, which copies the
+    /// parent's property map. Read by `EntityTagCompare` (requirements.zig) and
+    /// by `inferKind` below.
+    tags: []const u8 = "",
     max_hp: f32 = 40,
     kind: components.Kind = .zombie,
     /// Loot.xml container name for the death bag (LootDropEntityClass resolved
@@ -213,6 +219,9 @@ pub const builtin_defs = [_]EntityDef{
     .{
         .name = "playerMale",
         .hash = unity_hash.class_player_male,
+        // Stock entityclasses.xml playerMale `Tags` (the builtin catalog is the
+        // no-game-dir floor; the XML value wins when data loads).
+        .tags = "entity,player,human",
         .max_hp = 100,
         .kind = .player,
         .spawnable = false,
@@ -221,6 +230,7 @@ pub const builtin_defs = [_]EntityDef{
     .{
         .name = "zombieBoe",
         .hash = unity_hash.class_zombie_boe,
+        .tags = "entity,zombie,walker",
         .max_hp = 40,
         .kind = .zombie,
         .loot_list = "EntityLootContainerRegular",
@@ -857,6 +867,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         try list.append(allocator, .{
             .name = name,
             .hash = unity_hash.unityStringHash(name),
+            .tags = if (tags.len > 0) try arena.dupe(u8, tags) else "",
             .max_hp = max_hp,
             .kind = kind,
             .loot_list = loot,

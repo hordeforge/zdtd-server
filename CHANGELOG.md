@@ -7,6 +7,28 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Burning and shock damage-over-time never applied to players.
+  `buffs.xml`'s player half of a damage pair is gated
+  `<requirement name="EntityTagCompare" tags="player"/>` (and the non-player
+  half by the `!` twin), which the requirement evaluator did not implement, so
+  every one of those rows failed closed and `buffBurningFlamingArrow`,
+  `buffBurningMolotov`, `buffHazardBurningElement`, `buffRadiationPool` and the
+  `buffTwitch*` buffs dealt no health damage at all. `EntityTagCompare` now
+  reads the entity's own class `Tags` (`entityclasses.xml`, resolved through
+  `extends` the way `EntityClass::CopyFrom` does), fed per tick from the slot's
+  class, with `has_all_tags` all-of support and the stock inversion. A foreign
+  target (`other` / `instigator`) still refuses rather than reading self.
+- `StatComparePercCurrentToMax` divided by `Stat::ModifiedMax` instead of
+  `Stat::Max` (`m_baseMax`), so a perk or buff that raised the max moved every
+  hunger, thirst and stage threshold with it. The ctx now carries both the base
+  and the modified max, and the modifier-aware gates that were missing landed
+  with it: `StatComparePercCurrentToModMax` (which gates `buffNearDeathRegen`,
+  so the near-death regeneration floor now works), `StatCompareMax`,
+  `StatCompareModMax` and `StatComparePercModMaxToMax` (the health-stage ladder).
+  `IsNight` reads the sim clock so night-gated rows resolve instead of being
+  refused. Measured on the stock 3.2.0 files, `buffs.xml`'s gated tracked
+  passive rows move from 31 resolve / 12 refuse to 43 / 0.
+
 - Powered-block prefab markers were turned into loot containers. The chunk TE
   scan classified `TileEntityType.Powered` (0x0F) alongside the storage types,
   so a powered marker got an invented 8-slot grid and the storage TE sender

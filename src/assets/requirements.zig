@@ -68,8 +68,25 @@ pub const Kind = enum(u8) {
     armor_group_lowest_quality,
     armor_group_count,
     stat_compare_perc_current_to_max,
+    /// `StatComparePercCurrentToModMax` IL=66: the stat's current value as a
+    /// fraction of `Stat::ModifiedMax` (m_baseMax + m_maxModifier), i.e. the
+    /// same denominator the passive VM recomputes as the effective max.
+    stat_compare_perc_current_to_mod_max,
+    /// `StatCompareModMax` IL=46: the stat's `Stat::ModifiedMax` VALUE.
+    stat_compare_mod_max,
+    /// `StatCompareMax` IL=46: the stat's `Stat::Max` = `m_baseMax` value.
+    stat_compare_max,
+    /// `StatComparePercModMaxToMax` IL=42: `Stat::ModifiedMaxPercent` =
+    /// ModifiedMax / Max (how far the active modifiers have moved the max).
+    stat_compare_perc_mod_max_to_max,
     /// `StatCompareCurrent` IL=52: the stat's current VALUE (not a fraction).
     stat_compare_current,
+    /// `EntityTagCompare` IL=43: the target entity's `Tags` set
+    /// (`Entity::HasAnyTags` / `HasAllTags`), any-of by default and all-of with
+    /// `has_all_tags="true"`.
+    entity_tag_compare,
+    /// `IsNight` IL=19: `!World.IsDaytime()`, invert-aware.
+    is_night,
     /// `CVarCompare` IL=23: the entity's custom variable against `value`
     /// (a missing name reads 0).
     cvar_compare,
@@ -143,13 +160,31 @@ pub const Ctx = struct {
     /// Live stat fractions and maxes for the StatCompare gates (0..1 fractions;
     /// a non-positive max fails the gate like the IL).
     hp_frac: f32 = 0,
+    /// `Stat::ModifiedMax` (m_baseMax + m_maxModifier) for Health.
     hp_max: f32 = 0,
+    /// `Stat::Max` (m_baseMax) for Health, i.e. the max BEFORE the passive VM
+    /// modifiers. 0 = the caller does not distinguish base from modified, in
+    /// which case the `*ToMax` gates fall back to `hp_max` (the pre-VM
+    /// approximation) instead of failing every row.
+    hp_base_max: f32 = 0,
     stamina_frac: f32 = 0,
     stamina_max: f32 = 0,
+    stamina_base_max: f32 = 0,
     food_frac: f32 = 0,
     food_max: f32 = 0,
+    food_base_max: f32 = 0,
     water_frac: f32 = 0,
     water_max: f32 = 0,
+    water_base_max: f32 = 0,
+    /// `World.IsDaytime()` negated, for `IsNight` (IL=19). Null = the caller has
+    /// no clock, which refuses the gate rather than guessing a phase.
+    is_night: ?bool = null,
+    /// The entity's own `Tags` property (`entityclasses.xml <property
+    /// name="Tags">`, inherited through `extends` like `EntityClass.CopyFrom`
+    /// IL=171), as a comma list. `EntityTagCompare` with the default `self`
+    /// target reads it; null = the caller has no class tag set, which refuses
+    /// the gate rather than treating the entity as untagged.
+    entity_tags: ?[]const u8 = null,
     /// One entry per worn equipment item: the item's `Tags` property as a comma
     /// list (`WornItems` IL=54 walks `Equipment::GetSlotCount` and asks each
     /// item's `ItemClass::HasAnyTags`). Empty = nothing worn.
@@ -224,7 +259,13 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "ArmorGroupLowestQuality")) return .armor_group_lowest_quality;
     if (std.mem.eql(u8, name, "ArmorGroupCount")) return .armor_group_count;
     if (std.mem.eql(u8, name, "StatComparePercCurrentToMax")) return .stat_compare_perc_current_to_max;
+    if (std.mem.eql(u8, name, "StatComparePercCurrentToModMax")) return .stat_compare_perc_current_to_mod_max;
+    if (std.mem.eql(u8, name, "StatCompareModMax")) return .stat_compare_mod_max;
+    if (std.mem.eql(u8, name, "StatCompareMax")) return .stat_compare_max;
+    if (std.mem.eql(u8, name, "StatComparePercModMaxToMax")) return .stat_compare_perc_mod_max_to_max;
     if (std.mem.eql(u8, name, "StatCompareCurrent")) return .stat_compare_current;
+    if (std.mem.eql(u8, name, "EntityTagCompare")) return .entity_tag_compare;
+    if (std.mem.eql(u8, name, "IsNight")) return .is_night;
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
     return .unsupported;
@@ -412,33 +453,18 @@ fn evalArmorGroupCount(r: Requirement, ctx: Ctx) Verdict {
     return verdict(compare(count, r.op, operand(ctx, r)), r.negated);
 }
 
-/// `StatComparePercCurrentToMax::Compare` (IL=120): the named stat's value as a
-/// fraction of its max, compared against `value`; a stat whose max is not
-/// positive fails the gate in both polarities (the IL returns false before
-/// reading `invert`). Health, Stamina, Food and Water are the StatTypes the
-/// shipped rows use.
-fn evalStatComparePercCurrentToMax(r: Requirement, ctx: Ctx) Verdict {
-    const frac = if (eqIgnoreCase(r.arg, "Health"))
-        ctx.hp_frac
-    else if (eqIgnoreCase(r.arg, "Stamina"))
-        ctx.stamina_frac
-    else if (eqIgnoreCase(r.arg, "Food"))
-        ctx.food_frac
-    else if (eqIgnoreCase(r.arg, "Water"))
-        ctx.water_frac
-    else
-        return .unsupported;
-    const max = if (eqIgnoreCase(r.arg, "Health"))
-        ctx.hp_max
-    else if (eqIgnoreCase(r.arg, "Stamina"))
-        ctx.stamina_max
-    else if (eqIgnoreCase(r.arg, "Food"))
-        ctx.food_max
-    else
-        ctx.water_max;
-    if (!(max > 0)) return .fail;
-    return verdict(compare(frac, r.op, operand(ctx, r)), r.negated);
-}
+/// One tracked stat as the StatCompare family reads it: the current value, its
+/// fraction of `Stat::ModifiedMax`, the modified max and the base max
+/// (`Stat::Max`). Built from the ctx's `*_frac` / `*_max` / `*_base_max`
+/// triple, so every member of the family reads one consistent sample.
+const Sample = struct {
+    cur: f32 = 0,
+    frac: f32 = 0,
+    /// `Stat::ModifiedMax` (m_baseMax + m_maxModifier).
+    mod_max: f32 = 0,
+    /// `Stat::Max` = `m_baseMax`. 0 = the caller did not supply it.
+    base_max: f32 = 0,
+};
 
 fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
     if (a.len != b.len) return false;
@@ -446,24 +472,114 @@ fn eqIgnoreCase(a: []const u8, b: []const u8) bool {
     return true;
 }
 
+/// The sample for a named stat; null for a name the ctx does not track (the
+/// caller counts that as unsupported).
+fn sample(name: []const u8, ctx: Ctx) ?Sample {
+    const frac, const mod_max, const base_max = if (eqIgnoreCase(name, "Health"))
+        .{ ctx.hp_frac, ctx.hp_max, ctx.hp_base_max }
+    else if (eqIgnoreCase(name, "Stamina"))
+        .{ ctx.stamina_frac, ctx.stamina_max, ctx.stamina_base_max }
+    else if (eqIgnoreCase(name, "Food"))
+        .{ ctx.food_frac, ctx.food_max, ctx.food_base_max }
+    else if (eqIgnoreCase(name, "Water"))
+        .{ ctx.water_frac, ctx.water_max, ctx.water_base_max }
+    else
+        return null;
+    // `Stat::get_Value` IL=13 clamps to [0, ModifiedMax].
+    const cur = @max(0, @min(frac * mod_max, mod_max));
+    return .{ .cur = cur, .frac = frac, .mod_max = mod_max, .base_max = base_max };
+}
+
+/// `StatComparePercCurrentToMax::Compare` (IL=120): the named stat's value as a
+/// fraction of `Stat::Max` (the BASE max), compared against `value`; a stat
+/// whose max is not positive fails the gate in both polarities (the IL returns
+/// false before reading `invert`). Health, Stamina, Food and Water are the
+/// StatTypes the shipped rows use. A caller that carries no base max keeps the
+/// pre-VM approximation (the modified max) so a row is not turned off.
+fn evalStatComparePercCurrentToMax(r: Requirement, ctx: Ctx) Verdict {
+    const s = sample(r.arg, ctx) orelse return .unsupported;
+    const denom = if (s.base_max > 0) s.base_max else s.mod_max;
+    if (!(denom > 0)) return .fail;
+    return verdict(compare(s.cur / denom, r.op, operand(ctx, r)), r.negated);
+}
+
+/// `StatComparePercCurrentToModMax::Compare` (IL=66): the stat's value as a
+/// fraction of `Stat::ModifiedMax`; a non-positive modified max fails in both
+/// polarities (the IL checks `bgt.un` before reading `invert`).
+fn evalStatComparePercCurrentToModMax(r: Requirement, ctx: Ctx) Verdict {
+    const s = sample(r.arg, ctx) orelse return .unsupported;
+    if (!(s.mod_max > 0)) return .fail;
+    return verdict(compare(s.frac, r.op, operand(ctx, r)), r.negated);
+}
+
+/// `StatCompareModMax::Compare` (IL=46): the stat's `Stat::ModifiedMax` VALUE
+/// against the operand.
+fn evalStatCompareModMax(r: Requirement, ctx: Ctx) Verdict {
+    const s = sample(r.arg, ctx) orelse return .unsupported;
+    return verdict(compare(s.mod_max, r.op, operand(ctx, r)), r.negated);
+}
+
+/// `StatCompareMax::Compare` (IL=46): the stat's `Stat::Max` (base) VALUE. A
+/// caller that does not carry the base max refuses the gate rather than
+/// comparing a fabricated 0.
+fn evalStatCompareMax(r: Requirement, ctx: Ctx) Verdict {
+    const s = sample(r.arg, ctx) orelse return .unsupported;
+    if (!(s.base_max > 0)) return .unsupported;
+    return verdict(compare(s.base_max, r.op, operand(ctx, r)), r.negated);
+}
+
+/// `StatComparePercModMaxToMax::Compare` (IL=42): `Stat::ModifiedMaxPercent`
+/// (ModifiedMax / Max) against the operand.
+fn evalStatComparePercModMaxToMax(r: Requirement, ctx: Ctx) Verdict {
+    const s = sample(r.arg, ctx) orelse return .unsupported;
+    if (!(s.base_max > 0)) return .unsupported;
+    return verdict(compare(s.mod_max / s.base_max, r.op, operand(ctx, r)), r.negated);
+}
+
 /// `StatCompareCurrent::Compare` IL=52: the named stat's CURRENT value against
 /// the row's operand (Health, Stamina, Water and Food are StatTypes 1..4; the
-/// `Armor` branch reads `Equipment::GetTotalPhysicalArmorRating`, which is not
-/// on the ctx yet, so it stays unsupported and counted).
+/// `Armor` branch reads `Equipment::GetTotalPhysicalArmorRating`).
 fn evalStatCompareCurrent(r: Requirement, ctx: Ctx) Verdict {
-    const cur = if (eqIgnoreCase(r.arg, "Health"))
-        ctx.hp_frac * ctx.hp_max
-    else if (eqIgnoreCase(r.arg, "Stamina"))
-        ctx.stamina_frac * ctx.stamina_max
-    else if (eqIgnoreCase(r.arg, "Food"))
-        ctx.food_frac * ctx.food_max
-    else if (eqIgnoreCase(r.arg, "Water"))
-        ctx.water_frac * ctx.water_max
-    else if (eqIgnoreCase(r.arg, "Armor"))
-        ctx.armor_rating
-    else
-        return .unsupported;
-    return verdict(compare(cur, r.op, operand(ctx, r)), r.negated);
+    if (eqIgnoreCase(r.arg, "Armor")) {
+        return verdict(compare(ctx.armor_rating, r.op, operand(ctx, r)), r.negated);
+    }
+    const s = sample(r.arg, ctx) orelse return .unsupported;
+    return verdict(compare(s.cur, r.op, operand(ctx, r)), r.negated);
+}
+
+/// `IsNight::IsValid` (IL=19): `!World.IsDaytime()`, invert-aware. A caller
+/// with no clock refuses the gate instead of guessing the phase.
+fn evalIsNight(r: Requirement, ctx: Ctx) Verdict {
+    const night = ctx.is_night orelse return .unsupported;
+    return verdict(night, r.negated);
+}
+
+/// `EntityTagCompare::IsValid` IL=43: `target.HasAnyTags` (any-of) or
+/// `HasAllTags` with `has_all_tags="true"`, invert-aware. The evaluator runs
+/// for the default `self` target only; a foreign target is refused before the
+/// dispatch (the tick ctx carries one entity).
+fn evalEntityTagCompare(r: Requirement, ctx: Ctx) Verdict {
+    const entity_tags = ctx.entity_tags orelse return .unsupported;
+    var matched = r.has_all; // any-of starts false, all-of starts true
+    var seen = false;
+    var it = std.mem.splitScalar(u8, r.list, ',');
+    while (it.next()) |seg| {
+        const tag = std.mem.trim(u8, seg, " \t");
+        if (tag.len == 0) continue;
+        seen = true;
+        const hit = entity_tags.len > 0 and tagListHas(entity_tags, tag);
+        if (r.has_all) {
+            if (!hit) {
+                matched = false;
+                break;
+            }
+        } else if (hit) {
+            matched = true;
+            break;
+        }
+    }
+    if (!seen) matched = r.has_all; // empty list: any-of false, all-of true
+    return verdict(matched, r.negated);
 }
 
 /// `WornItems::IsValid` IL=54: `compareValues(count, op, value)` where `count`
@@ -552,7 +668,13 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
         .armor_group_count => return evalArmorGroupCount(r, ctx),
         .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
+        .stat_compare_perc_current_to_mod_max => return evalStatComparePercCurrentToModMax(r, ctx),
+        .stat_compare_mod_max => return evalStatCompareModMax(r, ctx),
+        .stat_compare_max => return evalStatCompareMax(r, ctx),
+        .stat_compare_perc_mod_max_to_max => return evalStatComparePercModMaxToMax(r, ctx),
         .stat_compare_current => return evalStatCompareCurrent(r, ctx),
+        .entity_tag_compare => return evalEntityTagCompare(r, ctx),
+        .is_night => return evalIsNight(r, ctx),
         .cvar_compare => return evalCvarCompare(r, ctx),
         .worn_items => return evalWornItems(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
@@ -814,8 +936,128 @@ test "StatCompareCurrent reads the stat's absolute value" {
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
-test "a value=\"@cvar\" operand is read live, not parsed as 0" {
-    // buffLevelUpTracking gates its `add $LastPlayerLevel 1` row on
+test "StatCompare max family separates Stat::Max from Stat::ModifiedMax" {
+    // Stat IL: get_Max() = m_baseMax, get_ModifiedMax() = m_baseMax +
+    // m_maxModifier, get_ModifiedMaxPercent() = ModifiedMax / Max. The ctx
+    // carries both (`hp_base_max` = the pre-VM base, `hp_max` = the value the
+    // passive VM recomputes). 100 base + 100 modifier at half health:
+    const ctx = Ctx{ .hp_frac = 0.5, .hp_max = 200, .hp_base_max = 100 };
+    const perc_max = Requirement{ .kind = .stat_compare_perc_current_to_max, .name = "StatComparePercCurrentToMax", .arg = "Health", .op = .eq, .value = 1 };
+    try testing.expect(all(&.{perc_max}, ctx));
+    const perc_max_lt = Requirement{ .kind = .stat_compare_perc_current_to_max, .name = "StatComparePercCurrentToMax", .arg = "Health", .op = .lt, .value = 1 };
+    try testing.expect(!all(&.{perc_max_lt}, ctx));
+    const perc_mod = Requirement{ .kind = .stat_compare_perc_current_to_mod_max, .name = "StatComparePercCurrentToModMax", .arg = "Health", .op = .eq, .value = 0.5 };
+    try testing.expect(all(&.{perc_mod}, ctx));
+    const mod_max = Requirement{ .kind = .stat_compare_mod_max, .name = "StatCompareModMax", .arg = "Health", .op = .eq, .value = 200 };
+    try testing.expect(all(&.{mod_max}, ctx));
+    const base_max = Requirement{ .kind = .stat_compare_max, .name = "StatCompareMax", .arg = "Health", .op = .eq, .value = 100 };
+    try testing.expect(all(&.{base_max}, ctx));
+    // ModifiedMaxPercent = 200/100 = 2 (the buffs.xml health-stage ladder gates
+    // on `StatComparePercModMaxToMax Health LT 0.9`).
+    const max_percent = Requirement{ .kind = .stat_compare_perc_mod_max_to_max, .name = "StatComparePercModMaxToMax", .arg = "Health", .op = .eq, .value = 2 };
+    try testing.expect(all(&.{max_percent}, ctx));
+    const max_percent_lt = Requirement{ .kind = .stat_compare_perc_mod_max_to_max, .name = "StatComparePercModMaxToMax", .arg = "Health", .op = .lt, .value = 0.9 };
+    try testing.expect(!all(&.{max_percent_lt}, ctx));
+    // The IL's zero guard: a non-positive denominator fails both polarities
+    // (PercCurrentToMax/PercCurrentToModMax return false before `invert`).
+    const zero = Ctx{ .hp_frac = 0.5, .hp_max = 0, .hp_base_max = 0 };
+    const perc_max_neg = Requirement{ .kind = .stat_compare_perc_current_to_max, .name = "StatComparePercCurrentToMax", .arg = "Health", .op = .eq, .value = 1, .negated = true };
+    const perc_mod_neg = Requirement{ .kind = .stat_compare_perc_current_to_mod_max, .name = "StatComparePercCurrentToModMax", .arg = "Health", .op = .eq, .value = 0.5, .negated = true };
+    try testing.expect(!all(&.{perc_max_neg}, zero));
+    try testing.expect(!all(&.{perc_mod_neg}, zero));
+    // A caller with no base max keeps the pre-VM approximation (the modified
+    // max) instead of turning the row off; a stat the ctx cannot read is
+    // refused, and StatCompareMax refuses rather than comparing a fabricated 0.
+    const perc_max_half = Requirement{ .kind = .stat_compare_perc_current_to_max, .name = "StatComparePercCurrentToMax", .arg = "Health", .op = .eq, .value = 0.5 };
+    try testing.expect(all(&.{perc_max_half}, .{ .hp_frac = 0.5, .hp_max = 200 }));
+    var counts: Counts = .{};
+    const other = Requirement{ .kind = .stat_compare_perc_current_to_mod_max, .name = "StatComparePercCurrentToModMax", .arg = "Speed", .op = .lt, .value = 1 };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{other}, ctx, &counts));
+    const no_base = Requirement{ .kind = .stat_compare_max, .name = "StatCompareMax", .arg = "Health", .op = .eq, .value = 100 };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{no_base}, .{ .hp_max = 200 }, &counts));
+    try testing.expectEqual(@as(u32, 2), counts.unsupported);
+}
+
+test "EntityTagCompare matches the entity's own class Tags" {
+    // EntityTagCompare IL=43: target.HasAnyTags (any-of) / HasAllTags with
+    // has_all_tags, invert-aware. The default target is self (targetType 0),
+    // and the ctx's `entity_tags` is the entityclasses.xml `Tags` set.
+    const ctx = Ctx{ .entity_tags = "entity,player,human" };
+    const player = Requirement{ .kind = .entity_tag_compare, .name = "EntityTagCompare", .list = "player" };
+    try testing.expect(all(&.{player}, ctx));
+    const zombie = Requirement{ .kind = .entity_tag_compare, .name = "EntityTagCompare", .list = "zombie" };
+    try testing.expect(!all(&.{zombie}, ctx));
+    // The invert spelling stock uses for the non-player half of a pair
+    // (buffBurningFlamingArrow ships both variants).
+    const not_zombie = Requirement{ .kind = .entity_tag_compare, .name = "EntityTagCompare", .list = "zombie", .negated = true };
+    try testing.expect(all(&.{not_zombie}, ctx));
+    // Any-of is the default, `has_all_tags` demands every tag.
+    const any = Requirement{ .kind = .entity_tag_compare, .name = "EntityTagCompare", .list = "zombie,human" };
+    try testing.expect(all(&.{any}, ctx));
+    const every = Requirement{ .kind = .entity_tag_compare, .name = "EntityTagCompare", .list = "entity,human", .has_all = true };
+    try testing.expect(all(&.{every}, ctx));
+    const all_miss = Requirement{ .kind = .entity_tag_compare, .name = "EntityTagCompare", .list = "entity,zombie", .has_all = true };
+    try testing.expect(!all(&.{all_miss}, ctx));
+    // A ctx with no class tag set refuses (fail closed, counted) instead of
+    // reading the entity as untagged; a foreign target is refused before the
+    // dispatch because the tick ctx carries one entity.
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{player}, .{}, &counts));
+    var foreign = player;
+    foreign.target = .other;
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{foreign}, .{ .entity_tags = "entity" }, &counts));
+    try testing.expectEqual(@as(u32, 2), counts.unsupported);
+}
+
+test "IsNight reads the clock and refuses without one" {
+    // IsNight IL=19: !World.IsDaytime(), invert-aware.
+    const night = Requirement{ .kind = .is_night, .name = "IsNight" };
+    try testing.expect(all(&.{night}, .{ .is_night = true }));
+    try testing.expect(!all(&.{night}, .{ .is_night = false }));
+    const inverted = Requirement{ .kind = .is_night, .name = "IsNight", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_night = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{night}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "the new gate kinds parse from the stock attribute spellings" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const src =
+        "<effect_group>" ++
+        "<requirement name=\"EntityTagCompare\" tags=\"player\" has_all_tags=\"true\"/>" ++
+        "<requirement name=\"!IsNight\"/>" ++
+        "<requirement name=\"StatComparePercCurrentToModMax\" stat=\"health\" operation=\"LTE\" value=\"0.5\"/>" ++
+        "</effect_group>";
+    var at: usize = 0;
+    var seen: usize = 0;
+    while (std.mem.findPos(u8, src, at, "<requirement")) |tag| {
+        at = tag + 12;
+        const r = try parse(src, tag, arena.allocator());
+        switch (seen) {
+            0 => {
+                try testing.expectEqual(Kind.entity_tag_compare, r.kind);
+                try testing.expectEqualStrings("player", r.list);
+                try testing.expect(r.has_all);
+            },
+            1 => {
+                try testing.expectEqual(Kind.is_night, r.kind);
+                try testing.expect(r.negated);
+            },
+            else => {
+                try testing.expectEqual(Kind.stat_compare_perc_current_to_mod_max, r.kind);
+                try testing.expectEqual(Compare.le, r.op);
+                try testing.expectEqual(@as(f32, 0.5), r.value);
+                try testing.expectEqualStrings("health", r.arg);
+            },
+        }
+        seen += 1;
+    }
+    try testing.expectEqual(@as(usize, 3), seen);
+}
+
+test "a value=\"@cvar\" operand is read live, not parsed as 0" { // buffLevelUpTracking gates its `add $LastPlayerLevel 1` row on
     // `PlayerLevel GT value="@$LastPlayerLevel"`. Parsing that operand as 0 made
     // the guard always pass, so the counter climbed on every 0.1 s update.
     var vars: cvars.Set = .{};

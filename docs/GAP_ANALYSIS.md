@@ -223,7 +223,7 @@ wins on conflict about what shipped, not about the arithmetic).
 | [Player progression](#10-player-progression) | 27 | 1 | 0 | 28 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated spend (NetPackageEntitySetSkillLevelServer) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT) gated by each row's parsed `<requirement>` (src/assets/requirements.zig); `<book>` progression values load too; XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins. Two shortfalls: perk purchase is denied (the parent-skill prerequisite is wrong) and the requirement vocabulary is partial (unknown kinds fail closed, counted) |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Round 18 (2026-09-11) closed the armor-set activation chain inside §10 (`ArmorGroupCount` + the full triggered-row gate + buffStatusCheck02 driven from data); what keeps it PARTIAL is the remaining gate vocabulary (`CVarCompare`/`EntityTagCompare`/`StatComparePercCurrentToModMax`), the `@cvar` passive values and the entity-class `Buffs=` lifecycle. Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Round 18 (2026-09-11) closed the armor-set activation chain inside §10 (`ArmorGroupCount` + the full triggered-row gate + buffStatusCheck02 driven from data); round 21 (2026-09-12) closed the buffs.xml gate vocabulary (`EntityTagCompare`, the `Stat::Max`/`Stat::ModifiedMax` family and `IsNight`, so all 43 gated tracked buff rows resolve). What keeps it PARTIAL is the gate kinds that need an input the per-tick ctx does not carry (`IsEquipped`, `RandomRoll`, `EntityHasMovementTag`, a foreign-target `EntityTagCompare`), the untracked passive names, and the surviving `@cvar`/row-action legs. Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3872,16 +3872,46 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     exclusive instead of summing.
     Residual for the next pass: `StatComparePercCurrentToMax` landed in round
     18 for Health/Stamina/Food/Water (the ctx carries the fractions and maxes,
-    and the stage rows plus the armor-status rows read them), leaving
-    `StatCompareCurrent`/`StatComparePercCurrentToModMax` (1 tracked row); and
+    and the stage rows plus the armor-status rows read them); and
     `CVarCompare` landed in round 20 with the per-entity store, the
     `@cvar` passive values and the `ModifyCVar`/`RemoveCVar` actions, so what is
     left of that leg is the driving: most of the 2915 write rows hang off item
-    and buff lifecycle events zdtd does not fire yet. Buff lifecycle events
-    (`onSelfBuffStart`/`Update`/`Remove`) are still only driven for
-    `buffStatusCheck01`/`buffStatusCheck02` by id, so the entity classes'
-    `Buffs=` list never applies the checks and the remaining buff triggered
-    actions do not fire yet.
+    and buff lifecycle events zdtd does not fire yet.
+  - **`EntityTagCompare` + the StatCompare max family + `IsNight` (round 21,
+    2026-09-12).** The entity's own class `Tags` (`entityclasses.xml`, resolved
+    through `extends` exactly like `EntityClass::CopyFrom` IL=171) is now on the
+    ctx (`Ctx.entity_tags`, fed per tick from the slot's class hash), so
+    `EntityTagCompare` (IL=43: `HasAnyTags` by default, `HasAllTags` with
+    `has_all_tags="true"`, invert-aware) resolves for the default `self` target.
+    A foreign target (`other` / `instigator`) still refuses and is counted.
+    The StatCompare family now separates `Stat::Max` (`m_baseMax`, the ctx's new
+    `*_base_max`) from `Stat::ModifiedMax` (`m_baseMax + m_maxModifier`, the
+    existing `*_max`): `StatCompareMax` IL=46, `StatCompareModMax` IL=46,
+    `StatComparePercCurrentToModMax` IL=66 and `StatComparePercModMaxToMax` IL=42
+    (`ModifiedMaxPercent`) all landed, and `StatComparePercCurrentToMax` IL=120
+    now divides by the base max (it used the modified max, which is not the IL's
+    `get_Max`). `IsNight` IL=19 reads the sim clock (`Ctx.is_night`; a caller
+    with no clock refuses rather than guessing the phase).
+    Measured on the stock 3.2.0 files: buffs.xml's gated tracked rows move from
+    **31 resolve / 12 refuse to 43 / 0** (the 12 were 9 `EntityTagCompare`
+    player-half rows - the burning and twitch damage-over-time passives, so
+    burning now actually burns - plus 3 `!EntityTagCompare` twins). The other
+    files keep their refusals: items.xml 1/7 (`IsEquipped` 6 needs
+    `params.ItemValue`, i.e. the item-context fold; `EntityTagCompare
+    target="other"` 1 needs the attacker's tags at the damage choke) and
+    progression.xml 1/7 (`RandomRoll` 5 needs a roll pinned to a stable seed and
+    period, `EntityHasMovementTag` 1 needs the live movement tag,
+    `EntityTagCompare target="other"` 1). None of those three is blocked on
+    vocabulary: each needs an input the per-tick ctx does not carry yet.
+  - **Buff lifecycle events are driven from the active set, not by id.** The
+    `onSelfEnteredGame` pass fires once per buff instance as the class `Buffs=`
+    list lands, `onSelfBuffStart`/`onSelfBuffUpdate`/`onSelfBuffRemove` fire for
+    every active buff on its own `<update_rate>`, and the engine applies the
+    rows' `AddBuff`/`RemoveBuff`/`ModifyCVar` as they pass, so
+    `buffStatusCheck01`/`buffStatusCheck02` are no longer special-cased and the
+    entity classes' `Buffs=` list applies through the same data path. What
+    remains of the leg is the row *actions* and the missing inputs above, not
+    the lifecycle plumbing.
   - `<book>` blocks (152) joined the catalog this round: a book is a
     progression value items.xml grants with `SetProgressionLevel level="-1"`,
     and before this a read almanac stored no level and folded no passive. This

@@ -40,6 +40,27 @@ const BuffNameLookup = struct {
 /// passive-41 query; the attacking item's own tags ride the per-hit path.
 const armor_query_tags = "coredamageresist";
 
+/// The stock base max for Food/Water/Stamina (`EntityStats` seeds all three to
+/// 100 and the VM folds its `*Max` deltas onto that base). Named so the
+/// StatCompare gates' `Stat::Max` operand and the max recompute below cannot
+/// drift apart.
+const base_consumable_stat_max: f32 = 100;
+
+/// The entity's own class `Tags` for `EntityTagCompare` (entityclasses.xml
+/// `Tags` resolved through `extends`). The slot's class hash is the same one
+/// the PlayerId wire carries; a slot without a class falls back to the player
+/// class. Null = no catalog carries the class, which the gate refuses
+/// (fail closed, counted) rather than silently treating the entity as
+/// untagged.
+fn entityClassTags(self: *Game, ps: ecs.Slot) ?[]const u8 {
+    const hash = if (self.sim.class_id[ps].hash != 0)
+        self.sim.class_id[ps].hash
+    else
+        assets_unity_hash.class_player_male;
+    const def = self.entities.byHash(hash) orelse return null;
+    return def.tags;
+}
+
 /// Add and remove the catalog buffs a triggered row asked for, relaying each
 /// change to observers (the same contract as syncStageBuffs). Bounded by the
 /// result's fixed arrays; an unknown name is skipped (fail closed).
@@ -322,12 +343,23 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 .worn_items = wornItemTags(self, ps, &worn_tags_buf),
                 .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
                 .hp_max = h.max_hp,
+                // `Stat::Max` is the pre-modifier base (`base_max_hp`); the VM
+                // recomputes the modified max one line below every tick.
+                .hp_base_max = h.base_max_hp,
                 .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
                 .stamina_max = h.stamina_max,
+                .stamina_base_max = base_consumable_stat_max,
                 .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
                 .food_max = h.food_max,
+                .food_base_max = base_consumable_stat_max,
                 .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
                 .water_max = h.water_max,
+                .water_base_max = base_consumable_stat_max,
+                // The sim clock's own day/night split (`World.IsDaytime`).
+                .is_night = self.sim.director.clock.isNight(),
+                // The entity's class Tags (`entityclasses.xml`), read by
+                // EntityTagCompare for the default self target.
+                .entity_tags = entityClassTags(self, ps),
             };
             var req_counts: requirements.Counts = .{};
             // Buff lifecycle events, driven from the active set rather than by
