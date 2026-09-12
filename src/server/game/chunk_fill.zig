@@ -12,6 +12,7 @@ const ln_peer = @import("../../litenet/peer.zig");
 const apm = @import("../../apm/root.zig");
 const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
+const requirements = @import("../../assets/requirements.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
@@ -404,7 +405,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     }
 }
 
-pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32) void {
+pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32, opener_peer: i32) void {
     // Remember the table that filled this container: the destroy_on_close
     // check on unlock reads it (ShouldDestroyOnClose, loot-economy.md 454).
     cont.loot_list = loot_name;
@@ -424,8 +425,23 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     // (`biomes.xml` names); a caller with no position leaves it null, so a
     // biome-gated entry stays omitted rather than rolling everywhere.
     const biome_id = self.biomeIdAt(cont.pos.x, cont.pos.z) orelse 0;
+    // The opener's requirement context answers the loot requirement classes
+    // that read player state (`Progression`, `CVar`, `RandomRoll @$cvar`): the
+    // same `requirements.Ctx` the buff/perk VM uses, built from the opener's
+    // own ledger. Without an opener (scan-time sizing, an anonymous re-roll)
+    // the ctx stays null and those gates refuse, so the entry is omitted
+    // rather than rolled unconditionally.
+    var player_ctx: ?requirements.Ctx = null;
+    if (opener_peer >= 0 and @as(usize, @intCast(opener_peer)) < self.clients.len) {
+        const oc = &self.clients[@intCast(opener_peer)];
+        if (oc.joined) player_ctx = .{
+            .levels = oc.skill_levels[0..oc.skill_level_n],
+            .cvars = &oc.cvars,
+        };
+    }
     const gate_ctx: assets_loot.LootGateCtx = .{
         .biome_name = self.world.biome_layers_table.nameById(biome_id),
+        .player = player_ctx,
     };
     var n = self.loot.rollContainer(loot_name, loot_stage, seed, stacks[0..cont.slot_count], gate_ctx);
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
@@ -493,6 +509,7 @@ pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_
             ll,
             lootSeedAt(pos.x, pos.y, pos.z),
             self.lootStageForPlayer(opener_peer),
+            @intCast(opener_peer),
         );
         return;
     }
@@ -521,6 +538,7 @@ pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_
         ll,
         lootSeedAt(pos.x, pos.y, pos.z) +% cycle *% 2654435761,
         self.lootStageForPlayer(opener_peer),
+        @intCast(opener_peer),
     );
 }
 

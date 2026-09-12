@@ -3634,8 +3634,8 @@ pub const Game = struct {
         game_chunk_fill.tryVendingSpill(self, x, y, z);
     }
 
-    pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32) void {
-        game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed, loot_stage);
+    pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32, opener_peer: i32) void {
+        game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed, loot_stage, opener_peer);
     }
 
     /// Derive a container's grid from loot.xml without rolling it (the roll

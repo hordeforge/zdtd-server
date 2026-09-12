@@ -5784,6 +5784,83 @@ test "spawn_starter_kit config replaces the built-in kit and fails closed" {
     try std.testing.expectEqual(@as(u32, 50), g2.sim.inventory[ps2].countItem(coin));
 }
 
+test "loot requirement gates read the opener's progression on the fill path" {
+    // Deterministic synthetic table (no game dir): a Progression-gated entry
+    // must roll only when the fill path can build the opener's requirements.Ctx
+    // from their ledger. `casinoCoin` resolves through the offline builtin map,
+    // so the assertion is about the gate, not the catalog.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    // Swap the (empty, offline) loot table for a synthetic one.
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="gateGroup" count="all">
+        \\  <item name="foodCanBeef"/>
+        \\  <item name="casinoCoin" count="10">
+        \\    <requirement class="Progression" name="perkTreasureHunter" operation="GTE" value="4"/>
+        \\  </item>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const coin = g.items.ecsIdByName("casinoCoin");
+    try std.testing.expect(coin != 0);
+    const Count = struct {
+        fn of(cont: *const @TypeOf(g.containers.items[0]), id: u16) u32 {
+            var n: u32 = 0;
+            for (cont.slots[0..cont.slot_count]) |sl| {
+                if (sl.item_id == id) n += sl.count;
+            }
+            return n;
+        }
+    };
+
+    // Unqualified: the gated row is omitted, the ungated one still rolls, so a
+    // zero result cannot pass by having rolled nothing at all.
+    cl.skill_levels[0] = .{ .name = "perkTreasureHunter", .level = 3 };
+    cl.skill_level_n = 1;
+    const a = g.containers.getOrCreate(.{ .x = 1, .y = 70, .z = 1 }, 8, 0).?;
+    a.player_storage = false;
+    a.loot_list = "gateGroup";
+    a.touched = false;
+    g.ensureContainerLoot(a, cl.slot);
+    try std.testing.expectEqual(@as(u32, 0), Count.of(a, coin));
+    var saw_food = false;
+    for (a.slots[0..a.slot_count]) |sl| {
+        if (sl.item_id != 0) saw_food = true;
+    }
+    try std.testing.expect(saw_food);
+
+    // Qualified (GTE 4 is inclusive): the gated row rolls.
+    cl.skill_levels[0] = .{ .name = "perkTreasureHunter", .level = 4 };
+    const b = g.containers.getOrCreate(.{ .x = 2, .y = 70, .z = 1 }, 8, 0).?;
+    b.player_storage = false;
+    b.loot_list = "gateGroup";
+    b.touched = false;
+    g.ensureContainerLoot(b, cl.slot);
+    try std.testing.expect(Count.of(b, coin) > 0);
+
+    // No opener: the gate cannot be answered, so it refuses.
+    const c = g.containers.getOrCreate(.{ .x = 3, .y = 70, .z = 1 }, 8, 0).?;
+    c.player_storage = false;
+    c.loot_list = "gateGroup";
+    c.touched = false;
+    g.fillContainerFromLoot(c, "gateGroup", 7, 1, -1);
+    try std.testing.expectEqual(@as(u32, 0), Count.of(c, coin));
+}
+
 test "equipped item mods fold their passives (layer 13, stock data)" {
     // EffectManager.GetValue layer 13 applies a modifier item's effect rows
     // alongside the item's own. Before this only the attachment tags were

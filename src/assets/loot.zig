@@ -42,39 +42,100 @@ pub const LootEntry = struct {
 
 /// One entry's roll-time gate. `none` = ungated; `biome` = the
 /// `LootEntryRequirementBiome` name list (the roll path carries the container's
-/// biome); `other` = a class whose state the roll path does not carry
-/// (`RandomRoll`, `Progression`, `CVar`, `SandboxOption`, `QuestTags`), so the
+/// biome); `progression` / `cvar` / `random_roll` = the classes the roll path
+/// can answer from the opener's requirement context; `other` = a class whose
+/// state the roll path does not carry (`SandboxOption`, `QuestTags`), so the
 /// entry is omitted.
-pub const GateKind = enum { none, biome, other };
+pub const GateKind = enum { none, biome, progression, cvar, random_roll, other };
 
 pub const EntryGate = struct {
     kind: GateKind = .none,
     /// `Biome` requirement `biomes="a,b"` (arena-owned).
     biomes: []const u8 = "",
+    /// `Progression name=` / `CVar cvar=` operand (arena-owned).
+    arg: []const u8 = "",
+    /// `operation=` on every class (stock `RequirementBase::compareValues`).
+    op: requirements.Compare = .eq,
+    /// Literal right-hand `value=`.
+    value: f32 = 0,
+    /// `value="@$name"`: the right-hand side is the entity's custom variable at
+    /// roll time (a missing name reads 0, like `EntityBuffs::GetCustomVar`).
+    value_cvar: []const u8 = "",
+    /// `RandomRoll min_max="a,b"`: the roll's inclusive float range.
+    min_max: [2]f32 = .{ 0, 100 },
 
     pub fn allowed(self: EntryGate, ctx: LootGateCtx) bool {
-        return switch (self.kind) {
-            .none => true,
-            .biome => blk: {
-                const here = ctx.biome_name orelse break :blk false;
+        switch (self.kind) {
+            .none => return true,
+            .biome => {
+                const here = ctx.biome_name orelse return false;
                 var it = std.mem.splitScalar(u8, self.biomes, ',');
                 while (it.next()) |raw| {
                     const nm = std.mem.trim(u8, raw, " \t");
-                    if (nm.len > 0 and std.mem.eql(u8, nm, here)) break :blk true;
+                    if (nm.len > 0 and std.mem.eql(u8, nm, here)) return true;
                 }
-                break :blk false;
+                return false;
             },
-            .other => false,
-        };
+            .progression => {
+                // `LootEntryRequirementProgression` reads the opener's level of
+                // `name`; stock's ProgressionLevel refuses when the target has
+                // no such value, so an unknown name fails the gate.
+                const player = ctx.player orelse return false;
+                const r = requirements.Requirement{
+                    .kind = .progression_level,
+                    .arg = self.arg,
+                    .op = self.op,
+                    .value = self.value,
+                };
+                return requirements.all(&[_]requirements.Requirement{r}, player);
+            },
+            .cvar => {
+                const player = ctx.player orelse return false;
+                const r = requirements.Requirement{
+                    .kind = .cvar_compare,
+                    .arg = self.arg,
+                    .op = self.op,
+                    .value = self.value,
+                };
+                return requirements.all(&[_]requirements.Requirement{r}, player);
+            },
+            .random_roll => {
+                // Stock `LootEntryRequirementRandomRoll`: LeftSide =
+                // Lerp(minMax.x, minMax.y, RandomFloat), RightSide =
+                // GetFloatValue(opener, value, 0). The roll comes from the
+                // roll path's deterministic stream (ctx.roll), so a re-roll
+                // with the same seed is reproducible (rule 22).
+                const player = ctx.player orelse return false;
+                const left = self.min_max[0] + (self.min_max[1] - self.min_max[0]) * ctx.roll;
+                const right = if (self.value_cvar.len > 0)
+                    requirements.cvarValue(player, self.value_cvar)
+                else
+                    self.value;
+                return requirements.compare(left, self.op, right);
+            },
+            .other => return false,
+        }
     }
 };
 
 /// Roll-time state a loot entry gate can read. `biome_name` is the biome the
 /// container/roll sits in, resolved from biomes.xml (`biome_layers.nameById`);
 /// null means the caller has no biome, so a biome-gated entry is omitted.
+/// `player` is the opener's requirement context (levels + cvars); null means
+/// no opener state was available, so a Progression/CVar/RandomRoll gate refuses
+/// and the entry stays omitted rather than rolling unconditionally.
 pub const LootGateCtx = struct {
     biome_name: ?[]const u8 = null,
+    player: ?requirements.Ctx = null,
+    /// [0,1) value for this entry's `RandomRoll`; the roll path advances a
+    /// deterministic per-entry stream into it.
+    roll: f32 = 0,
 };
+
+/// [0,1) from the roll stream's top 24 bits (the `RandomRoll` value).
+fn unitRoll(s: u32) f32 {
+    return @as(f32, @floatFromInt(s >> 8)) / 16777216.0;
+}
 
 /// One `<loot level="a,b" prob="p"/>` row of a `<lootprobtemplate>`.
 pub const ProbBand = struct {
@@ -284,7 +345,9 @@ pub const LootTable = struct {
             var i: u8 = 0;
             while (i < g.entry_n and n < picks and n < out.len) : (i += 1) {
                 const e = g.entries[i];
-                if (!e.gate.allowed(ctx)) continue;
+                var gctx = ctx;
+                gctx.roll = unitRoll(s ^ @as(u32, i));
+                if (!e.gate.allowed(gctx)) continue;
                 if (e.is_group) {
                     n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt, ctx);
                 } else {
@@ -318,7 +381,9 @@ pub const LootTable = struct {
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
             const picked = g.entries[chosen];
-            if (!picked.gate.allowed(ctx)) continue;
+            var gctx = ctx;
+            gctx.roll = unitRoll(s);
+            if (!picked.gate.allowed(gctx)) continue;
             if (picked.force_prob) {
                 if (!self.probGate(picked, loot_stage, s)) {
                     continue;
@@ -355,7 +420,9 @@ pub const LootTable = struct {
         var i: u8 = 0;
         while (i < cont.entry_n and n < out.len) : (i += 1) {
             const e = cont.entries[i];
-            if (!e.gate.allowed(ctx)) continue;
+            var gctx = ctx;
+            gctx.roll = unitRoll(s ^ @as(u32, i));
+            if (!e.gate.allowed(gctx)) continue;
             s = s *% 1103515245 +% 12345;
             // Every entry rolls its own prob (stock LootContainer.roll): a
             // force_prob entry gates independently (stock forceProb branch)
@@ -414,7 +481,9 @@ pub const LootTable = struct {
             var ai: u8 = 0;
             while (ai < g.entry_n and an < out.len) : (ai += 1) {
                 const e = g.entries[ai];
-                if (!e.gate.allowed(ctx)) continue;
+                var gctx = ctx;
+                gctx.roll = unitRoll(s ^ @as(u32, ai));
+                if (!e.gate.allowed(gctx)) continue;
                 s = s *% 1103515245 +% 12345;
                 if (e.force_prob and !self.probGate(e, loot_stage, s)) continue;
                 if (e.is_group) {
@@ -463,7 +532,9 @@ pub const LootTable = struct {
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
             const picked_e = g.entries[chosen];
-            if (!picked_e.gate.allowed(ctx)) continue;
+            var gctx = ctx;
+            gctx.roll = unitRoll(s);
+            if (!picked_e.gate.allowed(gctx)) continue;
             // A picked entry still has to clear its loot stage band, so a
             // low-stage player cannot pull a top-tier item out of a group.
             // A force_prob entry rolls its prob independently.
@@ -625,8 +696,32 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
     if (std.mem.findPos(u8, inner, 0, "<requirement")) |req_at| {
         const abs = tag_at + req_at;
         const class = xml.attr(tag_src, abs, "class") orelse "";
+        const op = requirements.parseCompare(xml.attr(tag_src, abs, "operation") orelse "");
         if (std.mem.eql(u8, class, "Biome")) {
             gate = .{ .kind = .biome, .biomes = xml.attr(tag_src, abs, "biomes") orelse "" };
+        } else if (std.mem.eql(u8, class, "Progression")) {
+            gate = .{
+                .kind = .progression,
+                .arg = xml.attr(tag_src, abs, "name") orelse "",
+                .op = op,
+                .value = xml.parseF32(xml.attr(tag_src, abs, "value") orelse "") orelse 0,
+            };
+        } else if (std.mem.eql(u8, class, "CVar")) {
+            gate = .{
+                .kind = .cvar,
+                .arg = xml.attr(tag_src, abs, "cvar") orelse "",
+                .op = op,
+                .value = xml.parseF32(xml.attr(tag_src, abs, "value") orelse "") orelse 0,
+            };
+        } else if (std.mem.eql(u8, class, "RandomRoll")) {
+            const value = xml.attr(tag_src, abs, "value") orelse "";
+            gate = .{
+                .kind = .random_roll,
+                .op = op,
+                .value = xml.parseF32(value) orelse 0,
+                .value_cvar = cvarOperand(value),
+                .min_max = parseMinMax(xml.attr(tag_src, abs, "min_max") orelse "0,100"),
+            };
         } else {
             gate = .{ .kind = .other };
         }
@@ -650,6 +745,36 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
         .gate = gate,
     };
+}
+
+/// `min_max="a,b"` on a RandomRoll requirement; a bare number is both ends.
+fn parseMinMax(s: []const u8) [2]f32 {
+    const comma = std.mem.findScalar(u8, s, ',') orelse {
+        const v = xml.parseF32(s) orelse 0;
+        return .{ v, v };
+    };
+    return .{
+        xml.parseF32(std.mem.trim(u8, s[0..comma], " \t")) orelse 0,
+        xml.parseF32(std.mem.trim(u8, s[comma + 1 ..], " \t")) orelse 100,
+    };
+}
+
+/// `value="@$name"` / `value="@name"` names the entity's cvar; anything else is
+/// a literal. `@:` is a localization key, never an operand.
+fn cvarOperand(v: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, v, "@$")) return v[2..];
+    if (std.mem.startsWith(u8, v, "@")) return v[1..];
+    return "";
+}
+
+/// Deep-copy the arena-owned slices of one gate (the source buffer dies when
+/// the parse returns).
+fn dupeGate(arena: std.mem.Allocator, g: EntryGate) !EntryGate {
+    var out = g;
+    if (out.biomes.len > 0) out.biomes = try arena.dupe(u8, out.biomes);
+    if (out.arg.len > 0) out.arg = try arena.dupe(u8, out.arg);
+    if (out.value_cvar.len > 0) out.value_cvar = try arena.dupe(u8, out.value_cvar);
+    return out;
 }
 
 /// `level="a,b"` on a `<loot>` band; a bare number covers exactly that level.
@@ -839,7 +964,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
                 // The gate's biome list points into the freed source text.
-                if (e.gate.biomes.len > 0) e.gate.biomes = try arena.dupe(u8, ent.gate.biomes);
+                e.gate = try dupeGate(arena, ent.gate);
                 g.entries[g.entry_n] = e;
                 g.entry_n += 1;
             }
@@ -911,7 +1036,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
-                if (e.gate.biomes.len > 0) e.gate.biomes = try arena.dupe(u8, ent.gate.biomes);
+                e.gate = try dupeGate(arena, ent.gate);
                 c.entries[c.entry_n] = e;
                 c.entry_n += 1;
             }
@@ -1317,7 +1442,9 @@ test "stock loot: a requirement-gated entry is omitted, not rolled at 100%" {
     var gated = false;
     for (crate.entries[0..crate.entry_n]) |e| {
         if (std.mem.eql(u8, e.name, "groupWorkingStiffsBooks")) {
-            try std.testing.expectEqual(GateKind.other, e.gate.kind);
+            try std.testing.expectEqual(GateKind.random_roll, e.gate.kind);
+            try std.testing.expectEqualStrings("perkBookwormChance", e.gate.value_cvar);
+            try std.testing.expectEqual(requirements.Compare.le, e.gate.op);
             gated = true;
         } else if (std.mem.eql(u8, e.name, "groupWorkingStiffs01")) {
             try std.testing.expectEqual(GateKind.none, e.gate.kind);
@@ -1375,7 +1502,7 @@ test "stock loot: a Biome-gated entry rolls in its biome, omitted elsewhere" {
             saw_biome = true;
         }
         if (std.mem.eql(u8, e.name, "booksAllScaled")) {
-            try std.testing.expectEqual(GateKind.other, e.gate.kind);
+            try std.testing.expectEqual(GateKind.random_roll, e.gate.kind);
             saw_other = true;
         }
     }
@@ -1404,4 +1531,101 @@ test "stock loot: a Biome-gated entry rolls in its biome, omitted elsewhere" {
     try std.testing.expect((EntryGate{ .kind = .biome, .biomes = "forest,wasteland" }).allowed(.{ .biome_name = "wasteland" }));
     try std.testing.expect(!(EntryGate{ .kind = .biome, .biomes = "forest" }).allowed(.{ .biome_name = "wasteland" }));
     try std.testing.expect(!(EntryGate{ .kind = .biome, .biomes = "forest" }).allowed(.{}));
+}
+
+test "loot requirement gates: Progression, CVar and RandomRoll evaluation" {
+    // `LootEntryRequirementProgression` / `CVar` / `RandomRoll` read the
+    // opening player's state. The evaluator takes the same requirements.Ctx the
+    // buff/perk VM uses, so the progression and cvar semantics live in one
+    // place. A missing opener ctx leaves every one of them refused (the entry
+    // stays omitted), which is the pre-evaluator behaviour.
+    const cvars = @import("cvars.zig");
+    var store: cvars.Set = .{};
+    _ = store.apply("perkBookwormChance", .set, 50);
+    _ = store.apply("perkBookworm", .set, 1);
+    const levels = [_]requirements.NameLevel{
+        .{ .name = "perkTreasureHunter", .level = 5 },
+    };
+    const player: requirements.Ctx = .{ .levels = &levels, .cvars = &store };
+    const no_player: LootGateCtx = .{};
+
+    // Progression: GTE 4 passes at level 5, fails at a level below it, and an
+    // unknown progression name fails closed (stock ProgressionLevel refuses).
+    const prog = EntryGate{ .kind = .progression, .arg = "perkTreasureHunter", .op = .ge, .value = 4 };
+    try std.testing.expect(prog.allowed(.{ .player = player }));
+    try std.testing.expect(!prog.allowed(no_player));
+    const prog_hi = EntryGate{ .kind = .progression, .arg = "perkTreasureHunter", .op = .ge, .value = 6 };
+    try std.testing.expect(!prog_hi.allowed(.{ .player = player }));
+    const prog_eq5 = EntryGate{ .kind = .progression, .arg = "perkTreasureHunter", .op = .eq, .value = 5 };
+    try std.testing.expect(prog_eq5.allowed(.{ .player = player }));
+    const prog_unknown = EntryGate{ .kind = .progression, .arg = "perkNope", .op = .ge, .value = 1 };
+    try std.testing.expect(!prog_unknown.allowed(.{ .player = player }));
+
+    // CVar: EQ 1 passes on the set cvar, fails on another value/name.
+    const cvar = EntryGate{ .kind = .cvar, .arg = "perkBookworm", .op = .eq, .value = 1 };
+    try std.testing.expect(cvar.allowed(.{ .player = player }));
+    const cvar_zero = EntryGate{ .kind = .cvar, .arg = "perkBookworm", .op = .eq, .value = 0 };
+    try std.testing.expect(!cvar_zero.allowed(.{ .player = player }));
+
+    // RandomRoll (`min_max="0,100" operation="LTE" value="@$perkBookwormChance"`):
+    // LeftSide = Lerp(min, max, roll), RightSide = the cvar. chance 50 passes at
+    // roll 0.5 and fails at 0.6; chance 100 always passes; chance 0 passes only
+    // at roll 0 (the stock `RandomFloat` boundary).
+    const roll50 = EntryGate{
+        .kind = .random_roll,
+        .op = .le,
+        .value_cvar = "perkBookwormChance",
+        .min_max = .{ 0, 100 },
+    };
+    try std.testing.expect(roll50.allowed(.{ .player = player, .roll = 0.5 }));
+    try std.testing.expect(!roll50.allowed(.{ .player = player, .roll = 0.6 }));
+    try std.testing.expect(!roll50.allowed(no_player));
+    var zero_store: cvars.Set = .{};
+    _ = zero_store.apply("perkBookwormChance", .set, 0);
+    const zero_player: requirements.Ctx = .{ .levels = &levels, .cvars = &zero_store };
+    try std.testing.expect(roll50.allowed(.{ .player = zero_player, .roll = 0 }));
+    try std.testing.expect(!roll50.allowed(.{ .player = zero_player, .roll = 0.01 }));
+    // A literal value (a modded row) needs no cvar.
+    const roll_lit = EntryGate{ .kind = .random_roll, .op = .le, .value = 25, .min_max = .{ 0, 100 } };
+    try std.testing.expect(roll_lit.allowed(.{ .player = player, .roll = 0.2 }));
+    try std.testing.expect(!roll_lit.allowed(.{ .player = player, .roll = 0.3 }));
+}
+
+test "loot requirement gates: parse the stock shapes from XML" {
+    const src =
+        \\<lootcontainers>
+        \\<lootcontainer name="gateTest" size="8,1" count="2">
+        \\  <item name="casinoCoin" count="100,200">
+        \\    <requirement class="Progression" name="perkTreasureHunter" operation="GTE" value="4"/>
+        \\  </item>
+        \\  <item name="resourceScrapIron">
+        \\    <requirement class="RandomRoll" seed_type="Random" min_max="0,100" operation="LTE" value="@$perkBookwormChance"/>
+        \\  </item>
+        \\  <item name="resourceScrapBrass">
+        \\    <requirement class="CVar" cvar="perkBookworm" operation="Equals" value="1"/>
+        \\  </item>
+        \\  <item name="resourceScrapLead">
+        \\    <requirement class="SandboxOption" option="HarvestingOutput" operation="EQ" value="0"/>
+        \\  </item>
+        \\</lootcontainer>
+        \\</lootcontainers>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, src);
+    defer lt.deinit();
+    const c = lt.containerByName("gateTest") orelse return error.TestUnexpectedResult;
+    // Entry order is document order; each gate keeps the class it parsed.
+    try std.testing.expectEqual(GateKind.progression, c.entries[0].gate.kind);
+    try std.testing.expectEqualStrings("perkTreasureHunter", c.entries[0].gate.arg);
+    try std.testing.expectEqual(requirements.Compare.ge, c.entries[0].gate.op);
+    try std.testing.expectEqual(@as(f32, 4), c.entries[0].gate.value);
+    try std.testing.expectEqual(GateKind.random_roll, c.entries[1].gate.kind);
+    try std.testing.expectEqual(@as(f32, 0), c.entries[1].gate.min_max[0]);
+    try std.testing.expectEqual(@as(f32, 100), c.entries[1].gate.min_max[1]);
+    try std.testing.expectEqualStrings("perkBookwormChance", c.entries[1].gate.value_cvar);
+    try std.testing.expectEqual(GateKind.cvar, c.entries[2].gate.kind);
+    try std.testing.expectEqualStrings("perkBookworm", c.entries[2].gate.arg);
+    // "Equals" is a stock spelling of EQ (OperationTypes).
+    try std.testing.expectEqual(requirements.Compare.eq, c.entries[2].gate.op);
+    // SandboxOption is still unanswerable at roll time, so it stays omitted.
+    try std.testing.expectEqual(GateKind.other, c.entries[3].gate.kind);
 }
