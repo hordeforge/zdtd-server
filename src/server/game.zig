@@ -3626,8 +3626,20 @@ pub const Game = struct {
         game_chunk_fill.tryVendingSpill(self, x, y, z);
     }
 
-    pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
-        game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed);
+    pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32) void {
+        game_chunk_fill.fillContainerFromLoot(self, cont, loot_name, seed, loot_stage);
+    }
+
+    /// Derive a container's grid from loot.xml without rolling it (the roll
+    /// waits for the first open; `game/chunk_fill.zig`).
+    pub fn setContainerSizeFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8) void {
+        game_chunk_fill.setContainerSizeFromLoot(self, cont, loot_name);
+    }
+
+    /// The roll a container gets when a player opens it (stock
+    /// LootManager.LootContainerOpened + the LootRespawnDays re-roll).
+    pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_peer: usize) void {
+        game_chunk_fill.ensureContainerLoot(self, cont, opener_peer);
     }
 
     /// Stock CheckDestroyTileEntity on container unlock (close): a loot def
@@ -3639,10 +3651,6 @@ pub const Game = struct {
     /// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
     /// container re-rolls its contents when the interval since the touch day
     /// has elapsed (game/chunk_fill.zig).
-    pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
-        game_chunk_fill.maybeRespawnContainer(self, cont);
-    }
-
     pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
         return game_chunk_stream.sendContainersInChunk(self, peer, cx, cz);
     }

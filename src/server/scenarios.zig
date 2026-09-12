@@ -8965,6 +8965,64 @@ test "scenario a land claim blocks a non-owner's SetBlock" {
     std.debug.print("PASS claim-gate: non-owner denied inside the claim, owner allowed\n", .{});
 }
 
+test "scenario world container loot rolls on first open, not at load" {
+    // Stock LootManager.LootContainerOpened rolls a placed container when a
+    // player first opens it, with that opener's loot stage; zdtd used to roll
+    // at chunk/prefab load with the party stage, so the contents (and the stage
+    // behind them) existed before anyone saw the chest. This pins the deferred
+    // roll: empty and untouched after creation, rolled and stamped on open,
+    // and player-placed storage never auto-rolls.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_lootopen");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_lootopen", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    var frame_buf: [8192]u8 = undefined;
+    var req: [36]u8 = undefined;
+
+    // A world container as the chunk scan leaves it: sized, loot list known,
+    // nothing rolled.
+    const chest_id: u16 = @intCast(packages.stock_deco.cnt_wooden_chest_closed);
+    const pos = containers_mod.PosKey{ .x = 251, .y = 70, .z = 251 };
+    const cont = g.containers.getOrCreate(pos, 8, chest_id) orelse return error.TestUnexpectedResult;
+    cont.player_storage = false;
+    cont.loot_list = "woodenChest"; // what setContainerSizeFromLoot installs
+    try std.testing.expect(!cont.touched);
+    for (cont.slots[0..cont.slot_count]) |s| try std.testing.expectEqual(@as(u16, 0), s.count);
+
+    @memcpy(req[0..16], &cont.inv_guid);
+    std.mem.writeInt(i32, req[16..20], 0, .little);
+    @memcpy(req[20..36], &cont.inv_guid);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    try std.testing.expect(cont.touched);
+    try std.testing.expectEqual(g.sim.director.clock.day, cont.touched_day);
+    var rolled: usize = 0;
+    for (cont.slots[0..cont.slot_count]) |s| {
+        if (s.count > 0 and s.item_id != 0) rolled += 1;
+    }
+    try std.testing.expect(rolled > 0);
+
+    // Player-placed storage is the player's own: opening it never rolls.
+    const ppos = containers_mod.PosKey{ .x = 253, .y = 70, .z = 253 };
+    const pcont = g.containers.getOrCreate(ppos, 8, chest_id) orelse return error.TestUnexpectedResult;
+    pcont.player_storage = true;
+    pcont.loot_list = "woodenChest";
+    @memcpy(req[0..16], &pcont.inv_guid);
+    std.mem.writeInt(i32, req[16..20], 0, .little);
+    @memcpy(req[20..36], &pcont.inv_guid);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageInventoryDataRequest", &req));
+    try std.testing.expect(!pcont.touched);
+    for (pcont.slots[0..pcont.slot_count]) |s| try std.testing.expectEqual(@as(u16, 0), s.count);
+    std.debug.print("PASS loot-open: world chest rolls {d} stacks on first open, player storage untouched\n", .{rolled});
+}
+
 test "scenario container loot respawns after LootRespawnDays" {
     io_fs.mkdirPath("worlds");
     freshScenarioDir("worlds/zdtd_sc_lootrespawn");

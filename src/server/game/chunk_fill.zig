@@ -298,7 +298,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                     // Fail closed (audit A31): a storage block with no
                     // LootList stays empty instead of inventing woodenChest.
                     if (self.maxdamage.lootListFor(id)) |ll| {
-                        self.fillContainerFromLoot(cont, ll, lootSeedAt(wx, y, wz));
+                        self.setContainerSizeFromLoot(cont, ll);
                     }
                 }
                 found += 1;
@@ -376,7 +376,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
                 if (cont.slots[0].count == 0 and cont.slots[1].count == 0) {
                     // Fail closed (audit A31): no LootList, no invented loot.
                     if (tc.g.maxdamage.lootListFor(block_id)) |ll| {
-                        tc.g.fillContainerFromLoot(cont, ll, lootSeedAt(wx, wy, wz));
+                        tc.g.setContainerSizeFromLoot(cont, ll);
                     }
                 }
                 tc.found.* += 1;
@@ -400,7 +400,7 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     }
 }
 
-pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32) void {
+pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32) void {
     // Remember the table that filled this container: the destroy_on_close
     // check on unlock reads it (ShouldDestroyOnClose, loot-economy.md 454).
     cont.loot_list = loot_name;
@@ -423,7 +423,7 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     const gate_ctx: assets_loot.LootGateCtx = .{
         .biome_name = self.world.biome_layers_table.nameById(biome_id),
     };
-    var n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, stacks[0..cont.slot_count], gate_ctx);
+    var n = self.loot.rollContainer(loot_name, loot_stage, seed, stacks[0..cont.slot_count], gate_ctx);
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
     // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
     const sv = self.plugins.lootRoll(loot_name, @intCast(n));
@@ -449,20 +449,50 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
         cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = q });
         si += 1;
     }
-    // LootRespawnDays base: the day this loot was generated.
+    // Stock sets `bTouched` and `worldTimeTouched` BEFORE the roll
+    // (LootManager.LootContainerOpened), so an empty roll still stops the
+    // container from re-rolling until the LootRespawnDays interval elapses.
+    cont.touched = true;
     cont.touched_day = self.sim.director.clock.day;
 }
 
-/// LootRespawnDays (stock TEFeatureStorage.UpdateTick): a looted world
-/// container re-rolls its contents when the interval since the touch day
-/// has elapsed. Player-placed storage never respawns. The next open
-/// regenerates fresh loot; the cycle-varying seed makes each respawn
-/// differ while staying deterministic per (pos, cycle). A block without a
-/// LootList stays empty (fail closed, audit A31), never woodenChest.
-pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void {
-    if (self.loot_respawn_days == 0) return;
+/// Derive a container's storage grid from loot.xml without rolling it. Stock's
+/// TE carries the `LootContainer` size from the block's loot list, while the
+/// roll itself waits for the first open (`LootManager.LootContainerOpened`), so
+/// the chunk/prefab scan sizes the grid here and leaves the contents empty.
+pub fn setContainerSizeFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8) void {
+    cont.loot_list = loot_name;
+    if (self.loot.containerByName(loot_name)) |lc| {
+        const want = @min(@as(usize, lc.size_x) * @as(usize, lc.size_y), containers_mod.max_container_slots);
+        if (want >= 1) cont.slot_count = @intCast(want);
+    }
+}
+
+/// LootManager.LootContainerOpened + TEFeatureStorage.UpdateTick: the roll a
+/// container gets when a player opens it. An untouched world container rolls
+/// here with the **opener's** loot stage (stock's input) and stamps
+/// `bTouched`/`worldTimeTouched`; an already-touched, emptied container re-rolls
+/// once the LootRespawnDays interval has elapsed. Player-placed storage never
+/// rolls, and a block without a LootList stays empty (fail closed, audit A31).
+pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_peer: usize) void {
     if (cont.player_storage) return;
-    if (!cont.touched) return;
+    const id: u16 = @truncate(@as(u32, @bitCast(cont.block_id)));
+    const pos = cont.pos;
+    // Stock resolves the table by the TE's stored `lootListName`, falling back
+    // to the block's LootList.
+    const resolved = if (cont.loot_list.len > 0) cont.loot_list else (self.maxdamage.lootListFor(id) orelse "");
+    if (!cont.touched) {
+        if (resolved.len == 0) return;
+        const ll = resolved;
+        self.fillContainerFromLoot(
+            cont,
+            ll,
+            lootSeedAt(pos.x, pos.y, pos.z),
+            self.lootStageForPlayer(opener_peer),
+        );
+        return;
+    }
+    if (self.loot_respawn_days == 0) return;
     var empty = true;
     for (cont.slots[0..cont.slot_count]) |s| {
         if (s.count > 0 and s.item_id != 0) {
@@ -478,15 +508,15 @@ pub fn maybeRespawnContainer(self: *Game, cont: *containers_mod.Container) void 
     // rejected the future case.
     const elapsed = day -% cont.touched_day;
     if (elapsed < self.loot_respawn_days) return;
-    const id: u16 = @truncate(@as(u32, @bitCast(cont.block_id)));
     const cycle: u32 = day / self.loot_respawn_days;
-    const pos = cont.pos;
     // Fail closed (audit A31): no LootList, the container stays empty.
-    const ll = self.maxdamage.lootListFor(id) orelse return;
+    if (resolved.len == 0) return;
+    const ll = resolved;
     self.fillContainerFromLoot(
         cont,
         ll,
         lootSeedAt(pos.x, pos.y, pos.z) +% cycle *% 2654435761,
+        self.lootStageForPlayer(opener_peer),
     );
 }
 

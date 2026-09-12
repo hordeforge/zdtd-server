@@ -7,6 +7,25 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Container loot is now rolled when a player first opens the container, not
+  when the chunk loads. Stock's `LootManager.LootContainerOpened` rolls a placed
+  container on first open with the **opening player's** loot stage, sets
+  `bTouched` and stamps `worldTimeTouched` (before the roll, so an empty roll
+  still stops the container re-rolling until `LootRespawnDays` elapse), and
+  rolls only if the container is empty; zdtd rolled at chunk/prefab scan time
+  with a party-wide stage. A chest therefore held the loot (and the loot stage)
+  it had when its chunk happened to load, and the opener's progression could
+  never reach the entry gates. The scan now only sizes the grid from loot.xml
+  (`setContainerSizeFromLoot`), and `ensureContainerLoot` on the
+  `InventoryDataRequest` open path does the roll with `lootStageForPlayer`, the
+  container's biome, and the TE's own loot-list name (falling back to the
+  block's LootList). The `LootRespawnDays` re-roll uses the same opener stage,
+  player-placed storage still never auto-rolls, and a block without a LootList
+  stays empty. `worldTimeTouched` is kept per day (ZCT2 `touched_day`) rather
+  than exact world time, which only coarsens the respawn interval.
+
+### Fixed
+
 - Loot entries gated by a `<requirement>` were rolled as if ungated. `loot.xml`
   carries 87 such rows (63 `RandomRoll`, 14 `Progression`, 5 `Biome`, 3
   `SandboxOption`, 1 `QuestTags`, 1 `CVar`), and zdtd's loader ignored the child

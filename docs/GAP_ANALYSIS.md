@@ -2282,11 +2282,10 @@ can walk into every POI but none of them is the building TFP authored.
   resolve and their entries roll again; the `$perkBookwormChance` cvar is
   written by a `onSelfProgressionUpdate` triggered row that zdtd does not fire
   yet, so even with the evaluator a perk owner would read 0. Underneath that is
-  a timing difference (PROVENANCE 3.9, P2): stock rolls a placed container on
-  first open with the **opener's** loot stage (`LootManager.LootContainerOpened`,
-  `bTouched` + `worldTimeTouched`), while zdtd rolls at chunk/prefab load with
-  `partyLootStage()`, so a container's contents (and the stage that made them)
-  are fixed before any player sees it and the opener's state is unreachable.
+  a timing difference that is now fixed (2026-09-12): the chunk/prefab scan
+  sizes the grid only and the roll happens on the open path with the **opener's**
+  loot stage (`LootManager.LootContainerOpened`, `bTouched` + `worldTimeTouched`
+  stamped at open), so the opener's state is available to the gates.
   *Anchors:* `src/server/game.zig` fill sites, `src/assets/maxdamage.zig`
   `lootListFor`, `Data/Config/blocks.xml`, `Data/Config/loot.xml`
 

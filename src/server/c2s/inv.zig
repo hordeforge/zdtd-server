@@ -934,9 +934,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Serve TE container slots when Guid matches our deterministic pos-key.
         if (packages.parseInvDataRequestStock(body)) |req| {
             if (self.containers.getByGuid(&req.inventory_key)) |cont| {
-                // LootRespawnDays: a looted world container re-rolls here
-                // when its interval has elapsed (before the slots serve).
-                self.maybeRespawnContainer(cont);
+                // Stock LootManager.LootContainerOpened: an untouched world
+                // container rolls here with the opener's loot stage (the roll
+                // no longer happens at chunk load), and a looted one re-rolls
+                // once LootRespawnDays have elapsed.
+                self.ensureContainerLoot(cont, c.slot);
                 var slots: [containers_mod.max_container_slots]packages.stock_inv.StockSlot =
                     [_]packages.stock_inv.StockSlot{.{}} ** containers_mod.max_container_slots;
                 var si: usize = 0;

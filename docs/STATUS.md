@@ -8,7 +8,20 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Loadgen Navezgane mixed-mode smoke 2026-09-12
+`lint-architecture: clean`). **Container loot rolls on first open 2026-09-12**:
+the chunk/prefab scan sizes a container's grid from loot.xml only
+(`setContainerSizeFromLoot`) and the roll moved to the open path
+(`ensureContainerLoot` on `InventoryDataRequest`, stock
+`LootManager.LootContainerOpened`), where it uses the **opener's** loot stage
+(`lootStageForPlayer`), the container's biome, and the TE's loot-list name;
+`touched`/`touched_day` are stamped at open even for an empty roll, the
+`LootRespawnDays` re-roll uses the same stage, player-placed storage never
+auto-rolls and a block without a LootList stays empty. Gated by
+`scenario world container loot rolls on first open, not at load` (empty and
+untouched before the open, rolled and stamped after, player storage untouched)
+plus the existing respawn scenario; `zig build test` 1797 passed / 3 skipped /
+0 failed.
+**Loadgen Navezgane mixed-mode smoke 2026-09-12
 (round 19, post damage/loot changes)**: on the current commit (passive-43 EDR +
 `AffectedByArmor` source gate + loot `EntryGate`) the real map loaded (loot
 groups=1015 containers=339, 1559 prefabs) and 2 mixed-mode bots
