@@ -660,7 +660,8 @@ pub const WorldgenGroup = struct {
 /// AIDirector policy (stock values, RE-cited in aidirector.zig): the wandering
 /// horde schedule (start tick + min/max gap in world ticks) and spawn
 /// distance/size, plus the chunk-heat spawner constants (heat threshold,
-/// check/cooldown cadence, scout distance/count, feral roll). Only constants
+/// check cadence, spawn chance, short/long cooldowns, scout distance/count).
+/// Only constants
 /// the code actually reads are surfaced (YAGNI; `heat_event_ticks` was doc-only
 /// until craft.zig started stamping it - it now is a rule). Provenance:
 /// PROVENANCE.md §3.7.

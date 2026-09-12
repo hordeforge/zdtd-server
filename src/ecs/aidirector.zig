@@ -1267,8 +1267,9 @@ pub const Director = struct {
     }
 
     /// AIDirectorChunkEventComponent::Tick: decay region activity (events
-    /// expire), then every 5 s run CheckToSpawn: a region at/above 25 spawns a
-    /// scout party toward its center and cooldowns itself and its neighbors.
+    /// expire), then every 5 s run CheckToSpawn: a region at/above 25 resets,
+    /// and the `heat_spawn_chance` roll decides whether it spawns a scout party
+    /// toward its center and takes the long cooldown table, or only cools.
     fn tickHeat(self: *Director, w: *ecs_world.World, dt: f32, spawn_z: bool) void {
         var i: usize = 0;
         while (i < self.heat_n) {
