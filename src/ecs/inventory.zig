@@ -175,7 +175,6 @@ pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {
     if (!w.mask[ps].inventory) return false;
     const ok = w.inventory[ps].addItemStacked(item_id, count, w.maxStack(item_id));
     if (ok) {
-        markInv(w, ps);
         // Ledger delta is i16; clamp like the other recordInv callers (admin
         // give parses u16 counts up to 65535, which would trap the cast).
         recordInv(w, peer, item_id, @intCast(@min(count, std.math.maxInt(i16))), .give);
@@ -208,7 +207,6 @@ pub fn collectBagFull(w: *World, peer_slot: usize, bs: Slot) bool {
         const d: i16 = @intCast(@min(slot.count, std.math.maxInt(i16)));
         recordInv(w, peer_slot, slot.item_id, d, .loot);
     }
-    markInv(w, ps);
     return true;
 }
 
@@ -216,7 +214,6 @@ pub fn setHolding(w: *World, peer: usize, slot: u16) bool {
     const ps = w.playerByPeer(peer) orelse return false;
     if (!w.mask[ps].inventory) return false;
     const ok = w.inventory[ps].setHolding(slot);
-    if (ok) markInv(w, ps);
     return ok;
 }
 
@@ -234,7 +231,6 @@ pub fn move(w: *World, peer: usize, from: u16, to: u16, qty: u16) bool {
     if (from >= c.inv_equip_start and dst.count > 0 and !itemIsArmor(w, dst.item_id)) return false;
     const ok = w.inventory[ps].moveSlot(from, to, qty, w.maxStack(item));
     if (ok) {
-        markInv(w, ps);
         const d: i16 = if (qty == 0) 0 else @intCast(@min(qty, std.math.maxInt(i16)));
         recordInv(w, peer, item, d, .tx);
     }
@@ -260,7 +256,6 @@ pub fn drop(w: *World, peer: usize, slot: u16, qty: u16) Result {
             w.inventory[bi].slots[0].meta = taken.meta;
         }
     }
-    markInv(w, ps);
     const d: i16 = -@as(i16, @intCast(@min(taken.count, std.math.maxInt(i16))));
     recordInv(w, peer, taken.item_id, d, .drop);
     return .{ .ok = true, .dropped_entity = bag };
@@ -325,7 +320,6 @@ pub fn degradeUse(w: *World, peer: usize, slot: u16, amount: f32) bool {
         if (f(w.percent_uses_left_ctx, s.item_id, s.quality, before) <= 0) return true;
     }
     s.use_times = before + use_amount;
-    if (s.use_times != before) markInv(w, ps);
     return true;
 }
 
@@ -395,7 +389,6 @@ pub fn useEx(w: *World, peer: usize, slot: u16, resolve: ?EatResolver, ctx: ?*an
         return .{};
     const iid = s.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
-    markInv(w, ps);
     recordInv(w, peer, iid, -1, .eat);
     return applyEatProps(w, ps, props);
 }
@@ -411,7 +404,6 @@ pub fn openContainer(w: *World, peer: usize, container_net: i32) bool {
     if (!withinContainerReach(w, ps, cs)) return false;
     w.inventory[ps].open_container = container_net;
     if (w.mask[cs].loot_bag) w.loot_bag[cs].open = true;
-    markInv(w, ps);
     return true;
 }
 
@@ -476,7 +468,6 @@ pub fn takeFromContainer(w: *World, peer: usize, cont_slot: u16, qty: u16, out_e
         w.inventory[ps].open_container = -1;
         w.destroy(cs);
     }
-    markInv(w, ps);
     const d: i16 = @intCast(@min(taken.count, std.math.maxInt(i16)));
     recordInv(w, peer, taken.item_id, d, .loot);
     return true;
@@ -498,7 +489,6 @@ pub fn putIntoContainer(w: *World, peer: usize, player_slot: u16, qty: u16) bool
         restoreTaken(&w.inventory[ps], player_slot, taken, holding_before);
         return false;
     }
-    markInv(w, ps);
     const d: i16 = -@as(i16, @intCast(@min(taken.count, std.math.maxInt(i16))));
     recordInv(w, peer, taken.item_id, d, .tx);
     return true;
@@ -531,7 +521,6 @@ pub fn placeBlock(w: *World, peer: usize, slot: u16, x: i32, y: i32, z: i32) Res
         if (fv > 0) {
             const iid = item.item_id;
             _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
-            markInv(w, ps);
             recordInv(w, peer, iid, -1, .place);
             return .{
                 .ok = true,
@@ -550,7 +539,6 @@ pub fn placeBlock(w: *World, peer: usize, slot: u16, x: i32, y: i32, z: i32) Res
     if (block == 0) return .{};
     const iid = item.item_id;
     _ = w.inventory[ps].takeFromSlot(slot, 1) orelse return .{};
-    markInv(w, ps);
     recordInv(w, peer, iid, -1, .place);
     return .{ .ok = true, .place_block = block, .place_x = x, .place_y = y, .place_z = z };
 }
@@ -601,10 +589,6 @@ pub fn applyTransactionEx(
         .craft => .{ .ok = false },
         .scrap => .{ .ok = false },
     };
-}
-
-fn markInv(w: *World, ps: Slot) void {
-    w.markDirty(ps, .{ .inv = true });
 }
 
 fn recordInv(w: *World, peer: usize, item_id: u16, delta: i16, cause: InvCause) void {
@@ -921,7 +905,6 @@ test "degradeUse counts uses upward from a pristine zero" {
 
     try std.testing.expect(degradeUse(&w, 0, tool_slot, 1));
     try std.testing.expectEqual(@as(f32, 1), w.inventory[ps].slots[tool_slot].use_times);
-    try std.testing.expect(w.dirty[ps].inv);
 
     // Wear accumulates rather than resetting.
     try std.testing.expect(degradeUse(&w, 0, tool_slot, 4));

@@ -118,7 +118,7 @@ pub const default_pack_toml =
     \\name = "default"
     \\max_spawned_zombies = 64
     \\blood_moon_frequency = 7
-    \\enable_sample_plugin = true
+    \\enable_sample_plugin = false
 ;
 
 /// True when name is a single path segment: [A-Za-z0-9_]{1,64}, no dots/slashes.
@@ -211,7 +211,7 @@ test "parse default pack" {
     try std.testing.expectEqualStrings("default", p.name);
     try std.testing.expectEqual(@as(u16, 64), p.max_spawned_zombies.?);
     try std.testing.expectEqual(@as(u8, 7), p.blood_moon_frequency.?);
-    try std.testing.expectEqual(true, p.enable_sample_plugin.?);
+    try std.testing.expectEqual(false, p.enable_sample_plugin.?);
 }
 
 /// Mirror of the server init-options shape applyToInitOptions writes into.

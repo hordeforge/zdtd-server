@@ -48,7 +48,6 @@ pub fn needsPosSend(d: Dirty, tick_n: u64, period_ticks: u64) bool {
 pub fn clearAfterReplicate(d: *Dirty) void {
     d.pos = false;
     d.rot = false;
-    d.spawn = false;
     d.flags = false;
 }
 
@@ -196,14 +195,13 @@ test "observerMask edges: empty active, radius zero, cross-origin, last lane" {
     try std.testing.expectEqual(@as(u64, 0), observerMask(lanes, &cx, &cz, &rad, top, 100, 103));
 }
 
-test "clearAfterReplicate keeps hp inv remove" {
-    var d: Dirty = .{ .pos = true, .rot = true, .spawn = true, .flags = true, .hp = true, .inv = true, .remove = true };
+test "clearAfterReplicate clears the motion bits and keeps hp" {
+    // hp is consumed by the health pass after the motion pass, so it survives;
+    // pos/rot/flags are fanned out by the pass that clears them.
+    var d: Dirty = .{ .pos = true, .rot = true, .flags = true, .hp = true };
     clearAfterReplicate(&d);
     try std.testing.expect(!d.pos);
     try std.testing.expect(!d.rot);
-    try std.testing.expect(!d.spawn);
     try std.testing.expect(!d.flags);
     try std.testing.expect(d.hp);
-    try std.testing.expect(d.inv);
-    try std.testing.expect(d.remove);
 }

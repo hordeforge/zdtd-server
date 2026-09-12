@@ -9,5 +9,6 @@ name = "default"
 max_spawned_zombies = 64
 blood_moon_frequency = 7
 
-# Static plugin host (src/plugin/); sample_hello when true
-enable_sample_plugin = true
+# Static plugin host (src/plugin/), test scaffolding per ADR 0020 decision 2.
+# Off in the shipped configs; set true only to exercise the native vtable path.
+enable_sample_plugin = false

@@ -776,7 +776,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (ok) {
                         self.sim.inventory[ps].slots = staged;
                         self.clampInventoryStacks(&self.sim.inventory[ps]);
-                        self.sim.markDirty(ps, .{ .inv = true });
                         // Stock minimal ack: success true + count 0 (full
                         // stacks ride only for non-primary players).
                         var ack: [5]u8 = .{ 1, 0, 0, 0, 0 };

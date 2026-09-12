@@ -311,7 +311,6 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
         self.sim.inventory[ps] = inventory_before;
         return false;
     }
-    self.sim.markDirty(ps, .{ .inv = true });
     const p: u16 = if (peer_slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer_slot);
     const d: i16 = @intCast(@min(out_count, std.math.maxInt(i16)));
     self.sim.inv_ledger.record(p, out_id, d, .craft);
@@ -398,7 +397,6 @@ pub fn tryScrap(self: *Game, peer_slot: usize, bag_slot: u16, qty: u16) bool {
         self.sim.inventory[ps] = inventory_before;
         return false;
     }
-    self.sim.markDirty(ps, .{ .inv = true });
     const p: u16 = if (peer_slot > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer_slot);
     const d: i16 = @intCast(@min(out_count, std.math.maxInt(i16)));
     self.sim.inv_ledger.record(p, out_id, d, .craft);

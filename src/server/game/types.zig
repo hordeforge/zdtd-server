@@ -408,8 +408,12 @@ pub const InitOptions = struct {
     /// dialect the server emits (zdtd.toml `[wire] profile`, resolved by
     /// main.zig; default stock). Non-stock needs a paired client mod.
     wire_profile: protocol.WireProfile = .{},
-    /// Register in-tree sample_hello static plugin (logs once on enable).
-    enable_sample_plugin: bool = true,
+    /// Register the in-tree sample_hello static plugin (logs once on enable).
+    /// Default false: ADR 0020 decision 2 calls the native vtable host test
+    /// scaffolding, not a product surface, so the shipped configuration runs
+    /// one plugin mechanism (Wasm). Tests and a deliberate operator opt-in
+    /// (`enable_sample_plugin = true` in a preset) still exercise it.
+    enable_sample_plugin: bool = false,
     /// Seed the near-spawn demo hostiles at world init (2 zombies, a sleeper
     /// and an animal). Default true: a fresh world has something to fight and
     /// the demo turret has targets. Stock spawns these lazily through the

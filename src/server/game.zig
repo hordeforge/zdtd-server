@@ -3585,7 +3585,6 @@ pub const Game = struct {
             while (ci < end and ci < ecs.components.max_inv_slots) : (ci += 1) {
                 self.sim.inventory[victim_slot].slots[ci] = .{};
             }
-            self.sim.markDirty(victim_slot, .{ .inv = true });
             self.broadcastLootSpawn(bag_nid) catch {};
             if (self.clientByEntityId(self.sim.network_id[victim_slot].id)) |vic| {
                 vic.bagged_this_death = true;

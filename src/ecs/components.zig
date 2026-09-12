@@ -1197,13 +1197,14 @@ pub const Dirty = packed struct(u8) {
     rot: bool = false,
     flags: bool = false,
     hp: bool = false,
-    spawn: bool = false,
-    remove: bool = false,
-    inv: bool = false,
-    _pad: bool = false,
+    /// Padding to the u8 backing type. `spawn`/`remove`/`inv` used to live
+    /// here: nothing ever read them, and they were never cleared, so any
+    /// entity that set one stayed in `dirty_bits` forever (ECS review
+    /// 2026-09-12). Marking an entity dirty is `pos`/`flags`/`hp`.
+    _pad: u4 = 0,
 
     pub fn any(self: Dirty) bool {
-        return self.pos or self.rot or self.flags or self.hp or self.spawn or self.remove or self.inv;
+        return self.pos or self.rot or self.flags or self.hp;
     }
 };
 

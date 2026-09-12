@@ -675,7 +675,6 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (!self.sim.inventory[ps].removeItem(coins, chunk)) return true;
                     left -= chunk;
                 }
-                self.sim.markDirty(ps, .{ .inv = true });
             }
         }
         self.sim.wallet[ps].coins -= cost;

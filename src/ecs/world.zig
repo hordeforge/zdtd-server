@@ -1098,7 +1098,7 @@ pub const World = struct {
         self.network_id[s] = .{ .id = nid, .gen = self.slot_gen[s] };
         self.kind[s] = kind;
         self.flags[s] = .{ .bits = c.flag_spawned };
-        self.dirty[s] = .{ .spawn = true, .pos = true };
+        self.dirty[s] = .{ .pos = true };
         self.dirty_bits.set(s);
         const cid: u16 = switch (kind) {
             .player => 0,
@@ -1923,9 +1923,6 @@ pub const World = struct {
         if (bits.rot) self.dirty[slot].rot = true;
         if (bits.flags) self.dirty[slot].flags = true;
         if (bits.hp) self.dirty[slot].hp = true;
-        if (bits.spawn) self.dirty[slot].spawn = true;
-        if (bits.remove) self.dirty[slot].remove = true;
-        if (bits.inv) self.dirty[slot].inv = true;
         if (bits.any()) self.dirty_bits.set(slot);
     }
 
@@ -2284,7 +2281,7 @@ test "alive_bits and dirty_bits survive random spawn destroy churn" {
         switch (rnd.uintLessThan(u8, 4)) {
             0 => _ = w.spawnZombie(rnd.float(f32) * 100, 70, rnd.float(f32) * 100, 40),
             1 => w.destroy(rnd.uintLessThan(Slot, max_entities)),
-            2 => w.markDirty(rnd.uintLessThan(Slot, max_entities), .{ .pos = true, .inv = true }),
+            2 => w.markDirty(rnd.uintLessThan(Slot, max_entities), .{ .pos = true }),
             else => {
                 const s = rnd.uintLessThan(Slot, max_entities);
                 if (w.alive[s]) {
@@ -2313,7 +2310,7 @@ test "slot recycle does not inherit the previous tenant's dirty bit" {
     try w.ensureNetMap(std.testing.allocator);
     const id = w.spawnZombie(0, 70, 0, 40).?;
     const s = w.slotOfNetId(id).?;
-    w.markDirty(s, .{ .hp = true, .inv = true });
+    w.markDirty(s, .{ .hp = true });
     w.destroy(s);
     try std.testing.expect(!w.alive_bits.isSet(s));
     try std.testing.expect(!w.dirty_bits.isSet(s));
@@ -2326,7 +2323,7 @@ test "slot recycle does not inherit the previous tenant's dirty bit" {
     const s2 = w.slotOfNetId(id2).?;
     try std.testing.expectEqual(s, s2);
     try std.testing.expect(w.dirty_bits.isSet(s2));
-    try std.testing.expect(!w.dirty[s2].hp and !w.dirty[s2].inv);
+    try std.testing.expect(!w.dirty[s2].hp);
 }
 
 test "generation-counted handle invalidates after destroy" {
