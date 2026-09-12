@@ -1093,7 +1093,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 weight_declared = true;
                 const w = xml.parseF32(v) orelse 0;
                 if (w > 0 and w <= @as(f32, @floatFromInt(std.math.maxInt(u16)))) {
-                    weight = @intFromFloat(w);
+                    weight = @trunc(w);
                 }
             }
             try stock_weights.append(allocator, weight);

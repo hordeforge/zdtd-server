@@ -320,7 +320,7 @@ pub fn wasmSense(ctx: *plugin_mod.wasm.HostCtx, out: []u8) usize {
         var vy: i32 = 0;
         if (k == 0) {
             if (g.sim.player[s].peer_slot >= 0 and g.sim.player[s].peer_slot < game_mod.max_clients) {
-                vy = @intFromFloat(g.clients[@intCast(g.sim.player[s].peer_slot)].vy_blocks_per_s);
+                vy = @trunc(g.clients[@intCast(g.sim.player[s].peer_slot)].vy_blocks_per_s);
             }
         }
         std.mem.writeInt(i32, r[28..32], vy, .little);

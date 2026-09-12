@@ -77,6 +77,14 @@ pub fn isDroppablePackage(pkg_name: []const u8) bool {
         "NetPackageEntityStatChanged",
         "NetPackageVehiclePositions",
         "NetPackageWorldTime",
+        // SignDataResponse rides the compressed path (isCompressedPackage)
+        // and its MIDDLE batches go out through plain sendGame. A full window
+        // there used to hard-error out of sendSignDataBatches, so the loop
+        // never reached the final batch and the client sat on "Starting Game"
+        // (blocks worldInfoCo until isLastBatch=true). Dropping a middle batch
+        // loses that batch's signs; the final batch is critical and still
+        // must deliver.
+        "NetPackageSignDataResponse",
     };
     for (names) |n| {
         if (std.mem.eql(u8, pkg_name, n)) return true;

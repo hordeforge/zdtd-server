@@ -539,7 +539,7 @@ fn skillCostForLevel(def_cost: u16, mult: f32, level: u8) u32 {
     const v = @as(f32, @floatFromInt(def_cost)) * powf;
     if (!(v > 0)) return 0; // NaN / <= 0; a zero-cost row is free like stock
     if (v >= 65535) return 65535;
-    return @intFromFloat(@trunc(v));
+    return @trunc(v);
 }
 
 /// Catalog-validated cost of buying `skill` at `target_level`, or null when

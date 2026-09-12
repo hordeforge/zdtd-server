@@ -361,7 +361,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
     const prog = self.sim.rules.progression;
     const sv = assets_buffs.survival(&self.buffs);
     const use_buff = sv.ok();
-    if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
+    // Zero depletion rates disable ONLY the two food/water decay writes. This
+    // used to return early, which also skipped drowning, radiation, the
+    // stamina/well-fed folds and the whole buff lifecycle (including the
+    // player class buffs fired by onSelfEnteredGame) whenever a preset turned
+    // survival decay off, e.g. presets/builder.toml.
+    const decay_on = prog.food_depletion_per_hour > 0 or prog.water_depletion_per_hour > 0;
     const game_hours = self.sim.director.clock.hoursFor(dt);
     const secs = dt;
     // Sandbox gates: decode the server's code once per tick rather than per
@@ -442,8 +447,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
         const food_max_was = h.food_max;
         const water_max_was = h.water_max;
         const stamina_max_was = h.stamina_max;
-        h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
-        h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
+        if (decay_on) {
+            h.food = @max(0, h.food - prog.food_depletion_per_hour * game_hours);
+            h.water = @max(0, h.water - prog.water_depletion_per_hour * game_hours);
+        }
         // Well-fed regen and starvation: when buffs.xml is present the
         // thresholds are fractions of max (StatComparePercCurrentToMax); otherwise
         // fall back to Rules. The Rules well_fed_threshold is an absolute that

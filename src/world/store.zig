@@ -710,7 +710,7 @@ pub const World = struct {
     /// u8 fallback height for baked-DTM out-of-bounds samples (geometry sea).
     fn fallbackSeaU8(geo: rules_mod.Geometry) u8 {
         const s = @max(0.0, @min(geo.sea_level, 255.0));
-        return @intFromFloat(s);
+        return @trunc(s);
     }
 
     /// Rewrite a filled height plane through the geometry projection. Non-stock

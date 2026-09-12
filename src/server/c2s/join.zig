@@ -405,6 +405,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // Fallback spawn path when RequestToSpawnPlayer never arrives / fails parse.
         if (c.entity_id > 0) {
             c.view_radius = if (c.view_radius < 1) self.view_radius else c.view_radius;
+            // One deadline for the whole must-deliver bundle (same rule as the
+            // RequestToEnterGame path): without it every sendGameCritical in
+            // the bundle re-arms its own budget and a peer that stops ACKing
+            // costs the tick one full budget per critical package.
+            peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
+            defer peer.critical_budget_deadline_ns = 0;
             try self.sendJoinBundle(c, peer, sp.x, sp.y, sp.z, c.entity_id);
             std.debug.print("zdtd: DynamicClientArrive -> join bundle (spawn fallback) entity={d}\n", .{c.entity_id});
         } else {
@@ -534,6 +540,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         }
         // Death-respawn already sent Spawned+stats; still re-send join bundle so the
         // client re-enters IsSpawned (playtest saw hp=100 but IsSpawned=false without it).
+        // One deadline for the bundle, as in the RequestToEnterGame path.
+        peer.critical_budget_deadline_ns = clock.monoNs() + game_mod.critical_retry_budget_ns;
+        defer peer.critical_budget_deadline_ns = 0;
         try self.sendJoinBundle(c, peer, surf.x, surf.y, surf.z, c.entity_id);
         return true;
     }

@@ -1414,7 +1414,7 @@ pub const World = struct {
         // Deterministic per-hit draw: victim net id folded with hp, the same
         // hash-roll policy as rollLootDrop below.
         var h: u64 = @bitCast(@as(i64, self.network_id[victim].id));
-        h = h *% 1103515245 +% @as(u64, @bitCast(@as(i64, @intFromFloat(self.health[victim].hp * 1000)))) +% 12345;
+        h = h *% 1103515245 +% @as(u64, @bitCast(@as(i64, @trunc(self.health[victim].hp * 1000)))) +% 12345;
         h = (h >> 16) ^ h;
         const draw: f32 = @as(f32, @floatFromInt(h % 100000)) / 100000.0;
         var out: u8 = 0;

@@ -75,6 +75,18 @@ pub fn guidFromPos(pos: PosKey) [16]u8 {
     return g;
 }
 
+/// Inverse of `guidFromPos`: decode a container guid back to its position.
+/// Null when the tag bytes are not ours (a foreign/zero guid must not resolve
+/// to a bogus position).
+pub fn posFromGuid(guid: *const [16]u8) ?PosKey {
+    if (guid[12] != 'Z' or guid[13] != 'T' or guid[14] != 'E' or guid[15] != 1) return null;
+    return .{
+        .x = std.mem.readInt(i32, guid[0..4], .little),
+        .y = std.mem.readInt(i32, guid[4..8], .little),
+        .z = std.mem.readInt(i32, guid[8..12], .little),
+    };
+}
+
 pub const ContainerStore = struct {
     items: [max_containers]Container = undefined,
     /// Lookup key mirror of `items[i].pos`, written by getOrCreate. Only valid
@@ -154,14 +166,9 @@ pub const ContainerStore = struct {
     }
 
     pub fn getByGuid(self: *ContainerStore, guid: *const [16]u8) ?*Container {
-        var seen: usize = 0;
-        var i: usize = 0;
-        while (i < max_containers and seen < self.n) : (i += 1) {
-            if (!self.used[i]) continue;
-            seen += 1;
-            if (std.mem.eql(u8, &self.items[i].inv_guid, guid)) return &self.items[i];
-        }
-        return null;
+        // inv_guid is only ever guidFromPos(pos), so decode the position and
+        // reuse get()'s key-mirror scan instead of striding the ~500 B AoS.
+        return self.get(posFromGuid(guid) orelse return null);
     }
 
     pub fn remove(self: *ContainerStore, pos: PosKey) void {
@@ -484,6 +491,20 @@ test "container get or create" {
     const g = guidFromPos(.{ .x = 1, .y = 70, .z = 2 });
     try std.testing.expectEqualSlices(u8, &g, &c.inv_guid);
     try std.testing.expect(s.getByGuid(&g) == c);
+}
+
+test "container guid decode rejects a foreign tag and round-trips" {
+    const pos = PosKey{ .x = -7, .y = 70, .z = 12345 };
+    const g = guidFromPos(pos);
+    const back = posFromGuid(&g).?;
+    try std.testing.expect(PosKey.eql(pos, back));
+    var foreign = g;
+    foreign[15] = 2; // wrong tag byte; must not decode to a position
+    try std.testing.expect(posFromGuid(&foreign) == null);
+    var s: ContainerStore = .{};
+    _ = s.getOrCreate(pos, 8, 100).?;
+    try std.testing.expect(s.getByGuid(&g) != null);
+    try std.testing.expect(s.getByGuid(&foreign) == null);
 }
 
 test "container persistence retains every full-capacity container" {

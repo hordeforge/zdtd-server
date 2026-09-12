@@ -567,7 +567,7 @@ pub const Geometry = struct {
     pub fn project(self: Geometry, elev_m: f32, profile_max: u32) u32 {
         const v = self.height_offset + self.height_scale * elev_m;
         const c = @max(0.0, @min(v, @as(f32, @floatFromInt(self.ceiling(profile_max)))));
-        return @intFromFloat(c);
+        return @trunc(c);
     }
 
     /// Identity projection: skip the plane rewrite entirely.

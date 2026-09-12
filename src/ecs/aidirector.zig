@@ -552,7 +552,7 @@ pub const Director = struct {
         // spawning.xml per-rule budget gate still applies per spawn
         // (spawnNearPlayers -> budgetFor/budgetAllows).
         if (spawn_z and !self.initial_population_done) {
-            const target: u32 = @intFromFloat(@as(f32, @floatFromInt(cap)) * w.rules.director.initial_population_frac);
+            const target: u32 = @trunc(@as(f32, @floatFromInt(cap)) * w.rules.director.initial_population_frac);
             const gap: u32 = if (alive_z < target) target - alive_z else 0;
             if (gap == 0) {
                 self.initial_population_done = true;
@@ -1329,7 +1329,7 @@ pub const Director = struct {
         if (chance >= 1) return true;
         const h = (ordinal +% 0x9E3779B9) *% 0x85EBCA6B;
         const roll = (h ^ (h >> 16)) % 1000;
-        return roll < @as(u32, @intFromFloat(chance * 1000.0));
+        return roll < @as(u32, @trunc(chance * 1000.0));
     }
 
     /// StartCooldownOnNeighbors: the eight surrounding regions get the shorter
@@ -1479,7 +1479,7 @@ test "starter population fills toward the cap once, batched" {
     try std.testing.expect(w.director.initial_population_done);
     try std.testing.expect(w.countKind(.zombie) > 0);
     // Never overshoots the target (0.25 x 64 = 16).
-    const target: u32 = @intFromFloat(64.0 * w.rules.director.initial_population_frac);
+    const target: u32 = @trunc(64.0 * w.rules.director.initial_population_frac);
     try std.testing.expect(w.countKind(.zombie) <= target);
     // The fill does not re-fire: daytime has no horde drip, so the count
     // stays put once the target is reached.

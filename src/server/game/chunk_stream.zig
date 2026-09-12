@@ -229,9 +229,13 @@ pub fn drainSpawnArea(self: *Game, c: *Client, budget: *u32) !void {
         const cz = c.pending_area_cz + cell.dz;
         const key = packages.makeChunkKey(cx, cz);
         if (clientHasStreamed(c, key)) continue;
-        if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
-        clientAddStreamed(self, c, key);
+        // Charge the shared budget per ATTEMPT, not per delivery: a refused
+        // send (full reliable window) has already paid worldgen + encode, so
+        // an untouched budget let one wedged peer walk every ring cell in a
+        // single tick. Stop the pass on refusal; the rest retries next tick.
         budget.* -= 1;
+        if (!try self.sendSpawnChunk(peer, cx, cz)) return;
+        clientAddStreamed(self, c, key);
         // ACK-yield between drain chunks, same as the join core: a bursted
         // batch overflows the reliable window (measured 257 drops without it;
         // loopback RTT ~100 µs, so the 500 µs yield drains the window per
@@ -323,7 +327,11 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                 const key = packages.makeChunkKey(cx, cz);
                 // Cap path / race: bitset miss but list still holds key.
                 if (clientHasStreamed(c, key)) continue;
-                if (!try self.sendSpawnChunk(peer, cx, cz)) continue;
+                // Charge the per-pass budget per ATTEMPT (see drainSpawnArea):
+                // a refused send already paid worldgen + encode, and scanning
+                // on past it let one wedged peer walk the whole view square.
+                added += 1;
+                if (!try self.sendSpawnChunk(peer, cx, cz)) break :outer;
                 clientAddStreamed(self, c, key);
                 in_view.set(bit);
                 // Deco for the newly-streamed chunk: the client's
@@ -334,7 +342,6 @@ pub fn streamChunksForClient(self: *Game, c: *Client) !void {
                 game_join.sendDecoForStreamedChunk(self, c, peer, cx, cz) catch |err| {
                     std.debug.print("zdtd: stream deco failed at {d},{d}: {s}\n", .{ cx, cz, @errorName(err) });
                 };
-                added += 1;
             }
         }
     }

@@ -156,7 +156,7 @@ export fn on_enable() void {
     if (n > 0) parseConfig(cfg_buf[0..@min(@as(usize, @intCast(n)), cfg_buf.len)]);
     var b: common.Buf = .{};
     b.put("parachute: config deploy_vy=");
-    b.putInt(@as(i32, @intFromFloat(cfg_deploy_vy)));
+    b.putInt(@as(i32, @trunc(cfg_deploy_vy)));
     b.put(" delay_ticks=");
     b.putInt(cfg_delay_ticks);
     b.put(" item_tag=");

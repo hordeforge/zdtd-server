@@ -584,14 +584,20 @@ pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {
 }
 
 /// Stored BlockValue.rawData for a cell, or 0 when the block was placed
-/// without meta (the sparse store only holds cells that carry it).
+/// without meta. The sparse mirror is a bounded cache (oldest entries are
+/// evicted), so on a miss fall back to the chunk raw plane, which is the
+/// source of truth for rotation/meta; reading it keeps a resend or a TE
+/// replicate from reporting a bare id for a rotated block. Resident-only
+/// (`chunkAt`, not `getOrCreate`) so a read cannot generate a chunk.
 pub fn blockRawAt(self: *const Game, x: i32, y: i32, z: i32) u32 {
     const key = packBlockKey(x, y, z);
     var i: usize = 0;
     while (i < self.block_raw_n) : (i += 1) {
         if (self.block_raw_key[i] == key) return self.block_raw[i];
     }
-    return 0;
+    const t = world_store.World.worldToChunk(x, z);
+    const c = self.world.chunkAt(t.pos) orelse return 0;
+    return c.rawAt(t.lx, y, t.lz);
 }
 
 pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {

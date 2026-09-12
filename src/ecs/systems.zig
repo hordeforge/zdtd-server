@@ -1428,7 +1428,7 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
             if (scale < 1) {
                 const disc_f: f64 = @as(f64, @floatFromInt(unit)) * @as(f64, 1 - scale);
                 const kept: f64 = @max(0, @as(f64, @floatFromInt(unit)) - disc_f);
-                unit = @intCast(@max(1, @as(u64, @intFromFloat(@ceil(kept)))));
+                unit = @intCast(@max(1, @as(u64, @ceil(kept))));
             }
         }
         // Widen before the multiply: a verdict-scaled unit can sit at u32 max,
@@ -1518,7 +1518,7 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                 const bonus_f: f64 = @as(f64, @floatFromInt(unit)) * @as(f64, scale - 1);
                 const raised: f64 = @as(f64, @floatFromInt(unit)) + bonus_f;
                 if (std.math.isFinite(raised)) {
-                    unit = @intCast(@max(1, @min(@as(u64, @intFromFloat(@ceil(raised))), std.math.maxInt(u32))));
+                    unit = @intCast(@max(1, @min(@as(u64, @ceil(raised)), std.math.maxInt(u32))));
                 }
             }
         }

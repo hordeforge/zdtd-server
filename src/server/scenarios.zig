@@ -10,6 +10,7 @@ const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_wasm_host = @import("game/wasm_host.zig");
 const replicate_te = @import("replicate_te.zig");
 const game_join = @import("game/join.zig");
+const game_weather = @import("game/weather.zig");
 const plugin_api = @import("../plugin/api.zig");
 const ln_peer = @import("../litenet/peer.zig");
 const packages = @import("../wire/packages.zig");
@@ -862,9 +863,9 @@ test "scenario waterset: a client water edit applies and reaches peer B" {
     // A cell inside the editor's reach, at the player's own position.
     const ps = g.sim.playerByPeer(ca.slot).?;
     const tr = g.sim.transform[ps];
-    const wx: i32 = @intFromFloat(tr.x);
-    const wy: i32 = @intFromFloat(tr.y);
-    const wz: i32 = @intFromFloat(tr.z);
+    const wx: i32 = @trunc(tr.x);
+    const wy: i32 = @trunc(tr.y);
+    const wz: i32 = @trunc(tr.z);
 
     const changes = [_]packages.WaterSetChange{
         .{ .x = wx, .y = wy, .z = wz, .mass = packages.water_mass_full },
@@ -4180,8 +4181,8 @@ test "scenario a joiner sees what other players are holding" {
         g,
         cc.peer orelse return error.TestUnexpectedResult,
         cc,
-        @intFromFloat(g.sim.transform[ps_c].x),
-        @intFromFloat(g.sim.transform[ps_c].z),
+        @trunc(g.sim.transform[ps_c].x),
+        @trunc(g.sim.transform[ps_c].z),
     );
     const d_body = cap_a.findPkgIdEntity(spawn_id, cc.entity_id) orelse
         return error.TestUnexpectedResult;
@@ -4533,10 +4534,11 @@ test "scenario weather storm cycle and blood moon override" {
     while (world_time <= 96_000) : (world_time += 50) {
         g.world.weather.tick(&g.world.biome_layers_table, world_time, false);
         const st = g.world.weather.states[0];
-        // The wire body is always exactly 5 entries of 23 bytes, group index in
-        // range for its biome, whatever the machine is doing.
+        // The wire body is exactly weather_n entries of 23 bytes (the client
+        // sizes from biomeWeather.Count), group index in range for its biome,
+        // whatever the machine is doing.
         const body = g.buildWeatherBodyFromBiomes() orelse return error.TestUnexpectedResult;
-        try std.testing.expectEqual(@as(usize, 115), body.len);
+        try std.testing.expectEqual(@as(usize, 2) * game_weather.weather_entry_bytes, body.len);
         try std.testing.expectEqual(st.biome_id, body[0]);
         try std.testing.expect(body[1] < pine.n);
         try std.testing.expectEqual(st.group_index, body[1]);
@@ -4569,8 +4571,20 @@ test "scenario weather storm cycle and blood moon override" {
     var i: usize = 0;
     while (i < g.world.weather.n) : (i += 1) {
         const set = &g.world.biome_layers_table.weather_groups[i];
-        try std.testing.expectEqual(set.findIndex("bloodMoon").?, bm_body[i * 23 + 1]);
+        try std.testing.expectEqual(set.findIndex("bloodMoon").?, bm_body[i * game_weather.weather_entry_bytes + 1]);
     }
+    // A modded biomes.xml with more weather biomes must widen the body: the
+    // count is the loaded table's weather_n, not a pinned 5 (hardcode audit
+    // 2026-09-12 A1). Add a third biome and re-init the manager.
+    g.world.biome_layers_table.weather_ids[2] = 11;
+    g.world.biome_layers_table.weather_groups[2] = biome_layers.parseWeatherGroups(
+        \\<weather name="default" prob="90" duration="5"><CloudThickness range="0,10"/></weather>
+    );
+    g.world.biome_layers_table.weather_n = 3;
+    g.world.weather.initFrom(&g.world.biome_layers_table, .{ .seed = 20240101 });
+    const wide = g.buildWeatherBodyFromBiomes() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 3) * game_weather.weather_entry_bytes, wide.len);
+    try std.testing.expectEqual(@as(u8, 11), wide[2 * game_weather.weather_entry_bytes]);
     std.debug.print(
         "PASS weather: stormbuild→storm→clear over 4 days, blood moon forced group={d}, body={d}B\n",
         .{ bm_body[1], bm_body.len },
@@ -5065,14 +5079,14 @@ test "scenario SetBlock beyond edit reach is rejected" {
 
     // Just inside the reach: allowed, so the far edit below is rejected for
     // distance and not for some unrelated reason.
-    const near_x: i32 = @intFromFloat(ep.x + g.max_edit_range - 4);
-    const near_z: i32 = @intFromFloat(ep.z);
+    const near_x: i32 = @trunc(ep.x + g.max_edit_range - 4);
+    const near_z: i32 = @trunc(ep.z);
     const near = try packages.buildSetBlockBody(&sb, near_x, 70, near_z, stone);
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", near));
     try std.testing.expectEqual(stone, try g.world.blockWorld(near_x, 70, near_z));
 
     // Well beyond it: dropped, and the counter says why.
-    const far_x: i32 = @intFromFloat(ep.x + g.max_edit_range * 4);
+    const far_x: i32 = @trunc(ep.x + g.max_edit_range * 4);
     const before = g.harness.counters.get(.bounds_rejects);
     const far = try packages.buildSetBlockBody(&sb, far_x, 70, near_z, stone);
     try g.injectFramed(c, try packages.framed(&fb, "NetPackageSetBlock", far));
@@ -6593,9 +6607,15 @@ test "scenario zombie melee reaches the client as EntityStatChanged, then death 
     const ps = g.sim.playerByPeer(c.slot).?;
     const p = g.sim.transform[ps];
     // This test exercises damage/death replication, not survival: turn the
-    // depletion loop off so well-fed regen cannot interfere with the kill.
+    // survival HP legs off so well-fed regen and starvation cannot interfere
+    // with the kill. Zeroing the depletion rates used to disable the whole
+    // survival pass; since 2026-09-12 it gates only the two decay writes
+    // (presets/builder.toml documents "health regen stays on"), so the regen
+    // and starvation legs are disabled directly.
     g.sim.rules.progression.food_depletion_per_hour = 0;
     g.sim.rules.progression.water_depletion_per_hour = 0;
+    g.sim.rules.progression.well_fed_regen_per_hour = 0;
+    g.sim.rules.progression.starvation_damage_per_hour = 0;
     _ = g.sim.spawnZombie(p.x + 1, p.y, p.z, 40).?;
 
     cap.clear();
@@ -11744,14 +11764,14 @@ test "scenario wrench pickup applies to the world and honours reach and claims" 
     var fb: [512]u8 = undefined;
 
     // In reach, unclaimed: the block is gone from the world, not just echoed.
-    const nx: i32 = @intFromFloat(ep.x + 3);
-    const nz: i32 = @intFromFloat(ep.z + 3);
+    const nx: i32 = @trunc(ep.x + 3);
+    const nz: i32 = @trunc(ep.z + 3);
     try g.setBlock(nx, 70, nz, stone);
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePickupBlock", try buildPickup(&pb, nx, 70, nz, stone, ca.entity_id)));
     try std.testing.expectEqual(@as(u32, 0), try g.world.blockWorld(nx, 70, nz));
 
     // Beyond reach: the block survives and the counter says why.
-    const fx: i32 = @intFromFloat(ep.x + g.max_edit_range * 4);
+    const fx: i32 = @trunc(ep.x + g.max_edit_range * 4);
     try g.setBlock(fx, 70, nz, stone);
     const bounds_before = g.harness.counters.get(.bounds_rejects);
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackagePickupBlock", try buildPickup(&pb, fx, 70, nz, stone, ca.entity_id)));
@@ -11760,8 +11780,8 @@ test "scenario wrench pickup applies to the world and honours reach and claims" 
 
     // Inside another player's claim, in reach: still refused.
     const kid = g.maxdamage.idByName("keystoneBlock") orelse return error.TestUnexpectedResult;
-    const cx: i32 = @intFromFloat(ep.x + 6);
-    const cz: i32 = @intFromFloat(ep.z + 6);
+    const cx: i32 = @trunc(ep.x + 6);
+    const cz: i32 = @trunc(ep.z + 6);
     var sb: [64]u8 = undefined;
     try g.injectFramed(cb, try packages.framed(&fb, "NetPackageSetBlock", try packages.buildSetBlockBody(&sb, cx, 70, cz, kid)));
     const claim = g.claimCovering(cx, cz) orelse return error.TestUnexpectedResult;
@@ -11799,8 +11819,8 @@ test "scenario block paint lands in the world and honours its gates" {
     const ps = g.sim.playerByPeer(c.slot) orelse return error.TestUnexpectedResult;
     const ep = g.sim.transform[ps];
 
-    const px: i32 = @intFromFloat(ep.x + 3);
-    const pz: i32 = @intFromFloat(ep.z + 3);
+    const px: i32 = @trunc(ep.x + 3);
+    const pz: i32 = @trunc(ep.z + 3);
     try g.setBlock(px, 70, pz, world_store.block_stone);
 
     const readTex = struct {
@@ -12686,7 +12706,7 @@ test "scenario blood-moon music is per-party, not global" {
     cap3.clear();
     const cc_ps = g.sim.playerByPeer(cc.slot) orelse return error.TestUnexpectedResult;
     const cc_pos = g.sim.transform[cc_ps];
-    try g.sendJoinBundle(cc, cc.peer.?, @intFromFloat(cc_pos.x), @intFromFloat(cc_pos.y), @intFromFloat(cc_pos.z), cc.entity_id);
+    try g.sendJoinBundle(cc, cc.peer.?, @trunc(cc_pos.x), @trunc(cc_pos.y), @trunc(cc_pos.z), cc.entity_id);
     try std.testing.expect(cap3.findPkgId(bm_id) != null);
     try std.testing.expect(cc.bloodmoon_music);
     std.debug.print("PASS bm-wire: edge broadcast fires and holds, join bundle replays\n", .{});
@@ -15445,9 +15465,9 @@ test "scenario storage te scope: a distant peer is not told about a chest edit" 
     const p_far = g.sim.playerByPeer(c_far.slot).?;
 
     // Chest at the near player's feet; the far player is well past interest.
-    const cx: i32 = @intFromFloat(g.sim.transform[p_near].x);
+    const cx: i32 = @trunc(g.sim.transform[p_near].x);
     const cy: i32 = 70;
-    const cz: i32 = @intFromFloat(g.sim.transform[p_near].z);
+    const cz: i32 = @trunc(g.sim.transform[p_near].z);
     g.sim.transform[p_far].x = g.sim.transform[p_near].x + g.interest_range * 8;
     g.sim.transform[p_far].z = g.sim.transform[p_near].z;
 
@@ -16172,9 +16192,9 @@ test "scenario draining a death bag clears the backpack marker" {
     const bag_slot = bags[bags.len - 1];
     const bag_id = g.sim.network_id[bag_slot].id;
     const bag_t = g.sim.transform[bag_slot];
-    const bag_x: i32 = @intFromFloat(@trunc(bag_t.x));
-    const bag_y: i32 = @intFromFloat(@trunc(bag_t.y));
-    const bag_z: i32 = @intFromFloat(@trunc(bag_t.z));
+    const bag_x: i32 = @trunc(bag_t.x);
+    const bag_y: i32 = @trunc(bag_t.y);
+    const bag_z: i32 = @trunc(bag_t.z);
 
     // Open it and take the only stack: the bag empties and despawns.
     try std.testing.expect(invsys.applyTransaction(&g.sim, c.slot, .open, 0, 0, 0, bag_id).ok);
@@ -16855,9 +16875,9 @@ test "scenario mining a powered block takes its node and container with it" {
     // kept the node of what it used to be, still feeding the grid.
     const ps = g.sim.playerByPeer(cl.slot) orelse return error.TestUnexpectedResult;
     const pp = g.sim.transform[ps];
-    const rx: i32 = @intFromFloat(pp.x + 3);
-    const ry: i32 = @intFromFloat(pp.y);
-    const rz: i32 = @intFromFloat(pp.z + 3);
+    const rx: i32 = @trunc(pp.x + 3);
+    const ry: i32 = @trunc(pp.y);
+    const rz: i32 = @trunc(pp.z + 3);
 
     // Register the upgrade pair the handler gates on. Insert through the
     // table's own arena: its deinit frees keys and values from there, so an
@@ -16883,9 +16903,9 @@ test "scenario mining a powered block takes its node and container with it" {
     // The chunk stream walks the live entries and ships one per joining
     // player, so a destroyed lamp kept lighting the room for everyone who
     // arrived later.
-    const lx: i32 = @intFromFloat(pp.x + 5);
-    const ly: i32 = @intFromFloat(pp.y);
-    const lz: i32 = @intFromFloat(pp.z + 5);
+    const lx: i32 = @trunc(pp.x + 5);
+    const ly: i32 = @trunc(pp.y);
+    const lz: i32 = @trunc(pp.z + 5);
     const lpos = light_te_mod.PosKey{ .x = lx, .y = ly, .z = lz };
     try g.world.setBlockWorld(lx, ly, lz, stone);
     _ = g.light_te.getOrCreate(lpos) orelse return error.TestUnexpectedResult;
@@ -16900,9 +16920,9 @@ test "scenario mining a powered block takes its node and container with it" {
     // round-tripping through workstations.zws, so it came back on every
     // restart still holding its fuel. It holds items, so breaking it has to
     // spill them like a container rather than delete them.
-    const wx: i32 = @intFromFloat(pp.x - 3);
-    const wy: i32 = @intFromFloat(pp.y);
-    const wz: i32 = @intFromFloat(pp.z - 3);
+    const wx: i32 = @trunc(pp.x - 3);
+    const wy: i32 = @trunc(pp.y);
+    const wz: i32 = @trunc(pp.z - 3);
     try g.world.setBlockWorld(wx, wy, wz, stone);
     const ws = g.workstations.getOrCreate(wx, wy, wz) orelse return error.TestUnexpectedResult;
     ws.fuel[0] = .{ .item_id = 7, .count = 9, .quality = 1 };
@@ -16919,8 +16939,8 @@ test "scenario mining a powered block takes its node and container with it" {
     // The player break path spills first, which also drops the entry, so it
     // cannot show whether noteBlockRemoved carries the workstation. The other
     // four removal paths have no spill step and rely on it alone.
-    const dx: i32 = @intFromFloat(pp.x - 5);
-    const dz: i32 = @intFromFloat(pp.z - 5);
+    const dx: i32 = @trunc(pp.x - 5);
+    const dz: i32 = @trunc(pp.z - 5);
     try g.world.setBlockWorld(dx, wy, dz, stone);
     const ws2 = g.workstations.getOrCreate(dx, wy, dz) orelse return error.TestUnexpectedResult;
     ws2.fuel[0] = .{ .item_id = 7, .count = 3, .quality = 1 };
@@ -16931,8 +16951,8 @@ test "scenario mining a powered block takes its node and container with it" {
     // a container emptied by damage, a zombie dig or a collapse owes its
     // contents to the ground exactly like a player break. Only the two player
     // paths used to spill; the other three destroyed what was inside.
-    const ex: i32 = @intFromFloat(pp.x + 7);
-    const ez: i32 = @intFromFloat(pp.z + 7);
+    const ex: i32 = @trunc(pp.x + 7);
+    const ez: i32 = @trunc(pp.z + 7);
     try g.world.setBlockWorld(ex, wy, ez, stone);
     const epos = containers_mod.PosKey{ .x = ex, .y = wy, .z = ez };
     const ec = g.containers.getOrCreate(epos, 8, stone) orelse return error.TestUnexpectedResult;
@@ -16945,8 +16965,8 @@ test "scenario mining a powered block takes its node and container with it" {
     // The other half: a block appearing claims what its type owns. The two
     // downgrade arms removed the old block and never registered the new one,
     // so a block downgrading *into* a powered form had no node at all.
-    const ax: i32 = @intFromFloat(pp.x + 9);
-    const az: i32 = @intFromFloat(pp.z + 9);
+    const ax: i32 = @trunc(pp.x + 9);
+    const az: i32 = @trunc(pp.z + 9);
     const gen_id = g.maxdamage.idByName("generatorbank") orelse return error.SkipZigTest;
     if (g.power_registry.lookup(gen_id) == null) return error.SkipZigTest;
     try g.world.setBlockWorld(ax, wy, az, gen_id);
@@ -16956,8 +16976,8 @@ test "scenario mining a powered block takes its node and container with it" {
     // The explosion damage path is a sixth removal path I had not found: its
     // downgrade arm cleared neither side, so a blast that downgraded a
     // generator left the old node and gave the new block none.
-    const bxx: i32 = @intFromFloat(pp.x + 11);
-    const bzz: i32 = @intFromFloat(pp.z + 11);
+    const bxx: i32 = @trunc(pp.x + 11);
+    const bzz: i32 = @trunc(pp.z + 11);
     try g.world.setBlockWorld(bxx, wy, bzz, stone);
     _ = g.sim.power.addNodeAt(.generator, bxx, wy, bzz, 1000);
     const bpos = containers_mod.PosKey{ .x = bxx, .y = wy, .z = bzz };
@@ -16970,8 +16990,8 @@ test "scenario mining a powered block takes its node and container with it" {
     // A vending machine's stock rows are the owner's goods, bought and
     // stocked by a player. Clearing the store entry without spilling them
     // destroys them, the same way it would for a container.
-    const vx: i32 = @intFromFloat(pp.x - 7);
-    const vz: i32 = @intFromFloat(pp.z - 7);
+    const vx: i32 = @trunc(pp.x - 7);
+    const vz: i32 = @trunc(pp.z - 7);
     try g.world.setBlockWorld(vx, wy, vz, stone);
     const vpos = vending_mod.PosKey{ .x = vx, .y = wy, .z = vz };
     const vm = g.vending.getOrCreate(vpos, stone, 0) orelse return error.TestUnexpectedResult;

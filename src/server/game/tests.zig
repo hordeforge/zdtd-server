@@ -2074,10 +2074,13 @@ test "power visuals rewrite block meta once per state change" {
         packages.blockMeta(raw),
     );
 
-    // Nothing flipped: the second pass must not touch the block or emit a packet.
+    // Nothing flipped: the second pass must not touch the block or emit a
+    // packet. blockRawAt falls back to the chunk raw plane on a mirror miss
+    // (see game/world.zig), so the observable is the absence of meta bits, not
+    // a zero raw.
     g.clearBlockRaw(8, 70, 8);
     replicate_te.broadcastPowerVisuals(g);
-    try std.testing.expectEqual(@as(u32, 0), g.blockRawAt(8, 70, 8));
+    try std.testing.expectEqual(@as(u8, 0), packages.blockMeta(g.blockRawAt(8, 70, 8)));
 
     // Losing power is an edge, so it writes meta 0 again.
     g.sim.power.nodes[ni].powered = false;
@@ -2413,6 +2416,37 @@ test "survival: food/water deplete, starvation damages, well-fed regens, S2C syn
     g.tickSurvival(0.2);
     try std.testing.expect(g.sim.health[ps].stamina > st_before);
     try std.testing.expect(g.sim.health[ps].stamina <= g.sim.health[ps].stamina_max);
+}
+
+test "survival: zero decay rates do not disable the rest of the pass" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    g.sim.director.clock.time_of_day_inc_per_sec = 1000;
+    // presets/builder.toml zeroes both rates; only the two decay writes may be
+    // skipped then (the old early return also skipped stamina, drowning,
+    // radiation and the buff lifecycle).
+    g.sim.rules.progression.food_depletion_per_hour = 0;
+    g.sim.rules.progression.water_depletion_per_hour = 0;
+    g.sim.health[ps].food = 100;
+    g.sim.health[ps].water = 100;
+    g.sim.health[ps].stamina = 50;
+    cl.sprint_speed = 5;
+    cl.sprint_stale_cd = 5.0;
+    g.tickSurvival(0.2);
+    try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].food);
+    try std.testing.expectEqual(@as(f32, 100), g.sim.health[ps].water);
+    // Sprint drain lives in the same pass and must still run.
+    try std.testing.expect(g.sim.health[ps].stamina < 50);
 }
 
 test "compressible packages send deflated frames the parser can read back" {

@@ -657,7 +657,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // ExplosionData.DamageType default Heat (ExplosionData cctor
             // ldc.i4.6; the initiate body carries no damage type).
             {
-                const applied: u16 = @intCast(@min(@as(u32, @intFromFloat(@max(0, amount))), 65535));
+                const applied: u16 = @intCast(@min(@as(u32, @trunc(@max(0, amount))), 65535));
                 const atk = if (c.entity_id > 0) c.entity_id else -1;
                 if (packages.buildDamageBody(self.body_buf[288..544], nid, 0, 6, applied, dmg.killed, atk)) |db| {
                     self.broadcastNear("NetPackageDamageEntity", db, t.x, t.z, self.interest_range) catch {};

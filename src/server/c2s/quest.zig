@@ -263,7 +263,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         const pz = self.sim.transform[ps].z;
         const cx: f32 = if (s.poi.valid()) s.poi.x + s.poi.size_x * 0.5 else px;
         const cz: f32 = if (s.poi.valid()) s.poi.z + s.poi.size_z * 0.5 else pz;
-        const gy_u = self.world.heightWorld(@intFromFloat(cx), @intFromFloat(cz)) catch {
+        const gy_u = self.world.heightWorld(@trunc(cx), @trunc(cz)) catch {
             self.harness.counters.inc(.c2s_rejects);
             return true;
         };
@@ -274,9 +274,9 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             req.player_id,
             req.quest_code,
             req.blocks_per_reduction,
-            @intFromFloat(cx),
+            @trunc(cx),
             gy,
-            @intFromFloat(cz),
+            @trunc(cz),
             0,
             0,
             0,

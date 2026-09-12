@@ -877,7 +877,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.slotOfNetId(d.entity_id)) |vslot| {
             if (self.sim.mask[vslot].transform) {
                 const vt = self.sim.transform[vslot];
-                const applied: u16 = @intCast(@min(@as(u32, @intFromFloat(@max(0, amount))), 65535));
+                const applied: u16 = @intCast(@min(@as(u32, @trunc(@max(0, amount))), 65535));
                 if (packages.buildDamageBody(self.body_buf[288..544], d.entity_id, d.source, d.dtype, applied, dmg.killed, self.sim.network_id[actor_slot].id)) |db| {
                     // The roll's outcome rides the stock flag bits
                     // (Setup IL=235: CrippleLegs -> 0x2, Dismember -> 0x8,
