@@ -5,6 +5,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Added
+
+- **Loot `<requirement>` gates evaluate player state.** Container loot carried `LootEntryRequirement*` children that the loader ignored, so a gated entry rolled at its base `prob`: `groupWorkingStiffsBooks` (no `prob`, i.e. 1.0, gated on `RandomRoll @$perkBookwormChance`) filled every Working Stiffs crate. The gates now parse and resolve per class: `Biome` against the container's biome, `Progression` / `CVar` through the shared `requirements.Ctx` built from the **opening player's** ledger (perk levels, cvars), and `RandomRoll` as `Lerp(min_max, roll)` against a literal `value` or a `value="@$cvar"` operand, using the roll path's deterministic per-entry stream so a re-roll stays reproducible. With no opener (scan-time or an anonymous re-roll) those gates refuse, keeping the entry omitted rather than rolling it for nobody. Stock counts, excluding the commented header examples: 63 `RandomRoll`, 14 `Progression`, 5 `Biome`, 3 `SandboxOption`; the `SandboxOption` rows stay omitted (numeric sandbox-option compare not wired), and the 63 `RandomRoll` rows read chance 0 until the `onSelfProgressionUpdate` row that writes `$perkBookwormChance` exists, which is stock's own answer for a player without the perk.
+
 ### Changed
 
 - **Health replication walks the dirty set.** `replicatePlayerHealth` scanned all `max_entities` slots every tick; it now iterates a snapshot of `dirty_bits`, which every hp writer maintains (through `markDirty` or the explicit `syncDirtyBit` on the WindowFull retry). No wire or behaviour change.

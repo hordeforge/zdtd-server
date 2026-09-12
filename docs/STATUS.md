@@ -880,8 +880,14 @@ Then the loot probability row's headline gap closed: rollGroup picks are
 prob-weighted like stock (stage-resolved prob as the relative weight;
 zero-prob never picked; tested at ~90/10), on top of the existing
 lootstage templates + gamestage-derived stage + force_prob gates. The row
-stays PARTIAL for <requirement> filtering (85 stock uses) and per-entry
-abundance_type (68).
+stayed PARTIAL for `<requirement>` filtering (85 stock uses) and per-entry
+abundance_type (68). Then the requirement evaluator landed (2026-09-12):
+`Biome` resolves from the container's biome and `Progression` / `CVar` /
+`RandomRoll` from the opener's own ledger (the fill path builds the shared
+`requirements.Ctx`; `RandomRoll` uses the deterministic per-entry stream and a
+`value="@$cvar"` operand). The residual is the 3 `SandboxOption` rows, whose
+numeric sandbox-option compare is not wired, plus abundance_type; the row
+stays PARTIAL for those.
 Then the timid-animals row went WORKS: `approach_attack` is gated by the
 class's inherited AITask-* list (`ai_attack` parsed from entityclasses.xml;
 `ApproachAndAttackTarget` is the only attack task in V3.1.0 b14), so a stag
