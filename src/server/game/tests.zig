@@ -5820,6 +5820,21 @@ test "loot prob passives scale tagged entries (stock perkDeadEye)" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.55), g.lootProbScale(cl.slot, ps, "rifleSkill", 0.5), 1e-3);
     // An untagged query never sees a tagged row.
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "shotgunSkill", 0.5), 1e-4);
+
+    // Equipped-item rows fold at their quality tier: armorFarmerHelmet carries
+    // `LootProb perc_add 2,4,6,8,10,20 tier=1..6 tags="seedSkill"`.
+    const helmet = g.items.ecsIdByName("armorFarmerHelmet");
+    if (helmet != 0) {
+        const esi: usize = @import("../../ecs/components.zig").inv_equip_start;
+        g.sim.inventory[ps].slots[esi] = .{ .item_id = helmet, .count = 1, .quality = 6 };
+        try std.testing.expectApproxEqAbs(@as(f32, 0.6), g.lootProbScale(cl.slot, ps, "seedSkill", 0.5), 1e-3);
+        g.sim.inventory[ps].slots[esi].quality = 1;
+        try std.testing.expectApproxEqAbs(@as(f32, 0.51), g.lootProbScale(cl.slot, ps, "seedSkill", 0.5), 1e-3);
+        // An unrelated query still ignores the helmet row (shotgunSkill has no
+        // LootProb row on any worn item or purchased perk here).
+        try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "shotgunSkill", 0.5), 1e-3);
+        g.sim.inventory[ps].slots[esi] = .{};
+    }
 }
 
 test "container loot starts a random-durability item worn" {

@@ -718,7 +718,33 @@ pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const 
             v = assets_buffs.lootProbFold(def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
         }
     }
+    // Equipped and held items (stock GetValue layers 7/8): each item's rows
+    // evaluate at its own quality tier, so a Q6 armorFarmerHelmet
+    // (`LootProb perc_add 2..20 tags="seedSkill"`) contributes its tier value.
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .tags = tags };
+        const inv = &self.sim.inventory[ps];
+        const held = inv.heldItem();
+        if (held.count > 0) {
+            if (self.items.byId(held.item_id)) |def| {
+                v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(held.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(slot.quality), ctx, v, &counts);
+        }
+    }
     return v;
+}
+
+/// Item quality as the passive-fold axis (matches the tick's item fold).
+fn itemQualityAxis(quality: u8) assets_buffs.Axis {
+    const qmax: u8 = ecs.components.max_quality_tiers;
+    return .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
 }
 
 /// A progression value's `triggered_effect` rows from progression.xml.
