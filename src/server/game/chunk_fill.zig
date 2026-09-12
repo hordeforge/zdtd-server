@@ -13,6 +13,7 @@ const apm = @import("../../apm/root.zig");
 const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
 const requirements = @import("../../assets/requirements.zig");
+const sandbox = @import("../../assets/sandbox.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
@@ -432,12 +433,19 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     // the ctx stays null and those gates refuse, so the entry is omitted
     // rather than rolled unconditionally.
     var player_ctx: ?requirements.Ctx = null;
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
     if (opener_peer >= 0 and @as(usize, @intCast(opener_peer)) < self.clients.len) {
         const oc = &self.clients[@intCast(opener_peer)];
-        if (oc.joined) player_ctx = .{
-            .levels = oc.skill_levels[0..oc.skill_level_n],
-            .cvars = &oc.cvars,
-        };
+        if (oc.joined) {
+            // The decoded server sandbox code answers a `SandboxOption` gate;
+            // the buffer lives for this call, which is all the ctx is used for.
+            const sandbox_n = sandbox.decode(self.sandbox_code, &sandbox_buf);
+            player_ctx = .{
+                .levels = oc.skill_levels[0..oc.skill_level_n],
+                .cvars = &oc.cvars,
+                .sandbox_groups = sandbox_buf[0..sandbox_n],
+            };
+        }
     }
     const gate_ctx: assets_loot.LootGateCtx = .{
         .biome_name = self.world.biome_layers_table.nameById(biome_id),

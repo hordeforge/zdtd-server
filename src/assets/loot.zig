@@ -4,6 +4,7 @@ const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const requirements = @import("requirements.zig");
+const sandbox = @import("sandbox.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 // zdtd storage bounds, not stock rules; stock caps neither. Measured against
@@ -46,7 +47,7 @@ pub const LootEntry = struct {
 /// can answer from the opener's requirement context; `other` = a class whose
 /// state the roll path does not carry (`SandboxOption`, `QuestTags`), so the
 /// entry is omitted.
-pub const GateKind = enum { none, biome, progression, cvar, random_roll, other };
+pub const GateKind = enum { none, biome, progression, cvar, random_roll, sandbox, other };
 
 pub const EntryGate = struct {
     kind: GateKind = .none,
@@ -112,6 +113,31 @@ pub const EntryGate = struct {
                 else
                     self.value;
                 return requirements.compare(left, self.op, right);
+            },
+            .sandbox => {
+                // `LootEntryRequirementSandboxOption`: the option's value under
+                // the server's decoded sandbox code, compared numerically. The
+                // requirement's `operation`/`value` are the compare (stock's
+                // `HarvestingOutput EQ 0` means "output disabled"), which a
+                // boolean-truthiness test would invert.
+                const player = ctx.player orelse return false;
+                const o = sandbox.optionByName(self.arg) orelse return false;
+                const set = sandbox.findSet(o.set_name) orelse return false;
+                var v: f32 = switch (o.kind) {
+                    .boolean => if (o.default_i != 0) 1 else 0,
+                    .int => @floatFromInt(o.default_i),
+                    .float => o.default_f,
+                };
+                for (player.sandbox_groups) |g| {
+                    if (g.option_id != o.id) continue;
+                    v = switch (o.kind) {
+                        .boolean => if (sandbox.valueB(o, g.index)) 1 else 0,
+                        .int => @floatFromInt(sandbox.valueI(o, set, g.index)),
+                        .float => sandbox.valueF(o, set, g.index),
+                    };
+                    break;
+                }
+                return requirements.compare(v, self.op, self.value);
             },
             .other => return false,
         }
@@ -710,6 +736,13 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
             gate = .{
                 .kind = .cvar,
                 .arg = xml.attr(tag_src, abs, "cvar") orelse "",
+                .op = op,
+                .value = xml.parseF32(xml.attr(tag_src, abs, "value") orelse "") orelse 0,
+            };
+        } else if (std.mem.eql(u8, class, "SandboxOption")) {
+            gate = .{
+                .kind = .sandbox,
+                .arg = xml.attr(tag_src, abs, "option") orelse "",
                 .op = op,
                 .value = xml.parseF32(xml.attr(tag_src, abs, "value") orelse "") orelse 0,
             };
@@ -1533,7 +1566,7 @@ test "stock loot: a Biome-gated entry rolls in its biome, omitted elsewhere" {
     try std.testing.expect(!(EntryGate{ .kind = .biome, .biomes = "forest" }).allowed(.{}));
 }
 
-test "loot requirement gates: Progression, CVar and RandomRoll evaluation" {
+test "loot requirement gates: Progression, CVar, RandomRoll and SandboxOption" {
     // `LootEntryRequirementProgression` / `CVar` / `RandomRoll` read the
     // opening player's state. The evaluator takes the same requirements.Ctx the
     // buff/perk VM uses, so the progression and cvar semantics live in one
@@ -1589,6 +1622,36 @@ test "loot requirement gates: Progression, CVar and RandomRoll evaluation" {
     const roll_lit = EntryGate{ .kind = .random_roll, .op = .le, .value = 25, .min_max = .{ 0, 100 } };
     try std.testing.expect(roll_lit.allowed(.{ .player = player, .roll = 0.2 }));
     try std.testing.expect(!roll_lit.allowed(.{ .player = player, .roll = 0.3 }));
+
+    // SandboxOption compares the option's value under the decoded code. Stock
+    // `HarvestingOutput EQ 0` means "output disabled": a boolean-truthiness
+    // test would pass where it must fail, so pin both polarities.
+    const sb = @import("sandbox.zig");
+    const ho = sb.optionByName("HarvestingOutput").?;
+    const gate_off = EntryGate{ .kind = .sandbox, .arg = "HarvestingOutput", .op = .eq, .value = 0 };
+    const gate_on = EntryGate{ .kind = .sandbox, .arg = "HarvestingOutput", .op = .eq, .value = 1 };
+    // Code index 0 = the option's first value set entry (0 = disabled).
+    const groups_off = [_]sb.Group{.{ .option_id = ho.id, .index = 0 }};
+    const off_ctx: requirements.Ctx = .{ .levels = &levels, .cvars = &store, .sandbox_groups = &groups_off };
+    try std.testing.expect(gate_off.allowed(.{ .player = off_ctx }));
+    try std.testing.expect(!gate_on.allowed(.{ .player = off_ctx }));
+    // The index whose LootAbundanceValues entry is 1.0 (the stock "100%").
+    const ho_set = sb.findSet(ho.set_name).?;
+    var one_idx: u8 = 0;
+    for (ho_set.floats, 0..) |f, i| {
+        if (f == 1.0) {
+            one_idx = @intCast(i);
+            break;
+        }
+    }
+    const groups_on = [_]sb.Group{.{ .option_id = ho.id, .index = one_idx }};
+    const on_ctx: requirements.Ctx = .{ .levels = &levels, .cvars = &store, .sandbox_groups = &groups_on };
+    try std.testing.expect(!gate_off.allowed(.{ .player = on_ctx }));
+    try std.testing.expect(gate_on.allowed(.{ .player = on_ctx }));
+    // Unknown option / no opener refuse.
+    const gate_bad = EntryGate{ .kind = .sandbox, .arg = "NoSuchOption", .op = .eq, .value = 0 };
+    try std.testing.expect(!gate_bad.allowed(.{ .player = off_ctx }));
+    try std.testing.expect(!gate_off.allowed(no_player));
 }
 
 test "loot requirement gates: parse the stock shapes from XML" {
@@ -1626,6 +1689,9 @@ test "loot requirement gates: parse the stock shapes from XML" {
     try std.testing.expectEqualStrings("perkBookworm", c.entries[2].gate.arg);
     // "Equals" is a stock spelling of EQ (OperationTypes).
     try std.testing.expectEqual(requirements.Compare.eq, c.entries[2].gate.op);
-    // SandboxOption is still unanswerable at roll time, so it stays omitted.
-    try std.testing.expectEqual(GateKind.other, c.entries[3].gate.kind);
+    // SandboxOption parses its option name and compares numerically.
+    try std.testing.expectEqual(GateKind.sandbox, c.entries[3].gate.kind);
+    try std.testing.expectEqualStrings("HarvestingOutput", c.entries[3].gate.arg);
+    try std.testing.expectEqual(requirements.Compare.eq, c.entries[3].gate.op);
+    try std.testing.expectEqual(@as(f32, 0), c.entries[3].gate.value);
 }

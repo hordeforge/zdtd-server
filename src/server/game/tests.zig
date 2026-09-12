@@ -5852,6 +5852,9 @@ test "loot requirement gates read the opener's progression on the fill path" {
         \\  <item name="casinoCoin" count="10">
         \\    <requirement class="Progression" name="perkTreasureHunter" operation="GTE" value="4"/>
         \\  </item>
+        \\  <item name="resourceWood">
+        \\    <requirement class="SandboxOption" option="HarvestingOutput" operation="EQ" value="0"/>
+        \\  </item>
         \\</lootgroup>
         \\</lootgroups>
     );
@@ -5901,6 +5904,29 @@ test "loot requirement gates read the opener's progression on the fill path" {
     c.touched = false;
     g.fillContainerFromLoot(c, "gateGroup", 7, 1, -1);
     try std.testing.expectEqual(@as(u32, 0), Count.of(c, coin));
+
+    // A SandboxOption gate reads the server's decoded sandbox code. Default
+    // code: HarvestingOutput is 1.0, so the `EQ 0` row stays out. `ADYA` sets
+    // option 102 (HarvestingOutput) to value index 0 = 0.0, so it rolls.
+    const wood = g.items.ecsIdByName("resourceWood");
+    try std.testing.expect(wood != 0);
+    const CountOne = struct {
+        fn of(cont: *const @TypeOf(g.containers.items[0]), id: u16) u32 {
+            var n: u32 = 0;
+            for (cont.slots[0..cont.slot_count]) |sl| {
+                if (sl.item_id == id) n += sl.count;
+            }
+            return n;
+        }
+    };
+    try std.testing.expectEqual(@as(u32, 0), CountOne.of(a, wood));
+    g.sandbox_code = "ADYA";
+    const d = g.containers.getOrCreate(.{ .x = 4, .y = 70, .z = 1 }, 8, 0).?;
+    d.player_storage = false;
+    d.loot_list = "gateGroup";
+    d.touched = false;
+    g.ensureContainerLoot(d, cl.slot);
+    try std.testing.expect(CountOne.of(d, wood) > 0);
 }
 
 test "equipped item mods fold their passives (layer 13, stock data)" {
