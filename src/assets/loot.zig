@@ -163,6 +163,56 @@ fn unitRoll(s: u32) f32 {
     return @as(f32, @floatFromInt(s >> 8)) / 16777216.0;
 }
 
+/// `AbundanceLootModTypes` name (lootgroup `abundance_type=`) -> the sandbox
+/// option that carries that category's count modifier (RE loot-economy.md 8.3,
+/// `GetCountMultiplierFromSandbox`; the option names are the stock
+/// `*LootCount` sandbox options).
+fn abundanceOptionName(type_name: []const u8) ?[]const u8 {
+    const pairs = .{
+        .{ "Food", "FoodLootCount" },
+        .{ "Drinks", "DrinkLootCount" },
+        .{ "Ammo", "AmmoLootCount" },
+        .{ "Meds", "MedicalLootCount" },
+        .{ "Resources", "ResourceLootCount" },
+        .{ "Armor", "ArmorLootCount" },
+        .{ "Melee", "MeleeLootCount" },
+        .{ "Ranged", "RangedLootCount" },
+        .{ "Dukes", "DukesLootCount" },
+        .{ "Magazines", "CraftingMagazinesLootCount" },
+        .{ "Books", "BookLootCount" },
+    };
+    inline for (pairs) |pair| {
+        if (std.mem.eql(u8, type_name, pair[0])) return pair[1];
+    }
+    return null;
+}
+
+/// A group's `abundance_type` count multiplier. 1.0 when the group has no type,
+/// the category is unknown, or the roll has no sandbox ctx (RE returns -1 for
+/// an unknown type, which the caller reads as "do not scale").
+fn groupAbundanceFactor(ctx: LootGateCtx, g: *const LootGroup) f32 {
+    if (g.abundance_type.len == 0) return 1.0;
+    const opt_name = abundanceOptionName(g.abundance_type) orelse return 1.0;
+    const player = ctx.player orelse return 1.0;
+    const o = sandbox.optionByName(opt_name) orelse return 1.0;
+    const set = sandbox.findSet(o.set_name) orelse return 1.0;
+    var v: f32 = switch (o.kind) {
+        .boolean => if (o.default_i != 0) 1 else 0,
+        .int => @floatFromInt(o.default_i),
+        .float => o.default_f,
+    };
+    for (player.sandbox_groups) |grp| {
+        if (grp.option_id != o.id) continue;
+        v = switch (o.kind) {
+            .boolean => if (sandbox.valueB(o, grp.index)) 1 else 0,
+            .int => @floatFromInt(sandbox.valueI(o, set, grp.index)),
+            .float => sandbox.valueF(o, set, grp.index),
+        };
+        break;
+    }
+    return if (v < 0) 1.0 else v;
+}
+
 /// One `<loot level="a,b" prob="p"/>` row of a `<lootprobtemplate>`.
 pub const ProbBand = struct {
     min_level: i32 = 0,
@@ -185,6 +235,10 @@ pub const LootGroup = struct {
     /// count="all": every entry spawns once (stock -1 sentinel →
     /// SpawnAllItemsFromList; regular prob is ignored, force_prob gates).
     pick_all: bool = false,
+    /// `abundance_type` (67 stock groups: Armor/Books/Magazines/Melee/Ranged):
+    /// `AbundanceLootModTypes` category whose sandbox count modifier scales this
+    /// group's counts (RE loot-economy.md 8.3, `LoadLootGroup` parses it).
+    abundance_type: []const u8 = "",
     entries: [max_entries]LootEntry = [_]LootEntry{.{}} ** max_entries,
     entry_n: u8 = 0,
 };
@@ -206,10 +260,6 @@ pub const LootContainer = struct {
     /// unique_item="true" (stock questRewardSkillMagazines): each entry rolls
     /// at most once per fill (no duplicate magazines).
     unique_item: bool = false,
-    /// abundance_type (Armor/Books/Magazines/Melee/Ranged, 67 stock): the
-    /// per-type LootAbundance multiplier. Parsed; the type multiplier table
-    /// is RE-tracked (loot-economy), not applied in the sim yet.
-    abundance_type: []const u8 = "",
     /// unmodified_lootstage="true": roll at the raw stage, skipping the
     /// container's stage-modifier chain. Parsed and deliberately not applied:
     /// all 65 stock containers carrying it are `twitch_*`, placed only by the
@@ -312,12 +362,19 @@ pub const LootTable = struct {
         return (s % 1000) <= thresh;
     }
 
-    /// Scale a rolled count by LootAbundance, keeping at least 1. Containers
-    /// with ignore_loot_abundance="true" pass apply=false (stock
-    /// LootAbundance skips those; twitch-only carriers in b14).
-    fn scaleCount(self: *const LootTable, cnt: u16, apply_abundance: bool) u16 {
-        if (!apply_abundance or self.abundance_pct == 100) return @max(cnt, 1);
-        const scaled = (@as(u32, cnt) * self.abundance_pct) / 100;
+    /// Scale a rolled count by LootAbundance and the group's `abundance_type`
+    /// category modifier, keeping at least 1. Containers with
+    /// ignore_loot_abundance="true" pass apply=false (stock LootAbundance skips
+    /// those; twitch-only carriers in b14). `mult` is the category multiplier
+    /// from `groupAbundanceFactor`; 0 means the category is disabled, which
+    /// spawns none of it (RE loot-economy.md 8.3: `abundance *= mult` before
+    /// RandomSpawnCount), so the caller drops the stack.
+    fn scaleCount(self: *const LootTable, cnt: u16, apply_abundance: bool, mult: f32) u16 {
+        if (mult <= 0) return 0;
+        if (!apply_abundance or (self.abundance_pct == 100 and mult == 1.0)) return @max(cnt, 1);
+        const pct: f32 = @as(f32, @floatFromInt(self.abundance_pct)) * mult;
+        const pct_i: u32 = @intFromFloat(@max(0, @min(pct, 65535.0)));
+        const scaled = (@as(u32, cnt) * pct_i) / 100;
         // Clamp before the cast: a modded loot.xml count with a high
         // LootAbundance (stock range 1..1000) can exceed u16; saturate at
         // the stack cap rather than trapping the roll.
@@ -365,6 +422,7 @@ pub const LootTable = struct {
         const g = self.groupByName(name) orelse return 0;
         if (g.entry_n == 0 or picks == 0 or out.len == 0) return 0;
         const qt = g.quality_template;
+        const mult = groupAbundanceFactor(ctx, g);
         var n: usize = 0;
         var s = seed;
         if (is_fixed) {
@@ -377,9 +435,11 @@ pub const LootTable = struct {
                 if (e.is_group) {
                     n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt, ctx);
                 } else {
+                    const cnt = self.scaleCount(if (e.count_min > 0) e.count_min else 1, true, mult);
+                    if (cnt == 0) continue; // disabled category spawns none
                     out[n] = .{
                         .item_name = e.name,
-                        .count = self.scaleCount(if (e.count_min > 0) e.count_min else 1, true),
+                        .count = cnt,
                         .quality = self.resolveQuality(qt, loot_stage, s ^ @as(u32, i)),
                     };
                     n += 1;
@@ -421,10 +481,12 @@ pub const LootTable = struct {
                 const cmin = picked.count_min;
                 const cmax = if (picked.count_max >= cmin) picked.count_max else cmin;
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
-                const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
+                const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
+                const cnt = self.scaleCount(cnt0, true, mult);
+                if (cnt == 0) continue; // disabled category spawns none
                 out[n] = .{
                     .item_name = picked.name,
-                    .count = self.scaleCount(cnt, true),
+                    .count = cnt,
                     .quality = self.resolveQuality(qt, loot_stage, s),
                 };
                 n += 1;
@@ -481,7 +543,7 @@ pub const LootTable = struct {
                 }
                 out[n] = .{
                     .item_name = e.name,
-                    .count = self.scaleCount(cnt, !cont.ignore_abundance),
+                    .count = self.scaleCount(cnt, !cont.ignore_abundance, 1.0),
                     .quality = self.resolveQuality(cont.quality_template, loot_stage, s),
                 };
                 n += 1;
@@ -498,6 +560,7 @@ pub const LootTable = struct {
         const g = self.groupByName(name) orelse return 0;
         if (g.entry_n == 0) return 0;
         const qt = if (g.quality_template.len > 0) g.quality_template else inherit_template;
+        const mult = groupAbundanceFactor(ctx, g);
         var s = seed;
         // count="all" (stock -1): every entry spawns once; regular prob is
         // ignored, force_prob entries gate independently (SpawnAllItemsFromList,
@@ -518,8 +581,10 @@ pub const LootTable = struct {
                     const cmin = e.count_min;
                     const cmax = if (e.count_max >= cmin) e.count_max else cmin;
                     const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
-                    const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                    out[an] = .{ .item_name = e.name, .count = self.scaleCount(cnt, true), .quality = self.resolveQuality(qt, loot_stage, s) };
+                    const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
+                    const cnt = self.scaleCount(cnt0, true, mult);
+                    if (cnt == 0) continue; // disabled category spawns none
+                    out[an] = .{ .item_name = e.name, .count = cnt, .quality = self.resolveQuality(qt, loot_stage, s) };
                     an += 1;
                 }
             }
@@ -574,8 +639,10 @@ pub const LootTable = struct {
                 const cmax = if (picked_e.count_max >= cmin) picked_e.count_max else cmin;
                 // Same span widening as rollContainer (count="0,65535").
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
-                const cnt: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                out[n] = .{ .item_name = picked_e.name, .count = self.scaleCount(cnt, true), .quality = self.resolveQuality(qt, loot_stage, s) };
+                const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
+                const cnt = self.scaleCount(cnt0, true, mult);
+                if (cnt == 0) continue; // disabled category spawns none
+                out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = self.resolveQuality(qt, loot_stage, s) };
                 n += 1;
             }
         }
@@ -644,17 +711,22 @@ test "scaleCount saturates at the u16 cap instead of trapping" {
     // Max stock abundance (1000) times a modded count past 6553 would exceed
     // u16 in the scaled product; the roll saturates at the stack cap.
     lt.abundance_pct = 1000;
-    try std.testing.expectEqual(@as(u16, std.math.maxInt(u16)), lt.scaleCount(10000, true));
-    try std.testing.expectEqual(@as(u16, std.math.maxInt(u16)), lt.scaleCount(65535, true));
+    try std.testing.expectEqual(@as(u16, std.math.maxInt(u16)), lt.scaleCount(10000, true, 1.0));
+    try std.testing.expectEqual(@as(u16, std.math.maxInt(u16)), lt.scaleCount(65535, true, 1.0));
     // Mid-range values still scale normally.
     lt.abundance_pct = 200;
-    try std.testing.expectEqual(@as(u16, 200), lt.scaleCount(100, true));
+    try std.testing.expectEqual(@as(u16, 200), lt.scaleCount(100, true, 1.0));
     // The floor keeps at least one even for a tiny count and abundance.
     lt.abundance_pct = 1;
-    try std.testing.expectEqual(@as(u16, 1), lt.scaleCount(1, true));
+    try std.testing.expectEqual(@as(u16, 1), lt.scaleCount(1, true, 1.0));
     // ignore_loot_abundance passes the raw count through unmodified.
     lt.abundance_pct = 1000;
-    try std.testing.expectEqual(@as(u16, 65535), lt.scaleCount(65535, false));
+    try std.testing.expectEqual(@as(u16, 65535), lt.scaleCount(65535, false, 1.0));
+    // The group's abundance_type factor multiplies the global abundance, and 0
+    // means the category is disabled (stock `abundance *= mult`).
+    lt.abundance_pct = 100;
+    try std.testing.expectEqual(@as(u16, 50), lt.scaleCount(100, true, 0.5));
+    try std.testing.expectEqual(@as(u16, 0), lt.scaleCount(100, true, 0.0));
 }
 
 const builtin_groups = [_]LootGroup{
@@ -990,6 +1062,9 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
                 g.pick_max = @intCast(@min(cr.max, 255));
             }
         }
+        if (xml.attr(clean, tag, "abundance_type")) |at| {
+            g.abundance_type = try arena.dupe(u8, at);
+        }
         var bi: usize = 0;
         while (bi < body.len and g.entry_n < max_entries) {
             const itag = std.mem.findPos(u8, body, bi, "<item") orelse break;
@@ -1053,9 +1128,6 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         }
         if (xml.attr(clean, tag, "unique_item")) |ui| {
             c.unique_item = std.mem.eql(u8, ui, "true");
-        }
-        if (xml.attr(clean, tag, "abundance_type")) |at| {
-            c.abundance_type = try arena.dupe(u8, at);
         }
         if (xml.attr(clean, tag, "unmodified_lootstage")) |ul| {
             c.raw_lootstage = std.mem.eql(u8, ul, "true");
@@ -1694,4 +1766,81 @@ test "loot requirement gates: parse the stock shapes from XML" {
     try std.testing.expectEqualStrings("HarvestingOutput", c.entries[3].gate.arg);
     try std.testing.expectEqual(requirements.Compare.eq, c.entries[3].gate.op);
     try std.testing.expectEqual(@as(f32, 0), c.entries[3].gate.value);
+}
+
+test "abundance_type maps to the stock sandbox count options" {
+    // RE loot-economy.md 8.3: `GetCountMultiplierFromSandbox(AbundanceLootModTypes)`
+    // -> the per-category count modifier; the option names are the stock
+    // `*LootCount` sandbox options.
+    try std.testing.expectEqualStrings("FoodLootCount", abundanceOptionName("Food").?);
+    try std.testing.expectEqualStrings("DrinkLootCount", abundanceOptionName("Drinks").?);
+    try std.testing.expectEqualStrings("AmmoLootCount", abundanceOptionName("Ammo").?);
+    try std.testing.expectEqualStrings("MedicalLootCount", abundanceOptionName("Meds").?);
+    try std.testing.expectEqualStrings("ResourceLootCount", abundanceOptionName("Resources").?);
+    try std.testing.expectEqualStrings("ArmorLootCount", abundanceOptionName("Armor").?);
+    try std.testing.expectEqualStrings("MeleeLootCount", abundanceOptionName("Melee").?);
+    try std.testing.expectEqualStrings("RangedLootCount", abundanceOptionName("Ranged").?);
+    try std.testing.expectEqualStrings("DukesLootCount", abundanceOptionName("Dukes").?);
+    try std.testing.expectEqualStrings("CraftingMagazinesLootCount", abundanceOptionName("Magazines").?);
+    try std.testing.expectEqualStrings("BookLootCount", abundanceOptionName("Books").?);
+    try std.testing.expect(abundanceOptionName("None") == null);
+    try std.testing.expect(abundanceOptionName("nonsense") == null);
+    // Every mapped option exists in the stock sandbox table and is a float in
+    // the LootAbundanceValues set (the modifier is a multiplier, not a percent).
+    const names = [_][]const u8{
+        "FoodLootCount",     "DrinkLootCount",             "AmmoLootCount",  "MedicalLootCount",
+        "ResourceLootCount", "ArmorLootCount",             "MeleeLootCount", "RangedLootCount",
+        "DukesLootCount",    "CraftingMagazinesLootCount", "BookLootCount",
+    };
+    for (names) |n| {
+        const o = sandbox.optionByName(n) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqualStrings("LootAbundanceValues", o.set_name);
+        try std.testing.expectEqual(sandbox.Kind.float, o.kind);
+    }
+}
+
+test "abundance_type scales the group's counts from the sandbox code" {
+    const src =
+        \\<lootgroups>
+        \\<lootgroup name="bookGroup" count="all" abundance_type="Books">
+        \\  <item name="resourceWood" count="100"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, src);
+    defer lt.deinit();
+    const g = lt.groupByName("bookGroup").?;
+    try std.testing.expectEqualStrings("Books", g.abundance_type);
+
+    var stacks: [max_roll_stacks]Stack = undefined;
+    // No sandbox ctx: the factor is 1.0 and the count is the raw 100.
+    const plain = lt.rollGroup("bookGroup", 1, 7, &stacks, 0, "", .{});
+    try std.testing.expectEqual(@as(usize, 1), plain);
+    try std.testing.expectEqual(@as(u16, 100), stacks[0].count);
+
+    // A code carrying BookLootCount at half abundance: index 3 of
+    // LootAbundanceValues = 0.5. The option id encodes to two base-26 letters,
+    // so decode a real code string rather than hand-building the group.
+    const opt = sandbox.optionByName("BookLootCount").?;
+    var code_buf: [8]u8 = undefined;
+    const code = std.fmt.bufPrint(&code_buf, "A{c}{c}D", .{
+        @as(u8, 'A') + @as(u8, @intCast(opt.id / 26)),
+        @as(u8, 'A') + @as(u8, @intCast(opt.id % 26)),
+    }) catch unreachable;
+    var decoded: [4]sandbox.Group = undefined;
+    const decoded_n = sandbox.decode(code, &decoded);
+    try std.testing.expectEqual(@as(usize, 1), decoded_n);
+    try std.testing.expectEqual(opt.id, decoded[0].option_id);
+    try std.testing.expectEqual(@as(u8, 3), decoded[0].index);
+    const half = decoded[0..1];
+    const player: requirements.Ctx = .{ .sandbox_groups = half };
+    const scaled = lt.rollGroup("bookGroup", 1, 7, &stacks, 0, "", .{ .player = player });
+    try std.testing.expectEqual(@as(usize, 1), scaled);
+    try std.testing.expect(stacks[0].count < 100 and stacks[0].count >= 1);
+
+    // Index 0 = 0.0: the category is disabled and spawns none of it.
+    const off = [_]sandbox.Group{.{ .option_id = opt.id, .index = 0 }};
+    const off_ctx: requirements.Ctx = .{ .sandbox_groups = &off };
+    const none = lt.rollGroup("bookGroup", 1, 7, &stacks, 0, "", .{ .player = off_ctx });
+    try std.testing.expectEqual(@as(usize, 0), none);
 }
