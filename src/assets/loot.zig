@@ -31,6 +31,11 @@ pub const LootEntry = struct {
     /// joining the group's pick pool (stock SpawnAllItemsFromList /
     /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
     force_prob: bool = false,
+    /// `loot_stage_count_mod` (84 stock entries, all `0.01` on ammo rows): the
+    /// count grows with the loot stage. `LootContainer` IL_017F adds
+    /// `RoundToInt(count * mod * lootStage)` to the sandbox-scaled count, so a
+    /// stage-50 ammo roll of 6..8 spawns roughly 9..12. 0 = no stage growth.
+    loot_stage_count_mod: f32 = 0,
     /// `quality="N"`: the fixed quality this entry spawns at, overriding the
     /// loot quality template. Engine support from `ParseItemList` (which seeds
     /// minQuality/maxQuality from the caller and lets a `quality` attribute
@@ -357,6 +362,18 @@ pub const LootTable = struct {
         return 1;
     }
 
+    /// The loot-stage count growth of one entry (`LootContainer` IL_017F):
+    /// `count + RoundToInt(count * lootstageCountMod * lootStage)`. Applied
+    /// after the abundance/category scale, like stock.
+    fn stageCount(self: *const LootTable, cnt: u16, e: LootEntry, loot_stage: i32) u16 {
+        _ = self;
+        if (e.loot_stage_count_mod == 0 or loot_stage <= 0 or cnt == 0) return cnt;
+        const extra = @round(@as(f32, @floatFromInt(cnt)) * e.loot_stage_count_mod * @as(f32, @floatFromInt(loot_stage)));
+        if (!(extra > 0)) return cnt;
+        const total = @as(u32, cnt) + @as(u32, @intFromFloat(extra));
+        return @intCast(@min(total, std.math.maxInt(u16)));
+    }
+
     fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32) bool {
         const p = self.entryProb(e, loot_stage);
         // A NaN prob (crafted/patched loot.xml) fails both comparisons below and
@@ -442,7 +459,7 @@ pub const LootTable = struct {
                 if (e.is_group) {
                     n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt, ctx);
                 } else {
-                    const cnt = self.scaleCount(if (e.count_min > 0) e.count_min else 1, true, mult);
+                    const cnt = self.stageCount(self.scaleCount(if (e.count_min > 0) e.count_min else 1, true, mult), e, loot_stage);
                     if (cnt == 0) continue; // disabled category spawns none
                     out[n] = .{
                         .item_name = e.name,
@@ -489,7 +506,7 @@ pub const LootTable = struct {
                 const cmax = if (picked.count_max >= cmin) picked.count_max else cmin;
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                const cnt = self.scaleCount(cnt0, true, mult);
+                const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), picked, loot_stage);
                 if (cnt == 0) continue; // disabled category spawns none
                 out[n] = .{
                     .item_name = picked.name,
@@ -550,7 +567,7 @@ pub const LootTable = struct {
                 }
                 out[n] = .{
                     .item_name = e.name,
-                    .count = self.scaleCount(cnt, !cont.ignore_abundance, 1.0),
+                    .count = self.stageCount(self.scaleCount(cnt, !cont.ignore_abundance, 1.0), e, loot_stage),
                     .quality = if (e.quality > 0) e.quality else self.resolveQuality(cont.quality_template, loot_stage, s),
                 };
                 n += 1;
@@ -589,7 +606,7 @@ pub const LootTable = struct {
                     const cmax = if (e.count_max >= cmin) e.count_max else cmin;
                     const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                     const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                    const cnt = self.scaleCount(cnt0, true, mult);
+                    const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), e, loot_stage);
                     if (cnt == 0) continue; // disabled category spawns none
                     out[an] = .{ .item_name = e.name, .count = cnt, .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s) };
                     an += 1;
@@ -647,7 +664,7 @@ pub const LootTable = struct {
                 // Same span widening as rollContainer (count="0,65535").
                 const span: u32 = @as(u32, cmax) - @as(u32, cmin) + 1;
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
-                const cnt = self.scaleCount(cnt0, true, mult);
+                const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), picked_e, loot_stage);
                 if (cnt == 0) continue; // disabled category spawns none
                 out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = if (picked_e.quality > 0) picked_e.quality else self.resolveQuality(qt, loot_stage, s) };
                 n += 1;
@@ -796,6 +813,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         @intCast(@min(xml.parseU16(q) orelse 0, 255))
     else
         0;
+    const stage_mod = xml.parseF32(xml.attr(tag_src, tag_at, "loot_stage_count_mod") orelse "") orelse 0;
     // The entry's own `<requirement>` child, if any (the element extent keeps a
     // nested group's gated entries their own). Only `Biome` is rolled today;
     // every other class marks the entry omitted (see `EntryGate`).
@@ -859,6 +877,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .prob = prob,
         .prob_template = tpl,
         .quality = quality,
+        .loot_stage_count_mod = stage_mod,
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
         .gate = gate,
     };
@@ -1325,6 +1344,59 @@ test "stock loot item entries leave quality to the template" {
         for (qt.bands) |band| picks += band.picks.len;
     }
     try std.testing.expect(picks > 100);
+}
+
+test "loot_stage_count_mod grows the count with the loot stage" {
+    // LootContainer IL_017F: count += RoundToInt(count * lootstageCountMod *
+    // lootStage), applied to the sandbox-scaled count. Stock's 84 uses are all
+    // 0.01 on ammo rows.
+    const src =
+        \\<lootgroups>
+        \\<lootgroup name="ammoGroup" count="all">
+        \\  <item name="ammoBox" count="10" loot_stage_count_mod="0.01"/>
+        \\  <item name="ammoPlain" count="10"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, src);
+    defer lt.deinit();
+    const g = lt.groupByName("ammoGroup").?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.01), g.entries[0].loot_stage_count_mod, 1e-6);
+    try std.testing.expectEqual(@as(f32, 0), g.entries[1].loot_stage_count_mod);
+
+    var stacks: [8]Stack = undefined;
+    // Stage 0 (the no-gamestage floor): nothing added.
+    var n = lt.rollGroup("ammoGroup", 0, 5, &stacks, 0, "", .{});
+    try std.testing.expectEqual(@as(usize, 2), n);
+    for (stacks[0..n]) |st| try std.testing.expectEqual(@as(u16, 10), st.count);
+    // Stage 50: 10 + round(10 * 0.01 * 50) = 15 for the modded entry only.
+    n = lt.rollGroup("ammoGroup", 50, 5, &stacks, 0, "", .{});
+    try std.testing.expectEqual(@as(usize, 2), n);
+    for (stacks[0..n]) |st| {
+        if (std.mem.eql(u8, st.item_name, "ammoBox")) {
+            try std.testing.expectEqual(@as(u16, 15), st.count);
+        } else {
+            try std.testing.expectEqual(@as(u16, 10), st.count);
+        }
+    }
+}
+
+test "stock loot entries carry loot_stage_count_mod on ammo groups" {
+    // Guards the attribute name/parse against a stock update: group9mmSmall's
+    // rounds carry the 0.01 stage growth.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var lt = try loadFromPath(std.testing.allocator, path);
+    defer lt.deinit();
+    const g = lt.groupByName("group9mmSmall") orelse return error.TestUnexpectedResult;
+    var seen: usize = 0;
+    for (g.entries[0..g.entry_n]) |e| {
+        if (e.loot_stage_count_mod > 0) {
+            try std.testing.expectApproxEqAbs(@as(f32, 0.01), e.loot_stage_count_mod, 1e-6);
+            seen += 1;
+        }
+    }
+    try std.testing.expect(seen > 0);
 }
 
 test "loot entry quality overrides the quality template" {
