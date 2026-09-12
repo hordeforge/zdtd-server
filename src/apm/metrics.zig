@@ -132,6 +132,12 @@ pub const CounterId = enum(u16) {
     /// run (sized above the stock maximum; a modlet can exceed it), not a
     /// silent pass.
     triggered_rows_dropped,
+    /// Applied plugin effects a withdrawal could not revert (`damage`, `say`,
+    /// `despawn`: already in the world or on the wire, see `ecs/command.zig`
+    /// `Inverse`). Counted once per withdrawn plugin so the residue of paper
+    /// 3.1's unchecked inverse witness is visible instead of assumed away;
+    /// `spawn_zombie` and `glide` are reverted and never counted.
+    plugin_effects_not_reverted,
     _,
 };
 

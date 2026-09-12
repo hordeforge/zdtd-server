@@ -602,6 +602,12 @@ pub fn withdrawDisabledPlugins(self: *Game) void {
 pub fn withdrawPluginSrc(self: *Game, src: i16) void {
     var spawn_out: [ecs.command.max_commands]i32 = undefined;
     const sn = self.sim.commands.dropFrom(src, &spawn_out);
+    // Applied effects with no inverse (damage/say/despawn) cannot be reverted,
+    // so report the residue once instead of forgetting it: paper 3.1's witness
+    // is an author obligation the runtime never verifies, and `ecs/command.zig`
+    // `Inverse` is the checked classification behind this count.
+    const residue = self.sim.commands.takeIrrevocable(src);
+    if (residue > 0) self.harness.counters.add(.plugin_effects_not_reverted, residue);
     for (spawn_out[0..sn]) |id| {
         if (self.sim.slotOfNetId(id)) |es| {
             // Tell the clients before destroying: they hold the model, and

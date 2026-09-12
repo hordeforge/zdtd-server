@@ -5,6 +5,18 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Added
+
+- Plugin effects that cannot be reverted are now classified and reported. The
+  Cordis paper's revertible effects require every effect to carry an inverse,
+  and the runtime cannot verify that witness, so the queued verbs are now
+  classified in one exhaustive table (`ecs/command.zig` `inverseOfOp`):
+  `spawn_zombie` and `glide` are reverted on withdrawal, while `damage`, `say`
+  and `despawn` are already in the world or on the wire and are counted per
+  plugin source instead of being forgotten. `plugin_effects_not_reverted` in
+  the APM dump reports what a withdrawn module left behind. Adding a queued
+  verb without classifying it is now a compile error.
+
 ### Fixed
 
 - Server-to-client datagrams were capped below stock's MTU. The game's

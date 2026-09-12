@@ -5880,6 +5880,16 @@ test "scenario plugin withdrawal despawns applied spawns" {
     // Withdraw plugin 1 only: its spawn is despawned, plugin 2's survives.
     @import("game/step.zig").withdrawPluginSrc(g, 1);
     try std.testing.expectEqual(base + 1, g.sim.countKind(.zombie));
+    // A spawn-only plugin leaves no residue: its one effect is revertible.
+    try std.testing.expectEqual(@as(u64, 0), g.harness.counters.get(.plugin_effects_not_reverted));
+
+    // An applied effect with no inverse (here a chat broadcast) is reported as
+    // residue when its plugin is withdrawn: the message is already out, so the
+    // runtime can only count it (paper 3.1's unchecked witness, made visible).
+    _ = g.sim.commands.pushSrc(5, .{ .say = .{ .text = undefined, .len = 0 } });
+    _ = g.sim.commands.drain(&g.sim);
+    @import("game/step.zig").withdrawPluginSrc(g, 5);
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.plugin_effects_not_reverted));
 
     // Bots queued through zdtd.queue are attributed too: a withdrawn plugin's
     // bots and count floor must not outlive it.

@@ -16,7 +16,7 @@ gaps recorded with realization sketches.
 
 | Paper mechanism | zdtd realization | Status |
 |---|---|---|
-| 3.1 revertible effects (`track`, `recover`, LIFO inverse accumulator) | `zdtd.queue` verbs carry a 1-based plugin src; `CommandBuffer.dropFrom` + `Game.withdrawPluginSrc` drop pending ops, despawn applied spawns, clear applied glide, drop bots | **Partial**: the inverse exists per verb class, but is classified only in prose (F3) |
+| 3.1 revertible effects (`track`, `recover`, LIFO inverse accumulator) | `zdtd.queue` verbs carry a 1-based plugin src; `CommandBuffer.dropFrom` + `Game.withdrawPluginSrc` drop pending ops, despawn applied spawns, clear applied glide, drop bots; `inverseOfOp` classifies every verb and the refusal residue is counted | **Realized** for the revertible verbs, with the non-invertible remainder classified and reported (F3 fixed) |
 | 3.1.2-3 effect functions / iterators, step-boundary interruption | Each hook call is a unit; a trap or fuel exhaustion disables the module mid-turn and the withdrawal pass runs before the drain | **Realized** for the host-driven unit granularity |
 | 3.2.1-2 coeffect context, satisfaction, `notify` | `_zdtd_requires` is the specification; load rejects a module that cannot satisfy it (fail-closed), so a loaded module never reads an absent binding | **Realized** as a load-time check; no runtime `notify` (no host capability changes at runtime) |
 | 3.2.2 provider ordering / withdrawal before dependents | `WasmHost.claimSlot` (this run) resolves an exclusive point claim against the claimant's liveness; a disabled or hook-less claimant stops providing | **Fixed here** (F1); the general provider-drain ordering has no analogue because dependencies are host-only (F5) |
@@ -59,16 +59,22 @@ code. Realization sketch: store the claimed points on `Plugin` at install and
 re-install them in `reload` (refusing a claim whose hook the new module does
 not export), or route reload through the resolver for the module's directory.
 
-**F3 (P2, open) - the inverse classification is prose, not a checked table.**
-`Op` has five verbs: `spawn_zombie` and `glide` are revertible (despawn, clear
-flag); `damage`, `say` and `despawn` are applied effects with no inverse, which
-is a legitimate boundary decision (paper 6.1 delimits the author obligation;
-5.1.1 notes the runtime never verifies the witness) but is recorded only in
-comments. The review prompt's rule ("no new side-effect verb without a
-withdrawal story") is therefore unenforced. Realization sketch: a
-comptime-exhaustive `verbInverse(Op) Inverse` classification used by the
-withdrawal path and an apm counter for effects a withdrawal could not revert,
-so a new verb cannot land without a decision and operators can see the residue.
+**F3 (P2, fixed 2026-09-12) - the inverse classification is now a checked
+table.** `Op` has five verbs: `spawn_zombie` and `glide` are revertible
+(despawn, clear flag); `damage`, `say` and `despawn` are applied effects with no
+inverse, which is a legitimate boundary decision (paper 6.1 delimits the author
+obligation; 5.1.1 notes the runtime never verifies the witness) but was recorded
+only in comments, so the review prompt's rule ("no new side-effect verb without
+a withdrawal story") was unenforced. `ecs/command.zig` now carries
+`Inverse { revertible, irrevocable }` and `inverseOfOp(Op)` with an exhaustive
+`switch` (no `else`), so a new verb fails the build until it is classified. The
+classification has a live consumer: `drainWith` counts applied irrevocable
+effects per source, `withdrawPluginSrc` takes that count and adds it to the
+`plugin_effects_not_reverted` apm counter, and slot compaction moves a source's
+residue with it. A spawn-only withdrawal leaves the counter at 0; a withdrawn
+plugin that broadcast a chat message reports 1. Gate: the `ecs.command` unit
+tests (classification table, per-source residue, compaction) plus the
+`scenario plugin withdrawal despawns applied spawns` assertions.
 
 **F4 (P2, ADR-worthy) - no interception or isolation.** The paper's 3.2.3
 `intercept` (context-carried metadata merged with the component's declaration,
@@ -124,7 +130,7 @@ table, not an open key space.
 
 ## Follow-ups
 
-F2 (claim re-resolution on reload), F3 (checked inverse table), F4
-(interception policy, needs an ADR), F5 (provider ordering, moot until plugins
-provide keys) and F6 (contract version export) are the next slices. F1 is fixed
-and gated by the scenario above.
+F2 (claim re-resolution on reload), F4 (interception policy, needs an ADR), F5
+(provider ordering, moot until plugins provide keys) and F6 (contract version
+export) are the next slices. F1 and F3 are fixed and gated by the scenarios and
+unit tests named above.

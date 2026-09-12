@@ -98,8 +98,14 @@ safe runtime components:
   interception) as F2/F4.
 - Effect introspection (§3.1.3): the command buffer's src attribution and
   the spawn ring let the host enumerate a module's pending and applied
-  effects (`dropFrom`); no further iterator surface is needed. The review
-  records that the per-verb inverse classification is prose today (F3).
+  effects (`dropFrom`); no further iterator surface is needed.
+  Amended 2026-09-12 (F3): the per-verb withdrawal story is a checked table
+  now, not prose. `ecs/command.zig` classifies every `Op` as `revertible`
+  (`spawn_zombie`, `glide`) or `irrevocable` (`damage`, `say`, `despawn`)
+  through an exhaustive `switch`, so a new verb cannot land without deciding;
+  the drain counts applied irrevocable effects per source and the withdrawal
+  reports them through the `plugin_effects_not_reverted` apm counter, which is
+  where paper 6.1's author obligation becomes visible instead of assumed.
 - Config reconciliation (§5.2.1): not adopted. The paper's loader reconciles
   entry-field changes incrementally; zdtd reads `[plugin]` config once at
   startup and `plugin reload` re-arms the stored budget rather than re-reading
