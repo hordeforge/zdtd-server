@@ -7,7 +7,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Changed
 
+- **Health replication walks the dirty set.** `replicatePlayerHealth` scanned all `max_entities` slots every tick; it now iterates a snapshot of `dirty_bits`, which every hp writer maintains (through `markDirty` or the explicit `syncDirtyBit` on the WindowFull retry). No wire or behaviour change.
+- **Plugin logs use the manifest vocabulary.** `OverridePoint.wire()` returned `@tagName` (underscored), so a refused `damage.player_scale` claim logged `damage_player_scale` while mods write the dotted name. It now returns the manifest name from the point table.
+- **Idiom cleanups (Zig 0.16).** `QueueVerb`'s parallel `names` table is gone (its tags already are the operator vocabulary, parsed through `@tagName`); `parse` on the two policy enums is `parseVerb` / `parsePoint`; `std.meta.tags` is `@typeInfo(...).@"enum".fields`; the 10 `std.mem.indexOf` call sites use `find` (0.16 makes `indexOf` an alias); `WireProfile.plane_cells` / `c_max_height` / `y_pow` are `planeCells` / `cMaxHeight` / `yPow`.
 - **The static plugin host is off in the shipped configuration.** `enable_sample_plugin` defaulted to true, so every product build registered the native vtable `sample_hello` host and composed its verdicts before Wasm on 28 hook names across 18 files, while ADR 0020 decision 2 calls that host test scaffolding rather than a product surface. The `InitOption` default and both shipped presets are now false; tests and a deliberate `enable_sample_plugin = true` still exercise the native path. One plugin mechanism is live by default.
+
+### Fixed
+
+- Review follow-ups (round 6).
+  - **`world/store.zig` `sea_level` divergence row closed as a framing error.** The row compared zdtd's flat empty-world fill height (64, zdtd-owned, operator-tunable via `[rules.geometry] sea_level`) with stock's `Block.cWaterLevel` water surface (62.88). The stock constant is implemented where it applies, the RWG water table (`world/worldgen.zig water_surface_cell = 62`, pinned by its test), so the two are different quantities and there is no divergence to track.
 
 ### Fixed
 

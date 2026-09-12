@@ -45,6 +45,7 @@ the hostiles are behind `starter_zombies`).
 |---|---|---|
 | net-send P1 | `game.zig` `sendBlockIdMapping` logs and returns on frame-init/write/deflate failure instead of propagating | that is the documented contract in the function's own header: "All or nothing. A partial blob is worse than none... any validation failure, an empty dump, or a compressed size that does not fit all skip the package entirely and leave today's LoadLocal behaviour in place." `LoadFromArray` swallows a partial blob and `assignLeftOverBlocks` silently renumbers unnamed blocks, so returning the error (which aborts the join) is strictly worse than the current fail-closed skip |
 | best-practices P1 | `game.zig` has 226 one-line forwarders | it is the documented delegating facade; deleting them touches every call site of a 3.9 k-line file for no behavioural gain. Kept deliberately; the note "stop adding no-policy forwarders" is recorded below |
+| idiomatic P3 | drop the `_,` catch-all from `apm/profiler.zig` `Section` so switches are exhaustiveness-checked | the `_` is Zig's non-exhaustive-enum marker, not a switch arm, and it is load-bearing: `scope` must stay inert for an unnamed/unknown id (the test passes `@enumFromInt(200)`). Removing it fails to compile at that call. Kept, with a comment recording why |
 
 ## Fixed in the second pass (round 22)
 
@@ -56,6 +57,17 @@ the hostiles are behind `starter_zombies`).
 | plugin F7 P1 | point claims bound by plan slot, not loaded slot | `loadResolved` maps plan slot to loaded slot and refuses a claim whose module never loaded; regression test with a skipped first module |
 | net-send P2 | `map.zig` marked pieces sent before the send | marked only on a real send |
 | net-send P2 | `budget_ns == null` disabled the only fragment-retry deadline | parameter is a plain `u64`; no caller passed null |
+
+## Fixed in the sixth pass (round 26)
+
+| Review | Finding | Change |
+|---|---|---|
+| ECS P2 | `replicatePlayerHealth` scanned all `max_entities` slots every tick | iterates a snapshot of `dirty_bits` (every hp writer maintains it: `markDirty`, or the explicit `syncDirtyBit` on the retry) |
+| best-practices P2 | `QueueVerb.names` duplicated the enum tags; `std.meta.tags` used for count/iteration | tags parsed via `@tagName` and `@typeInfo(...).@"enum".fields`; `parse` renamed `parseVerb` / `parsePoint` |
+| best-practices P2 | `protocol.zig` methods were snake_case among camelCase siblings | `yPow` / `cMaxHeight` / `planeCells` |
+| zig-0.16 P2 | `std.mem.indexOf` is an alias of `find` in 0.16 | all 10 non-vendored call sites use `std.mem.find` |
+| (own finding) | `OverridePoint.wire()` returned the underscored enum tag, so a refused `damage.player_scale` claim logged `damage_player_scale` while manifests write the dotted name | returns the manifest name table entry |
+| divergence register | `world/store.zig sea_level` was listed as a P3 stock divergence | closed as a framing error: the flat-world fill height is zdtd-owned and configurable; stock's 62.88 lives in the RWG water table (`worldgen.water_surface_cell = 62`) |
 
 ## Fixed in the fifth pass (round 25)
 
@@ -98,49 +110,33 @@ Correctness / behaviour, next pass:
 
 1. **ECS P1** - `wire/stock_inv.zig` / `wire/stock_te.zig` mutate ECS state;
    move the apply functions next to their target types (~130 lines).
-2. **ECS P2** - `replicate_health.zig` and `tickTraderAreas` scan full
-   `max_entities` instead of `dirty_bits` / the trader kind group (the health
-   pass sets `dirty[].hp` outside the `markDirty` funnel, which the iteration
-   change must account for).
+2. **ECS P2** - `tickTraderAreas` scans full `max_entities`; walk the trader
+   kind group instead (the health half of this finding is done).
 3. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
    density plane exists (POI chunks), bypassing the existing
    `packDensityFromRaws` SIMD path.
-4. **abstractions P2** - one `hookVerdict` helper for the 28 static-then-Wasm
-   dispatch sites (the default-off change above left the sites in place);
-   keep the native path reachable for tests.
-   (`enable_sample_plugin`), composes before Wasm on 28 hooks, and is a
-   shipped preset knob, while ADR 0020 decision 2 calls it test scaffolding.
-   Needs a maintainer call: default it off in product configs, or amend the
-   ADR.
 
 Structure / idiom (no behaviour change):
 
+4. **abstractions P2** - one `hookVerdict` helper for the 28 static-then-Wasm
+   dispatch sites (the static host is off by default now, but the sites
+   remain); keep the native path reachable for tests.
 5. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
-    `std.Io.Threaded` on `Game` instead of a fresh init/deinit in `step.zig`
-    (per APM period), `net.zig clientFor` (per first datagram) and all 12
-    `util/io_fs.zig` helpers. The 0.16 `Threaded.init` installs process-global
-    SIGIO/SIGPIPE handlers, so the current shape clobbers the live instances in
-    `udp_socket.zig` / `parallel.zig` and `join()`s on the tick thread.
-6. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
-    parallel `QueueVerb.names` table where `@typeInfo(T).@"enum".fields` +
-    `@tagName` is the 0.16 shape used elsewhere.
-7. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
-    `plane_cells` are snake_case among camelCase siblings.
-8. **abstractions P2** - add `arena.destroyHolder` and replace the 28
-    open-coded child/deinit/destroy blocks (`util/arena.zig` already has
-    `newArenaHolder`); merge the duplicated edit-reach predicate
-    (`game/rescue.zig` vs `game/guard.zig`).
-9. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
-    `Section` so switches over it are exhaustiveness-checked; widen
-    `webui.zig:1396`'s `[8]u8` and give it one overflow policy.
-10. **simd P1/P2** - density/texture channel SIMD planes, replicate range
-    mask reuse, worldgen row-band material pass (measure first; all have scalar
-    goldens to compare against).
-11. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
-    `sys_metrics.zig` residual-table note.
-12. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
-    `server/game/`, delete the four no-policy `packages.zig` forwarders and the
-    `unityStringHash` alias, inline `game/bans.zig`.
+   `std.Io.Threaded` on `Game` instead of a fresh init/deinit in `step.zig`
+   (per APM period), `net.zig clientFor` (per first datagram) and all 12
+   `util/io_fs.zig` helpers. The 0.16 `Threaded.init` installs process-global
+   SIGIO/SIGPIPE handlers, so the current shape clobbers the live instances in
+   `udp_socket.zig` / `parallel.zig` and `join()`s on the tick thread.
+6. **abstractions P2** - add `arena.destroyHolder` and replace the 28
+   open-coded child/deinit/destroy blocks (`util/arena.zig` already has
+   `newArenaHolder`); merge the duplicated edit-reach predicate
+   (`game/rescue.zig` vs `game/guard.zig`).
+7. **simd P1/P2** - density/texture channel SIMD planes, replicate range mask
+   reuse, worldgen row-band material pass (measure first; all have scalar
+   goldens to compare against).
+8. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
+   `server/game/`, delete the four no-policy `packages.zig` forwarders and the
+   `unityStringHash` alias, inline `game/bans.zig`.
 
 ## Evidence notes
 
@@ -167,6 +163,10 @@ Structure / idiom (no behaviour change):
   3 skipped; 0 failed` and `make check` green. New tests: the F11 config
   re-read (edited file picked up, deleted file fails closed) and the peer
   unreliable limit pinned to the negotiated MTU in the MTU test.
+- The sixth batch (round 26): `zig build test` direct run `1803 passed;
+  3 skipped; 0 failed` and `make check` green. The idiom batch is
+  behaviour-neutral; the one finding not applied (the profiler `_,`) is in the
+  rejected table with the compile error that proves it load-bearing.
 - The fifth batch (round 25): `zig build test` direct run `1803 passed;
   3 skipped; 0 failed` and `make check` green. The dead-bit removal kept every
   existing replication test green (the bits were write-only); the

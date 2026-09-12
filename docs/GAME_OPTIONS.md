@@ -347,7 +347,7 @@ test, so a retune cannot land silently).
 |---|---|---|
 | `container_open_range` | 8.0 | Container open/use reach in blocks, 3D (R7; authority reach cap, ECS-visible) |
 | `topsoil_all_broken` | false | Force every column's topsoil "broken" on the chunk wire: the client renders block textures instead of MicroSplat splat maps. False = stock (fresh terrain splat-renders; dig/upgrade marks disturbed columns). Worlds without splat maps (the flat demo world) may render grey with the stock mode; set true for them |
-| `sea_level` | 64 | World sea level in blocks (absolute game Y): the flat-world surface and the baked-DTM out-of-bounds fallback. Stock zdtd default 64 (stock 62.88 tracked in the divergence register); RealEarth-style worlds set ~100 |
+| `sea_level` | 64 | World sea level in blocks (absolute game Y): the flat-world surface and the baked-DTM out-of-bounds fallback. zdtd-owned default 64 (the flat world is zdtd-generated; stock's water surface 62.88 is the RWG water table's `worldgen.water_surface_cell`); RealEarth-style worlds set ~100 |
 | `height_scale` | 1.0 | Elevation projection: `surface_y = clamp(height_offset + height_scale * elev_m, 0, ceiling)`. 1.0 = identity; < 1 compresses mountains into the column; > 1 needs a taller wire profile for headroom (ADR 0036) |
 | `height_offset` | 0.0 | Vertical shift applied after scaling (lift/lower the whole world) |
 | `height_ceiling` | 0 | Hard ceiling for the projected surface Y; 0 = active wire-profile max (stock 255) |
