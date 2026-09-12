@@ -8,7 +8,18 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Loadgen Navezgane smoke 2026-09-12 (round 9,
+`lint-architecture: clean`). **Pregen world matrix re-run 2026-09-12**: the
+open P1 "C2S payload decode Overflow on every pregen world" from 2026-08-12 does
+not reproduce. Pregen06k01 (dtm=6144x6144, 3469 prefabs) took 2 wander bots
+through 11 lives / 1200 ticks with `join_fail=0`, `net_payload_errors=0`,
+`decode_rejects=0` and every enter PASS; Pregen08k02 (5103 prefabs) took 3 bots
+through 25 PASS joins with the same zeros. The join failure that report recorded
+on Pregen06k01 was the S2C `WorldSpawnPoints` 512-byte builder overflow fixed
+2026-08-29. The only residual is a transient `stream_errors` WindowFull on the
+chunk stream (1 on Pregen06k01, 2 on Pregen08k02), which leaves the unsent chunk
+pending and retries it on the next stream period; `reliable_window_drops` (41 /
+59) are the droppable repackages the window policy is allowed to shed.
+**Loadgen Navezgane smoke 2026-09-12 (round 9,
 world-clock rate)**: the real map loaded, 2/2 wander bots joined and stayed
 alive to the timeout (w=2659/2621 steps, deaths=0), and
 `join_fail`/`encode_errors`/`decode_rejects`/`net_send_errors`/`stream_errors`/
