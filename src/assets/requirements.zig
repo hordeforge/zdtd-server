@@ -87,6 +87,11 @@ pub const Kind = enum(u8) {
     entity_tag_compare,
     /// `IsNight` IL=19: `!World.IsDaytime()`, invert-aware.
     is_night,
+    /// `EntityHasMovementTag` IL=47: the target's `CurrentMovementTag` set
+    /// (`Test_AnySet` by default, `Test_AllSet` with `has_all_tags`),
+    /// invert-aware. zdtd derives idle/walking/running from the client's
+    /// reported movement state.
+    entity_has_movement_tag,
     /// `IsEquipped` IL=97: true when the row's own item value sits in one of
     /// the target's equipment slots (the mod path scans each equipped item's
     /// Modifications array, which zdtd does not model, so a mod context refuses).
@@ -188,6 +193,11 @@ pub const Ctx = struct {
     /// refused; true/false = the item fold's own answer. An item in the hand is
     /// NOT equipped (Equipment::GetItems does not include the holding slot).
     item_equipped: ?bool = null,
+    /// The entity's `CurrentMovementTag` set (`EntityAlive::OnUpdateLive` sets
+    /// idle/walking/running from the move direction and `bMovementRunning`), as
+    /// a comma list, for `EntityHasMovementTag` (IL=47). Null = the caller has
+    /// no movement state, which refuses the gate rather than guessing a tag.
+    movement_tags: ?[]const u8 = null,
     /// The entity's own `Tags` property (`entityclasses.xml <property
     /// name="Tags">`, inherited through `extends` like `EntityClass.CopyFrom`
     /// IL=171), as a comma list. `EntityTagCompare` with the default `self`
@@ -276,6 +286,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "EntityTagCompare")) return .entity_tag_compare;
     if (std.mem.eql(u8, name, "IsNight")) return .is_night;
     if (std.mem.eql(u8, name, "IsEquipped")) return .is_equipped;
+    if (std.mem.eql(u8, name, "EntityHasMovementTag")) return .entity_has_movement_tag;
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
     return .unsupported;
@@ -572,6 +583,34 @@ fn evalIsEquipped(r: Requirement, ctx: Ctx) Verdict {
     return verdict(equipped, r.negated);
 }
 
+/// `EntityHasMovementTag::IsValid` IL=47: the target's `CurrentMovementTag` set
+/// against the row's tags, any-of via `Test_AnySet` and all-of via
+/// `Test_AllSet` with `has_all_tags="true"`, inverted by `invert`. A caller
+/// with no movement state refuses rather than guessing a tag.
+fn evalEntityHasMovementTag(r: Requirement, ctx: Ctx) Verdict {
+    const tags = ctx.movement_tags orelse return .unsupported;
+    var matched = r.has_all; // any-of starts false, all-of starts true
+    var seen = false;
+    var it = std.mem.splitScalar(u8, r.list, ',');
+    while (it.next()) |seg| {
+        const tag = std.mem.trim(u8, seg, " \t");
+        if (tag.len == 0) continue;
+        seen = true;
+        const hit = tags.len > 0 and tagListHas(tags, tag);
+        if (r.has_all) {
+            if (!hit) {
+                matched = false;
+                break;
+            }
+        } else if (hit) {
+            matched = true;
+            break;
+        }
+    }
+    if (!seen) matched = r.has_all; // empty list: any-of false, all-of true
+    return verdict(matched, r.negated);
+}
+
 /// `EntityTagCompare::IsValid` IL=43: `target.HasAnyTags` (any-of) or
 /// `HasAllTags` with `has_all_tags="true"`, invert-aware. The evaluator runs
 /// for the default `self` target only; a foreign target is refused before the
@@ -694,6 +733,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .entity_tag_compare => return evalEntityTagCompare(r, ctx),
         .is_night => return evalIsNight(r, ctx),
         .is_equipped => return evalIsEquipped(r, ctx),
+        .entity_has_movement_tag => return evalEntityHasMovementTag(r, ctx),
         .cvar_compare => return evalCvarCompare(r, ctx),
         .worn_items => return evalWornItems(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
@@ -1038,6 +1078,27 @@ test "IsEquipped answers from the item fold's own context" {
     try testing.expect(all(&.{negated}, .{ .item_equipped = false }));
     var counts: Counts = .{};
     try testing.expectEqual(Verdict.unsupported, evaluate(&.{eq}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "EntityHasMovementTag matches the live movement tag set" {
+    // EntityHasMovementTag IL=47: Test_AnySet by default, Test_AllSet with
+    // has_all_tags, invert-aware. perkHardTarget's row is the shipped
+    // `tags="walking,running"` one.
+    const ctx = Ctx{ .movement_tags = "running" };
+    const walking_or_running = Requirement{ .kind = .entity_has_movement_tag, .name = "EntityHasMovementTag", .list = "walking,running" };
+    try testing.expect(all(&.{walking_or_running}, ctx));
+    const idle = Requirement{ .kind = .entity_has_movement_tag, .name = "EntityHasMovementTag", .list = "idle" };
+    try testing.expect(!all(&.{idle}, ctx));
+    // The `!` spelling stock uses on the idle half of a pair.
+    const not_idle = Requirement{ .kind = .entity_has_movement_tag, .name = "EntityHasMovementTag", .list = "idle", .negated = true };
+    try testing.expect(all(&.{not_idle}, Ctx{ .movement_tags = "walking" }));
+    // All-of demands every listed tag; a single-tag set cannot satisfy it.
+    const every = Requirement{ .kind = .entity_has_movement_tag, .name = "EntityHasMovementTag", .list = "walking,running", .has_all = true };
+    try testing.expect(!all(&.{every}, ctx));
+    // A caller with no movement state refuses instead of guessing a tag.
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{walking_or_running}, .{}, &counts));
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 

@@ -235,7 +235,7 @@ wins on conflict about what shipped, not about the arithmetic).
 | [Player progression](#10-player-progression) | 27 | 1 | 0 | 28 | Level, XP, survival stats and active buffs survive a restart (ZPV12 tail, saved on reap); eating caps like stock; death bags drop the real inventory; DeathPenalty is a real option; respawn targets the bedroll with a stock-order confirm; clean curve loader; server-validated spend (NetPackageEntitySetSkillLevelServer) with the level-scaled perk passives folded through the passive-effects VM (armor resist + HealthChangeOT) gated by each row's parsed `<requirement>` (src/assets/requirements.zig); `<book>` progression values load too; XP/level/SP ledger server-side with NetPackagePlayerStats relay + NetPackageEntityAddExpClient; purchased perk levels + skill points persist across restart (ZPV11); kill counters ride PlayerStats; the on_perk_spend plugin verdict (ADR 0033) gates/scales spending on top of the catalog validation and the on_stat_changed observer (ADR 0034) surfaces the survival/XP legs to plugins. Two shortfalls: perk purchase is denied (the parent-skill prerequisite is wrong) and the requirement vocabulary is partial (unknown kinds fail closed, counted) |
 | [World systems](#11-world-systems) | 46 | 1 | 0 | 47 | Walk, dig, build, persist; upgrades validate against the blocks.xml UpgradeBlock table; placed-block rotation/meta rides the chunk raw plane and ZCH3; POIs and parts place and paint; lakes and POI pools wet, claims expire, repair heals, supports collapse; per-cell biome ids follow the biome map; block damage persists per-cell in ZCH3; explosions carry per-entity ExplosionData + material bonuses; the chunk store is pointer-stable (GAP 2026-08-30) |
 | [Net and ops](#12-net-and-ops) | 48 | 0 | 0 | 48 | Join works, telnet is stock-shaped; bans/whitelist/admin gates are stock-authorizer faithful; C2S/S2C coverage complete; in-game player console complete (allowlist + admin routing); the ops verb set is complete; web dashboard is the stock-WebDashboard surface (operator-only, non-client-visible) |
-| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Round 18 (2026-09-11) closed the armor-set activation chain inside §10 (`ArmorGroupCount` + the full triggered-row gate + buffStatusCheck02 driven from data); round 21 (2026-09-12) closed the buffs.xml gate vocabulary (`EntityTagCompare`, the `Stat::Max`/`Stat::ModifiedMax` family and `IsNight`, so all 43 gated tracked buff rows resolve). What keeps it PARTIAL is the gate kinds that need an input the per-tick ctx does not carry (`IsEquipped`, `RandomRoll`, `EntityHasMovementTag`, a foreign-target `EntityTagCompare`), the untracked passive names, and the surviving `@cvar`/row-action legs. Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
+| **Total** | **298** | **2** | **0** | **300** | Two PARTIAL rows with named shortfalls: the perk/attribute passive-effects VM (§10) and the join-burst tick budget (§11, 2026-08-29). Round 18 (2026-09-11) closed the armor-set activation chain inside §10 (`ArmorGroupCount` + the full triggered-row gate + buffStatusCheck02 driven from data); round 21 (2026-09-12) closed the buffs.xml gate vocabulary (`EntityTagCompare`, the `Stat::Max`/`Stat::ModifiedMax` family and `IsNight`, so all 43 gated tracked buff rows resolve); rounds 23-24 added the equipped/held item fold and `IsEquipped`, and `EntityHasMovementTag` from the reported movement state. What keeps it PARTIAL is the gate kinds that need an input the per-tick ctx does not carry (`RandomRoll`, a foreign-target `EntityTagCompare`), the untracked passive names, and the surviving `@cvar`/row-action legs. Death/kill counters promoted to WORKS 2026-09-08 (client-accrued accumulators live in DIVERGENCES §2). Chunk-pointer stability closed 2026-08-30 by the pointer-stable chunk store |
 
 ---
 
@@ -3646,11 +3646,13 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   - Implemented kinds: `ProgressionLevel`, `PlayerLevel`, `HasBuff`,
     `IsAlive`, `IsAttachedToEntity`, `InBiome`, `HoldingItemHasTags`,
     `SandboxOptionBool`, `ArmorGroupLowestQuality`, `ArmorGroupCount`,
-    `StatComparePercCurrentToMax`, `StatCompareCurrent`, `CVarCompare`,
-    `WornItems`, plus the `requirement_group` AND/OR nodes. The rest (measured vocabulary:
-    `ItemHasTags`, `CVarCompare`, `RandomRoll`,
-    `EntityTagCompare`, `EntityHasMovementTag`, `IsNight`, `IsIndoors`,
-    `StatComparePercCurrentToModMax`, `HitLocation`, ...) **fail closed** and are
+    `StatComparePercCurrentToMax`, `StatComparePercCurrentToModMax`,
+    `StatCompareMax`, `StatCompareModMax`, `StatComparePercModMaxToMax`,
+    `StatCompareCurrent`, `CVarCompare`, `WornItems`, `EntityTagCompare`,
+    `IsEquipped`, `EntityHasMovementTag`, `IsNight`, plus the
+    `requirement_group` AND/OR nodes. The rest (measured vocabulary:
+    `ItemHasTags`, `RandomRoll`, `CompareItemMetaFloat`, `RequirementItemTier`,
+    `IsIndoors`, `IsSheltered`, `HitLocation`, ...) **fail closed** and are
     counted in `apm` `requirement_unsupported`, so the gap is visible instead
     of silently passing. `RandomRoll` additionally cannot be folded per tick
     the way the pure state reads can: a chance gate re-rolled on the max-stat
@@ -3908,13 +3910,32 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     **31 resolve / 12 refuse to 43 / 0** (the 12 were 9 `EntityTagCompare`
     player-half rows - the burning and twitch damage-over-time passives, so
     burning now actually burns - plus 3 `!EntityTagCompare` twins). The other
-    files keep their refusals: items.xml 1/7 (`IsEquipped` 6 needs
-    `params.ItemValue`, i.e. the item-context fold; `EntityTagCompare
-    target="other"` 1 needs the attacker's tags at the damage choke) and
-    progression.xml 1/7 (`RandomRoll` 5 needs a roll pinned to a stable seed and
-    period, `EntityHasMovementTag` 1 needs the live movement tag,
-    `EntityTagCompare target="other"` 1). None of those three is blocked on
-    vocabulary: each needs an input the per-tick ctx does not carry yet.
+    files keep their refusals: items.xml 7/1 (one `EntityTagCompare
+    target="other"` row needs the attacker's tags at the damage choke) and
+    progression.xml 2/6 (`RandomRoll` 5 needs a roll pinned to a stable seed and
+    period, `EntityTagCompare target="other"` 1). The former `IsEquipped` 6
+    closed in round 23 with the item fold and `EntityHasMovementTag` 1 in round
+    24 with the reported movement tag, so what is left is not vocabulary: each
+    remaining row needs an input the ctx does not carry (a stable roll, the
+    attacker's tags).
+  - **`EntityHasMovementTag` and the movement tag set (round 24, 2026-09-12).**
+    Stock keeps `EntityAlive.CurrentMovementTag` as a one-tag set that
+    `OnUpdateLive` assigns from the move direction plus `bMovementRunning`
+    (running/walking/idle) and that jumping/climbing/swimming/stance assignment
+    sites OR into. zdtd now latches the client's own `NetPackageEntitySpeeds`
+    `MovementState` (which `SetMovementState` IL=45 derives from the same
+    speeds) onto the client as a three-value `Client.MoveTag` and feeds it to
+    the ctx (`Ctx.movement_tags`), so `EntityHasMovementTag` IL=47 evaluates
+    any-of/`has_all_tags`/invert against it. That vocabulary is the whole set
+    stock uses (idle 3 rows, running 24, walking+running 1), so no shipped row
+    asks for a tag the server cannot derive; a modlet asking for
+    swimming/jumping/falling asks for a state a remote player's body is not
+    modelled with, and the gate fails closed (refused, counted). Fixed by it:
+    `perkHardTarget`'s `GeneralDamageResist base_add level="1,5" value=".05,.25"`
+    is gated `tags="walking,running"` and now folds only while the player walks
+    or runs (the round-22 GDR consumer is what makes it matter). The tag lapses
+    with the same stale timer as the sprint report, so a silent client stops
+    claiming to be moving instead of holding a walking/running gate open.
   - **Buff lifecycle events are driven from the active set, not by id.** The
     `onSelfEnteredGame` pass fires once per buff instance as the class `Buffs=`
     list lands, `onSelfBuffStart`/`onSelfBuffUpdate`/`onSelfBuffRemove` fire for

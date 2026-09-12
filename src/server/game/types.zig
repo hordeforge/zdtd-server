@@ -440,6 +440,43 @@ pub const SkillLevel = assets_progression.SkillLevel;
 pub const max_skill_levels: usize = 128;
 
 pub const Client = struct {
+    /// The player's current movement tag, `EntityAlive.CurrentMovementTag`
+    /// (`MovementTagIdle`/`Walking`/`Running`, set in
+    /// `EntityAlive::OnUpdateLive` from the move direction plus
+    /// `bMovementRunning`). zdtd reads the client's own report
+    /// (`NetPackageEntitySpeeds.MovementState`, derived from the same speeds by
+    /// `EntityAlive::SetMovementState`) and folds it to this three-value set;
+    /// that is the whole vocabulary stock uses in `EntityHasMovementTag` rows
+    /// (idle 3, running 24, walking+running 1), so no tag a row can ask for is
+    /// left underivable.
+    pub const MoveTag = enum(u8) {
+        idle,
+        walking,
+        running,
+
+        /// The tag name as stock writes it in `CurrentMovementTag`
+        /// (`FastTags.Parse` of "idle"/"walking"/"running").
+        pub fn name(self: MoveTag) []const u8 {
+            return switch (self) {
+                .idle => "idle",
+                .walking => "walking",
+                .running => "running",
+            };
+        }
+
+        /// Fold the reported `MovementState` (0 stopped, 1 moving, 2 above walk
+        /// speed, 3 above aggro speed; `EntityAlive::SetMovementState` IL=45).
+        /// State 3 is the client's sprint/aggro band, which is what stock's
+        /// `bMovementRunning` reports for a running body.
+        pub fn fromMovementState(state: u8) MoveTag {
+            return switch (state) {
+                0 => .idle,
+                1, 2 => .walking,
+                else => .running,
+            };
+        }
+    };
+
     peer: ?*ln_peer.Peer = null,
     entity_id: i32 = -1,
     /// Server-side XP ledger (XPMultiplier applied on award).
@@ -604,6 +641,12 @@ pub const Client = struct {
     /// drain (UpdatePlayerStaminaOT).
     sprint_speed: f32 = 0,
     sprint_stale_cd: f32 = 0,
+    /// Movement tag the client last reported (NetPackageEntitySpeeds), gating
+    /// `EntityHasMovementTag` rows (perkHardTarget's walking/running damage
+    /// resist, the running-tagged StaminaChangeOT rows). Latched with the same
+    /// stale timer as `sprint_speed`: a client that stops reporting stops
+    /// claiming to be moving rather than keeping the gate open forever.
+    move_tag: MoveTag = .idle,
     /// Cost-class token buckets (refill on accept path).
     inv_tokens: u8 = 0,
     inv_refill_ns: u64 = 0,

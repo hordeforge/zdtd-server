@@ -215,8 +215,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             return true;
         }
         // Sprint state for the stamina drain (MovementState 3 = sprint/aggro,
-        // entity-ai.md SetMovementState); lapses on a stale timer.
+        // entity-ai.md SetMovementState); lapses on a stale timer. The same
+        // report carries the movement tag `EntityHasMovementTag` gates read
+        // (stock sets `CurrentMovementTag` from the move direction plus
+        // `bMovementRunning`, and `SetMovementState` derives its state from the
+        // same speeds).
         c.sprint_speed = sprintMagnitude(s.movement_state, s.speed_forward, s.speed_strafe);
+        c.move_tag = Client.MoveTag.fromMovementState(s.movement_state);
         c.sprint_stale_cd = self.sim.rules.progression.sprint_stale_seconds;
         // Re-encode rather than relay: stock's body is exactly 13 bytes, and
         // the parser only requires a minimum, so a raw relay would forward a

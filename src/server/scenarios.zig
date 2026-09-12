@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const game_mod = @import("game.zig");
+const Client = game_mod.Client;
 const game_bot = @import("game/bot.zig");
 const game_player = @import("game/player.zig");
 const game_movement_helpers = @import("game/movement_helpers.zig");
@@ -11892,11 +11893,21 @@ test "scenario entity flag and speed reports must name the sender's own entity" 
     const sprint_state: u8 = 3;
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntitySpeeds", try packages.buildEntitySpeedsBody(&body, ca.entity_id, sprint_state, 6.0, 0)));
     try std.testing.expect(ca.sprint_speed > 0);
+    // The same report drives the movement tag `EntityHasMovementTag` gates
+    // read: state 3 is the sprint/aggro band = running.
+    try std.testing.expectEqual(Client.MoveTag.running, ca.move_tag);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntitySpeeds", try packages.buildEntitySpeedsBody(&body, ca.entity_id, 1, 2.0, 0)));
+    try std.testing.expectEqual(Client.MoveTag.walking, ca.move_tag);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntitySpeeds", try packages.buildEntitySpeedsBody(&body, ca.entity_id, 0, 0, 0)));
+    try std.testing.expectEqual(Client.MoveTag.idle, ca.move_tag);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntitySpeeds", try packages.buildEntitySpeedsBody(&body, ca.entity_id, sprint_state, 6.0, 0)));
 
     const b_sprint_before = cb.sprint_speed;
+    const b_tag_before = cb.move_tag;
     own_before = g.harness.counters.get(.ownership_rejects);
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntitySpeeds", try packages.buildEntitySpeedsBody(&body, cb.entity_id, sprint_state, 6.0, 0)));
     try std.testing.expectEqual(b_sprint_before, cb.sprint_speed);
+    try std.testing.expectEqual(b_tag_before, cb.move_tag);
     try std.testing.expectEqual(own_before + 1, g.harness.counters.get(.ownership_rejects));
     std.debug.print("PASS self-report: own flags and speeds applied, spoofed entity ids refused\n", .{});
 }

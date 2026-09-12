@@ -366,6 +366,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 // The entity's class Tags (`entityclasses.xml`), read by
                 // EntityTagCompare for the default self target.
                 .entity_tags = entityClassTags(self, ps),
+                // CurrentMovementTag (`EntityHasMovementTag`): the client's
+                // reported movement state folded to idle/walking/running.
+                .movement_tags = c.move_tag.name(),
             };
             var req_counts: requirements.Counts = .{};
             // Buff lifecycle events, driven from the active set rather than by
@@ -576,7 +579,13 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             h.stamina_max != stamina_max_was;
         if (c.sprint_stale_cd > 0) {
             c.sprint_stale_cd -= dt;
-            if (c.sprint_stale_cd <= 0) c.sprint_speed = 0;
+            if (c.sprint_stale_cd <= 0) {
+                c.sprint_speed = 0;
+                // The movement tag lapses with the same report: a client that
+                // stopped sending speeds stops claiming to be moving, so a
+                // walking/running gate does not stay open on stale input.
+                c.move_tag = .idle;
+            }
         }
         const stamina_was = h.stamina;
         if (c.sprint_speed > 0) {

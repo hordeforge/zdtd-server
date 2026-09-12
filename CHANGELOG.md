@@ -7,6 +7,21 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Movement-gated perks never applied. `EntityHasMovementTag` was not
+  implemented, so every row behind it failed closed: `perkHardTarget`'s
+  `GeneralDamageResist` (its only gate is `tags="walking,running"`) folded
+  nothing, and the running-tagged stamina rows were unreachable. The client's
+  `NetPackageEntitySpeeds` movement state (which the game itself derives from
+  the reported speeds, `EntityAlive::SetMovementState`) now latches onto the
+  client as idle/walking/running, the survival tick feeds it to the requirement
+  context, and `EntityHasMovementTag` evaluates any-of / `has_all_tags` /
+  inverted against it. The tag lapses with the same stale timer as the sprint
+  report, so a silent client stops claiming to be moving rather than holding a
+  walking/running gate open. That three-tag set is the whole vocabulary stock
+  ships in those rows (idle 3, running 24, walking+running 1); a modlet asking
+  for swimming, jumping or falling asks for a state the server does not model
+  for a remote body and still fails closed.
+
 - An exclusive plugin override point stayed routed to a claimant that had
   stopped providing. `damage.player_scale`, `craft.request`, `loot.roll`,
   `trade.price` and `quest.payout` sent every call to the slot named in the

@@ -4235,6 +4235,43 @@ test "equipped item passives fold into the survival VM (stock data)" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.05), g.sim.buff_general_resist[ps], 0.0001);
 }
 
+test "perkHardTarget's movement-gated GeneralDamageResist folds while moving" {
+    // perkHardTarget's `GeneralDamageResist base_add level="1,5" value=".05,.25"`
+    // sits in an effect_group gated `EntityHasMovementTag tags="walking,running"`.
+    // The survival tick feeds the client's reported movement state as the
+    // CurrentMovementTag set, so the row folds while walking or running and
+    // drops at idle, which is not in the row's tag list.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    cl.skill_levels[0] = .{ .name = "perkHardTarget", .level = 5 };
+    cl.skill_level_n = 1;
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
+    cl.move_tag = .running;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), g.sim.buff_general_resist[ps], 0.001);
+    cl.move_tag = .walking;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), g.sim.buff_general_resist[ps], 0.001);
+    cl.move_tag = .idle;
+    try g.step();
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
+}
+
 test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
     // perkPainTolerance's untagged `GeneralDamageResist base_add level="1,5"
     // value=".05,.25"` row is passive 40, which EntityAlive::DamageEntity reads
