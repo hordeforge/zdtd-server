@@ -888,8 +888,10 @@ abundance_type (68). Then the requirement evaluator landed (2026-09-12):
 `value="@$cvar"` operand). The `$perkBookwormChance` writer is data too:
 progression.xml's `perkIntellectMastery` `onSelfProgressionUpdate` rows fire on
 every level change, so an Intellect Mastery 2+ opener rolls those 63 rows at
-25%. The residual is the 3 `SandboxOption` rows, whose numeric sandbox-option
-compare is not wired, plus abundance_type; the row stays PARTIAL for those.
+25%. `SandboxOption` rows compare the option's value under the decoded server
+sandbox code too (stock `HarvestingOutput EQ 0`), so the residual is only
+per-entry `abundance_type` (the per-category sandbox count modifier); the row
+stays PARTIAL for that.
 Then the timid-animals row went WORKS: `approach_attack` is gated by the
 class's inherited AITask-* list (`ai_attack` parsed from entityclasses.xml;
 `ApproachAndAttackTarget` is the only attack task in V3.1.0 b14), so a stag
