@@ -7,6 +7,54 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Fixes from the 2026-09-12 review passes (snapshots under `docs/archive/`).
+  - **Chunk pacing budget charged per attempt.** `drainSpawnArea` and
+    `streamChunksForClient` decremented the shared per-tick budget only after a
+    chunk was delivered, and skipped to the next cell on a refused send. A peer
+    with a full reliable window still paid worldgen plus encode (and the retry
+    pump) for every cell, so one tick walked the whole spawn ring (288 cells) or
+    view square (up to 625) and stalled the sim for seconds. The budget is now
+    consumed by the attempt and the pass stops on refusal, so the rest retries
+    next tick.
+  - **Sign batches no longer wedge the join.** Middle
+    `NetPackageSignDataResponse` batches are sent through plain `sendGame`, and
+    a full window there hard-errored out of `sendSignDataBatches`, so the loop
+    never reached the final batch and the client sat on "Starting Game"
+    (`worldInfoCo` blocks until `isLastBatch=true`). The package is now in
+    `isDroppablePackage`: a middle batch may be dropped, the final batch stays
+    critical and must deliver.
+  - **One critical deadline per join bundle.** `sendJoinBundle` at the
+    `RequestToSpawnPlayer` and `DynamicClientArrive` fallback sites is now
+    wrapped in the shared critical deadline like the `RequestToEnterGame`
+    bundle, so a peer that stops ACKing no longer re-arms the full budget for
+    every critical package in the bundle.
+  - **Weather body count comes from the loaded table.** `NetPackageWeather` was
+    pinned to 5 biome entries and padded by duplicating the last state. The
+    stock client sizes its read from `biomeWeather.Count`, which is the number
+    of biomes with weather groups (the loaded `biome_layers.weather_n`), so a
+    modded `biomes.xml` with a different count produced a wrong-length body.
+    The builder now uses that count (and names real biome ids when padding),
+    keeping the 5-entry fallback only when no `biomes.xml` is loaded.
+  - **Zero survival decay no longer disables the whole survival pass.**
+    `tickSurvival` returned early when both `food_depletion_per_hour` and
+    `water_depletion_per_hour` were 0 (as `presets/builder.toml` sets), which
+    also skipped drowning, radiation, the stamina and well-fed folds and the
+    buff lifecycle, including the player class buffs fired by
+    `onSelfEnteredGame`. Only the two decay writes are gated now.
+  - **Block meta reads fall back to the chunk raw plane.** `blockRawAt` returned
+    0 when the sparse mirror missed (it evicts oldest entries), so a resend or
+    TE replicate could report a bare block id for a rotated block. A miss now
+    reads the resident chunk's raw plane (no `getOrCreate`, so a read cannot
+    generate a chunk).
+  - **Container lookup by guid decodes the position.** `getByGuid` scanned the
+    ~500 B AoS; `inv_guid` is only ever `guidFromPos(pos)`, so it now decodes the
+    position (`posFromGuid`, tag-checked) and reuses the key-mirror scan.
+  - **Zig 0.16 conformance.** `@intFromFloat` is a deprecated alias of `@trunc`
+    in 0.16; the 58 non-vendored call sites in `src/` and `mods/` now use
+    `@trunc` (nested `@trunc(@ceil(x))` forms collapse to `@ceil(x)`).
+
+### Fixed
+
 - Container loot is now rolled when a player first opens the container, not
   when the chunk loads. Stock's `LootManager.LootContainerOpened` rolls a placed
   container on first open with the **opening player's** loot stage, sets

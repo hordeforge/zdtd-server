@@ -1,0 +1,139 @@
+# Review triage 2026-09-12
+
+All nine `docs/prompts/*.md` review passes ran against HEAD `3d408904` and wrote
+their snapshots under `docs/archive/` (commit `2d60fccb`). This file is the
+consolidation: every finding, its verification result, and where it stands.
+
+Dispositions:
+
+- **FIXED** - applied in this pass, gate run after (see the commit that carries
+  this file).
+- **REJECTED** - verified and found not to be a defect (reason given). Reviews
+  are static; a finding is not a fix instruction until the code around it is
+  read.
+- **QUEUED** - real, not applied here. Ordered by severity in the batch list at
+  the end.
+
+Snapshots: `HARDCODE_AUDIT_2026-09-12.md`, `NET_SEND_REVIEW_2026-09-12.md`,
+`ECS_REVIEW_2026-09-12.md`, `ZIG_0_16_REVIEW_2026-09-12.md`,
+`ZIG_REVIEW_2026-09-12.md`, `ZIG_PRACTICES_REVIEW_2026-09-12.md`,
+`ABSTRACTION_REVIEW_2026-09-12.md`, `SIMD_REVIEW_2026-09-12.md`,
+`../reviews/PLUGIN_COMPOSABILITY.md` (F7-F11).
+
+## Fixed in this pass
+
+| Review | Finding | Change |
+|---|---|---|
+| net-send P0 | `chunk_stream.zig` charged the tick pacing budget only on a delivered chunk, so a wedged peer walked the whole spawn ring / view square in one tick | budget charged per attempt; the pass stops on refusal (`drainSpawnArea`, `streamChunksForClient`) |
+| net-send P1 | `NetPackageSignDataResponse` was absent from `isDroppablePackage`, so a full window aborted `sendSignDataBatches` before `isLastBatch=true` | added to the droppable set (middle batches may drop, the critical final batch still must deliver) |
+| net-send P1 | `sendJoinBundle` at the spawn/respawn sites re-armed a full critical budget per package | both call sites arm the shared `critical_budget_deadline_ns` like the `RequestToEnterGame` bundle |
+| hardcode A1 P1 | `weather.zig` pinned the `NetPackageWeather` body to 5 biomes and padded by duplicating state | count now `biome_layers.weather_n` (stock `biomeWeather.Count`); the 5-entry fallback survives only for a table with no biomes at all |
+| ECS P1 | `tickSurvival` returned early when both decay rates were 0, skipping drowning/radiation/stamina and the whole buff lifecycle, including the `onSelfEnteredGame` class buffs | only the two food/water decay writes are gated |
+| ECS P1 | `blockRawAt` returned 0 on a sparse-mirror miss (the mirror evicts), so a resend or TE replicate could report a bare block id for a rotated block | miss reads the resident chunk raw plane (`chunkAt`, never `getOrCreate`) |
+| ECS P1 | `containers.getByGuid` scanned the ~500 B AoS | decodes the guid to `PosKey` (`posFromGuid`, tag-checked) and reuses `get`'s key-mirror scan |
+| zig-0.16 P1 | `@intFromFloat` is a deprecated alias of `@trunc` in 0.16 | all 60 call sites in `src/` and `mods/` moved to `@trunc` (nested `@trunc(@ceil(x))` collapsed to `@ceil(x)`) |
+
+Doc corrections that fall out of the hardcode audit (the code was right, the
+docs were not): `XML_DATA_AUDIT.md` row 6 (the starter kit never moved to
+`zdtd.toml`), the same file's loot "fabricated scrap iron" row (the roll fails
+closed now), `PROVENANCE.md` ambient-seeds row and `DIVERGENCES.md` 6.2 (only
+the hostiles are behind `starter_zombies`).
+
+## Rejected after verification
+
+| Review | Finding | Why it is not a defect |
+|---|---|---|
+| net-send P1 | `game.zig` `sendBlockIdMapping` logs and returns on frame-init/write/deflate failure instead of propagating | that is the documented contract in the function's own header: "All or nothing. A partial blob is worse than none... any validation failure, an empty dump, or a compressed size that does not fit all skip the package entirely and leave today's LoadLocal behaviour in place." `LoadFromArray` swallows a partial blob and `assignLeftOverBlocks` silently renumbers unnamed blocks, so returning the error (which aborts the join) is strictly worse than the current fail-closed skip |
+| best-practices P1 | `game.zig` has 226 one-line forwarders | it is the documented delegating facade; deleting them touches every call site of a 3.9 k-line file for no behavioural gain. Kept deliberately; the note "stop adding no-policy forwarders" is recorded below |
+
+## Queued (ordered)
+
+Correctness / behaviour, next pass:
+
+1. **plugin F7 (P1)** - plugin point claims are installed by plan slot while
+   `self.n` advances only for modules that load, so a skipped module binds the
+   claim to the wrong module. Map plan slot to loaded slot.
+2. **plugin F8 (P2)** - `reload` does not set `ctx.require_declaration`, so a
+   manifest-backed module can be swapped on disk to drop `_zdtd_requires` and
+   load, where a restart refuses it.
+3. **plugin F9 (P2)** - `reconcileClaims` zeroes `module_deny` before
+   `manifest.bindManifest`; a bind/validate failure leaves the deny lifted.
+4. **net-send P2** - `map.zig` marks a minimap piece sent before
+   `trySendCompressed` and ignores the result, so one failure holes the map.
+5. **net-send P2** - `budget_ns == null` disables the only fragment-retry
+   deadline (`peer.zig:312-335`); assert non-null or arm a bounded attempt.
+6. **net-send P2** - the unreliable guards use `max_single_user` while
+   `sendUnreliable` enforces `min(max_single_user, peer_mtu-4)`.
+7. **ECS P1** - `wire/stock_inv.zig` / `wire/stock_te.zig` mutate ECS state;
+   move the apply functions next to their target types (~130 lines).
+8. **ECS P2** - `game/trader.zig` copies the whole `TraderStock` by value in
+   the replicate loop; take a pointer.
+9. **ECS P2** - `replicate_health.zig` and `tickTraderAreas` scan full
+   `max_entities` instead of `dirty_bits` / the trader kind group.
+10. **ECS P2** - the `Dirty.spawn/.inv/.remove` bits are set but never read or
+    cleared, so `dirty_bits` never releases the slot; delete them.
+11. **SIMD P1** - `chunk_fill.zig:149` passes `dmg_at` unconditionally, so
+    `writeDamageChannel` runs 65536 indirect callbacks per chunk whose null
+    branch writes identical bytes. One-line gate mirroring `dens_at`.
+12. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
+    density plane exists (POI chunks), bypassing the existing
+    `packDensityFromRaws` SIMD path.
+13. **hardcode B1 (P2)** - the starter kit is still hardcoded in
+    `ecs/world.zig`; add `[sim] spawn_starter_kit` (parse once at `create`,
+    resolve names through items.xml, fail closed).
+14. **hardcode B2 (P2)** - wrap the trader/minibike/chest/power seeds in one
+    `[sim] demo_seed` switch so `starter_zombies = false` really is stock-lazy.
+15. **hardcode A2 (P3)** - `world/workstations.zig` applies the invented 10 s
+    fuel burn even when a fuel resolver is wired; gate the fallback on
+    `caps.fuel_resolve == null`.
+16. **hardcode B3 (P3)** - `pos_heartbeat_period_ticks` is paired with a
+    tunable but is not itself configurable.
+17. **abstractions P1** - the native `PluginHost` vtable defaults on
+    (`enable_sample_plugin`), composes before Wasm on 28 hooks, and is a
+    shipped preset knob, while ADR 0020 decision 2 calls it test scaffolding.
+    Needs a maintainer call: default it off in product configs, or amend the
+    ADR.
+18. **plugin F10/F11 (P3)** - `pluginVerbDenied` matches only the first token
+    (`deny="spawn"` does not stop `bot spawn`); a manifest-backed reload keeps
+    the old `config_bytes` and never re-reads `config.toml`.
+
+Structure / idiom (no behaviour change):
+
+19. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
+    `std.Io.Threaded` on `Game` instead of a fresh init/deinit in `step.zig`
+    (per APM period), `net.zig clientFor` (per first datagram) and all 12
+    `util/io_fs.zig` helpers. The 0.16 `Threaded.init` installs process-global
+    SIGIO/SIGPIPE handlers, so the current shape clobbers the live instances in
+    `udp_socket.zig` / `parallel.zig` and `join()`s on the tick thread.
+20. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
+    parallel `QueueVerb.names` table where `@typeInfo(T).@"enum".fields` +
+    `@tagName` is the 0.16 shape used elsewhere.
+21. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
+    `plane_cells` are snake_case among camelCase siblings.
+22. **abstractions P2** - add `arena.destroyHolder` and replace the 28
+    open-coded child/deinit/destroy blocks (`util/arena.zig` already has
+    `newArenaHolder`); merge the duplicated edit-reach predicate
+    (`game/rescue.zig` vs `game/guard.zig`).
+23. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
+    `Section` so switches over it are exhaustiveness-checked; widen
+    `webui.zig:1396`'s `[8]u8` and give it one overflow policy.
+24. **simd P1/P2** - density/texture channel SIMD planes, replicate range
+    mask reuse, worldgen row-band material pass (measure first; all have scalar
+    goldens to compare against).
+25. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
+    `sys_metrics.zig` residual-table note.
+26. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
+    `server/game/`, delete the four no-policy `packages.zig` forwarders and the
+    `unityStringHash` alias, inline `game/bans.zig`.
+
+## Evidence notes
+
+- The batch landed with `zig build` clean and `make check` green (lint,
+  provenance 203/203 and 65 ledgered constants, XML audit, tests, fuzz).
+- The Navezgane mixed-mode loadgen smoke on this tree (2 bots) passed every
+  join; it also printed one `tick overrun n=700 late_us=44591 (budget=50000us)`,
+  which is worth watching as the independent measurement for the net-send P0
+  (the fix bounds the pathological case, it does not claim the common-case
+  tick cost fell).
+- No review fix was applied without reading the surrounding code; the two
+  rejected findings above are the reason that matters.

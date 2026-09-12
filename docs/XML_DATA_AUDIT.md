@@ -94,7 +94,7 @@ hardcoded literal. Verified against the b14 install before changing.
 | 3 | Saved vehicle restore HP `200` (`server/persist.zig`) | `vehicles.xml` per-kind `max_hp` (gyro 250, 4x4 300) | restore passes `vehicles.byKind(kind).max_hp` |
 | 4 | Airdrop loot container `"supplyCrate"` (`server/game/tick.zig`) - no such stock name, crates rolled empty | `loot.xml` `airDrop` (+ `entityclasses.xml` `LootList`) | renamed to `"airDrop"` |
 | 5 | Item→block place map `resourceWood→frameShapes:cube`, `resourceCobblestones→cobblestoneShapes:cube` (`ecs/inventory.zig`, `server/game/hooks.zig`) - invented; b14 defines no `Placeable` for them | `items.xml` `Blockname` (torch → `wallTorchLightPlayer`, candle → `candleWallLightPlayer`) | `items.zig` parses `Blockname` into `ItemDef.place_block_name`; `placeBlockId` resolves only that name via AssignIds and drops the invented wood/cobble map (frameShapes:cube is not an item in b14) |
-| 6 | Starter kit (4 items + counts) hardcoded in `ecs/world.zig` spawnPlayer | none - stock defines the kit in code, so it is server policy | moved to `zdtd.toml` `spawn_starter_kit` (config level, per ADR 0010); Game parses once, applies at fresh join, resolves names through items.xml, fail-closed on unknown names |
+| 6 | Starter kit (4 items + counts) hardcoded in `ecs/world.zig` spawnPlayer | none - stock defines the kit in code, so it is server policy | still hardcoded (`ecs/world.zig` `spawnPlayer`: stone axe 1, foodCanBeef 5, resourceWood 20, casinoCoin 50; names resolve through items.xml, counts are policy). Open: a `[sim] spawn_starter_kit` config key (hardcode audit 2026-09-12 B1). An earlier revision of this row claimed the move was done; it never was |
 
 ## Offline fallbacks (allowed last resort, code bucket)
 
@@ -141,9 +141,10 @@ values to a connected stock client:
   ARE wired: `tickSurvival` (`game/tick.zig`) consumes `buffs.survival()`
   (hunger/thirst stage fractions, starvation/dehydration HP/s,
   `StaminaChangeOT` penalty) whenever `buffs.xml` is present.
-- `loot.zig` `rollContainer` falls back to fabricated `resourceScrapIron × 5`
-  when a container rolls empty; stock yields an empty container (fail-closed
-  change is a separate behavioural decision).
+- `loot.zig` `rollContainer` **fails closed**: an empty roll returns zero stacks
+  (stock `LootContainer.roll` yields an empty container when every entry fails
+  its gate), and the fabricated `resourceScrapIron × 5` fallback this row used to
+  describe is gone (`assets/loot.zig` roll tail).
 - **Modlet-added items** (e.g. `mods/parachute/Config/items.xml` adds the
   `parachute` item, ADR 0037): these are operator-installed game data patched
   into the catalog before loading (PRD 0003), never hardcoded in `src/`; the
