@@ -222,9 +222,10 @@ Guests: each `.wasm` is instantiated once, its exported hooks registered, and
 every call runs under the fuel and memory budget described above. No raw `*Game`
 crosses, and no package bytes can be injected (ADR 0010, ADR 0020).
 
-The in-tree static host (`src/plugin/host.zig`, gated by `enable_sample_plugin`)
-runs the same hook order without a runtime, so scenarios can assert hook
-behaviour directly. It is test scaffolding, not a shipping format.
+The in-tree static host (`src/plugin/host.zig`, gated by `enable_sample_plugin`,
+default false) runs the same hook order without a runtime, so scenarios can
+assert hook behaviour directly. It is test scaffolding, not a shipping format,
+and the shipped presets leave it off (ADR 0020 decision 2).
 
 ## Host surface (narrow)
 
@@ -361,7 +362,8 @@ never races plugin writes.
 
 Plugins are compiled in and registered at runtime via `PluginHost.register`
 (`src/plugin/host.zig`); the sample is gated by the `enable_sample_plugin`
-InitOption, not a build option. Public facade: `src/plugin/root.zig`.
+InitOption (default false, test scaffolding), not a build option. Public
+facade: `src/plugin/root.zig`.
 
 ### v2 (shipped first cut): Wasm runtime
 

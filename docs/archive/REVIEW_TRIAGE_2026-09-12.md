@@ -57,6 +57,18 @@ the hostiles are behind `starter_zombies`).
 | net-send P2 | `map.zig` marked pieces sent before the send | marked only on a real send |
 | net-send P2 | `budget_ns == null` disabled the only fragment-retry deadline | parameter is a plain `u64`; no caller passed null |
 
+## Fixed in the fifth pass (round 25)
+
+| Review | Finding | Change |
+|---|---|---|
+| ECS P2 | `Dirty.spawn/.inv/.remove` were written in 13 places, read nowhere, and `inv`/`remove` were never cleared, so `dirty_bits` never released those slots | fields, writers and the `markInv` helper deleted; `dirty_bits` releases after the motion/health passes |
+| abstractions P1 | the native vtable `PluginHost` defaulted on and composed before Wasm on 28 hooks, against ADR 0020 decision 2 | `enable_sample_plugin` and both shipped presets default false; tests and an explicit opt-in still use the native path |
+
+Residual for the abstractions P1: the 28 "static first, then Wasm" dispatch
+sites remain (they cost one null-ish check each when no static plugin is
+registered). Collapsing them into one helper is a separate refactor, listed
+with the structure items below.
+
 ## Fixed in the fourth pass (round 24)
 
 | Review | Finding | Change |
@@ -88,15 +100,14 @@ Correctness / behaviour, next pass:
    move the apply functions next to their target types (~130 lines).
 2. **ECS P2** - `replicate_health.zig` and `tickTraderAreas` scan full
    `max_entities` instead of `dirty_bits` / the trader kind group (the health
-   pass also sets `dirty[].hp` outside the `markDirty` funnel, which the
-   iteration change must account for).
-3. **ECS P2** - the `Dirty.spawn/.inv/.remove` bits are set in 10+ places,
-   read nowhere and never cleared, so `dirty_bits` never releases the slot;
-   delete them.
-4. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
+   pass sets `dirty[].hp` outside the `markDirty` funnel, which the iteration
+   change must account for).
+3. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
    density plane exists (POI chunks), bypassing the existing
    `packDensityFromRaws` SIMD path.
-5. **abstractions P1** - the native `PluginHost` vtable defaults on
+4. **abstractions P2** - one `hookVerdict` helper for the 28 static-then-Wasm
+   dispatch sites (the default-off change above left the sites in place);
+   keep the native path reachable for tests.
    (`enable_sample_plugin`), composes before Wasm on 28 hooks, and is a
    shipped preset knob, while ADR 0020 decision 2 calls it test scaffolding.
    Needs a maintainer call: default it off in product configs, or amend the
@@ -104,30 +115,30 @@ Correctness / behaviour, next pass:
 
 Structure / idiom (no behaviour change):
 
-6. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
+5. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
     `std.Io.Threaded` on `Game` instead of a fresh init/deinit in `step.zig`
     (per APM period), `net.zig clientFor` (per first datagram) and all 12
     `util/io_fs.zig` helpers. The 0.16 `Threaded.init` installs process-global
     SIGIO/SIGPIPE handlers, so the current shape clobbers the live instances in
     `udp_socket.zig` / `parallel.zig` and `join()`s on the tick thread.
-7. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
+6. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
     parallel `QueueVerb.names` table where `@typeInfo(T).@"enum".fields` +
     `@tagName` is the 0.16 shape used elsewhere.
-8. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
+7. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
     `plane_cells` are snake_case among camelCase siblings.
-9. **abstractions P2** - add `arena.destroyHolder` and replace the 28
+8. **abstractions P2** - add `arena.destroyHolder` and replace the 28
     open-coded child/deinit/destroy blocks (`util/arena.zig` already has
     `newArenaHolder`); merge the duplicated edit-reach predicate
     (`game/rescue.zig` vs `game/guard.zig`).
-10. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
+9. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
     `Section` so switches over it are exhaustiveness-checked; widen
     `webui.zig:1396`'s `[8]u8` and give it one overflow policy.
-11. **simd P1/P2** - density/texture channel SIMD planes, replicate range
+10. **simd P1/P2** - density/texture channel SIMD planes, replicate range
     mask reuse, worldgen row-band material pass (measure first; all have scalar
     goldens to compare against).
-12. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
+11. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
     `sys_metrics.zig` residual-table note.
-13. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
+12. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
     `server/game/`, delete the four no-policy `packages.zig` forwarders and the
     `unityStringHash` alias, inline `game/bans.zig`.
 
@@ -156,5 +167,10 @@ Structure / idiom (no behaviour change):
   3 skipped; 0 failed` and `make check` green. New tests: the F11 config
   re-read (edited file picked up, deleted file fails closed) and the peer
   unreliable limit pinned to the negotiated MTU in the MTU test.
+- The fifth batch (round 25): `zig build test` direct run `1803 passed;
+  3 skipped; 0 failed` and `make check` green. The dead-bit removal kept every
+  existing replication test green (the bits were write-only); the
+  static-host change only flipped documented defaults, and the tests that use
+  the native host pass `enable_sample_plugin = true` explicitly.
 - No review fix was applied without reading the surrounding code; the two
   rejected findings above are the reason that matters.

@@ -5,6 +5,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **The static plugin host is off in the shipped configuration.** `enable_sample_plugin` defaulted to true, so every product build registered the native vtable `sample_hello` host and composed its verdicts before Wasm on 28 hook names across 18 files, while ADR 0020 decision 2 calls that host test scaffolding rather than a product surface. The `InitOption` default and both shipped presets are now false; tests and a deliberate `enable_sample_plugin = true` still exercise the native path. One plugin mechanism is live by default.
+
+### Fixed
+
+- Review follow-ups (round 5).
+  - **Dead `Dirty` bits removed.** `Dirty.spawn`, `.remove` and `.inv` were written in 13 places (including a `markInv` helper called from every inventory mutation) and read by nothing, and `.inv`/`.remove` were never cleared, so any entity that ever set one stayed in `dirty_bits` forever and was re-considered by every replicate pass. The bits, their writers and the `markInv` helper are gone; `dirty_bits` now releases a slot once its motion/health bits are consumed.
+
 ### Fixed
 
 - Review follow-ups (round 4).

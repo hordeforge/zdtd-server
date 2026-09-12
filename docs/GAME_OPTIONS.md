@@ -424,7 +424,7 @@ config, wasm and assets together.
 | `drop_on_death` | 0 nothing, 1 all, 2 toolbelt, 3 backpack, 4 delete |
 | `land_claim_size` / `land_claim_online_durability_modifier` / `land_claim_offline_durability_modifier` / `land_claim_expiry_days` | claim geometry and decay |
 | `loot_respawn_days` | container re-roll interval (0..365) |
-| `enable_sample_plugin` | Register in-tree `sample_hello` static plugin (host already exists) |
+| `enable_sample_plugin` | Register the in-tree `sample_hello` static plugin (the native vtable host already exists). Default **false** since 2026-09-12: ADR 0020 decision 2 calls the static host test scaffolding, not a product surface, so the shipped presets run one plugin mechanism (Wasm). Tests and a deliberate opt-in set it true |
 | `worldgen_seed` | Enables the on-the-fly procedural terrain (infinite world). Precedence: CLI `--worldgen-seed` > zdtd.toml `[worldgen] seed` > this key |
 | `[rules.*]` sections | Any `Rules` field via `[rules.combat]`, `[rules.ai]`, `[rules.bloodmoon]`, `[rules.director]`, `[rules.worldgen]` (see above) |
 
