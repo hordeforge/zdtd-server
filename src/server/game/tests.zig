@@ -5784,6 +5784,51 @@ test "spawn_starter_kit config replaces the built-in kit and fails closed" {
     try std.testing.expectEqual(@as(u32, 50), g2.sim.inventory[ps2].countItem(coin));
 }
 
+test "container loot starts a random-durability item worn" {
+    // Stock LootContainer: when `random_durability="true"` and the item has a
+    // MaxUseTimes, UseTimes = (int)(max * RandomRange(0.2, 0.8)); otherwise 0.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const axe = g.items.ecsIdByName("meleeToolRepairT0StoneAxe");
+    if (axe == 0) return error.SkipZigTest;
+    const max_use = g.itemMaxUseTimes(axe, 1);
+    if (max_use == 0) return error.SkipZigTest;
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="duraCrate" count="all">
+        \\  <item name="meleeToolRepairT0StoneAxe" random_durability="true"/>
+        \\  <item name="meleeToolRepairT0StoneAxe" random_durability="false"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const cont = g.containers.getOrCreate(.{ .x = 6, .y = 70, .z = 6 }, 8, 0).?;
+    cont.player_storage = false;
+    cont.loot_list = "duraCrate";
+    cont.touched = false;
+    g.ensureContainerLoot(cont, cl.slot);
+    try std.testing.expect(cont.slots[0].item_id == axe and cont.slots[1].item_id == axe);
+    const lo: f32 = @as(f32, @floatFromInt(max_use)) * 0.15; // truncation margin
+    const hi: f32 = @as(f32, @floatFromInt(max_use)) * 0.85;
+    try std.testing.expect(cont.slots[0].use_times >= lo and cont.slots[0].use_times <= hi);
+    try std.testing.expectEqual(@as(f32, 0), cont.slots[1].use_times);
+}
+
 test "container loot applies entry buffs to the opener" {
     // Stock collects a spawned entry's `buffs=` during the roll and applies the
     // list to the opener after it (LootContainer.ExecuteBuffActions ->

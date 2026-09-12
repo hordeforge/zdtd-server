@@ -31,6 +31,9 @@ pub const LootEntry = struct {
     /// joining the group's pick pool (stock SpawnAllItemsFromList /
     /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
     force_prob: bool = false,
+    /// `random_durability="true"` (123 stock entries, all explicitly false, so
+    /// this is engine/modlet support): the spawned item starts 20-80% worn.
+    random_durability: bool = false,
     /// `buffs=` (63 stock entries, `buffPerkBookwormSuccess`): buffs added to
     /// the opener when this entry spawns (`LootContainer` collects the list and
     /// `ExecuteBuffActions` applies them). Arena-owned comma list.
@@ -321,7 +324,20 @@ pub const Stack = struct {
     /// Rolled ItemValue quality (loot_quality_template by loot stage); 1 for
     /// stackables without a quality tier.
     quality: u8 = 1,
+    /// `random_durability="true"` on the entry: the spawned item starts worn
+    /// (`LootContainer` sets `UseTimes = (int)(MaxUseTimes * RandomRange(0.2,
+    /// 0.8))`). The fill path owns the item's MaxUseTimes, so it resolves the
+    /// value from this flag plus the roll seed.
+    random_durability: bool = false,
 };
+
+/// Stock random durability for one spawned item (`LootContainer` IL_032D):
+/// `(int)(max_use * RandomRange(0.2, 0.8))`. 0 max (no durability) stays 0.
+pub fn randomUseTimes(max_use: u32, s: u32) f32 {
+    if (max_use == 0) return 0;
+    const f = 0.2 + 0.6 * unitRoll(s);
+    return @floatFromInt(@as(u32, @intFromFloat(@as(f32, @floatFromInt(max_use)) * f)));
+}
 
 /// One quality-template level band: the loot stage window, the fallback
 /// quality when no pick passes, and the prob-weighted quality picks.
@@ -495,6 +511,7 @@ pub const LootTable = struct {
                         .item_name = e.name,
                         .count = cnt,
                         .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s ^ @as(u32, i)),
+                        .random_durability = e.random_durability,
                     };
                     n += 1;
                 }
@@ -543,6 +560,7 @@ pub const LootTable = struct {
                     .item_name = picked.name,
                     .count = cnt,
                     .quality = if (picked.quality > 0) picked.quality else self.resolveQuality(qt, loot_stage, s),
+                    .random_durability = picked.random_durability,
                 };
                 n += 1;
             }
@@ -601,6 +619,7 @@ pub const LootTable = struct {
                     .item_name = e.name,
                     .count = self.stageCount(self.scaleCount(cnt, !cont.ignore_abundance, 1.0), e, loot_stage),
                     .quality = if (e.quality > 0) e.quality else self.resolveQuality(cont.quality_template, loot_stage, s),
+                    .random_durability = e.random_durability,
                 };
                 n += 1;
             }
@@ -641,7 +660,7 @@ pub const LootTable = struct {
                     const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                     const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), e, loot_stage);
                     if (cnt == 0) continue; // disabled category spawns none
-                    out[an] = .{ .item_name = e.name, .count = cnt, .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s) };
+                    out[an] = .{ .item_name = e.name, .count = cnt, .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = e.random_durability };
                     an += 1;
                 }
             }
@@ -700,7 +719,7 @@ pub const LootTable = struct {
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                 const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), picked_e, loot_stage);
                 if (cnt == 0) continue; // disabled category spawns none
-                out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = if (picked_e.quality > 0) picked_e.quality else self.resolveQuality(qt, loot_stage, s) };
+                out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = if (picked_e.quality > 0) picked_e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = picked_e.random_durability };
                 n += 1;
             }
         }
@@ -848,6 +867,10 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
     else
         0;
     const stage_mod = xml.parseF32(xml.attr(tag_src, tag_at, "loot_stage_count_mod") orelse "") orelse 0;
+    const rnd_dura = blk: {
+        const v = xml.attr(tag_src, tag_at, "random_durability") orelse break :blk false;
+        break :blk std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True") or std.mem.eql(u8, v, "1");
+    };
     // The entry's own `<requirement>` child, if any (the element extent keeps a
     // nested group's gated entries their own). Only `Biome` is rolled today;
     // every other class marks the entry omitted (see `EntryGate`).
@@ -912,6 +935,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .prob_template = tpl,
         .quality = quality,
         .loot_stage_count_mod = stage_mod,
+        .random_durability = rnd_dura,
         .buffs = xml.attr(tag_src, tag_at, "buffs") orelse "",
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
         .gate = gate,
@@ -1381,6 +1405,42 @@ test "stock loot item entries leave quality to the template" {
         for (qt.bands) |band| picks += band.picks.len;
     }
     try std.testing.expect(picks > 100);
+}
+
+test "random_durability marks the stack and the wear formula matches stock" {
+    // LootContainer IL_032D: `UseTimes = (int)(MaxUseTimes * RandomRange(0.2,
+    // 0.8))`. The roll only marks the stack; the fill path owns MaxUseTimes.
+    try std.testing.expectEqual(@as(f32, 0), randomUseTimes(0, 12345));
+    var s: u32 = 1;
+    while (s <= 200) : (s += 1) {
+        const v = randomUseTimes(100, s);
+        try std.testing.expect(v >= 20 and v <= 80);
+        try std.testing.expectEqual(v, randomUseTimes(100, s)); // deterministic
+    }
+    // An absurd cap saturates the cast instead of trapping.
+    try std.testing.expect(randomUseTimes(std.math.maxInt(u32), 7) > 0);
+
+    const src =
+        \\<lootgroups>
+        \\<lootgroup name="duraGroup" count="all">
+        \\  <item name="toolWorn" random_durability="true"/>
+        \\  <item name="toolPristine" random_durability="false"/>
+        \\  <item name="toolPlain"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, src);
+    defer lt.deinit();
+    const g = lt.groupByName("duraGroup").?;
+    try std.testing.expect(g.entries[0].random_durability);
+    try std.testing.expect(!g.entries[1].random_durability);
+    try std.testing.expect(!g.entries[2].random_durability);
+    var stacks: [8]Stack = undefined;
+    const n = lt.rollGroup("duraGroup", 1, 7, &stacks, 0, "", .{});
+    try std.testing.expectEqual(@as(usize, 3), n);
+    try std.testing.expect(stacks[0].random_durability);
+    try std.testing.expect(!stacks[1].random_durability);
+    try std.testing.expect(!stacks[2].random_durability);
 }
 
 test "loot entry buffs are reported only for spawned entries" {

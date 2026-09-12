@@ -1927,6 +1927,14 @@ pub const Game = struct {
         return game_world.maxDamageForBlock(self, block_id);
     }
 
+    /// Quality-lerped durability cap (`ItemClass.get_MaxUseTimesBase`, passive
+    /// 8). 0 = the item has no durability. Used by the loot random-durability
+    /// path, which starts a spawned item 20-80% worn.
+    pub fn itemMaxUseTimes(self: *const Game, item_id: u16, quality: u8) u32 {
+        const d = self.items.byId(item_id) orelse return 0;
+        return game_hooks.maxUseTimes(d, quality);
+    }
+
     pub fn wireBlockDamage(self: *const Game, block_id: u16, stored: u16) u16 {
         return game_world.wireBlockDamage(self, block_id, stored);
     }

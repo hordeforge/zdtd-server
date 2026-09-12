@@ -7,6 +7,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- **Loot entries can spawn a random-durability item.** `random_durability="true"` (123 stock rows, all explicitly `false` today) now marks the rolled stack, and the container fill starts the item at `(int)(MaxUseTimes * RandomRange(0.2, 0.8))` — stock `LootContainer` IL_032D — using the container's deterministic roll seed, so a worn tool is reproducible. An item with no durability stays pristine.
+
 - **Loot entries apply their `buffs` to the opener.** 63 stock entries carry a `buffs=` list (62 `buffPerkBookwormSuccess`, the bookworm success chime). Stock collects a spawned entry's list during the roll and applies it to the opener after it (`LootContainer.ExecuteBuffActions` → `Buffs.AddBuff`); the roll now reports each spawned entry's list through a `LootBuffSink` and the container fill adds them through the catalog path that also relays the buff to the client. An unknown name fails closed, which is what stock's own typo'd `buffbuffPerkBookwormSuccess` row needs.
 
 - **`loot_stage_count_mod` grows loot counts with the loot stage.** The 84 stock entries that carry it (all `0.01` on ammo rows) now add `RoundToInt(count * mod * lootStage)` to the sandbox-scaled count, matching `LootContainer` IL_017F, so a stage-50 roll of 6..8 rounds spawns roughly 9..12 while a stage-0 roll is unchanged.

@@ -496,7 +496,14 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
             (if (d.stack == 1) stacks[i].quality else 1)
         else
             stacks[i].quality;
-        cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = q });
+        // `random_durability="true"`: the item starts worn at
+        // `(int)(MaxUseTimes * RandomRange(0.2, 0.8))` (stock LootContainer).
+        // Deterministic per container + stack index, like the rest of the roll.
+        const use_times: f32 = if (stacks[i].random_durability)
+            assets_loot.randomUseTimes(self.itemMaxUseTimes(eid, q), seed ^ @as(u32, @intCast(i)))
+        else
+            0;
+        cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = q, .use_times = use_times });
         si += 1;
     }
     // Stock sets `bTouched` and `worldTimeTouched` BEFORE the roll

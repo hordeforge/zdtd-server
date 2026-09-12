@@ -676,7 +676,7 @@ pub fn percentUsesLeft(ctx: ?*anyopaque, item_id: u16, quality: u8, use_times: f
 /// MaxUseTimes for a quality (tier 1..6): the DegradationMax pair lerped
 /// over (quality-1)/5 like the stock passive tier range, truncated to int
 /// per get_MaxUseTimesBase's `(int)GetValue(...)` cast. 0 = no durability.
-fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
+pub fn maxUseTimes(d: items.ItemDef, quality: u8) u32 {
     if (d.degradation_max == 0) return 0;
     const q: f32 = @floatFromInt(@max(1, @min(quality, 6)));
     const t: f32 = (q - 1.0) / 5.0;
