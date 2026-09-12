@@ -129,6 +129,16 @@ fn itemIsArmor(w: *const World, item_id: u16) bool {
     return isArmorOffline(item_id);
 }
 
+/// Stock `EntityAlive::DamageEntity` general leg (IL=236, PassiveEffects 40):
+/// `resist = min(1, GetValue(GeneralDamageResist, null, 0, this, null, empty))`
+/// of the incoming strength, for EVERY damage type. The value is the untagged
+/// buff+perk VM total the survival tick caches per entity slot, so a row this
+/// tick did not fold reads 0 (no resist). Negative totals are kept: stock does
+/// not clamp at 0, and a vulnerability row is meant to raise the damage taken.
+pub fn generalDamageResist(w: *const World, ps: Slot) f32 {
+    return @min(1.0, w.buff_general_resist[ps]);
+}
+
 /// Armor in equip slots reduces incoming damage (0..cap), plus the buff-side
 /// PhysicalDamageResist percent from the passive-effects VM. The item leg is
 /// the equipped armor's summed PhysicalDamageResist percent at its quality
@@ -788,6 +798,25 @@ test "place fuel item yields refuel_amount" {
     try std.testing.expectEqual(@as(u16, 50), r.refuel_item_id);
     try std.testing.expectEqual(@as(u16, 0), r.place_block);
     try std.testing.expectEqual(@as(u16, 1), w.inventory[ps].slots[slot].count);
+}
+
+test "generalDamageResist clamps at 1 and keeps vulnerabilities" {
+    const WorldT = @import("world.zig").World;
+    var w: WorldT = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0);
+    const ps = w.playerByPeer(0).?;
+    // No VM fold ran: no resist.
+    try std.testing.expectEqual(@as(f32, 0), generalDamageResist(&w, ps));
+    w.buff_general_resist[ps] = 0.25;
+    try std.testing.expectEqual(@as(f32, 0.25), generalDamageResist(&w, ps));
+    // Stock reads min(1, value), so a 200% row is full immunity.
+    w.buff_general_resist[ps] = 3;
+    try std.testing.expectEqual(@as(f32, 1), generalDamageResist(&w, ps));
+    // A negative total is a vulnerability and is NOT clamped (stock's
+    // accumulation lets it subtract from the resisted amount).
+    w.buff_general_resist[ps] = -0.5;
+    try std.testing.expectEqual(@as(f32, -0.5), generalDamageResist(&w, ps));
 }
 
 test "equip armor and place wood" {

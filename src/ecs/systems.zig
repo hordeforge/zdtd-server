@@ -626,6 +626,17 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
             // mixed-control condition holds by construction. The scale runs
             // before the plugin verdict, matching the C2S path's order.
             dmg = @round(dmg * w.director.damageScale(false, true, &w.rules.difficulty));
+            // Resist legs, in stock `EntityAlive::DamageEntity` order: the
+            // untagged GeneralDamageResist (passive 40, all damage types) then
+            // the physical armor rating (Equipment::CalcDamage). The accumulated
+            // attackers here are AI melee (and turret fire aimed at mobs), whose
+            // HandItem damage types are all in `Equipment.physicalDamageTypes`,
+            // so the armor leg applies. Without this a full-armor player took
+            // exactly the naked damage from a zombie.
+            dmg *= 1.0 - inventory.generalDamageResist(w, i);
+            if (w.player[i].peer_slot >= 0) {
+                dmg *= 1.0 - inventory.armorMitigation(w, @intCast(w.player[i].peer_slot));
+            }
             if (w.player_damage_verdict_fn) |vdf| {
                 const v = vdf(w.player_damage_verdict_ctx, w.network_id[i].id, dmg);
                 if (v < 0) continue;
@@ -3022,6 +3033,10 @@ pub fn systemFallingBlocks(w: *World, dt: f32) void {
                     const raw: f32 = @min(f.mass_kg * -f.vy * 0.05, 40.0);
                     var dmg: f32 = @floatFromInt(@as(i32, @trunc(raw)));
                     if (kind == .player) {
+                        // GeneralDamageResist covers every damage type (stock
+                        // EntityAlive::DamageEntity), so it joins the crush
+                        // before the armor leg.
+                        dmg *= 1.0 - inventory.generalDamageResist(w, t);
                         // peer_slot is i32 and defaults to -1 for a player
                         // entity with no attached peer; @intCast traps on it.
                         const ps = w.player[t].peer_slot;
@@ -5729,6 +5744,57 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, zfp[0..]));
     try std.testing.expectEqual(@as(f32, 92.0), w.health[zs].hp); // 8.0 flat
 }
+
+test "deferred AI damage passes GeneralDamageResist and the armor leg" {
+    // Stock EntityAlive::DamageEntity order: GeneralDamageResist (passive 40,
+    // every damage type) then the physical armor rating (Equipment::CalcDamage).
+    // Before this the deferred choke (zombie melee) applied neither, so armor
+    // and GDR perks did nothing against the most common damage in the game.
+    var w: World = .{};
+    defer w.deinit();
+    try w.ensureNetMap(std.testing.allocator);
+    const p = w.spawnPlayer(0, 70, 0, 0).?;
+    const ps = w.slotOfNetId(p).?;
+    w.health[ps].hp = 100;
+    var fp: [max_entities]u32 = .{0} ** max_entities;
+    fp[ps] = 800; // 8.0 hp
+    // Bare: no armor, no VM fold -> 8.0 x Adventurer 0.75 = 6.0.
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
+    // GeneralDamageResist .25 (perkPainTolerance 5): 6.0 x 0.75 = 4.5.
+    w.buff_general_resist[ps] = 0.25;
+    w.health[ps].hp = 100;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(f32, 95.5), w.health[ps].hp);
+    // A full resist clamps at 1 (stock min(1, value)): the hit is negated.
+    w.buff_general_resist[ps] = 5;
+    w.health[ps].hp = 100;
+    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(f32, 100.0), w.health[ps].hp);
+    // Negative totals are kept: stock does not clamp at 0, so a vulnerability
+    // row raises the damage taken (6.0 x 1.5 = 9.0).
+    w.buff_general_resist[ps] = -0.5;
+    w.health[ps].hp = 100;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(f32, 91.0), w.health[ps].hp);
+    // Worn armor joins the same choke (offline pieces-rate floor: one piece =
+    // 0.1), so 8.0 x 0.75 = 6.0 -> x 0.9 = 5.4.
+    w.buff_general_resist[ps] = 0;
+    w.health[ps].hp = 100;
+    try std.testing.expect(inventory.give(&w, 0, 11, 1)); // armor
+    var armor_slot: u16 = 0;
+    for (w.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == 11) {
+            armor_slot = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(inventory.equip(&w, 0, armor_slot, 0));
+    try std.testing.expect(inventory.armorMitigation(&w, 0) >= 0.09);
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectApproxEqAbs(@as(f32, 94.6), w.health[ps].hp, 0.001);
+}
+
 test "multi-seat: four riders fill a truck, the fifth is refused" {
     var w: World = .{};
     defer w.deinit();

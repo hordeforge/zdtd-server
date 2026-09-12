@@ -320,6 +320,12 @@ pub const World = struct {
     /// by the survival tick. Feeds armorMitigation like stock
     /// GetTotalPhysicalArmorRating sums the wearer's passive 41.
     buff_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    /// Buff/perk-side GeneralDamageResist (passive 40) summed by the same
+    /// untagged VM fold and refreshed by the survival tick. Stock
+    /// `EntityAlive::DamageEntity` (IL=236) reads it with an empty tag set and
+    /// applies `min(1, value)` to EVERY incoming damage type, so it joins every
+    /// player-damage choke (AI melee, C2S claims, explosions, environmental DoT).
+    buff_general_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
 
     /// Peer slots are bounded by the server's fixed client table. Keeping the
     /// reverse index here avoids a full entity scan in every C2S inventory,

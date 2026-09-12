@@ -3924,6 +3924,41 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     entity classes' `Buffs=` list applies through the same data path. What
     remains of the leg is the row *actions* and the missing inputs above, not
     the lifecycle plumbing.
+  - **`GeneralDamageResist` has a consumer, and the AI melee choke has the armor
+    leg (round 22, 2026-09-12).** The tracked fold produced `general_resist` and
+    `elem_resist` and **nothing read either**: `grep general_resist` found only
+    the fold. Stock `EntityAlive::DamageEntity` (IL=236) reads passive 40 with
+    an empty tag set and applies `min(1, value)` to every damage type, so the
+    value is not a niche stat. The survival tick now caches
+    `World.buff_general_resist[ps] = vm.general_resist + pvm.general_resist`
+    (untagged fold, like the passives' own read) and
+    `inventory.generalDamageResist` joins every player-damage choke: the
+    deferred AI accumulator (`applyDeferredDamage`), the C2S claim path, the
+    explosion blast, falling blocks and the environmental DoT legs. The same
+    choke also gained the **physical armor rating**, which was missing entirely
+    on the AI path: a full-armor player took exactly the naked damage from
+    zombie melee, while the identical armor reduced PvP hits, explosions and
+    falling blocks. Stock order is honoured (difficulty IncomingDamage, then
+    GDR, then `Equipment::CalcDamage`'s physical armor, then the plugin
+    verdict), and a negative GDR total stays a vulnerability because stock does
+    not clamp at 0.
+    Measured effect: `perkPainTolerance` level 5 (`.05,.25` untagged) moves from
+    inert to 25% off every incoming hit, and a single offline armor piece takes
+    a 6.0 hp zombie bite to 5.4.
+    - **Residual (recorded, not wired): `ElementalDamageResist` (passive 43).**
+      `Equipment::CalcDamage` (IL=83) splits on `Equipment.physicalDamageTypes`
+      (`"piercing,bashing,slashing,crushing,none,corrosive"`, Equipment cctor
+      IL=2590): the physical branch uses the armor rating, every other branch
+      uses passive 43 queried with the **damage type tag**. So the armour leg
+      above is right for physical hits only, and the two non-physical player
+      chokes are approximations today: explosions carry stock's default Heat
+      type (the S2C fan-out already sends dtype 6) yet take the physical armor
+      rating, and the environmental legs (Radiation/Suffocation/Starvation) have
+      no EDR leg. Wiring EDR needs a damage-type tag on the ctx and a per-tag
+      fold, and the stock rows are mostly `tags="heat,electrical"` /
+      `tags="radiation"` item and `god`-buff rows, so the fold has to run at the
+      choke rather than once per tick. Recorded here with the IL citation rather
+      than guessed at.
   - `<book>` blocks (152) joined the catalog this round: a book is a
     progression value items.xml grants with `SetProgressionLevel level="-1"`,
     and before this a read almanac stored no level and folded no passive. This

@@ -4168,6 +4168,40 @@ test "EntityTagCompare resolves the player-only burning rows from stock buffs.xm
     try std.testing.expect(g.sim.health[ps].hp < before);
 }
 
+test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
+    // perkPainTolerance's untagged `GeneralDamageResist base_add level="1,5"
+    // value=".05,.25"` row is passive 40, which EntityAlive::DamageEntity reads
+    // with an empty tag set. The survival tick's untagged VM fold now caches it
+    // per entity so every player-damage choke consumes it; before this the row
+    // folded into a TrackedDeltas field nothing read.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
+    cl.skill_levels[0] = .{ .name = "perkPainTolerance", .level = 5 };
+    cl.skill_level_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.25), g.sim.buff_general_resist[ps], 0.001);
+    // Revertible like the rest of the VM: dropping the perk clears it.
+    cl.skill_level_n = 0;
+    try g.step();
+    try std.testing.expectEqual(@as(f32, 0), g.sim.buff_general_resist[ps]);
+}
+
 test "perk max-stat deltas recompute max_hp revertibly" {
     // perkFortitudeMastery HealthMax is level="4,5" value="50,100": with the
     // perk at level 5 the survival pass recomputes max_hp = 100 + 100 = 200;

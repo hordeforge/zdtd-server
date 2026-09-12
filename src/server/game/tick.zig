@@ -22,6 +22,7 @@ const admin_cmds = @import("../admin_cmds.zig");
 const admin_xml = @import("../admin_xml.zig");
 const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
+const inventory = @import("../../ecs/inventory.zig");
 
 /// Requirement-gate bridge: `HasBuff` resolves names through the loaded buffs
 /// table (`EntityBuffs::HasBuff` is case-insensitive). Living here keeps
@@ -268,7 +269,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                     // Wasm-first (AGENTS rule 29): environmental damage passes
                     // the on_player_damage verdict with attacker -1, so a
                     // module scales/denies drowning like any other player hit.
-                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.drowning_damage_per_second * c.drown_accum);
+                    // GeneralDamageResist (passive 40) covers every damage type.
+                    const raw = prog.drowning_damage_per_second * c.drown_accum *
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.drown_accum = 0;
                 }
@@ -283,8 +287,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 c.radiation_accum += secs;
                 if (c.radiation_accum >= 1.0) {
                     // Wasm-first (AGENTS rule 29): verdict with attacker -1,
-                    // like drowning above.
-                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.radiation_damage_per_second * c.radiation_accum);
+                    // like drowning above. GeneralDamageResist covers it too.
+                    const raw = prog.radiation_damage_per_second * c.radiation_accum *
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                    const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.radiation_accum = 0;
                 }
@@ -446,6 +452,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // stock GetTotalPhysicalArmorRating sums passive 41 on the wearer.
             // The attacking item's tags are per-hit and stay with `item_mit`.
             self.sim.buff_phys_resist[ps] = vm_armor.phys_resist + pvm_armor.phys_resist;
+            // GeneralDamageResist (passive 40) is read UNTAGGED at the damage
+            // choke (EntityAlive::DamageEntity reads it with an empty tag set),
+            // so it comes off the plain fold and joins every player hit.
+            self.sim.buff_general_resist[ps] = vm.general_resist + pvm.general_resist;
             // Perk/buff max-stat deltas: unconditional recompute from the
             // bases every tick (revertible recompute-from-set - a zero delta
             // restores the spawn max; the values are stable so no churn).
@@ -471,8 +481,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 const per_s = assets_buffs.stage3HpLossPerSecond(&self.buffs, stages);
                 if (per_s > 0) {
                     // Wasm-first (AGENTS rule 29): verdict with attacker -1,
-                    // like drowning/radiation above.
-                    hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, per_s * secs);
+                    // like drowning/radiation above. GDR covers it too.
+                    const raw = per_s * secs * (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                    hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                 }
             } else if (sv.hungry_frac[0] > 0 and sv.thirsty_frac[0] > 0) {
                 if (h.food >= sv.hungry_frac[0] * h.food_max and h.water >= sv.thirsty_frac[0] * h.water_max) {
@@ -502,8 +513,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
         } else {
             if (h.food <= 0 or h.water <= 0) {
                 // Wasm-first (AGENTS rule 29): verdict with attacker -1, like
-                // drowning/radiation above.
-                hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, prog.starvation_damage_per_hour * game_hours);
+                // drowning/radiation above. GDR covers it too.
+                const raw = prog.starvation_damage_per_hour * game_hours *
+                    (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                hp_delta -= game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }

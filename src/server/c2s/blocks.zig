@@ -628,6 +628,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             if (fall <= 0) continue;
             var amount = e_dmg * fall;
             if (self.sim.mask[es].player and self.sim.player[es].peer_slot >= 0) {
+                // GeneralDamageResist (passive 40) covers every damage type, so
+                // it joins the blast before the physical armor leg (stock
+                // EntityAlive::DamageEntity order).
+                amount *= 1.0 - invsys.generalDamageResist(&self.sim, es);
                 const victim_slot: usize = @intCast(self.sim.player[es].peer_slot);
                 if (self.pvp_mode == 0 and victim_slot != c.slot) continue;
                 if (victim_slot != c.slot) {

@@ -7,6 +7,24 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Worn armor did nothing against zombie melee. The deferred AI damage choke
+  (`applyDeferredDamage`) applied the difficulty scale and the plugin verdict
+  but neither resist leg, so a player in a full set took exactly the naked
+  damage from a zombie while the same armor did reduce PvP hits, explosions and
+  falling blocks. The choke now applies the physical armor rating as stock
+  `Equipment::CalcDamage` does (`GetTotalPhysicalArmorRating` over the equipped
+  pieces plus the buff-side `PhysicalDamageResist`).
+- `GeneralDamageResist` (passive 40) folded into the passive-effects VM but
+  nothing read it, so every perk and buff that grants it (`perkPainTolerance`,
+  `perkHardTarget`, `buffPerkCharismaticNature`, the armor-set rows) was inert.
+  Stock's `EntityAlive::DamageEntity` reads it with an empty tag set and applies
+  `min(1, value)` to every damage type, so the survival tick now caches the
+  buff+perk total per entity and every player-damage choke consumes it: AI
+  melee, client-claimed damage, explosions, falling blocks and the
+  environmental damage-over-time legs (drowning, radiation, starvation).
+  Negative totals are kept, since stock does not clamp at 0 and a vulnerability
+  row is meant to raise the damage taken.
+
 - Burning and shock damage-over-time never applied to players.
   `buffs.xml`'s player half of a damage pair is gated
   `<requirement name="EntityTagCompare" tags="player"/>` (and the non-player

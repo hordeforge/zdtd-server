@@ -738,16 +738,21 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // NPC kinds (a spoofed fatal must not one-shot another player).
         var amount: f32 = @floatFromInt(@min(d.strength, self.max_claimed_damage));
         if (d.fatal and was_zombie) amount = fatal_kill_amount;
-        // PvP gate + armor mitigation when damaging a player.
+        // PvP gate + resist legs when damaging a player, in stock
+        // EntityAlive::DamageEntity order: GeneralDamageResist (passive 40, all
+        // damage types) then the physical armor rating.
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
-            if (self.sim.mask[ei].player and self.sim.player[ei].peer_slot >= 0) {
-                // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
-                if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
-                    return true;
-                // Armor mitigation, less the attacker's held-item TargetArmor
-                // penetration (RE GetTotalPhysicalArmorRating IL=47).
-                const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
-                amount *= (1.0 - mit);
+            if (self.sim.mask[ei].player) {
+                amount *= 1.0 - invsys.generalDamageResist(&self.sim, ei);
+                if (self.sim.player[ei].peer_slot >= 0) {
+                    // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
+                    if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
+                        return true;
+                    // Armor mitigation, less the attacker's held-item TargetArmor
+                    // penetration (RE GetTotalPhysicalArmorRating IL=47).
+                    const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
+                    amount *= (1.0 - mit);
+                }
             }
         }
         // Wasm-first (AGENTS rule 29): damage directed at a player passes the
