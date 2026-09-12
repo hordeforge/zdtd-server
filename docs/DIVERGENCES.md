@@ -938,6 +938,7 @@ Behaviour the wire cannot see, but a player can.
 | # | Stock behaviour | zdtd behaviour | Why |
 |---|---|---|---|
 | 6.1 | The dedicated server pauses world time while no players are connected (`server-lifecycle.md` 5, live-observed 2026-08-11) | `WorldClock.tick` advances unconditionally, so a server with nobody on it still runs through days, horde nights and weather | zdtd has no stock "session" to hang the pause on and a running clock keeps the persisted day, blood-moon schedule and loot respawn honest across a wipe; the cost is that an idle server burns through its scheduled events instead of holding them |
+| 6.2 | A fresh stock world spawns hostiles lazily: `listents` at join is players only, and zombies/animals appear later through the AIDirector near players | zdtd seeds the near-spawn demo hostiles at world init (2 zombies, a sleeper, an animal; `server/game/init_world.zig`) so a fresh world has something to fight and the demo turret has targets | the demo set exists for the offline/loadgen path and for a lone joiner on an otherwise empty world; it is switchable (`[sim] starter_zombies = false` runs stock-lazy), and the worldgen spawner/director rules are unchanged. Cost of the default: a player who joins immediately can meet the seeded zombies before the lazy spawner would have produced any |
 
 ## Keeping this current
 

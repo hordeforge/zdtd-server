@@ -8,7 +8,19 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Elemental damage resistance 2026-09-12**:
+`lint-architecture: clean`). **Starter-hostile seeds configurable 2026-09-12**:
+the near-spawn demo seeds (2 zombies, sleeper, animal) are `[sim]
+starter_zombies` (default true, unchanged behaviour; `false` leaves a fresh
+world to the lazy AIDirector spawner like stock). The divergence is recorded in
+DIVERGENCES 6.2 and the provenance register row is updated; gated by
+`server.game.tests` "starter_zombies gates the near-spawn demo hostiles" (off =
+0 zombies/0 animals, on = the 3+1 demo set) and by the zdtd.toml binder
+assertion. Two stale register/scorecard entries were corrected while auditing:
+the invented `zombieFeral` class row was already repointed to the real
+`zombieBoeFeral` (A40), and the "perk purchase is denied (parent-skill
+prerequisite)" note was stale (`skillCostOf` uses stock's
+`GetCalculatedMaxLevel` level_requirements gate).
+**Elemental damage resistance 2026-09-12**:
 passive 43 (`ElementalDamageResist`) now has its stock consumer. The wire
 `damageType` byte classifies physical vs elemental (`EnumDamageTypes` ordinals;
 stock's physical set is `piercing,bashing,slashing,crushing,none,corrosive`, so

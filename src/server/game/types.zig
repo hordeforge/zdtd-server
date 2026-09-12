@@ -406,6 +406,12 @@ pub const InitOptions = struct {
     wire_profile: protocol.WireProfile = .{},
     /// Register in-tree sample_hello static plugin (logs once on enable).
     enable_sample_plugin: bool = true,
+    /// Seed the near-spawn demo hostiles at world init (2 zombies, a sleeper
+    /// and an animal). Default true: a fresh world has something to fight and
+    /// the demo turret has targets. Stock spawns these lazily through the
+    /// AIDirector instead; `[sim] starter_zombies = false` matches that
+    /// (docs/DIVERGENCES.md).
+    starter_zombies: bool = true,
     /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
     /// modules; ADR 0020). Empty = no Wasm plugins.
     plugin_modules: []const []const u8 = &.{},

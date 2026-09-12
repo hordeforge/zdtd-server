@@ -254,14 +254,23 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     const sx: f32 = @floatFromInt(sp.x);
     const sz: f32 = @floatFromInt(sp.z);
 
-    // Keep starter zombies outside default turret range (~24) so they survive until join.
+    // Near-spawn demo hostiles (see `[sim] starter_zombies`): a fresh world
+    // with something to fight, and targets for the demo turret. Stock spawns
+    // these lazily through the AIDirector instead (documented divergence:
+    // docs/DIVERGENCES.md), so an operator can switch the demo off. Kept
+    // outside the default turret range (~24) so they survive until join.
     // A35: spawn the full resolved class so the entities carry their own stats.
-    const zdef = self.entities.defaultZombie();
-    const z1 = self.sim.spawnZombieDef(sx + 40, sy, sz + 8, zdef.max_hp, self.entityClassOf(zdef));
-    const z2 = self.sim.spawnZombieDef(sx - 35, sy, sz + 12, zdef.max_hp, self.entityClassOf(zdef));
-    const z3 = self.sim.spawnSleeperDef(sx + 30, sy, sz - 40, self.entityClassOf(zdef), 0);
-    const adef = self.entities.defaultAnimal();
-    _ = self.sim.spawnAnimalDef(sx - 20, sy, sz - 25, self.entityClassOf(adef));
+    var z1: ?i32 = null;
+    var z2: ?i32 = null;
+    var z3: ?i32 = null;
+    if (opts.starter_zombies) {
+        const zdef = self.entities.defaultZombie();
+        z1 = self.sim.spawnZombieDef(sx + 40, sy, sz + 8, zdef.max_hp, self.entityClassOf(zdef));
+        z2 = self.sim.spawnZombieDef(sx - 35, sy, sz + 12, zdef.max_hp, self.entityClassOf(zdef));
+        z3 = self.sim.spawnSleeperDef(sx + 30, sy, sz - 40, self.entityClassOf(zdef), 0);
+        const adef = self.entities.defaultAnimal();
+        _ = self.sim.spawnAnimalDef(sx - 20, sy, sz - 25, self.entityClassOf(adef));
+    }
     // Stock npc.xml maps Trader Jen / npcTraderJen to traders.xml id 2.
     // Offline fixtures have no npc.xml, so traderIdForClass returns 0; keep the
     // stock Jen id so TraderData.get_TraderInfo() is non-null for showrestock.

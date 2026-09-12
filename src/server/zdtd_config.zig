@@ -95,6 +95,10 @@ pub const Perf = struct {
 
 /// Sim policy that is not stock serverconfig and not stock game data.
 pub const Sim = struct {
+    /// Seed the near-spawn demo hostiles (2 zombies, a sleeper, an animal) at
+    /// world init. Default true; false matches stock's lazy AIDirector
+    /// spawning (the divergence is recorded in docs/DIVERGENCES.md).
+    starter_zombies: ?bool = null,
     /// Trader AvailableMoney display pool (no stock key: stock Traders.xml has
     /// no wallet property; AvailableMoney is engine-managed per-day).
     trader_wallet_dukes: ?i32 = null,
@@ -418,6 +422,9 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.perf.async_chunk_flush) |v| opts.async_chunk_flush = v;
     if (f.perf.terrain_snapshot) |v| opts.terrain_snapshot = v;
     if (f.perf.job_batches) |v| opts.job_batches = v;
+    if (f.sim.starter_zombies) |v| {
+        if (@hasField(@TypeOf(opts.*), "starter_zombies")) opts.starter_zombies = v;
+    }
     if (f.sim.trader_wallet_dukes) |v| opts.trader_wallet_dukes = v;
     if (f.sim.min_chat_gap_ns) |v| opts.min_chat_gap_ns = v;
     if (f.sim.inv_bucket_cap) |v| opts.inv_bucket_cap = v;
@@ -675,6 +682,7 @@ test "parse stream and authority" {
         \\deco_mirror = no
         \\block_id_mapping = false
         \\[sim]
+        \\starter_zombies = false
         \\te_scan_block_cap = 16
         \\te_scan_te_cap = 24
         \\workstation_crafts_per_tick = 8
@@ -708,6 +716,7 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(u64, 20), f.authority.guard_kick_delay_ticks.?);
     try std.testing.expectEqual(@as(u64, 80), f.authority.guard_shed_hold_ticks.?);
     try std.testing.expectEqual(@as(u32, 1200), f.authority.guard_weak_break_rate.?);
+    try std.testing.expectEqual(false, f.sim.starter_zombies.?);
     try std.testing.expectEqual(@as(u32, 16), f.sim.te_scan_block_cap.?);
     try std.testing.expectEqual(@as(u32, 24), f.sim.te_scan_te_cap.?);
     try std.testing.expectEqual(@as(u16, 8), f.sim.workstation_crafts_per_tick.?);

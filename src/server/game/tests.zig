@@ -5630,3 +5630,36 @@ test "queued-verb policy: a denied verb is dropped before the command buffer" {
     try std.testing.expectEqual(before + 3, g.sim.commands.n);
     try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.plugin_verbs_denied));
 }
+
+test "starter_zombies gates the near-spawn demo hostiles" {
+    // `[sim] starter_zombies`: the demo seeds (2 zombies + sleeper + animal)
+    // are a zdtd convenience; stock spawns them lazily through the AIDirector
+    // (docs/DIVERGENCES.md). The switch must leave the world genuinely empty
+    // when off and keep the demo world populated when on (default).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const off_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "off" });
+    defer std.testing.allocator.free(off_dir);
+    io_fs.mkdirPath(off_dir);
+    const g_off = try Game.createWithOptions(std.testing.allocator, off_dir, 0, .{ .starter_zombies = false });
+    defer {
+        g_off.deinit();
+        std.testing.allocator.destroy(g_off);
+    }
+    try std.testing.expectEqual(@as(u32, 0), g_off.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(u32, 0), g_off.sim.countKind(.animal));
+
+    const on_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "on" });
+    defer std.testing.allocator.free(on_dir);
+    io_fs.mkdirPath(on_dir);
+    const g_on = try Game.create(std.testing.allocator, on_dir, 0);
+    defer {
+        g_on.deinit();
+        std.testing.allocator.destroy(g_on);
+    }
+    try std.testing.expectEqual(@as(u32, 3), g_on.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(u32, 1), g_on.sim.countKind(.animal));
+}

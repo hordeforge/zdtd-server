@@ -5,6 +5,16 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Changed
+
+- The near-spawn demo hostiles are now configurable. A fresh zdtd world seeds
+  two zombies, a sleeper and an animal next to the spawn so a lone joiner has
+  something to fight and the demo turret has targets; stock instead leaves the
+  world empty at join and lets the AIDirector spawn lazily near players. The
+  seeds are now `[sim] starter_zombies` (default true, the existing behaviour);
+  set it to `false` for stock-lazy spawning. The divergence and the switch are
+  recorded in docs/DIVERGENCES.md 6.2.
+
 ### Fixed
 
 - Elemental damage ignored armor's elemental resistance (and physical armor
