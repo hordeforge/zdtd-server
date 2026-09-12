@@ -5784,6 +5784,53 @@ test "spawn_starter_kit config replaces the built-in kit and fails closed" {
     try std.testing.expectEqual(@as(u32, 50), g2.sim.inventory[ps2].countItem(coin));
 }
 
+test "container loot applies entry buffs to the opener" {
+    // Stock collects a spawned entry's `buffs=` during the roll and applies the
+    // list to the opener after it (LootContainer.ExecuteBuffActions ->
+    // Buffs.AddBuff). The fill path routes the entry's list through a sink into
+    // the catalog add, which is what makes a bookworm success chime reach the
+    // client. An unknown name fails closed (stock ships one typo'd row).
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const buff_id = g.buffs.indexOfName("buffPerkBookwormSuccess") orelse return error.SkipZigTest;
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="buffCrate" count="all">
+        \\  <item name="foodCanBeef" buffs="buffPerkBookwormSuccess"/>
+        \\  <item name="resourceWood" buffs="noSuchBuffAtAll"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expect(g.sim.buffs[ps].find(buff_id) == null);
+
+    const cont = g.containers.getOrCreate(.{ .x = 5, .y = 70, .z = 5 }, 8, 0).?;
+    cont.player_storage = false;
+    cont.loot_list = "buffCrate";
+    cont.touched = false;
+    g.ensureContainerLoot(cont, cl.slot);
+    // The known buff landed; the typo'd name resolves to no catalog row, so the
+    // sink's add failed closed and nothing was added for it.
+    try std.testing.expect(g.sim.buffs[ps].find(buff_id) != null);
+    try std.testing.expect(g.buffs.indexOfName("noSuchBuffAtAll") == null);
+}
+
 test "progression update rows write $perkBookwormChance (stock data)" {
     // The other half of the loot RandomRoll gates: progression.xml's
     // `perkIntellectMastery` rows fire on `onSelfProgressionUpdate` and set

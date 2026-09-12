@@ -110,7 +110,9 @@ const BuffSink = struct {
 /// Add one catalog buff to the entity's set unless it is already active, and
 /// relay the add. Returns whether it was added. Unknown names are skipped (fail
 /// closed), like every other data-bound lookup.
-fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8) bool {
+/// Add a buff by catalog name to a player's sim slot and relay it (the loot
+/// `buffs=` sink and the class-buff path share this).
+pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8) bool {
     const def_id = self.buffs.indexOfName(name) orelse return false;
     const def = self.buffs.byId(def_id) orelse return false;
     const set = self.sim.buffsMut(ps);

@@ -14,6 +14,7 @@ const packages = @import("../../wire/packages.zig");
 const assets_loot = @import("../../assets/loot.zig");
 const requirements = @import("../../assets/requirements.zig");
 const sandbox = @import("../../assets/sandbox.zig");
+const game_tick = @import("tick.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
@@ -406,6 +407,20 @@ pub fn ensurePrefabStorageInChunk(self: *Game, ch: *world_store.Chunk, cx: i32, 
     }
 }
 
+/// `LootGateCtx.buffs` sink: applies a spawned entry's `buffs=` to the opener.
+/// Stock collects the list during the roll and calls
+/// `LootContainer.ExecuteBuffActions` after it, which is exactly this shape.
+const LootBuffCtx = struct {
+    g: *Game,
+    ps: ecs.Slot,
+    entity_id: i32,
+
+    fn add(ctx: ?*anyopaque, name: []const u8) void {
+        const s: *@This() = @ptrCast(@alignCast(ctx.?));
+        _ = game_tick.addCatalogBuff(s.g, s.entity_id, s.ps, name);
+    }
+};
+
 pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_name: []const u8, seed: u32, loot_stage: i32, opener_peer: i32) void {
     // Remember the table that filled this container: the destroy_on_close
     // check on unlock reads it (ShouldDestroyOnClose, loot-economy.md 454).
@@ -434,9 +449,15 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     // rather than rolled unconditionally.
     var player_ctx: ?requirements.Ctx = null;
     var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    var buff_ctx: LootBuffCtx = undefined;
+    var buff_sink: ?assets_loot.LootBuffSink = null;
     if (opener_peer >= 0 and @as(usize, @intCast(opener_peer)) < self.clients.len) {
         const oc = &self.clients[@intCast(opener_peer)];
         if (oc.joined) {
+            if (self.sim.playerByPeer(@intCast(opener_peer))) |ps| {
+                buff_ctx = .{ .g = self, .ps = ps, .entity_id = oc.entity_id };
+                buff_sink = .{ .ctx = &buff_ctx, .add = LootBuffCtx.add };
+            }
             // The decoded server sandbox code answers a `SandboxOption` gate;
             // the buffer lives for this call, which is all the ctx is used for.
             const sandbox_n = sandbox.decode(self.sandbox_code, &sandbox_buf);
@@ -450,6 +471,7 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     const gate_ctx: assets_loot.LootGateCtx = .{
         .biome_name = self.world.biome_layers_table.nameById(biome_id),
         .player = player_ctx,
+        .buffs = buff_sink,
     };
     var n = self.loot.rollContainer(loot_name, loot_stage, seed, stacks[0..cont.slot_count], gate_ctx);
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict

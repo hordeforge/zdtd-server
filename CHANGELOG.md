@@ -7,6 +7,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- **Loot entries apply their `buffs` to the opener.** 63 stock entries carry a `buffs=` list (62 `buffPerkBookwormSuccess`, the bookworm success chime). Stock collects a spawned entry's list during the roll and applies it to the opener after it (`LootContainer.ExecuteBuffActions` → `Buffs.AddBuff`); the roll now reports each spawned entry's list through a `LootBuffSink` and the container fill adds them through the catalog path that also relays the buff to the client. An unknown name fails closed, which is what stock's own typo'd `buffbuffPerkBookwormSuccess` row needs.
+
 - **`loot_stage_count_mod` grows loot counts with the loot stage.** The 84 stock entries that carry it (all `0.01` on ammo rows) now add `RoundToInt(count * mod * lootStage)` to the sandbox-scaled count, matching `LootContainer` IL_017F, so a stage-50 roll of 6..8 rounds spawns roughly 9..12 while a stage-0 roll is unchanged.
 
 - **Per-entry loot `quality` override.** `loot.xml`'s `ParseItemList` lets an item entry pin its quality with a `quality="N"` attribute, overriding the loot quality template; the loader ignored it. Entries now keep the attribute and the roll uses it instead of the template value. Stock's own file writes `quality` only on the `<loot>` rows inside `<lootqualitytemplate>`, so this is engine/modlet support rather than a stock-behaviour change (a test pins both facts).

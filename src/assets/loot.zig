@@ -31,6 +31,10 @@ pub const LootEntry = struct {
     /// joining the group's pick pool (stock SpawnAllItemsFromList /
     /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
     force_prob: bool = false,
+    /// `buffs=` (63 stock entries, `buffPerkBookwormSuccess`): buffs added to
+    /// the opener when this entry spawns (`LootContainer` collects the list and
+    /// `ExecuteBuffActions` applies them). Arena-owned comma list.
+    buffs: []const u8 = "",
     /// `loot_stage_count_mod` (84 stock entries, all `0.01` on ammo rows): the
     /// count grows with the loot stage. `LootContainer` IL_017F adds
     /// `RoundToInt(count * mod * lootStage)` to the sandbox-scaled count, so a
@@ -162,9 +166,20 @@ pub const EntryGate = struct {
 /// `player` is the opener's requirement context (levels + cvars); null means
 /// no opener state was available, so a Progression/CVar/RandomRoll gate refuses
 /// and the entry stays omitted rather than rolling unconditionally.
+/// Where a spawned entry's `buffs=` list goes. Stock collects the list during
+/// the roll (`SpawnItemsFromList` AddRange) and applies it to the opener after
+/// (`LootContainer.ExecuteBuffActions` -> `Buffs.AddBuff`). The sink keeps the
+/// loot table Game-free: the fill path owns the entity and applies the buff.
+pub const LootBuffSink = struct {
+    ctx: ?*anyopaque = null,
+    add: *const fn (?*anyopaque, name: []const u8) void,
+};
+
 pub const LootGateCtx = struct {
     biome_name: ?[]const u8 = null,
     player: ?requirements.Ctx = null,
+    /// Reports the `buffs=` of every entry that actually spawned.
+    buffs: ?LootBuffSink = null,
     /// [0,1) value for this entry's `RandomRoll`; the roll path advances a
     /// deterministic per-entry stream into it.
     roll: f32 = 0,
@@ -197,6 +212,20 @@ fn abundanceOptionName(type_name: []const u8) ?[]const u8 {
         if (std.mem.eql(u8, type_name, pair[0])) return pair[1];
     }
     return null;
+}
+
+/// Report one spawned entry's `buffs=` list to the sink (comma-separated, the
+/// same shape `ModifyCVar`-style lists use). Unknown names are the caller's
+/// problem: the Game's add fails closed, which is stock's behaviour for the
+/// one typo'd stock row (`buffbuffPerkBookwormSuccess`).
+fn reportBuffs(ctx: LootGateCtx, e: LootEntry) void {
+    const sink = ctx.buffs orelse return;
+    if (e.buffs.len == 0) return;
+    var it = std.mem.splitScalar(u8, e.buffs, ',');
+    while (it.next()) |raw| {
+        const nm = std.mem.trim(u8, raw, " \t");
+        if (nm.len > 0) sink.add(sink.ctx, nm);
+    }
 }
 
 /// A group's `abundance_type` count multiplier. 1.0 when the group has no type,
@@ -457,6 +486,7 @@ pub const LootTable = struct {
                 gctx.roll = unitRoll(s ^ @as(u32, i));
                 if (!e.gate.allowed(gctx)) continue;
                 if (e.is_group) {
+                    reportBuffs(gctx, e);
                     n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt, ctx);
                 } else {
                     const cnt = self.stageCount(self.scaleCount(if (e.count_min > 0) e.count_min else 1, true, mult), e, loot_stage);
@@ -499,6 +529,7 @@ pub const LootTable = struct {
                     continue;
                 }
             } else if (picked.prob_template != 0 and !self.probGate(picked, loot_stage, s)) continue;
+            reportBuffs(gctx, picked);
             if (picked.is_group) {
                 n += self.rollGroup(picked.name, loot_stage, s, out[n..], 1, qt, ctx);
             } else {
@@ -565,6 +596,7 @@ pub const LootTable = struct {
                     }
                     if (dup) continue;
                 }
+                reportBuffs(ctx, e);
                 out[n] = .{
                     .item_name = e.name,
                     .count = self.stageCount(self.scaleCount(cnt, !cont.ignore_abundance, 1.0), e, loot_stage),
@@ -599,6 +631,7 @@ pub const LootTable = struct {
                 if (!e.gate.allowed(gctx)) continue;
                 s = s *% 1103515245 +% 12345;
                 if (e.force_prob and !self.probGate(e, loot_stage, s)) continue;
+                reportBuffs(gctx, e);
                 if (e.is_group) {
                     an += self.rollGroup(e.name, loot_stage, s, out[an..], depth + 1, qt, ctx);
                 } else {
@@ -656,6 +689,7 @@ pub const LootTable = struct {
             if (picked_e.force_prob) {
                 if (!self.probGate(picked_e, loot_stage, s)) continue;
             } else if (picked_e.prob_template != 0 and !self.probGate(picked_e, loot_stage, s)) continue;
+            reportBuffs(gctx, picked_e);
             if (picked_e.is_group) {
                 n += self.rollGroup(picked_e.name, loot_stage, s, out[n..], depth + 1, qt, ctx);
             } else {
@@ -878,6 +912,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .prob_template = tpl,
         .quality = quality,
         .loot_stage_count_mod = stage_mod,
+        .buffs = xml.attr(tag_src, tag_at, "buffs") orelse "",
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
         .gate = gate,
     };
@@ -1102,6 +1137,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
+                if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
                 // The gate's biome list points into the freed source text.
                 e.gate = try dupeGate(arena, ent.gate);
                 g.entries[g.entry_n] = e;
@@ -1172,6 +1208,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
+                if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
                 e.gate = try dupeGate(arena, ent.gate);
                 c.entries[c.entry_n] = e;
                 c.entry_n += 1;
@@ -1344,6 +1381,56 @@ test "stock loot item entries leave quality to the template" {
         for (qt.bands) |band| picks += band.picks.len;
     }
     try std.testing.expect(picks > 100);
+}
+
+test "loot entry buffs are reported only for spawned entries" {
+    // Stock collects a spawned entry's `buffsToAdd` during the roll and applies
+    // the list to the opener after it (`ExecuteBuffActions`). The sink reports
+    // exactly the entries that spawned: a gated entry that refuses reports
+    // nothing, an ungated sibling still does.
+    const src =
+        \\<lootgroups>
+        \\<lootgroup name="buffGroup" count="all">
+        \\  <item name="bookA" buffs="buffPerkBookwormSuccess"/>
+        \\  <item name="bookB" buffs="buffX,buffY">
+        \\    <requirement class="Progression" name="perkTreasureHunter" operation="GTE" value="4"/>
+        \\  </item>
+        \\</lootgroup>
+        \\</lootgroups>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, src);
+    defer lt.deinit();
+    try std.testing.expectEqualStrings("buffPerkBookwormSuccess", lt.groupByName("buffGroup").?.entries[0].buffs);
+
+    const Rec = struct {
+        n: usize = 0,
+        names: [8][]const u8 = .{""} ** 8,
+        fn add(ctx: ?*anyopaque, name: []const u8) void {
+            const r: *@This() = @ptrCast(@alignCast(ctx.?));
+            if (r.n < r.names.len) {
+                r.names[r.n] = name;
+                r.n += 1;
+            }
+        }
+    };
+    var stacks: [8]Stack = undefined;
+    var rec: Rec = .{};
+    const sink = LootBuffSink{ .ctx = &rec, .add = Rec.add };
+
+    // No opener: the Progression gate refuses, so only bookA's buff is seen.
+    _ = lt.rollGroup("buffGroup", 1, 7, &stacks, 0, "", .{ .buffs = sink });
+    try std.testing.expectEqual(@as(usize, 1), rec.n);
+    try std.testing.expectEqualStrings("buffPerkBookwormSuccess", rec.names[0]);
+
+    // A level-4 opener: both entries spawn and all three names are reported.
+    const levels = [_]requirements.NameLevel{.{ .name = "perkTreasureHunter", .level = 4 }};
+    const player: requirements.Ctx = .{ .levels = &levels };
+    rec = .{};
+    _ = lt.rollGroup("buffGroup", 1, 7, &stacks, 0, "", .{ .player = player, .buffs = sink });
+    try std.testing.expectEqual(@as(usize, 3), rec.n);
+    try std.testing.expectEqualStrings("buffPerkBookwormSuccess", rec.names[0]);
+    try std.testing.expectEqualStrings("buffX", rec.names[1]);
+    try std.testing.expectEqualStrings("buffY", rec.names[2]);
 }
 
 test "loot_stage_count_mod grows the count with the loot stage" {

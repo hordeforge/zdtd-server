@@ -892,9 +892,10 @@ every level change, so an Intellect Mastery 2+ opener rolls those 63 rows at
 sandbox code too (stock `HarvestingOutput EQ 0`), and `abundance_type` scales a
 group's counts by its category's `*LootCount` sandbox option (67 stock groups,
 a disabled category spawns none), and `loot_stage_count_mod` grows a count with
-the loot stage (84 stock ammo rows). The residual is the remaining loot-entry
-attributes (`tags` for the sandbox count/prob paths, `buffs` to the opener,
-`random_durability`, `mods`); the row stays PARTIAL for those.
+the loot stage (84 stock ammo rows), and a spawned entry's `buffs=` list is
+applied to the opener (63 stock rows, the bookworm success buff). The residual
+is the remaining loot-entry attributes (`tags` for the sandbox count/prob
+paths, `random_durability`, `mods`); the row stays PARTIAL for those.
 Then the timid-animals row went WORKS: `approach_attack` is gated by the
 class's inherited AITask-* list (`ai_attack` parsed from entityclasses.xml;
 `ApproachAndAttackTarget` is the only attack task in V3.1.0 b14), so a stag
