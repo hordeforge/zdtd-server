@@ -2797,7 +2797,10 @@ pub const Game = struct {
             .blood_moon_enemy_count = self.sim.director.bloodmoon_enemy_count,
             .enemy_difficulty = self.sim.director.enemy_difficulty,
             .day_light_length = @trunc(clk.dusk - clk.dawn),
-            .day_night_length = @trunc(clk.seconds_per_hour * 24.0 / 60.0),
+            // GameStats[72]/[11] come from the clock's configured day length and
+            // its stock integer rate, never derived back out of a float scale
+            // (stock seeds both straight from GamePrefs; server-lifecycle.md:168).
+            .day_night_length = @intCast(clk.day_night_length),
             .blood_moon_day = bloodMoonDayFor(clk),
             .block_damage_player = self.block_damage_player,
             .block_damage_ai = self.block_damage_ai,
@@ -2830,9 +2833,10 @@ pub const Game = struct {
             else
                 @divTrunc(self.air_drop_interval_hours, 24),
             // Stock TimeOfDayIncPerSec = world-time units per real second
-            // (24000-unit day; live-observed 6 at DayLightLength 18). Derive
-            // from the clock so the wire matches the sim's own rate.
-            .time_of_day_inc_per_sec = @trunc(24000.0 / (clk.seconds_per_hour * 24.0)),
+            // (24000-unit day; live-observed 6 at the default 60 minute day).
+            // The clock's rate *is* this value, so the wire cannot disagree
+            // with the sim (RE server-lifecycle.md:168).
+            .time_of_day_inc_per_sec = @intCast(clk.time_of_day_inc_per_sec),
             .storm_freq = self.storm_frequency,
             .sandbox_preset = self.sandbox_preset,
             .sandbox_code = self.sandbox_code,

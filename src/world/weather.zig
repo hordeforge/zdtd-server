@@ -13,6 +13,9 @@
 const std = @import("std");
 const rng = @import("../util/rng.zig");
 const biome_layers = @import("../assets/biome_layers.zig");
+/// `ticks_per_day` only: the in-game day length in world ticks (24000). world ->
+/// ecs is a legal edge (scripts/lint-architecture.sh); ecs never imports world.
+const aidirector = @import("../ecs/aidirector.zig");
 
 pub const max_biomes = biome_layers.max_weather_biomes;
 
@@ -50,9 +53,12 @@ pub const Config = struct {
     day_night_length: u16 = 60,
     /// World::StormFrequency (SandboxOptions 57, stock default 1.0). 0 disables storms.
     storm_frequency: f32 = 1,
-    /// GameStats.TimeOfDayIncPerSec, the divisor turning remaining ticks into the
-    /// client's storm warning countdown. Must match the GameStats blob we send.
-    time_of_day_inc_per_sec: u8 = 20,
+    /// GameStats.TimeOfDayIncPerSec, the real world-time rate (world ticks per
+    /// second) that turns remaining world ticks into the client's storm warning
+    /// countdown. The caller derives it from DayNightLength with the stock
+    /// integer formula (`ecs/aidirector.zig` `timeOfDayIncPerSec`), so it always
+    /// matches the GameStats blob we send.
+    time_of_day_inc_per_sec: u32 = 6,
     /// Storms are pushed this many world ticks past a horde night
     /// (`[sim] storm_bm_push_ticks`; stock ~5 in-game hours).
     blood_moon_storm_push: i64 = 5000,
@@ -64,7 +70,7 @@ pub const Manager = struct {
     rand: rng.XorShift32 = .init(1),
     storm_frequency: f32 = 1,
     day_night_length: u16 = 60,
-    time_of_day_inc_per_sec: u8 = 20,
+    time_of_day_inc_per_sec: u32 = 6,
     blood_moon_storm_push: i64 = 5000,
     last_update_world_time: i64 = 0,
     /// WeatherManager::weatherAllName != null: a global type overrides every biome.
@@ -79,10 +85,9 @@ pub const Manager = struct {
                 cfg.storm_frequency
             else
                 0,
-            .day_night_length = @max(cfg.day_night_length, 1),
-            .time_of_day_inc_per_sec = cfg.time_of_day_inc_per_sec,
             .blood_moon_storm_push = cfg.blood_moon_storm_push,
         };
+        self.setDayNightLength(cfg.day_night_length, cfg.time_of_day_inc_per_sec);
         var i: usize = 0;
         while (i < table.weather_n and i < max_biomes) : (i += 1) {
             const set = &table.weather_groups[i];
@@ -95,6 +100,15 @@ pub const Manager = struct {
             self.setWeatherRandom(&self.states[self.n], set, 0);
             self.n += 1;
         }
+    }
+
+    /// Keep the scheduler's clock scale in step with the sim `WorldClock`.
+    /// `initFrom` installs the boot values; a runtime `setgamepref
+    /// DayNightLength` re-installs them here so storm countdowns (ticks divided
+    /// by the rate) and duration scaling follow the new day length.
+    pub fn setDayNightLength(self: *Manager, minutes_per_day: u16, time_of_day_inc_per_sec: u32) void {
+        self.day_night_length = @max(minutes_per_day, 1);
+        self.time_of_day_inc_per_sec = time_of_day_inc_per_sec;
     }
 
     /// Console `storm`: force every storm-capable biome into an active storm
@@ -124,7 +138,7 @@ pub const Manager = struct {
         _ = table; // storm-capability is already encoded in storm_world_time
         // (null means storms disabled for this state, set at init); the null
         // check below gates the loop instead of re-consulting table.
-        const day_ticks: i64 = @as(i64, self.day_night_length) * 60 * self.time_of_day_inc_per_sec;
+        const day_ticks: i64 = @intCast(aidirector.ticks_per_day);
         var i: usize = 0;
         while (i < self.n) : (i += 1) {
             const st = &self.states[i];
@@ -212,7 +226,7 @@ pub const Manager = struct {
                         self.setWeatherNamed(st, set, "stormbuild");
                     }
                     if (self.time_of_day_inc_per_sec > 0) {
-                        const secs = @divTrunc(until_storm, self.time_of_day_inc_per_sec);
+                        const secs = @divTrunc(until_storm, @as(i64, self.time_of_day_inc_per_sec));
                         st.remaining_seconds = @intCast(@min(secs, 255));
                     }
                     return;

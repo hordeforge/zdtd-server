@@ -230,8 +230,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
     const sv = assets_buffs.survival(&self.buffs);
     const use_buff = sv.ok();
     if (prog.food_depletion_per_hour <= 0 and prog.water_depletion_per_hour <= 0) return;
-    if (self.sim.director.clock.seconds_per_hour <= 0) return;
-    const game_hours = dt / self.sim.director.clock.seconds_per_hour;
+    const game_hours = self.sim.director.clock.hoursFor(dt);
     const secs = dt;
     // Sandbox gates: decode the server's code once per tick rather than per
     // requirement (SandboxOptionBool reads it through SandboxOptionManager).

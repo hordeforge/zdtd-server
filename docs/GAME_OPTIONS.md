@@ -86,7 +86,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `BloodMoonRange` | 0 | 0..15 | deterministic ±day jitter of the blood-moon day per cycle |
 | `BloodMoonEnemyCount` | 8 | 0..60 | zombies per blood-moon spawn burst |
 | `PlayerKillingMode` | 3 | 0..3 | 0 drops player→player `DamageEntity` (PvP off) |
-| `DayNightLength` | 60 | 10..1200 | real minutes per full day → `WorldClock.seconds_per_hour` |
+| `DayNightLength` | 60 | 10..1200 | real minutes per full day → GameStats `DayNightLength` and `WorldClock.time_of_day_inc_per_sec` = `24000/(m*60)` integer ticks/s (stock; 6 at 60) |
 | `DayLightLength` | 18 | 1..23 | daylight window; dawn 04:00, dusk = 4 + value |
 | `MaxSpawnedZombies` | 64 | 0..2048 | server-wide alive-zombie cap (`Director.max_alive`); 0 = no zombie spawns |
 | `MaxSpawnedAnimals` | 50 | 0..2048 | daytime wildlife cap + spawner (`Director.spawnAnimalsNearPlayers`) |

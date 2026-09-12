@@ -3591,7 +3591,10 @@ pub const GameStatsValues = struct {
     show_friend_player_on_map: bool = true,
     is_spawn_enemies: bool = true,
     enemy_spawn_mode: bool = true,
-    time_of_day_inc_per_sec: i32 = 20,
+    /// GameStats[11] TimeOfDayIncPerSec = 24000 / (DayNightLength * 60) in
+    /// integer arithmetic: 6 at the stock 60 real-minute day (live `getgamestat`
+    /// 2026-08-12). Callers pass the WorldClock's own rate.
+    time_of_day_inc_per_sec: i32 = 6,
     death_penalty: i32 = 1,
     quest_progression_daily_limit: i32 = 4,
     /// Percent, stock GamePrefs.StormFreq default 100 (asm.il 1908835). Also the

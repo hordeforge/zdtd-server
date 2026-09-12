@@ -34,6 +34,10 @@ const assets_progression = @import("../../assets/progression.zig");
 const assets_vehicles = @import("../../assets/vehicles.zig");
 const assets_storage_pairs = @import("../../assets/storage_pairs.zig");
 const ecs = @import("../../ecs/root.zig");
+/// Stock TimeOfDayIncPerSec (= 24000 / (DayNightLength * 60)) is defined once,
+/// on the clock that runs at that rate; the weather scheduler is handed the
+/// same value here.
+const ecs_aidirector = @import("../../ecs/aidirector.zig");
 
 /// Report a catalog load failure and fall back to the builtin table.
 /// `tryLoad` returns null for "stock file absent" and an error for a real
@@ -617,8 +621,9 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             // Weather groups must come from the same effective biomes.xml we
             // serve, since groupIndex is a document ordinal in that file.
             // Frequency and countdown divisor read the very GameStats values
-            // the client is told, so server sim and client display agree.
-            const gs_defaults: packages.GameStatsValues = .{};
+            // the client is told, so server sim and client display agree. The
+            // rate is the stock integer expression over DayNightLength, the
+            // same function the WorldClock runs on (no second formula).
             self.world.weather.initFrom(&self.world.biome_layers_table, .{
                 .seed = opts.worldgen_seed orelse util_sim.default_seed,
                 .day_night_length = opts.day_night_length,
@@ -626,7 +631,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 // scheduler divides by (0 disables storms). Mirrors the
                 // GameStats wire value so client and server agree.
                 .storm_frequency = @as(f32, @floatFromInt(self.storm_frequency)) / 100.0,
-                .time_of_day_inc_per_sec = @intCast(@max(gs_defaults.time_of_day_inc_per_sec, 0)),
+                .time_of_day_inc_per_sec = ecs_aidirector.timeOfDayIncPerSec(opts.day_night_length),
                 // [sim] storm_bm_push_ticks: storms pushed past a horde night.
                 .blood_moon_storm_push = opts.storm_bm_push_ticks,
             });

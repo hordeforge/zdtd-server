@@ -7,6 +7,24 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- World time ran faster than stock. The server advanced one in-game hour every
+  `DayNightLength*60/24` real seconds (0.4 game-minutes per second at the default
+  60-minute day), while stock advances `GameStats.TimeOfDayIncPerSec` =
+  `24000 / (DayNightLength * 60)` in integer arithmetic: 6 world ticks per second
+  at the default, which is 0.36 game-minutes per second and makes a nominal
+  "60 minute" day take 4000 real seconds. The client draws its day counter and
+  sky from the world time the server sends, so every server ran about 11 percent
+  ahead of what it told the client. `WorldClock` now stores the configured
+  `DayNightLength` and the stock integer rate, advances by that rate, and reports
+  both numbers verbatim in the GameStats blob instead of deriving them back out
+  of a float scale. The same rate is what the weather scheduler divides its storm
+  countdown by, so the client's storm warning now matches the sim; and
+  `clearweather` pushes the next storm one real in-game day (24000 ticks) out
+  rather than the three days the stale rate produced. An operator who sets
+  `DayNightLength` above 400 real minutes gets the stock expression's own
+  answer, 0 ticks per second, which freezes world time rather than a rate zdtd
+  invented.
+
 - World decorations grew inside POIs. `AllowDecorations` was parsed but never
   consulted, so the biome deco sampler placed trees and rocks inside every POI
   footprint, including through buildings. The sampler now gates each cell on the

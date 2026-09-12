@@ -2359,17 +2359,18 @@ test "survival: food/water deplete, starvation damages, well-fed regens, S2C syn
     var cap: ln_peer.Capture = .{};
     const cl = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(cl.slot).?;
-    // Pin the game-hour length so one tickSurvival(30.0) call is exactly one
-    // in-game hour regardless of the default day-length config.
-    g.sim.director.clock.seconds_per_hour = 30;
+    // Pin the clock rate so one tickSurvival(1.0) call is exactly one in-game
+    // hour regardless of the default day-length config (1000 world ticks per
+    // in-game hour, stock TimeOfDayIncPerSec rate).
+    g.sim.director.clock.time_of_day_inc_per_sec = 1000;
     g.sim.health[ps].food = 100;
     g.sim.health[ps].water = 100;
     g.sim.health[ps].hp = 100;
     const st_id = packages.idOf("NetPackageEntityStatChanged").?;
 
-    // One in-game hour (default seconds_per_hour = 30): food -2, water -2.5.
+    // One in-game hour: food -2, water -2.5.
     cap.clear();
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].food < 100);
     try std.testing.expect(g.sim.health[ps].water < 100);
     try std.testing.expect(cap.findPkgId(st_id) != null); // S2C sync fired
@@ -2378,21 +2379,21 @@ test "survival: food/water deplete, starvation damages, well-fed regens, S2C syn
     g.sim.health[ps].food = 0;
     g.sim.health[ps].water = 100;
     const hp_before = g.sim.health[ps].hp;
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].hp < hp_before);
 
     // Well-fed regen: fed + hydrated restores hp (10/game-hour), capped.
     g.sim.health[ps].hp = 50;
     g.sim.health[ps].food = 90;
     g.sim.health[ps].water = 90;
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].hp > 50);
     try std.testing.expect(g.sim.health[ps].hp <= g.sim.health[ps].max_hp);
 
     // Clamp at zero: depletion never goes negative.
     g.sim.health[ps].food = 0.5;
     g.sim.health[ps].water = 0.5;
-    g.tickSurvival(30.0);
+    g.tickSurvival(1.0);
     try std.testing.expect(g.sim.health[ps].food == 0);
     try std.testing.expect(g.sim.health[ps].water == 0);
 

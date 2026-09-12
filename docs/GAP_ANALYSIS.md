@@ -2476,7 +2476,10 @@ gamestage, no wandering hordes, and no screamers.
 **40 WORKS · 0 PARTIAL · 0 MISSING**
 
 - **AIDirector world clock, day/night, blood-moon night detection** `WORKS`
-  `WorldClock.tick` advances from DayNightLength; `isNight` uses dawn 04:00 plus
+  `WorldClock.tick` advances at the stock real rate: `time_of_day_inc_per_sec` =
+  `24000/(DayNightLength*60)` in integer arithmetic (6 ticks/s at the default 60
+  minute day, RE server-lifecycle.md:168), the same value the GameStats blob and
+  the weather countdown read; `isNight` uses dawn 04:00 plus
   DayLightLength; `isBloodMoonNight` honours frequency and range with deterministic
   jitter and probes neighbouring cycles so a jittered day is not missed.
   *Anchors:* `src/ecs/aidirector.zig:6-68`, `:41-61`,
@@ -4139,8 +4142,9 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
 
 - **Food / water decay over time** `WORKS`
   `tickSurvival` depletes food/water per game hour (`Rules.progression`
-  `food_depletion_per_hour`/`water_depletion_per_hour` divided by
-  `clock.seconds_per_hour`), synced to owner on `survival_sync_seconds`
+  `food_depletion_per_hour`/`water_depletion_per_hour` over
+  `clock.hoursFor(dt)`, which is the stock `TimeOfDayIncPerSec` rate), synced to
+  owner on `survival_sync_seconds`
   throttle. Starving/dehydrated players take `buffs.survival()` threshold-gated
   HP damage; well-fed ones regen. Verified: `game/tests` one-hour starve plaus
   + well-fed regen + starve HP loss.
@@ -4715,8 +4719,10 @@ a finer server encoding.
 - **Weather state machine (clear / stormbuild / storm, per biome)** `WORKS`
   Branch-for-branch port of `BiomeWeather::ServerTimeUpdate`: 5-tick
   re-evaluation gate, 60/DayNightLength scaling, storm delay divided by
-  StormFrequency, duration jitter, remaining_seconds divided by TimeOfDayIncPerSec,
-  weighted group pick and per-ProbType range roll. Six unit tests including a full
+  StormFrequency, duration jitter, remaining_seconds divided by TimeOfDayIncPerSec
+  (the stock integer rate the GameStats blob carries, so the client's storm
+  countdown matches the sim), weighted group pick and per-ProbType range roll.
+  Six unit tests including a full
   storm cycle and an i64-max case.
   *Anchors:* `src/world/weather.zig:104-284`, `asm.il:2048930`, `asm.il:2049128`,
   `asm.il:1250209`, `asm.il:1249300`
@@ -4772,10 +4778,11 @@ a finer server encoding.
   `../../7dtd-engine-research/docs/gameplay/weather-environment.md` §4, `sandbox-options.md` §8
 
 - **Day/night clock and NetPackageWorldTime broadcast** `WORKS`
-  WorldClock advances hours from real dt scaled by DayNightLength, dawn fixed at
-  04:00 and dusk = 4 + DayLightLength, broadcast as a u64 every 20 ticks and sent
-  once at enter. Blood-moon nights, zombie speed bands and POI lockouts all read
-  the same clock.
+  WorldClock advances hours from real dt at the stock `TimeOfDayIncPerSec` rate
+  (`24000/(DayNightLength*60)`, integer; 6 ticks/s at the 60-minute default),
+  dawn fixed at 04:00 and dusk = 4 + DayLightLength, broadcast as a u64 every 20
+  ticks and sent once at enter. Blood-moon nights, zombie speed bands and POI
+  lockouts all read the same clock.
   *Anchors:* `src/ecs/aidirector.zig:6-68`, `src/server/game.zig`,
   `:6204-6205`
 

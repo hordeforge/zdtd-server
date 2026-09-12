@@ -924,6 +924,20 @@ Recorded because they are easy to mistake for one:
   actions) and are tracked as gaps in [GAP_ANALYSIS](GAP_ANALYSIS.md), not as
   decisions to behave differently. Per-class XML lists now omit them rather
   than mapping them onto ApproachAndAttackTarget.
+- **A `DayNightLength` over 400 real minutes freezes world time.** Stock's
+  `TimeOfDayIncPerSec` is `24000 / (DayNightLength * 60)` in integer arithmetic,
+  so past 400 the result is 0 ticks per second and time does not advance. zdtd
+  runs that same expression, so this is stock fidelity, not a policy choice
+  (the serverconfig range still allows 10..1200; an operator who wants a slow
+  day should stay at or under 400, where the rate is 1 tick/s).
+
+## 6. World-clock sim policy
+
+Behaviour the wire cannot see, but a player can.
+
+| # | Stock behaviour | zdtd behaviour | Why |
+|---|---|---|---|
+| 6.1 | The dedicated server pauses world time while no players are connected (`server-lifecycle.md` 5, live-observed 2026-08-11) | `WorldClock.tick` advances unconditionally, so a server with nobody on it still runs through days, horde nights and weather | zdtd has no stock "session" to hang the pause on and a running clock keeps the persisted day, blood-moon schedule and loot respawn honest across a wipe; the cost is that an idle server burns through its scheduled events instead of holding them |
 
 ## Keeping this current
 

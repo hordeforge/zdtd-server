@@ -8,7 +8,20 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Loadgen Navezgane smoke 2026-09-12 (round 27,
+`lint-architecture: clean`). **Loadgen Navezgane smoke 2026-09-12 (round 9,
+world-clock rate)**: the real map loaded, 2/2 wander bots joined and stayed
+alive to the timeout (w=2659/2621 steps, deaths=0), and
+`join_fail`/`encode_errors`/`decode_rejects`/`net_send_errors`/`stream_errors`/
+`c2s_malformed`/`phase_rejects`/`ownership_rejects` were all 0 on 3600 ticks
+(`movement_rejects=77` is the bots' jump steps, `tick_overruns=75` is join
+churn). The clock rate was sampled live over the admin console twice, 60 s and
+61 s apart: 07:17 -> 07:39 and 07:41 -> 08:03, i.e. 22 in-game minutes per
+minute = 0.36 game-min/s, the stock `getgamestat TimeOfDayIncPerSec = 6`
+ticks/s (the previous flat scale would have read 24). `make check` green
+(`zig build test` 1785 passed / 1 skipped / 0 failed; fuzz clean; provenance
+203/203 files, 64 constants; `gen_provenance.py` leaves `docs/provenance.html`
+unchanged).
+**Loadgen Navezgane smoke 2026-09-12 (round 27,
 deco suppression)**: the real map loaded (dtm=6144x6144, 1559 prefabs, 39 water
 sources), one wander bot joined and walked 247 steps with
 `join_fail`/`encode_errors`/`decode_rejects`/`net_send_errors`/`stream_errors`/

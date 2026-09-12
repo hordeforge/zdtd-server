@@ -759,9 +759,7 @@ pub fn replyGamePrefs(self: *Game, filter: []const u8) void {
     self.gamePref(filter, "GameName", "{s}", .{self.world_name});
     self.gamePref(filter, "ViewRadius", "{d}", .{self.view_radius});
     self.gamePref(filter, "GameDifficulty", "{d}", .{self.sim.director.difficulty});
-    self.gamePref(filter, "DayNightLength", "{d}", .{
-        @as(u32, @round(self.sim.director.clock.seconds_per_hour * 24.0 / 60.0)),
-    });
+    self.gamePref(filter, "DayNightLength", "{d}", .{self.sim.director.clock.day_night_length});
     self.gamePref(filter, "TelnetPort", "{d}", .{self.admin.port});
 }
 
@@ -992,6 +990,12 @@ pub fn applyGamePrefSet(self: *Game, name: []const u8, value: []const u8) bool {
         self.sim.director.clock.bloodmoon_frequency = @intCast(@min(@max(v, 0), 255));
     } else if (std.mem.eql(u8, name, "DayNightLength")) {
         self.sim.director.clock.setDayNightLength(@intCast(@min(@max(v, 10), 1200)));
+        // The weather scheduler scales storm countdowns by the same rate, so it
+        // has to move with the clock (a stale rate mis-times the storm warning).
+        self.world.weather.setDayNightLength(
+            self.sim.director.clock.day_night_length,
+            self.sim.director.clock.time_of_day_inc_per_sec,
+        );
     } else if (std.mem.eql(u8, name, "BlockDamagePlayer")) {
         self.block_damage_player = @intCast(@min(@max(v, 0), 1000));
     } else if (std.mem.eql(u8, name, "XPMultiplier")) {

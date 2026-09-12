@@ -4618,8 +4618,13 @@ test "scenario console storm commands force and clear the storm" {
     try std.testing.expect(g.clearStorm());
     st = g.world.weather.states[0];
     try std.testing.expectEqual(@as(u8, 0), st.storm_state);
-    // The next storm is pushed a full in-game day out.
-    try std.testing.expect(st.storm_world_time.? > wt0 + 70_000);
+    // The next storm is pushed exactly one in-game day out (24000 world ticks;
+    // it used to be DayNightLength*60*TimeOfDayIncPerSec, which at the old
+    // struct default rate of 20 was 72000: three days, not one).
+    try std.testing.expectEqual(
+        wt0 + @as(i64, @intCast(@import("../ecs/aidirector.zig").ticks_per_day)),
+        st.storm_world_time.?,
+    );
 
     std.debug.print(
         "PASS storm-commands: forced storm_state=2 group={d}, cleared to 0, next > day out\n",
@@ -16503,6 +16508,67 @@ test "scenario the loot rate and party range the sim uses reach the GameStats wi
     std.mem.writeInt(i32, &want_range, 42, .little);
     try std.testing.expect(std.mem.find(u8, gs, &want_range) != null);
     std.debug.print("PASS gamestats: loot abundance 175 and party range 42 reach the wire\n", .{});
+}
+
+test "scenario the world clock runs and advertises the stock TimeOfDayIncPerSec rate" {
+    // The sim used to advance a flat DayNightLength*60/24 seconds per in-game
+    // hour (0.4 game-min/s at the default 60 minute day) while stock advances
+    // GameStats.TimeOfDayIncPerSec = 24000/(DayNightLength*60) in integer
+    // arithmetic, i.e. 6 ticks/s = 0.36 game-min/s (RE server-lifecycle.md:168;
+    // live `getgamestat TimeOfDayIncPerSec` = 6). The client's HUD day therefore
+    // drifted ahead of the server's.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .day_night_length = 90 });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+
+    const clk = g.sim.director.clock;
+    try std.testing.expectEqual(@as(u16, 90), clk.day_night_length);
+    // 24000 / (90 * 60) = 4.44 -> 4, not the flat 4.44.
+    try std.testing.expectEqual(@as(u32, 4), clk.time_of_day_inc_per_sec);
+
+    // The clock's own field is what the blob carries: one hour of real time at
+    // 4 ticks/s is 14400 world ticks = 14.4 in-game hours, not the nominal
+    // 16 a flat 4.44 ticks/s scale would give.
+    var c = clk;
+    c.hours = 7.0;
+    c.tick(3600.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 21.4), c.hours, 1e-3);
+
+    const vals = g.gameStatsValues();
+    try std.testing.expectEqual(@as(i32, 90), vals.day_night_length);
+    try std.testing.expectEqual(@as(i32, 4), vals.time_of_day_inc_per_sec);
+
+    // Down to the bytes: build two blobs that differ in one field only and
+    // check the first differing offset really holds the new value. A bare
+    // `mem.find` would be satisfied by the same bytes appearing inside another
+    // i32, which is exactly how a dropped field slips through.
+    var base_buf: [1024]u8 = undefined;
+    var alt_buf: [1024]u8 = undefined;
+    const base = try packages.buildGameStatsBodyValues(&base_buf, .{
+        .day_night_length = 60,
+        .time_of_day_inc_per_sec = 6,
+    });
+    const alt = try packages.buildGameStatsBodyValues(&alt_buf, .{
+        .day_night_length = 90,
+        .time_of_day_inc_per_sec = 4,
+    });
+    var off: usize = 0;
+    while (off < alt.len and base[off] == alt[off]) : (off += 1) {}
+    // TimeOfDayIncPerSec (slot 11) is written well before DayNightLength
+    // (slot 72), so the first difference is the rate slot and it must hold 4.
+    try std.testing.expectEqual(alt.len, base.len);
+    try std.testing.expectEqual(@as(i32, 4), std.mem.readInt(i32, alt[off..][0..4], .little));
+    std.debug.print("PASS gamestats: clock rate 4/s and DayNightLength 90 reach the wire\n", .{});
 }
 
 test "scenario PlayerStats carries the held item, not bare hands" {

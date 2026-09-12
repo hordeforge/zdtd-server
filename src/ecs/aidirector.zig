@@ -10,16 +10,36 @@ const ecs_world = @import("world.zig");
 /// instead of one tick spawning the whole population.
 const initial_population_batch: u32 = 4;
 
-/// Sim world clock. Starts day 1, 07:00 (stock dedicated boot time, observed
-/// live 2026-08-11: `gettime` on a fresh stock server reads "Day 1, 07:00").
-/// seconds_per_hour is the sim's time scale default (30 s per in-game hour);
-/// stock serverconfig DayNightLength (default 60 min day) sets the real scale.
 /// In-game ticks per day (DayTimeToWorldTime: 24000 ticks, 1000 per hour).
 pub const ticks_per_day: u64 = 24000;
+
+/// Stock GameStats[11] TimeOfDayIncPerSec: world-time ticks advanced per real
+/// second, `24000 / (DayNightLength * 60)` in **integer** arithmetic
+/// (RE ../7dtd-engine-research/docs/admin/server-lifecycle.md:168; live
+/// `getgamestat TimeOfDayIncPerSec` = 6 at the default 60 real-minute day).
+/// The truncation is the point: a 60 minute day nominally runs 6.667 ticks/s
+/// but stock advances 6, so it really takes 24000/6 = 4000 real seconds. A day
+/// over 400 real minutes divides to 0 (frozen world time), which is what the
+/// stock expression does; `WorldClock.tick` reproduces that rather than
+/// inventing a floor.
+pub fn timeOfDayIncPerSec(minutes_per_day: u16) u32 {
+    const minutes: u32 = @max(minutes_per_day, 1);
+    return @intCast(ticks_per_day / (@as(u64, minutes) * 60));
+}
+
+/// Sim world clock. Starts day 1, 07:00 (stock dedicated boot time, observed
+/// live 2026-08-11: `gettime` on a fresh stock server reads "Day 1, 07:00").
+/// DayNightLength (serverconfig, default 60 real minutes per day) sets the
+/// rate through `timeOfDayIncPerSec`; the clock stores both so the sim rate and
+/// the GameStats blob the client is told can never drift apart.
 pub const WorldClock = struct {
     hours: f32 = 7.0,
     day: u32 = 1,
-    seconds_per_hour: f32 = 30.0,
+    /// GameStats[72] DayNightLength: configured real minutes per in-game day
+    /// (config.zig clamps 10..1200). Reported verbatim on the wire.
+    day_night_length: u16 = 60,
+    /// GameStats[11] TimeOfDayIncPerSec: real world-time rate (ticks/s).
+    time_of_day_inc_per_sec: u32 = 6,
     /// Daylight window [dawn, dusk]; night is outside it (stock `World.IsDark`
     /// IL=31: `hour < DawnHour || hour > DuskHour` - the dusk hour itself is
     /// still light, weather-environment.md boundary derivation).
@@ -44,9 +64,12 @@ pub const WorldClock = struct {
     bm_freq: u32 = 0,
     bm_range: u8 = 0,
 
-    /// Real seconds per in-game hour from DayNightLength (real minutes per day).
+    /// Real minutes per in-game day from serverconfig DayNightLength. Recomputes
+    /// the stock TimeOfDayIncPerSec rate, so the world advances at the very rate
+    /// the GameStats blob advertises.
     pub fn setDayNightLength(self: *WorldClock, minutes_per_day: u16) void {
-        self.seconds_per_hour = @as(f32, @floatFromInt(minutes_per_day)) * 60.0 / 24.0;
+        self.day_night_length = @max(minutes_per_day, 1);
+        self.time_of_day_inc_per_sec = timeOfDayIncPerSec(self.day_night_length);
     }
 
     pub fn setDayLightLength(self: *WorldClock, daylight_hours: u8) void {
@@ -70,15 +93,22 @@ pub const WorldClock = struct {
     }
 
     pub fn tick(self: *WorldClock, dt: f32) void {
-        // DIVERGENCE: stock dedicated pauses world time with zero connected
-        // players (live-observed 2026-08-11, server-lifecycle.md 5); zdtd
-        // advances unconditionally - a policy simplification, not a stock
-        // behavior.
-        self.hours += dt / self.seconds_per_hour;
+        // DIVERGENCE (docs/DIVERGENCES.md 6.1): stock dedicated pauses world
+        // time with zero connected players (live-observed 2026-08-11,
+        // server-lifecycle.md 5); zdtd advances unconditionally - a policy
+        // simplification, not a stock behavior.
+        self.hours += self.hoursFor(dt);
         while (self.hours >= 24.0) {
             self.hours -= 24.0;
             self.day +%= 1;
         }
+    }
+
+    /// In-game hours elapsed over `dt` real seconds at the stock world rate:
+    /// `time_of_day_inc_per_sec` world ticks per real second, 1000 ticks per
+    /// in-game hour. Zero when the rate is frozen (DayNightLength > 400).
+    pub fn hoursFor(self: *const WorldClock, dt: f32) f32 {
+        return dt * @as(f32, @floatFromInt(self.time_of_day_inc_per_sec)) / 1000.0;
     }
 
     pub fn isNight(self: *const WorldClock) bool {
@@ -1341,10 +1371,41 @@ pub const Director = struct {
     }
 };
 
+test "clock rate is the stock truncated TimeOfDayIncPerSec" {
+    // RE ../7dtd-engine-research/docs/admin/server-lifecycle.md:168:
+    // GameStats[11] = 24000 / (DayNightLength * 60), integer division.
+    try std.testing.expectEqual(@as(u32, 40), timeOfDayIncPerSec(10));
+    try std.testing.expectEqual(@as(u32, 6), timeOfDayIncPerSec(60));
+    try std.testing.expectEqual(@as(u32, 4), timeOfDayIncPerSec(90));
+    try std.testing.expectEqual(@as(u32, 3), timeOfDayIncPerSec(120));
+    try std.testing.expectEqual(@as(u32, 1), timeOfDayIncPerSec(400));
+    // The stock expression truncates to 0 past 400 real minutes, which freezes
+    // world time. Reproduce it rather than inventing a floor nobody measured.
+    try std.testing.expectEqual(@as(u32, 0), timeOfDayIncPerSec(401));
+    try std.testing.expectEqual(@as(u32, 0), timeOfDayIncPerSec(1200));
+
+    var cl: WorldClock = .{};
+    cl.setDayNightLength(60);
+    try std.testing.expectEqual(@as(u16, 60), cl.day_night_length);
+    try std.testing.expectEqual(@as(u32, 6), cl.time_of_day_inc_per_sec);
+    // A stock 60 minute day really runs 24000/6 = 4000 s. Sixty seconds of
+    // 20 TPS ticks advance 0.36 in-game hours; the old flat scale (6.667
+    // ticks/s) advanced 0.4 and ran the client's day ahead of the server's.
+    var i: usize = 0;
+    while (i < 1200) : (i += 1) cl.tick(0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 7.36), cl.hours, 1e-3);
+
+    // Frozen rate advances nothing.
+    var frozen: WorldClock = .{};
+    frozen.setDayNightLength(1200);
+    frozen.tick(600.0);
+    try std.testing.expectEqual(@as(f32, 7.0), frozen.hours);
+}
+
 test "clock advances and bloodmoon spans dusk to dawn across rollover" {
     // BM day 7: the horde runs day 7 22:00 (dusk) through day 8 04:00 (dawn),
     // including the midnight day rollover (stock IsBloodMoonTime).
-    var cl: WorldClock = .{ .hours = 21.0, .day = 7, .seconds_per_hour = 1.0 };
+    var cl: WorldClock = .{ .hours = 21.0, .day = 7, .time_of_day_inc_per_sec = 1000 };
     try std.testing.expect(!cl.isBloodMoonNight()); // before dusk
     cl.tick(2.0); // 23:00 day 7: at/after dusk
     try std.testing.expectEqual(@as(u32, 7), cl.day);
@@ -1357,7 +1418,7 @@ test "clock advances and bloodmoon spans dusk to dawn across rollover" {
 }
 
 test "worldTimeBits encodes stock day 1 as zero offset" {
-    var cl: WorldClock = .{ .hours = 8.0, .day = 1, .seconds_per_hour = 1.0 };
+    var cl: WorldClock = .{ .hours = 8.0, .day = 1, .time_of_day_inc_per_sec = 1000 };
     // Stock DayTimeToWorldTime: (day-1)*24000 + hours*1000; WorldTimeToDays
     // (wt/24000 + 1) must round-trip the wire day.
     const wt = cl.worldTimeBits();
@@ -1371,7 +1432,7 @@ test "worldTimeBits encodes stock day 1 as zero offset" {
 
 test "director spawns at night near player ecs" {
     var w: ecs_world.World = .{};
-    var dir: Director = .{ .clock = .{ .hours = 23.0, .day = 1, .seconds_per_hour = 1.0 }, .horde_cd = 0 };
+    var dir: Director = .{ .clock = .{ .hours = 23.0, .day = 1, .time_of_day_inc_per_sec = 1000 }, .horde_cd = 0 };
     _ = w.spawnPlayer(0, 70, 0, 0);
     const r = dir.tick(&w, 0.1);
     try std.testing.expect(r.spawned >= 1);
@@ -1431,7 +1492,7 @@ test "director spawns daytime animals up to cap" {
     var w: ecs_world.World = .{};
     // Noon, animal cap 3, no zombie horde interference (day).
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .max_alive_animals = 3,
         .scouts_cd = 999, // suppress daytime scout zombie
     };
@@ -1452,7 +1513,7 @@ test "director=false stops zombies but wildlife follows its own flag" {
     w.rules.systems.director = false;
     w.rules.systems.animals = true;
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .max_alive_animals = 3,
     };
     _ = w.spawnPlayer(0, 70, 0, 0);
@@ -1479,7 +1540,7 @@ test "director=false stops zombies but wildlife follows its own flag" {
 test "animals and heat keep ticking when the zombie cap is full" {
     var w: ecs_world.World = .{};
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .max_alive = 2,
         .max_alive_animals = 3,
         .scouts_cd = 999,
@@ -1523,7 +1584,7 @@ test "spawned classes carry full entityclasses stats via the resolver (A35)" {
     };
     var w: ecs_world.World = .{};
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .horde_cd = 0,
         // hpScale neutral tier (difficulty_hp_2 = 1.0): the assert below
         // checks the resolver's class stats unscaled, not the difficulty
@@ -1596,7 +1657,7 @@ test "blood moon walks the stage spawn groups across the night" {
     w.rules.director.initial_population_frac = 0;
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
         .bloodmoon_enemy_count = 8,
         .bloodmoon_cd = 0,
         .horde_cd = 999,
@@ -1662,7 +1723,7 @@ test "director draws the daytime scout group from the stage tier" {
     var w: ecs_world.World = .{};
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .party_stage = 90,
         .spawner_group_fn = &Hooks.spawnerGroup,
         .group_pick_fn = &Hooks.pick,
@@ -1699,7 +1760,7 @@ test "daytime scout wave size comes from the spawner TotalPerWave" {
     var w: ecs_world.World = .{};
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 },
         .party_stage = 90,
         .spawner_group_fn = &Hooks.spawnerGroup,
         .group_pick_fn = &Hooks.pick,
@@ -1751,7 +1812,7 @@ test "blood moon wave size is capped by the stage maxAlive" {
     _ = w.spawnPlayer(0, 70, 0, 0);
     // Blood moon night with a generous BloodMoonEnemyCount; maxAlive=2 wins.
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
         .bloodmoon_enemy_count = 40,
         .party_stage = 61,
         .horde_cd = 999, // isolate the blood moon branch from the night horde
@@ -1769,7 +1830,7 @@ test "director without stage hooks keeps its unstaged behaviour" {
     w.rules.director.initial_population_frac = 0; // isolate the wave count from the starter fill
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
         .bloodmoon_enemy_count = 8,
         .horde_cd = 999,
     };
@@ -1862,7 +1923,9 @@ test "wandering horde arms after day 1 and spawns a 6-pack at 92 m" {
     defer w.deinit();
     const pid = w.spawnPlayer(0, 70, 0, 0).?;
     _ = pid;
-    var d: Director = .{};
+    // Pin the clock rate so one 50 ms tick advances a whole world tick past the
+    // "due" schedule it forces below (the stock 6 ticks/s needs ~4 ticks).
+    var d: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
     // Day 1 (worldTime < 28000): not scheduled yet.
     _ = d.tick(&w, 0.05);
     try std.testing.expectEqual(@as(u64, 0), d.wandering_next);
@@ -1901,7 +1964,7 @@ test "wandering horde size and distance follow [rules.director]" {
     w.rules.director.wandering_horde_size = 3;
     w.rules.director.wandering_spawn_dist = 40.0;
     _ = w.spawnPlayer(0, 70, 0, 0);
-    var d: Director = .{ .clock = .{ .day = 2, .hours = 10.0 } };
+    var d: Director = .{ .clock = .{ .day = 2, .hours = 10.0, .time_of_day_inc_per_sec = 1000 } };
     d.wandering_next = d.clock.worldTimeBits() + 1;
     _ = d.tick(&w, 0.05);
     var horde: u32 = 0;
@@ -1991,7 +2054,7 @@ test "bloodmoon schedule persists position and advances past the live day" {
     // cycle 1 (freq 7 + jitter 0..2); the horde spans dusk to dawn across
     // midnight; advancing the live day rolls the schedule forward; a runtime
     // frequency change rebuilds it.
-    var cl: WorldClock = .{ .hours = 12.0, .day = 1, .seconds_per_hour = 1.0 };
+    var cl: WorldClock = .{ .hours = 12.0, .day = 1, .time_of_day_inc_per_sec = 1000 };
     cl.bloodmoon_frequency = 7;
     cl.bloodmoon_range = 2;
     const first = cl.bloodMoonDayFor(1);
@@ -2093,7 +2156,7 @@ test "night spawns ground-snap through the world ground hook" {
     }.f;
     _ = w.spawnPlayer(0, 70, 0, 0);
     var dir: Director = .{
-        .clock = .{ .hours = 23.0, .day = 7, .seconds_per_hour = 1.0 },
+        .clock = .{ .hours = 23.0, .day = 7, .time_of_day_inc_per_sec = 1000 },
         .bloodmoon_enemy_count = 8,
         .horde_cd = 0,
     };
