@@ -11,6 +11,7 @@ const io_fs = @import("../util/io_fs.zig");
 const paths = @import("paths.zig");
 const buffs = @import("buffs.zig");
 const requirements = @import("requirements.zig");
+const cvars = @import("cvars.zig");
 
 // zdtd storage bounds, not stock rules; stock has no limit on either. Measured
 // against V3.2.0 `Data/Config` (2026-09-04): progression.xml defines 8
@@ -20,6 +21,9 @@ pub const max_perks: usize = 512;
 pub const max_skills: usize = 64; // crafting skills (stock 23)
 /// passive_effect rows per perk/attribute body (stock bodies stay well under).
 pub const max_passives_per_def: usize = 32;
+/// `triggered_effect` rows per perk/attribute body. Stock's heaviest body is
+/// `perkIntellectMastery` with a handful of cvar rows; sized above it.
+pub const max_triggered_per_def: usize = 12;
 
 /// Level-curve defaults used before progression.xml loads (stock XML wins at
 /// runtime; assets/progression.zig parses the shipped curve). These mirror the
@@ -74,6 +78,10 @@ pub const AttrDef = struct {
     /// folds the tracked subset (buffs.trackedDeltasFrom); attribute state is
     /// not applied yet (perk runtime open), parsed so the surface is data.
     passives: []const buffs.Passive = &.{},
+    /// `triggered_effect` rows in the attribute body (progression.xml), each
+    /// with its effect_group's gates. Parsed so the surface is data; the
+    /// `onSelfProgressionUpdate` event fires them when the level changes.
+    triggered: []const buffs.Triggered = &.{},
     /// `<level_requirements>` gates, one per block in file order (stock: every
     /// attribute's levels 1..10, each gated on PlayerLevel).
     level_reqs: []const LevelReq = &.{},
@@ -107,6 +115,10 @@ pub const PerkDef = struct {
     /// requirements; perk state is not applied yet (perk runtime open), parsed
     /// so the effect surface is data.
     passives: []const buffs.Passive = &.{},
+    /// `triggered_effect` rows in the perk body (progression.xml). Stock's
+    /// `perkIntellectMastery` uses `onSelfProgressionUpdate` + ModifyCVar to
+    /// maintain `$perkBookwormChance`; the loot RandomRoll gates read it.
+    triggered: []const buffs.Triggered = &.{},
     /// `<level_requirements>` gates, one per block in file order (50 stock
     /// perks carry them, all gated on ProgressionLevel/PlayerLevel).
     level_reqs: []const LevelReq = &.{},
@@ -449,6 +461,71 @@ fn scanPassives(
     }
 }
 
+/// Scan a perk/attribute/book body for `<triggered_effect>` rows. Same walk as
+/// the passive scan: rows inside an `<effect_group>` take that group's direct
+/// requirements, a top-level row only its own. The rows land in one shared pool
+/// with per-def ranges, like the passives.
+fn scanTriggered(
+    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    triggered: *std.ArrayList(buffs.Triggered),
+    reqs: *std.ArrayList(requirements.Requirement),
+    trig_req_ranges: *std.ArrayList(struct { usize, usize }),
+) !void {
+    var i: usize = 0;
+    while (i < body.len and triggered.items.len < triggered.items.len + max_triggered_per_def) {
+        const lt = std.mem.findPos(u8, body, i, "<") orelse break;
+        if (std.mem.startsWith(u8, body[lt..], "</")) break;
+        if (std.mem.startsWith(u8, body[lt..], "<effect_group")) {
+            const gt = std.mem.findPos(u8, body, lt, ">") orelse break;
+            if (gt > lt and body[gt - 1] == '/') {
+                i = gt + 1;
+                continue;
+            }
+            const close = std.mem.findPos(u8, body, gt, "</effect_group>") orelse break;
+            const inner = body[gt + 1 .. close];
+            var group_reqs: std.ArrayList(requirements.Requirement) = .empty;
+            defer group_reqs.deinit(allocator);
+            try requirements.scanChildren(allocator, arena, inner, 0, inner.len, &group_reqs);
+            var seen: usize = triggered.items.len;
+            try buffs.scanTriggeredRows(
+                allocator,
+                arena,
+                inner,
+                0,
+                inner.len,
+                group_reqs.items,
+                triggered,
+                reqs,
+                trig_req_ranges,
+                triggered.items.len + max_triggered_per_def,
+                &seen,
+            );
+            i = close + "</effect_group>".len;
+            continue;
+        }
+        if (std.mem.startsWith(u8, body[lt..], "<triggered_effect")) {
+            const end = requirements.elementEnd(body, lt);
+            var seen: usize = triggered.items.len;
+            try buffs.scanTriggeredRows(
+                allocator,
+                arena,
+                body,
+                lt,
+                end,
+                &.{},
+                triggered,
+                reqs,
+                trig_req_ranges,
+                triggered.items.len + max_triggered_per_def,
+                &seen,
+            );
+        }
+        i = requirements.elementEnd(body, lt);
+    }
+}
+
 /// One `<perk>`/`<book>` element body: catalog row plus its passive rows. Both
 /// element names carry the same attributes (name, max_level, parent) and the
 /// same `<effect_group>`/`<level_requirements>` children.
@@ -467,6 +544,9 @@ fn scanProgressionBlocks(
     reqs: *std.ArrayList(requirements.Requirement),
     req_ranges: *std.ArrayList([2]usize),
     ranges: *std.ArrayList([2]usize),
+    triggered: *std.ArrayList(buffs.Triggered),
+    trig_req_ranges: *std.ArrayList(struct { usize, usize }),
+    trig_ranges: *std.ArrayList([2]usize),
     limit: usize,
 ) !void {
     var i: usize = 0;
@@ -504,6 +584,8 @@ fn scanProgressionBlocks(
         try scanLevelReqs(allocator, arena, body, &lvl_buf);
         const r0 = passives.items.len;
         try scanPassives(allocator, arena, body, passives, reqs, req_ranges);
+        const t0 = triggered.items.len;
+        try scanTriggered(allocator, arena, body, triggered, reqs, trig_req_ranges);
         try list.append(allocator, .{
             .name = try arena.dupe(u8, name),
             .max_level = max_l,
@@ -515,6 +597,7 @@ fn scanProgressionBlocks(
             .override_cost = try parseOverrideCost(allocator, arena, clean, pi),
         });
         try ranges.append(allocator, .{ r0, passives.items.len - r0 });
+        try trig_ranges.append(allocator, .{ t0, triggered.items.len - t0 });
         i = pi + open_tag.len;
     }
 }
@@ -544,6 +627,14 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     defer req_ranges.deinit(allocator);
     var perk_ranges: std.ArrayList([2]usize) = .empty;
     defer perk_ranges.deinit(allocator);
+    var triggered_list: std.ArrayList(buffs.Triggered) = .empty;
+    defer triggered_list.deinit(allocator);
+    var trig_req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer trig_req_ranges.deinit(allocator);
+    var attr_trig_ranges: std.ArrayList([2]usize) = .empty;
+    defer attr_trig_ranges.deinit(allocator);
+    var perk_trig_ranges: std.ArrayList([2]usize) = .empty;
+    defer perk_trig_ranges.deinit(allocator);
 
     // Default attribute costs from <attributes ...>
     var def_min: u8 = 1;
@@ -603,35 +694,50 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
         const ar0 = passives_list.items.len;
         try scanPassives(allocator, arena, abody, &passives_list, &reqs_list, &req_ranges);
         try attr_ranges.append(allocator, .{ ar0, passives_list.items.len - ar0 });
+        const at0 = triggered_list.items.len;
+        try scanTriggered(allocator, arena, abody, &triggered_list, &reqs_list, &trig_req_ranges);
+        try attr_trig_ranges.append(allocator, .{ at0, triggered_list.items.len - at0 });
         i = ai + 11;
     }
 
-    try scanProgressionBlocks(allocator, arena, clean, "<perk ", "</perk>", false, perk_max_level, perk_base_cost, perk_cost_mult, &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks);
+    try scanProgressionBlocks(allocator, arena, clean, "<perk ", "</perk>", false, perk_max_level, perk_base_cost, perk_cost_mult, &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, &triggered_list, &trig_req_ranges, &perk_trig_ranges, max_perks);
     // `<book>` blocks share the perk shape (name, max_level, parent,
     // effect_group passives) and are progression values in their own right:
     // items.xml grants them with SetProgressionLevel level="-1". Without them
     // in the catalog a read almanac stores no level and folds no passive.
-    try scanProgressionBlocks(allocator, arena, clean, "<book ", "</book>", true, perk_max_level, perk_base_cost, perk_cost_mult, &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, max_perks);
+    try scanProgressionBlocks(allocator, arena, clean, "<book ", "</book>", true, perk_max_level, perk_base_cost, perk_cost_mult, &perks, &passives_list, &reqs_list, &req_ranges, &perk_ranges, &triggered_list, &trig_req_ranges, &perk_trig_ranges, max_perks);
 
     const passive_pool = try arena.alloc(buffs.Passive, passives_list.items.len);
     @memcpy(passive_pool, passives_list.items);
+    const trig_pool = try arena.alloc(buffs.Triggered, triggered_list.items.len);
+    @memcpy(trig_pool, triggered_list.items);
     const aslice = try arena.alloc(AttrDef, attrs.items.len);
     @memcpy(aslice, attrs.items);
     for (aslice, attr_ranges.items) |*a, rg| {
         a.passives = passive_pool[rg[0] .. rg[0] + rg[1]];
+    }
+    for (aslice, attr_trig_ranges.items) |*a, rg| {
+        a.triggered = trig_pool[rg[0] .. rg[0] + rg[1]];
     }
     const pslice = try arena.alloc(PerkDef, perks.items.len);
     @memcpy(pslice, perks.items);
     for (pslice, perk_ranges.items) |*p, rg| {
         p.passives = passive_pool[rg[0] .. rg[0] + rg[1]];
     }
+    for (pslice, perk_trig_ranges.items) |*p, rg| {
+        p.triggered = trig_pool[rg[0] .. rg[0] + rg[1]];
+    }
     // Every folded row has one range of gates in the pool (empty for ungated
     // rows); a mismatch means the walk and the append drifted apart.
     if (req_ranges.items.len != passive_pool.len) return error.MalformedProgression;
+    if (trig_req_ranges.items.len != trig_pool.len) return error.MalformedProgression;
     const req_pool = try arena.alloc(requirements.Requirement, reqs_list.items.len);
     @memcpy(req_pool, reqs_list.items);
     for (passive_pool, req_ranges.items) |*p, rg| {
         p.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
+    }
+    for (trig_pool, trig_req_ranges.items) |*t, rg| {
+        t.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
     }
 
     // Crafting skills + unlock_entry gates (99 rows in stock): the item
@@ -830,6 +936,45 @@ test "crafting skill unlock_entry gates parse and resolve tiers" {
     try std.testing.expectEqual(@as(u8, 1), req[1]);
     // Ungated items (always_unlocked) have no requirement.
     try std.testing.expect(unlockRequirement(&t, "resourceWood") == null);
+}
+
+test "progression triggered rows parse (perkIntellectMastery bookworm cvar)" {
+    // The writer for `$perkBookwormChance` is data: `perkIntellectMastery`'s
+    // two `onSelfProgressionUpdate` rows set 25 at level >= 2 and 0 at level
+    // <= 1. Without them the 63 loot RandomRoll gates that read the cvar can
+    // only ever fail, so the parse is the first half of that behaviour.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadTableFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    var mastery: ?PerkDef = null;
+    for (t.perks) |pk| {
+        if (std.mem.eql(u8, pk.name, "perkIntellectMastery")) {
+            mastery = pk;
+            break;
+        }
+    }
+    const m = mastery orelse return error.TestUnexpectedResult;
+    var set_row: ?buffs.Triggered = null;
+    var clear_row: ?buffs.Triggered = null;
+    for (m.triggered) |tr| {
+        if (!std.mem.eql(u8, tr.cvar, "$perkBookwormChance")) continue;
+        try std.testing.expectEqual(buffs.Trigger.progression_update, tr.trigger);
+        try std.testing.expectEqual(buffs.TriggeredAction.modify_cvar, tr.action);
+        try std.testing.expectEqual(@as(usize, 1), tr.reqs.len);
+        try std.testing.expectEqual(requirements.Kind.progression_level, tr.reqs[0].kind);
+        try std.testing.expectEqualStrings("perkIntellectMastery", tr.reqs[0].arg);
+        if (tr.value == 25) set_row = tr else clear_row = tr;
+    }
+    const sr = set_row orelse return error.TestUnexpectedResult;
+    const cr = clear_row orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(cvars.Operation.set, sr.cvar_op);
+    try std.testing.expectEqual(requirements.Compare.ge, sr.reqs[0].op);
+    try std.testing.expectEqual(@as(f32, 2), sr.reqs[0].value);
+    try std.testing.expectEqual(requirements.Compare.le, cr.reqs[0].op);
+    try std.testing.expectEqual(@as(f32, 1), cr.reqs[0].value);
+    // Stock keeps these rows on the perk body, not on attributes.
+    for (t.attributes) |a| try std.testing.expectEqual(@as(usize, 0), a.triggered.len);
 }
 
 test "perk/attribute passive_effect rows parse (the 649-row surface)" {

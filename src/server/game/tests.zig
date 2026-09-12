@@ -5784,6 +5784,48 @@ test "spawn_starter_kit config replaces the built-in kit and fails closed" {
     try std.testing.expectEqual(@as(u32, 50), g2.sim.inventory[ps2].countItem(coin));
 }
 
+test "progression update rows write $perkBookwormChance (stock data)" {
+    // The other half of the loot RandomRoll gates: progression.xml's
+    // `perkIntellectMastery` rows fire on `onSelfProgressionUpdate` and set
+    // `$perkBookwormChance` to 25 at level >= 2, 0 at <= 1. The purchase and
+    // add level paths both run them, so the cvar tracks the perk.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    // Fresh character: no cvar, so the 63 loot RandomRoll rows read 0.
+    try std.testing.expectEqual(@as(f32, 0), cl.cvars.get("$perkBookwormChance"));
+
+    // Reaching Intellect Mastery 2 sets the chance to 25.
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkIntellectMastery", 2));
+    try std.testing.expectEqual(@as(f32, 25), cl.cvars.get("$perkBookwormChance"));
+
+    // The second row clears it at level <= 1. Purchases only ever go one level
+    // up (skillCostOf refuses a downgrade), so prove it on a second character
+    // buying level 1 from scratch: the row fires with level 1 and writes 0.
+    var cap2: ln_peer.Capture = .{};
+    const cl2 = try g.attachJoinedClient(&cap2);
+    cl2.skill_points = 100;
+    // The stock purchase gate: perk level 1 needs attIntellect >= 6.
+    cl2.skill_levels[0] = .{ .name = "attIntellect", .level = 6 };
+    cl2.skill_level_n = 1;
+    try std.testing.expect(g.purchaseSkill(cl2.slot, "perkIntellectMastery", 1));
+    try std.testing.expectEqual(@as(f32, 0), cl2.cvars.get("$perkBookwormChance"));
+}
+
 test "loot requirement gates read the opener's progression on the fill path" {
     // Deterministic synthetic table (no game dir): a Progression-gated entry
     // must roll only when the fill path can build the opener's requirements.Ctx

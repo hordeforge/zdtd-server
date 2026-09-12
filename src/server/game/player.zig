@@ -14,6 +14,7 @@ const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
+const requirements = @import("../../assets/requirements.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_items = @import("../../assets/items.zig");
 const ecs_party = @import("../../ecs/party.zig");
@@ -629,12 +630,14 @@ pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_l
     while (i < c.skill_level_n) : (i += 1) {
         if (std.mem.eql(u8, c.skill_levels[i].name, interned)) {
             c.skill_levels[i].level = target_level;
+            fireProgressionUpdate(self, slot, interned);
             return true;
         }
     }
     if (c.skill_level_n < c.skill_levels.len) {
         c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = target_level };
         c.skill_level_n += 1;
+        fireProgressionUpdate(self, slot, interned);
         return true;
     }
     return false;
@@ -673,6 +676,38 @@ fn progressionMaxLevel(self: *const Game, name: []const u8) ?u16 {
 /// MinEventActionAddProgressionLevel (RE minevents.md IL=143): add `delta`
 /// to the named ProgressionValue, clamped to the crafting_skill max_level
 /// (stock magazines ship level="1"). Unknown names fail closed.
+/// A progression value's `triggered_effect` rows from progression.xml.
+fn progressionTriggered(self: *const Game, name: []const u8) []const assets_buffs.Triggered {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.triggered;
+    }
+    for (self.progression_table.perks) |p| {
+        if (std.mem.eql(u8, p.name, name)) return p.triggered;
+    }
+    return &.{};
+}
+
+/// Fire a progression value's `onSelfProgressionUpdate` rows (stock runs them
+/// whenever the value changes, from SetProgressionLevel and the purchase path).
+/// The rows are data: `perkIntellectMastery` sets `$perkBookwormChance` to 25
+/// at level >= 2 and 0 at <= 1, which is what the loot RandomRoll gates read.
+/// ModifyCVar/RemoveCVar land in the client's cvar store as the evaluator
+/// scans; the returned stat/buff lists are not applied yet (perk runtime open),
+/// the same limitation the parsed perk passives carry.
+pub fn fireProgressionUpdate(self: *Game, slot: usize, name: []const u8) void {
+    if (slot >= self.clients.len) return;
+    const rows = progressionTriggered(self, name);
+    if (rows.len == 0) return;
+    const c = &self.clients[slot];
+    var counts: requirements.Counts = .{};
+    const ctx: requirements.Ctx = .{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .cvars = &c.cvars,
+    };
+    _ = assets_buffs.evaluateRows(rows, .progression_update, ctx, &counts);
+}
+
 pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {
     if (delta == 0 or slot >= self.clients.len) return false;
     const interned = internProgressionName(self, name) orelse return false;
@@ -685,6 +720,7 @@ pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8
             const next: u16 = @min(max_level, cur + delta);
             if (next == cur) return false;
             c.skill_levels[i].level = @intCast(next);
+            fireProgressionUpdate(self, slot, interned);
             return true;
         }
     }
@@ -692,6 +728,7 @@ pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8
     const first: u16 = @min(max_level, delta);
     c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = @intCast(first) };
     c.skill_level_n += 1;
+    fireProgressionUpdate(self, slot, interned);
     return true;
 }
 

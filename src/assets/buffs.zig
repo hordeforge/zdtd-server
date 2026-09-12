@@ -110,6 +110,10 @@ pub const Trigger = enum(u8) {
     remove,
     entered_game,
     first_spawn,
+    /// `onSelfProgressionUpdate`: fired when a progression value (perk,
+    /// attribute, book) changes. progression.xml's `perkIntellectMastery` rows
+    /// write `$perkBookwormChance` here, which the loot RandomRoll gates read.
+    progression_update,
     other,
 };
 
@@ -504,7 +508,7 @@ fn scanEffectGroup(
 /// region's gates first, then the row's own direct children, so a group gate
 /// applies to every row inside it. `budget` is the absolute pool index the
 /// per-buff cap ends at; `seen` accumulates the rows taken this buff.
-fn scanTriggeredRows(
+pub fn scanTriggeredRows(
     allocator: std.mem.Allocator,
     arena: std.mem.Allocator,
     body: []const u8,
@@ -1150,6 +1154,7 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfBuffRemove")) return .remove;
     if (std.mem.eql(u8, s, "onSelfEnteredGame")) return .entered_game;
     if (std.mem.eql(u8, s, "onSelfFirstSpawn")) return .first_spawn;
+    if (std.mem.eql(u8, s, "onSelfProgressionUpdate")) return .progression_update;
     return .other;
 }
 
@@ -1191,9 +1196,17 @@ pub const TriggeredResult = struct {
 /// counted). Unknown triggers/actions are skipped. Bounded: the result arrays
 /// cap the outcome; no allocation.
 pub fn evaluateTriggered(t: *const Table, def_id: u16, event: Trigger, ctx: requirements.Ctx, counts: *requirements.Counts) TriggeredResult {
+    const def = t.byId(def_id) orelse return .{};
+    return evaluateRows(def.triggered, event, ctx, counts);
+}
+
+/// Evaluate one row list for `event`. Shared by the buff engine (a buff's own
+/// rows) and the progression engine (progression.xml's `perkIntellectMastery`
+/// `onSelfProgressionUpdate` rows write `$perkBookwormChance`), so the row
+/// semantics - gate, document-order cvar writes - live in one place.
+pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.Ctx, counts: *requirements.Counts) TriggeredResult {
     var out: TriggeredResult = .{};
-    const def = t.byId(def_id) orelse return out;
-    for (def.triggered) |tr| {
+    for (rows) |tr| {
         if (tr.trigger != event) continue;
         if (tr.reqs.len > 0 and requirements.evaluate(tr.reqs, ctx, counts) != .pass) continue;
         switch (tr.action) {
