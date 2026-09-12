@@ -412,6 +412,18 @@ pub const InitOptions = struct {
     /// AIDirector instead; `[sim] starter_zombies = false` matches that
     /// (docs/DIVERGENCES.md).
     starter_zombies: bool = true,
+    /// Operator starter kit for a fresh player (`zdtd.toml [sim]
+    /// spawn_starter_kit`, rows `name` or `name:count` comma-separated). Parsed
+    /// once at create, after the item catalog loads; null keeps the built-in
+    /// default kit (stone axe 1, foodCanBeef 5, resourceWood 20, casinoCoin 50).
+    /// A fresh-spawn kit is server policy, not stock data (stock defines it in
+    /// code), so it is config per ADR 0010.
+    spawn_starter_kit: ?[]const u8 = null,
+    /// Seed the rest of the near-spawn demo set on a fresh world: Trader Jen,
+    /// the minibike, the seed chest and the demo turret (`starter_zombies`
+    /// covers the hostiles). Default true, the historical demo world; false
+    /// leaves a fresh world to the lazy stock systems (docs/DIVERGENCES.md 6.2).
+    demo_seed: bool = true,
     /// .wasm modules loaded by the Wasm plugin runtime (zdtd.toml [plugin]
     /// modules; ADR 0020). Empty = no Wasm plugins.
     plugin_modules: []const []const u8 = &.{},

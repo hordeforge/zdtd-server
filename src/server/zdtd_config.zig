@@ -99,6 +99,16 @@ pub const Sim = struct {
     /// world init. Default true; false matches stock's lazy AIDirector
     /// spawning (the divergence is recorded in docs/DIVERGENCES.md).
     starter_zombies: ?bool = null,
+    /// Fresh-player starter kit (server policy, not stock data: stock defines
+    /// its kit in code). Rows are `name` or `name:count`, comma-separated,
+    /// resolved through items.xml once at create. Unknown names are omitted
+    /// (fail closed); counts clamp to the item's Stacknumber.
+    spawn_starter_kit: ?[]const u8 = null,
+    /// Seed the near-spawn demo set on a fresh world: Trader Jen, the minibike,
+    /// the seed chest and the demo turret (hostiles are `starter_zombies`).
+    /// Default true; false leaves a fresh world to the lazy stock systems
+    /// (docs/DIVERGENCES.md 6.2).
+    demo_seed: ?bool = null,
     /// Trader AvailableMoney display pool (no stock key: stock Traders.xml has
     /// no wallet property; AvailableMoney is engine-managed per-day).
     trader_wallet_dukes: ?i32 = null,
@@ -425,6 +435,12 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.sim.starter_zombies) |v| {
         if (@hasField(@TypeOf(opts.*), "starter_zombies")) opts.starter_zombies = v;
     }
+    if (f.sim.spawn_starter_kit) |v| {
+        if (@hasField(@TypeOf(opts.*), "spawn_starter_kit")) opts.spawn_starter_kit = v;
+    }
+    if (f.sim.demo_seed) |v| {
+        if (@hasField(@TypeOf(opts.*), "demo_seed")) opts.demo_seed = v;
+    }
     if (f.sim.trader_wallet_dukes) |v| opts.trader_wallet_dukes = v;
     if (f.sim.min_chat_gap_ns) |v| opts.min_chat_gap_ns = v;
     if (f.sim.inv_bucket_cap) |v| opts.inv_bucket_cap = v;
@@ -683,6 +699,8 @@ test "parse stream and authority" {
         \\block_id_mapping = false
         \\[sim]
         \\starter_zombies = false
+        \\spawn_starter_kit = "foodCanBeef:5,resourceWood:20"
+        \\demo_seed = false
         \\te_scan_block_cap = 16
         \\te_scan_te_cap = 24
         \\workstation_crafts_per_tick = 8
@@ -736,6 +754,9 @@ test "parse stream and authority" {
     // Interception policy lists ride as scalars (the binder has no arrays).
     try std.testing.expectEqualStrings("core_lootgate=damage,say; core_pvp=say", f.plugin.deny.?);
     try std.testing.expectEqualStrings("core_announce=say", f.plugin.allow.?);
+    // Starter kit + demo seed swim with the other [sim] scalars.
+    try std.testing.expectEqualStrings("foodCanBeef:5,resourceWood:20", f.sim.spawn_starter_kit.?);
+    try std.testing.expectEqual(false, f.sim.demo_seed.?);
 }
 
 test "parse rules overlay sections" {

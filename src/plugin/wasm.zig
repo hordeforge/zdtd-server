@@ -998,6 +998,12 @@ pub const WasmHost = struct {
         self.allocator = allocator;
         self.ctx = ctx;
         self.budget = budget;
+        // Plan index -> loaded slot. The two differ whenever a module is
+        // skipped (unloadable, or the plugin cap), and `point_claims` is keyed
+        // by PLAN index. Binding a claim by plan index would name whichever
+        // module happened to land in that slot (whose hook_present may pass),
+        // or a slot >= self.n that claimSlot voids forever.
+        var slot_of_plan: [max_wasm_plugins]u8 = .{no_claim} ** max_wasm_plugins;
         for (plan.modules) |rm| {
             if (self.n >= max_wasm_plugins) {
                 std.debug.print("zdtd: wasm plugin cap {d} reached; skipping '{s}'\n", .{ max_wasm_plugins, rm.manifest.wasm.? });
@@ -1056,6 +1062,10 @@ pub const WasmHost = struct {
                     }
                 }
             }
+            // `rm.slot` is the resolver's final slot index, which is also where
+            // this module lands when every earlier module loaded; record where
+            // it actually landed instead.
+            if (rm.slot < slot_of_plan.len) slot_of_plan[rm.slot] = @intCast(self.n);
             self.n += 1;
             const tier_s = switch (rm.tier) {
                 .core => "core",
@@ -1080,7 +1090,17 @@ pub const WasmHost = struct {
         var it = plan.point_claims.iterator();
         while (it.next()) |entry| {
             const point = manifest.OverridePoint.parse(entry.key_ptr.*) orelse continue;
-            const slot: usize = @intCast(entry.value_ptr.*);
+            // point_claims is keyed by PLAN index; translate to the loaded slot.
+            const plan_slot: usize = @intCast(entry.value_ptr.*);
+            if (plan_slot >= slot_of_plan.len) continue;
+            const slot: usize = slot_of_plan[plan_slot];
+            if (slot == no_claim) {
+                std.debug.print(
+                    "zdtd: claim on {s} names a module that did not load; claim refused\n",
+                    .{manifest.OverridePoint.wire(point)},
+                );
+                continue;
+            }
             if (slot < self.n and !self.slots[slot].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
                 std.debug.print(
                     "zdtd: mod '{s}' claims {s} but does not export {s}; claim refused\n",
@@ -2655,6 +2675,50 @@ test "reload reconciles the module's manifest point claims" {
     host.slots[2].manifest_loaded = false;
     try std.testing.expect(host.reload(2, wasm2));
     try std.testing.expectEqual(@as(u8, 2), host.claims[craft]);
+}
+
+test "point claims bind to the loaded slot, not the plan index" {
+    // F7 (plugin-composability review 2026-09-12): a module the loader skips
+    // (missing file, cap) shifts every later module down, while point_claims
+    // stays keyed by the resolver's plan slot. Binding by plan slot named
+    // whichever module landed there (whose hook_present may pass), or a slot
+    // >= self.n that claimSlot voids forever.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    const a = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const gone_dir = try std.fs.path.join(a, &.{ dir, "gone" });
+    defer a.free(gone_dir);
+    io_fs.mkdirPath(gone_dir);
+
+    // The second module is the shipped override fixture: it exports
+    // on_loot_roll and a valid _zdtd_requires, so loadResolved accepts it.
+    var modules = [_]resolver.ResolvedModule{
+        .{ .manifest = .{ .name = "gone", .dir = gone_dir, .wasm = "absent.wasm" }, .tier = .user, .slot = 0 },
+        .{ .manifest = .{ .name = "gate", .dir = "assets/fixtures", .wasm = "plugin_override.wasm" }, .tier = .user, .slot = 1 },
+    };
+    var plan: resolver.ResolvedResult = .{ .modules = &modules, .point_claims = .{}, .name_to_slot = .{}, .synthetic = &.{} };
+    defer plan.point_claims.deinit(a);
+    defer plan.name_to_slot.deinit(a);
+    try plan.point_claims.put(a, "loot.roll", 1);
+
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var host: WasmHost = .{};
+    defer host.shutdown();
+    host.loadResolved(a, &plan, &ctx, .{});
+    // The first module is skipped, so the claimant lands in slot 0 and its
+    // claim must follow it there.
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+    try std.testing.expectEqualStrings("gate", host.slots[0].display);
+    try std.testing.expectEqual(@as(u8, 0), host.claims[@intFromEnum(manifest.OverridePoint.loot_roll)]);
 }
 
 test "queued-verb policy: module deny, operator right-bias, reload" {

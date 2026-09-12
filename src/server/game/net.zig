@@ -173,11 +173,13 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
 
 /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
 /// rules so broadcast and sendGameBudget share the same behaviour.
-/// `budget_ns==null` is reserved for callers that already impose an outer
-/// deadline. Returns error.WindowFull on exhaustion; callers own drop counters/logs and the
-/// packages_broadcast count (via count_broadcast).
-pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
-    const retry_deadline: u64 = if (budget_ns) |b| clock.monoNs() + b else 0;
+/// `budget_ns` is always a real deadline: it is the only cap the fragment retry
+/// checks (`peer.reliable_send_deadline_ns`), so a "no deadline" caller would
+/// be bounded by `max_attempts` alone. Returns error.WindowFull on exhaustion;
+/// callers own drop counters/logs and the packages_broadcast count (via
+/// count_broadcast).
+pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, framed: []const u8, budget_ns: u64, max_attempts: u32, count_broadcast: bool) !void {
+    const retry_deadline: u64 = clock.monoNs() + budget_ns;
     const previous_send_deadline = peer.reliable_send_deadline_ns;
     peer.reliable_send_deadline_ns = retry_deadline;
     defer peer.reliable_send_deadline_ns = previous_send_deadline;
@@ -189,7 +191,7 @@ pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, frame
                     self.harness.counters.inc(.net_send_errors);
                 };
                 self.pollNetOnce();
-                if (budget_ns != null and clock.monoNs() >= retry_deadline) break;
+                if (clock.monoNs() >= retry_deadline) break;
                 if (attempts >= window_fast_attempts and attempts % 4 == 3) clock.sleepNs(window_retry_sleep_ns);
                 continue;
             },

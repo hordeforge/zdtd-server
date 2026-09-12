@@ -146,7 +146,11 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
         // bit-for-bit with no overrides: densityForBlock(type) per cell.
         .dens_at = if (ch.densities == null) null else BlockCtx.dens,
         .water_block_id = self.world.terrain_ids.water,
-        .dmg_at = DmgCtx.at,
+        // Same gate as dens_at: with no damage plane every cell reads 0, and
+        // writeDamageChannel's null branch (sameValue 0 per layer) writes the
+        // bytes the scalar path produces, so the 65536 indirect
+        // dmgAt/blockAt/wireBlockDamage calls per chunk were pure cost.
+        .dmg_at = if (ch.damages == null) null else DmgCtx.at,
         .dmg_ctx = &dmg_ctx,
         // Dense plane already lives on the chunk after getOrCreate; pass it so
         // encode skips the 65536-cell scratch fill and the density/water SIMD

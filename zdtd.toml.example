@@ -72,6 +72,17 @@ block_id_mapping = true
 
 # Sim policy that is not stock serverconfig and not stock game data.
 [sim]
+# Fresh-player starter kit (server policy: stock defines its kit in code).
+# Rows are `name` or `name:count`, comma-separated, resolved through items.xml;
+# unknown names are omitted (fail closed) and counts clamp to Stacknumber.
+# Unset keeps the built-in kit: meleeToolRepairT0StoneAxe:1, foodCanBeef:5,
+# resourceWood:20, casinoCoin:50.
+# spawn_starter_kit = "meleeToolRepairT0StoneAxe:1,foodCanBeef:5,resourceWood:20,casinoCoin:50"
+# Near-spawn demo set on a fresh world: Trader Jen, the minibike, the seed chest,
+# the demo turret and (with starter_zombies) the demo hostiles. false leaves a
+# fresh world to the lazy stock systems (docs/DIVERGENCES.md 6.2).
+# demo_seed = true
+# starter_zombies = true
 # Trader AvailableMoney display pool. Stock Traders.xml has no wallet key
 # (AvailableMoney is engine-managed per-day); zdtd has no trader economy, so
 # trade() credits the player wallet directly and this is a display value.

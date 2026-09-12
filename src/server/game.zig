@@ -1060,6 +1060,10 @@ pub const Game = struct {
             subbiome_noise.stableHash(opts.game_world));
 
         try game_init_assets.loadAssets(self, allocator, opts);
+        // Operator starter kit (zdtd.toml [sim] spawn_starter_kit): resolve the
+        // names once here, where the item catalog is up, into the sim's fixed
+        // table. Null/empty leaves the built-in default kit in place.
+        game_player.parseStarterKit(self, opts.spawn_starter_kit);
         try @import("game/init_world.zig").initWorld(self, allocator, port, opts, had_saved_entities);
         // Trader stock survives restart (traders.zst): initWorld filled the
         // fresh XML rolls; a saved window overrides them by trader name (stock
@@ -1655,10 +1659,10 @@ pub const Game = struct {
 
     /// Shared reliable-window retry pump: one place for the budget/deadline/sleep
     /// rules so broadcast and sendGameBudget share the same behaviour.
-    /// `budget_ns==null` means no deadline (stream/broadcast). Returns
-    /// error.WindowFull on exhaustion; callers own drop counters/logs and the
-    /// packages_broadcast count (via count_broadcast).
-    pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, tag: []const u8, framed: []const u8, budget_ns: ?u64, max_attempts: u32, count_broadcast: bool) !void {
+    /// `budget_ns` is always a real deadline (the only cap the fragment retry
+    /// checks). Returns error.WindowFull on exhaustion; callers own drop
+    /// counters/logs and the packages_broadcast count (via count_broadcast).
+    pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, tag: []const u8, framed: []const u8, budget_ns: u64, max_attempts: u32, count_broadcast: bool) !void {
         return game_net.sendReliablePumped(self, peer, tag, framed, budget_ns, max_attempts, count_broadcast);
     }
 

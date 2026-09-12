@@ -5696,6 +5696,78 @@ test "starter_zombies gates the near-spawn demo hostiles" {
     }
     try std.testing.expectEqual(@as(u32, 3), g_on.sim.countKind(.zombie));
     try std.testing.expectEqual(@as(u32, 1), g_on.sim.countKind(.animal));
+
+    // `[sim] demo_seed = false` takes the whole near-spawn demo set with it:
+    // the trader, the minibike, the seed chest and the demo turret, not just
+    // the hostiles. docs/DIVERGENCES.md 6.2 documents the pair.
+    const none_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "none" });
+    defer std.testing.allocator.free(none_dir);
+    io_fs.mkdirPath(none_dir);
+    const g_none = try Game.createWithOptions(std.testing.allocator, none_dir, 0, .{ .demo_seed = false });
+    defer {
+        g_none.deinit();
+        std.testing.allocator.destroy(g_none);
+    }
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.zombie));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.animal));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.trader));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.vehicle));
+    try std.testing.expectEqual(@as(u32, 0), g_none.sim.countKind(.turret));
+    // The default world seeds all four kinds, so the switch is not vacuous.
+    try std.testing.expect(g_on.sim.countKind(.trader) > 0);
+    try std.testing.expect(g_on.sim.countKind(.vehicle) > 0);
+    try std.testing.expect(g_on.sim.countKind(.turret) > 0);
+}
+
+test "spawn_starter_kit config replaces the built-in kit and fails closed" {
+    // `[sim] spawn_starter_kit` is server policy (ADR 0010): stock defines its
+    // kit in code, so zdtd makes it config. A configured spec resolves names
+    // through items.xml, omits unknown names, and clamps counts to
+    // Stacknumber; an absent spec keeps the historical four-row default.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+
+    const kit_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "kit" });
+    defer std.testing.allocator.free(kit_dir);
+    io_fs.mkdirPath(kit_dir);
+    const g = try Game.createWithOptions(std.testing.allocator, kit_dir, 0, .{
+        .spawn_starter_kit = " foodCanBeef:2 , noSuchItem:3, resourceWood:9999 ",
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const beef = g.items.ecsIdByName("foodCanBeef");
+    const wood = g.items.ecsIdByName("resourceWood");
+    const coin = g.items.ecsIdByName("casinoCoin");
+    try std.testing.expect(beef != 0 and wood != 0 and coin != 0);
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try std.testing.expectEqual(@as(u32, 2), g.sim.inventory[ps].countItem(beef));
+    // The unknown row is omitted rather than falling back to the default kit.
+    try std.testing.expectEqual(@as(u32, 0), g.sim.inventory[ps].countItem(coin));
+    const wood_n = g.sim.inventory[ps].countItem(wood);
+    try std.testing.expect(wood_n > 0);
+    try std.testing.expect(wood_n <= @as(u32, g.sim.maxStack(wood)));
+
+    const def_dir = try std.fs.path.join(std.testing.allocator, &.{ root, "default" });
+    defer std.testing.allocator.free(def_dir);
+    io_fs.mkdirPath(def_dir);
+    const g2 = try Game.create(std.testing.allocator, def_dir, 0);
+    defer {
+        g2.deinit();
+        std.testing.allocator.destroy(g2);
+    }
+    var cap2: ln_peer.Capture = .{};
+    const cl2 = try g2.attachJoinedClient(&cap2);
+    const ps2 = g2.sim.playerByPeer(cl2.slot).?;
+    try std.testing.expectEqual(@as(u32, 5), g2.sim.inventory[ps2].countItem(beef));
+    try std.testing.expectEqual(@as(u32, 50), g2.sim.inventory[ps2].countItem(coin));
 }
 
 test "equipped item mods fold their passives (layer 13, stock data)" {

@@ -27,6 +27,13 @@ pub const NetId = ent.NetId;
 pub const Kind = c.Kind;
 pub const Mask = c.Mask;
 
+/// Max rows in the configurable starter kit (`[sim] spawn_starter_kit`).
+pub const max_starter_kit = 12;
+/// One resolved starter-kit row: an ECS item id and a count. Game fills this
+/// from the operator spec after the item catalog loads (`item_id == 0` marks a
+/// name the catalog does not resolve, which spawnPlayer omits).
+pub const StarterKitEntry = struct { item_id: u16 = 0, count: u16 = 0 };
+
 /// A host-side bot's world presence as seen by the zombie AI (ADR 0026).
 /// Bots are NOT ECS entities; `bot_snap_fn` fills this from the BotManager.
 /// `net_id < 0` means "no bot" (empty result).
@@ -473,6 +480,11 @@ pub const World = struct {
     /// Optional item_id → max stack (items.xml Stacknumber). Null → builtin_defs.
     stack_ctx: ?*anyopaque = null,
     stack_fn: ?*const fn (?*anyopaque, u16) u16 = null,
+    /// Operator starter kit (zdtd.toml `[sim] spawn_starter_kit`), resolved by
+    /// Game after the item catalog loads. `starter_kit_n == 0` means "not
+    /// configured": spawnPlayer then grants the built-in default kit below.
+    starter_kit: [max_starter_kit]StarterKitEntry = [_]StarterKitEntry{.{}} ** max_starter_kit,
+    starter_kit_n: u8 = 0,
     /// Optional item_id → held-item light (items.xml LightValue, 0 = none).
     /// Feeds the PlayerStealth selfLight blend (rule 15).
     held_light_ctx: ?*anyopaque = null,
@@ -1333,19 +1345,28 @@ pub const World = struct {
         self.health[s].food_max = 100;
         self.health[s].water = 100;
         self.health[s].water_max = 100;
-        // Starter kit by stock item name. Production resolves via item_id_fn
-        // (items.xml / AssignIds); missing names fail closed. Offline tests
+        // Starter kit. A configured `[sim] spawn_starter_kit` (resolved by Game
+        // into `starter_kit`) wins, with unknown names omitted; otherwise the
+        // built-in default kit resolves by stock item name through item_id_fn
+        // (items.xml / AssignIds), and missing names fail closed. Offline tests
         // without the hook keep the builtin ECS ids.
-        const starter = [_]struct { []const u8, u16, u16 }{
-            .{ "meleeToolRepairT0StoneAxe", 8, 1 },
-            .{ "foodCanBeef", 2, 5 },
-            .{ "resourceWood", 7, 20 },
-            .{ "casinoCoin", 6, 50 },
-        };
-        for (starter) |it| {
-            const id: u16 = if (self.item_id_fn) |f| f(self.item_id_ctx, it[0]) else it[1];
-            if (id == 0) continue;
-            _ = self.depositItem(s, id, it[2]);
+        if (self.starter_kit_n > 0) {
+            for (self.starter_kit[0..self.starter_kit_n]) |it| {
+                if (it.item_id == 0 or it.count == 0) continue;
+                _ = self.depositItem(s, it.item_id, it.count);
+            }
+        } else {
+            const starter = [_]struct { []const u8, u16, u16 }{
+                .{ "meleeToolRepairT0StoneAxe", 8, 1 },
+                .{ "foodCanBeef", 2, 5 },
+                .{ "resourceWood", 7, 20 },
+                .{ "casinoCoin", 6, 50 },
+            };
+            for (starter) |it| {
+                const id: u16 = if (self.item_id_fn) |f| f(self.item_id_ctx, it[0]) else it[1];
+                if (id == 0) continue;
+                _ = self.depositItem(s, id, it[2]);
+            }
         }
 
         return self.network_id[s].id;

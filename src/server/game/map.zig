@@ -81,6 +81,7 @@ pub fn tickMapChunks(self: *Game) void {
         const cx = c.map_middle_x >> 4;
         const cz = c.map_middle_z >> 4;
         var pieces: [map_batch]packages.MapChunkPiece = undefined;
+        var slots: [map_batch]usize = undefined;
         var n: usize = 0;
         var idx: usize = 0;
         while (idx < game_mod.map_window_n and n < map_batch) : (idx += 1) {
@@ -96,13 +97,19 @@ pub fn tickMapChunks(self: *Game) void {
                     @as(i32, @intCast(@as(u32, @bitCast(kz)) & 0xFFFF)),
                 .colors = colors,
             };
-            c.map_chunks_sent[idx] = 1;
+            slots[n] = idx;
             n += 1;
         }
         if (n == 0) continue;
         if (packages.buildMapChunksBody(&self.body_buf, c.entity_id, pieces[0..n])) |body| {
             // Channel 1 + deflate (MapChunks Compress=true), normal budget.
-            _ = self.trySendCompressed(peer, "NetPackageMapChunks", body);
+            // Mark the pieces sent only on a real send: marking first left a
+            // permanent hole in the minimap when the window was full or
+            // compression failed, because the middle never moves to reset the
+            // sent set.
+            if (self.trySendCompressed(peer, "NetPackageMapChunks", body)) {
+                for (slots[0..n]) |i| c.map_chunks_sent[i] = 1;
+            }
         } else |_| {
             self.harness.counters.inc(.encode_errors);
         }

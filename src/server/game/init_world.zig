@@ -254,16 +254,17 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     const sx: f32 = @floatFromInt(sp.x);
     const sz: f32 = @floatFromInt(sp.z);
 
-    // Near-spawn demo hostiles (see `[sim] starter_zombies`): a fresh world
-    // with something to fight, and targets for the demo turret. Stock spawns
-    // these lazily through the AIDirector instead (documented divergence:
-    // docs/DIVERGENCES.md), so an operator can switch the demo off. Kept
-    // outside the default turret range (~24) so they survive until join.
+    // Near-spawn demo hostiles (see `[sim] starter_zombies` / `[sim]
+    // demo_seed`): a fresh world with something to fight, and targets for the
+    // demo turret. Stock spawns these lazily through the AIDirector instead
+    // (documented divergence: docs/DIVERGENCES.md), so an operator can switch
+    // the demo off. Kept outside the default turret range (~24) so they
+    // survive until join.
     // A35: spawn the full resolved class so the entities carry their own stats.
     var z1: ?i32 = null;
     var z2: ?i32 = null;
     var z3: ?i32 = null;
-    if (opts.starter_zombies) {
+    if (opts.starter_zombies and opts.demo_seed) {
         const zdef = self.entities.defaultZombie();
         z1 = self.sim.spawnZombieDef(sx + 40, sy, sz + 8, zdef.max_hp, self.entityClassOf(zdef));
         z2 = self.sim.spawnZombieDef(sx - 35, sy, sz + 12, zdef.max_hp, self.entityClassOf(zdef));
@@ -278,12 +279,14 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         const id = self.npc.traderIdForClass("Trader Jen");
         break :blk if (id != 0) id else 2;
     };
-    if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, jen_info_id, self.trader_wallet_dukes)) |trader_id| {
-        self.fillTraderFromXml(trader_id);
+    if (opts.demo_seed) {
+        if (self.sim.spawnTrader("Trader Jen", sx + 12, sy, sz + 8, jen_info_id, self.trader_wallet_dukes)) |trader_id| {
+            self.fillTraderFromXml(trader_id);
+        }
     }
     // Persistable kinds seed only on a fresh world; entities.zen owns
     // them across restarts (see had_saved_entities above).
-    if (!had_saved_entities) {
+    if (opts.demo_seed and !had_saved_entities) {
         const vk: ecs.components.VehicleKind = .minibike;
         if (self.vehicles.byKind(vk)) |vd| {
             _ = self.sim.spawnVehicleEx(vk, sx + 6, sy, sz - 4, vd.max_hp, vd.velocity_max, vd.seat_count);
@@ -298,7 +301,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     // survive restart via the chunk save + containers.zct, so re-placing on
     // every boot would both dirty the spawn chunk needlessly and clobber
     // whatever the player built at the seed-chest spot.
-    if (!had_saved_entities) {
+    if (opts.demo_seed and !had_saved_entities) {
         const cx: i32 = sp.x + 2;
         const cy: i32 = sp.y;
         const cz: i32 = sp.z + 2;
@@ -337,7 +340,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
         self.sim.power.addNode(.generator, @trunc(sx + 50), @trunc(sy), @trunc(sz + 50), gen_watts)
     else
         null;
-    if (!had_saved_entities) {
+    if (opts.demo_seed and !had_saved_entities) {
         if (self.sim.spawnTurret(sx + 52, sy, sz + 52)) |tid| {
             if (gen) |gid| {
                 if (self.sim.slotOfNetId(tid)) |ts| {

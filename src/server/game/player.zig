@@ -813,6 +813,53 @@ pub fn barterSellScale(ctx: ?*anyopaque, slot: usize) f32 {
     return 1 + @max(0, namedPassiveFold(g, slot, as, "BarteringSelling"));
 }
 
+/// Parse the `[sim] spawn_starter_kit` spec into the sim's fixed starter kit
+/// (ADR 0010: a fresh-spawn kit is server policy, so it is config, not code).
+///
+/// Rows are `name` or `name:count`, separated by commas or semicolons; `name`
+/// is a stock items.xml name resolved through the loaded catalog. An unknown
+/// name keeps its row with `item_id = 0` (spawnPlayer omits it) so a typo
+/// cannot silently fall back to the built-in kit, and a count above the item's
+/// Stacknumber is clamped to it. A null/empty spec leaves the kit unconfigured
+/// (`starter_kit_n == 0`), which selects the built-in default in spawnPlayer.
+pub fn parseStarterKit(self: *Game, spec: ?[]const u8) void {
+    self.sim.starter_kit = [_]ecs.world.StarterKitEntry{.{}} ** ecs.world.max_starter_kit;
+    self.sim.starter_kit_n = 0;
+    const text = spec orelse return;
+    var it = std.mem.tokenizeAny(u8, text, ",;");
+    while (it.next()) |raw| {
+        if (self.sim.starter_kit_n >= ecs.world.max_starter_kit) {
+            std.debug.print(
+                "zdtd: spawn_starter_kit: more than {d} rows; the rest are ignored\n",
+                .{ecs.world.max_starter_kit},
+            );
+            break;
+        }
+        const row = std.mem.trim(u8, raw, " \t");
+        if (row.len == 0) continue;
+        var name = row;
+        var count: u16 = 1;
+        if (std.mem.indexOfScalar(u8, row, ':')) |colon| {
+            name = std.mem.trim(u8, row[0..colon], " \t");
+            const ctext = std.mem.trim(u8, row[colon + 1 ..], " \t");
+            count = std.fmt.parseInt(u16, ctext, 10) catch {
+                std.debug.print("zdtd: spawn_starter_kit: bad count '{s}' for '{s}'; row skipped\n", .{ ctext, name });
+                continue;
+            };
+        }
+        if (name.len == 0 or count == 0) continue;
+        const id = self.items.ecsIdByName(name);
+        if (id == 0) {
+            std.debug.print("zdtd: spawn_starter_kit: '{s}' is not in items.xml; omitted\n", .{name});
+        } else {
+            const cap = self.sim.maxStack(id);
+            if (cap > 0 and count > cap) count = cap;
+        }
+        self.sim.starter_kit[self.sim.starter_kit_n] = .{ .item_id = id, .count = count };
+        self.sim.starter_kit_n += 1;
+    }
+}
+
 const assets_progression_test = @import("../../assets/progression.zig");
 const requirements_test = @import("../../assets/requirements.zig");
 
