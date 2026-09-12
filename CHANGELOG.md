@@ -7,6 +7,25 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Review follow-ups (round 4).
+  - **Plugin HMR re-reads `config.toml` (F11).** A manifest-backed reload
+    re-read `/manifest.toml` but kept the pre-reload `config_bytes`, so an
+    edited `config.toml` was never seen until a restart. The config is now
+    re-read with the declaration; a missing or oversized file fails closed to
+    no config, the same rule `loadResolved` applies.
+  - **Unreliable sends use the peer's MTU, not the compile cap.** LiteNet
+    negotiates an MTU per peer, and `sendUnreliable` rejects anything above
+    `min(max_single_user, peer_mtu - header)`, so a frame between that limit
+    and the compile cap returned Overflow and was dropped with no fallback on
+    the unreliable broadcast paths. The three guards now ask
+    `Peer.singleUserLimit()`, so an in-between frame routes to the reliable
+    path instead.
+  - **Trader stock is read by pointer.** `traderMoney` and `stockEntries`
+    copied the whole ~540 B `TraderStock` (entries `[50]StockEntry`) per call,
+    the first per trader per replicate pass.
+
+### Fixed
+
 - Review follow-ups (round 3).
   - **`[stream] pos_heartbeat_period_ticks`.** The PosAndRot heartbeat for an
     entity with no dirty motion bit was a module constant paired with the

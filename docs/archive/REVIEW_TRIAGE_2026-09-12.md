@@ -57,6 +57,14 @@ the hostiles are behind `starter_zombies`).
 | net-send P2 | `map.zig` marked pieces sent before the send | marked only on a real send |
 | net-send P2 | `budget_ns == null` disabled the only fragment-retry deadline | parameter is a plain `u64`; no caller passed null |
 
+## Fixed in the fourth pass (round 24)
+
+| Review | Finding | Change |
+|---|---|---|
+| plugin F11 P3 | a manifest-backed reload kept the old `config_bytes`, so an edited `config.toml` was invisible until restart | reload re-reads `config.toml` with the declaration; absent/oversized fails closed to none |
+| net-send P2 | unreliable guards used `max_single_user` while `sendUnreliable` enforces the negotiated MTU, dropping in-between frames with no fallback | `Peer.singleUserLimit()` used at all three guards; the MTU test pins the limit |
+| ECS P2 | `traderMoney` / `stockEntries` copied the ~540 B `TraderStock` per call | read by pointer |
+
 ## Fixed in the third pass (round 23)
 
 | Review | Finding | Change |
@@ -76,22 +84,19 @@ module after the fact; the strict form stays queued with F11.
 
 Correctness / behaviour, next pass:
 
-1. **plugin F11 (P3)** - a manifest-backed reload keeps the old `config_bytes`
-   and never re-reads `config.toml`, so an edited config is not seen on HMR.
-2. **net-send P2** - the unreliable guards use `max_single_user` while
-   `sendUnreliable` enforces `min(max_single_user, peer_mtu-4)`.
-3. **ECS P1** - `wire/stock_inv.zig` / `wire/stock_te.zig` mutate ECS state;
+1. **ECS P1** - `wire/stock_inv.zig` / `wire/stock_te.zig` mutate ECS state;
    move the apply functions next to their target types (~130 lines).
-4. **ECS P2** - `game/trader.zig` copies the whole `TraderStock` by value in
-   the replicate loop; take a pointer.
-5. **ECS P2** - `replicate_health.zig` and `tickTraderAreas` scan full
-   `max_entities` instead of `dirty_bits` / the trader kind group.
-6. **ECS P2** - the `Dirty.spawn/.inv/.remove` bits are set but never read or
-   cleared, so `dirty_bits` never releases the slot; delete them.
-7. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
+2. **ECS P2** - `replicate_health.zig` and `tickTraderAreas` scan full
+   `max_entities` instead of `dirty_bits` / the trader kind group (the health
+   pass also sets `dirty[].hp` outside the `markDirty` funnel, which the
+   iteration change must account for).
+3. **ECS P2** - the `Dirty.spawn/.inv/.remove` bits are set in 10+ places,
+   read nowhere and never cleared, so `dirty_bits` never releases the slot;
+   delete them.
+4. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
    density plane exists (POI chunks), bypassing the existing
    `packDensityFromRaws` SIMD path.
-8. **abstractions P1** - the native `PluginHost` vtable defaults on
+5. **abstractions P1** - the native `PluginHost` vtable defaults on
    (`enable_sample_plugin`), composes before Wasm on 28 hooks, and is a
    shipped preset knob, while ADR 0020 decision 2 calls it test scaffolding.
    Needs a maintainer call: default it off in product configs, or amend the
@@ -99,30 +104,30 @@ Correctness / behaviour, next pass:
 
 Structure / idiom (no behaviour change):
 
-9. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
+6. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
     `std.Io.Threaded` on `Game` instead of a fresh init/deinit in `step.zig`
     (per APM period), `net.zig clientFor` (per first datagram) and all 12
     `util/io_fs.zig` helpers. The 0.16 `Threaded.init` installs process-global
     SIGIO/SIGPIPE handlers, so the current shape clobbers the live instances in
     `udp_socket.zig` / `parallel.zig` and `join()`s on the tick thread.
-10. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
+7. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
     parallel `QueueVerb.names` table where `@typeInfo(T).@"enum".fields` +
     `@tagName` is the 0.16 shape used elsewhere.
-11. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
+8. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
     `plane_cells` are snake_case among camelCase siblings.
-12. **abstractions P2** - add `arena.destroyHolder` and replace the 28
+9. **abstractions P2** - add `arena.destroyHolder` and replace the 28
     open-coded child/deinit/destroy blocks (`util/arena.zig` already has
     `newArenaHolder`); merge the duplicated edit-reach predicate
     (`game/rescue.zig` vs `game/guard.zig`).
-13. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
+10. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
     `Section` so switches over it are exhaustiveness-checked; widen
     `webui.zig:1396`'s `[8]u8` and give it one overflow policy.
-14. **simd P1/P2** - density/texture channel SIMD planes, replicate range
+11. **simd P1/P2** - density/texture channel SIMD planes, replicate range
     mask reuse, worldgen row-band material pass (measure first; all have scalar
     goldens to compare against).
-15. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
+12. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
     `sys_metrics.zig` residual-table note.
-16. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
+13. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
     `server/game/`, delete the four no-policy `packages.zig` forwarders and the
     `unityStringHash` alias, inline `game/bans.zig`.
 
@@ -147,5 +152,9 @@ Structure / idiom (no behaviour change):
   which is worth watching as the independent measurement for the net-send P0
   (the fix bounds the pathological case, it does not claim the common-case
   tick cost fell).
+- The fourth batch (round 24): `zig build test` direct run `1803 passed;
+  3 skipped; 0 failed` and `make check` green. New tests: the F11 config
+  re-read (edited file picked up, deleted file fails closed) and the peer
+  unreliable limit pinned to the negotiated MTU in the MTU test.
 - No review fix was applied without reading the surrounding code; the two
   rejected findings above are the reason that matters.
