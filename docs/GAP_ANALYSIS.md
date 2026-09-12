@@ -201,6 +201,18 @@ leftover pipeline, fixed pins reproduce; replacing the bundled 3.1.0
 dump still needs a live 3.2.0 client capture to prove byte-exactness,
 so the 2 new 3.2.0 blocks stay pinned in the maxdamage stale-dump
 allowance).
+**2026-09-12 measurement (round 21): running the shipped regenerator against
+the installed 3.2.0 `Data/Config` and diffing the name -> id map against
+`src/assets/assignids_v314.embed.txt` (24808 names) shows 24822 names, 24793
+ids moved, 9 names only in the bundled dump (`*Shapes:VariantHelper`, the
+implicit helper shape the 3.1.4 client table carried) and 23 only in the
+regenerated one. Sixteen of those 23 are `BLOCK_NAME_HERE` / `M_ARCH_TEST`
+expansions: both shapes are commented out in stock `shapes.xml` and the tool
+does not strip XML comments, so the output cannot be the client table as it
+stands. Not a reason to touch zdtd's data layer (rule 15: a wrong id is worse
+than a missing one), just the evidence for why the refresh stays gated on a
+live capture, plus a concrete tool fix (strip comments, decide the
+`VariantHelper` treatment) before the next attempt.**
 
 ## 2. Scorecard
 
