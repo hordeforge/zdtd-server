@@ -1,6 +1,6 @@
 # Plugin composability review against the Cordis paper
 
-**Run:** 2026-09-12 (round 23 review)
+**Run:** 2026-09-12 (round 24 review; re-traces F1-F6 and adds F7-F11)
 **Paper:** *A Programming Paradigm for Spatiotemporal Composability*,
 Shi / Zhang / Cui (Peking University, DeepSeek-AI), arXiv:2608.25512v1,
 submitted 2026-08-26, 92 pages. The `cordiverse/paper` repository's
@@ -8,9 +8,16 @@ submitted 2026-08-26, 92 pages. The `cordiverse/paper` repository's
 README that points at arXiv (commit "read the paper on arxiv", 2026-08-26), so
 this review is pinned to the arXiv v1 PDF.
 **Prompt:** [prompts/plugin-composability-review.md](../prompts/plugin-composability-review.md).
-**Verdict:** the three properties zdtd adopted (ADR 0030) are realized; one
-P1 gap found in how a coeffect binding is released, fixed here; three P2/P3
-gaps recorded with realization sketches.
+**Verdict:** the three properties zdtd adopted (ADR 0030) are realized for the
+paths F1-F6 fixed. This round re-traced those and found five further gaps in
+the load/reload/claim paths (F7-F11): one P1 (a boot-time exclusive point
+claim is indexed by plan slot, so any module the loader skips shifts the
+binding onto a different live module or silently voids it), three P2
+(reloads bypass the fail-closed declaration probe and can silently drop a
+module's own queued-verb deny, and a manifest that fails validation is
+accepted on reload where boot would refuse), and one P3 (deny granularity
+between the ECS `spawn` verb and the `bot spawn` family). No fix applied:
+this run was read-only, so these are findings with sketches.
 
 ## Mechanism map
 
@@ -19,13 +26,13 @@ gaps recorded with realization sketches.
 | 3.1 revertible effects (`track`, `recover`, LIFO inverse accumulator) | `zdtd.queue` verbs carry a 1-based plugin src; `CommandBuffer.dropFrom` + `Game.withdrawPluginSrc` drop pending ops, despawn applied spawns, clear applied glide, drop bots; `inverseOfOp` classifies every verb and the refusal residue is counted | **Realized** for the revertible verbs, with the non-invertible remainder classified and reported (F3 fixed) |
 | 3.1.2-3 effect functions / iterators, step-boundary interruption | Each hook call is a unit; a trap or fuel exhaustion disables the module mid-turn and the withdrawal pass runs before the drain | **Realized** for the host-driven unit granularity |
 | 3.2.1-2 coeffect context, satisfaction, `notify` | `_zdtd_requires` is the specification; load rejects a module that cannot satisfy it (fail-closed), so a loaded module never reads an absent binding | **Realized** as a load-time check; no runtime `notify` (no host capability changes at runtime) |
-| 3.2.2 provider ordering / withdrawal before dependents | `WasmHost.claimSlot` (this run) resolves an exclusive point claim against the claimant's liveness; a disabled or hook-less claimant stops providing | **Fixed here** (F1); the general provider-drain ordering has no analogue because dependencies are host-only (F5) |
+| 3.2.2 provider ordering / withdrawal before dependents | `WasmHost.claimSlot` (this run) resolves an exclusive point claim against the claimant's liveness; a disabled or hook-less claimant stops providing | **Fixed here** (F1); the general provider-drain ordering has no analogue because dependencies are host-only (F5), and the boot claim *table* can still name the wrong slot when the loader skips a module (F7) |
 | 3.2.3 isolation (`ctx.isolate`) | each module has its own instance, memory and config bytes; no realm table for shared keys | **N/A today**: no two modules share a dependency key with different bindings |
 | 3.2.3 interception (`ctx.intercept`, right-biased metadata) | `manifest.toml deny` (module declaration) merged with `zdtd.toml [plugin] deny`/`allow` (operator context, applied last), enforced at the `zdtd.queue` boundary | **Realized** (F4 fixed, ADR 0039) |
 | 5.1.1 `ctx.effect` single mutation primitive | every plugin affordance that mutates the world is a queued command; direct ECS/wire mutation is absent | **Realized** (boundary), with the witness unverified exactly as the paper says a host may leave it |
 | 5.1.2 coeffect operations / 5.1.4 context access | `zdtd.config` (per-module bytes), `zdtd.sense`/`zdtd.query` read-only views; no `ctx[key]` reflection | **Realized in spirit**: capabilities are imports, not a reflective table |
 | 5.1.3 component lifecycle (inertial load/unload, reload chaining) | `Plugin.load` -> `on_enable`; `on_shutdown` -> withdraw -> deinit -> `loadInto` -> `on_enable`; a failed reload drops the slot and re-points backlinks and claims | **Realized** for the single-instance case |
-| 5.2.1 declarative configuration reconciliation | `manifest.toml` + resolver plan (tiers, `override`, point claims) builds the composition at boot; `[mods] enabled/disabled` is boot-time; `plugin reload` now re-reads the module's manifest and reconciles its point claims (F2), while the zdtd.toml/mode-pack chain stays a restart-time read | **Realized** for the per-module declaration (F2 fixed); the config chain remains boot-time |
+| 5.2.1 declarative configuration reconciliation | `manifest.toml` + resolver plan (tiers, `override`, point claims) builds the composition at boot; `[mods] enabled/disabled` is boot-time; `plugin reload` now re-reads the module's manifest and reconciles its point claims (F2), while the zdtd.toml/mode-pack chain stays a restart-time read | **Realized** for the per-module declaration (F2 fixed); the config chain remains boot-time, and the reload re-read is more permissive than boot when the declaration disappears or the manifest is invalid (F8/F9) |
 | 5.2.2 hot module replacement | `plugin reload <name>`: dispose and reinstantiate in place, budget re-armed, config/display/tier preserved | **Realized** |
 | 6.5 mutual dependencies / granularity | dependencies name host capabilities only, so a cycle cannot form; the resolver already reports duplicate point claims at load | **N/A today**; cycle reporting from declarations is the check to add if plugins ever provide keys |
 | 6.6 dependency typing/versioning | an optional `_zdtd_api() -> i32` export carries the guest's contract version: newer than the host is refused fail-closed, older is accepted and logged, absent keeps the permissive legacy path; the shipped Zig guests export it and a host test gates the two constants against each other | **Realized** (F6 fixed) |
@@ -137,27 +144,105 @@ was `max_wasm_plugins = 8` while the shipped tree already had 14 modules, so a
 full `[plugin] modules` list silently lost modules at the cap. The ceiling is
 now 32, and the test asserts the shipped set still fits it.
 
+**F7 (P1, open) - a boot-time exclusive point claim is indexed by plan slot,
+not by loaded slot.** The resolver records each module's claim against its
+position in the final *plan* (`resolver.zig:236`; plan slots are stamped
+`= load.items.len` at `resolver.zig:183/199/294`), and `loadResolved` installs
+the claim by that same number (`wasm.zig:1083` `const slot = entry.value_ptr.*`).
+But `loadResolved` increments `self.n` only for a module that actually loads:
+a bad wasm path (`wasm.zig:1009-1012`), a corrupt/failed load (`1025-1028`), or
+the cap (`1002-1004`) `continue`s or returns without advancing the slot. Every
+module after the skipped one therefore lands one slot lower than its plan
+index. The install loop then either (a) checks `hook_present` on, and binds the
+claim to, the *wrong* live module when the plan slot still happens to be
+`< self.n`, or (b) binds a claim to a slot `>= self.n`, which `claimSlot`
+(`wasm.zig:1394`) rejects forever, silently voiding the claim (the point then
+falls through to the ordinary loop, so a gate the operator installed stops
+gating). Both are spatial-composability violations: the binding names a
+provider that never declared it. Reachable whenever one discovered mod fails
+to load before a later claimant; no test covers a skipped load plus a claim
+(the claim tests at `wasm.zig:2541-2657` poke the table directly, and
+`loadResolved` scenario tests load every module). Fix: map plan slot to
+loaded slot and translate at install.
+
+**F8 (P2, open) - a reload bypasses the fail-closed declaration probe.** At
+boot, `loadResolved` sets `ctx.require_declaration = true` before each
+`loadInto` (`wasm.zig:1021-1024`), so a discovered mod that exports hooks but
+has no `_zdtd_requires` is refused (`probeRequires`, `wasm.zig:328-335`).
+`reload` calls `loadInto` directly (`wasm.zig:1196`) without setting the flag;
+after boot the flag is restored to false (`wasm.zig:1024`), so a manifest-backed
+slot (`manifest_loaded`, which the reload path otherwise trusts) is reinstantiated
+through the permissive raw path. A module replaced on disk with one that dropped
+its declaration loads on `plugin reload` where a restart would reject it: the
+declarative-dependency check is a boot-only gate, and HMR is a documented way to
+swap the module. Fix: force `ctx.require_declaration` (or pass the flag into
+`loadInto`) for `manifest_loaded` slots.
+
+**F9 (P2, open) - `reconcileClaims` accepts a manifest that failed validation
+and drops the module's own deny.** `reconcileClaims` zeroes `module_deny`
+before it binds the on-disk manifest (`wasm.zig:1238`), then returns early
+when `manifest.bindManifest` fails (`1241`, which includes a failed
+`validate()`, `manifest.zig:315-317`). The reload still succeeds and
+`on_enable` runs, with `module_deny` left at 0: the module's declared queued-verb
+restriction is silently lifted (fail-open) and the invalid manifest is tolerated
+until the next restart, where `loadResolved`/discovery would refuse it. Fix:
+capture the old mask, only reset it after a successful bind, and refuse the
+reload (or keep the prior declaration) on a bind failure.
+
+**F10 (P3, open) - `deny = "spawn"` does not deny `bot spawn`.** Interception
+matches only the first token against `QueueVerb` (`wasm_host.zig:127-129`),
+whose vocabulary has a single coarse `bot` entry (`manifest.zig:38-44`).
+`bot spawn` therefore parses as `bot`: a module or operator mask denying
+`spawn` leaves `g.bots.handleCommand` (`wasm_host.zig:104`) free to create a
+host bot and reach `BotManager`. The F4 note above ("a denied verb cannot ...
+spawn an entity") holds per verb *name*, not per effect; conversely
+`deny = "bot"` does not deny ECS `spawn`. Fix: when the first token is `bot`,
+map the sub-verb onto the corresponding top-level bit (`bot spawn` honors the
+`spawn` bit, `bot remove` the `despawn` bit), or add explicit `bot.*` verbs to
+the declared vocabulary.
+
+**F11 (P3, open) - reload re-reads the manifest but not `config.toml`.**
+`reload` preserves `config_bytes` by copying the old slot value
+(`wasm.zig:1174-1177`, reassigned `1207`), while the sibling declaration in
+`manifest.toml` is re-read from disk (F2). A module whose `config.toml` changed
+on disk keeps serving the stale bytes through `zdtd.config` after
+`plugin reload`, which is the HMR case the reload exists for. Fix: when
+`manifest_loaded`, re-read the config alongside `reconcileClaims` (the binder
+already returns `m.config`, `manifest.zig:323-328`).
+
 ## OK-verified
+
+Re-traced 2026-09-12 against the current tree (read-only, no gates run).
 
 - Vocabulary sync (prompt check 3): `host_verbs` (10 entries) and the
   `defineFuncCtx` import list (10) are the same set; `Hook` (24 variants) and
   `Hook.names` (24) agree. No host import is undeclarable, no hook is
-  unnameable.
+  unnameable. A new import missing from `host_verbs` would be undeclarable;
+  the two lists are single-sourced by the `wasm.zig:2758` test.
 - Reload (prompt check 1): `on_shutdown` -> withdraw -> deinit -> `loadInto` ->
-  `on_enable`; `rt_slot`/`plugin_slot` re-pointed; display/config/tier copied
-  before `deinit` frees them and freed on the failure path; a failed reload
-  drops the disposed slot and re-points the moved modules' backlinks and
-  claims.
+  `on_enable`; the module name is duped before `deinit` (`wasm.zig:1154`);
+  `rt_slot`/`plugin_slot` re-pointed; display/config/tier copied before
+  `deinit` frees them and freed on the failure path; a failed reload drops the
+  disposed slot and re-points the moved modules' backlinks and claims. The two
+  caveats are F8 (declaration probe) and F11 (config bytes).
 - Withdrawal (prompt check 2): `World.pre_drain_fn` runs `takeWithdrawn`
-  immediately before the drain, once per disable; pending ops are dropped,
-  applied spawns despawned with `NetPackageEntityRemove`, glide cleared, bots
-  dropped; slot compaction remaps srcs.
+  immediately before the drain (`world.zig:1883-1888`), once per disable;
+  `CommandBuffer.dropFrom` drops pending ops and hands back applied spawns,
+  `withdrawPluginSrc` despawns them with `NetPackageEntityRemove`, clears
+  `glide_src` matches, reports irreversible residue once
+  (`plugin_effects_not_reverted`), and calls `bots.dropFrom`; the per-op
+  `SrcGate` (`command.zig:230-239`, `drainWith`) covers mid-drain traps. Slot
+  compaction remaps pending-op, spawn-ring and residue srcs
+  (`shiftSrcsAfter`).
 - Boundary (prompt check 4): the plugin path cannot emit wire or mutate the
   ECS directly; mutation is a queued command the owner drains, and discretionary
-  outcomes are verdict hooks.
+  outcomes are verdict hooks. `zdtd.queue` fails closed (returns 1) when the
+  caller's runtime is not in `rt_slot`, so an unattributable op is dropped
+  rather than run as native (`wasm.zig:1641-1643`).
 
 ## Follow-ups
 
-F5 (provider ordering, moot until plugins provide keys) is the only finding
-left open. F1, F2, F3, F4 and F6 are fixed and gated by the scenarios and unit
-tests named above.
+Open: F5 (provider ordering, moot until plugins provide keys), F7 (P1, boot
+claim slot mapping), F8/F9 (P2, reload fail-closed), F10/F11 (P3, deny
+granularity and config re-read). F1, F2, F3, F4 and F6 are fixed and gated by
+the scenarios and unit tests named above.
