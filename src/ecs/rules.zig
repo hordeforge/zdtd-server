@@ -545,8 +545,10 @@ pub const WorldGroup = struct {
 /// (`gameY = sea + elev_m`); the sea addition lives in the source.
 pub const Geometry = struct {
     /// Sea level in blocks (absolute game Y): the flat-world surface and the
-    /// baked-DTM out-of-bounds fallback. zdtd default 64 (stock 62.88 tracked
-    /// in the divergence register; RealEarth-style worlds set ~100).
+    /// baked-DTM out-of-bounds fallback. zdtd-owned default 64 (the flat world
+    /// is zdtd-generated; stock's `Block.cWaterLevel` 62.88 is the RWG water
+    /// table's business, `world/worldgen.zig water_surface_cell`);
+    /// RealEarth-style worlds set ~100.
     sea_level: f32 = 64,
     /// surface_y = clamp(height_offset + height_scale * elev_m, 0, ceiling).
     /// 1.0 = identity; < 1 compresses mountains into the column; > 1 needs a

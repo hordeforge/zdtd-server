@@ -5549,9 +5549,9 @@ test "scenario guardreport shows the would-kick diff (T23)" {
     g.admin_reply_sink = null;
     const reply = sink[0..g.admin_reply_len];
     try std.testing.expect(reply.len > 0);
-    try std.testing.expect(std.mem.indexOf(u8, reply, "dry_run=true") != null);
-    try std.testing.expect(std.mem.indexOf(u8, reply, "tripped=true") != null);
-    try std.testing.expect(std.mem.indexOf(u8, reply, "det=movement") != null);
+    try std.testing.expect(std.mem.find(u8, reply, "dry_run=true") != null);
+    try std.testing.expect(std.mem.find(u8, reply, "tripped=true") != null);
+    try std.testing.expect(std.mem.find(u8, reply, "det=movement") != null);
     std.debug.print("PASS guardreport: {s}\n", .{reply});
 }
 
@@ -7482,7 +7482,7 @@ test "scenario tall wire profile: 512-tall columns, 128-layer wire body, ZCH4 sa
     try std.testing.expectEqual(@as(u32, 512), g.world.profile.y_dim);
     try std.testing.expect(g.world.profile.validate());
     try std.testing.expectEqual(@as(u32, 128), g.world.profile.layers());
-    try std.testing.expectEqual(@as(u32, 256 * 512), g.world.profile.plane_cells());
+    try std.testing.expectEqual(@as(u32, 256 * 512), g.world.profile.planeCells());
     const pos: world_store.ChunkPos = .{ .x = 0, .z = 0 };
     const ch = try g.world.getOrCreate(pos);
     try std.testing.expectEqual(@as(u32, 512), ch.y_dim);

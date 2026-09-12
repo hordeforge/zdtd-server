@@ -1089,7 +1089,7 @@ pub const WasmHost = struct {
         self.claims = .{no_claim} ** manifest.OverridePoint.count;
         var it = plan.point_claims.iterator();
         while (it.next()) |entry| {
-            const point = manifest.OverridePoint.parse(entry.key_ptr.*) orelse continue;
+            const point = manifest.OverridePoint.parsePoint(entry.key_ptr.*) orelse continue;
             // point_claims is keyed by PLAN index; translate to the loaded slot.
             const plan_slot: usize = @intCast(entry.value_ptr.*);
             if (plan_slot >= slot_of_plan.len) continue;
@@ -1326,7 +1326,7 @@ pub const WasmHost = struct {
         while (it.next()) |raw| {
             const name = std.mem.trim(u8, raw, " \t");
             if (name.len == 0) continue;
-            const point = manifest.OverridePoint.parse(name) orelse continue; // validate() rejected unknown names
+            const point = manifest.OverridePoint.parsePoint(name) orelse continue; // validate() rejected unknown names
             const pi = @intFromEnum(point);
             if (!self.slots[idx].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) {
                 std.debug.print(
@@ -2390,8 +2390,8 @@ test "the guest contract version is read and a newer one is refused" {
     try std.testing.expect(p_next.requires_failed);
     try std.testing.expectEqual(@as(?u32, api.plugin_api_version + 1), p_next.api_version);
     // The reason names both versions for the operator log.
-    try std.testing.expect(std.mem.indexOf(u8, p_next.requires_err[0..p_next.requires_err_len], "plugin API v") != null);
-    try std.testing.expect(std.mem.indexOf(u8, p_next.requires_err[0..p_next.requires_err_len], "this host is v") != null);
+    try std.testing.expect(std.mem.find(u8, p_next.requires_err[0..p_next.requires_err_len], "plugin API v") != null);
+    try std.testing.expect(std.mem.find(u8, p_next.requires_err[0..p_next.requires_err_len], "this host is v") != null);
     // loadAll is the shipping path: a newer guest is skipped, not loaded.
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

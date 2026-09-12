@@ -43,12 +43,13 @@ pub const QueueVerb = enum(u3) {
     glide,
     bot,
 
-    pub const count = std.meta.tags(QueueVerb).len;
-    pub const names = .{ "spawn", "despawn", "damage", "say", "glide", "bot" };
+    pub const count = @typeInfo(QueueVerb).@"enum".fields.len;
 
-    pub fn parse(s: []const u8) ?QueueVerb {
-        inline for (std.meta.tags(QueueVerb), 0..) |t, i| {
-            if (std.mem.eql(u8, s, names[i])) return t;
+    /// The tag names ARE the operator vocabulary (`spawn`, `bot`, ...), so
+    /// there is no parallel string table to drift from the enum.
+    pub fn parseVerb(s: []const u8) ?QueueVerb {
+        inline for (@typeInfo(QueueVerb).@"enum".fields) |f| {
+            if (std.mem.eql(u8, s, f.name)) return @field(QueueVerb, f.name);
         }
         return null;
     }
@@ -57,7 +58,7 @@ pub const QueueVerb = enum(u3) {
     /// first token is not a known verb (unknown commands are dropped by the
     /// caller, so they carry no policy).
     pub fn indexOf(s: []const u8) ?u3 {
-        const v = parse(s) orelse return null;
+        const v = parseVerb(s) orelse return null;
         return @intFromEnum(v);
     }
 
@@ -78,7 +79,7 @@ pub fn queueVerbMask(list: []const u8, bad: *[]const u8) ?QueueVerbMask {
     while (it.next()) |raw| {
         const name = std.mem.trim(u8, raw, " \t");
         if (name.len == 0) continue;
-        const v = QueueVerb.parse(name) orelse {
+        const v = QueueVerb.parseVerb(name) orelse {
             bad.* = name;
             return null;
         };
@@ -91,13 +92,13 @@ pub fn queueVerbMask(list: []const u8, bad: *[]const u8) ?QueueVerbMask {
 /// buffer) and return the written slice. Used by the boot policy log and tests.
 pub fn formatVerbMask(mask: QueueVerbMask, buf: []u8) []const u8 {
     var w: usize = 0;
-    inline for (std.meta.tags(QueueVerb), 0..) |_, i| {
+    inline for (@typeInfo(QueueVerb).@"enum".fields, 0..) |f, i| {
         if (mask & (@as(u16, 1) << i) != 0) {
             if (w != 0 and w < buf.len) {
                 buf[w] = ',';
                 w += 1;
             }
-            for (QueueVerb.names[i]) |c| {
+            for (f.name) |c| {
                 if (w >= buf.len) break;
                 buf[w] = c;
                 w += 1;
@@ -164,19 +165,24 @@ pub const OverridePoint = enum {
     craft_request,
     trade_price,
 
-    pub const count = std.meta.tags(OverridePoint).len;
+    pub const count = @typeInfo(OverridePoint).@"enum".fields.len;
 
-    pub const names = .{ "loot.roll", "quest.payout", "damage.player_scale", "craft.request", "trade.price" };
+    /// The manifest vocabulary is dotted while the enum tags are underscored,
+    /// so this table is NOT redundant with `@tagName` (unlike QueueVerb), and
+    /// `wire()` must use it rather than the tag.
+    pub const names = [_][]const u8{ "loot.roll", "quest.payout", "damage.player_scale", "craft.request", "trade.price" };
 
-    pub fn parse(s: []const u8) ?OverridePoint {
-        inline for (std.meta.tags(OverridePoint), 0..) |t, i| {
-            if (std.mem.eql(u8, s, names[i])) return t;
+    pub fn parsePoint(s: []const u8) ?OverridePoint {
+        inline for (@typeInfo(OverridePoint).@"enum".fields, 0..) |f, i| {
+            if (std.mem.eql(u8, s, names[i])) return @field(OverridePoint, f.name);
         }
         return null;
     }
 
+    /// The point's operator-facing name (what a manifest claims and a log
+    /// should print): the dotted name, not the underscored enum tag.
     pub fn wire(self: OverridePoint) []const u8 {
-        return @tagName(self);
+        return names[@intFromEnum(self)];
     }
 
     /// The Hook name (wasm.zig) that implements this point.
@@ -260,7 +266,7 @@ pub const Manifest = struct {
             // Same rule as preset: a relative path inside the mod dir only.
             var ok = ic.len > 0 and ic.len <= 128;
             if (ic.len > 0 and (ic[0] == '/' or ic[0] == '\\')) ok = false;
-            if (std.mem.indexOf(u8, ic, "..") != null) ok = false;
+            if (std.mem.find(u8, ic, "..") != null) ok = false;
             if (!ok) return "invalid 'icon' path (must be a relative path inside the mod dir, no '..')";
         }
         if (self.preset) |pr| {
@@ -269,7 +275,7 @@ pub const Manifest = struct {
             // folder). Empty or oversized is a load error.
             var ok = pr.len > 0 and pr.len <= 128;
             if (pr.len > 0 and (pr[0] == '/' or pr[0] == '\\')) ok = false;
-            if (std.mem.indexOf(u8, pr, "..") != null) ok = false;
+            if (std.mem.find(u8, pr, "..") != null) ok = false;
             if (!ok) return "invalid 'preset' path (must be a relative path inside the mod dir, no '..')";
         }
         if (self.tier) |t| {
@@ -282,7 +288,7 @@ pub const Manifest = struct {
             while (it.next()) |p| {
                 const p_t = std.mem.trim(u8, p, " \t");
                 if (p_t.len == 0) continue;
-                if (OverridePoint.parse(p_t) == null) {
+                if (OverridePoint.parsePoint(p_t) == null) {
                     return "unknown override point in 'points' (known: loot.roll, quest.payout, damage.player_scale, craft.request, trade.price)";
                 }
             }

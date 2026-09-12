@@ -35,8 +35,8 @@ pub const content_len_entity_rel_pos_and_rot_no_q: usize = 22;
 /// client mod (RealEarth-style engine expand: stock clients cannot read it).
 /// XZ (`ChunkAreaDim`) never expands; only the column height grows.
 ///
-/// One source of truth: only `y_dim` is stored; `layers`, `c_max_height` and
-/// `plane_cells` derive from it, so a profile cannot disagree with itself.
+/// One source of truth: only `y_dim` is stored; `layers`, `cMaxHeight` and
+/// `planeCells` derive from it, so a profile cannot disagree with itself.
 /// The block-plane index stride is the fixed `ChunkAreaDim` 256 in every
 /// dialect (`x + z*16 + y*256`); only the cell count grows with the height.
 pub const WireProfile = struct {
@@ -50,18 +50,18 @@ pub const WireProfile = struct {
         return self.y_dim / self.layer_height;
     }
     /// ChunkBlockYPow = log2(y_dim) (8 stock, 14 expanded). Validated at load.
-    pub fn y_pow(self: WireProfile) u8 {
+    pub fn yPow(self: WireProfile) u8 {
         return @intCast(@ctz(self.y_dim));
     }
     /// cMaxHeight = y_dim - 1 (255 stock, 16383 expanded).
-    pub fn c_max_height(self: WireProfile) u32 {
+    pub fn cMaxHeight(self: WireProfile) u32 {
         return self.y_dim - 1;
     }
     /// Dense block-plane cell count: ChunkAreaDim × y_dim = 256 × y_dim
     /// (65536 stock, 131072 at 512). The plane INDEX stride is the fixed
     /// ChunkAreaDim 256 (`x + z*16 + y*256`) in every dialect - only the cell
     /// count and the layer band count grow with the column height.
-    pub fn plane_cells(self: WireProfile) u32 {
+    pub fn planeCells(self: WireProfile) u32 {
         return 256 * self.y_dim;
     }
     /// Stock dialect: today's byte-pinned format.
@@ -72,8 +72,8 @@ pub const WireProfile = struct {
     pub fn validate(self: WireProfile) bool {
         if (self.y_dim < 256 or self.y_dim & (self.y_dim - 1) != 0) return false;
         if (self.layer_height == 0 or self.y_dim % self.layer_height != 0) return false;
-        const expected_pow: u32 = @as(u32, 1) << @as(u5, @intCast(self.y_pow()));
-        return expected_pow == self.y_dim and self.y_dim == self.c_max_height() + 1;
+        const expected_pow: u32 = @as(u32, 1) << @as(u5, @intCast(self.yPow()));
+        return expected_pow == self.y_dim and self.y_dim == self.cMaxHeight() + 1;
     }
 };
 
@@ -104,7 +104,7 @@ test "known wire profiles resolve and validate" {
     const t = profileForName("tall-512").?;
     try std.testing.expect(t.validate());
     try std.testing.expectEqual(@as(u32, 128), t.layers());
-    try std.testing.expectEqual(@as(u32, 256 * 512), t.plane_cells());
+    try std.testing.expectEqual(@as(u32, 256 * 512), t.planeCells());
     try std.testing.expect(profileForName("bogus") == null);
 }
 
@@ -112,18 +112,18 @@ test "WireProfile stock derives the RE constants" {
     try std.testing.expect(stock_profile.validate());
     try std.testing.expect(stock_profile.isStock());
     try std.testing.expectEqual(@as(u32, 64), stock_profile.layers());
-    try std.testing.expectEqual(@as(u8, 8), stock_profile.y_pow());
-    try std.testing.expectEqual(@as(u32, 255), stock_profile.c_max_height());
-    try std.testing.expectEqual(@as(u32, 65536), stock_profile.plane_cells());
+    try std.testing.expectEqual(@as(u8, 8), stock_profile.yPow());
+    try std.testing.expectEqual(@as(u32, 255), stock_profile.cMaxHeight());
+    try std.testing.expectEqual(@as(u32, 65536), stock_profile.planeCells());
 
     // Expanded (RealEarth-style): 16384 / 8 / 4096 layers; the plane grows
     // 256 × y_dim while the index stride stays the fixed ChunkAreaDim 256.
     const tall: WireProfile = .{ .y_dim = 16384 };
     try std.testing.expect(tall.validate());
     try std.testing.expectEqual(@as(u32, 4096), tall.layers());
-    try std.testing.expectEqual(@as(u8, 14), tall.y_pow());
-    try std.testing.expectEqual(@as(u32, 16383), tall.c_max_height());
-    try std.testing.expectEqual(@as(u32, 256 * 16384), tall.plane_cells());
+    try std.testing.expectEqual(@as(u8, 14), tall.yPow());
+    try std.testing.expectEqual(@as(u32, 16383), tall.cMaxHeight());
+    try std.testing.expectEqual(@as(u32, 256 * 16384), tall.planeCells());
     try std.testing.expect(!tall.isStock());
 
     // Invalid profiles are rejected.

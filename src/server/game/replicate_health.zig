@@ -11,8 +11,15 @@ const interest = @import("../../ecs/interest.zig");
 /// Drain the hp dirty bit into stock EntityStatChanged(Health) packages.
 /// See game.zig replicatePlayerHealth for the full doc comment.
 pub fn replicatePlayerHealth(self: *Game) void {
-    var i: ecs.Slot = 0;
-    while (i < ecs.max_entities) : (i += 1) {
+    // Walk the dirty set rather than all `max_entities` slots: this runs every
+    // tick and only an hp-dirty entity can have an update, and every hp writer
+    // either funnels through markDirty or syncs explicitly (the WindowFull
+    // retry below). A snapshot, because the body destroys and re-marks
+    // entities on the death path while it walks.
+    var dirty_now = self.sim.dirty_bits;
+    var dirty_it = dirty_now.iterator(.{});
+    while (dirty_it.next()) |idx| {
+        const i: ecs.Slot = @intCast(idx);
         if (!self.sim.alive[i] or !self.sim.mask[i].dirty or !self.sim.dirty[i].hp) continue;
         self.sim.dirty[i].hp = false;
         self.sim.syncDirtyBit(i);

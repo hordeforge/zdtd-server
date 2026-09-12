@@ -241,11 +241,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
             def.craft_exp_gain = xml.parseI32Prefix(ceg) orelse -1;
         }
         // Self-closing or open body tag both mark forge scrap stubs.
-        if (std.mem.indexOf(u8, body, "<wildcard_forge_category") != null) {
+        if (std.mem.find(u8, body, "<wildcard_forge_category") != null) {
             def.wildcard_forge_category = true;
         } else if (gt > tag and clean[gt - 1] == '/') {
             // Self-closing recipe with no body: check the open tag itself.
-            if (std.mem.indexOf(u8, clean[tag .. gt + 1], "<wildcard_forge_category") != null) {
+            if (std.mem.find(u8, clean[tag .. gt + 1], "<wildcard_forge_category") != null) {
                 def.wildcard_forge_category = true;
             }
         }

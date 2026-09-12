@@ -1820,7 +1820,7 @@ test "a bag count wider than the ECS bag does not spill into other slots" {
 
     // Widen the bag count the builder wrote, past the ECS bag width.
     const want: u16 = @intCast(components.inv_bag_count);
-    const at = std.mem.indexOf(u8, body, &std.mem.toBytes(want)) orelse
+    const at = std.mem.find(u8, body, &std.mem.toBytes(want)) orelse
         return error.TestUnexpectedResult;
     std.mem.writeInt(u16, body[at..][0..2], want + 32, .little);
 
