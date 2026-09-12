@@ -3,6 +3,7 @@
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
+const requirements = @import("requirements.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 // zdtd storage bounds, not stock rules; stock caps neither. Measured against
@@ -29,6 +30,14 @@ pub const LootEntry = struct {
     /// joining the group's pick pool (stock SpawnAllItemsFromList /
     /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
     force_prob: bool = false,
+    /// The entry carries a `<requirement>` child (loot.xml's
+    /// `LootEntryRequirement*` leaves, e.g. `RandomRoll ... value=
+    /// "@$perkBookwormChance"`). The evaluator needs player state the roll
+    /// path does not carry, so the row is omitted rather than rolled
+    /// unconditionally - "missing beats fake" applies to loot too, and stock's
+    /// own gate refuses for a player without the perk/cvar. The flag keeps the
+    /// row in the table for the evaluator this needs.
+    gated: bool = false,
 };
 
 /// One `<loot level="a,b" prob="p"/>` row of a `<lootprobtemplate>`.
@@ -239,6 +248,7 @@ pub const LootTable = struct {
             var i: u8 = 0;
             while (i < g.entry_n and n < picks and n < out.len) : (i += 1) {
                 const e = g.entries[i];
+                if (e.gated) continue;
                 if (e.is_group) {
                     n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt);
                 } else {
@@ -272,6 +282,7 @@ pub const LootTable = struct {
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
             const picked = g.entries[chosen];
+            if (picked.gated) continue;
             if (picked.force_prob) {
                 if (!self.probGate(picked, loot_stage, s)) {
                     continue;
@@ -308,6 +319,7 @@ pub const LootTable = struct {
         var i: u8 = 0;
         while (i < cont.entry_n and n < out.len) : (i += 1) {
             const e = cont.entries[i];
+            if (e.gated) continue;
             s = s *% 1103515245 +% 12345;
             // Every entry rolls its own prob (stock LootContainer.roll): a
             // force_prob entry gates independently (stock forceProb branch)
@@ -366,6 +378,7 @@ pub const LootTable = struct {
             var ai: u8 = 0;
             while (ai < g.entry_n and an < out.len) : (ai += 1) {
                 const e = g.entries[ai];
+                if (e.gated) continue;
                 s = s *% 1103515245 +% 12345;
                 if (e.force_prob and !self.probGate(e, loot_stage, s)) continue;
                 if (e.is_group) {
@@ -414,6 +427,7 @@ pub const LootTable = struct {
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
             const picked_e = g.entries[chosen];
+            if (picked_e.gated) continue;
             // A picked entry still has to clear its loot stage band, so a
             // low-stage player cannot pull a top-tier item out of a group.
             // A force_prob entry rolls its prob independently.
@@ -566,6 +580,11 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
     const cr = parseCountRange(xml.attr(tag_src, tag_at, "count") orelse "1");
     const prob = xml.parseF32(xml.attr(tag_src, tag_at, "prob") orelse "1") orelse 1;
     const fp = xml.attr(tag_src, tag_at, "force_prob") orelse "";
+    // A `<requirement>` child gates the entry on player state (see
+    // `LootEntry.gated`): detect it inside this element only, so a nested
+    // group's own gated entries stay their own.
+    const entry_end = requirements.elementEnd(tag_src, tag_at);
+    const gated = std.mem.findPos(u8, tag_src[tag_at..entry_end], 0, "<requirement") != null;
     var tpl: u16 = 0;
     if (xml.attr(tag_src, tag_at, "loot_prob_template")) |tn| {
         for (templates, 0..) |t, ti| {
@@ -583,6 +602,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .prob = prob,
         .prob_template = tpl,
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
+        .gated = gated,
     };
 }
 
@@ -1231,4 +1251,57 @@ test "stock loot.xml container flags parse" {
     // ignore_loot_abundance on a twitch carrier.
     const tw = lt.containerByName("twitch_tier0weapon").?;
     try std.testing.expect(tw.ignore_abundance);
+}
+
+test "stock loot: a requirement-gated entry is omitted, not rolled at 100%" {
+    // `groupWorkingStiffsCrate` carries `<item group="groupWorkingStiffsBooks"
+    // count="1">` with a `<requirement class="RandomRoll" value=
+    // "@$perkBookwormChance">` child. Stock evaluates the roll against the cvar
+    // (absent without perkBookworm = 0, so the gate refuses); the entry has no
+    // `prob`, i.e. 1.0, so ignoring the requirement put a book in every crate.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var lt = try loadFromPath(std.testing.allocator, path);
+    defer lt.deinit();
+
+    const crate = lt.groupByName("groupWorkingStiffsCrate") orelse return error.SkipZigTest;
+    var gated = false;
+    for (crate.entries[0..crate.entry_n]) |e| {
+        if (std.mem.eql(u8, e.name, "groupWorkingStiffsBooks")) {
+            try std.testing.expect(e.gated);
+            gated = true;
+        } else if (std.mem.eql(u8, e.name, "groupWorkingStiffs01")) {
+            try std.testing.expect(!e.gated);
+        }
+    }
+    try std.testing.expect(gated);
+
+    // Collect the gated group's item names, then prove none of them can come
+    // out of any crate roll while other entries still do.
+    var book_names: [16][]const u8 = undefined;
+    var book_n: usize = 0;
+    if (lt.groupByName("groupWorkingStiffsBooks")) |books| {
+        for (books.entries[0..books.entry_n]) |e| {
+            if (book_n >= book_names.len) break;
+            if (!e.is_group) {
+                book_names[book_n] = e.name;
+                book_n += 1;
+            }
+        }
+    }
+    var stacks: [max_roll_stacks]Stack = undefined;
+    var produced: usize = 0;
+    var seed: u32 = 1;
+    while (seed <= 200) : (seed += 1) {
+        const n = lt.rollGroup("groupWorkingStiffsCrate", 1, seed, &stacks, 0, "");
+        produced += n;
+        for (stacks[0..n]) |st| {
+            for (book_names[0..book_n]) |bn| {
+                try std.testing.expect(!std.mem.eql(u8, st.item_name, bn));
+            }
+        }
+    }
+    // The group really rolls: a test that passed by producing nothing would
+    // not prove the gated entry was omitted.
+    try std.testing.expect(produced > 0);
 }

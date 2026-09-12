@@ -7,6 +7,18 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Loot entries gated by a `<requirement>` were rolled as if ungated. `loot.xml`
+  carries 87 such rows (63 `RandomRoll`, 14 `Progression`, 5 `Biome`, 3
+  `SandboxOption`, 1 `QuestTags`, 1 `CVar`), and zdtd's loader ignored the child
+  element entirely, so a gated entry dropped at its base `prob` - a book entry
+  with no `prob` (1.0) gated on `RandomRoll ... value="@$perkBookwormChance"`
+  put a book in **every** Working Stiffs crate, where stock's gate refuses for a
+  player without the perk. The parser now flags such entries and the roll paths
+  omit them: an entry whose gate zdtd cannot evaluate is missing rather than
+  faked, and the flag keeps the row for the evaluator it still needs.
+
+### Fixed
+
 - Armour applied to damage that stock says bypasses it. `DamageSource::
   AffectedByArmor()` (IL=5) is `damageSource == EnumDamageSource.External`, so
   the whole armour branch of `Equipment.CalcDamage` - the physical rating and

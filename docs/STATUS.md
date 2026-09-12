@@ -8,7 +8,16 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **AffectedByArmor source gate 2026-09-12**:
+`lint-architecture: clean`). **Loot entry gates 2026-09-12**: loot.xml's 87
+`<requirement>`-gated entries are now flagged at parse time and omitted from
+rolls instead of dropping ungated; before this a book entry with prob 1.0 gated
+on `RandomRoll @$perkBookwormChance` filled every Working Stiffs crate. Gated by
+the `assets.loot` stock test (the books entry is flagged, its item names never
+appear across 200 crate rolls, and the group still produces loot). The
+evaluator for those rows (cvars/levels/biome/sandbox) remains a recorded
+residual, together with the `onSelfProgressionUpdate` triggered row that writes
+`$perkBookwormChance`.
+**AffectedByArmor source gate 2026-09-12**:
 `DamageSource::AffectedByArmor()` (IL=5) is External-only, so the C2S damage
 path now applies the armour branch (physical rating or passive 43) only when
 the wire `source` byte is 0; an Internal claim keeps GDR and skips armour. The

@@ -2269,6 +2269,18 @@ can walk into every POI but none of them is the building TFP authored.
   `smallSafes`, a chest `woodenChest`, and a medicine cabinet its own table.
   `blocks.xml` declares ~172 distinct LootList values across 449 blocks and
   `loot.xml` defines 340 lootcontainers; the mapping now exists end to end.
+  Loot-entry `<requirement>` children (`LootEntryRequirement*`, 87 rows in
+  stock: 63 `RandomRoll`, 14 `Progression`, 5 `Biome`, 3 `SandboxOption`, 1
+  `QuestTags`, 1 `CVar`) are parsed as a gate flag and the entry is **omitted**
+  rather than rolled unconditionally (2026-09-12): the evaluator needs player
+  state the roll path does not carry, and stock's own gate refuses for a player
+  without the perk. Before this, `groupWorkingStiffsBooks` (gated on
+  `RandomRoll ... value="@$perkBookwormChance"`, entry prob 1.0) put a book in
+  every Working Stiffs crate. The recorded residual is the evaluator itself:
+  once the roller carries cvars/levels/biome/sandbox, the 87 rows resolve and
+  effectively-gated entries roll again; the `$perkBookwormChance` cvar is
+  written by a `onSelfProgressionUpdate` triggered row that zdtd does not fire
+  yet, so even with the evaluator a perk owner would read 0.
   *Anchors:* `src/server/game.zig` fill sites, `src/assets/maxdamage.zig`
   `lootListFor`, `Data/Config/blocks.xml`, `Data/Config/loot.xml`
 
