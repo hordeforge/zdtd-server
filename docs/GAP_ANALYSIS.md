@@ -5594,15 +5594,17 @@ persists so little that a restart visibly damages a built base.
   *Anchors:* `src/litenet/peer.zig:418-435`, `:369-410`,
   `src/litenet/server.zig:104-124`, `src/litenet/peer.zig:658`
 
-- **Ping/Pong and MTU negotiation** `WORKS` `(2026-08-21)`
+- **Ping/Pong and MTU negotiation** `WORKS` `(2026-08-21; cap aligned 2026-09-12)`
   Ping is answered with the stock 11-byte Pong and MtuCheck is echoed as MtuOk
   (both sizes byte-correct for the client's NetPacket.Verify). The MtuCheck
   probes now also drive a per-peer negotiated MTU: the client steps the stock
   PossibleMtu list (1024..1432) ascending, the server records the max probe
   seen, and S2C single datagrams + fragment parts are capped at it - so a path
   MTU below the old hardcoded 1327 no longer drops every reliable datagram and
-  kills the join. Clamped to the 1327 buffers (the stock full-1432 throughput
-  is a buffer-growth follow-up). Residual (non-client-visible): zdtd never
+  kills the join. The cap itself was 1327 (no stock entry, so a stock client's
+  final 1432 probe negotiated only 1327 and large bodies fragmented more than
+  stock's); it is stock's 1432 as of 2026-09-12, with the part/pending/hold
+  buffers derived from it. Residual (non-client-visible): zdtd never
   initiates Ping, so retransmit stays a fixed 80 ms with no RTT estimate - dead
   peers are reaped by the 10 s RX-silence window instead.
   *Anchors:* `src/litenet/peer.zig` peer_mtu + ping/mtu handlers,
@@ -5990,7 +5992,8 @@ client-visible blood-moon behaviour is IL-derived.
   audit; all wire claims are encoder-plus-IL.
 - **Net and ops:** LiteNetLib is a separate assembly and is **not** in `asm.il`
   (only `.assembly extern LiteNetLib`), so the PacketProperty ordinals,
-  window_size 64, max_sequence 32768, ack payload size, MTU 1327 and the fragment
+  window_size 64, max_sequence 32768, ack payload size, the MTU cap (stock's
+  1432 since 2026-09-12) and the fragment
   header layout rest on prior research plus the fact that a stock client completes
   the handshake and streams chunks. Only channelNumber 0 and DeliveryMethod 2 or 4
   were confirmed from the game-side IL. Counts of handled and sent package names

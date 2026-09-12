@@ -17,20 +17,17 @@ pub const channeled_header_size: usize = 4;
 /// FragmentId:u16 + FragmentPart:u16 + FragmentsTotal:u16 (after channeled header).
 pub const fragment_header_size: usize = 6;
 pub const fragmented_header_total: usize = channeled_header_size + fragment_header_size; // 10
-/// DIVERGES from stock: game Managed LiteNetLib PossibleMtu=[1024,1164,1392,
-/// 1404,1424,1432], MaxPacketSize=1432 (RVA-decoded; pinned in
-/// ../../7dtd-engine-research/docs/network/network.md). 1327 matches no stock entry - likely
-/// an older LiteNetLib list. Tracked in the provenance divergence register.
+/// The game Managed LiteNetLib `NetConstants.MaxPacketSize`, 1432, the last
+/// entry of its `PossibleMtu` = [1024, 1164, 1392, 1404, 1424, 1432]
+/// (RVA-decoded; pinned in ../../7dtd-engine-research/docs/network/network.md).
 ///
-/// It does not break discovery, and the earlier note here that negotiation
-/// "expects the stock list" overstated it: `handlePacket` echoes every
-/// MtuCheck at the probe's own size, so a stock client walks its full list
-/// and finishes normally. Only `peer_mtu` is clamped to this value, so zdtd's
-/// own datagrams stay at the conservative size - smaller sends and more
-/// fragments than stock, never an oversized one. Inbound is unaffected: the
-/// receive buffer is 64 KiB. Raising this to 1432 is a throughput change
-/// gated on growing the part/pending buffers, not a correctness fix.
-pub const max_packet_size: usize = 1327;
+/// This was 1327 until 2026-09-12, a value matching no stock MTU entry (an
+/// older LiteNetLib default carried in), which capped `peer_mtu` below stock
+/// and fragmented large S2C bodies into more parts than a stock server would.
+/// The per-peer part and pending buffers derive from this constant
+/// (`max_single_user` / `max_fragment_user` / `pending_bytes`), so raising it
+/// grew them with it; the divergence-register entry is closed.
+pub const max_packet_size: usize = 1432;
 /// Max user bytes in one non-fragmented channeled datagram.
 pub const max_single_user: usize = max_packet_size - channeled_header_size;
 /// Max user bytes per fragment part.

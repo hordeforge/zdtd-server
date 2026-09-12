@@ -1739,7 +1739,11 @@ MTU negotiation shipped 2026-08-21 (Net and ops 36/15/5 -> 37/14/5): the
 MtuCheck probes now drive a per-peer negotiated MTU (client steps the stock
 PossibleMtu list ascending; the server records the max probe and caps S2C
 single datagrams + fragment parts at it), so a path MTU below the old fixed
-1327 no longer drops every reliable datagram and kills the join. Outbound
+1327 no longer drops every reliable datagram and kills the join. The cap
+itself was aligned to stock's 1432 on 2026-09-12 (the 1327 value matched no
+PossibleMtu entry, so a stock client's last probe negotiated only 1327 and
+large bodies fragmented more than stock's; the part/pending/hold buffers
+derive from the constant and grew with it). Outbound
 Ping / RTT-adaptive retransmit stays a documented non-client-visible residual
 (10 s RX-silence reap covers dead peers). Total 175/114/44 -> **176/113/44**.
 

@@ -176,8 +176,9 @@ pub const Peer = struct {
     pending: [pending_cap]Pending = [_]Pending{.{}} ** pending_cap,
     /// Earliest time the next resendPending window scan is worth doing. The
     /// WindowFull retry loops call resendPending thousands of times per stall;
-    /// without this gate each call walks all 64 pending slots (86 KiB stride)
-    /// even though nothing can be due until resend_ns has elapsed.
+    /// without this gate each call walks all 64 pending slots (91 KiB stride at
+    /// the stock 1432 MTU) even though nothing can be due until resend_ns has
+    /// elapsed.
     next_resend_check_ns: u64 = 0,
     last_recv_ns: u64 = 0,
     /// Negotiated packet size, learned from the peer's MtuCheck probes (the
@@ -638,10 +639,9 @@ pub const Peer = struct {
                 if (raw.len >= 1) {
                     // Probes step the stock PossibleMtu list ascending, so the
                     // max seen is the negotiated size; 0 = not yet negotiated.
-                    // Clamped to packet.max_packet_size: the part/pending
-                    // buffers are sized for the conservative 1327, so the
-                    // negotiated MTU only ever lowers the S2C size (the stock
-                    // full-1432 throughput is a buffer-growth follow-up).
+                    // Clamped to packet.max_packet_size, which is stock's 1432,
+                    // so the negotiated MTU is exactly the client's last probe
+                    // (the part/pending buffers derive from the same constant).
                     self.peer_mtu = @min(@max(self.peer_mtu, @min(raw.len, 1500)), packet.max_packet_size);
                     var ok_buf: [1500]u8 = undefined;
                     const n = @min(raw.len, ok_buf.len);
@@ -719,24 +719,24 @@ fn relSeq(a: i32) i32 {
     return r;
 }
 
-test "MTU probes are answered in full but never raise the send size" {
-    // `packet.max_packet_size` is 1327 where the game's LiteNetLib pins 1432
-    // (PossibleMtu = [1024,1164,1392,1404,1424,1432], network.md). The two
-    // halves of that divergence behave differently and neither was tested:
-    // a probe is echoed at its own size, so the client's discovery walks the
-    // full stock list and completes, while `peer_mtu` is clamped, so zdtd's
-    // own datagrams stay at the conservative size. The effect is smaller
-    // sends (more fragments), never an oversized one.
+test "MTU probes are answered in full and negotiate up to the stock 1432" {
+    // `packet.max_packet_size` is the game's `NetConstants.MaxPacketSize`,
+    // 1432 (PossibleMtu = [1024,1164,1392,1404,1424,1432], network.md), and
+    // every per-peer part/pending buffer derives from it. A probe is echoed at
+    // its own size so the client's discovery walks the full stock list, and
+    // `peer_mtu` tracks the largest probe up to that same cap, so a stock
+    // client's last probe negotiates the stock send size.
     var peer: Peer = .{};
     peer.alive = true;
     var sock: udp.Socket = .{}; // null socket: sendTo is a no-op
 
-    // A probe larger than our cap, as a stock client's last step would be.
+    // The stock list's last entry, as a stock client's final probe would be.
     var probe: [1432]u8 = undefined;
     @memset(&probe, 0);
     probe[0] = packet.makeByte0(.mtu_check, peer.conn_num);
     try std.testing.expect(try peer.handlePacket(&sock, &probe) == null);
     try std.testing.expectEqual(packet.max_packet_size, peer.peer_mtu);
+    try std.testing.expectEqual(@as(usize, 1432), peer.peer_mtu);
 
     // A probe below the cap negotiates that smaller size verbatim.
     var small: Peer = .{};
@@ -750,6 +750,15 @@ test "MTU probes are answered in full but never raise the send size" {
     // And it only ever climbs: a late smaller probe does not shrink it.
     try std.testing.expect(try small.handlePacket(&sock, probe2[0..512]) == null);
     try std.testing.expectEqual(@as(usize, 1024), small.peer_mtu);
+
+    // An absurd probe is still clamped to the stock cap, never above it.
+    var big: Peer = .{};
+    big.alive = true;
+    var probe3: [1500]u8 = undefined;
+    @memset(&probe3, 0);
+    probe3[0] = packet.makeByte0(.mtu_check, big.conn_num);
+    try std.testing.expect(try big.handlePacket(&sock, &probe3) == null);
+    try std.testing.expectEqual(@as(usize, 1432), big.peer_mtu);
 }
 
 test "relSeq wraps the 32768 sequence space symmetrically" {

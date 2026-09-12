@@ -7,6 +7,17 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Server-to-client datagrams were capped below stock's MTU. The game's
+  LiteNetLib pins `MaxPacketSize` = 1432 with `PossibleMtu` = [1024, 1164,
+  1392, 1404, 1424, 1432], but zdtd carried 1327, a value matching no stock
+  entry, so the negotiated peer MTU was clamped below the client's final probe
+  and every large body (block id mapping, chunk payloads) fragmented into more
+  parts than a stock server would send. The cap is now 1432, the per-peer part,
+  pending and hold buffers that derive from it grew with it (about 21 KiB per
+  peer), and a 1500-byte probe is still clamped. Discovery is unchanged: probes
+  are echoed at their own size, so the client's list walk still completes and
+  its last probe is the negotiated size.
+
 - Movement-gated perks never applied. `EntityHasMovementTag` was not
   implemented, so every row behind it failed closed: `perkHardTarget`'s
   `GeneralDamageResist` (its only gate is `tags="walking,running"`) folded

@@ -59,21 +59,20 @@ inherit `AllowedBeforeAuth = false`, which is correct: that phase is reached
 only after a login is accepted. Nothing to change, recorded so the sweep is
 not repeated.
 
-**Datagrams are capped at 1327 bytes, not stock's 1432 (2026-09-04).** The
-game's LiteNetLib pins `MaxPacketSize` = 1432 and `PossibleMtu` =
-[1024, 1164, 1392, 1404, 1424, 1432] (`network.md`); `packet.max_packet_size`
-is 1327, which matches no entry in that list and is most likely an older
-LiteNetLib default carried in.
-
-Discovery still completes: `handlePacket` echoes every `MtuCheck` back at the
-probe's own size, so a stock client walks its full list and finishes. What the
-cap changes is only zdtd's own send size - `peer_mtu` is clamped to 1327, so
-S2C datagrams are smaller than stock's and a large body fragments into more
-parts. Inbound is unaffected (64 KiB receive buffer), and an undersized
-datagram is always legal, so this costs throughput rather than compatibility.
-Raising it is gated on growing the part and pending buffers. Both halves are
-pinned by a test in `litenet/peer.zig`; the code comment that used to claim
-negotiation "expects the stock list" overstated the effect and is corrected.
+**Datagram cap now matches stock (closed 2026-09-12).** The game's LiteNetLib
+pins `MaxPacketSize` = 1432 and `PossibleMtu` = [1024, 1164, 1392, 1404, 1424,
+1432] (`network.md`). From 2026-09-04 until 2026-09-12 `packet.max_packet_size`
+was 1327, a value matching no stock MTU entry (an older LiteNetLib default
+carried in), so `peer_mtu` was clamped below the client's final probe and large
+S2C bodies fragmented into more parts than a stock server would send. The
+constant is now stock's 1432, and the per-peer part/pending/hold buffers derive
+from it (`max_single_user` / `max_fragment_user` / `pending_bytes`), so they
+grew with it (about 21 KiB per peer across the three). Discovery was already
+correct and is unchanged: `handlePacket` echoes every `MtuCheck` at the probe's
+own size, so a stock client walks its full list and the last probe is the
+negotiated size. `litenet/peer.zig`'s MTU test now pins the stock cap in both
+directions (a 1432 probe negotiates 1432, a 1024 probe stays 1024, a 1500-byte
+probe is clamped to 1432).
 
 **`FlushQueue` is moot here (2026-09-04).** The last `NetPackage` property
 that could carry a wire contract turns on a send queue zdtd does not have.
