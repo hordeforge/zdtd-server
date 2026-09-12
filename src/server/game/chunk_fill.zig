@@ -511,8 +511,13 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
         // (stock ItemClass.HasQuality = tiered effect controller, which
         // zdtd approximates as stack==1; quality items never stack) carry
         // it, so stackables keep quality 1 and merge normally.
+        // `ItemClass.HasQuality` (items.xml owner-tiered effect groups), not
+        // `stack == 1`: a tool like meleeToolRepairT0StoneAxe has quality with
+        // Stacknumber 500, so the stack heuristic silently dropped its rolled
+        // quality. Quality items still never stack (addSlotStacked merges on
+        // equal quality), and a stackable keeps quality 1.
         const q = if (self.items.byId(eid)) |d|
-            (if (d.stack == 1) stacks[i].quality else 1)
+            (if (d.has_quality) stacks[i].quality else 1)
         else
             stacks[i].quality;
         // `random_durability="true"`: the item starts worn at

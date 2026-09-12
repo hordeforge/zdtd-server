@@ -683,6 +683,22 @@ pub const World = struct {
         return self.inventory[s].addItemStacked(item_id, count, self.maxStack(item_id));
     }
 
+    /// Deposit a rolled loot stack with its ItemValue fields. A loot bag is a
+    /// stock `LootContainer` roll like any container, so the rolled quality and
+    /// the random-durability wear ride the slot. The caller decides the quality
+    /// (it owns the catalog's `ItemClass.HasQuality` gate and passes 1 for a
+    /// stackable); the stack cap still comes from `maxStack` so merging stays
+    /// consistent with `depositItem`.
+    pub fn depositLootStack(self: *World, s: Slot, item_id: u16, count: u16, quality: u8, use_times: f32) bool {
+        if (!self.mask[s].inventory) return false;
+        return self.inventory[s].addSlotStacked(.{
+            .item_id = item_id,
+            .count = count,
+            .quality = quality,
+            .use_times = use_times,
+        }, self.maxStack(item_id));
+    }
+
     pub fn ensureNetMap(self: *World, allocator: std.mem.Allocator) !void {
         if (self.net_map_init) return;
         self.net_map_allocator = allocator;

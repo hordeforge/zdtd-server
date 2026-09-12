@@ -5837,6 +5837,58 @@ test "loot prob passives scale tagged entries (stock perkDeadEye)" {
     }
 }
 
+test "loot bag fill carries the rolled quality, stackables stay quality 1" {
+    // A death/airdrop bag is a stock LootContainer roll, so the rolled quality
+    // (and random-durability wear) belongs on the deposited stack; a stackable
+    // keeps quality 1 like every other deposit path.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const axe = g.items.ecsIdByName("meleeToolRepairT0StoneAxe");
+    const coin = g.items.ecsIdByName("casinoCoin");
+    if (axe == 0 or coin == 0) return error.SkipZigTest;
+    // The quality gate is HasQuality, not stack size: the axe has quality with
+    // Stacknumber 500, the coin is a stackable without quality.
+    if (!g.items.byId(axe).?.has_quality or g.items.byId(coin).?.has_quality) return error.SkipZigTest;
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="bagGroup" count="all">
+        \\  <item name="meleeToolRepairT0StoneAxe" quality="6"/>
+        \\  <item name="casinoCoin" count="5" quality="3"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    const bag = g.sim.spawnLootBag(1, 70, 1, coin, 1).?;
+    g.fillLootBagFromTable(bag, "bagGroup", 7, 1);
+    const bs = g.sim.slotOfNetId(bag).?;
+    var saw_axe = false;
+    var saw_coin = false;
+    for (g.sim.inventory[bs].slots) |sl| {
+        if (sl.item_id == axe) {
+            try std.testing.expectEqual(@as(u8, 6), sl.quality);
+            saw_axe = true;
+        }
+        if (sl.item_id == coin and sl.count > 1) {
+            try std.testing.expectEqual(@as(u8, 1), sl.quality);
+            saw_coin = true;
+        }
+    }
+    try std.testing.expect(saw_axe and saw_coin);
+}
+
 test "container loot starts a random-durability item worn" {
     // Stock LootContainer: when `random_durability="true"` and the item has a
     // MaxUseTimes, UseTimes = (int)(max * RandomRange(0.2, 0.8)); otherwise 0.
@@ -5865,6 +5917,7 @@ test "container loot starts a random-durability item worn" {
         \\<lootgroup name="duraCrate" count="all">
         \\  <item name="meleeToolRepairT0StoneAxe" random_durability="true"/>
         \\  <item name="meleeToolRepairT0StoneAxe" random_durability="false"/>
+        \\  <item name="meleeToolRepairT0StoneAxe" quality="6"/>
         \\</lootgroup>
         \\</lootgroups>
     );
@@ -5880,6 +5933,9 @@ test "container loot starts a random-durability item worn" {
     const hi: f32 = @as(f32, @floatFromInt(max_use)) * 0.85;
     try std.testing.expect(cont.slots[0].use_times >= lo and cont.slots[0].use_times <= hi);
     try std.testing.expectEqual(@as(f32, 0), cont.slots[1].use_times);
+    // A tool carries quality despite Stacknumber 500 (`ItemClass.HasQuality`),
+    // which the old `stack == 1` heuristic dropped.
+    try std.testing.expectEqual(@as(u8, 6), cont.slots[2].quality);
 }
 
 test "container loot applies entry buffs to the opener" {

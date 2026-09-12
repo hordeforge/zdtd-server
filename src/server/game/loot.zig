@@ -46,7 +46,20 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
     while (i < n) : (i += 1) {
         const eid = ecsIdFromItemName(self, stacks[i].item_name);
         if (eid == 0) continue;
-        _ = self.sim.depositItem(slot, eid, stacks[i].count);
+        // Carry the rolled ItemValue fields, like the container fill: a death
+        // bag is a stock LootContainer roll, so quality and the
+        // random-durability wear belong on the deposited stack.
+        // Same `ItemClass.HasQuality` gate as the container fill (a tool with
+        // Stacknumber 500 still carries quality).
+        const q = if (self.items.byId(eid)) |d|
+            (if (d.has_quality) stacks[i].quality else 1)
+        else
+            stacks[i].quality;
+        const use_times: f32 = if (stacks[i].random_durability)
+            assets_loot.randomUseTimes(self.itemMaxUseTimes(eid, q), seed ^ @as(u32, @intCast(i)))
+        else
+            0;
+        _ = self.sim.depositLootStack(slot, eid, stacks[i].count, q, use_times);
     }
 }
 
