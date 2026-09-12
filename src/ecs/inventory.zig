@@ -163,7 +163,11 @@ pub fn armorMitigation(w: *const World, peer: usize) f32 {
     }
     const item_mit = phys_pdr / 100.0;
     const fallback = if (phys_pdr == 0) pieces * w.rules.combat.armor_mitigation_per_piece else 0;
-    return @min(w.rules.combat.armor_mitigation_cap, item_mit + fallback + w.buff_phys_resist[ps] / 100.0);
+    // The worn items' installed mods (EffectManager layer 13) join the same
+    // rating: stock GetTotalPhysicalArmorRating sums passive 41 over the
+    // items' effect layers, so modArmorPlatingBasic's +1 counts.
+    const mod_mit = w.item_mod_phys_resist[ps] / 100.0;
+    return @min(w.rules.combat.armor_mitigation_cap, item_mit + mod_mit + fallback + w.buff_phys_resist[ps] / 100.0);
 }
 
 pub fn give(w: *World, peer: usize, item_id: u16, count: u16) bool {

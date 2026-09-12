@@ -17,9 +17,10 @@ heat/electrical), `modRadiationReady` (+50% radiation), the fittings' stamina
 rows and the admin shirt's `HealthMax`. The tagged EDR query folds mod rows too
 (verified by the `server.game.tests` "equipped item mods fold their passives
 (layer 13, stock data)" test: +1 heat on the liner, >40% radiation on
-Radiation Ready, both tag-scoped and reverting when the mods are removed), and
-the parser test asserts an ungated fixture row plus an empty slice for a
-mod with no rows. Attacker-side modifier rows stay client-computed (the damage
+Radiation Ready, both tag-scoped and reverting when the mods are removed, plus
+a plating mod's +1 PhysicalDamageResist reaching `armorMitigation` while the
+same mod on the held item does not), and the parser test asserts an ungated
+fixture row plus an empty slice for a mod with no rows. Attacker-side modifier rows stay client-computed (the damage
 packet carries the finished number); tiered modifier rows and
 `params.ItemValue` gates remain recorded residuals.
 **Starter-hostile seeds configurable 2026-09-12**:

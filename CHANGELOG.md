@@ -16,11 +16,15 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   `<passive_effect>` rows (through the shared buffs scanner, so their
   `effect_group` gates come along), the per-tick item fold adds an item's
   installed mods' rows alongside its own, and the tagged
-  `ElementalDamageResist` query folds them too. Stock's server-relevant
-  modifier rows are flat, so they apply without needing the mod's own quality;
-  tiered modifier rows and the `params.ItemValue`-scoped gates remain recorded
-  residuals (the client's damage packet already carries attacker-side numbers,
-  so those rows stay client-computed by design).
+  `ElementalDamageResist` query folds them too. A plating mod's
+  `PhysicalDamageResist` joins the armour rating through the survival tick
+  (`modArmorPlatingBasic` +1 / Reinforced +2); a mod on the *held* item
+  contributes stats but not armour, because stock's armour rating walks the
+  worn equipment slots only. Stock's server-relevant modifier rows are flat, so
+  they apply without needing the mod's own quality; tiered modifier rows and the
+  `params.ItemValue`-scoped gates remain recorded residuals (the client's damage
+  packet already carries attacker-side numbers, so those rows stay
+  client-computed by design).
 
 ### Changed
 

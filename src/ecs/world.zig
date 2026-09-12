@@ -320,6 +320,12 @@ pub const World = struct {
     /// by the survival tick. Feeds armorMitigation like stock
     /// GetTotalPhysicalArmorRating sums the wearer's passive 41.
     buff_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
+    /// Item-mod-side PhysicalDamageResist percent summed over the entity's
+    /// equipped items' installed modifiers (EffectManager layer 13) and
+    /// refreshed by the survival tick. Stock `GetTotalPhysicalArmorRating`
+    /// sums passive 41 over the worn items' effect layers, so a plating mod
+    /// (+1/+2) joins the same mitigation as the item's own row.
+    item_mod_phys_resist: [max_entities]f32 = [_]f32{0} ** max_entities,
     /// Buff/perk-side GeneralDamageResist (passive 40) summed by the same
     /// untagged VM fold and refreshed by the survival tick. Stock
     /// `EntityAlive::DamageEntity` (IL=236) reads it with an empty tag set and

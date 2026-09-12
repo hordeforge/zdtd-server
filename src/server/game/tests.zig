@@ -5725,4 +5725,29 @@ test "equipped item mods fold their passives (layer 13, stock data)" {
     g.sim.inventory[ps].slots[eq].mods = .{0} ** 4;
     g.sim.inventory[ps].slots[eq].mod_n = 0;
     try std.testing.expectApproxEqAbs(heat_before, g.elementalDamageResist(ps, "heat"), 0.005);
+
+    // A plating mod's PhysicalDamageResist joins the armour rating through the
+    // survival tick's column (stock GetTotalPhysicalArmorRating walks the worn
+    // items' effect layers), while the same mod on the *held* item does not:
+    // the holding slot is not armour.
+    try g.step();
+    const pdr_before = ecs.inventory.armorMitigation(&g.sim, cl.slot);
+    const plate = g.items.ecsIdByName("modArmorPlatingBasic");
+    if (plate == 0) return error.SkipZigTest;
+    g.sim.inventory[ps].slots[eq].mods[0] = plate;
+    g.sim.inventory[ps].slots[eq].mod_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(pdr_before + 0.01, ecs.inventory.armorMitigation(&g.sim, cl.slot), 0.002);
+
+    g.sim.inventory[ps].slots[eq].mods = .{0} ** 4;
+    g.sim.inventory[ps].slots[eq].mod_n = 0;
+    const held_slot = g.sim.inventory[ps].holding;
+    if (held_slot < ecs.components.inv_toolbelt) {
+        g.sim.inventory[ps].slots[held_slot].item_id = helmet.id;
+        g.sim.inventory[ps].slots[held_slot].count = 1;
+        g.sim.inventory[ps].slots[held_slot].mods[0] = plate;
+        g.sim.inventory[ps].slots[held_slot].mod_n = 1;
+        try g.step();
+        try std.testing.expectApproxEqAbs(pdr_before, ecs.inventory.armorMitigation(&g.sim, cl.slot), 0.002);
+    }
 }

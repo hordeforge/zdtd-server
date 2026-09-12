@@ -255,17 +255,48 @@ fn itemTrackedDeltas(
     ctx: requirements.Ctx,
     counts: *requirements.Counts,
 ) assets_buffs.TrackedDeltas {
-    const qmax: u8 = ecs.components.max_quality_tiers;
-    const axis: assets_buffs.Axis = .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
-    var out = assets_buffs.trackedDeltasAt(def.passives, axis, ctx, counts);
+    const axis = itemQualityAxis(quality);
+    return assets_buffs.deltasPlus(
+        assets_buffs.trackedDeltasAt(def.passives, axis, ctx, counts),
+        modTrackedDeltas(self, mods, quality, ctx, counts, null),
+    );
+}
+
+/// The installed mods' rows alone (`EffectManager.GetValue` layer 13). The
+/// mod-side PhysicalDamageResist is returned through `phys_out` when the caller
+/// consumes it (the per-tick fold stores it for `armorMitigation`, since stock
+/// `GetTotalPhysicalArmorRating` sums the worn items' effect layers); the
+/// mod-side ElementalDamageResist is dropped because the tagged EDR query owns
+/// it. A null `phys_out` keeps both in the returned deltas (the EDR caller).
+fn modTrackedDeltas(
+    self: *Game,
+    mods: [4]u16,
+    quality: u8,
+    ctx: requirements.Ctx,
+    counts: *requirements.Counts,
+    phys_out: ?*f32,
+) assets_buffs.TrackedDeltas {
+    const axis = itemQualityAxis(quality);
+    var out: assets_buffs.TrackedDeltas = .{};
     for (mods) |mod_id| {
         if (mod_id == 0) continue;
         const modef = self.items.byId(mod_id) orelse continue;
         const md = self.item_mods.byName(modef.name) orelse continue;
         if (md.passives.len == 0) continue;
-        out = assets_buffs.deltasPlus(out, assets_buffs.trackedDeltasAt(md.passives, axis, ctx, counts));
+        var m = assets_buffs.trackedDeltasAt(md.passives, axis, ctx, counts);
+        if (phys_out) |mp| {
+            mp.* += m.phys_resist;
+            m.phys_resist = 0;
+            m.elem_resist = 0;
+        }
+        out = assets_buffs.deltasPlus(out, m);
     }
     return out;
+}
+
+fn itemQualityAxis(quality: u8) assets_buffs.Axis {
+    const qmax: u8 = ecs.components.max_quality_tiers;
+    return .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
 }
 
 pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
@@ -569,11 +600,19 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             var ivm: assets_buffs.TrackedDeltas = .{};
             {
                 var item_ctx = req_ctx;
+                var mod_phys: f32 = 0;
                 const held = self.sim.inventory[ps].heldItem();
                 if (held.count > 0) {
                     item_ctx.item_equipped = false;
                     if (self.items.byId(held.item_id)) |def| {
-                        ivm = assets_buffs.deltasPlus(ivm, itemTrackedDeltas(self, &def, held.mods, held.quality, item_ctx, &req_counts));
+                        ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(held.quality), item_ctx, &req_counts));
+                        // The holding item's mod rows fold for their stats, but
+                        // its physical resist is not armour: stock
+                        // GetTotalPhysicalArmorRating walks the Equipment slots
+                        // only, so a held weapon's plating mod does not mitigate
+                        // incoming hits. `null` keeps the value out of the
+                        // armour column and `ivm.phys_resist` is zeroed below.
+                        ivm = assets_buffs.deltasPlus(ivm, modTrackedDeltas(self, held.mods, held.quality, item_ctx, &req_counts, null));
                     }
                 }
                 item_ctx.item_equipped = true;
@@ -582,14 +621,17 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                     const slot = self.sim.inventory[ps].slots[esi];
                     if (slot.count == 0) continue;
                     const def = self.items.byId(slot.item_id) orelse continue;
-                    ivm = assets_buffs.deltasPlus(ivm, itemTrackedDeltas(self, &def, slot.mods, slot.quality, item_ctx, &req_counts));
+                    ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(slot.quality), item_ctx, &req_counts));
+                    ivm = assets_buffs.deltasPlus(ivm, modTrackedDeltas(self, slot.mods, slot.quality, item_ctx, &req_counts, &mod_phys));
                 }
-                // The two resist names stay owned by the items.xml quality-curve
-                // path (`armor_pdr_fn` -> armorMitigation): folding them here too
-                // would double-count PhysicalDamageResist, and
-                // ElementalDamageResist has no consumer yet.
+                // The item's own resist rows stay owned by the items.xml
+                // quality-curve path (`armor_pdr_fn` -> armorMitigation) and the
+                // tagged EDR query, so folding them here too would double-count;
+                // the mod side is consumed (mod_phys below, EDR in the event
+                // fold), which is why the mod helper strips those two fields.
                 ivm.phys_resist = 0;
                 ivm.elem_resist = 0;
+                self.sim.item_mod_phys_resist[ps] = mod_phys;
             }
             // GeneralDamageResist (passive 40) is read UNTAGGED at the damage
             // choke (EntityAlive::DamageEntity reads it with an empty tag set),

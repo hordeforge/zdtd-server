@@ -3977,10 +3977,11 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
       `armorMitigation`) owns the item's own PhysicalDamageResist and the
       event-tagged EDR fold (see the round-22 EDR row above) owns
       ElementalDamageResist, so folding them here too would double-count; the
-      *mod* side of EDR is folded in that event fold, while a modifier's
-      PhysicalDamageResist (modArmorPlatingBasic +1, Reinforced +2) is parsed but
-      still unconsumed - wiring it means the physical-resist ownership moves to
-      this fold (or `armorMitigation` learns to read mod rows); (b) the 83
+      *mod* side of EDR is folded in that event fold, and a modifier's
+      PhysicalDamageResist (modArmorPlatingBasic +1, Reinforced +2) now reaches
+      `armorMitigation` through the survival tick's `item_mod_phys_resist`
+      column, so the worn items' plating counts like stock's summed passive 41
+      (a held weapon's plating does not: the holding slot is not armour); (b) the 83
       item `StaminaChangeOT` rows are all `tags="running"`/`"walking"`, so they
       need the sprint leg to run a `running`-tagged query before they apply (the
       current sprint drain uses the `Rules` floor); (c) the `Equipment` mod layer
