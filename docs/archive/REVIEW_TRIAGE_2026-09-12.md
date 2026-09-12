@@ -57,68 +57,72 @@ the hostiles are behind `starter_zombies`).
 | net-send P2 | `map.zig` marked pieces sent before the send | marked only on a real send |
 | net-send P2 | `budget_ns == null` disabled the only fragment-retry deadline | parameter is a plain `u64`; no caller passed null |
 
+## Fixed in the third pass (round 23)
+
+| Review | Finding | Change |
+|---|---|---|
+| hardcode A2 P3 | `world/workstations.zig` applied the invented 10 s burn when a wired FuelValue resolver answered 0 | a wired resolver answering 0 stops the burn and leaves the item; the fallback is offline-only |
+| hardcode B3 P3 | `pos_heartbeat_period_ticks` was not operator-tunable | `[stream] pos_heartbeat_period_ticks` (default 5, clamp >= 1) threaded through `interest.needsPosSend` |
+| plugin F8 P2 | `reload` did not enforce `_zdtd_requires` for manifest-backed modules, so HMR accepted a module a restart refuses | reload sets the same flag as `loadResolved`; the in-repo test fixtures now declare `_zdtd_requires` |
+| plugin F9 P2 | `reconcileClaims` zeroed claims/deny before `bindManifest`, so a failed re-read lifted both | manifest read first, state changed only on success; failure logs and keeps the previous claims and mask |
+| plugin F10 P3 | `deny = "spawn"` did not stop `bot spawn` (and `despawn` vs `bot remove`) | bot sub-verbs fold into the tested mask; other sub-verbs stay behind `bot` |
+
+Residual from F9: a manifest-backed reload still succeeds when its manifest
+is invalid (the module itself loaded); the state change is refused but the
+reload is not. Refusing the reload would mean tearing down a freshly loaded
+module after the fact; the strict form stays queued with F11.
+
 ## Queued (ordered)
 
 Correctness / behaviour, next pass:
 
-1. **plugin F8 (P2)** - `reload` does not set `ctx.require_declaration`, so a
-   manifest-backed module can be swapped on disk to drop `_zdtd_requires` and
-   load, where a restart refuses it.
-2. **plugin F9 (P2)** - `reconcileClaims` zeroes `module_deny` before
-   `manifest.bindManifest`; a bind/validate failure leaves the deny lifted.
-3. **net-send P2** - the unreliable guards use `max_single_user` while
+1. **plugin F11 (P3)** - a manifest-backed reload keeps the old `config_bytes`
+   and never re-reads `config.toml`, so an edited config is not seen on HMR.
+2. **net-send P2** - the unreliable guards use `max_single_user` while
    `sendUnreliable` enforces `min(max_single_user, peer_mtu-4)`.
-4. **ECS P1** - `wire/stock_inv.zig` / `wire/stock_te.zig` mutate ECS state;
+3. **ECS P1** - `wire/stock_inv.zig` / `wire/stock_te.zig` mutate ECS state;
    move the apply functions next to their target types (~130 lines).
-5. **ECS P2** - `game/trader.zig` copies the whole `TraderStock` by value in
+4. **ECS P2** - `game/trader.zig` copies the whole `TraderStock` by value in
    the replicate loop; take a pointer.
-6. **ECS P2** - `replicate_health.zig` and `tickTraderAreas` scan full
+5. **ECS P2** - `replicate_health.zig` and `tickTraderAreas` scan full
    `max_entities` instead of `dirty_bits` / the trader kind group.
-7. **ECS P2** - the `Dirty.spawn/.inv/.remove` bits are set but never read or
+6. **ECS P2** - the `Dirty.spawn/.inv/.remove` bits are set but never read or
    cleared, so `dirty_bits` never releases the slot; delete them.
-8. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
+7. **SIMD P1** - `stock_chunk.zig` density channel is scalar whenever a TTS
    density plane exists (POI chunks), bypassing the existing
    `packDensityFromRaws` SIMD path.
-9. **hardcode A2 (P3)** - `world/workstations.zig` applies the invented 10 s
-   fuel burn even when a fuel resolver is wired; gate the fallback on
-   `caps.fuel_resolve == null`.
-10. **hardcode B3 (P3)** - `pos_heartbeat_period_ticks` is paired with a
-    tunable but is not itself configurable.
-11. **abstractions P1** - the native `PluginHost` vtable defaults on
-    (`enable_sample_plugin`), composes before Wasm on 28 hooks, and is a
-    shipped preset knob, while ADR 0020 decision 2 calls it test scaffolding.
-    Needs a maintainer call: default it off in product configs, or amend the
-    ADR.
-12. **plugin F10/F11 (P3)** - `pluginVerbDenied` matches only the first token
-    (`deny="spawn"` does not stop `bot spawn`); a manifest-backed reload keeps
-    the old `config_bytes` and never re-reads `config.toml`.
+8. **abstractions P1** - the native `PluginHost` vtable defaults on
+   (`enable_sample_plugin`), composes before Wasm on 28 hooks, and is a
+   shipped preset knob, while ADR 0020 decision 2 calls it test scaffolding.
+   Needs a maintainer call: default it off in product configs, or amend the
+   ADR.
 
 Structure / idiom (no behaviour change):
 
-13. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
+9. **idiomatic P1 + abstractions P2 + best-practices agree** - one shared
     `std.Io.Threaded` on `Game` instead of a fresh init/deinit in `step.zig`
     (per APM period), `net.zig clientFor` (per first datagram) and all 12
     `util/io_fs.zig` helpers. The 0.16 `Threaded.init` installs process-global
     SIGIO/SIGPIPE handlers, so the current shape clobbers the live instances in
     `udp_socket.zig` / `parallel.zig` and `join()`s on the tick thread.
-14. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
+10. **best-practices P2** - `plugin/manifest.zig` uses `std.meta.tags` and a
     parallel `QueueVerb.names` table where `@typeInfo(T).@"enum".fields` +
     `@tagName` is the 0.16 shape used elsewhere.
-15. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
+11. **best-practices P2** - `protocol.zig` methods `y_pow` / `c_max_height` /
     `plane_cells` are snake_case among camelCase siblings.
-16. **abstractions P2** - add `arena.destroyHolder` and replace the 28
+12. **abstractions P2** - add `arena.destroyHolder` and replace the 28
     open-coded child/deinit/destroy blocks (`util/arena.zig` already has
     `newArenaHolder`); merge the duplicated edit-reach predicate
     (`game/rescue.zig` vs `game/guard.zig`).
-17. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
+13. **idiomatic P3** - rename the `_,` catch-all out of `apm/profiler.zig`
     `Section` so switches over it are exhaustiveness-checked; widen
     `webui.zig:1396`'s `[8]u8` and give it one overflow policy.
-18. **simd P1/P2** - density/texture channel SIMD planes, replicate range
+14. **simd P1/P2** - density/texture channel SIMD planes, replicate range
     mask reuse, worldgen row-band material pass (measure first; all have scalar
     goldens to compare against).
-19. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
+15. **zig-0.16 P2/P3** - `std.mem.indexOf` -> `std.mem.find` (10 sites),
     `sys_metrics.zig` residual-table note.
-20. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
+16. **best-practices / abstractions P3** - move `server/replicate_te.zig` under
     `server/game/`, delete the four no-policy `packages.zig` forwarders and the
     `unityStringHash` alias, inline `game/bans.zig`.
 
@@ -132,6 +136,12 @@ Structure / idiom (no behaviour change):
   default), `demo_seed = false` removing every demo kind while the default
   world still has them, and the F7 claim mapping with a skipped first module.
   The weather-body test asserts the table count instead of a pinned 115.
+- The third batch (round 23): `zig build test` direct run `1802 passed;
+  3 skipped; 0 failed` and `make check` green. The scheduled gaps called for
+  `[stream] pos_heartbeat_period_ticks` and a `needsPosSend` period argument,
+  the two plugin tests that reload a hand-built module had to gain a real
+  `_zdtd_requires` export (the F8 rule now holds on HMR too), and the verb
+  policy test asserts `deny="spawn"` stops `bot spawn` without spawning.
 - The Navezgane mixed-mode loadgen smoke on this tree (2 bots) passed every
   join; it also printed one `tick overrun n=700 late_us=44591 (budget=50000us)`,
   which is worth watching as the independent measurement for the net-send P0

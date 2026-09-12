@@ -7,6 +7,37 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Review follow-ups (round 3).
+  - **`[stream] pos_heartbeat_period_ticks`.** The PosAndRot heartbeat for an
+    entity with no dirty motion bit was a module constant paired with the
+    tunable `motion_replicate_period_ticks`. It is now an operator knob
+    (default 5, clamped to >= 1) threaded through
+    `interest.needsPosSend`.
+  - **Workstation fuel fails closed when a FuelValue resolver is wired.**
+    `handleFuel` consumed a fuel item and, when the resolver answered 0 (item
+    has no `FuelValue`), added the offline flat 10 s fallback, inventing burn
+    time from nothing. A wired resolver answering 0 now stops the burn and
+    leaves the item in the slot; the 10 s fallback survives only for the
+    no-resolver offline path.
+  - **Plugin reload holds the boot declaration rule (F8).** `loadResolved`
+    requires `_zdtd_requires` from a manifest-backed module, but `reload`
+    loaded without that flag, so a module swapped on disk to drop its
+    declaration loaded on HMR and was refused on the next restart. The reload
+    path now sets the same flag.
+  - **A failed manifest re-read no longer rewrites plugin state (F9).**
+    `reconcileClaims` released the module's point claims and zeroed its
+    queued-verb deny mask *before* `bindManifest`, so an unreadable or invalid
+    manifest silently dropped exclusivity and lifted the module's own deny
+    list. The manifest is read first and state changes only on success; a
+    failure logs and keeps the previous claims and mask.
+  - **`spawn`/`despawn` deny covers the bot family (F10).** `pluginVerbDenied`
+    matched only the first token, so `deny = "spawn"` did not stop `bot spawn`
+    (which creates an entity) and `deny = "despawn"` did not stop `bot
+    remove`. The bot sub-verbs now fold into the tested mask; the other
+    sub-verbs (move/look/shoot/count) stay behind the `bot` verb.
+
+### Fixed
+
 - Config surfaces and review follow-ups (round 2 of the 2026-09-12 batch).
   - **`[sim] spawn_starter_kit`.** The fresh-player kit was hardcoded in
     `World.spawnPlayer` (stone axe 1, foodCanBeef 5, resourceWood 20,
