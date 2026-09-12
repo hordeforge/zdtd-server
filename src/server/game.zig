@@ -161,6 +161,7 @@ pub const default_chunk_stream_radius_max = game_types.default_chunk_stream_radi
 pub const default_chunk_adds_per_stream_tick = game_types.default_chunk_adds_per_stream_tick;
 pub const default_chunk_stream_period_ticks = game_types.default_chunk_stream_period_ticks;
 pub const default_motion_replicate_period_ticks = game_types.default_motion_replicate_period_ticks;
+pub const default_pos_heartbeat_period_ticks = game_types.default_pos_heartbeat_period_ticks;
 pub const default_world_time_send_ticks = game_types.default_world_time_send_ticks;
 pub const default_vehicle_pos_send_ticks = game_types.default_vehicle_pos_send_ticks;
 pub const default_sleeper_tick_ticks = game_types.default_sleeper_tick_ticks;
@@ -623,6 +624,9 @@ pub const Game = struct {
     chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
     chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
+    /// PosAndRot heartbeat cadence for idle entities (zdtd.toml [stream]
+    /// pos_heartbeat_period_ticks).
+    pos_heartbeat_period_ticks: u64 = default_pos_heartbeat_period_ticks,
     world_time_send_ticks: u64 = default_world_time_send_ticks,
     vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
     sleeper_tick_ticks: u64 = default_sleeper_tick_ticks,
@@ -757,6 +761,7 @@ pub const Game = struct {
             .chunk_adds_per_stream_tick = opts.chunk_adds_per_stream_tick,
             .chunk_stream_period_ticks = opts.chunk_stream_period_ticks,
             .motion_replicate_period_ticks = opts.motion_replicate_period_ticks,
+            .pos_heartbeat_period_ticks = opts.pos_heartbeat_period_ticks,
             .world_time_send_ticks = opts.world_time_send_ticks,
             .vehicle_pos_send_ticks = opts.vehicle_pos_send_ticks,
             .sleeper_tick_ticks = opts.sleeper_tick_ticks,

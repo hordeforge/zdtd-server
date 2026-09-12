@@ -125,8 +125,25 @@ fn pluginVerbDenied(g: *Game, src: i16, cmd: []const u8) bool {
     const denied = g.wasm_plugins.slots[idx].denied;
     if (denied == 0) return false;
     const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
-    const vi = plugin_mod.manifest.QueueVerb.indexOf(cmd[0..verb_end]) orelse return false;
-    if (denied & (@as(u16, 1) << vi) == 0) return false;
+    const verb = cmd[0..verb_end];
+    const vi = plugin_mod.manifest.QueueVerb.indexOf(verb) orelse return false;
+    var mask: u16 = @as(u16, 1) << vi;
+    // `bot spawn` / `bot remove` create and destroy an entity exactly as the
+    // ECS spawn/despawn verbs do, so an operator denial of those must stop the
+    // bot family too (review F10). The other bot sub-verbs (move/look/shoot/
+    // count) stay behind the `bot` verb alone.
+    if (std.mem.eql(u8, verb, "bot")) {
+        var it = std.mem.tokenizeScalar(u8, cmd, ' ');
+        _ = it.next();
+        if (it.next()) |sub| {
+            if (std.mem.eql(u8, sub, "spawn")) {
+                mask |= @as(u16, 1) << @intFromEnum(plugin_mod.manifest.QueueVerb.spawn);
+            } else if (std.mem.eql(u8, sub, "remove")) {
+                mask |= @as(u16, 1) << @intFromEnum(plugin_mod.manifest.QueueVerb.despawn);
+            }
+        }
+    }
+    if (denied & mask == 0) return false;
     g.harness.counters.inc(.plugin_verbs_denied);
     const n = g.harness.counters.get(.plugin_verbs_denied);
     if (n == 1 or n % 100 == 0) {

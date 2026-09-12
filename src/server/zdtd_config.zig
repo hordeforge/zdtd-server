@@ -23,6 +23,9 @@ pub const Stream = struct {
     stream_radius_max: ?i32 = null,
     chunk_stream_period_ticks: ?u64 = null,
     motion_replicate_period_ticks: ?u64 = null,
+    /// PosAndRot heartbeat cadence for entities with no dirty motion bit
+    /// (game.zig default_pos_heartbeat_period_ticks).
+    pos_heartbeat_period_ticks: ?u64 = null,
     /// WorldTime broadcast cadence (game.zig default_world_time_send_ticks).
     world_time_send_ticks: ?u64 = null,
     /// Vehicle position broadcast cadence (game.zig default_vehicle_pos_send_ticks).
@@ -383,6 +386,7 @@ pub fn applyToInitOptions(f: *const File, opts: anytype) void {
     if (f.stream.stream_radius_max) |v| opts.chunk_stream_radius_max = v;
     if (f.stream.chunk_stream_period_ticks) |v| opts.chunk_stream_period_ticks = v;
     if (f.stream.motion_replicate_period_ticks) |v| opts.motion_replicate_period_ticks = v;
+    if (f.stream.pos_heartbeat_period_ticks) |v| opts.pos_heartbeat_period_ticks = v;
     if (f.stream.world_time_send_ticks) |v| opts.world_time_send_ticks = v;
     if (f.stream.vehicle_pos_send_ticks) |v| opts.vehicle_pos_send_ticks = v;
     if (f.stream.spawn_area_radius_max) |v| opts.spawn_area_radius_max = v;
@@ -539,6 +543,10 @@ pub fn sanitizeInitOptions(opts: anytype) void {
         util_log.warn("zdtd: motion_replicate_period_ticks=0 invalid; using 1\n", .{});
         opts.motion_replicate_period_ticks = 1;
     }
+    if (opts.pos_heartbeat_period_ticks == 0) {
+        util_log.warn("zdtd: pos_heartbeat_period_ticks=0 invalid; using 1\n", .{});
+        opts.pos_heartbeat_period_ticks = 1;
+    }
     if (opts.world_time_send_ticks == 0) {
         util_log.warn("zdtd: world_time_send_ticks=0 invalid; using 1\n", .{});
         opts.world_time_send_ticks = 1;
@@ -679,6 +687,7 @@ test "parse stream and authority" {
         \\stream_radius_min = 5
         \\world_time_send_ticks = 40
         \\vehicle_pos_send_ticks = 7
+        \\pos_heartbeat_period_ticks = 3
         \\[authority]
         \\interest_range_blocks = 120.5
         \\peer_stale_ms = 4000
@@ -722,6 +731,7 @@ test "parse stream and authority" {
     try std.testing.expectEqual(@as(i32, 5), f.stream.stream_radius_min.?);
     try std.testing.expectEqual(@as(u64, 40), f.stream.world_time_send_ticks.?);
     try std.testing.expectEqual(@as(u64, 7), f.stream.vehicle_pos_send_ticks.?);
+    try std.testing.expectEqual(@as(u64, 3), f.stream.pos_heartbeat_period_ticks.?);
     try std.testing.expectApproxEqAbs(@as(f32, 120.5), f.authority.interest_range_blocks.?, 0.01);
     try std.testing.expectEqual(@as(u64, 4000), f.authority.peer_stale_ms.?);
     try std.testing.expectEqualStrings("observe", f.authority.mode.?);
@@ -825,6 +835,7 @@ const TestOpts = struct {
     chunk_stream_radius_max: i32 = 9,
     chunk_stream_period_ticks: u64 = 5,
     motion_replicate_period_ticks: u64 = 2,
+    pos_heartbeat_period_ticks: u64 = 5,
     world_time_send_ticks: u64 = 20,
     vehicle_pos_send_ticks: u64 = 5,
     sleeper_tick_ticks: u64 = 10,

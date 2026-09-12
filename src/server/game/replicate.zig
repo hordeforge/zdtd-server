@@ -92,7 +92,7 @@ pub fn replicate(self: *Game) !void {
         }
     }
 
-    const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
+    const heartbeat = self.tick_n % self.pos_heartbeat_period_ticks == 0;
     var candidates: ecs.world.AtomicBits = .initEmpty();
     if (!heartbeat) {
         candidates = self.sim.dirty_bits;
@@ -213,7 +213,7 @@ pub fn replicate(self: *Game) !void {
         }
 
         const d = if (self.sim.mask[i].dirty) self.sim.dirty[i] else @as(ecs.components.Dirty, .{});
-        if (!interest.needsPosSend(d, self.tick_n)) continue;
+        if (!interest.needsPosSend(d, self.tick_n, self.pos_heartbeat_period_ticks)) continue;
 
         const viewers = if (self.sim.mask[i].player)
             in_range & ~game_mod.bitOfPeerSlot(self.sim.player[i].peer_slot)
@@ -356,7 +356,7 @@ fn replicateBots(
     obs_r: *const [game_mod.max_clients]i32,
     active: game_mod.ObsMask,
 ) !void {
-    const heartbeat = self.tick_n % interest.pos_heartbeat_period_ticks == 0;
+    const heartbeat = self.tick_n % self.pos_heartbeat_period_ticks == 0;
     var pos_frame_buf: [game_mod.replicate_frame_cap]u8 = undefined;
     for (&self.bots.bots, 0..) |*b, bi| {
         if (!b.alive) {

@@ -318,18 +318,23 @@ pub const Workstation = struct {
         self.burn_time_left -= dt;
         while (self.burn_time_left <= 0) {
             // Stock GetFuelTime = items.xml FuelValue (seconds per fuel item,
-            // RE items.md 1953); coal 100 s, wood 1-5 s. takeOne zeroes the
-            // slot, so read the item id before consuming.
+            // RE items.md 1953); coal 100 s, wood 1-5 s. With a resolver wired a
+            // 0 answer means "not fuel" (or no FuelValue), so fail closed
+            // instead of inventing the offline flat burn; only the no-resolver
+            // offline path keeps the 10 s fallback. The item stays in the slot
+            // because the check runs before the take.
             const fuel_id: u16 = if (self.fuel_len > 0) self.fuel[0].item_id else 0;
-            if (takeOne(self.fuel[0..self.fuel_len])) {
-                const burn_s: f32 = if (caps.fuel_resolve) |fr| fr(caps.fuel_ctx, fuel_id) else 0;
-                self.burn_time_left += if (burn_s > 0) burn_s else default_fuel_burn_seconds;
-            } else {
+            const burn_s: f32 = if (caps.fuel_resolve) |fr|
+                fr(caps.fuel_ctx, fuel_id)
+            else
+                default_fuel_burn_seconds;
+            if (!(burn_s > 0) or !takeOne(self.fuel[0..self.fuel_len])) {
                 self.is_burning = false;
                 self.burn_time_left = 0;
                 self.dirty = true;
                 break; // burn_time_left == 0 still satisfies the loop guard
             }
+            self.burn_time_left += burn_s;
         }
     }
 
@@ -1056,6 +1061,31 @@ test "workstation burn consumes fuel then stops" {
     w.burn_time_left = 0.1;
     w.tick(0.2); // no fuel left → stops
     try std.testing.expect(!w.is_burning);
+}
+
+test "workstation fuel resolver: 0 means not fuel, no invented burn" {
+    const Fx = struct {
+        fn zero(_: ?*anyopaque, _: u16) f32 {
+            return 0;
+        }
+        fn fifty(_: ?*anyopaque, _: u16) f32 {
+            return 50;
+        }
+    };
+    // A wired resolver answering 0 (not fuel / no FuelValue) stops the burn and
+    // leaves the item in the slot instead of applying the offline 10 s fallback.
+    var w: Workstation = .{ .is_burning = true, .burn_time_left = 0.1 };
+    w.fuel[0] = .{ .item_id = 4242, .count = 3 };
+    w.tickResolved(0.2, null, null, .{ .fuel_resolve = &Fx.zero });
+    try std.testing.expect(!w.is_burning);
+    try std.testing.expectEqual(@as(u16, 3), w.fuel[0].count);
+    // A resolver with a real value burns exactly that value.
+    var w2: Workstation = .{ .is_burning = true, .burn_time_left = 0.1 };
+    w2.fuel[0] = .{ .item_id = 4242, .count = 1 };
+    w2.tickResolved(0.2, null, null, .{ .fuel_resolve = &Fx.fifty });
+    try std.testing.expect(w2.is_burning);
+    try std.testing.expectApproxEqAbs(@as(f32, 49.9), w2.burn_time_left, 0.01);
+    try std.testing.expectEqual(@as(u16, 0), w2.fuel[0].count);
 }
 
 const MeltTestCtx = struct {

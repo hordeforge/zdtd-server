@@ -8,9 +8,10 @@ const Dirty = @import("components.zig").Dirty;
 /// Spatial interest grid cell, 32 blocks (zdtd M11 interest; engineering).
 pub const cell_size: f32 = 32.0;
 
-/// Main-tick period for PosAndRot heartbeat when no dirty bits (paired with
-/// motion_replicate_period in game.zig; effective interval is LCM).
-pub const pos_heartbeat_period_ticks: u64 = 5;
+/// Default main-tick period for the PosAndRot heartbeat when no dirty bits
+/// (paired with motion_replicate_period in game.zig; effective interval is
+/// their LCM). Operators override it with `[stream] pos_heartbeat_period_ticks`.
+pub const default_pos_heartbeat_period_ticks: u64 = 5;
 
 pub fn cellOf(x: f32, z: f32) struct { cx: i32, cz: i32 } {
     // Floor the division, not the coordinate: truncating first puts every
@@ -34,11 +35,13 @@ pub fn inRange(px: f32, pz: f32, ex: f32, ez: f32, radius_cells: i32) bool {
     return cellsInRange(a.cx, a.cz, b.cx, b.cz, radius_cells);
 }
 
-/// Whether this entity should emit PosAndRot this motion pass.
-/// Dirty pos/rot always; otherwise heartbeat every `pos_heartbeat_period_ticks`.
-pub fn needsPosSend(d: Dirty, tick_n: u64) bool {
+/// Whether this entity should emit PosAndRot this motion pass. Dirty pos/rot
+/// always; otherwise heartbeat every `period_ticks` (the operator's
+/// `[stream] pos_heartbeat_period_ticks`).
+pub fn needsPosSend(d: Dirty, tick_n: u64, period_ticks: u64) bool {
     if (d.pos or d.rot) return true;
-    return tick_n % pos_heartbeat_period_ticks == 0;
+    const p = if (period_ticks == 0) 1 else period_ticks;
+    return tick_n % p == 0;
 }
 
 /// Clear bits that serialize-once interest has fanned out this pass.
@@ -132,12 +135,12 @@ test "interest cell range" {
 
 test "needsPosSend dirty and heartbeat" {
     const clean: Dirty = .{};
-    try std.testing.expect(needsPosSend(clean, 0));
-    try std.testing.expect(!needsPosSend(clean, 1));
-    try std.testing.expect(needsPosSend(clean, 5));
+    try std.testing.expect(needsPosSend(clean, 0, 5));
+    try std.testing.expect(!needsPosSend(clean, 1, 5));
+    try std.testing.expect(needsPosSend(clean, 5, 5));
     const moved: Dirty = .{ .pos = true };
-    try std.testing.expect(needsPosSend(moved, 1));
-    try std.testing.expect(needsPosSend(moved, 3));
+    try std.testing.expect(needsPosSend(moved, 1, 5));
+    try std.testing.expect(needsPosSend(moved, 3, 5));
 }
 
 test "observerMask matches the scalar reference over random observers" {

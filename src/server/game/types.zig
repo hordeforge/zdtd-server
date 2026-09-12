@@ -78,6 +78,9 @@ pub const map_window_radius: i32 = 8;
 pub const map_window_n: usize = 17 * 17;
 pub const default_chunk_stream_period_ticks: u64 = 5;
 pub const default_motion_replicate_period_ticks: u64 = 2;
+/// PosAndRot heartbeat period when an entity has no dirty motion bit (paired
+/// with motion_replicate_period_ticks; the effective interval is their LCM).
+pub const default_pos_heartbeat_period_ticks: u64 = 5;
 
 /// WorldTime (and weather) broadcast cadence, and vehicle position cadence
 /// (zdtd.toml [stream] world_time_send_ticks / vehicle_pos_send_ticks).
@@ -330,6 +333,7 @@ pub const InitOptions = struct {
     chunk_adds_per_stream_tick: u32 = default_chunk_adds_per_stream_tick,
     chunk_stream_period_ticks: u64 = default_chunk_stream_period_ticks,
     motion_replicate_period_ticks: u64 = default_motion_replicate_period_ticks,
+    pos_heartbeat_period_ticks: u64 = default_pos_heartbeat_period_ticks,
     world_time_send_ticks: u64 = default_world_time_send_ticks,
     vehicle_pos_send_ticks: u64 = default_vehicle_pos_send_ticks,
     /// 2 Hz class of sim side-work (zdtd.toml [stream] sleeper_tick_ticks):

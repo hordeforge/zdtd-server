@@ -5663,6 +5663,20 @@ test "queued-verb policy: a denied verb is dropped before the command buffer" {
     wasm_host.wasmQueue(&g.wasm_ctx, 1, "say allowed hello");
     try std.testing.expectEqual(before + 3, g.sim.commands.n);
     try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.plugin_verbs_denied));
+
+    // `spawn` also covers `bot spawn` (review F10): both create an entity, so
+    // a policy that forbids entity creation cannot be bypassed through the bot
+    // family. Other bot sub-verbs stay behind the `bot` verb alone.
+    const spawn_bit = plugin_mod.manifest.QueueVerb.spawn.bit();
+    g.wasm_plugins.slots[0].op_allow = 0;
+    g.wasm_plugins.slots[0].module_deny = spawn_bit;
+    g.wasm_plugins.slots[0].refreshDenied();
+    const bots_before = g.bots.n;
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "bot spawn 5 5");
+    try std.testing.expectEqual(@as(u64, 2), g.harness.counters.get(.plugin_verbs_denied));
+    try std.testing.expectEqual(bots_before, g.bots.n);
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "bot count");
+    try std.testing.expectEqual(@as(u64, 2), g.harness.counters.get(.plugin_verbs_denied));
 }
 
 test "starter_zombies gates the near-spawn demo hostiles" {

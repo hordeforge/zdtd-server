@@ -14,6 +14,9 @@ stream_radius_min = 7
 stream_radius_max = 9
 # chunk_stream_period_ticks = 5
 # motion_replicate_period_ticks = 2
+# PosAndRot heartbeat for entities with no dirty motion bit (paired with
+# motion_replicate_period_ticks; the effective interval is their LCM).
+# pos_heartbeat_period_ticks = 5
 # world_time_send_ticks = 20
 # vehicle_pos_send_ticks = 5
 # sleeper_tick_ticks = 10
