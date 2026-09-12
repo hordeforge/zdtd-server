@@ -635,13 +635,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 amount *= 1.0 - invsys.generalDamageResist(&self.sim, es);
                 const victim_slot: usize = @intCast(self.sim.player[es].peer_slot);
                 if (self.pvp_mode == 0 and victim_slot != c.slot) continue;
-                if (victim_slot != c.slot) {
-                    // ExplosionData.DamageType is the stock Heat default (6), so
-                    // the blast takes passive 43 ElementalDamageResist, not the
-                    // physical armor rating (Equipment.CalcDamage IL=83 splits
-                    // on Equipment.physicalDamageTypes).
-                    amount *= (1.0 - self.elementalDamageResist(es, protocol.damageTypeName(6)));
-                }
+                // Explosion.AttackEntites builds the DamageSource External
+                // (IL_0499), so DamageSource::AffectedByArmor (IL=5) holds for
+                // every victim including the blaster, and the blast's stock
+                // Heat type (ExplosionData default 6) takes passive 43
+                // ElementalDamageResist rather than the physical armor rating
+                // (Equipment.CalcDamage IL=83).
+                amount *= (1.0 - self.elementalDamageResist(es, protocol.damageTypeName(6)));
                 // Wasm-first (AGENTS rule 29): the on_player_damage verdict
                 // applies to explosion damage too (attacker = the blaster), so
                 // a module scales/denies PvP and self-damage from explosives

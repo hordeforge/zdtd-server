@@ -4021,7 +4021,11 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
       uses passive 43 queried with the **damage type tag**. The wire byte is
       `EnumDamageTypes` (`NetPackageDamageEntity.damageType`, protocol.md 6.5),
       so `protocol.damageTypeIsPhysical` is `dtype <= 5` and
-      `damageTypeName` is the tag. `Game.elementalDamageResist(ps, tag)` folds
+      `damageTypeName` is the tag. Before any of that, `DamageSource::
+      AffectedByArmor()` (IL=5) gates the whole armour branch on the wire
+      `source` byte being External (0): an Internal claim keeps GDR only, and
+      the blast (External) mitigates for every victim including the blaster.
+      `Game.elementalDamageResist(ps, tag)` folds
       the victim's equipped item rows, buffs and perks on the damage event with
       that tag as the ctx query (stock rows are `tags="heat,electrical"` /
       `radiation` plus untagged jitter), and the player chokes use it: the C2S

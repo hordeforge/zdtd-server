@@ -400,12 +400,14 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                     // Wasm-first (AGENTS rule 29): environmental damage passes
                     // the on_player_damage verdict with attacker -1, so a
                     // module scales/denies drowning like any other player hit.
-                    // GeneralDamageResist (passive 40) covers every damage type,
-                    // then the armor branch: drowning is EnumDamageTypes 16
-                    // Suffocation (protocol.md 6.5), so passive 43 resists it.
+                    // GeneralDamageResist (passive 40) covers every damage type.
+                    // This leg models stock's Internal self-damage (a client
+                    // drown report carries damageSource 1), and
+                    // DamageSource::AffectedByArmor (IL=5) keeps the armour
+                    // branch - passive 41 and passive 43 alike - for External
+                    // hits only, so no EDR term here.
                     const raw = prog.drowning_damage_per_second * c.drown_accum *
-                        (1.0 - inventory.generalDamageResist(&self.sim, ps)) *
-                        (1.0 - self.elementalDamageResist(ps, protocol.damageTypeName(16)));
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
                     const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.drown_accum = 0;
@@ -421,11 +423,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                 c.radiation_accum += secs;
                 if (c.radiation_accum >= 1.0) {
                     // Wasm-first (AGENTS rule 29): verdict with attacker -1,
-                    // like drowning above. GeneralDamageResist covers it too,
-                    // then ElementalDamageResist for the Radiation type (8).
+                    // like drowning above: GDR only, since this is Internal
+                    // self-damage and the armour branch is External-only
+                    // (DamageSource::AffectedByArmor IL=5).
                     const raw = prog.radiation_damage_per_second * c.radiation_accum *
-                        (1.0 - inventory.generalDamageResist(&self.sim, ps)) *
-                        (1.0 - self.elementalDamageResist(ps, protocol.damageTypeName(8)));
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
                     const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.radiation_accum = 0;

@@ -8,7 +8,17 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Item mod stats fold server-side 2026-09-12**:
+`lint-architecture: clean`). **AffectedByArmor source gate 2026-09-12**:
+`DamageSource::AffectedByArmor()` (IL=5) is External-only, so the C2S damage
+path now applies the armour branch (physical rating or passive 43) only when
+the wire `source` byte is 0; an Internal claim keeps GDR and skips armour. The
+explosion blast is External and now mitigates for the blaster too (was
+exempted), and the server's drowning/radiated-biome legs model Internal
+self-damage so they run GDR-only. Gated by the extended
+`scenario ElementalDamageResist` (source=1 heat and bashing hits on the
+armoured victim take the full claimed strength while source=0 is mitigated)
+plus the `protocol` source test.
+**Item mod stats fold server-side 2026-09-12**:
 `item_modifiers.xml` now parses each modifier's effect rows (layer 13) through
 the shared buffs scanner, and the item fold adds an item's installed mods'
 rows alongside its own, so the flat defensive rows apply:

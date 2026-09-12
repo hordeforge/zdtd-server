@@ -740,10 +740,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (d.fatal and was_zombie) amount = fatal_kill_amount;
         // PvP gate + resist legs when damaging a player, in stock
         // EntityAlive::DamageEntity order: GeneralDamageResist (passive 40, all
-        // damage types) then the armor branch of Equipment.CalcDamage (IL=83):
-        // physical types take the physical armor rating, every other
-        // EnumDamageTypes member takes passive 43 ElementalDamageResist scaled
-        // by the damage type's tag (combat-damage.md 2.1).
+        // damage types, every source) then the armor branch of
+        // Equipment.CalcDamage (IL=83), which stock only reaches when
+        // DamageSource::AffectedByArmor (IL=5) holds - that is External (0)
+        // damage. An Internal claim (starvation, dehydration, blood loss)
+        // therefore keeps its GDR but takes no armour branch at all. On the
+        // armour branch, physical types take the physical armor rating and
+        // every other EnumDamageTypes member takes passive 43
+        // ElementalDamageResist scaled by the damage type's tag
+        // (combat-damage.md 2.1).
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
             if (self.sim.mask[ei].player) {
                 amount *= 1.0 - invsys.generalDamageResist(&self.sim, ei);
@@ -751,16 +756,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
                     if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
                         return true;
-                    if (protocol.damageTypeIsPhysical(d.dtype)) {
-                        // Armor mitigation, less the attacker's held-item
-                        // TargetArmor penetration (RE GetTotalPhysicalArmorRating
-                        // IL=47).
-                        const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
-                        amount *= (1.0 - mit);
-                    } else {
-                        // ElementalDamageResist is a percentage on the victim;
-                        // no penetration leg exists for it in stock.
-                        amount *= (1.0 - self.elementalDamageResist(ei, protocol.damageTypeName(d.dtype)));
+                    if (protocol.damageSourceAffectedByArmor(d.source)) {
+                        if (protocol.damageTypeIsPhysical(d.dtype)) {
+                            // Armor mitigation, less the attacker's held-item
+                            // TargetArmor penetration (RE
+                            // GetTotalPhysicalArmorRating IL=47).
+                            const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
+                            amount *= (1.0 - mit);
+                        } else {
+                            // ElementalDamageResist is a percentage on the
+                            // victim; no penetration leg exists for it in stock.
+                            amount *= (1.0 - self.elementalDamageResist(ei, protocol.damageTypeName(d.dtype)));
+                        }
                     }
                 }
             }

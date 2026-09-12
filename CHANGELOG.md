@@ -7,6 +7,22 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Armour applied to damage that stock says bypasses it. `DamageSource::
+  AffectedByArmor()` (IL=5) is `damageSource == EnumDamageSource.External`, so
+  the whole armour branch of `Equipment.CalcDamage` - the physical rating and
+  passive 43 ElementalDamageResist alike - runs for External (0) damage only;
+  an Internal (1) claim keeps its GeneralDamageResist but takes no armour.
+  The C2S damage path now honours the wire `source` byte, so a starvation,
+  dehydration or blood-loss report no longer gets mitigated by armour. The
+  explosion blast is External (`Explosion.AttackEntites` IL_0499), so it now
+  mitigates for every player victim including the blaster instead of exempting
+  self-damage. The server's own drowning and radiated-biome legs model stock's
+  Internal self-damage (`DamageSource(Internal, ...)`, the vehicle-inside
+  hazard is the RE-recorded example), so they apply GeneralDamageResist only
+  and no longer take the EDR term added earlier.
+
+### Fixed
+
 - Item mods now apply their stats on the server. `item_modifiers.xml` was
   parsed only for the attachment tag gates, so a modded armour piece defended
   no better than a bare one: `modArmorInsulatedLiner`/`modArmorCoolingMesh`'s

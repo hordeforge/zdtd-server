@@ -176,6 +176,17 @@ pub fn damageTypeIsPhysical(dtype: u8) bool {
     return dtype <= max_physical_damage_type;
 }
 
+/// `DamageSource::AffectedByArmor()` (IL=5) is `damageSource ==
+/// EnumDamageSource.External` (0): armour - the physical rating *and* passive
+/// 43 ElementalDamageResist - applies only to External hits. Internal (1)
+/// damage (starvation, dehydration, blood loss, the vehicle-inside hazard the
+/// RE records as `DamageSource(Internal, VehicleInside)`) bypasses armour
+/// entirely; `EntityAlive::DamageEntity`'s passive-40 GeneralDamageResist step
+/// runs before this and still applies.
+pub fn damageSourceAffectedByArmor(source: u8) bool {
+    return source == 0;
+}
+
 /// The FastTags name for a wire damage type, used as the query tag set for
 /// passive 43 and for logs. Out-of-range bytes return "" (no tag match).
 pub fn damageTypeName(dtype: u8) []const u8 {
@@ -196,4 +207,8 @@ test "damage types: stock physical set and wire names" {
     try std.testing.expectEqualStrings("suffocation", damageTypeName(16));
     try std.testing.expectEqualStrings("heat", damageTypeName(6));
     try std.testing.expectEqualStrings("", damageTypeName(200));
+    // DamageSource::AffectedByArmor IL=5: External (0) only.
+    try std.testing.expect(damageSourceAffectedByArmor(0));
+    try std.testing.expect(!damageSourceAffectedByArmor(1));
+    try std.testing.expect(!damageSourceAffectedByArmor(2));
 }

@@ -17271,6 +17271,9 @@ test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagg
         gpa.destroy(g);
     }
     g.pvp_mode = 3; // damage between players is legal; the resist legs are what this tests
+    // Six hits in a burst exceed the anti-abuse damage bucket; this test is
+    // about mitigation, not the rate gate.
+    g.damage_burst_max = 16;
     var cap_a: ln_peer.Capture = .{};
     const a = try g.attachJoinedClient(&cap_a);
     var cap_b: ln_peer.Capture = .{};
@@ -17281,18 +17284,20 @@ test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagg
     var frame_buf: [1024]u8 = undefined;
     // Hit the victim for `strength` of wire damage type `dtype`; return the hp
     // actually lost, so the choke's whole mitigation order is in the number.
+    // `source` is the wire DamageSource byte: 0 External (armour applies),
+    // 1 Internal (armour does not; DamageSource::AffectedByArmor IL=5).
     const Hit = struct {
-        fn f(g_: *game_mod.Game, c: anytype, actor_eid: i32, victim_ps: ecs.Slot, victim_eid: i32, dtype: u8, strength: u16, body_: []u8, frame_: []u8) !f32 {
+        fn f(g_: *game_mod.Game, c: anytype, actor_eid: i32, victim_ps: ecs.Slot, victim_eid: i32, source: u8, dtype: u8, strength: u16, body_: []u8, frame_: []u8) !f32 {
             g_.sim.health[victim_ps].hp = 100;
-            const dmg = try packages.buildDamageBody(body_, victim_eid, 0, dtype, strength, false, actor_eid);
+            const dmg = try packages.buildDamageBody(body_, victim_eid, source, dtype, strength, false, actor_eid);
             try g_.injectFramed(c, try packages.framed(frame_, "NetPackageDamageEntity", dmg));
             return 100 - g_.sim.health[victim_ps].hp;
         }
     }.f;
 
     // No armor: heat lands at full strength (no buffs, so GDR is 0).
-    const bare_heat = try Hit(g, b, a.entity_id, ps, b.entity_id, 6, 100, &body, &frame_buf);
-    try std.testing.expectApproxEqAbs(@as(f32, 100), bare_heat, 0.5);
+    const bare_heat = try Hit(g, b, a.entity_id, ps, b.entity_id, 0, 6, 40, &body, &frame_buf);
+    try std.testing.expectApproxEqAbs(@as(f32, 40), bare_heat, 0.5);
     try std.testing.expectApproxEqAbs(@as(f32, 0), g.elementalDamageResist(ps, "heat"), 0.001);
 
     // Wear the primitive helmet at Q6 (8..12.3 curve + jitter).
@@ -17314,14 +17319,21 @@ test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagg
     try std.testing.expect(g.elementalDamageResist(ps, "electrical") > 0.08);
     try std.testing.expect(g.elementalDamageResist(ps, "cold") < 0.01);
 
-    const armored_heat = try Hit(g, b, a.entity_id, ps, b.entity_id, 6, 100, &body, &frame_buf);
-    try std.testing.expect(armored_heat < 92); // ~12% EDR
-    const armored_cold = try Hit(g, b, a.entity_id, ps, b.entity_id, 7, 100, &body, &frame_buf);
-    try std.testing.expect(armored_cold > 99); // only the untagged jitter row
+    const armored_heat = try Hit(g, b, a.entity_id, ps, b.entity_id, 0, 6, 40, &body, &frame_buf);
+    try std.testing.expect(armored_heat < 37); // ~12% EDR
+    const armored_cold = try Hit(g, b, a.entity_id, ps, b.entity_id, 0, 7, 40, &body, &frame_buf);
+    try std.testing.expect(armored_cold > 39.5); // only the untagged jitter row
     // A physical type keeps the armor-rating branch (the helmet also carries
     // PhysicalDamageResist 8,12.3), so it is mitigated but through PDR.
-    const armored_bash = try Hit(g, b, a.entity_id, ps, b.entity_id, 3, 100, &body, &frame_buf);
-    try std.testing.expect(armored_bash < 92);
+    const armored_bash = try Hit(g, b, a.entity_id, ps, b.entity_id, 0, 3, 40, &body, &frame_buf);
+    try std.testing.expect(armored_bash < 37);
+    // Internal claims bypass armour entirely, physical and elemental alike:
+    // the same armoured victim takes the full claimed strength (40) from a source=1 heat or
+    // bashing hit (GDR is 0 with no buffs).
+    const internal_heat = try Hit(g, b, a.entity_id, ps, b.entity_id, 1, 6, 40, &body, &frame_buf);
+    try std.testing.expectApproxEqAbs(@as(f32, 40), internal_heat, 0.5);
+    const internal_bash = try Hit(g, b, a.entity_id, ps, b.entity_id, 1, 3, 40, &body, &frame_buf);
+    try std.testing.expectApproxEqAbs(@as(f32, 40), internal_bash, 0.5);
     std.debug.print(
         "PASS elemental resist: bare heat {d:.1}, armored heat {d:.1}, cold {d:.1}, bash {d:.1}\n",
         .{ bare_heat, armored_heat, armored_cold, armored_bash },
