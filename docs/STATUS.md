@@ -9,14 +9,18 @@
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`). **Loot entry gates 2026-09-12**: loot.xml's 87
-`<requirement>`-gated entries are now flagged at parse time and omitted from
-rolls instead of dropping ungated; before this a book entry with prob 1.0 gated
-on `RandomRoll @$perkBookwormChance` filled every Working Stiffs crate. Gated by
-the `assets.loot` stock test (the books entry is flagged, its item names never
-appear across 200 crate rolls, and the group still produces loot). The
-evaluator for those rows (cvars/levels/biome/sandbox) remains a recorded
-residual, together with the `onSelfProgressionUpdate` triggered row that writes
-`$perkBookwormChance`.
+`<requirement>`-gated entries now carry an `EntryGate`: `Biome` resolves at roll
+time against the container's own biome (the container fill passes
+`biome_layers.nameById(biomeIdAt(pos))`), and the player-state classes are
+omitted from rolls instead of dropping ungated; before this a book entry with
+prob 1.0 gated on `RandomRoll @$perkBookwormChance` filled every Working Stiffs
+crate. Gated by two `assets.loot` stock tests (the books entry is
+`GateKind.other` and its item names never appear across 200 crate rolls; the
+wasteland-only `plantedGraceCorn1Schematic` rolls with `biome_name="wasteland"`,
+is absent for `"forest"` and absent with no ctx, and the group still produces
+loot). The player-state evaluator (cvars/levels/sandbox/quest tags) remains a
+recorded residual, together with the `onSelfProgressionUpdate` triggered row
+that writes `$perkBookwormChance`.
 **AffectedByArmor source gate 2026-09-12**:
 `DamageSource::AffectedByArmor()` (IL=5) is External-only, so the C2S damage
 path now applies the armour branch (physical rating or passive 43) only when

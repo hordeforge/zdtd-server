@@ -32,7 +32,7 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
     if (!self.sim.mask[slot].inventory) return;
     self.sim.inventory[slot].clear();
     var stacks: [assets_loot.max_roll_stacks]assets_loot.Stack = undefined;
-    var n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks);
+    var n = self.loot.rollContainer(list_name, loot_stage, seed, &stacks, .{});
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
     // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
     const sv = self.plugins.lootRoll(list_name, @intCast(n));

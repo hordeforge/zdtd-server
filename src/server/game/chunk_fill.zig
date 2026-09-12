@@ -416,7 +416,14 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
     // Roll up to the container's own capacity (the roll is capped by the
     // buffer, so a bigger container actually fills more stacks).
     var stacks: [containers_mod.max_container_slots]assets_loot.Stack = undefined;
-    var n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, stacks[0..cont.slot_count]);
+    // The container's own biome answers a `LootEntryRequirementBiome` gate
+    // (`biomes.xml` names); a caller with no position leaves it null, so a
+    // biome-gated entry stays omitted rather than rolling everywhere.
+    const biome_id = self.biomeIdAt(cont.pos.x, cont.pos.z) orelse 0;
+    const gate_ctx: assets_loot.LootGateCtx = .{
+        .biome_name = self.world.biome_layers_table.nameById(biome_id),
+    };
+    var n = self.loot.rollContainer(loot_name, self.partyLootStage(), seed, stacks[0..cont.slot_count], gate_ctx);
     // Wasm-first (AGENTS rule 29): the roll passes the on_loot_roll verdict
     // (<0 empty the result, 0 keep, >0 scale the rolled count by percent).
     const sv = self.plugins.lootRoll(loot_name, @intCast(n));

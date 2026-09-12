@@ -473,7 +473,7 @@ pub fn step(self: *Game) !void {
                             // loot-economy.md 8.4, progression.md
                             // GetTraderStage IL=46); the tier mod comes from
                             // the traders.xml root quest_tier_mod.
-                            const n = self.loot.rollGroupPicks(spec.item_name, self.questRewardStage(d, peer), seed, want, spec.is_fixed, &stacks);
+                            const n = self.loot.rollGroupPicks(spec.item_name, self.questRewardStage(d, peer), seed, want, spec.is_fixed, &stacks, .{});
                             var si: usize = 0;
                             while (si < n) : (si += 1) {
                                 const eid = self.items.ecsIdByName(stacks[si].item_name);

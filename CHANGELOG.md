@@ -13,9 +13,12 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
   element entirely, so a gated entry dropped at its base `prob` - a book entry
   with no `prob` (1.0) gated on `RandomRoll ... value="@$perkBookwormChance"`
   put a book in **every** Working Stiffs crate, where stock's gate refuses for a
-  player without the perk. The parser now flags such entries and the roll paths
-  omit them: an entry whose gate zdtd cannot evaluate is missing rather than
-  faked, and the flag keeps the row for the evaluator it still needs.
+  player without the perk. The parser now keeps each entry's gate (`EntryGate`)
+  and the roll paths honour it: a `Biome` gate resolves against the container's
+  own biome (so the wasteland-only rows roll in the wasteland and nowhere
+  else), and every class whose state the roll path does not carry is omitted
+  rather than faked. The rows stay in the table for the evaluator they still
+  need.
 
 ### Fixed
 

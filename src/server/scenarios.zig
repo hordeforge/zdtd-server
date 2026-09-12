@@ -11496,7 +11496,7 @@ test "scenario on_loot_roll verdict halves loot (real core_lootgate)" {
 
     // Control roll without any plugin: the seeded roll's stack count.
     var stacks: [64]assets_loot.Stack = undefined;
-    const n0 = g.loot.rollContainer("EntityLootContainerRegular", 1, 42, &stacks);
+    const n0 = g.loot.rollContainer("EntityLootContainerRegular", 1, 42, &stacks, .{});
     try std.testing.expect(n0 >= 1);
 
     // Load the committed gate module (scales every roll to 50%).

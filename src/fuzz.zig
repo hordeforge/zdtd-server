@@ -1759,7 +1759,7 @@ fn fuzzLootXml(_: void, smith: *std.testing.Smith) !void {
     var stacks: [loot.max_roll_stacks]loot.Stack = undefined;
     var ci: usize = 0;
     while (ci < n_rolls) : (ci += 1) {
-        const n = t.rollContainer(t.containers[ci].name, smith.value(i32), smith.value(u32), &stacks);
+        const n = t.rollContainer(t.containers[ci].name, smith.value(i32), smith.value(u32), &stacks, .{});
         try std.testing.expect(n <= stacks.len);
         for (stacks[0..n]) |st| {
             try std.testing.expect(st.count >= 1);

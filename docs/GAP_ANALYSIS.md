@@ -2271,14 +2271,15 @@ can walk into every POI but none of them is the building TFP authored.
   `loot.xml` defines 340 lootcontainers; the mapping now exists end to end.
   Loot-entry `<requirement>` children (`LootEntryRequirement*`, 87 rows in
   stock: 63 `RandomRoll`, 14 `Progression`, 5 `Biome`, 3 `SandboxOption`, 1
-  `QuestTags`, 1 `CVar`) are parsed as a gate flag and the entry is **omitted**
-  rather than rolled unconditionally (2026-09-12): the evaluator needs player
-  state the roll path does not carry, and stock's own gate refuses for a player
-  without the perk. Before this, `groupWorkingStiffsBooks` (gated on
+  `QuestTags`, 1 `CVar`) are parsed into an `EntryGate` (2026-09-12): a `Biome`
+  gate resolves against the container's own biome (the 5 wasteland rows roll in
+  the wasteland), and every class whose state the roll path does not carry keeps
+  the entry **omitted** rather than rolled unconditionally - stock's own gate
+  refuses for a player without the perk. Before this, `groupWorkingStiffsBooks` (gated on
   `RandomRoll ... value="@$perkBookwormChance"`, entry prob 1.0) put a book in
-  every Working Stiffs crate. The recorded residual is the evaluator itself:
-  once the roller carries cvars/levels/biome/sandbox, the 87 rows resolve and
-  effectively-gated entries roll again; the `$perkBookwormChance` cvar is
+  every Working Stiffs crate. The recorded residual is the player-state
+  evaluator: once the roller carries cvars/levels/sandbox/quest tags, those rows
+  resolve and their entries roll again; the `$perkBookwormChance` cvar is
   written by a `onSelfProgressionUpdate` triggered row that zdtd does not fire
   yet, so even with the evaluator a perk owner would read 0.
   *Anchors:* `src/server/game.zig` fill sites, `src/assets/maxdamage.zig`

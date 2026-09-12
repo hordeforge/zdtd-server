@@ -30,14 +30,50 @@ pub const LootEntry = struct {
     /// joining the group's pick pool (stock SpawnAllItemsFromList /
     /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
     force_prob: bool = false,
-    /// The entry carries a `<requirement>` child (loot.xml's
-    /// `LootEntryRequirement*` leaves, e.g. `RandomRoll ... value=
-    /// "@$perkBookwormChance"`). The evaluator needs player state the roll
-    /// path does not carry, so the row is omitted rather than rolled
-    /// unconditionally - "missing beats fake" applies to loot too, and stock's
-    /// own gate refuses for a player without the perk/cvar. The flag keeps the
-    /// row in the table for the evaluator this needs.
-    gated: bool = false,
+    /// The entry's `<requirement>` child (loot.xml's `LootEntryRequirement*`
+    /// leaves). A class the roll path can answer resolves; everything else
+    /// keeps the entry **omitted** rather than rolled unconditionally -
+    /// "missing beats fake" applies to loot too, and stock's own gate refuses
+    /// for a player without the perk/cvar (round 16: an ignored
+    /// `RandomRoll @$perkBookwormChance` put a book in every Working Stiffs
+    /// crate). The requirements stay on the row for the evaluator this needs.
+    gate: EntryGate = .{},
+};
+
+/// One entry's roll-time gate. `none` = ungated; `biome` = the
+/// `LootEntryRequirementBiome` name list (the roll path carries the container's
+/// biome); `other` = a class whose state the roll path does not carry
+/// (`RandomRoll`, `Progression`, `CVar`, `SandboxOption`, `QuestTags`), so the
+/// entry is omitted.
+pub const GateKind = enum { none, biome, other };
+
+pub const EntryGate = struct {
+    kind: GateKind = .none,
+    /// `Biome` requirement `biomes="a,b"` (arena-owned).
+    biomes: []const u8 = "",
+
+    pub fn allowed(self: EntryGate, ctx: LootGateCtx) bool {
+        return switch (self.kind) {
+            .none => true,
+            .biome => blk: {
+                const here = ctx.biome_name orelse break :blk false;
+                var it = std.mem.splitScalar(u8, self.biomes, ',');
+                while (it.next()) |raw| {
+                    const nm = std.mem.trim(u8, raw, " \t");
+                    if (nm.len > 0 and std.mem.eql(u8, nm, here)) break :blk true;
+                }
+                break :blk false;
+            },
+            .other => false,
+        };
+    }
+};
+
+/// Roll-time state a loot entry gate can read. `biome_name` is the biome the
+/// container/roll sits in, resolved from biomes.xml (`biome_layers.nameById`);
+/// null means the caller has no biome, so a biome-gated entry is omitted.
+pub const LootGateCtx = struct {
+    biome_name: ?[]const u8 = null,
 };
 
 /// One `<loot level="a,b" prob="p"/>` row of a `<lootprobtemplate>`.
@@ -238,7 +274,7 @@ pub const LootTable = struct {
     /// prob-weighted (uniform when all weights equal), or the first `picks`
     /// entries when `is_fixed` (deterministic). Stage bands still gate each
     /// entry. Returns the stack count.
-    pub fn rollGroupPicks(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, picks: u8, is_fixed: bool, out: []Stack) usize {
+    pub fn rollGroupPicks(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, picks: u8, is_fixed: bool, out: []Stack, ctx: LootGateCtx) usize {
         const g = self.groupByName(name) orelse return 0;
         if (g.entry_n == 0 or picks == 0 or out.len == 0) return 0;
         const qt = g.quality_template;
@@ -248,9 +284,9 @@ pub const LootTable = struct {
             var i: u8 = 0;
             while (i < g.entry_n and n < picks and n < out.len) : (i += 1) {
                 const e = g.entries[i];
-                if (e.gated) continue;
+                if (!e.gate.allowed(ctx)) continue;
                 if (e.is_group) {
-                    n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt);
+                    n += self.rollGroup(e.name, loot_stage, s ^ @as(u32, i), out[n..], 1, qt, ctx);
                 } else {
                     out[n] = .{
                         .item_name = e.name,
@@ -282,14 +318,14 @@ pub const LootTable = struct {
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
             const picked = g.entries[chosen];
-            if (picked.gated) continue;
+            if (!picked.gate.allowed(ctx)) continue;
             if (picked.force_prob) {
                 if (!self.probGate(picked, loot_stage, s)) {
                     continue;
                 }
             } else if (picked.prob_template != 0 and !self.probGate(picked, loot_stage, s)) continue;
             if (picked.is_group) {
-                n += self.rollGroup(picked.name, loot_stage, s, out[n..], 1, qt);
+                n += self.rollGroup(picked.name, loot_stage, s, out[n..], 1, qt, ctx);
             } else {
                 const cmin = picked.count_min;
                 const cmax = if (picked.count_max >= cmin) picked.count_max else cmin;
@@ -309,17 +345,17 @@ pub const LootTable = struct {
     /// Deterministic roll into `out` at `loot_stage`. Returns stack count.
     /// Pass 1 for "no gamestage information"; the templates' first band starts
     /// at level 0 or 1, so stage 1 is the honest floor, not a magic value.
-    pub fn rollContainer(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack) usize {
+    pub fn rollContainer(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack, ctx: LootGateCtx) usize {
         const cont = self.containerByName(name) orelse {
             // Unknown: try as group name.
-            return self.rollGroup(name, loot_stage, seed, out, 0, "");
+            return self.rollGroup(name, loot_stage, seed, out, 0, "", ctx);
         };
         var n: usize = 0;
         var s = seed ^ 0x9e3779b9;
         var i: u8 = 0;
         while (i < cont.entry_n and n < out.len) : (i += 1) {
             const e = cont.entries[i];
-            if (e.gated) continue;
+            if (!e.gate.allowed(ctx)) continue;
             s = s *% 1103515245 +% 12345;
             // Every entry rolls its own prob (stock LootContainer.roll): a
             // force_prob entry gates independently (stock forceProb branch)
@@ -330,7 +366,7 @@ pub const LootTable = struct {
             const gate = !self.probGate(e, loot_stage, s);
             if (gate) continue;
             if (e.is_group) {
-                n += self.rollGroup(e.name, loot_stage, s, out[n..], 0, cont.quality_template);
+                n += self.rollGroup(e.name, loot_stage, s, out[n..], 0, cont.quality_template, ctx);
             } else {
                 const cmin = e.count_min;
                 const cmax = if (e.count_max >= cmin) e.count_max else cmin;
@@ -364,7 +400,7 @@ pub const LootTable = struct {
         return n;
     }
 
-    fn rollGroup(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack, depth: u8, inherit_template: []const u8) usize {
+    fn rollGroup(self: *const LootTable, name: []const u8, loot_stage: i32, seed: u32, out: []Stack, depth: u8, inherit_template: []const u8, ctx: LootGateCtx) usize {
         if (depth > 6 or out.len == 0) return 0;
         const g = self.groupByName(name) orelse return 0;
         if (g.entry_n == 0) return 0;
@@ -378,11 +414,11 @@ pub const LootTable = struct {
             var ai: u8 = 0;
             while (ai < g.entry_n and an < out.len) : (ai += 1) {
                 const e = g.entries[ai];
-                if (e.gated) continue;
+                if (!e.gate.allowed(ctx)) continue;
                 s = s *% 1103515245 +% 12345;
                 if (e.force_prob and !self.probGate(e, loot_stage, s)) continue;
                 if (e.is_group) {
-                    an += self.rollGroup(e.name, loot_stage, s, out[an..], depth + 1, qt);
+                    an += self.rollGroup(e.name, loot_stage, s, out[an..], depth + 1, qt, ctx);
                 } else {
                     const cmin = e.count_min;
                     const cmax = if (e.count_max >= cmin) e.count_max else cmin;
@@ -427,7 +463,7 @@ pub const LootTable = struct {
             }
             if (chosen >= g.entry_n) chosen = g.entry_n - 1;
             const picked_e = g.entries[chosen];
-            if (picked_e.gated) continue;
+            if (!picked_e.gate.allowed(ctx)) continue;
             // A picked entry still has to clear its loot stage band, so a
             // low-stage player cannot pull a top-tier item out of a group.
             // A force_prob entry rolls its prob independently.
@@ -435,7 +471,7 @@ pub const LootTable = struct {
                 if (!self.probGate(picked_e, loot_stage, s)) continue;
             } else if (picked_e.prob_template != 0 and !self.probGate(picked_e, loot_stage, s)) continue;
             if (picked_e.is_group) {
-                n += self.rollGroup(picked_e.name, loot_stage, s, out[n..], depth + 1, qt);
+                n += self.rollGroup(picked_e.name, loot_stage, s, out[n..], depth + 1, qt, ctx);
             } else {
                 const cmin = picked_e.count_min;
                 const cmax = if (picked_e.count_max >= cmin) picked_e.count_max else cmin;
@@ -487,10 +523,10 @@ test "pickWeight clamps malformed probs instead of trapping the cast" {
 test "loot abundance scales counts, keeps at least one" {
     var lt = LootTable.builtin();
     var base: [max_roll_stacks]Stack = undefined;
-    const nb = lt.rollContainer("woodenChest", 1, 12345, &base);
+    const nb = lt.rollContainer("woodenChest", 1, 12345, &base, .{});
     lt.abundance_pct = 200;
     var big: [max_roll_stacks]Stack = undefined;
-    const ng = lt.rollContainer("woodenChest", 1, 12345, &big);
+    const ng = lt.rollContainer("woodenChest", 1, 12345, &big, .{});
     try std.testing.expectEqual(nb, ng);
     // Every non-fallback stack doubles (same seed → same base counts).
     var i: usize = 0;
@@ -501,7 +537,7 @@ test "loot abundance scales counts, keeps at least one" {
     // A tiny abundance still yields at least 1 per stack.
     lt.abundance_pct = 1;
     var small: [max_roll_stacks]Stack = undefined;
-    const ns = lt.rollContainer("woodenChest", 1, 12345, &small);
+    const ns = lt.rollContainer("woodenChest", 1, 12345, &small, .{});
     i = 0;
     while (i < ns) : (i += 1) try std.testing.expect(small[i].count >= 1);
 }
@@ -580,11 +616,21 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
     const cr = parseCountRange(xml.attr(tag_src, tag_at, "count") orelse "1");
     const prob = xml.parseF32(xml.attr(tag_src, tag_at, "prob") orelse "1") orelse 1;
     const fp = xml.attr(tag_src, tag_at, "force_prob") orelse "";
-    // A `<requirement>` child gates the entry on player state (see
-    // `LootEntry.gated`): detect it inside this element only, so a nested
-    // group's own gated entries stay their own.
+    // The entry's own `<requirement>` child, if any (the element extent keeps a
+    // nested group's gated entries their own). Only `Biome` is rolled today;
+    // every other class marks the entry omitted (see `EntryGate`).
     const entry_end = requirements.elementEnd(tag_src, tag_at);
-    const gated = std.mem.findPos(u8, tag_src[tag_at..entry_end], 0, "<requirement") != null;
+    const inner = tag_src[tag_at..entry_end];
+    var gate: EntryGate = .{};
+    if (std.mem.findPos(u8, inner, 0, "<requirement")) |req_at| {
+        const abs = tag_at + req_at;
+        const class = xml.attr(tag_src, abs, "class") orelse "";
+        if (std.mem.eql(u8, class, "Biome")) {
+            gate = .{ .kind = .biome, .biomes = xml.attr(tag_src, abs, "biomes") orelse "" };
+        } else {
+            gate = .{ .kind = .other };
+        }
+    }
     var tpl: u16 = 0;
     if (xml.attr(tag_src, tag_at, "loot_prob_template")) |tn| {
         for (templates, 0..) |t, ti| {
@@ -602,7 +648,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .prob = prob,
         .prob_template = tpl,
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
-        .gated = gated,
+        .gate = gate,
     };
 }
 
@@ -792,6 +838,8 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
+                // The gate's biome list points into the freed source text.
+                if (e.gate.biomes.len > 0) e.gate.biomes = try arena.dupe(u8, ent.gate.biomes);
                 g.entries[g.entry_n] = e;
                 g.entry_n += 1;
             }
@@ -863,6 +911,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
             if (parseItemOrGroup(body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
+                if (e.gate.biomes.len > 0) e.gate.biomes = try arena.dupe(u8, ent.gate.biomes);
                 c.entries[c.entry_n] = e;
                 c.entry_n += 1;
             }
@@ -892,7 +941,7 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
 test "builtin loot roll" {
     const t = LootTable.builtin();
     var stacks: [max_roll_stacks]Stack = undefined;
-    const n = t.rollContainer("EntityLootContainerRegular", 1, 42, &stacks);
+    const n = t.rollContainer("EntityLootContainerRegular", 1, 42, &stacks, .{});
     try std.testing.expect(n >= 1);
     try std.testing.expect(stacks[0].count >= 1);
 }
@@ -911,7 +960,7 @@ test "load stock loot when present" {
     var total: usize = 0;
     var seed: u32 = 0;
     while (seed < 32) : (seed += 1) {
-        total += t.rollContainer("woodenChest", 7, seed, &stacks);
+        total += t.rollContainer("woodenChest", 7, seed, &stacks, .{});
     }
     try std.testing.expect(total >= 1);
 }
@@ -967,11 +1016,11 @@ test "loot prob templates gate entries by loot stage" {
     var seen_high: usize = 0;
     var seed: u32 = 0;
     while (seed < 400) : (seed += 1) {
-        var n = t.rollContainer("c", 0, seed, &stacks);
+        var n = t.rollContainer("c", 0, seed, &stacks, .{});
         for (stacks[0..n]) |st| {
             if (std.mem.eql(u8, st.item_name, "gated")) seen_low += 1;
         }
-        n = t.rollContainer("c", 40, seed, &stacks);
+        n = t.rollContainer("c", 40, seed, &stacks, .{});
         for (stacks[0..n]) |st| {
             if (std.mem.eql(u8, st.item_name, "gated")) seen_high += 1;
         }
@@ -999,7 +1048,7 @@ test "all-gated roll yields an empty container, not fabricated items" {
     var stacks: [max_roll_stacks]Stack = undefined;
     var seed: u32 = 0;
     while (seed < 50) : (seed += 1) {
-        const n = t.rollContainer("emptyOk", 30, seed, &stacks);
+        const n = t.rollContainer("emptyOk", 30, seed, &stacks, .{});
         try std.testing.expectEqual(@as(usize, 0), n);
     }
 }
@@ -1034,7 +1083,7 @@ test "loot quality template rolls quality by loot stage" {
     var saw_hi = false;
     var i: u32 = 0;
     while (i < 200) : (i += 1) {
-        const n = t.rollContainer("c", 1, 9000 + i, &stacks);
+        const n = t.rollContainer("c", 1, 9000 + i, &stacks, .{});
         for (stacks[0..n]) |s| {
             try std.testing.expect(s.quality == 1 or s.quality == 2);
             if (s.quality == 2) saw_hi = true;
@@ -1045,7 +1094,7 @@ test "loot quality template rolls quality by loot stage" {
     var saw_6 = false;
     i = 0;
     while (i < 200) : (i += 1) {
-        const n = t.rollContainer("c", 15, 7000 + i, &stacks);
+        const n = t.rollContainer("c", 15, 7000 + i, &stacks, .{});
         for (stacks[0..n]) |s| {
             try std.testing.expect(s.quality == 4 or s.quality == 6);
             if (s.quality == 6) saw_6 = true;
@@ -1079,7 +1128,7 @@ test "count=all groups spawn every entry; force_prob gates independently" {
     // count="all": every entry spawns once regardless of prob; the force_prob
     // entry gates on its own prob (1 here so it stays).
     var stacks: [16]Stack = undefined;
-    const n = t.rollGroup("allGroup", 1, 7, &stacks, 0, "");
+    const n = t.rollGroup("allGroup", 1, 7, &stacks, 0, "", .{});
     try std.testing.expectEqual(@as(usize, 4), n);
     var saw_all = true;
     for ([_][]const u8{ "a", "b", "c", "gated" }) |want| {
@@ -1095,7 +1144,7 @@ test "count=all groups spawn every entry; force_prob gates independently" {
     var i: u32 = 0;
     var saw_x = false;
     while (i < 200) : (i += 1) {
-        const n2 = t.rollGroup("pickGroup", 1, 1000 + i, &s2, 0, "");
+        const n2 = t.rollGroup("pickGroup", 1, 1000 + i, &s2, 0, "", .{});
         for (s2[0..n2]) |s| {
             if (std.mem.eql(u8, s.item_name, "x")) saw_x = true;
         }
@@ -1120,17 +1169,17 @@ test "loot rolls stay deterministic for a given stage and seed" {
     const t = LootTable.builtin();
     var a: [max_roll_stacks]Stack = undefined;
     var b: [max_roll_stacks]Stack = undefined;
-    const na = t.rollContainer("woodenChest", 37, 99, &a);
-    const nb = t.rollContainer("woodenChest", 37, 99, &b);
+    const na = t.rollContainer("woodenChest", 37, 99, &a, .{});
+    const nb = t.rollContainer("woodenChest", 37, 99, &b, .{});
     try std.testing.expectEqual(na, nb);
     for (a[0..na], b[0..nb]) |x, y| {
         try std.testing.expectEqualStrings(x.item_name, y.item_name);
         try std.testing.expectEqual(x.count, y.count);
     }
     // Stage 0 and the i32 extremes must not trap.
-    _ = t.rollContainer("woodenChest", 0, 1, &a);
-    _ = t.rollContainer("woodenChest", std.math.minInt(i32), 1, &a);
-    _ = t.rollContainer("woodenChest", std.math.maxInt(i32), 1, &a);
+    _ = t.rollContainer("woodenChest", 0, 1, &a, .{});
+    _ = t.rollContainer("woodenChest", std.math.minInt(i32), 1, &a, .{});
+    _ = t.rollContainer("woodenChest", std.math.maxInt(i32), 1, &a, .{});
 }
 
 test "stock loot prob templates load and band the real items" {
@@ -1180,12 +1229,12 @@ test "reward group rolls fixed first picks or prob-weighted choices" {
     defer lt.deinit();
     var stacks: [8]Stack = undefined;
     // isfixed: the first two entries, deterministic.
-    const nf = lt.rollGroupPicks("groupQuestWeapons", 1, 42, 2, true, &stacks);
+    const nf = lt.rollGroupPicks("groupQuestWeapons", 1, 42, 2, true, &stacks, .{});
     try std.testing.expectEqual(@as(usize, 2), nf);
     try std.testing.expectEqualStrings("gunPistolT2", stacks[0].item_name);
     try std.testing.expectEqualStrings("gunRifleT2", stacks[1].item_name);
     // Weighted picks: each pick resolves to one of the three.
-    const nw = lt.rollGroupPicks("groupQuestWeapons", 1, 42, 3, false, &stacks);
+    const nw = lt.rollGroupPicks("groupQuestWeapons", 1, 42, 3, false, &stacks, .{});
     try std.testing.expectEqual(@as(usize, 3), nw);
     var i: usize = 0;
     while (i < nw) : (i += 1) {
@@ -1194,7 +1243,7 @@ test "reward group rolls fixed first picks or prob-weighted choices" {
             std.mem.eql(u8, stacks[i].item_name, "meleeClubT2"));
     }
     // Unknown group returns nothing (fail closed).
-    try std.testing.expectEqual(@as(usize, 0), lt.rollGroupPicks("noSuchGroup", 1, 1, 1, false, &stacks));
+    try std.testing.expectEqual(@as(usize, 0), lt.rollGroupPicks("noSuchGroup", 1, 1, 1, false, &stacks, .{}));
 }
 
 test "container group rolls are prob-weighted, not uniform" {
@@ -1223,7 +1272,7 @@ test "container group rolls are prob-weighted, not uniform" {
     var i: usize = 0;
     while (i < 4000) : (i += 1) {
         s = s *% 1103515245 +% 12345;
-        const n = lt.rollContainer("cWeighted", 1, s, &stacks);
+        const n = lt.rollContainer("cWeighted", 1, s, &stacks, .{});
         try std.testing.expectEqual(@as(usize, 1), n);
         if (std.mem.eql(u8, stacks[0].item_name, "commonItem")) {
             common += 1;
@@ -1268,10 +1317,10 @@ test "stock loot: a requirement-gated entry is omitted, not rolled at 100%" {
     var gated = false;
     for (crate.entries[0..crate.entry_n]) |e| {
         if (std.mem.eql(u8, e.name, "groupWorkingStiffsBooks")) {
-            try std.testing.expect(e.gated);
+            try std.testing.expectEqual(GateKind.other, e.gate.kind);
             gated = true;
         } else if (std.mem.eql(u8, e.name, "groupWorkingStiffs01")) {
-            try std.testing.expect(!e.gated);
+            try std.testing.expectEqual(GateKind.none, e.gate.kind);
         }
     }
     try std.testing.expect(gated);
@@ -1293,7 +1342,7 @@ test "stock loot: a requirement-gated entry is omitted, not rolled at 100%" {
     var produced: usize = 0;
     var seed: u32 = 1;
     while (seed <= 200) : (seed += 1) {
-        const n = lt.rollGroup("groupWorkingStiffsCrate", 1, seed, &stacks, 0, "");
+        const n = lt.rollGroup("groupWorkingStiffsCrate", 1, seed, &stacks, 0, "", .{});
         produced += n;
         for (stacks[0..n]) |st| {
             for (book_names[0..book_n]) |bn| {
@@ -1304,4 +1353,55 @@ test "stock loot: a requirement-gated entry is omitted, not rolled at 100%" {
     // The group really rolls: a test that passed by producing nothing would
     // not prove the gated entry was omitted.
     try std.testing.expect(produced > 0);
+}
+
+test "stock loot: a Biome-gated entry rolls in its biome, omitted elsewhere" {
+    // `groupShamwaySafe` (count="all") carries
+    // `<item name="plantedGraceCorn1Schematic"><requirement class="Biome"
+    // biomes="wasteland"/></item>` next to a RandomRoll-gated book group. The
+    // biome gate is answerable at roll time (the container's own biome), so it
+    // resolves; the RandomRoll stays omitted until its cvar exists.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var lt = try loadFromPath(std.testing.allocator, path);
+    defer lt.deinit();
+    const g = lt.groupByName("groupShamwaySafe") orelse return error.SkipZigTest;
+    var saw_biome = false;
+    var saw_other = false;
+    for (g.entries[0..g.entry_n]) |e| {
+        if (std.mem.eql(u8, e.name, "plantedGraceCorn1Schematic")) {
+            try std.testing.expectEqual(GateKind.biome, e.gate.kind);
+            try std.testing.expectEqualStrings("wasteland", e.gate.biomes);
+            saw_biome = true;
+        }
+        if (std.mem.eql(u8, e.name, "booksAllScaled")) {
+            try std.testing.expectEqual(GateKind.other, e.gate.kind);
+            saw_other = true;
+        }
+    }
+    try std.testing.expect(saw_biome and saw_other);
+
+    var stacks: [32]Stack = undefined;
+    const in_biome = lt.rollGroup("groupShamwaySafe", 1, 7, &stacks, 0, "", .{ .biome_name = "wasteland" });
+    var got_corn = false;
+    for (stacks[0..in_biome]) |st| {
+        if (std.mem.eql(u8, st.item_name, "plantedGraceCorn1Schematic")) got_corn = true;
+    }
+    try std.testing.expect(got_corn);
+    const off_biome = lt.rollGroup("groupShamwaySafe", 1, 7, &stacks, 0, "", .{ .biome_name = "forest" });
+    for (stacks[0..off_biome]) |st| {
+        try std.testing.expect(!std.mem.eql(u8, st.item_name, "plantedGraceCorn1Schematic"));
+    }
+    // No biome in the ctx: the gate cannot be answered, so it is omitted.
+    const no_ctx = lt.rollGroup("groupShamwaySafe", 1, 7, &stacks, 0, "", .{});
+    for (stacks[0..no_ctx]) |st| {
+        try std.testing.expect(!std.mem.eql(u8, st.item_name, "plantedGraceCorn1Schematic"));
+    }
+
+    // The evaluator itself: ungated always, biome by name, other never.
+    try std.testing.expect((EntryGate{}).allowed(.{}));
+    try std.testing.expect(!(EntryGate{ .kind = .other }).allowed(.{ .biome_name = "wasteland" }));
+    try std.testing.expect((EntryGate{ .kind = .biome, .biomes = "forest,wasteland" }).allowed(.{ .biome_name = "wasteland" }));
+    try std.testing.expect(!(EntryGate{ .kind = .biome, .biomes = "forest" }).allowed(.{ .biome_name = "wasteland" }));
+    try std.testing.expect(!(EntryGate{ .kind = .biome, .biomes = "forest" }).allowed(.{}));
 }
