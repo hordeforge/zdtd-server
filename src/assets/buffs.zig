@@ -352,7 +352,17 @@ pub const Axis = union(enum) {
     level: u8,
     /// A buff's elapsed duration in seconds.
     duration: f32,
+    /// An equipped/held item's quality tier. Unlike `level`, quality 0 is a
+    /// real value (an item with no quality tier), so it does not short-circuit:
+    /// stock seeds `PassiveEffect.ModValue` with `ItemValue.Quality` and spreads
+    /// the value curve across the item's tier axis (`tier=`/quality 1..max),
+    /// which is `curveValueAt` rather than the level-anchor interpolator.
+    quality: Quality,
 };
+
+/// The item-quality axis: the tier value plus the tier count cap the items.xml
+/// curve spreads over (stock item quality 1..6, `components.max_quality_tiers`).
+pub const Quality = struct { level: u8, max: u8 };
 
 /// Anchor-pair curve evaluation (stock `PassiveEffect.ModValue` over the
 /// `level=`/`duration=` anchors): piecewise-linear between (levels[i],
@@ -554,21 +564,22 @@ fn scanTriggeredRows(
     }
 }
 
-/// One buff body's `<passive_effect>` rows, each with its effect_group's gates.
-/// Every stock buff keeps its passives in `<effect_group>` blocks (881/881) and
-/// none nests a group, so the walk is one level deep; a hand-built or modded
-/// buff may put a row at the top level, which then carries only its own gates.
-/// `budget` is the absolute pool index `max_passives_per_buff` ends at.
-fn scanPassives(
+/// One element body's `<passive_effect>` rows, each with its effect_group's
+/// gates. Every stock buff keeps its passives in `<effect_group>` blocks
+/// (881/881) and none nests a group, so the walk is one level deep; a hand-built
+/// or modded buff may put a row at the top level, which then carries only its
+/// own gates. Items.xml carries the same rows on an `<item>`, so the scanner is
+/// shared: `budget` is the absolute pool index the caller's row cap ends at
+/// (buffs: `max_passives_per_buff`; items: `max_passives_per_item`).
+pub fn scanPassives(
     allocator: std.mem.Allocator,
     arena: std.mem.Allocator,
     body: []const u8,
     passives: *std.ArrayList(Passive),
     req_pool: *std.ArrayList(requirements.Requirement),
     req_ranges: *std.ArrayList(struct { usize, usize }),
+    budget: usize,
 ) !bool {
-    const p0 = passives.items.len;
-    const budget = @min(p0 + max_passives_per_buff, max_passives_total);
     var i: usize = 0;
     while (i < body.len and passives.items.len < budget) {
         const lt = std.mem.findPos(u8, body, i, "<") orelse break;
@@ -738,7 +749,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
         try trig_ranges.append(allocator, .{ tr0, triggered_list.items.len - tr0 });
 
         const p0 = passives_list.items.len;
-        if (try scanPassives(allocator, arena, body, &passives_list, &reqs_list, &req_ranges)) truncated_passives += 1;
+        const passive_budget = @min(passives_list.items.len + max_passives_per_buff, max_passives_total);
+        if (try scanPassives(allocator, arena, body, &passives_list, &reqs_list, &req_ranges, passive_budget)) truncated_passives += 1;
         try metas.append(allocator, meta);
         try ranges.append(allocator, .{ p0, passives_list.items.len - p0 });
         try mod_ranges.append(allocator, .{ m0, mods_list.items.len - m0 });
@@ -992,6 +1004,9 @@ pub fn trackedDeltasAt(
     const a: f32 = switch (axis) {
         .level => |l| if (l == 0) return .{} else @floatFromInt(l),
         .duration => |d| d,
+        // The quality axis never short-circuits (see Axis.quality); the value is
+        // resolved per row through curveValueAt below.
+        .quality => 0,
     };
     var out: TrackedDeltas = .{};
     for (passives) |p| {
@@ -1008,7 +1023,14 @@ pub fn trackedDeltasAt(
         if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
         // A `value="@name"` row reads the entity's cvar instead of the curve
         // (the cvar's own value already carries any scaling).
-        const v = if (p.value_cvar.len > 0) requirements.cvarValue(ctx, p.value_cvar) else curveAtAxis(p, a);
+        const v = if (p.value_cvar.len > 0)
+            requirements.cvarValue(ctx, p.value_cvar)
+        else switch (axis) {
+            // Item rows carry the same `value=` curve, but the axis is the
+            // quality tier (see itemQualityValue).
+            .quality => |q| itemQualityValue(p, q),
+            else => curveAtAxis(p, a),
+        };
         switch (p.op) {
             .base_add => addTo(&out, field, v),
             .base_subtract => addTo(&out, field, -v),
@@ -1018,6 +1040,20 @@ pub fn trackedDeltasAt(
         }
     }
     return out;
+}
+
+/// Value of a passive row at an item's quality tier. Stock seeds
+/// `PassiveEffect.ModValue` with `ItemValue.Quality`, and the IL branches are:
+/// explicit `_levels` anchors interpolate; a single `_values` entry applies
+/// flat at any level (`_levels == null`, `_values.Length == 1`); a
+/// multi-segment curve spreads its segments across the tier range
+/// (1..`q.max`), so a level below the first segment applies nothing (a
+/// no-quality item's level 0). Matches the items.xml PDR/EDR curve path.
+fn itemQualityValue(p: Passive, q: Quality) f32 {
+    if (p.curve_levels_len > 0) return curveAtAxis(p, @floatFromInt(q.level));
+    if (p.curve_len <= 1) return p.value;
+    if (q.level == 0) return 0;
+    return curveValueAt(q.level, q.max, p.curve[0..p.curve_len]);
 }
 
 /// `PassiveEffect::hasMatchingTag` (IL=53) with the stock defaults (`MatchAnyTags`
@@ -1302,6 +1338,36 @@ fn triggeredHealthPerSecond(def: *const BuffDef, r: *const TriggeredResult) f32 
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
     return paths.tryLoadConfig("buffs.xml", Table, loadFromPath, allocator, game_dir, config_dir);
+}
+
+test "the quality axis evaluates item rows at the item's tier" {
+    var counts: requirements.Counts = .{};
+    // A single-segment row is level-independent (ModValue's `_levels == null`,
+    // `_values.Length == 1` branch): it applies at any quality, including the 0
+    // of an item with no quality tier (a plain shirt's flat row).
+    var flat: Passive = .{ .name = "GeneralDamageResist", .op = .base_add, .curve_len = 1 };
+    flat.curve[0] = 0.05;
+    flat.value = 0.05;
+    for ([_]u8{ 0, 1, 6 }) |q| {
+        const d = trackedDeltasAt(&.{flat}, .{ .quality = .{ .level = q, .max = 6 } }, .{}, &counts);
+        try std.testing.expectApproxEqAbs(@as(f32, 0.05), d.general_resist, 0.0001);
+    }
+    // Six segments spread across tiers 1..6 (armorAthleticOutfit HealthMax
+    // "2,4,6,8,10,20"): Q1 = 2, Q6 = 20. The level axis would average a
+    // two-segment curve, which is why items need their own axis.
+    var curve: Passive = .{ .name = "HealthMax", .op = .base_add, .curve_len = 6 };
+    curve.curve = .{ 2, 4, 6, 8, 10, 20, 0, 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 20), trackedDeltasAt(&.{curve}, .{ .quality = .{ .level = 6, .max = 6 } }, .{}, &counts).hp_max, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), trackedDeltasAt(&.{curve}, .{ .quality = .{ .level = 1, .max = 6 } }, .{}, &counts).hp_max, 0.001);
+    // A no-quality item sits below the first segment: nothing applies (stock
+    // returns from ModValue without touching the value).
+    try std.testing.expectEqual(@as(f32, 0), trackedDeltasAt(&.{curve}, .{ .quality = .{ .level = 0, .max = 6 } }, .{}, &counts).hp_max);
+    // Two segments (the armor resist shape "8,12.3") spread over 1..6 too:
+    // Q1 = 8, Q6 = 12.3.
+    var pair: Passive = .{ .name = "PhysicalDamageResist", .op = .base_add, .curve_len = 2 };
+    pair.curve = .{ 8, 12.3, 0, 0, 0, 0, 0, 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 8), trackedDeltasAt(&.{pair}, .{ .quality = .{ .level = 1, .max = 6 } }, .{}, &counts).phys_resist, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.3), trackedDeltasAt(&.{pair}, .{ .quality = .{ .level = 6, .max = 6 } }, .{}, &counts).phys_resist, 0.001);
 }
 
 test "stack_type parse is case-insensitive and falls back to ignore" {

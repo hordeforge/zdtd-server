@@ -3924,6 +3924,41 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     entity classes' `Buffs=` list applies through the same data path. What
     remains of the leg is the row *actions* and the missing inputs above, not
     the lifecycle plumbing.
+  - **Item passives fold: the equipment and holding layers (round 23,
+    2026-09-12).** Stock `EffectManager.GetValue` (IL=372, layer list in
+    RE `content/minevents.md` 7.0) folds, in order: the original item, the
+    holding item (7), the equipment items (8), progression, then buffs. zdtd
+    folded only progression and buffs, and the items loader kept just the two
+    resist names (the quality curves `armorMitigation` reads), so the rest of
+    the file's rows were parsed away: 3030 `<passive_effect>` rows across 272
+    items, of which 72 items carry one of the tracked names (HealthMax 7,
+    StaminaMax 8, GeneralDamageResist 1, PhysicalDamageResist 134,
+    ElementalDamageResist 133, StaminaChangeOT 83). The loader now parses every
+    row with its `effect_group` + row gates through the shared buffs scanner,
+    resolves the list through `Extends` (first ancestor with rows wins, the
+    rule the resist curves already follow), and the survival tick folds the
+    equipped slots and `Inventory.heldItem()` into the same VM. Item rows
+    evaluate on a new `.quality` axis (`buffs.itemQualityValue`): an explicit
+    `level=` anchor interpolates, a single-segment row is level-independent
+    (so a no-quality item's flat row still applies), and a multi-segment curve
+    spreads across the tier range exactly like the PDR curve path. `IsEquipped`
+    (IL=97) lands with it, answered per fold (`Ctx.item_equipped`: true for an
+    equipment slot, false for the hand, null for buff/perk folds which refuse).
+    Measured live: `armorAthleticOutfit` Q6 lifts max HP 100 -> 120 and the
+    lift reverses on unequip (recompute-from-set), and `armorEnforcerOutfit`'s
+    `GeneralDamageResist 0.05` row is gated `ProgressionLevel
+    perkEnforcerApparel Equals 1`, so it folds only once the perk is owned.
+    - Residuals, recorded: (a) the two resist names are deliberately NOT folded
+      here because `armor_pdr_fn` (the items.xml quality-curve path feeding
+      `armorMitigation`) already owns PhysicalDamageResist; ElementalDamageResist
+      still has no consumer (see the round-22 EDR residual above); (b) the 83
+      item `StaminaChangeOT` rows are all `tags="running"`/`"walking"`, so they
+      need the sprint leg to run a `running`-tagged query before they apply (the
+      current sprint drain uses the `Rules` floor); (c) `Equipment` mod items
+      (layer 13, `ItemClassModifier` Effects applied at the mod's quality) and
+      the `params.ItemValue`-scoped gates (`ItemHasTags`, `CompareItemMetaFloat`,
+      `RequirementItemModTier`) are not modelled, so those rows still fail
+      closed and are counted.
   - **`GeneralDamageResist` has a consumer, and the AI melee choke has the armor
     leg (round 22, 2026-09-12).** The tracked fold produced `general_resist` and
     `elem_resist` and **nothing read either**: `grep general_resist` found only

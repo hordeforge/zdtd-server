@@ -8,7 +8,18 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Loadgen combat smoke 2026-09-12** (AGENTS rule 5,
+`lint-architecture: clean`). **Loadgen combat smoke 2026-09-12 (round 23,
+item-passive fold)** on the same setup: 2/2 joins, 12 zombie kills, and every
+wire/encode/decode/phase/ownership counter still 0. Tick cost moved with the
+new work: the `survival` section went from 35 us mean / 24.5 us p50 to 45 us
+mean / 49 us p50 (Debug binary, 2 players, ~6 us per player-tick for the
+equipped/held item fold), still ~0.1 percent of the 50 ms budget at 8 players;
+`tick_total` p50 read 0.79 ms in both runs of this build against 0.39 ms in the
+round-22 run, which is join-churn dominated (the same run's `sim_entities` p50
+is 0.39 ms and `replicate` mean 11.5 ms). The item-fold arithmetic itself is
+pinned by the `assets` and `game` tests with stock items.xml, not by the bots,
+which spawn without armor.
+**Loadgen combat smoke 2026-09-12** (AGENTS rule 5,
 Debug binary, flat world with the stock `--game-dir`, `--mode combat
 --spawn-zombies`, 2 bots): 8 joins, `join_fail=0`, 16 zombies spawned, 12
 deaths from zombie melee (the deferred-damage choke), and

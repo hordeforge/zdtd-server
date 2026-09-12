@@ -87,6 +87,10 @@ pub const Kind = enum(u8) {
     entity_tag_compare,
     /// `IsNight` IL=19: `!World.IsDaytime()`, invert-aware.
     is_night,
+    /// `IsEquipped` IL=97: true when the row's own item value sits in one of
+    /// the target's equipment slots (the mod path scans each equipped item's
+    /// Modifications array, which zdtd does not model, so a mod context refuses).
+    is_equipped,
     /// `CVarCompare` IL=23: the entity's custom variable against `value`
     /// (a missing name reads 0).
     cvar_compare,
@@ -179,6 +183,11 @@ pub const Ctx = struct {
     /// `World.IsDaytime()` negated, for `IsNight` (IL=19). Null = the caller has
     /// no clock, which refuses the gate rather than guessing a phase.
     is_night: ?bool = null,
+    /// The row's item sits in an equipment slot, for `IsEquipped` (IL=97).
+    /// Null = the fold has no item context (a buff or perk row), so the gate is
+    /// refused; true/false = the item fold's own answer. An item in the hand is
+    /// NOT equipped (Equipment::GetItems does not include the holding slot).
+    item_equipped: ?bool = null,
     /// The entity's own `Tags` property (`entityclasses.xml <property
     /// name="Tags">`, inherited through `extends` like `EntityClass.CopyFrom`
     /// IL=171), as a comma list. `EntityTagCompare` with the default `self`
@@ -266,6 +275,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "StatCompareCurrent")) return .stat_compare_current;
     if (std.mem.eql(u8, name, "EntityTagCompare")) return .entity_tag_compare;
     if (std.mem.eql(u8, name, "IsNight")) return .is_night;
+    if (std.mem.eql(u8, name, "IsEquipped")) return .is_equipped;
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
     return .unsupported;
@@ -554,6 +564,14 @@ fn evalIsNight(r: Requirement, ctx: Ctx) Verdict {
     return verdict(night, r.negated);
 }
 
+/// `IsEquipped::IsValid` IL=97: the row's item value is in an equipment slot.
+/// The caller supplies that answer for the fold it is running (equipment true,
+/// holding false, mods unsupported); a caller with no item context refuses.
+fn evalIsEquipped(r: Requirement, ctx: Ctx) Verdict {
+    const equipped = ctx.item_equipped orelse return .unsupported;
+    return verdict(equipped, r.negated);
+}
+
 /// `EntityTagCompare::IsValid` IL=43: `target.HasAnyTags` (any-of) or
 /// `HasAllTags` with `has_all_tags="true"`, invert-aware. The evaluator runs
 /// for the default `self` target only; a foreign target is refused before the
@@ -675,6 +693,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .stat_compare_current => return evalStatCompareCurrent(r, ctx),
         .entity_tag_compare => return evalEntityTagCompare(r, ctx),
         .is_night => return evalIsNight(r, ctx),
+        .is_equipped => return evalIsEquipped(r, ctx),
         .cvar_compare => return evalCvarCompare(r, ctx),
         .worn_items => return evalWornItems(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
@@ -1007,6 +1026,19 @@ test "EntityTagCompare matches the entity's own class Tags" {
     foreign.target = .other;
     try testing.expectEqual(Verdict.unsupported, evaluate(&.{foreign}, .{ .entity_tags = "entity" }, &counts));
     try testing.expectEqual(@as(u32, 2), counts.unsupported);
+}
+
+test "IsEquipped answers from the item fold's own context" {
+    // IsEquipped IL=97: true when the row's ItemValue is in an equipment slot.
+    // Only the item fold knows that, so a buff/perk fold (null) refuses.
+    const eq = Requirement{ .kind = .is_equipped, .name = "IsEquipped" };
+    try testing.expect(all(&.{eq}, .{ .item_equipped = true }));
+    try testing.expect(!all(&.{eq}, .{ .item_equipped = false }));
+    const negated = Requirement{ .kind = .is_equipped, .name = "IsEquipped", .negated = true };
+    try testing.expect(all(&.{negated}, .{ .item_equipped = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{eq}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
 test "IsNight reads the clock and refuses without one" {

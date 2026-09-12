@@ -452,24 +452,70 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             // stock GetTotalPhysicalArmorRating sums passive 41 on the wearer.
             // The attacking item's tags are per-hit and stay with `item_mit`.
             self.sim.buff_phys_resist[ps] = vm_armor.phys_resist + pvm_armor.phys_resist;
+            // Equipped and held item passives (stock `EffectManager.GetValue`
+            // layers 7/8: `Inventory.ModifyValue` for the holding item, then the
+            // equipment `ModifyValue` pass). Each item's rows evaluate at its own
+            // quality tier, with `Ctx.item_equipped` answering `IsEquipped`
+            // (true for an equipment slot, false for the hand - `Equipment::
+            // GetItems` does not include the holding slot).
+            var ivm: assets_buffs.TrackedDeltas = .{};
+            {
+                const qmax: u8 = ecs.components.max_quality_tiers;
+                var item_ctx = req_ctx;
+                const held = self.sim.inventory[ps].heldItem();
+                if (held.count > 0) {
+                    item_ctx.item_equipped = false;
+                    if (self.items.byId(held.item_id)) |def| {
+                        if (def.passives.len > 0) {
+                            ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(
+                                def.passives,
+                                .{ .quality = .{ .level = @min(held.quality, qmax), .max = qmax } },
+                                item_ctx,
+                                &req_counts,
+                            ));
+                        }
+                    }
+                }
+                item_ctx.item_equipped = true;
+                var esi: usize = ecs.components.inv_equip_start;
+                while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+                    const slot = self.sim.inventory[ps].slots[esi];
+                    if (slot.count == 0) continue;
+                    const def = self.items.byId(slot.item_id) orelse continue;
+                    if (def.passives.len == 0) continue;
+                    ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(
+                        def.passives,
+                        .{ .quality = .{ .level = @min(slot.quality, qmax), .max = qmax } },
+                        item_ctx,
+                        &req_counts,
+                    ));
+                }
+                // The two resist names stay owned by the items.xml quality-curve
+                // path (`armor_pdr_fn` -> armorMitigation): folding them here too
+                // would double-count PhysicalDamageResist, and
+                // ElementalDamageResist has no consumer yet.
+                ivm.phys_resist = 0;
+                ivm.elem_resist = 0;
+            }
             // GeneralDamageResist (passive 40) is read UNTAGGED at the damage
             // choke (EntityAlive::DamageEntity reads it with an empty tag set),
-            // so it comes off the plain fold and joins every player hit.
-            self.sim.buff_general_resist[ps] = vm.general_resist + pvm.general_resist;
-            // Perk/buff max-stat deltas: unconditional recompute from the
+            // so it comes off the plain fold and joins every player hit. Items
+            // contribute through the same cache (`armorEnforcerOutfit` +0.05).
+            self.sim.buff_general_resist[ps] = vm.general_resist + pvm.general_resist + ivm.general_resist;
+            // Perk/buff/item max-stat deltas: unconditional recompute from the
             // bases every tick (revertible recompute-from-set - a zero delta
             // restores the spawn max; the values are stable so no churn).
-            const mhp = vm.hp_max + pvm.hp_max;
+            const mhp = vm.hp_max + pvm.hp_max + ivm.hp_max;
             h.max_hp = @max(1, h.base_max_hp + mhp);
             if (h.hp > h.max_hp) {
                 h.hp = h.max_hp;
                 self.sim.markDirty(ps, .{ .hp = true });
             }
-            const mfood = vm.food_max + pvm.food_max;
+            const mfood = vm.food_max + pvm.food_max + ivm.food_max;
             h.food_max = @max(1, 100 + mfood);
-            const mwater = vm.water_max + pvm.water_max;
+            const mwater = vm.water_max + pvm.water_max + ivm.water_max;
             h.water_max = @max(1, 100 + mwater);
-            const mstam = vm.stamina_max + pvm.stamina_max;
+            const mstam = vm.stamina_max + pvm.stamina_max + ivm.stamina_max;
             h.stamina_max = @max(1, 100 + mstam);
             const stages = assets_buffs.survivalStages(sv, h);
             const starving = stages.hungry == 3;
@@ -492,17 +538,17 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
             } else if (h.food >= prog.well_fed_threshold and h.water >= prog.well_fed_threshold) {
                 hp_delta += prog.well_fed_regen_per_hour * game_hours;
             }
-            // Perk/buff HealthChangeOT: stock applies the OT rate per second
+            // Perk/buff/item HealthChangeOT: stock applies the OT rate per second
             // (perkHealingFactor .011..16, well-rested regen), composing with
             // the starvation/regen branches above.
-            const hp_ot = vm.hp_ot + pvm.hp_ot;
+            const hp_ot = vm.hp_ot + pvm.hp_ot + ivm.hp_ot;
             if (hp_ot != 0) hp_delta += hp_ot * secs;
-            // Stamina OT consumer (perk/buff StaminaChangeOT): the VM's
+            // Stamina OT consumer (perk/buff/item StaminaChangeOT): the VM's
             // perc fraction of max per second joins the idle regen (stock
             // applies the buff's OT continuously; perkRuleOneCardio .1..3
             // adds a regen bonus, the stage-3 starvation buff drains while
             // idle too). The sprint branch keeps the stage-3 penalty.
-            stamina_ot_bonus = (vm.stamina_ot + pvm.stamina_ot) * h.stamina_max / 100.0;
+            stamina_ot_bonus = (vm.stamina_ot + pvm.stamina_ot + ivm.stamina_ot) * h.stamina_max / 100.0;
             // Stamina penalty: stock `StaminaChangeOT perc_subtract .1` on
             // buffStatusHungry03 while its stage holds. The gate moved from
             // "food/water <= 0" to "stage-3 buff active" (the stock 2%

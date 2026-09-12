@@ -4168,6 +4168,73 @@ test "EntityTagCompare resolves the player-only burning rows from stock buffs.xm
     try std.testing.expect(g.sim.health[ps].hp < before);
 }
 
+test "equipped item passives fold into the survival VM (stock data)" {
+    // Stock `EffectManager.GetValue` layers 7/8 fold the holding item and the
+    // equipment items alongside buffs and perks. Asserting on stock items.xml:
+    // armorAthleticOutfit HealthMax "2,4,6,8,10,20" (Q6 = +20) and
+    // armorEnforcerOutfit's flat GeneralDamageResist 0.05. Before this the item
+    // rows were parsed for the resist curves only, so armor gave no max stats.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    const slotOfItem = struct {
+        fn f(g_: *Game, ps_: ecs.Slot, id: u16) u16 {
+            for (g_.sim.inventory[ps_].slots, 0..) |s, i| {
+                if (s.item_id == id) return @intCast(i);
+            }
+            return 0;
+        }
+    }.f;
+    const outfit = g.items.byName("armorAthleticOutfit") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, outfit.id, 1));
+    var from = slotOfItem(g, ps, outfit.id);
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 0));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 120), g.sim.health[ps].max_hp, 0.001);
+    // Revertible: moving the piece out of the slot restores the base max on the
+    // next recompute (no inverse bookkeeping).
+    var free: u16 = 0;
+    for (g.sim.inventory[ps].slots[0..ecs.components.inv_equip_start], 0..) |s, i| {
+        if (s.count == 0) {
+            free = @intCast(i);
+            break;
+        }
+    }
+    try std.testing.expect(ecs.inventory.move(&g.sim, cl.slot, ecs.components.inv_equip_start, free, 1));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
+    // A second piece's flat GeneralDamageResist reaches the damage cache. Its
+    // row is gated `ProgressionLevel perkEnforcerApparel Equals 1`, so the item
+    // fold also proves item gates evaluate against the player's ledger.
+    const enforcer = g.items.byName("armorEnforcerOutfit") orelse return error.SkipZigTest;
+    try std.testing.expect(ecs.inventory.give(&g.sim, cl.slot, enforcer.id, 1));
+    from = slotOfItem(g, ps, enforcer.id);
+    try std.testing.expect(ecs.inventory.equip(&g.sim, cl.slot, from, 1));
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.sim.buff_general_resist[ps], 0.0001);
+    cl.skill_levels[0] = .{ .name = "perkEnforcerApparel", .level = 1 };
+    cl.skill_level_n = 1;
+    try g.step();
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), g.sim.buff_general_resist[ps], 0.0001);
+}
+
 test "perkPainTolerance GeneralDamageResist reaches the damage choke cache" {
     // perkPainTolerance's untagged `GeneralDamageResist base_add level="1,5"
     // value=".05,.25"` row is passive 40, which EntityAlive::DamageEntity reads

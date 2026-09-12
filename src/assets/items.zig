@@ -4,6 +4,7 @@ const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const buffs = @import("buffs.zig");
+const requirements = @import("requirements.zig");
 const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
 
@@ -12,6 +13,12 @@ const components = @import("../ecs/components.zig");
 /// **1413**, so this runs at 17% and has room to spare, unlike the block cap
 /// next door.
 pub const max_items: usize = 8192;
+
+/// Per-item passive_effect row cap and the pool cap across the whole file.
+/// Measured against V3.2.0 `Data/Config` (2026-09-12): 3255 `<passive_effect`
+/// rows in items.xml, the busiest item carrying 8, so both run far below cap.
+pub const max_passives_per_item: usize = 24;
+pub const max_item_passives_total: usize = 8192;
 
 /// Stock FastTags match between a passive's tag list and a drop row's tag
 /// list: an untagged passive applies to every drop; a tagged passive needs
@@ -126,6 +133,12 @@ pub const ItemDef = struct {
     /// chokes are physical-only today, so the PDR leg is the live one.
     elem_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     elem_resist_n: u8 = 0,
+    /// Every `<passive_effect>` row on the item, with its `effect_group` and
+    /// row gates, parsed through the shared buffs scanner. The survival tick
+    /// folds the tracked names over the equipped and held items (stock
+    /// `EffectManager.GetValue` layers 7/8), so clothing max stats, armor
+    /// resistances and boots' stamina rows apply. Empty = no rows (most items).
+    passives: []const buffs.Passive = &.{},
     /// items.xml `Tags` property (comma list): the item's mod-attachment tag
     /// surface. A mod fits when its installable_tags intersects Tags and its
     /// blocked_tags is disjoint (RE items.md ItemClassModifier suitability).
@@ -954,6 +967,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_has_quality.deinit(allocator);
     var stock_effect_group_declared: std.ArrayList(bool) = .empty;
     defer stock_effect_group_declared.deinit(allocator);
+    // Full `<passive_effect>` surface per item (same rows and gates buffs
+    // carry). The survival VM folds the tracked names over the equipped and
+    // held items; the dedicated PDR/EDR curve fields above stay the source for
+    // those two names (armorMitigation owns them).
+    var stock_passive_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer stock_passive_ranges.deinit(allocator);
+    var passives_pool: std.ArrayList(buffs.Passive) = .empty;
+    defer passives_pool.deinit(allocator);
+    var passive_reqs_pool: std.ArrayList(requirements.Requirement) = .empty;
+    defer passive_reqs_pool.deinit(allocator);
+    var passive_req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    defer passive_req_ranges.deinit(allocator);
 
     var next_stock: i32 = stock_first_item_type;
     var i: usize = 0;
@@ -1095,6 +1120,26 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_no_scrapping.append(allocator, no_scrap);
             // ItemActionEat: Action0 Class=Eat + effect_group cvars.
             const body = clean[ii..item_end];
+            // Every `<passive_effect>` row on the item, through the buffs
+            // scanner (rows and gates have one shape across both files).
+            // Truncation is silent per item; the total is capped so a crafted
+            // items.xml cannot exhaust the arena. The scanner takes the element
+            // BODY (as buffs passes the `<buff>` body), so the enclosing
+            // `<item>` tag is skipped here; a self-closing `<item/>` has none.
+            {
+                const p0 = passives_pool.items.len;
+                const budget = @min(p0 + max_passives_per_item, max_item_passives_total);
+                if (std.mem.findPos(u8, body, 0, ">")) |igt| {
+                    const inner_start = igt + 1;
+                    if (!(igt > 0 and body[igt - 1] == '/')) {
+                        const inner_end = std.mem.findPos(u8, body, inner_start, "</item>") orelse body.len;
+                        if (budget > p0 and inner_end > inner_start) {
+                            _ = try buffs.scanPassives(allocator, arena, body[inner_start..inner_end], &passives_pool, &passive_reqs_pool, &passive_req_ranges, budget);
+                        }
+                    }
+                }
+                try stock_passive_ranges.append(allocator, .{ p0, passives_pool.items.len - p0 });
+            }
             var is_eat = itemActionClassIs(body, "Eat");
             const food_amt: f32 = firstCvarAdd(body, "$foodAmountAdd") orelse 0;
             // HP on consume: food items carry `foodHealthAmount`; medical
@@ -1557,6 +1602,49 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         }
     }
 
+    // Materialize the item passive pool into the arena and resolve the ranges
+    // through `Extends` first: a child that declares no row inherits its
+    // parent's list (stock property inheritance, same rule the resist curves
+    // above follow). The pool order never changes, so the recorded ranges stay
+    // valid against the arena copy.
+    var item_passives: []const buffs.Passive = &.{};
+    {
+        var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer ext_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
+        }
+        var own_passive_map: std.StringHashMapUnmanaged(struct { usize, usize }) = .{};
+        defer own_passive_map.deinit(allocator);
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_passive_ranges.items[idx][1] > 0)
+                try own_passive_map.put(allocator, n, stock_passive_ranges.items[idx]);
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_passive_ranges.items[idx][1] > 0) continue;
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < 24) : (hops += 1) {
+                if (own_passive_map.get(cur)) |rg| {
+                    stock_passive_ranges.items[idx] = rg;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        const pool = try arena.alloc(buffs.Passive, passives_pool.items.len);
+        @memcpy(pool, passives_pool.items);
+        // One gate range per passive row; a mismatch means the scan and the
+        // append drifted apart (the same invariant buffs.zig checks).
+        if (passive_req_ranges.items.len != pool.len) return error.MalformedItems;
+        const req_pool = try arena.alloc(requirements.Requirement, passive_reqs_pool.items.len);
+        @memcpy(req_pool, passive_reqs_pool.items);
+        for (pool, passive_req_ranges.items) |*p, rg| {
+            p.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
+        }
+        item_passives = pool;
+    }
+
     // Builtin defs: fill stock_type + stack/econ/dmg from items.xml via stock alias.
     var list: std.ArrayList(ItemDef) = .empty;
     defer list.deinit(allocator);
@@ -1583,6 +1671,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.phys_resist_n = stock_pdr_n.items[idx];
                 def.elem_resist_curve = stock_edr_curves.items[idx];
                 def.elem_resist_n = stock_edr_n.items[idx];
+                const prg0 = stock_passive_ranges.items[idx];
+                def.passives = item_passives[prg0[0] .. prg0[0] + prg0[1]];
                 def.tags = try arena.dupe(u8, stock_tags.items[idx]);
                 def.armor_group = try arena.dupe(u8, stock_armor_group.items[idx]);
                 def.mod_slots_curve = stock_mslots_curves.items[idx];
@@ -1664,6 +1754,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .phys_resist_n = stock_pdr_n.items[idx],
             .elem_resist_curve = stock_edr_curves.items[idx],
             .elem_resist_n = stock_edr_n.items[idx],
+            .passives = item_passives[stock_passive_ranges.items[idx][0] .. stock_passive_ranges.items[idx][0] + stock_passive_ranges.items[idx][1]],
             .tags = try arena.dupe(u8, stock_tags.items[idx]),
             .armor_group = try arena.dupe(u8, stock_armor_group.items[idx]),
             .mod_slots_curve = stock_mslots_curves.items[idx],
@@ -2153,6 +2244,47 @@ test "stock items.xml Stacknumber default and Extends resolution" {
     try std.testing.expectEqual(@as(f32, 1.0), scaleOf(&t, "meleeToolRepairT0StoneAxe"));
     try std.testing.expectEqual(@as(f32, 0.5), scaleOf(&t, "toolCookingGrill"));
     try std.testing.expectEqual(@as(f32, 1.0), t.byId(8).?.econ_sell_scale);
+}
+
+test "item passive rows parse with their gates and inherit through Extends" {
+    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(gd ++ "/Data/Config")) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, gd ++ "/Data/Config/items.xml");
+    defer t.deinit();
+    const rowOf = struct {
+        fn f(d: ItemDef, name: []const u8) ?buffs.Passive {
+            for (d.passives) |p| {
+                if (std.mem.eql(u8, p.name, name)) return p;
+            }
+            return null;
+        }
+    }.f;
+    // armorAthleticOutfit carries HealthMax "2,4,6,8,10,20" (a 6-segment tier
+    // curve); the survival VM folds it at the item's quality.
+    const outfit = t.byName("armorAthleticOutfit") orelse return error.SkipZigTest;
+    const hm = rowOf(outfit, "HealthMax") orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(u8, 6), hm.curve_len);
+    try std.testing.expectApproxEqAbs(@as(f32, 20), hm.curve[5], 0.001);
+    // armorRangerBoots inherits StaminaMax from its master class (the same
+    // Extends chain the resist curves use).
+    const boots = t.byName("armorRangerBoots") orelse return error.SkipZigTest;
+    const sm = rowOf(boots, "StaminaMax") orelse return error.SkipZigTest;
+    try std.testing.expect(sm.curve_len > 0);
+    // armorEnforcerOutfit's flat GeneralDamageResist row (passive 40), the one
+    // item row the round-2 damage choke consumes.
+    const enforcer = t.byName("armorEnforcerOutfit") orelse return error.SkipZigTest;
+    const gdr = rowOf(enforcer, "GeneralDamageResist") orelse return error.SkipZigTest;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), gdr.value, 0.0001);
+    // The admin items gate their rows on IsEquipped (6 stock rows), which the
+    // item fold answers with Ctx.item_equipped.
+    const shirt = t.byName("toughGuyShirtAdmin") orelse return error.SkipZigTest;
+    var gated = false;
+    for (shirt.passives) |p| {
+        for (p.reqs) |r| {
+            if (r.kind == .is_equipped) gated = true;
+        }
+    }
+    try std.testing.expect(gated);
 }
 
 test "armor resist curves parse from stock items.xml (PDR quality curves)" {

@@ -7,6 +7,23 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Equipped armor and clothing granted none of their stats. `items.xml` carries
+  the same `<passive_effect>` rows buffs do (3030 rows across 272 items), but
+  the loader kept only the PhysicalDamageResist/ElementalDamageResist quality
+  curves, so an athletic outfit's `HealthMax 2..20`, ranger boots'
+  `StaminaMax 10..60` and the enforcer outfit's `GeneralDamageResist` never
+  applied. The loader now parses every row with its `effect_group` and row
+  gates (shared scanner with `buffs.xml`), resolves the list through `Extends`
+  like the other item properties, and the survival tick folds the equipped
+  items and the holding item into the same buff/perk VM at each item's own
+  quality tier, which is stock's `EffectManager.GetValue` layers 7 and 8.
+  `IsEquipped` (IL=97) evaluates against that item context, so the admin
+  clothing rows resolve too. Item rows the tick folds include gated ones: the
+  enforcer outfit's row is gated `ProgressionLevel perkEnforcerApparel
+  Equals 1` and only applies once the perk is owned. PhysicalDamageResist and
+  ElementalDamageResist stay owned by the item quality-curve path
+  (`armorMitigation`), so equipping a piece does not count its armour twice.
+
 - Worn armor did nothing against zombie melee. The deferred AI damage choke
   (`applyDeferredDamage`) applied the difficulty scale and the plugin verdict
   but neither resist leg, so a player in a full set took exactly the naked
