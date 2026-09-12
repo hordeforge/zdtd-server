@@ -7,6 +7,43 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Config surfaces and review follow-ups (round 2 of the 2026-09-12 batch).
+  - **`[sim] spawn_starter_kit`.** The fresh-player kit was hardcoded in
+    `World.spawnPlayer` (stone axe 1, foodCanBeef 5, resourceWood 20,
+    casinoCoin 50). It is now config: comma-separated `name` or `name:count`
+    rows, parsed once at `Game.create` after the item catalog loads, resolved
+    through items.xml. An unknown name is omitted rather than silently falling
+    back to the default kit, a count above the item's Stacknumber is clamped,
+    and an unset key keeps the built-in default.
+  - **`[sim] demo_seed`.** `starter_zombies = false` only dropped the demo
+    hostiles; Trader Jen, the minibike, the seed chest and the demo
+    generator/turret still placed unconditionally, so the documented
+    "stock-lazy fresh world one key away" was not true. `demo_seed = false` now
+    drops the rest, and the two switches together leave a fresh world to the
+    lazy stock systems (docs/DIVERGENCES.md 6.2).
+  - **Chunk damage channel is skipped when the chunk has no damage plane.**
+    `NetPackageChunk` always passed `dmg_at`, so `writeDamageChannel` ran
+    65536 indirect `dmgAt`/`blockAt`/`wireBlockDamage` calls per chunk even
+    when every cell reads 0; the null branch writes the same bytes
+    (sameValue 0 per layer), so the gate is byte-identical and mirrors the
+    existing `dens_at` gate.
+  - **Plugin override-point claims bind to the loaded slot.** A module the
+    loader skips (missing file, plugin cap) shifts every later module down,
+    while the resolver's `point_claims` stays keyed by plan slot. The claim
+    was installed on whichever module landed in that slot (whose
+    `hook_present` may pass) or on a slot past `self.n` that was voided
+    forever. `loadResolved` now maps plan slot to loaded slot.
+  - **Minimap pieces are marked sent only on a real send.** `tickMapChunks`
+    set `map_chunks_sent` before `trySendCompressed` and ignored the result,
+    so a full window or a compression failure left a permanent hole until the
+    map middle moved.
+  - **`sendReliablePumped` always has a deadline.** `budget_ns` was optional
+    and a null armed `reliable_send_deadline_ns = 0`, disabling the only cap
+    the fragment retry checks (leaving `max_attempts`, about 200 s). No caller
+    passed null; the parameter is now a plain `u64`.
+
+### Fixed
+
 - Fixes from the 2026-09-12 review passes (snapshots under `docs/archive/`).
   - **Chunk pacing budget charged per attempt.** `drainSpawnArea` and
     `streamChunksForClient` decremented the shared per-tick budget only after a
