@@ -1570,6 +1570,12 @@ pub const Game = struct {
         return game_player.purchaseSkillAtCost(self, slot, skill, target_level, cost_override);
     }
 
+    /// Fold the opening player's `LootProb` passives onto a tagged loot
+    /// entry's probability (stock `getProbability` -> GetValue(79, tags)).
+    pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const u8, base: f32) f32 {
+        return game_player.lootProbScale(self, peer_slot, ps, tags, base);
+    }
+
     pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {
         return game_player.addProgressionLevel(self, slot, name, delta);
     }

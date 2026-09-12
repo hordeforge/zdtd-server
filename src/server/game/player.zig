@@ -676,6 +676,51 @@ fn progressionMaxLevel(self: *const Game, name: []const u8) ?u16 {
 /// MinEventActionAddProgressionLevel (RE minevents.md IL=143): add `delta`
 /// to the named ProgressionValue, clamped to the crafting_skill max_level
 /// (stock magazines ship level="1"). Unknown names fail closed.
+/// Perk/attribute passives by name (the ledger keys on the catalog name).
+fn progressionPassives(self: *const Game, name: []const u8) []const assets_buffs.Passive {
+    for (self.progression_table.attributes) |a| {
+        if (std.mem.eql(u8, a.name, name)) return a.passives;
+    }
+    for (self.progression_table.perks) |p| {
+        if (std.mem.eql(u8, p.name, name)) return p.passives;
+    }
+    return &.{};
+}
+
+/// Fold the opening player's `LootProb` rows onto a loot entry's probability,
+/// with the entry's own `tags=` as the GetValue query set: the purchased
+/// perk/attribute rows at their level plus the active buffs' rows at their
+/// elapsed duration (stock `getProbability` -> `EffectManager.GetValue(79,
+/// ..., entry.tags)`). Equipped-item rows are not folded yet (2 stock rows, on
+/// the seed-packet items), and the query falls back to the item's own tags in
+/// stock only when the entry has none.
+pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const u8, base: f32) f32 {
+    var counts: requirements.Counts = .{};
+    var v = base;
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .cvars = &c.cvars,
+            .tags = tags,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.lootProbFold(progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .tags = tags };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.lootProbFold(def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    return v;
+}
+
 /// A progression value's `triggered_effect` rows from progression.xml.
 fn progressionTriggered(self: *const Game, name: []const u8) []const assets_buffs.Triggered {
     for (self.progression_table.attributes) |a| {

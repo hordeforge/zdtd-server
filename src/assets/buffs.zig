@@ -1046,6 +1046,45 @@ pub fn trackedDeltasAt(
     return out;
 }
 
+/// Fold the `LootProb` rows (passive 79) of `passives` onto a loot entry's base
+/// probability. Rows apply in file order with the GetValue op semantics
+/// (`base_set` replaces, `base_add`/`base_subtract` add, `perc_add`/
+/// `perc_subtract` scale by `1 +/- v/100`), and only rows whose `tags` intersect
+/// `ctx.tags` participate (`PassiveEffect::RequirementsMet` filters on the query
+/// tag set before the requirement group) - that query set is the loot entry's
+/// own `tags=` attribute, which is what the 431 tagged stock entries are for.
+/// Stock's 128 LootProb rows hang off perks like `perkDeadEye`
+/// (`perc_add 2..10 tags="rifleSkill,ammo762mm"`).
+pub fn lootProbFold(passives: []const Passive, axis: Axis, ctx: requirements.Ctx, base: f32, counts: *requirements.Counts) f32 {
+    const a: f32 = switch (axis) {
+        .level => |l| if (l == 0) return base else @floatFromInt(l),
+        .duration => |d| d,
+        .quality => 0,
+    };
+    var v = base;
+    for (passives) |p| {
+        if (!std.mem.eql(u8, p.name, "LootProb")) continue;
+        if (!tagsMatch(p.tags, ctx.tags)) continue;
+        if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
+        const amount = if (p.value_cvar.len > 0)
+            requirements.cvarValue(ctx, p.value_cvar)
+        else switch (axis) {
+            .quality => |q| itemQualityValue(p, q),
+            else => curveAtAxis(p, a),
+        };
+        switch (p.op) {
+            .base_set, .set => v = amount,
+            .base_add, .add => v += amount,
+            .base_subtract, .subtract => v -= amount,
+            .perc_add => v *= 1.0 + amount / 100.0,
+            .perc_subtract => v *= 1.0 - amount / 100.0,
+            else => {},
+        }
+        if (!(v >= 0)) v = 0;
+    }
+    return v;
+}
+
 /// Value of a passive row at an item's quality tier. Stock seeds
 /// `PassiveEffect.ModValue` with `ItemValue.Quality`, and the IL branches are:
 /// explicit `_levels` anchors interpolate; a single `_values` entry applies
@@ -1078,6 +1117,28 @@ pub fn tagsMatch(row_tags: []const u8, query: []const u8) bool {
         }
     }
     return false;
+}
+
+test "lootProbFold applies tagged LootProb rows in order" {
+    // perkDeadEye shape: perc_add 2..10 over levels 1..5 with the entry's tag
+    // in the query. Untagged queries and unmatched tags leave the base alone.
+    const rows = [_]Passive{
+        .{ .name = "LootProb", .op = .perc_add, .tags = "rifleSkill", .curve = .{ 2, 4, 6, 8, 10, 0, 0, 0 }, .curve_len = 5, .curve_levels = .{ 1, 2, 3, 4, 5, 0, 0, 0 }, .curve_levels_len = 5 },
+        .{ .name = "LootProb", .op = .base_set, .value = 1, .tags = "" },
+    };
+    var counts: requirements.Counts = .{};
+    const hit: requirements.Ctx = .{ .tags = "rifleSkill" };
+    // base 0.5 -> perc_add 10% at level 5 -> 0.55, then the untagged base_set 1
+    // (an untagged row matches any query) replaces it with 1.
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), lootProbFold(&rows, .{ .level = 5 }, hit, 0.5, &counts), 1e-4);
+    // Without the tag only the untagged row applies.
+    const miss: requirements.Ctx = .{ .tags = "shotgunSkill" };
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), lootProbFold(&rows, .{ .level = 5 }, miss, 0.5, &counts), 1e-4);
+    // Level 0 (not purchased) short-circuits before any row.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), lootProbFold(&rows, .{ .level = 0 }, hit, 0.5, &counts), 1e-4);
+    // A perc-only list scales the base: 0.5 * 1.02 = 0.51 at level 1.
+    const perc_only = [_]Passive{rows[0]};
+    try std.testing.expectApproxEqAbs(@as(f32, 0.51), lootProbFold(&perc_only, .{ .level = 1 }, hit, 0.5, &counts), 1e-4);
 }
 
 /// The level-1 (flat) variant, used by perk/attribute callers and tests.

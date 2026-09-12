@@ -5784,6 +5784,44 @@ test "spawn_starter_kit config replaces the built-in kit and fails closed" {
     try std.testing.expectEqual(@as(u32, 50), g2.sim.inventory[ps2].countItem(coin));
 }
 
+test "loot prob passives scale tagged entries (stock perkDeadEye)" {
+    // progression.xml's perkDeadEye carries
+    // `<passive_effect name="LootProb" operation="perc_add" level="1,5"
+    // value="2,10" tags="rifleSkill"/>` and the same for `ammo762mm`. The loot
+    // fold answers a tagged entry's probabilty from the opener's purchased
+    // perk rows, so a Dead Eye 5 player sees +10% on rifle-tagged loot and an
+    // unrelated tag is untouched.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    // Fresh character: every tag folds to the base.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "ammo762mm", 0.5), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "shotgunSkill", 0.5), 1e-4);
+
+    // Dead Eye 5: `perc_add 10` on the rifle/ammo762mm rows.
+    try std.testing.expect(g.addProgressionLevel(cl.slot, "perkDeadEye", 5));
+    const rifle = g.lootProbScale(cl.slot, ps, "ammo762mm", 0.5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.55), rifle, 1e-3);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.55), g.lootProbScale(cl.slot, ps, "rifleSkill", 0.5), 1e-3);
+    // An untagged query never sees a tagged row.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), g.lootProbScale(cl.slot, ps, "shotgunSkill", 0.5), 1e-4);
+}
+
 test "container loot starts a random-durability item worn" {
     // Stock LootContainer: when `random_durability="true"` and the item has a
     // MaxUseTimes, UseTimes = (int)(max * RandomRange(0.2, 0.8)); otherwise 0.

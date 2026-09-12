@@ -7,6 +7,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- **Tagged loot entries fold the player's `LootProb` passives.** 431 stock entries carry `tags=`; stock uses that list as the query tag set for `EffectManager.GetValue` of passive 79 (`LootProb`) and folds the result onto the entry's probability, which is what perks like `perkDeadEye` (`perc_add 2..10 tags="rifleSkill,ammo762mm"`, 128 stock rows in progression.xml) are for. The roll now applies a `ProbScale` callback for tagged entries, and the fill path answers it from the opener's purchased perk/attribute rows at their level plus the active buffs' rows at their duration, with the GetValue op semantics (`base_set`/`base_add`/`perc_add`…). A Dead Eye 5 player sees rifle-tagged loot at +10%.
+
 - **Loot entries can spawn a random-durability item.** `random_durability="true"` (123 stock rows, all explicitly `false` today) now marks the rolled stack, and the container fill starts the item at `(int)(MaxUseTimes * RandomRange(0.2, 0.8))` — stock `LootContainer` IL_032D — using the container's deterministic roll seed, so a worn tool is reproducible. An item with no durability stays pristine.
 
 - **Loot entries apply their `buffs` to the opener.** 63 stock entries carry a `buffs=` list (62 `buffPerkBookwormSuccess`, the bookworm success chime). Stock collects a spawned entry's list during the roll and applies it to the opener after it (`LootContainer.ExecuteBuffActions` → `Buffs.AddBuff`); the roll now reports each spawned entry's list through a `LootBuffSink` and the container fill adds them through the catalog path that also relays the buff to the client. An unknown name fails closed, which is what stock's own typo'd `buffbuffPerkBookwormSuccess` row needs.

@@ -43,6 +43,11 @@ pub const LootEntry = struct {
     /// `RoundToInt(count * mod * lootStage)` to the sandbox-scaled count, so a
     /// stage-50 ammo roll of 6..8 spawns roughly 9..12. 0 = no stage growth.
     loot_stage_count_mod: f32 = 0,
+    /// `tags="a,b"` (431 stock entries): the query tag set for the player's
+    /// `LootProb` passives (stock `getProbability` folds them onto the entry's
+    /// probability), so a perk like perkDeadEye's `tags="rifleSkill,ammo762mm"`
+    /// rows raise the odds of the entries carrying those tags. Arena-owned.
+    tags: []const u8 = "",
     /// `quality="N"`: the fixed quality this entry spawns at, overriding the
     /// loot quality template. Engine support from `ParseItemList` (which seeds
     /// minQuality/maxQuality from the caller and lets a `quality` attribute
@@ -178,11 +183,22 @@ pub const LootBuffSink = struct {
     add: *const fn (?*anyopaque, name: []const u8) void,
 };
 
+/// `getProbability`'s LootProb fold: the Game resolves the opening player's
+/// `LootProb` rows for the entry's own tag list.
+pub const ProbScale = struct {
+    ctx: ?*anyopaque = null,
+    scale: *const fn (?*anyopaque, tags: []const u8, base: f32) f32,
+};
+
 pub const LootGateCtx = struct {
     biome_name: ?[]const u8 = null,
     player: ?requirements.Ctx = null,
     /// Reports the `buffs=` of every entry that actually spawned.
     buffs: ?LootBuffSink = null,
+    /// Scales an entry's probability by its `tags=` list (stock
+    /// `getProbability` -> `EffectManager.GetValue(79, ..., entry.tags)`, the
+    /// player's LootProb passives; 128 stock rows). Null = no scaling.
+    prob_scale: ?ProbScale = null,
     /// [0,1) value for this entry's `RandomRoll`; the roll path advances a
     /// deterministic per-entry stream into it.
     roll: f32 = 0,
@@ -419,8 +435,13 @@ pub const LootTable = struct {
         return @intCast(@min(total, std.math.maxInt(u16)));
     }
 
-    fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32) bool {
-        const p = self.entryProb(e, loot_stage);
+    fn probGate(self: *const LootTable, e: LootEntry, loot_stage: i32, s: u32, ctx: LootGateCtx) bool {
+        var p = self.entryProb(e, loot_stage);
+        // The entry's own `tags=` are the query set for the player's LootProb
+        // passives (stock's tagged branch); an untagged entry is unscaled.
+        if (ctx.prob_scale) |ps| {
+            if (e.tags.len > 0) p = ps.scale(ps.ctx, e.tags, p);
+        }
         // A NaN prob (crafted/patched loot.xml) fails both comparisons below and
         // the NaN→int conversion in `@round` traps; fail closed to match the C#
         // unchecked cast (NaN rounds to 0, i.e. never picked).
@@ -542,10 +563,10 @@ pub const LootTable = struct {
             gctx.roll = unitRoll(s);
             if (!picked.gate.allowed(gctx)) continue;
             if (picked.force_prob) {
-                if (!self.probGate(picked, loot_stage, s)) {
+                if (!self.probGate(picked, loot_stage, s, ctx)) {
                     continue;
                 }
-            } else if (picked.prob_template != 0 and !self.probGate(picked, loot_stage, s)) continue;
+            } else if (picked.prob_template != 0 and !self.probGate(picked, loot_stage, s, ctx)) continue;
             reportBuffs(gctx, picked);
             if (picked.is_group) {
                 n += self.rollGroup(picked.name, loot_stage, s, out[n..], 1, qt, ctx);
@@ -591,7 +612,7 @@ pub const LootTable = struct {
             // index-0-always exception is gone - it was data-benign (0 of the
             // 339 stock containers have a plain first entry with prob < 1)
             // but wrong for hypothetical data.
-            const gate = !self.probGate(e, loot_stage, s);
+            const gate = !self.probGate(e, loot_stage, s, ctx);
             if (gate) continue;
             if (e.is_group) {
                 n += self.rollGroup(e.name, loot_stage, s, out[n..], 0, cont.quality_template, ctx);
@@ -649,7 +670,7 @@ pub const LootTable = struct {
                 gctx.roll = unitRoll(s ^ @as(u32, ai));
                 if (!e.gate.allowed(gctx)) continue;
                 s = s *% 1103515245 +% 12345;
-                if (e.force_prob and !self.probGate(e, loot_stage, s)) continue;
+                if (e.force_prob and !self.probGate(e, loot_stage, s, ctx)) continue;
                 reportBuffs(gctx, e);
                 if (e.is_group) {
                     an += self.rollGroup(e.name, loot_stage, s, out[an..], depth + 1, qt, ctx);
@@ -706,8 +727,8 @@ pub const LootTable = struct {
             // low-stage player cannot pull a top-tier item out of a group.
             // A force_prob entry rolls its prob independently.
             if (picked_e.force_prob) {
-                if (!self.probGate(picked_e, loot_stage, s)) continue;
-            } else if (picked_e.prob_template != 0 and !self.probGate(picked_e, loot_stage, s)) continue;
+                if (!self.probGate(picked_e, loot_stage, s, ctx)) continue;
+            } else if (picked_e.prob_template != 0 and !self.probGate(picked_e, loot_stage, s, ctx)) continue;
             reportBuffs(gctx, picked_e);
             if (picked_e.is_group) {
                 n += self.rollGroup(picked_e.name, loot_stage, s, out[n..], depth + 1, qt, ctx);
@@ -934,6 +955,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .prob = prob,
         .prob_template = tpl,
         .quality = quality,
+        .tags = xml.attr(tag_src, tag_at, "tags") orelse "",
         .loot_stage_count_mod = stage_mod,
         .random_durability = rnd_dura,
         .buffs = xml.attr(tag_src, tag_at, "buffs") orelse "",
@@ -1162,6 +1184,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
                 if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
+                if (ent.tags.len > 0) e.tags = try arena.dupe(u8, ent.tags);
                 // The gate's biome list points into the freed source text.
                 e.gate = try dupeGate(arena, ent.gate);
                 g.entries[g.entry_n] = e;
@@ -1233,6 +1256,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
                 if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
+                if (ent.tags.len > 0) e.tags = try arena.dupe(u8, ent.tags);
                 e.gate = try dupeGate(arena, ent.gate);
                 c.entries[c.entry_n] = e;
                 c.entry_n += 1;
@@ -1405,6 +1429,57 @@ test "stock loot item entries leave quality to the template" {
         for (qt.bands) |band| picks += band.picks.len;
     }
     try std.testing.expect(picks > 100);
+}
+
+test "loot entry tags feed the LootProb scale" {
+    // getProbability folds the player's LootProb passives onto the entry's prob
+    // with the entry's own `tags=` as the query set. A provider that answers 1
+    // makes the gated entry certain, 0 makes it impossible.
+    const src =
+        \\<lootcontainers>
+        \\<lootcontainer name="tagc" size="6,1">
+        \\  <item name="taggedThing" prob="0.5" tags="tagA"/>
+        \\</lootcontainer>
+        \\</lootcontainers>
+    ;
+    var lt = try loadFromSlice(std.testing.allocator, src);
+    defer lt.deinit();
+    try std.testing.expectEqualStrings("tagA", lt.containerByName("tagc").?.entries[0].tags);
+
+    const Fx = struct {
+        answer: f32 = 1.0,
+        seen_tags: []const u8 = "",
+        fn scale(ctx: ?*anyopaque, tags: []const u8, base: f32) f32 {
+            const f: *@This() = @ptrCast(@alignCast(ctx.?));
+            f.seen_tags = tags;
+            return if (f.answer < 0) base else f.answer;
+        }
+    };
+    var stacks: [4]Stack = undefined;
+    var hits: usize = 0;
+    var seed: u32 = 1;
+    while (seed <= 60) : (seed += 1) {
+        if (lt.rollContainer("tagc", 1, seed, &stacks, .{}) > 0) hits += 1;
+    }
+    try std.testing.expect(hits > 0 and hits < 60); // ~half without a provider
+
+    var fx: Fx = .{ .answer = 1.0 };
+    const sink = ProbScale{ .ctx = &fx, .scale = Fx.scale };
+    hits = 0;
+    seed = 1;
+    while (seed <= 60) : (seed += 1) {
+        if (lt.rollContainer("tagc", 1, seed, &stacks, .{ .prob_scale = sink }) > 0) hits += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 60), hits);
+    try std.testing.expectEqualStrings("tagA", fx.seen_tags);
+
+    fx.answer = 0;
+    hits = 0;
+    seed = 1;
+    while (seed <= 60) : (seed += 1) {
+        if (lt.rollContainer("tagc", 1, seed, &stacks, .{ .prob_scale = sink }) > 0) hits += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 0), hits);
 }
 
 test "random_durability marks the stack and the wear formula matches stock" {
