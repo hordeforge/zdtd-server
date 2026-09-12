@@ -7,6 +7,8 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- **Per-entry loot `quality` override.** `loot.xml`'s `ParseItemList` lets an item entry pin its quality with a `quality="N"` attribute, overriding the loot quality template; the loader ignored it. Entries now keep the attribute and the roll uses it instead of the template value. Stock's own file writes `quality` only on the `<loot>` rows inside `<lootqualitytemplate>`, so this is engine/modlet support rather than a stock-behaviour change (a test pins both facts).
+
 - **`abundance_type` scales loot group counts.** The 67 stock groups that carry `abundance_type` (Armor/Books/Magazines/Melee/Ranged) now scale their counts by that category's sandbox count option, read from the decoded server code (`FoodLootCount` ... `BookLootCount`, `LootAbundanceValues`), matching RE `RandomCountFromSandbox`. A category whose option is 0 disables it and spawns none of it, so the entry is dropped rather than written as an empty stack. The field was parsed onto `LootContainer`; stock puts it on `<lootgroup>` (67 groups, 0 containers), so it moved to `LootGroup` where the roll reads it.
 
 - **`SandboxOption` loot gates compare numerically.** The last unanswerable loot requirement class (3 stock rows) marked its entry omitted. `LootEntryRequirementSandboxOption` now reads the option's value under the server's decoded sandbox code and compares it with the requirement's operation and value, so stock's `HarvestingOutput EQ 0` ("output disabled") means what it says instead of being dropped; the fill path decodes `Game.sandbox_code` into the opener's requirement context.

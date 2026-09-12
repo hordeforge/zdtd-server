@@ -31,6 +31,13 @@ pub const LootEntry = struct {
     /// joining the group's pick pool (stock SpawnAllItemsFromList /
     /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
     force_prob: bool = false,
+    /// `quality="N"`: the fixed quality this entry spawns at, overriding the
+    /// loot quality template. Engine support from `ParseItemList` (which seeds
+    /// minQuality/maxQuality from the caller and lets a `quality` attribute
+    /// override them); stock's own loot.xml writes `quality` only on the
+    /// `<loot>` rows inside `<lootqualitytemplate>`, so every stock item entry
+    /// keeps 0 and uses the template roll. A modlet entry can pin one value.
+    quality: u8 = 0,
     /// The entry's `<requirement>` child (loot.xml's `LootEntryRequirement*`
     /// leaves). A class the roll path can answer resolves; everything else
     /// keeps the entry **omitted** rather than rolled unconditionally -
@@ -440,7 +447,7 @@ pub const LootTable = struct {
                     out[n] = .{
                         .item_name = e.name,
                         .count = cnt,
-                        .quality = self.resolveQuality(qt, loot_stage, s ^ @as(u32, i)),
+                        .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s ^ @as(u32, i)),
                     };
                     n += 1;
                 }
@@ -487,7 +494,7 @@ pub const LootTable = struct {
                 out[n] = .{
                     .item_name = picked.name,
                     .count = cnt,
-                    .quality = self.resolveQuality(qt, loot_stage, s),
+                    .quality = if (picked.quality > 0) picked.quality else self.resolveQuality(qt, loot_stage, s),
                 };
                 n += 1;
             }
@@ -544,7 +551,7 @@ pub const LootTable = struct {
                 out[n] = .{
                     .item_name = e.name,
                     .count = self.scaleCount(cnt, !cont.ignore_abundance, 1.0),
-                    .quality = self.resolveQuality(cont.quality_template, loot_stage, s),
+                    .quality = if (e.quality > 0) e.quality else self.resolveQuality(cont.quality_template, loot_stage, s),
                 };
                 n += 1;
             }
@@ -584,7 +591,7 @@ pub const LootTable = struct {
                     const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                     const cnt = self.scaleCount(cnt0, true, mult);
                     if (cnt == 0) continue; // disabled category spawns none
-                    out[an] = .{ .item_name = e.name, .count = cnt, .quality = self.resolveQuality(qt, loot_stage, s) };
+                    out[an] = .{ .item_name = e.name, .count = cnt, .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s) };
                     an += 1;
                 }
             }
@@ -642,7 +649,7 @@ pub const LootTable = struct {
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                 const cnt = self.scaleCount(cnt0, true, mult);
                 if (cnt == 0) continue; // disabled category spawns none
-                out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = self.resolveQuality(qt, loot_stage, s) };
+                out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = if (picked_e.quality > 0) picked_e.quality else self.resolveQuality(qt, loot_stage, s) };
                 n += 1;
             }
         }
@@ -785,6 +792,10 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
     const cr = parseCountRange(xml.attr(tag_src, tag_at, "count") orelse "1");
     const prob = xml.parseF32(xml.attr(tag_src, tag_at, "prob") orelse "1") orelse 1;
     const fp = xml.attr(tag_src, tag_at, "force_prob") orelse "";
+    const quality: u8 = if (xml.attr(tag_src, tag_at, "quality")) |q|
+        @intCast(@min(xml.parseU16(q) orelse 0, 255))
+    else
+        0;
     // The entry's own `<requirement>` child, if any (the element extent keeps a
     // nested group's gated entries their own). Only `Biome` is rolled today;
     // every other class marks the entry omitted (see `EntryGate`).
@@ -847,6 +858,7 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .count_max = cr.max,
         .prob = prob,
         .prob_template = tpl,
+        .quality = quality,
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
         .gate = gate,
     };
@@ -1280,6 +1292,91 @@ test "all-gated roll yields an empty container, not fabricated items" {
     while (seed < 50) : (seed += 1) {
         const n = t.rollContainer("emptyOk", 30, seed, &stacks, .{});
         try std.testing.expectEqual(@as(usize, 0), n);
+    }
+}
+
+test "stock loot item entries leave quality to the template" {
+    // Stock writes `quality` only on the <loot> rows inside a
+    // <lootqualitytemplate>, never on an <item>. This pins that fact and the
+    // template path it implies: the parsed entries carry no override, and the
+    // template still resolves a quality for them.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var lt = try loadFromPath(std.testing.allocator, path);
+    defer lt.deinit();
+    var entries: usize = 0;
+    for (lt.groups) |g| {
+        for (g.entries[0..g.entry_n]) |e| {
+            try std.testing.expectEqual(@as(u8, 0), e.quality);
+            entries += 1;
+        }
+    }
+    for (lt.containers) |c| {
+        for (c.entries[0..c.entry_n]) |e| {
+            try std.testing.expectEqual(@as(u8, 0), e.quality);
+            entries += 1;
+        }
+    }
+    try std.testing.expect(entries > 100);
+    // The template rows did parse (a rename would empty the picks).
+    try std.testing.expect(lt.quality_templates.len > 0);
+    var picks: usize = 0;
+    for (lt.quality_templates) |qt| {
+        for (qt.bands) |band| picks += band.picks.len;
+    }
+    try std.testing.expect(picks > 100);
+}
+
+test "loot entry quality overrides the quality template" {
+    // 698 stock entries carry a single `quality="1..6"`. Stock seeds the
+    // entry's minQuality/maxQuality from the caller and a `quality` attribute
+    // overrides them, so the entry spawns at that fixed quality instead of the
+    // template roll.
+    const src =
+        \\<lootcontainers>
+        \\<lootqualitytemplate name="qualTest">
+        \\  <qualitytemplate level="0,999999" default_quality="1">
+        \\    <loot quality="1" prob="1"/>
+        \\  </qualitytemplate>
+        \\</lootqualitytemplate>
+        \\<lootgroup name="fixedQ">
+        \\  <item name="weaponFixed" quality="6"/>
+        \\  <item name="weaponTemplate"/>
+        \\</lootgroup>
+        \\</lootcontainers>
+    ;
+    var t = try loadFromSlice(std.testing.allocator, src);
+    defer t.deinit();
+    const g = t.groupByName("fixedQ").?;
+    try std.testing.expectEqual(@as(u8, 6), g.entries[0].quality);
+    try std.testing.expectEqual(@as(u8, 0), g.entries[1].quality);
+
+    // The template alone always yields quality 1 here; the fixed entry must
+    // still come out at 6 with the group's template inherited (count="all").
+    const src2 =
+        \\<lootgroups>
+        \\<lootqualitytemplate name="qualTest">
+        \\  <qualitytemplate level="0,999999" default_quality="1">
+        \\    <loot quality="1" prob="1"/>
+        \\  </qualitytemplate>
+        \\</lootqualitytemplate>
+        \\<lootgroup name="allFixed" count="all" loot_quality_template="qualTest">
+        \\  <item name="weaponFixed" quality="6"/>
+        \\  <item name="weaponTemplate"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    ;
+    var t2 = try loadFromSlice(std.testing.allocator, src2);
+    defer t2.deinit();
+    var stacks: [8]Stack = undefined;
+    const n = t2.rollGroup("allFixed", 1, 42, &stacks, 0, "", .{});
+    try std.testing.expectEqual(@as(usize, 2), n);
+    for (stacks[0..n]) |st| {
+        if (std.mem.eql(u8, st.item_name, "weaponFixed")) {
+            try std.testing.expectEqual(@as(u8, 6), st.quality);
+        } else {
+            try std.testing.expectEqual(@as(u8, 1), st.quality);
+        }
     }
 }
 
