@@ -129,7 +129,9 @@ pub fn sendGameBudget(self: *Game, peer: *ln_peer.Peer, pkg_name: []const u8, bo
         return err;
     };
     if (isUnreliablePackage(pkg_name)) {
-        if (framed.len <= ln_packet.max_single_user) {
+        // Peer-aware limit: a frame between the negotiated MTU and the compile
+        // cap must fall through to the reliable path, not Overflow and drop.
+        if (framed.len <= peer.singleUserLimit()) {
             peer.sendUnreliable(&self.net.sock, framed) catch |err| {
                 self.harness.counters.inc(.net_send_errors);
                 return err;
@@ -210,7 +212,7 @@ pub fn sendReliablePumped(self: *Game, peer: *ln_peer.Peer, _: []const u8, frame
 }
 
 pub fn sendFramedUnreliable(self: *Game, peer: *ln_peer.Peer, framed: []const u8) void {
-    if (framed.len > ln_packet.max_single_user) {
+    if (framed.len > peer.singleUserLimit()) {
         sendFramedDroppable(self, peer, framed);
         return;
     }
@@ -339,7 +341,7 @@ pub fn broadcastExcept(self: *Game, name: []const u8, body: []const u8, except_s
         const p = c.peer orelse continue;
         if (!c.joined) continue;
         if (except_slot) |ex| if (c.slot == ex) continue;
-        if (isUnreliablePackage(name) and framed.len <= ln_packet.max_single_user) {
+        if (isUnreliablePackage(name) and framed.len <= p.singleUserLimit()) {
             p.sendUnreliable(&self.net.sock, framed) catch {
                 self.harness.counters.inc(.net_send_errors);
                 continue;

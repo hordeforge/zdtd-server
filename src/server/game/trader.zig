@@ -16,7 +16,9 @@ pub fn coinItemId(self: *const Game) u16 {
 
 pub fn traderMoney(self: *const Game, s: ecs.Slot) i32 {
     if (self.sim.mask[s].trader_stock) {
-        const m = self.sim.trader_stock[s];
+        // Pointer, not a copy: TraderStock is ~540 B (entries [50]StockEntry)
+        // and this is read per trader per replicate pass.
+        const m = &self.sim.trader_stock[s];
         if (m.wallet_default != 0) return m.wallet;
     }
     return self.trader_wallet_dukes;

@@ -249,11 +249,19 @@ pub const Peer = struct {
         return p;
     }
 
+    /// Largest unreliable user payload this peer accepts: the negotiated MTU
+    /// may sit below the compile cap, so senders must guard on this rather
+    /// than `packet.max_single_user` or an in-between frame returns Overflow
+    /// and is dropped with no fallback (net-send review 2026-09-12).
+    pub fn singleUserLimit(self: *const Peer) usize {
+        const eff_mtu: usize = if (self.peer_mtu == 0) packet.max_packet_size else self.peer_mtu;
+        return @min(packet.max_single_user, eff_mtu -| packet.channeled_header_size);
+    }
+
     /// Fire-and-forget unreliable (LiteNet property Unreliable). No retransmit.
     /// Use for high-rate cosmetic motion; game-critical still sendReliable.
     pub fn sendUnreliable(self: *Peer, sock: *udp.Socket, user: []const u8) !void {
-        const eff_mtu: usize = if (self.peer_mtu == 0) packet.max_packet_size else self.peer_mtu;
-        if (user.len > @min(packet.max_single_user, eff_mtu -| packet.channeled_header_size)) return error.Overflow;
+        if (user.len > self.singleUserLimit()) return error.Overflow;
         if (self.capture) |cap| cap.push(user);
         var buf: [packet.max_packet_size]u8 = undefined;
         // Unreliable header: property byte 0 + user
@@ -737,6 +745,13 @@ test "MTU probes are answered in full and negotiate up to the stock 1432" {
     try std.testing.expect(try peer.handlePacket(&sock, &probe) == null);
     try std.testing.expectEqual(packet.max_packet_size, peer.peer_mtu);
     try std.testing.expectEqual(@as(usize, 1432), peer.peer_mtu);
+    // The unreliable send limit follows the negotiated MTU, not the compile
+    // cap: a smaller probe shrinks it so senders route in-between frames to
+    // the reliable fallback instead of Overflowing and dropping them.
+    try std.testing.expectEqual(
+        @as(usize, 1432) - packet.channeled_header_size,
+        peer.singleUserLimit(),
+    );
 
     // A probe below the cap negotiates that smaller size verbatim.
     var small: Peer = .{};
@@ -746,6 +761,10 @@ test "MTU probes are answered in full and negotiate up to the stock 1432" {
     probe2[0] = packet.makeByte0(.mtu_check, small.conn_num);
     try std.testing.expect(try small.handlePacket(&sock, &probe2) == null);
     try std.testing.expectEqual(@as(usize, 1024), small.peer_mtu);
+    try std.testing.expectEqual(
+        @as(usize, 1024) - packet.channeled_header_size,
+        small.singleUserLimit(),
+    );
 
     // And it only ever climbs: a late smaller probe does not shrink it.
     try std.testing.expect(try small.handlePacket(&sock, probe2[0..512]) == null);

@@ -1183,6 +1183,7 @@ pub const WasmHost = struct {
             self.allocator.dupe(u8, self.slots[idx].display) catch ""
         else
             "";
+        const manifest_loaded = self.slots[idx].manifest_loaded;
         // `config.toml` bytes are loaded by loadResolved/loadAll, not by
         // loadInto, so a reload that only preserved tier/display silently
         // dropped them: every module with a config reverts to its compiled
@@ -1190,12 +1191,12 @@ pub const WasmHost = struct {
         // (zdtd.config then returns 0 bytes). Copy them here for the same
         // reason as the display name, and with the same ownership rule - the
         // frame owns the copy until the reload succeeds, and frees it on the
-        // failure path.
-        const config_copy = if (self.slots[idx].config_bytes.len > 0)
+        // failure path. A manifest-backed slot re-reads `config.toml` from
+        // disk instead (review F11), so its copy starts empty.
+        const config_copy = if (!manifest_loaded and self.slots[idx].config_bytes.len > 0)
             self.allocator.dupe(u8, self.slots[idx].config_bytes) catch ""
         else
             "";
-        const manifest_loaded = self.slots[idx].manifest_loaded;
         // The operator's interception policy is config-derived, not part of the
         // module, so a reload keeps it (paper 3.2.3 right-bias must not wash out
         // on HMR). `refreshDenied` recombines it with the fresh declaration.
@@ -1239,14 +1240,48 @@ pub const WasmHost = struct {
         self.slots[idx].manifest_loaded = manifest_loaded;
         self.slots[idx].op_deny = op_deny;
         self.slots[idx].op_allow = op_allow;
-        // Re-read the module's declaration before it goes live: a replaced
-        // module may have dropped or added a `points` claim on disk, and the
-        // install-time table is load-fixed (paper 5.2.1/5.2.2).
-        if (manifest_loaded) self.reconcileClaims(idx, path_owned);
+        // Re-read the on-disk declaration before it goes live: a replaced
+        // module may have dropped or added a `points` claim or edited its
+        // `config.toml` (reviews F11 and the claim reconciliation below), and
+        // the install-time table is load-fixed (paper 5.2.1/5.2.2).
+        if (manifest_loaded) {
+            self.rereadConfig(idx, path_owned);
+            self.reconcileClaims(idx, path_owned);
+        }
         self.slots[idx].refreshDenied();
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
+    }
+
+    /// Re-read `<mod dir>/config.toml` into slot `idx` (review F11). HMR
+    /// reloads a manifest-backed module's declaration, so an edited config
+    /// must not keep the pre-reload copy. Missing, oversized or unreadable
+    /// fails closed to no config, the same rule `loadResolved` applies.
+    fn rereadConfig(self: *WasmHost, idx: usize, path: []const u8) void {
+        const dir = std.fs.path.dirname(path) orelse {
+            self.setSlotConfig(idx, "");
+            return;
+        };
+        var m = manifest.bindManifest(self.allocator, dir) catch |err| {
+            std.debug.print(
+                "zdtd: mod '{s}' config re-read failed ({s}); config kept\n",
+                .{ self.slots[idx].display, @errorName(err) },
+            );
+            return;
+        };
+        defer manifest.free(self.allocator, &m);
+        self.setSlotConfig(idx, m.config);
+    }
+
+    /// Replace slot `idx`'s owned config bytes ("" = none). Frees the previous
+    /// allocation, so every caller hands over a slice it does not own.
+    fn setSlotConfig(self: *WasmHost, idx: usize, bytes: []const u8) void {
+        if (self.slots[idx].config_bytes.len > 0) self.allocator.free(self.slots[idx].config_bytes);
+        self.slots[idx].config_bytes = if (bytes.len > 0)
+            (self.allocator.dupe(u8, bytes) catch "")
+        else
+            "";
     }
 
     /// Re-install slot `idx`'s exclusive point claims from its on-disk
@@ -2513,6 +2548,67 @@ test "plugin reload keeps the module's config bytes" {
     // Readable after the reload, and the old copy was freed by deinit (a leak
     // or double free fails this test under std.testing.allocator).
     try std.testing.expectEqualStrings(cfg_text, host.slots[0].config_bytes);
+}
+
+/// Minimal declaring module for the manifest-backed reload tests: exports
+/// on_tick plus a valid `_zdtd_requires` ("log"), which the reviewed F8 rule
+/// requires of a module loaded from a manifest.
+const declaring_test_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00,
+    0x01, 0x7e, 0x03, 0x03, 0x02, 0x00, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x1c, 0x02, 0x07,
+    0x6f, 0x6e, 0x5f, 0x74, 0x69, 0x63, 0x6b, 0x00, 0x00, 0x0e, 0x5f, 0x7a, 0x64, 0x74, 0x64, 0x5f,
+    0x72, 0x65, 0x71, 0x75, 0x69, 0x72, 0x65, 0x73, 0x00, 0x01, 0x0a, 0x0d, 0x02, 0x02, 0x00, 0x0b,
+    0x08, 0x00, 0x42, 0x80, 0x80, 0x80, 0x80, 0x30, 0x0b, 0x0b, 0x09, 0x01, 0x00, 0x41, 0x00, 0x0b,
+    0x03, 0x6c, 0x6f, 0x67,
+};
+
+test "plugin reload re-reads config.toml for a manifest-backed module" {
+    // F11 (plugin-composability review 2026-09-12): a manifest-backed reload
+    // re-reads manifest.toml but kept the pre-reload config_bytes, so an
+    // edited config.toml was never seen until a restart. The config is now
+    // re-read with the declaration; a missing file fails closed to none.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const a = std.testing.allocator;
+    const wasm_path = try std.fs.path.join(a, &.{ dir, "m.wasm" });
+    defer a.free(wasm_path);
+    const man_path = try std.fs.path.join(a, &.{ dir, "manifest.toml" });
+    defer a.free(man_path);
+    const cfg_path = try std.fs.path.join(a, &.{ dir, "config.toml" });
+    defer a.free(cfg_path);
+    try io_fs.writeFile(wasm_path, &declaring_test_wasm);
+    try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\n");
+    try io_fs.writeFile(cfg_path, "announce = \"one\"\n");
+
+    var host: WasmHost = .{};
+    host.allocator = a;
+    host.ctx = &ctx;
+    host.budget = .{};
+    defer host.shutdown();
+    try host.loadInto(0, wasm_path);
+    host.n = 1;
+    host.slots[0].manifest_loaded = true;
+    host.slots[0].display = try a.dupe(u8, "m");
+    host.slots[0].config_bytes = try a.dupe(u8, "announce = \"one\"\n");
+
+    try io_fs.writeFile(cfg_path, "announce = \"two\"\n");
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqualStrings("announce = \"two\"\n", host.slots[0].config_bytes);
+
+    // The file is gone: the reload fails closed to no config.
+    io_fs.deleteFile(cfg_path);
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqual(@as(usize, 0), host.slots[0].config_bytes.len);
 }
 
 test "a discovered mod must declare _zdtd_requires" {
