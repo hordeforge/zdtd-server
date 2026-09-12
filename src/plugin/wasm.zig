@@ -10,6 +10,7 @@
 const std = @import("std");
 const zwasm = @import("zwasm");
 const io_fs = @import("../util/io_fs.zig");
+const api = @import("api.zig");
 const manifest = @import("manifest.zig");
 const resolver = @import("resolver.zig");
 
@@ -183,6 +184,9 @@ pub const Plugin = struct {
     requires_failed: bool = false,
     requires_err: [128]u8 = undefined,
     requires_err_len: usize = 0,
+    /// Guest contract version from the optional `_zdtd_api` export (paper 6.6).
+    /// Null = the module declares none (the permissive legacy path).
+    api_version: ?u32 = null,
     /// Guest offset and size of the host's scratch region for the request/reply
     /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
     scratch_off: u32 = 0,
@@ -236,6 +240,7 @@ pub const Plugin = struct {
         };
         p.probeHooks();
         p.probeRequires(ctx.require_declaration, ctx);
+        p.probeApiVersion();
         if (ctx.require_declaration and p.requires_failed) {
             // Fail closed at the load boundary: the caller wanted a declared
             // contract and this module does not have one (or declared names it
@@ -357,6 +362,37 @@ pub const Plugin = struct {
 
     fn requiresFailed(self: *Plugin, why: []const u8) void {
         self.requiresFailed2("", why, "");
+    }
+
+    /// Paper 6.6 (review F6): the dependency link is a name set, so it cannot
+    /// see a semantic change between two contract versions that still share the
+    /// hook vocabulary. A module may declare the version it was built against
+    /// with an optional `_zdtd_api() -> i32` export: a version newer than this
+    /// host is refused fail-closed (the same channel as an unmet
+    /// `_zdtd_requires`), an older one is accepted and logged, and a module
+    /// without the export keeps the permissive path (the shipped C fixtures and
+    /// any pre-versioning module), which is recorded in PLUGIN_API.md.
+    fn probeApiVersion(self: *Plugin) void {
+        if (self.instance.exportFuncSig("_zdtd_api") == null) return;
+        const ver: u32 = @bitCast(self.instance.call(fn () i32, "_zdtd_api", .{}) catch {
+            self.requiresFailed("_zdtd_api trapped");
+            return;
+        });
+        self.api_version = ver;
+        if (ver > api.plugin_api_version) {
+            var buf: [96]u8 = undefined;
+            const msg = std.fmt.bufPrint(
+                &buf,
+                "declares plugin API v{d}; this host is v{d}",
+                .{ ver, api.plugin_api_version },
+            ) catch "declares a newer plugin API version";
+            self.requiresFailed(msg);
+        } else if (ver < api.plugin_api_version) {
+            std.debug.print(
+                "zdtd: plugin '{s}' declares plugin API v{d}, host v{d}; accepted as older\n",
+                .{ self.name, ver, api.plugin_api_version },
+            );
+        }
     }
 
     fn requiresFailed2(self: *Plugin, pre: []const u8, mid: []const u8, post: []const u8) void {
@@ -882,7 +918,15 @@ pub const Plugin = struct {
     }
 };
 
-pub const max_wasm_plugins: usize = 8;
+/// Fixed-table capacity for loaded .wasm plugins. A ceiling, not a policy: the
+/// slot table is inline in the host, so every slot costs a Plugin header even
+/// when empty. It was 8 while the shipped tree already carries 14 modules (12
+/// core plugins plus the mcp/parachute addons), so a full `[plugin] modules`
+/// list silently lost modules at the cap; 32 leaves headroom and the
+/// `shipped core plugins declare the host contract version` test asserts the
+/// shipped set still fits. Past the ceiling the loader logs and skips (fail
+/// closed on composition, never a partial or fake module).
+pub const max_wasm_plugins: usize = 32;
 /// Ceiling on one module's bytes at load time (operator-supplied path).
 const max_wasm_module_bytes: usize = 16 * 1024 * 1024;
 
@@ -2167,6 +2211,136 @@ test "_zdtd_requires validates declarative dependencies at load" {
     defer bad.shutdown();
     // The module names an unknown capability: it must be rejected, not loaded.
     try std.testing.expectEqual(@as(usize, 0), bad.n);
+}
+
+test "the guest contract version is read and a newer one is refused" {
+    // Paper 6.6 (review F6): a name set cannot see a semantic change between
+    // two versions that share the hook vocabulary, so a guest may declare the
+    // version it was built against with `_zdtd_api() -> i32`. Newer than the
+    // host fails closed through the `_zdtd_requires` channel; older is
+    // accepted; absent keeps the permissive legacy path.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    // (module (func (export "_zdtd_api") (result i32) i32.const N))
+    const V = struct {
+        fn bytes(comptime ver: u8) [42]u8 {
+            return .{
+                0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+                0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+                0x02, 0x01, 0x00, 0x07, 0x0d, 0x01, 0x09, '_',
+                'z',  'd',  't',  'd',  '_',  'a',  'p',  'i',
+                0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+                ver,  0x0b,
+            };
+        }
+    };
+    // The C fixtures and every pre-versioning module export nothing: no
+    // declared version, still loaded.
+    const plain = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+        0x01, 0x00, 0x07, 0x0b, 0x01, 0x07, 'o',  'n',
+        '_',  't',  'i',  'c',  'k',  0x00, 0x00, 0x0a,
+        0x04, 0x01, 0x02, 0x00, 0x0b,
+    };
+    var p_plain = try Plugin.load(std.testing.allocator, "plain.wasm", &plain, &ctx, .{});
+    defer p_plain.deinit();
+    try std.testing.expectEqual(@as(?u32, null), p_plain.api_version);
+    try std.testing.expect(!p_plain.requires_failed);
+
+    const cur = V.bytes(@intCast(api.plugin_api_version));
+    var p_cur = try Plugin.load(std.testing.allocator, "cur.wasm", &cur, &ctx, .{});
+    defer p_cur.deinit();
+    try std.testing.expectEqual(@as(?u32, api.plugin_api_version), p_cur.api_version);
+    try std.testing.expect(!p_cur.requires_failed);
+
+    const next = V.bytes(@intCast(api.plugin_api_version + 1));
+    var p_next = try Plugin.load(std.testing.allocator, "next.wasm", &next, &ctx, .{});
+    defer p_next.deinit();
+    try std.testing.expect(p_next.requires_failed);
+    try std.testing.expectEqual(@as(?u32, api.plugin_api_version + 1), p_next.api_version);
+    // The reason names both versions for the operator log.
+    try std.testing.expect(std.mem.indexOf(u8, p_next.requires_err[0..p_next.requires_err_len], "plugin API v") != null);
+    try std.testing.expect(std.mem.indexOf(u8, p_next.requires_err[0..p_next.requires_err_len], "this host is v") != null);
+    // loadAll is the shipping path: a newer guest is skipped, not loaded.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const cur_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "cur.wasm" });
+    defer std.testing.allocator.free(cur_path);
+    const next_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "next.wasm" });
+    defer std.testing.allocator.free(next_path);
+    try io_fs.writeFile(cur_path, &cur);
+    try io_fs.writeFile(next_path, &next);
+    var host: WasmHost = .{};
+    defer host.shutdown();
+    host.loadAll(std.testing.allocator, &[_][]const u8{ cur_path, next_path }, &ctx, .{});
+    try std.testing.expectEqual(@as(usize, 1), host.n);
+}
+
+test "shipped core plugins declare the host contract version" {
+    // The guest constant lives in `mods/plugin_common.zig` (wasm32-freestanding
+    // cannot import the host's api.zig), so this test is the drift gate: bump
+    // one side without the other and every shipped plugin fails to load or
+    // stops matching.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+        fn senseFn(_: *HostCtx, out: []u8) usize {
+            _ = out;
+            return 0;
+        }
+        fn queryFn(_: *HostCtx, req: []const u8, out: []u8) usize {
+            _ = req;
+            _ = out;
+            return 0;
+        }
+    };
+    var ctx = HostCtx{
+        .log_fn = &Cap.logFn,
+        .tick_fn = &Cap.tickFn,
+        .queue_fn = &Cap.queueFn,
+        .sense_fn = &Cap.senseFn,
+        .query_fn = &Cap.queryFn,
+    };
+    const modules = [_][]const u8{
+        "plugins/core_announce/core_announce.wasm",
+        "plugins/core_killfeed/core_killfeed.wasm",
+        "plugins/core_damagegate/core_damagegate.wasm",
+        "plugins/core_pricegate/core_pricegate.wasm",
+        "plugins/core_rewardgate/core_rewardgate.wasm",
+        "plugins/core_lootgate/core_lootgate.wasm",
+        "plugins/core_tradefeed/core_tradefeed.wasm",
+        "plugins/core_pvp/core_pvp.wasm",
+        "plugins/core_questgate/core_questgate.wasm",
+        "plugins/core_craftgate/core_craftgate.wasm",
+        "plugins/core_adminverbs/core_adminverbs.wasm",
+        "plugins/core_perkgate/core_perkgate.wasm",
+        "mods/mcp/mcp.wasm",
+        "mods/parachute/parachute.wasm",
+    };
+    var host: WasmHost = .{};
+    defer host.shutdown();
+    host.loadAll(std.testing.allocator, &modules, &ctx, .{});
+    // The shipped set must fit the host table, or the default composition
+    // silently loses modules at the cap.
+    try std.testing.expect(modules.len <= max_wasm_plugins);
+    // Every module loaded: a plugin declaring a newer version than the host
+    // would have been skipped by loadAll, so the count is part of the gate.
+    try std.testing.expectEqual(@as(usize, modules.len), host.n);
+    for (0..host.n) |i| {
+        try std.testing.expectEqual(@as(?u32, api.plugin_api_version), host.slots[i].api_version);
+    }
 }
 
 test "plugin reload disposes and reinstantiates the module in place" {

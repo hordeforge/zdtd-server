@@ -28,7 +28,7 @@ gaps recorded with realization sketches.
 | 5.2.1 declarative configuration reconciliation | `manifest.toml` + resolver plan (tiers, `override`, point claims) builds the composition at boot; `[mods] enabled/disabled` is boot-time; `plugin reload` now re-reads the module's manifest and reconciles its point claims (F2), while the zdtd.toml/mode-pack chain stays a restart-time read | **Realized** for the per-module declaration (F2 fixed); the config chain remains boot-time |
 | 5.2.2 hot module replacement | `plugin reload <name>`: dispose and reinstantiate in place, budget re-armed, config/display/tier preserved | **Realized** |
 | 6.5 mutual dependencies / granularity | dependencies name host capabilities only, so a cycle cannot form; the resolver already reports duplicate point claims at load | **N/A today**; cycle reporting from declarations is the check to add if plugins ever provide keys |
-| 6.6 dependency typing/versioning | `_zdtd_requires` links by hook/verb *name* only; the host never negotiates a contract version with the guest | **Partial** (F6) |
+| 6.6 dependency typing/versioning | an optional `_zdtd_api() -> i32` export carries the guest's contract version: newer than the host is refused fail-closed, older is accepted and logged, absent keeps the permissive legacy path; the shipped Zig guests export it and a host test gates the two constants against each other | **Realized** (F6 fixed) |
 
 ## Findings
 
@@ -102,20 +102,29 @@ plugin-to-plugin bindings (requirements name host capabilities only), so the
 case cannot arise. Recorded so a future plugin-provided key is designed with
 the ordering from the start.
 
-**F6 (P2, open) - the dependency link is nominal with no contract version.**
+**F6 (P2, fixed 2026-09-12) - the guest declares its contract version.**
 Paper 6.6 names the two failure modes of name-only linking: interface drift and
-key collision. zdtd links by hook/verb name and validates the *set*
-(`_zdtd_requires`), but no guest export carries the contract version, so a
-module built against an older or newer hook surface is accepted whenever its
-names still match. An arity change fails closed today (the wasm call type
-check traps and the module is disabled), but a same-signature semantic change
-is silent, and `docs/PLUGIN_API.md` already claims `plugin_api_version` "names
-the guest contract" without anything reading it. Realization sketch: accept an
-optional `_zdtd_api` export returning the contract version; reject a module
-newer than the host's (fail-closed, like an unmet `_zdtd_requires`), accept and
-log an older one, and leave modules without the export on the current
-permissive path. Key collision does not arise: the vocabulary is a fixed host
-table, not an open key space.
+key collision. zdtd linked by hook/verb name and validated the *set*
+(`_zdtd_requires`), but no guest export carried the contract version, so a
+module built against an older or newer hook surface was accepted whenever its
+names still matched; an arity change failed closed (the wasm call type check
+traps) but a same-signature semantic change was silent, and `PLUGIN_API.md`
+claimed `plugin_api_version` named the guest contract with nothing reading it.
+`Plugin.probeApiVersion` now reads the optional `_zdtd_api() -> i32` export: a
+version newer than `api.plugin_api_version` fails closed through the
+`_zdtd_requires` channel (the reason names both versions), an older one is
+accepted with a log, and a module without the export keeps the permissive path
+(the shipped C fixtures and any pre-versioning module). `mods/plugin_common.zig`
+exports `_zdtd_api` for every Zig guest, and the host test "shipped core plugins
+declare the host contract version" loads all 14 shipped modules and asserts each
+declares the host version, so the two constants cannot drift silently. Key
+collision does not arise: the vocabulary is a fixed host table, not an open key
+space.
+
+That test also caught the second half of the composition bound: the host table
+was `max_wasm_plugins = 8` while the shipped tree already had 14 modules, so a
+full `[plugin] modules` list silently lost modules at the cap. The ceiling is
+now 32, and the test asserts the shipped set still fits it.
 
 ## OK-verified
 
@@ -138,6 +147,6 @@ table, not an open key space.
 
 ## Follow-ups
 
-F4 (interception policy, needs an ADR), F5 (provider ordering, moot until
-plugins provide keys) and F6 (contract version export) are the next slices. F1,
-F2 and F3 are fixed and gated by the scenarios and unit tests named above.
+F4 (interception policy, needs an ADR) and F5 (provider ordering, moot until
+plugins provide keys) are the next slices. F1, F2, F3 and F6 are fixed and
+gated by the scenarios and unit tests named above.

@@ -12,6 +12,21 @@
 
 const std = @import("std");
 
+/// The plugin contract version this guest was built against (paper 6.6,
+/// PLUGIN_API.md "Versioned": the exported hook names plus the host import
+/// table). The host refuses a module that declares a *newer* version and
+/// accepts an older one. Bump this together with `src/plugin/api.zig`
+/// `plugin_api_version`; the host-side test "shipped core plugins declare the
+/// host contract version" fails if the two drift.
+pub const api_version: u32 = 1;
+
+/// Optional `_zdtd_api` export: the contract version, read once at load. Every
+/// Zig guest built on this module declares it; the C fixtures and any
+/// pre-versioning module omit it and keep the permissive path.
+export fn _zdtd_api() i32 {
+    return @intCast(api_version);
+}
+
 pub extern "zdtd" fn log(level: i32, ptr: i32, len: i32) void;
 pub extern "zdtd" fn tick() i64;
 pub extern "zdtd" fn queue(ptr: i32, len: i32) i32;

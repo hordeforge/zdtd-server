@@ -8,7 +8,20 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Plugin reload claim reconciliation 2026-09-12
+`lint-architecture: clean`). **Plugin contract version + table ceiling
+2026-09-12 (composability review F6)**: a guest may now declare the contract
+version it was built against with `_zdtd_api() -> i32` (`mods/plugin_common.zig`
+exports it for every Zig guest). The host reads it at load; a version newer than
+`api.plugin_api_version` is refused fail-closed with a reason naming both, an
+older one is accepted and logged, and an absent export keeps the permissive
+legacy path (the C fixtures, `fps_bot`). The host test "shipped core plugins
+declare the host contract version" loads all 14 shipped modules and asserts each
+declares the host version, so the guest and host constants cannot drift. That
+test also showed `max_wasm_plugins` was 8 while 14 modules ship, so a full
+`[plugin] modules` list lost its tail at the cap; the ceiling is 32 and the test
+asserts the shipped set fits. `zig build test` 1787 passed / 2 skipped / 0
+failed (both skips are the environment-dependent live-asset samples).
+**Plugin reload claim reconciliation 2026-09-12
 (composability review F2)**: `plugin reload` now re-reads the module's
 `manifest.toml` and rebuilds its exclusive override-point claims, so a replaced
 module that dropped a `points` claim releases it (it used to hold the hook

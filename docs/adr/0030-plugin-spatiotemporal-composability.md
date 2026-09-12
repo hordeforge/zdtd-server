@@ -121,3 +121,17 @@ safe runtime components:
   reconciled, so a manifest beside it can neither mint nor drop a claim. The
   config-chain half stays as recorded above: zdtd.toml and mode packs are still
   read once at startup.
+  Amended 2026-09-12 (F6, contract version): a guest may declare the contract
+  version it was built against with an optional `_zdtd_api() -> i32` export
+  (`mods/plugin_common.zig` exports it for every Zig guest). The host reads it
+  once at load (`Plugin.probeApiVersion`): newer than `api.plugin_api_version`
+  fails closed through the same channel as an unmet `_zdtd_requires`, older is
+  accepted with a log, and a module without the export keeps the permissive
+  path (the shipped C fixtures and any pre-versioning module). The host test
+  "shipped core plugins declare the host contract version" loads the whole
+  shipped set and asserts the guest and host constants match, so name-set
+  linking cannot silently span a semantic change.
+  Amended 2026-09-12 (composition bound): the host table was
+  `max_wasm_plugins = 8` while the tree already ships 14 modules, so a full
+  `[plugin] modules` list lost modules at the cap. The ceiling is 32 and the
+  same test asserts the shipped set fits it.

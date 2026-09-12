@@ -52,6 +52,20 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Plugins can declare the contract version they were built against. Name-set
+  linking (`_zdtd_requires`) cannot see a semantic change between two contract
+  versions that still share the hook vocabulary, so a guest may now export
+  `_zdtd_api() -> i32`; the host reads it once at load and refuses a version
+  newer than its own (`api.plugin_api_version`) with a log naming both, accepts
+  an older one, and keeps the permissive path when the export is absent (the C
+  fixtures and any pre-versioning module). Every Zig guest built on
+  `mods/plugin_common.zig` exports it. The host test "shipped core plugins
+  declare the host contract version" loads the shipped set and asserts the
+  guest and host constants match, so the two cannot drift silently. That test
+  also showed the host's 8-slot plugin table was smaller than the shipped set
+  (14 modules), so a full `[plugin] modules` list lost modules at the cap; the
+  ceiling is now 32 and the test fails if the shipped set stops fitting.
+
 - Plugin effects that cannot be reverted are now classified and reported. The
   Cordis paper's revertible effects require every effect to carry an inverse,
   and the runtime cannot verify that witness, so the queued verbs are now

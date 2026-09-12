@@ -248,3 +248,14 @@ KBs, and an oversized operator-supplied `.wasm` fails closed instead of
 loading). Both are the "FAIL safety guards" class from RULES_CONFIG, not
 tunables. The frame-level C2S deflate bounds (`wire/frame.zig` inflate_cap
 512 KiB, max_inflate_ratio 64) are the same class on the transport side.
+
+### 2026-09-12 correction (plugin table ceiling)
+
+The 8-slot table above was a guard that had quietly become a policy: the tree
+now ships 14 modules (12 core plugins plus the mcp/parachute addons, and
+`fps_bot` for bot play), so a `[plugin] modules` list naming them all lost the
+tail at the cap. `max_wasm_plugins` is 32 now, still a fixed ceiling with
+fail-closed behaviour past it (the loader logs and skips, never a partial
+module). The host test "shipped core plugins declare the host contract version"
+loads the whole shipped set and asserts it fits, so the ceiling cannot fall
+below the shipped tree again without a red test.
