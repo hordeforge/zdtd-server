@@ -8,7 +8,17 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Loot entry gates 2026-09-12**: loot.xml's 87
+`lint-architecture: clean`). **Loadgen Navezgane mixed-mode smoke 2026-09-12
+(round 19, post damage/loot changes)**: on the current commit (passive-43 EDR +
+`AffectedByArmor` source gate + loot `EntryGate`) the real map loaded (loot
+groups=1015 containers=339, 1559 prefabs) and 2 mixed-mode bots
+(`--mode mixed --mixed-actions`, break/loot/jump/use) ran 18 PASS joins over
+120-action lives with `join_fail`/`net_payload_errors`/`decode_rejects`/
+`encode_errors`/`net_send_errors`/`c2s_malformed`/`stream_errors`/
+`phase_rejects`/`ownership_rejects`/`bounds_rejects`/`persistence_errors` all
+0, `plugin_verbs_denied`/`plugin_effects_not_reverted` 0, and
+`requirement_unsupported` 147 (the tracked VM-gate diagnostic, not an error).
+**Loot entry gates 2026-09-12**: loot.xml's 87
 `<requirement>`-gated entries now carry an `EntryGate`: `Biome` resolves at roll
 time against the container's own biome (the container fill passes
 `biome_layers.nameById(biomeIdAt(pos))`), and the player-state classes are
