@@ -62,6 +62,15 @@ safe runtime components:
    `queue`/`sense`/`query`/`json_*`). Unknown or un-exported capabilities
    reject the module at load with a loud error (fail-closed); the vocabulary
    stays in sync with `Hook.names` and the host import table.
+   Amended 2026-09-12 (claim liveness; review `docs/reviews/PLUGIN_COMPOSABILITY.md`
+   F1): an exclusive override-point claim is a coeffect binding, and paper
+   5.1.2 makes a binding available "only while the fiber that installed it is
+   ACTIVE". `WasmHost.claimSlot` now resolves a claim against the claimant's
+   liveness and its export of the point's hook, and the five point dispatches
+   fall through to the ordinary composition loop otherwise. Before this a
+   claimant that trapped kept the point routed to itself and answered
+   `verdict_keep` for every caller, so a user-tier gate claimant that crashed
+   silently lifted the core restriction it had overridden.
 4. **Boundary stays the boundary.** Plugins still mutate the sim only through
    the verbs the server understands; composability is host-side plumbing, not
    a widening of plugin authority. `plugin` remains a leaf package (no ecs
@@ -77,14 +86,20 @@ safe runtime components:
 - Not adopted: the paper's full fiber/provision calculus and dependency
   typing/versioning (§6.6) - overkill for a fixed hook table; revisited only
   if plugins gain mutual provisioning.
-- Reactive coeffects (§3.2): adopted as load-time validation. The paper
-  classifies runtime context changes against the spec to drive activation;
-  zdtd's coeffect context is the host hook/import surface, which is fixed for
-  the process, so a module's declared capabilities cannot disappear at
-  runtime and fail-closed load validation is the complete story.
+- Reactive coeffects (§3.2): adopted as load-time validation plus, since the
+  2026-09-12 amendment, dispatch-time claim liveness. The paper classifies
+  runtime context changes against the spec to drive activation; zdtd's coeffect
+  context is the host hook/import surface, which is fixed for the process, so
+  a module's declared capabilities cannot disappear at runtime and fail-closed
+  load validation covers that half. What can change at runtime is a *provider*:
+  an override-point claimant that traps or runs out of fuel stops providing,
+  which `claimSlot` now resolves. The review records the remaining
+  provider-side gaps (claim re-resolution on reload, reviewed policy
+  interception) as F2/F4.
 - Effect introspection (§3.1.3): the command buffer's src attribution and
   the spawn ring let the host enumerate a module's pending and applied
-  effects (`dropFrom`); no further iterator surface is needed.
+  effects (`dropFrom`); no further iterator surface is needed. The review
+  records that the per-verb inverse classification is prose today (F3).
 - Config reconciliation (§5.2.1): not adopted. The paper's loader reconciles
   entry-field changes incrementally; zdtd reads `[plugin]` config once at
   startup and `plugin reload` re-arms the stored budget rather than re-reading

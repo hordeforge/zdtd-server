@@ -7,6 +7,18 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- An exclusive plugin override point stayed routed to a claimant that had
+  stopped providing. `damage.player_scale`, `craft.request`, `loot.roll`,
+  `trade.price` and `quest.payout` sent every call to the slot named in the
+  claim table; when that module trapped or ran out of fuel the call returned
+  "keep" for the point, so a user-tier gate claimant that crashed silently
+  lifted the core restriction it had overridden and no other provider was
+  consulted. The dispatch now resolves the claim against the claimant's
+  liveness and its export of the point's hook, then falls through to the
+  ordinary composition loop (Cordis paper 5.1.2: a binding is available only
+  while the fiber that installed it is active). The claim table itself is
+  unchanged, so reloading the module re-arms its claim with no bookkeeping.
+
 - Equipped armor and clothing granted none of their stats. `items.xml` carries
   the same `<passive_effect>` rows buffs do (3030 rows across 272 items), but
   the loader kept only the PhysicalDamageResist/ElementalDamageResist quality

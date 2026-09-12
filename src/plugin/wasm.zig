@@ -1235,11 +1235,29 @@ pub const WasmHost = struct {
         return verdict_keep;
     }
 
+    /// The exclusive claimant for `point`, or null when the claim is not
+    /// currently provided. A binding is available to its dependents only while
+    /// the fiber that installed it is ACTIVE (paper 5.1.2), and a claimant that
+    /// trapped or ran out of fuel has stopped providing even though the claim
+    /// table still names it: routing to it would answer `verdict_keep` for
+    /// every caller, which for a gate point silently lifts the very check the
+    /// claim exists to serve (a user-tier claimant that crashes would disable
+    /// the core gate it overrode). The same check catches a reloaded module
+    /// that no longer exports the point's hook, since a module that cannot
+    /// answer must not hold the point for everyone else.
+    pub fn claimSlot(self: *const WasmHost, point: manifest.OverridePoint) ?usize {
+        const c = self.claims[@intFromEnum(point)];
+        if (c == no_claim or c >= self.n) return null;
+        const slot: usize = c;
+        if (self.slots[slot].disabled) return null;
+        if (!self.slots[slot].hook_present[hookIndex(manifest.OverridePoint.hook(point))]) return null;
+        return slot;
+    }
+
     /// Player-damage verdict; point `damage.player_scale` is exclusive when
     /// claimed: only the claimant is consulted and its verdict is final.
     pub fn playerDamage(self: *WasmHost, attacker: i32, victim: i32, amount: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.damage_player_scale)];
-        if (c != no_claim and c < self.n) return self.slots[c].callPlayerDamage(attacker, victim, amount);
+        if (self.claimSlot(.damage_player_scale)) |c| return self.slots[c].callPlayerDamage(attacker, victim, amount);
         for (0..self.n) |i| {
             const v = self.slots[i].callPlayerDamage(attacker, victim, amount);
             if (v != verdict_keep) return v;
@@ -1295,8 +1313,7 @@ pub const WasmHost = struct {
 
     /// Craft-request verdict; point `craft.request` is exclusive when claimed.
     pub fn craftRequest(self: *WasmHost, player: i32, recipe_name: []const u8, times: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.craft_request)];
-        if (c != no_claim and c < self.n) return self.slots[c].callCraftRequest(player, recipe_name, times);
+        if (self.claimSlot(.craft_request)) |c| return self.slots[c].callCraftRequest(player, recipe_name, times);
         for (0..self.n) |i| {
             const v = self.slots[i].callCraftRequest(player, recipe_name, times);
             if (v != verdict_keep) return v;
@@ -1306,8 +1323,7 @@ pub const WasmHost = struct {
 
     /// Loot-roll verdict; point `loot.roll` is exclusive when claimed.
     pub fn lootRoll(self: *WasmHost, list_name: []const u8, rolled: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.loot_roll)];
-        if (c != no_claim and c < self.n) return self.slots[c].callLootRoll(list_name, rolled);
+        if (self.claimSlot(.loot_roll)) |c| return self.slots[c].callLootRoll(list_name, rolled);
         for (0..self.n) |i| {
             const v = self.slots[i].callLootRoll(list_name, rolled);
             if (v != verdict_keep) return v;
@@ -1326,8 +1342,7 @@ pub const WasmHost = struct {
     /// Pre-trade price verdict: point `trade.price` is exclusive when claimed;
     /// 0 keeps the stock price.
     pub fn tradePrice(self: *WasmHost, player: i32, item: i32, unit_price: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.trade_price)];
-        if (c != no_claim and c < self.n) return self.slots[c].callTradePrice(player, item, unit_price);
+        if (self.claimSlot(.trade_price)) |c| return self.slots[c].callTradePrice(player, item, unit_price);
         for (0..self.n) |i| {
             const v = self.slots[i].callTradePrice(player, item, unit_price);
             if (v != verdict_keep) return v;
@@ -1337,8 +1352,7 @@ pub const WasmHost = struct {
 
     /// Quest-complete verdict; point `quest.payout` is exclusive when claimed.
     pub fn questComplete(self: *WasmHost, player: i32, quest_def: i32) i32 {
-        const c = self.claims[@intFromEnum(manifest.OverridePoint.quest_payout)];
-        if (c != no_claim and c < self.n) return self.slots[c].callQuestComplete(player, quest_def);
+        if (self.claimSlot(.quest_payout)) |c| return self.slots[c].callQuestComplete(player, quest_def);
         for (0..self.n) |i| {
             const v = self.slots[i].callQuestComplete(player, quest_def);
             if (v != verdict_keep) return v;

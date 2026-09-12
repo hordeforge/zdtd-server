@@ -12884,6 +12884,59 @@ test "scenario mods: a claim without the mapped hook is refused, not installed" 
     std.debug.print("PASS mods claim-nohook: a claim without its hook is refused\n", .{});
 }
 
+test "scenario mods: a disabled claimant releases its exclusive point" {
+    // Paper 5.1.2: a binding counts as available to its dependents only while
+    // the fiber that installed it is ACTIVE. A claimant that traps has stopped
+    // providing, so the point must fall back to the ordinary composition loop
+    // instead of being routed to the dead slot - a user-tier gate claimant that
+    // crashes would otherwise answer keep for every call and silently lift the
+    // core restriction it overrode.
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const mods = [_]plugin_mod.manifest.Manifest{
+        mkManifest("claimant", "assets/fixtures/plugin_claim_trap.wasm", "user", null, "loot.roll", null),
+        mkManifest("fallback", "assets/fixtures/plugin_override.wasm", "official", null, null, null),
+    };
+    var plan = try plugin_mod.resolver.resolve(gpa, &mods, &.{}, &.{}, &.{}, &.{});
+    defer plan.deinit(gpa);
+    const claimed_slot = plan.point_claims.get("loot.roll").?;
+
+    freshScenarioDir("worlds/zdtd_sc_mods_claim_release");
+    const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_mods_claim_release", 0, .{
+        .enable_sample_plugin = false,
+        .plugin_plan = &plan,
+    });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expectEqual(@as(usize, 2), g.wasm_plugins.n);
+    const ci = g.wasm_plugins.findByName("claimant").?;
+    const fi = g.wasm_plugins.findByName("fallback").?;
+    try std.testing.expectEqual(claimed_slot, ci);
+    try std.testing.expect(fi != ci);
+    try std.testing.expectEqual(
+        @as(u8, @intCast(ci)),
+        g.wasm_plugins.claims[@intFromEnum(plugin_mod.manifest.OverridePoint.loot_roll)],
+    );
+    // The claim binds while the claimant is active, so the first call reaches
+    // it and traps inside the guest: the host disables that module and reports
+    // keep for the call in flight.
+    try std.testing.expectEqual(@as(i32, 0), g.wasm_plugins.lootRoll("someList", 10));
+    try std.testing.expect(g.wasm_plugins.slots[ci].disabled);
+    // The table still names the slot (a reload of the same module re-arms it
+    // with no bookkeeping), but the dispatch no longer binds to a provider
+    // that stopped providing: the fallback's 300% answers instead of keep.
+    try std.testing.expectEqual(
+        @as(u8, @intCast(ci)),
+        g.wasm_plugins.claims[@intFromEnum(plugin_mod.manifest.OverridePoint.loot_roll)],
+    );
+    try std.testing.expectEqual(@as(i32, 300), g.wasm_plugins.lootRoll("someList", 10));
+    std.debug.print("PASS mods claim-release: a disabled claimant stops binding its point\n", .{});
+}
+
 test "scenario mods AC6: override = name replaces the official mod" {
     // A user mod declaring override = "fps_bot" loads in its place; the
     // official module is not instantiated.

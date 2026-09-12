@@ -143,4 +143,4 @@ review contradicts [STATUS.md](STATUS.md), STATUS wins.
 | [prompts/zig-0.16-changelog-review.md](prompts/zig-0.16-changelog-review.md) | archived (see `docs/archive/`) |
 | [prompts/zig-best-practices-review.md](prompts/zig-best-practices-review.md) | not yet run |
 | [prompts/net-send-review.md](prompts/net-send-review.md) | not yet run |
-| [prompts/plugin-composability-review.md](prompts/plugin-composability-review.md) | not yet run |
+| [prompts/plugin-composability-review.md](prompts/plugin-composability-review.md) | [reviews/PLUGIN_COMPOSABILITY.md](reviews/PLUGIN_COMPOSABILITY.md) (2026-09-12, against arXiv:2608.25512v1) |
