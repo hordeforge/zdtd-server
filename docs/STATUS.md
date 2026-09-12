@@ -8,7 +8,17 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Loadgen smoke 2026-09-08** (AGENTS rule 5, on
+`lint-architecture: clean`). **Loadgen combat smoke 2026-09-12** (AGENTS rule 5,
+Debug binary, flat world with the stock `--game-dir`, `--mode combat
+--spawn-zombies`, 2 bots): 8 joins, `join_fail=0`, 16 zombies spawned, 12
+deaths from zombie melee (the deferred-damage choke), and
+`encode_errors`/`decode_rejects`/`c2s_malformed`/`c2s_unhandled`/
+`phase_rejects`/`ownership_rejects`/`stream_errors`/`persistence_errors`/
+`net_send_errors` all 0; tick p50 0.39 ms with the usual join-burst overruns.
+That is the live path for the round-22 damage-resist change (armor +
+`GeneralDamageResist` at the AI melee choke), whose arithmetic is pinned by the
+`ecs` and `game` tests rather than by the bots, which carry no armor.
+**Loadgen smoke 2026-09-08** (AGENTS rule 5, on
 the ReleaseSafe binary against a fresh proc world): 81 joins, `join_fail=0`,
 and `c2s_malformed`, `c2s_unhandled`, `decode_rejects`, `encode_errors`,
 `ownership_rejects` and `net_send_errors` all 0 across wander, chatty, combat
