@@ -129,8 +129,12 @@ pub const ItemDef = struct {
     /// combat-damage.md). 0 segments = the item carries no row.
     phys_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     phys_resist_n: u8 = 0,
-    /// ElementalDamageResist passive (42), same curve shape. The sim's damage
-    /// chokes are physical-only today, so the PDR leg is the live one.
+    /// ElementalDamageResist passive (43, `Equipment.CalcDamage` IL=83), same
+    /// curve shape. This first-row curve is informational only: the live EDR
+    /// path folds the item's tagged rows on the damage event
+    /// (`Game.elementalDamageResist`), so a `tags="heat,electrical"` row
+    /// resists those types and not cold. The untagged rows in this curve are
+    /// the `-.2,.2` jitter, which applies to every non-physical type.
     elem_resist_curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len,
     elem_resist_n: u8 = 0,
     /// Every `<passive_effect>` row on the item, with its `effect_group` and

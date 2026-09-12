@@ -148,3 +148,52 @@ test "challengeEchoValid" {
     pkt[0] = 0;
     try std.testing.expect(!challengeEchoValid(&pkt));
 }
+
+/// `EnumDamageTypes` (V3.2.0 b9, `il/full-v3.2.0/_global/EnumDamageTypes.il.txt`
+/// field order; the wire byte in `NetPackageDamageEntity` is this ordinal:
+/// protocol.md §6.5 "3 Bashing, 16 Suffocation (drown), 26 Suicide").
+pub const damage_type_names = [_][]const u8{
+    "none",      "piercing",   "slashing",    "bashing",       "crushing",    "corrosive",
+    "heat",      "cold",       "radiation",   "toxic",         "electrical",  "disease",
+    "infection", "starvation", "dehydration", "falling",       "suffocation", "bloodloss",
+    "sprain",    "break",      "stun",        "concuss",       "knockout",    "blackout",
+    "knockdown", "barbedwire", "suicide",     "vehicleinside", "weather",     "special",
+};
+
+/// Stock `Equipment.physicalDamageTypes`
+/// (`Equipment::.cctor` IL=11: `Parse("piercing,bashing,slashing,crushing,none,corrosive")`).
+/// Those are ordinals 0 (none) and 1..5, so the test is `dtype <= 5`; every
+/// other `EnumDamageTypes` member is non-physical and takes
+/// `ElementalDamageResist` in `Equipment.CalcDamage` (IL=83) instead of the
+/// physical armor rating.
+pub const max_physical_damage_type: u8 = 5;
+
+/// True when `dtype` is in stock's `physicalDamageTypes` set (the armor-rating
+/// branch of `Equipment.CalcDamage`). An out-of-range byte is treated as
+/// non-physical: the enum's upper bound is the fallback, never a silent
+/// physical classification.
+pub fn damageTypeIsPhysical(dtype: u8) bool {
+    return dtype <= max_physical_damage_type;
+}
+
+/// The FastTags name for a wire damage type, used as the query tag set for
+/// passive 43 and for logs. Out-of-range bytes return "" (no tag match).
+pub fn damageTypeName(dtype: u8) []const u8 {
+    if (dtype >= damage_type_names.len) return "";
+    return damage_type_names[dtype];
+}
+
+test "damage types: stock physical set and wire names" {
+    // Equipment::.cctor: piercing, bashing, slashing, crushing, none, corrosive.
+    try std.testing.expect(damageTypeIsPhysical(0)); // none
+    try std.testing.expect(damageTypeIsPhysical(3)); // bashing
+    try std.testing.expect(damageTypeIsPhysical(5)); // corrosive
+    try std.testing.expect(!damageTypeIsPhysical(6)); // heat
+    try std.testing.expect(!damageTypeIsPhysical(16)); // suffocation (drown)
+    try std.testing.expect(!damageTypeIsPhysical(26)); // suicide
+    try std.testing.expect(!damageTypeIsPhysical(255)); // out of range -> elemental
+    try std.testing.expectEqualStrings("bashing", damageTypeName(3));
+    try std.testing.expectEqualStrings("suffocation", damageTypeName(16));
+    try std.testing.expectEqualStrings("heat", damageTypeName(6));
+    try std.testing.expectEqualStrings("", damageTypeName(200));
+}

@@ -12,6 +12,7 @@ const platform_user = packages.platform_user;
 const world_store = @import("../../world/store.zig");
 const ecs = @import("../../ecs/root.zig");
 const invsys = @import("../../ecs/inventory.zig");
+const protocol = @import("../../protocol.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
 
@@ -635,10 +636,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 const victim_slot: usize = @intCast(self.sim.player[es].peer_slot);
                 if (self.pvp_mode == 0 and victim_slot != c.slot) continue;
                 if (victim_slot != c.slot) {
-                    // Armor mitigation, less the blaster's held-item TargetArmor
-                    // penetration (RE GetTotalPhysicalArmorRating IL=47).
-                    const mit = invsys.armorMitigationVs(&self.sim, victim_slot, self.sim.playerByPeer(c.slot));
-                    amount *= (1.0 - mit);
+                    // ExplosionData.DamageType is the stock Heat default (6), so
+                    // the blast takes passive 43 ElementalDamageResist, not the
+                    // physical armor rating (Equipment.CalcDamage IL=83 splits
+                    // on Equipment.physicalDamageTypes).
+                    amount *= (1.0 - self.elementalDamageResist(es, protocol.damageTypeName(6)));
                 }
                 // Wasm-first (AGENTS rule 29): the on_player_damage verdict
                 // applies to explosion damage too (attacker = the blaster), so

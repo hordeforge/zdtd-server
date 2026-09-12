@@ -334,7 +334,10 @@ pub fn armorMitigationVs(w: *const World, victim_peer: usize, attacker_slot: ?Sl
     var mit = armorMitigation(w, victim_peer);
     if (attacker_slot) |as| {
         if (w.mask[as].inventory and w.item_penetration_fn != null) {
-            const held = w.inventory[as].slots[w.inventory[as].holding];
+            // `heldItem()` guards the no-holding sentinel (0xFFFF, a legal
+            // state once the held slot empties); indexing `holding` directly
+            // panicked on a hit from a player who never selected a toolbelt slot.
+            const held = w.inventory[as].heldItem();
             const attacker_peer: ?usize = if (w.mask[as].player and w.player[as].peer_slot >= 0)
                 @intCast(w.player[as].peer_slot)
             else

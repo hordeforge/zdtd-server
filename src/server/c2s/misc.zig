@@ -740,7 +740,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (d.fatal and was_zombie) amount = fatal_kill_amount;
         // PvP gate + resist legs when damaging a player, in stock
         // EntityAlive::DamageEntity order: GeneralDamageResist (passive 40, all
-        // damage types) then the physical armor rating.
+        // damage types) then the armor branch of Equipment.CalcDamage (IL=83):
+        // physical types take the physical armor rating, every other
+        // EnumDamageTypes member takes passive 43 ElementalDamageResist scaled
+        // by the damage type's tag (combat-damage.md 2.1).
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
             if (self.sim.mask[ei].player) {
                 amount *= 1.0 - invsys.generalDamageResist(&self.sim, ei);
@@ -748,10 +751,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
                     if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))
                         return true;
-                    // Armor mitigation, less the attacker's held-item TargetArmor
-                    // penetration (RE GetTotalPhysicalArmorRating IL=47).
-                    const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
-                    amount *= (1.0 - mit);
+                    if (protocol.damageTypeIsPhysical(d.dtype)) {
+                        // Armor mitigation, less the attacker's held-item
+                        // TargetArmor penetration (RE GetTotalPhysicalArmorRating
+                        // IL=47).
+                        const mit = invsys.armorMitigationVs(&self.sim, @intCast(self.sim.player[ei].peer_slot), actor_slot);
+                        amount *= (1.0 - mit);
+                    } else {
+                        // ElementalDamageResist is a percentage on the victim;
+                        // no penetration leg exists for it in stock.
+                        amount *= (1.0 - self.elementalDamageResist(ei, protocol.damageTypeName(d.dtype)));
+                    }
                 }
             }
         }
@@ -791,8 +801,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         var dismember_bits: u8 = 0;
         if (self.sim.slotOfNetId(d.entity_id)) |vs| {
             if (self.sim.mask[vs].health) {
+                // `heldItem()` guards the no-holding sentinel (0xFFFF, a legal
+                // state after the held slot empties): indexing `holding`
+                // directly panicked on a hit that arrived before the attacker
+                // ever selected a toolbelt slot.
                 const held_id = if (self.sim.mask[actor_slot].inventory)
-                    self.sim.inventory[actor_slot].slots[self.sim.inventory[actor_slot].holding].item_id
+                    self.sim.inventory[actor_slot].heldItem().item_id
                 else
                     0;
                 const weapon_chance = if (self.items.byId(held_id)) |idef| idef.dismember_chance else 0;
@@ -810,7 +824,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // The item's StaminaLoss passive is the cost; the survival pass
             // picks the deduction up on its next stamina sync.
             if (self.sim.mask[actor_slot].health and self.sim.mask[actor_slot].player) {
-                const held = &self.sim.inventory[actor_slot].slots[self.sim.inventory[actor_slot].holding];
+                const held = self.sim.inventory[actor_slot].heldItem();
                 if (self.items.byId(held.item_id)) |item_def| {
                     if (item_def.stamina_loss > 0) {
                         const cost = item_def.stamina_loss * self.sim.rules.combat.stamina_usage_multiplier;

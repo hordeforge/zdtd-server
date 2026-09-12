@@ -3974,8 +3974,9 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     perkEnforcerApparel Equals 1`, so it folds only once the perk is owned.
     - Residuals, recorded: (a) the two resist names are deliberately NOT folded
       here because `armor_pdr_fn` (the items.xml quality-curve path feeding
-      `armorMitigation`) already owns PhysicalDamageResist; ElementalDamageResist
-      still has no consumer (see the round-22 EDR residual above); (b) the 83
+      `armorMitigation`) owns PhysicalDamageResist and the event-tagged EDR fold
+      (see the round-22 EDR row above) owns ElementalDamageResist, so folding
+      them here too would double-count; (b) the 83
       item `StaminaChangeOT` rows are all `tags="running"`/`"walking"`, so they
       need the sprint leg to run a `running`-tagged query before they apply (the
       current sprint drain uses the `Rules` floor); (c) `Equipment` mod items
@@ -4004,20 +4005,26 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
     Measured effect: `perkPainTolerance` level 5 (`.05,.25` untagged) moves from
     inert to 25% off every incoming hit, and a single offline armor piece takes
     a 6.0 hp zombie bite to 5.4.
-    - **Residual (recorded, not wired): `ElementalDamageResist` (passive 43).**
+    - **`ElementalDamageResist` (passive 43) wired (2026-09-12).**
       `Equipment::CalcDamage` (IL=83) splits on `Equipment.physicalDamageTypes`
       (`"piercing,bashing,slashing,crushing,none,corrosive"`, Equipment cctor
-      IL=2590): the physical branch uses the armor rating, every other branch
-      uses passive 43 queried with the **damage type tag**. So the armour leg
-      above is right for physical hits only, and the two non-physical player
-      chokes are approximations today: explosions carry stock's default Heat
-      type (the S2C fan-out already sends dtype 6) yet take the physical armor
-      rating, and the environmental legs (Radiation/Suffocation/Starvation) have
-      no EDR leg. Wiring EDR needs a damage-type tag on the ctx and a per-tag
-      fold, and the stock rows are mostly `tags="heat,electrical"` /
-      `tags="radiation"` item and `god`-buff rows, so the fold has to run at the
-      choke rather than once per tick. Recorded here with the IL citation rather
-      than guessed at.
+      IL=11): the physical branch uses the armor rating, every other branch
+      uses passive 43 queried with the **damage type tag**. The wire byte is
+      `EnumDamageTypes` (`NetPackageDamageEntity.damageType`, protocol.md 6.5),
+      so `protocol.damageTypeIsPhysical` is `dtype <= 5` and
+      `damageTypeName` is the tag. `Game.elementalDamageResist(ps, tag)` folds
+      the victim's equipped item rows, buffs and perks on the damage event with
+      that tag as the ctx query (stock rows are `tags="heat,electrical"` /
+      `radiation` plus untagged jitter), and the player chokes use it: the C2S
+      damage path picks PDR *or* EDR by type (`c2s/misc.zig`), the explosion
+      blast takes Heat (ExplosionData default 6, `c2s/blocks.zig`), and the
+      server-side drowning (16 Suffocation) and radiated-biome (8 Radiation)
+      legs take it in `tick.zig`. An event-only ctx cannot answer a row's own
+      requirements, so such a row is counted unsupported and skipped; every
+      stock 43 row is requirement-free. Verified by the
+      `scenario ElementalDamageResist` test on stock items.xml: bare heat 100,
+      armored heat 87.5 (Q6 helmet), cold 99.8 (tag mismatch, jitter only) and
+      bashing 87.7 (PDR branch).
   - `<book>` blocks (152) joined the catalog this round: a book is a
     progression value items.xml grants with `SetProgressionLevel level="-1"`,
     and before this a read almanac stored no level and folded no passive. This
@@ -6347,7 +6354,7 @@ HAVE/PARTIAL: Transform, Health, NetworkId, Kind, Player, Journal, Wallet, Zombi
 | XP / progression / skills | PARTIAL (awardXp ledger; attribute + perk spending SHIPPED 2026-08-26: NetPackageEntitySetSkillLevelServer C2S is server-validated (one level per purchase, max level, parent-attribute gate, SP balance) and gated by the on_perk_spend Wasm verdict (ADR 0033) with the S2C client echo; the 23 crafting skills are MAGAZINE-driven in stock (A21+ book system, max_level 20-100, RE progression.md §4 residual) and their magazine advancement stays MISSING) |
 | Buffs / disease / food/water/temp | PARTIAL (buff set + stack/duration ticks + wire; food/water survival ships - server decay (tickSurvival) + the C2S inventory consumption refill (Path A eatable-loss → applyEatProps applies FoodChange/WaterChange/FoodHealth). Temperature: parity N/A 2026-08-26 re-audit - the felt-temperature path is CLIENT-owned in stock (the dedi stubs the felt-temp helpers to constants, weather-environment.md 307; the server's surface is the NetPackageWeather sync, which ships). Disease: buff-driven effects ship via the server-owned buff set; the item-consume buff grants (an item's Buff effects on eating/drinking - the disease triggers) stay recorded) |
 | Inventory component | HAVE (toolbelt/bag/equip + InvTx) |
-| Equipment / armor mitigation | WORKS (equip slots; with stock items.xml the mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality - the items.xml quality curves via `curveValueAt` (RE PassiveEffect.ModValue IL=796: piecewise-linear over levels scaled Q1..Q6, item quality is the effect level, EffectManager.GetValue IL_0393; GetTotalPhysicalArmorRating sums passive 41 on the wearer, Equipment.CalcDamage reduces physical damage by rating/100, combat-damage.md), plus the buff/perk resist leg from the effects VM; the `[rules.combat] armor_mitigation_per_piece` floor stands only for the offline/builtin catalog). Equipment swaps reach the server 2026-08-26: the standalone NetPackagePlayerEquipment C2S (sent on every bPlayerEquipmentChanged flip, an armor swap) is applied to the sim's equip slots (applyEquipmentBody, RE Equipment.Read IL=93) + relayed to the other tracked players, so mitigation and the rendered armor stay in sync - previously the package was an accepted no-op and swaps desynced the server) |
+| Equipment / armor mitigation | WORKS (equip slots; physical damage takes the equipped armor's summed PhysicalDamageResist percent and every non-physical EnumDamageTypes member takes the tag-matched ElementalDamageResist passive 43 at the choke (2026-09-12); with stock items.xml the mitigation is the equipped armor's summed PhysicalDamageResist percent at its quality - the items.xml quality curves via `curveValueAt` (RE PassiveEffect.ModValue IL=796: piecewise-linear over levels scaled Q1..Q6, item quality is the effect level, EffectManager.GetValue IL_0393; GetTotalPhysicalArmorRating sums passive 41 on the wearer, Equipment.CalcDamage reduces physical damage by rating/100, combat-damage.md), plus the buff/perk resist leg from the effects VM; the `[rules.combat] armor_mitigation_per_piece` floor stands only for the offline/builtin catalog). Equipment swaps reach the server 2026-08-26: the standalone NetPackagePlayerEquipment C2S (sent on every bPlayerEquipmentChanged flip, an armor swap) is applied to the sim's equip slots (applyEquipmentBody, RE Equipment.Read IL=93) + relayed to the other tracked players, so mitigation and the rendered armor stay in sync - previously the package was an accepted no-op and swaps desynced the server) |
 | Item passive routing (DegradationPerUse / TargetArmor) | WORKS (2026-08-25: `DegradationPerUse` base_set values wear the held tool per use (degradeUse hook, stock ItemValue.UseTimes); `TargetArmor` perc_add penetrates armor mitigation at the damage chokes - `armorMitigationVs`, RE GetTotalPhysicalArmorRating IL=47 applies passive 163 on the attacking item to the wearer's passive-41 rating base. The perk-tag-gated rows (perkJavelinMaster etc.) are wired too: the weapon's tagged value applies when the attacker owns the tagged perk (level >= 1), checked at the choke. Recorded, not wired: `BlockDamage` (the client computes its own tool+perk block damage and claims it - server-side re-scaling would double-apply, same finding as the difficulty C2S verbatim-strength path), `HarvestCount` (the item-side harvest count multiplier - **WIRED 2026-08-26** for the held-tool leg: `GameUtils.HarvestOnAttack` IL=623 pins count = trunc(rolled x GetValue(141, tool, 1, holder, null, dropTag)); items.xml rows fold over base 1 as base_add -> 1+X, base_set -> X, perc_add -> 1+Y (quality curves at the tool quality), tag-gated by the drop row's tag; `items.harvestMultiplier` applies it in the dig roll - a wooden club yields 0.25x (55 -> 13 rocks), the auger's untagged perc_add .2 yields 1.2x (55 -> 66), scenario harvest-count. Recorded: the equipped-armor aggregation (farmer/lumberjack/miner/scavenger rows over worn items - the passive-effects-VM non-goal) and the XUiM_Recipes seed/crop/mining/harvest output modifiers (sandbox "harvest output" options, defaults 1.0)), `LootProb` (passive 79 in LootContainer.getProbability IL=192 scales the template/entry prob by the receiving player's equipped LootProb for the looted item's tags; the only stock row - armorFarmerHelmet perc_add curve 2..20 tags=seedSkill - is DATA-INERT: no stock item Tags property or loot.xml entry tag contains seedSkill, so the passive can never intersect the roll's tag context (audited 2026-08-26, loot-economy.md 8.1). A modded items.xml/loot.xml with a matching tag would activate it - recorded, not wired (the equipped-items aggregation is the passive-effects-VM non-goal). **Block-loot drop SHIPPED 2026-08-25**: the 449 LootList blocks are all CompositeTileEntity containers, so a broken container now spills its pre-filled contents into a loot bag at the block (tryContainerSpill mirrors the eviction spill; rolling the list again would double-loot). **Terrain harvest drops SHIPPED 2026-08-26**: the server rolls the broken block's `<drop event="Harvest">` rows at the dig choke (BlockDef.harvest_drops parses count/prob/stick_chance/tool_category/tag from blocks.xml, inherits through Extends per CopyDroppedFrom IL=89 - own wins per item name - and scales prob by the block's ResourceScale property, zero b14 blocks set it); the roll is stock Block.DropItemsOnEvent IL=246 (count RandomRange(min,max+1), skip 0, drop when random < prob; tool_category/tag stored but never read by the roll - the item-side bonus legs) + GameUtils.HarvestOnAttack IL=623 (stacks grant to the breaker's inventory, overflow becomes a ground bag; XP = material.Experience x rolled count). The Fall (587 rows) and Destroy (1,286 rows) debris events stay recorded this slice; the `[recipe]`/`*` drop names appear on no b14 Harvest row and fail closed. Fixing this also fixed a latent P0: the stability plane computes lazily on the first dig AFTER the handler aired the block, so `removed_stab` was 0 and `cur_stab - 1` underflowed (first dig in any fresh chunk panicked in Debug/ReleaseSafe); `removeBlockAt` now guards the u8 underflow. `StaminaLoss` is WIRED: the landed-hit choke drains the held item's items.xml StaminaLoss x `[rules.combat] stamina_usage_multiplier` (RE ItemActionMelee IL: AddStamina(-(GetValue(StaminaLoss) x StaminaUsageMultiplier))); the negative quality-curve rows stay recorded)) |
 | Projectile / ranged combat | WORKS (2026-08-20, RE items.md:1097-1140: projectiles are client-side GameObjects with ProjectileMoveScript, never server entities; the server surface is the C2S NetPackageDamageEntity claim, which zdtd validates range/cap/fatal/PvP/armor, applies, knocks back and kills) |
 | Block damage from zombies | PARTIAL (`tickZombieBlockDamage`) |

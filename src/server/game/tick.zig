@@ -23,6 +23,7 @@ const admin_xml = @import("../admin_xml.zig");
 const game_social = @import("social.zig");
 const io_fs = @import("../../util/io_fs.zig");
 const inventory = @import("../../ecs/inventory.zig");
+const protocol = @import("../../protocol.zig");
 
 /// Requirement-gate bridge: `HasBuff` resolves names through the loaded buffs
 /// table (`EntityBuffs::HasBuff` is case-insensitive). Living here keeps
@@ -219,8 +220,83 @@ fn activeBuffIds(set: *const ecs.components.BuffSet, out: []u16) []const u16 {
 /// carries them: `buffs.survival()` resolves the stage thresholds, the
 /// starvation HP loss and the stamina penalty. Runs after tickAll so the world
 /// clock already advanced.
-pub fn tickSurvival(self: *Game, dt: f32) void {
-    // APM (P4b): the per-player effects pass (passive-effects VM + triggered
+/// `Equipment.CalcDamage` (IL=83, combat-damage.md §2.1) non-physical leg:
+/// stock queries `EffectManager.GetValue(43 ElementalDamageResist,
+/// itemValue: null, entity: the victim, tags: damageTypeTag)`, so an armor row
+/// tagged `heat,electrical` resists heat and electric but not cold, while the
+/// untagged jitter rows resist every non-physical type. zdtd folds the same
+/// rows the tick VM folds (equipped items, buffs, perks) on the damage event,
+/// with the damage type as the ctx tag set. Returns the 0..1 fraction; the
+/// caller scales `1 - fraction` like stock's
+/// `FastMax(0, damage * (1 - value/100))`.
+///
+/// The ctx here is deliberately the event's own: it carries the live survival
+/// state, class tags, clock and cvar/level ledger but not the tick fold's
+/// equipment/sandbox snapshots, so a row gated on something only the tick fold
+/// answers is refused (counted unsupported) rather than answered wrongly.
+/// Every stock passive-43 row is requirement-free (only `tags`/`tier`), so the
+/// fold is exact for stock data.
+pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
+    if (damage_tag.len == 0) return 0;
+    if (!self.sim.mask[ps].inventory or !self.sim.mask[ps].health) return 0;
+    const h = &self.sim.health[ps];
+    const peer_slot = self.sim.player[ps].peer_slot;
+    const c: ?*Client = if (peer_slot >= 0 and @as(usize, @intCast(peer_slot)) < self.clients.len)
+        &self.clients[@intCast(peer_slot)]
+    else
+        null;
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const buff_lookup = BuffNameLookup{ .table = &self.buffs };
+    const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
+    const ctx = requirements.Ctx{
+        .tags = damage_tag,
+        .levels = if (c) |cc| cc.skill_levels[0..cc.skill_level_n] else &.{},
+        .player_level = if (c) |cc| cc.level else 0,
+        .alive = self.sim.alive[ps],
+        .cvars = if (c) |cc| &cc.cvars else null,
+        .active_buffs = activeBuffIds(&self.sim.buffs[ps], &buff_ids),
+        .buff_names = &buff_names,
+        .is_night = self.sim.director.clock.isNight(),
+        .entity_tags = entityClassTags(self, ps),
+        .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
+        .hp_max = h.max_hp,
+        .hp_base_max = h.base_max_hp,
+        .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
+        .stamina_max = h.stamina_max,
+        .stamina_base_max = base_consumable_stat_max,
+        .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
+        .food_max = h.food_max,
+        .food_base_max = base_consumable_stat_max,
+        .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
+        .water_max = h.water_max,
+        .water_base_max = base_consumable_stat_max,
+    };
+    var counts: requirements.Counts = .{};
+    var total: f32 = 0;
+    const qmax: u8 = ecs.components.max_quality_tiers;
+    var i: usize = ecs.components.inv_equip_start;
+    while (i < ecs.components.max_inv_slots) : (i += 1) {
+        const slot = self.sim.inventory[ps].slots[i];
+        if (slot.count == 0) continue;
+        const def = self.items.byId(slot.item_id) orelse continue;
+        if (def.passives.len == 0) continue;
+        total += assets_buffs.trackedDeltasAt(
+            def.passives,
+            .{ .quality = .{ .level = @min(slot.quality, qmax), .max = qmax } },
+            ctx,
+            &counts,
+        ).elem_resist;
+    }
+    total += assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], ctx, &counts).elem_resist;
+    total += assets_progression.perkTotals(&self.progression_table, ctx.levels, ctx, &counts).elem_resist;
+    self.harness.counters.add(.requirement_gates, counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, counts.unsupported);
+    // Stock FastMax(0, ...) floors at zero and the fraction can exceed 1 only
+    // with modded rows; clamp so the caller's `1 - fraction` cannot go negative.
+    return std.math.clamp(total / 100.0, 0, 1);
+}
+
+pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player effects pass (passive-effects VM + triggered
     // engine + stat application) is bounded by the client table; the section
     // timer + survival_players/vm_recomputes counters keep it inside the
     // 50 ms budget as player counts scale.
@@ -268,9 +344,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                     // Wasm-first (AGENTS rule 29): environmental damage passes
                     // the on_player_damage verdict with attacker -1, so a
                     // module scales/denies drowning like any other player hit.
-                    // GeneralDamageResist (passive 40) covers every damage type.
+                    // GeneralDamageResist (passive 40) covers every damage type,
+                    // then the armor branch: drowning is EnumDamageTypes 16
+                    // Suffocation (protocol.md 6.5), so passive 43 resists it.
                     const raw = prog.drowning_damage_per_second * c.drown_accum *
-                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps)) *
+                        (1.0 - self.elementalDamageResist(ps, protocol.damageTypeName(16)));
                     const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.drown_accum = 0;
@@ -286,9 +365,11 @@ pub fn tickSurvival(self: *Game, dt: f32) void {
                 c.radiation_accum += secs;
                 if (c.radiation_accum >= 1.0) {
                     // Wasm-first (AGENTS rule 29): verdict with attacker -1,
-                    // like drowning above. GeneralDamageResist covers it too.
+                    // like drowning above. GeneralDamageResist covers it too,
+                    // then ElementalDamageResist for the Radiation type (8).
                     const raw = prog.radiation_damage_per_second * c.radiation_accum *
-                        (1.0 - inventory.generalDamageResist(&self.sim, ps));
+                        (1.0 - inventory.generalDamageResist(&self.sim, ps)) *
+                        (1.0 - self.elementalDamageResist(ps, protocol.damageTypeName(8)));
                     const dmg = game_mod.playerDamageVerdictAmount(self, -1, c.entity_id, raw);
                     if (dmg > 0) _ = self.sim.damageFrom(c.entity_id, dmg, -1);
                     c.radiation_accum = 0;

@@ -8,7 +8,22 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Plugin verb interception 2026-09-12
+`lint-architecture: clean`). **Elemental damage resistance 2026-09-12**:
+passive 43 (`ElementalDamageResist`) now has its stock consumer. The wire
+`damageType` byte classifies physical vs elemental (`EnumDamageTypes` ordinals;
+stock's physical set is `piercing,bashing,slashing,crushing,none,corrosive`, so
+`dtype <= 5`), the C2S player path takes PDR for physical and a tag-matched EDR
+for everything else, the explosion blast takes Heat (6), drowning Suffocation
+(16) and the radiated biome Radiation (8). `Game.elementalDamageResist` folds
+the victim's equipped item rows, buffs and perks on the damage event with the
+damage type as the query tag, so armor's `tags="heat,electrical"` rows resist
+those types and not cold. The new `scenario ElementalDamageResist` test on
+stock items.xml reads bare heat 100, Q6 helmet heat 87.5, cold 99.8 and bashing
+87.7. Writing it also exposed two latent crashes (`0xFFFF` no-holding sentinel
+read directly in `armorMitigationVs` and the harvest held-tool read), both fixed
+through `Inventory.heldItem()`. `zig build test` 1793 passed / 2 skipped / 0
+failed.
+**Plugin verb interception 2026-09-12
 (composability review F4, ADR 0039)**: a module can declare queued verbs it
 will not issue (`manifest.toml deny`), and `zdtd.toml [plugin] deny`/`allow`
 merge over that declaration right-biased (operator denies add, operator allows

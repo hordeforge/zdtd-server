@@ -7,6 +7,34 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Elemental damage ignored armor's elemental resistance (and physical armor
+  wrongly reduced it). Stock `Equipment.CalcDamage` (IL=83) splits on
+  `Equipment.physicalDamageTypes` (`piercing,bashing,slashing,crushing,none,
+  corrosive`): physical damage takes the armor rating, every other
+  `EnumDamageTypes` member is scaled by passive 43 `ElementalDamageResist`
+  queried with the **damage type tag**. Passive 43 was parsed but had no
+  consumer, so a heat hit took the physical armor rating while the armor's
+  `tags="heat,electrical"` rows never applied, and the server-computed
+  environmental legs (drowning, radiated biome) had no elemental leg at all.
+  The wire `damageType` byte now classifies physical vs elemental
+  (`protocol.damageTypeIsPhysical`, `damageTypeName`), and
+  `Game.elementalDamageResist` folds the victim's equipped item rows, buffs and
+  perks on the damage event with the damage type as the query tag, so
+  `heat,electrical` armor resists heat and electric but not cold, and the
+  untagged jitter rows apply to every elemental type. Wired at the C2S player
+  damage path, the explosion blast (stock Heat default), drowning (Suffocation)
+  and the radiated biome (Radiation). A row whose own requirements the
+  event-time context cannot answer is counted unsupported and skipped rather
+  than answered from a partial context; every stock passive-43 row is
+  requirement-free. Verified on stock `items.xml`: bare heat 100, Q6 helmet
+  heat 87.5, cold 99.8, bashing 87.7.
+
+- Two crash paths read the toolbelt index without the no-holding sentinel
+  (`0xFFFF`, a legal state once the held slot empties): a damage packet from a
+  player who had never selected a slot panicked in the armor-penetration read,
+  and a harvest packet panicked in the held-tool read. Both now go through
+  `Inventory.heldItem()`, which returns an empty slot for the sentinel.
+
 - Heat-map scout parties spawned five times too often and re-armed almost
   immediately. Stock `AIDirectorChunkData.CheckToSpawn` (aidirector.md verified
   literals) resets the region with a 240 s cooldown and then rolls

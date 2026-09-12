@@ -17247,3 +17247,83 @@ test "scenario dropped-bag markers survive a restart with the bags" {
     }
     std.debug.print("PASS bag markers: the map markers survive a restart with the bags\n", .{});
 }
+
+test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagged by type" {
+    // Equipment.CalcDamage (IL=83, combat-damage.md 2.1): physical damage types
+    // (piercing,bashing,slashing,crushing,none,corrosive) take the physical
+    // armor rating; every other EnumDamageTypes member is scaled by passive 43
+    // ElementalDamageResist on the victim, queried with the damage type tag.
+    // armorPrimitiveHelmet carries `ElementalDamageResist 8,12.3
+    // tags="heat,electrical"`, so heat and electric damage are resisted at the
+    // quality tier while cold only sees the untagged jitter row.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    g.pvp_mode = 3; // damage between players is legal; the resist legs are what this tests
+    var cap_a: ln_peer.Capture = .{};
+    const a = try g.attachJoinedClient(&cap_a);
+    var cap_b: ln_peer.Capture = .{};
+    const b = try g.attachJoinedClient(&cap_b);
+    const ps = g.sim.playerByPeer(b.slot) orelse return error.TestUnexpectedResult;
+
+    var body: [512]u8 = undefined;
+    var frame_buf: [1024]u8 = undefined;
+    // Hit the victim for `strength` of wire damage type `dtype`; return the hp
+    // actually lost, so the choke's whole mitigation order is in the number.
+    const Hit = struct {
+        fn f(g_: *game_mod.Game, c: anytype, actor_eid: i32, victim_ps: ecs.Slot, victim_eid: i32, dtype: u8, strength: u16, body_: []u8, frame_: []u8) !f32 {
+            g_.sim.health[victim_ps].hp = 100;
+            const dmg = try packages.buildDamageBody(body_, victim_eid, 0, dtype, strength, false, actor_eid);
+            try g_.injectFramed(c, try packages.framed(frame_, "NetPackageDamageEntity", dmg));
+            return 100 - g_.sim.health[victim_ps].hp;
+        }
+    }.f;
+
+    // No armor: heat lands at full strength (no buffs, so GDR is 0).
+    const bare_heat = try Hit(g, b, a.entity_id, ps, b.entity_id, 6, 100, &body, &frame_buf);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), bare_heat, 0.5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), g.elementalDamageResist(ps, "heat"), 0.001);
+
+    // Wear the primitive helmet at Q6 (8..12.3 curve + jitter).
+    const helmet = g.items.byName("armorPrimitiveHelmet") orelse return error.SkipZigTest;
+    try std.testing.expect(invsys.give(&g.sim, b.slot, helmet.id, 1));
+    var from: u16 = 0;
+    for (g.sim.inventory[ps].slots, 0..) |s, i| {
+        if (s.item_id == helmet.id) {
+            from = @intCast(i);
+            break;
+        }
+    }
+    g.sim.inventory[ps].slots[from].quality = 6;
+    try std.testing.expect(invsys.equip(&g.sim, b.slot, from, 0));
+    try g.step();
+
+    // Passive 43 is tag-matched: heat/electric resist, cold does not.
+    try std.testing.expect(g.elementalDamageResist(ps, "heat") > 0.08);
+    try std.testing.expect(g.elementalDamageResist(ps, "electrical") > 0.08);
+    try std.testing.expect(g.elementalDamageResist(ps, "cold") < 0.01);
+
+    const armored_heat = try Hit(g, b, a.entity_id, ps, b.entity_id, 6, 100, &body, &frame_buf);
+    try std.testing.expect(armored_heat < 92); // ~12% EDR
+    const armored_cold = try Hit(g, b, a.entity_id, ps, b.entity_id, 7, 100, &body, &frame_buf);
+    try std.testing.expect(armored_cold > 99); // only the untagged jitter row
+    // A physical type keeps the armor-rating branch (the helmet also carries
+    // PhysicalDamageResist 8,12.3), so it is mitigated but through PDR.
+    const armored_bash = try Hit(g, b, a.entity_id, ps, b.entity_id, 3, 100, &body, &frame_buf);
+    try std.testing.expect(armored_bash < 92);
+    std.debug.print(
+        "PASS elemental resist: bare heat {d:.1}, armored heat {d:.1}, cold {d:.1}, bash {d:.1}\n",
+        .{ bare_heat, armored_heat, armored_cold, armored_bash },
+    );
+}

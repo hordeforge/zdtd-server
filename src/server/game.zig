@@ -1701,6 +1701,13 @@ pub const Game = struct {
         return game_tick.tickSurvival(self, dt);
     }
 
+    /// Passive 43 (`ElementalDamageResist`) for the victim and one damage type,
+    /// the non-physical branch of `Equipment.CalcDamage` (IL=83). See
+    /// `game/tick.zig` for the fold and its fail-closed ctx rule.
+    pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
+        return game_tick.elementalDamageResist(self, ps, damage_tag);
+    }
+
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS
     /// entities; the BotManager owns them and integrates their move intents
     /// here. Replication streams their positions via the non-ECS path.

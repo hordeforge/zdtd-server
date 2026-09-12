@@ -666,7 +666,10 @@ pub fn rollBlockDropEvent(
         if (event == .harvest) {
             if (self.sim.playerByPeer(peer_slot)) |ps| {
                 if (self.sim.mask[ps].inventory) {
-                    const tool = self.sim.inventory[ps].slots[self.sim.inventory[ps].holding];
+                    // heldItem() guards the no-holding sentinel: a harvest
+                    // packet can arrive before the player selects a toolbelt
+                    // slot.
+                    const tool = self.sim.inventory[ps].heldItem();
                     if (tool.item_id != 0) {
                         const mult = self.items.harvestMultiplier(tool.item_id, tool.quality, d.tag);
                         if (mult <= 0) continue;
