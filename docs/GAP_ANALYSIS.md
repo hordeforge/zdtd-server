@@ -2853,12 +2853,13 @@ gamestage, no wandering hordes, and no screamers.
   (`Director.heat`): burning workstations whose block carries a blocks.xml
   `HeatMapStrength` (forge 6, campfire 5, workbench 5, ...) feed
   `notifyActivity(value, 720 ticks)`; events decay linearly and expire. Every
-  5 s `CheckToSpawn`: a region at/above 25 resets and spawns a scout party;
-  cooldowns are the RE-verified stock literals (region 240 s, neighbors 180 s,
-  aligned 2026-08-20, `[rules.director]` tunable).
+  5 s `CheckToSpawn` (IL=46): a region at/above 25 resets (`FindBestEventAndReset`
+  stamps 240 s) and a 20% `cSpawnChance` roll decides the rest (2026-09-12):
+  on a spawn `SetLongDelay` hard-sets 1320 s and the eight neighbours get 720 s,
+  otherwise the region keeps the 240 and the neighbours get 180 s. The region
+  and its neighbours then block new heat for that window.
   (Scouts1/2/Feral/Radiated by gamestage, chunk-heat spawner 0/8/10 constants)
-  that investigates the nearest player; the region and its neighbors go on
-  cooldown (120 s / 60 s; the 20% feral roll doubles it). Blood moons suppress
+  that investigates the nearest player. Blood moons suppress
   new heat (NotifyActivity gate). Noise-to-heat wired 2026-08-26: the
   movement-noise model folds sounds.xml `<Noise>` rows (heat_map_strength on
   gunfire/auger/explosions, 1312 rows) into notifyActivity via the stealth
@@ -2867,8 +2868,8 @@ gamestage, no wandering hordes, and no screamers.
   block-driven HeatMapStrength feed for placed torches/campfires is not yet
   modeled), and the screamer's scream-summons-more loop.
   *Anchors:* `src/ecs/aidirector.zig` (`heat`, `notifyActivity`, `tickHeat`,
-  `spawnHeatScouts`), `src/server/game.zig` (workstation heat feed),
-  `src/assets/blocks.zig` (`HeatMapStrength`), `asm.il:414504-415200`,
+  `heatSpawnRolls`, `spawnHeatScouts`), `src/server/game.zig` (workstation heat
+  feed), `src/assets/blocks.zig` (`HeatMapStrength`), `asm.il:414504-415200`,
   `asm.il:416218`, `Data/Config/blocks.xml:28086` (forge 6)
 
 - **NetPackageHordeEvent** `N/A (parity)`: see [§6 blood-moon

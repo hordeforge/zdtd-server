@@ -364,6 +364,10 @@ pub const Director = struct {
     bloodmoon_cd: f32 = 0,
     scouts_cd: f32 = 0,
     total_spawned: u32 = 0,
+    /// Threshold crossings evaluated by the chunk-heat spawner. Only the
+    /// deterministic `cSpawnChance` roll reads it; never persisted (heat
+    /// regions are rebuilt from live activity, not save state).
+    heat_checks: u32 = 0,
     bloodmoon_active: bool = false,
     /// Blood-moon party state (AIDirectorBloodMoonParty, 413090-413140):
     /// players within cPartyJoinDistance 80 m share one focus and one
@@ -1292,24 +1296,39 @@ pub const Director = struct {
         while (ci < self.heat_n) : (ci += 1) {
             const r = &self.heat[ci];
             if (r.activity < w.rules.director.heat_spawn_threshold or r.cooldown > 0) continue;
-            // FindBestEventAndReset + StartCooldownOnNeighbors; the feral roll
-            // (rules.director.heat_feral_chance) doubles the cooldown
-            // (rules.director.heat_feral_cd_mult; deterministic, seeded stream).
-            // roll = round(1/chance): default 0.2 -> 1-in-5, exactly as before.
-            const chance = w.rules.director.heat_feral_chance;
-            const roll: u32 = if (chance > 0 and std.math.isFinite(chance))
-                @max(1, @as(u32, @round(1.0 / chance)))
-            else
-                std.math.maxInt(u32);
-            const feral = (self.total_spawned +% @as(u32, @intCast(ci))) % roll == 0;
+            // CheckToSpawn (IL=46): FindBestEventAndReset picks the max-Value
+            // event and stamps the short cooldown (240 s), then the
+            // cSpawnChance roll (20%) decides whether this crossing spawns
+            // scouts. On a spawn, SetLongDelay hard-sets 1320 s and
+            // StartCooldownOnNeighbors(true) gives the eight neighbours 720 s;
+            // otherwise the region keeps the 240 and the neighbours get 180.
+            // The feral/radiated scout *type* is not a roll here: it comes from
+            // the gamestage bracket (scoutGroup -> Scouts1/2/Feral/Radiated).
+            const spawns = self.heatSpawnRolls(w.rules.director.heat_spawn_chance);
             r.activity = 0;
-            r.cooldown = if (feral)
-                w.rules.director.heat_cooldown_seconds * w.rules.director.heat_feral_cd_mult
-            else
-                w.rules.director.heat_cooldown_seconds;
-            self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_cooldown_seconds);
-            self.spawnHeatScouts(w, r.key);
+            r.cooldown = w.rules.director.heat_cooldown_seconds;
+            if (spawns) {
+                r.cooldown = w.rules.director.heat_long_cooldown_seconds;
+                self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_long_cooldown_seconds);
+                self.spawnHeatScouts(w, r.key);
+            } else {
+                self.cooldownNeighbors(r.key, w.rules.director.heat_neighbor_cooldown_seconds);
+            }
         }
+    }
+
+    /// One `CheckToSpawn` spawn roll against `chance` (stock `cSpawnChance`,
+    /// a GameRandom roll). zdtd derives it from a counter that advances once per
+    /// threshold crossing, so a replay with the same inputs makes the same
+    /// choices without a shared global RNG (sim rule 22).
+    fn heatSpawnRolls(self: *Director, chance: f32) bool {
+        const ordinal = self.heat_checks;
+        self.heat_checks +%= 1;
+        if (!std.math.isFinite(chance) or chance <= 0) return false;
+        if (chance >= 1) return true;
+        const h = (ordinal +% 0x9E3779B9) *% 0x85EBCA6B;
+        const roll = (h ^ (h >> 16)) % 1000;
+        return roll < @as(u32, @intFromFloat(chance * 1000.0));
     }
 
     /// StartCooldownOnNeighbors: the eight surrounding regions get the shorter
@@ -1997,6 +2016,9 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
     defer w.deinit();
     _ = w.spawnPlayer(0, 70, 0, 0).?;
     var d: Director = .{};
+    // Stock's cSpawnChance (20%) is a roll; pin it to 1 so this test is about
+    // the spawn mechanics. The chance split has its own test below.
+    w.rules.director.heat_spawn_chance = 1;
     // A forge (6 per event, 720-tick duration) feeds every tick: 30 ticks give
     // activity ~180, well past the 25 threshold.
     var t: u32 = 0;
@@ -2006,7 +2028,8 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
     }
     try std.testing.expect(d.heat_n >= 1);
     try std.testing.expect(d.heat[0].activity >= 25);
-    // The 5 s CheckToSpawn fires: scouts spawn, the region resets and cools.
+    // The 5 s CheckToSpawn fires: scouts spawn, the region resets and takes the
+    // long cooldown (stock SetLongDelay 1320 s, not the 240 the reset stamped).
     var warm: u32 = 0;
     while (warm < 110) : (warm += 1) _ = d.tick(&w, 0.05);
     var scouts: u32 = 0;
@@ -2016,17 +2039,79 @@ test "heat map: forge activity crosses 25 and spawns scouts with cooldown" {
         scouts += 1;
     }
     try std.testing.expectEqual(@as(u32, 2), scouts); // rules.director.heat_scout_count default
-    // Region was reset (activity 0) and is on cooldown. Region key of (0,0):
-    // floor(0/80)=0 on both axes, packed = 0.
+    // Region was reset (activity 0) and is on the long cooldown. Region key of
+    // (0,0): floor(0/80)=0 on both axes, packed = 0.
     var found = false;
     for (d.heat[0..d.heat_n]) |*r| {
         if (r.key == 0) {
             found = true;
             try std.testing.expect(r.activity == 0);
-            try std.testing.expect(r.cooldown > 0);
+            // Long branch (a spawn happened), minus the ~5.5 s of ticks this
+            // test runs past the check; the exact table is asserted in the
+            // chance-split test below.
+            try std.testing.expect(r.cooldown > w.rules.director.heat_cooldown_seconds);
+            try std.testing.expect(r.cooldown <= w.rules.director.heat_long_cooldown_seconds);
         }
     }
     try std.testing.expect(found);
+}
+
+test "heat map: cSpawnChance picks the short or long cooldown table" {
+    // Stock CheckToSpawn (IL=46, aidirector.md verified literals): the reset
+    // stamps 240 s, then a 20% roll either spawns (SetLongDelay 1320 s plus
+    // StartCooldownOnNeighbors(true) = 720 s on the eight neighbours) or not
+    // (the region keeps 240 and the neighbours get 180). zdtd spawned on every
+    // crossing and modelled the long delay as a feral 2x cooldown, so scout
+    // parties came about five times too often and the region re-armed after
+    // 240 s instead of 22 minutes.
+    var w0: ecs_world.World = .{};
+    defer w0.deinit();
+    _ = w0.spawnPlayer(0, 70, 0, 0).?;
+    // District (1,0) is one 80-block region east of district (0,0).
+    const neighbour_key = Director.heatRegionKey(80, 0);
+
+    // Roll fails: no scouts, region 240, neighbour 180.
+    var d0: Director = .{ .heat_check_cd = 0 };
+    w0.rules.director.heat_spawn_chance = 0;
+    d0.notifyActivity(0, 0, 30, 720);
+    d0.notifyActivity(80, 0, 30, 720);
+    _ = d0.tick(&w0, 0.05);
+    var zombies: u32 = 0;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w0.alive[s] and w0.zombie_ai[s].is_horde) zombies += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 0), zombies);
+    try std.testing.expectEqual(@as(f32, 240), cooldownOf(&d0, 0));
+    try std.testing.expectEqual(@as(f32, 180), cooldownOf(&d0, neighbour_key));
+
+    // Roll lands: the same crossing spawns and takes the long table.
+    var w1: ecs_world.World = .{};
+    defer w1.deinit();
+    _ = w1.spawnPlayer(0, 70, 0, 0).?;
+    var d1: Director = .{ .heat_check_cd = 0 };
+    w1.rules.director.heat_spawn_chance = 1;
+    d1.notifyActivity(0, 0, 30, 720);
+    d1.notifyActivity(80, 0, 30, 720);
+    _ = d1.tick(&w1, 0.05);
+    zombies = 0;
+    s = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w1.alive[s] and w1.zombie_ai[s].is_horde) zombies += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 2), zombies);
+    try std.testing.expectEqual(@as(f32, 1320), cooldownOf(&d1, 0));
+    // The neighbour's own check is skipped because the long cooldown is already
+    // stamped, so it holds exactly the neighbour-long value.
+    try std.testing.expectEqual(@as(f32, 720), cooldownOf(&d1, neighbour_key));
+}
+
+/// Cooldown of the heat region with `key`, or -1 when absent (test helper).
+fn cooldownOf(d: *const Director, key: i64) f32 {
+    for (d.heat[0..d.heat_n]) |r| {
+        if (r.key == key) return r.cooldown;
+    }
+    return -1;
 }
 
 test "heat map: low activity never spawns and decays away" {

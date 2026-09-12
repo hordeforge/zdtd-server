@@ -674,24 +674,30 @@ pub const Director = struct {
     wandering_spawn_dist: f32 = 92.0,
     heat_spawn_threshold: f32 = 25.0,
     heat_check_seconds: f32 = 5.0,
-    /// Region cooldown after a heat spawn. Stock `AIDirectorChunkData`
-    /// `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44,
-    /// aidirector.md verified literals; the long form is 1320 via SetLongDelay,
-    /// modelled here as the feral 2x roll). Was 120 before the A41 alignment.
+    /// `CheckToSpawn` (IL=46) spawn chance per threshold crossing: stock
+    /// `cSpawnChance = 0.2` (a GameRandom roll, playtest mode excluded). A
+    /// failed roll still stamps the short region cooldown and cools neighbours.
+    heat_spawn_chance: f32 = 0.2,
+    /// Region cooldown when `CheckToSpawn` does not spawn. Stock
+    /// `FindBestEventAndReset` (IL=44) stamps `cCooldownDelay = 240` s
+    /// (aidirector.md verified literals). Was 120 before the A41 alignment.
     heat_cooldown_seconds: f32 = 240.0,
-    /// Cooldown applied to the eight surrounding regions. Stock
-    /// `StartNeighborCooldown` sets 180 s (short) / 720 s (long) via FastMax
-    /// (aidirector.md verified literals). Was 60 before the A41 alignment.
+    /// Region cooldown when it does spawn: stock `SetLongDelay` (IL=4) hard-sets
+    /// `cCooldownLongDelay = 1320` s (22 min), replacing the 240 the reset
+    /// stamped. The short form was previously approximated as a feral 2x roll.
+    heat_long_cooldown_seconds: f32 = 1320.0,
+    /// Cooldown applied to the eight surrounding regions when the spawn roll
+    /// fails. Stock `StartNeighborCooldown(false)` sets `cCooldownNeighborDelay`
+    /// = 180 s via FastMax against the current value. Was 60 before the A41
+    /// alignment.
     heat_neighbor_cooldown_seconds: f32 = 180.0,
+    /// Neighbour cooldown when the spawn roll lands: stock
+    /// `StartCooldownOnNeighbors(true)` sets `cCooldownNeighborLongDelay` =
+    /// 720 s. A spawned region suppresses its neighbours for 12 real minutes.
+    heat_neighbor_long_cooldown_seconds: f32 = 720.0,
     heat_scout_dist: f32 = 10.0,
     /// Scouts spawned per heat event (sibling of heat_scout_dist).
     heat_scout_count: u32 = 2,
-    /// Feral roll chance per heat event (0.2 = one in five); doubles the
-    /// region cooldown when it lands. Now wired to the actual roll in
-    /// aidirector.zig (the old note said "doc-only until modelled" - it is).
-    heat_feral_chance: f32 = 0.2,
-    /// Cooldown multiplier applied when the feral roll lands.
-    heat_feral_cd_mult: f32 = 2.0,
     /// Heat-event duration (world ticks) stamped on heat sources (forge runs,
     /// campfire activity, ...) and by craft.zig notifyActivity.
     heat_event_ticks: f32 = 720.0,
@@ -1003,12 +1009,13 @@ pub const DirectorOverlay = struct {
     wandering_spawn_dist: ?f32 = null,
     heat_spawn_threshold: ?f32 = null,
     heat_check_seconds: ?f32 = null,
+    heat_spawn_chance: ?f32 = null,
     heat_cooldown_seconds: ?f32 = null,
+    heat_long_cooldown_seconds: ?f32 = null,
     heat_neighbor_cooldown_seconds: ?f32 = null,
+    heat_neighbor_long_cooldown_seconds: ?f32 = null,
     heat_scout_dist: ?f32 = null,
     heat_scout_count: ?u32 = null,
-    heat_feral_chance: ?f32 = null,
-    heat_feral_cd_mult: ?f32 = null,
     heat_event_ticks: ?f32 = null,
     enemy_spawn_ring_min: ?f32 = null,
     enemy_spawn_ring_max: ?f32 = null,

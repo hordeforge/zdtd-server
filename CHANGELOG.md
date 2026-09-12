@@ -7,6 +7,25 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Fixed
 
+- Heat-map scout parties spawned five times too often and re-armed almost
+  immediately. Stock `AIDirectorChunkData.CheckToSpawn` (aidirector.md verified
+  literals) resets the region with a 240 s cooldown and then rolls
+  `cSpawnChance` = 20% to actually spawn: on a spawn it hard-sets 1320 s
+  (`SetLongDelay`) and gives the eight neighbours 720 s
+  (`StartCooldownOnNeighbors(true)`), otherwise the region keeps 240 and the
+  neighbours get 180. The sim spawned on every threshold crossing and modelled
+  the long delay as a `heat_feral_chance`/`heat_feral_cd_mult` 2x roll, so a
+  forge could summon a screamer every couple of minutes instead of roughly once
+  per 22. The roll is now a rules value (`heat_spawn_chance`, deterministic and
+  seeded off the crossing ordinal) and the long/short cooldown table is four
+  stock-sourced rules (`heat_cooldown_seconds` 240, `heat_long_cooldown_seconds`
+  1320, `heat_neighbor_cooldown_seconds` 180,
+  `heat_neighbor_long_cooldown_seconds` 720). The scout *type* was never a roll:
+  it is the gamestage bracket (Scouts1/2/Feral/Radiated), as before.
+  **Config break:** the zdtd-only `[rules.director] heat_feral_chance` and
+  `heat_feral_cd_mult` keys are gone; a toml still setting them fails the
+  unknown-key check at startup (delete the keys).
+
 - `plugin reload` kept a stale exclusive override claim. The claim table is
   built once at boot from the discovered `manifest.toml` files, and reload only
   re-read the `.wasm`, so a module replaced on disk that dropped its `points`

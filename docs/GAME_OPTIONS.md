@@ -318,12 +318,13 @@ test, so a retune cannot land silently).
 | `wandering_spawn_dist` | 92.0 | Blocks out the horde spawns (stock `RandomOnUnitCircle * 92f`, IL_018B) |
 | `heat_spawn_threshold` | 25.0 | Chunk-heat activity at which a region spawns a scout party |
 | `heat_check_seconds` | 5.0 | Heat-region check cadence |
-| `heat_cooldown_seconds` | 240.0 | Region cooldown after a heat spawn. Stock `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44; the long form 1320 is the feral 2x approximation). Aligned from 120 (A41) |
-| `heat_neighbor_cooldown_seconds` | 180.0 | Shorter cooldown applied to the eight surrounding regions. Stock `StartNeighborCooldown` short = 180 s (720 long). Aligned from 60 (A41) |
+| `heat_spawn_chance` | 0.2 | `CheckToSpawn` chance to actually spawn scouts. Stock `cSpawnChance` 20% (IL=46); a failed roll still stamps the short region cooldown and cools the neighbours |
+| `heat_cooldown_seconds` | 240.0 | Region cooldown when the spawn roll fails. Stock `FindBestEventAndReset` stamps `cooldownDelay = 240` s (IL=44). Aligned from 120 (A41) |
+| `heat_long_cooldown_seconds` | 1320.0 | Region cooldown when it spawns. Stock `SetLongDelay` (IL=4) hard-sets `cCooldownLongDelay = 1320` s (22 min), replacing the 240 |
+| `heat_neighbor_cooldown_seconds` | 180.0 | Neighbour cooldown when the spawn roll fails. Stock `StartNeighborCooldown(false)` = 180 s. Aligned from 60 (A41) |
+| `heat_neighbor_long_cooldown_seconds` | 720.0 | Neighbour cooldown when it spawns. Stock `StartCooldownOnNeighbors(true)` = 720 s |
 | `heat_scout_dist` | 10.0 | Scout-party spawn distance from the hot region center (chunk-heat spawner 0/8/10 constants) |
-| `heat_scout_count` | 2 | Scouts spawned per heat event |
-| `heat_feral_chance` | 0.2 | Feral roll chance per heat event (one in five); doubles the region cooldown when it lands |
-| `heat_feral_cd_mult` | 2.0 | Cooldown multiplier applied when the feral roll lands |
+| `heat_scout_count` | 2 | Scouts spawned per heat event (the scout *type* comes from the gamestage bracket Scouts1/2/Feral/Radiated, not a roll) |
 | `heat_event_ticks` | 720.0 | Heat-event duration (world ticks) stamped on heat sources (forge runs, campfire activity, craft.zig notifyActivity) |
 | `enemy_spawn_ring_min` / `enemy_spawn_ring_max` | 28.0 / 54.0 | Enemy spawn ring around players. Stock `cEnemyMin/MaxDistance` (spawning.md); was 18..28 (on-camera) before the R4 alignment |
 | `animal_spawn_ring_min` / `animal_spawn_ring_max` | 48.0 / 70.0 | Animal spawn ring. Stock `cAnimalMin/MaxDistance` (spawning.md); was 20..45 before the R4 alignment |

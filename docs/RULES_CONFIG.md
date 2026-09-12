@@ -35,8 +35,9 @@ data exists; defaults stay identical (a move is not a retune).
 | `bloodmoon` | `budget_scale` | 1.9 | `aidirector.zig` CanSpawn(1.9f) ceiling (RE) |
 | `bloodmoon` | `wave_frac` | 0.5 | `aidirector.zig` BM wave = enemy_count/2 |
 | `director` | `heat_scout_count` | 2 | `aidirector.zig` scouts per heat event |
-| `director` | `heat_feral_chance` | 0.2 | `aidirector.zig` feral roll (`% 5`, was doc-only) |
-| `director` | `heat_feral_cd_mult` | 2.0 | `aidirector.zig` feral cooldown doubling |
+| `director` | `heat_spawn_chance` | 0.2 | `aidirector.zig` `CheckToSpawn` roll (stock `cSpawnChance` 20%) |
+| `director` | `heat_long_cooldown_seconds` | 1320.0 | `aidirector.zig` region delay after a spawn (stock `SetLongDelay`) |
+| `director` | `heat_neighbor_long_cooldown_seconds` | 720.0 | `aidirector.zig` neighbour delay after a spawn (stock `StartNeighborCooldown(true)`) |
 | `director` | `heat_event_ticks` | 720.0 | `aidirector.zig` const, actually used by `craft.zig` |
 | `vehicle` | `fuel_cap` | 100 | `world.zig` spawn fill + `craft.zig` tank cap |
 | `vehicle` | `refuel_reach` | 3.0 | `craft.zig` InvTx refuel reach |

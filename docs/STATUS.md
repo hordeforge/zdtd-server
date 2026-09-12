@@ -8,7 +8,19 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Plugin contract version + table ceiling
+`lint-architecture: clean`). **Heat-map spawn rate 2026-09-12**: the chunk-heat
+spawner now follows the stock `CheckToSpawn` table instead of spawning on every
+threshold crossing: 20% spawn chance, region 240 s (no spawn) / 1320 s
+(`SetLongDelay`), neighbours 180 s / 720 s. The zdtd-only
+`heat_feral_chance`/`heat_feral_cd_mult` rules are replaced by
+`heat_spawn_chance`, `heat_long_cooldown_seconds` and
+`heat_neighbor_long_cooldown_seconds`; the roll is deterministic
+(`Director.heatSpawnRolls`, seeded off the crossing ordinal) so a replay makes
+the same choices. Gated by the `ecs.aidirector` chance-split test (0% -> no
+scouts and the 240/180 table; 100% -> a spawn and the 1320/720 table) plus the
+existing forge test pinned to chance 1. `zig build test` 1788 passed / 2 skipped
+/ 0 failed.
+**Plugin contract version + table ceiling
 2026-09-12 (composability review F6)**: a guest may now declare the contract
 version it was built against with `_zdtd_api() -> i32` (`mods/plugin_common.zig`
 exports it for every Zig guest). The host reads it at load; a version newer than
