@@ -885,9 +885,11 @@ abundance_type (68). Then the requirement evaluator landed (2026-09-12):
 `Biome` resolves from the container's biome and `Progression` / `CVar` /
 `RandomRoll` from the opener's own ledger (the fill path builds the shared
 `requirements.Ctx`; `RandomRoll` uses the deterministic per-entry stream and a
-`value="@$cvar"` operand). The residual is the 3 `SandboxOption` rows, whose
-numeric sandbox-option compare is not wired, plus abundance_type; the row
-stays PARTIAL for those.
+`value="@$cvar"` operand). The `$perkBookwormChance` writer is data too:
+progression.xml's `perkIntellectMastery` `onSelfProgressionUpdate` rows fire on
+every level change, so an Intellect Mastery 2+ opener rolls those 63 rows at
+25%. The residual is the 3 `SandboxOption` rows, whose numeric sandbox-option
+compare is not wired, plus abundance_type; the row stays PARTIAL for those.
 Then the timid-animals row went WORKS: `approach_attack` is gated by the
 class's inherited AITask-* list (`ai_attack` parsed from entityclasses.xml;
 `ApproachAndAttackTarget` is the only attack task in V3.1.0 b14), so a stag
