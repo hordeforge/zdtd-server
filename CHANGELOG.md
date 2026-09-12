@@ -5,6 +5,21 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- World decorations grew inside POIs. `AllowDecorations` was parsed but never
+  consulted, so the biome deco sampler placed trees and rocks inside every POI
+  footprint, including through buildings. The sampler now gates each cell on the
+  prefab footprint: within a 128-block deco chunk it tests the footprints of the
+  POIs that did not set `AllowDecorations="true"` (the stock default), so an
+  opted-in POI still gets its world deco while every other POI is left clean
+  (V3.2.0 changelog 4.5, RFC/PRD 0007). The footprint list is built lazily per
+  deco chunk from the shipped decoration list, which keeps ~1487 prefab XMLs
+  from being read at boot; an entry that hits the per-chunk rect cap is counted
+  instead of silently truncating. Both deco paths (join burst and streamed
+  chunk) go through the one resolver, and the stale duplicate resolver in
+  `server/game/join.zig` is gone.
+
 ### Added
 
 - Plugin effects that cannot be reverted are now classified and reported. The

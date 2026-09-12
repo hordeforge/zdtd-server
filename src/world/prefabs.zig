@@ -176,6 +176,10 @@ pub const Decoration = struct {
     }
 };
 
+/// A POI footprint in world XZ (inclusive min, exclusive max): the shape the
+/// decoration suppressor tests a sample cell against.
+pub const Rect = struct { x0: i32, z0: i32, x1: i32, z1: i32 };
+
 pub const Index = struct {
     allocator: std.mem.Allocator,
     /// Owned name strings and decoration list.
@@ -228,6 +232,33 @@ pub const Index = struct {
             sz = t;
         }
         return .{ .x0 = d.x, .z0 = d.z, .x1 = d.x + sx, .z1 = d.z + sz };
+    }
+
+    /// POI footprints inside `[x0,x1) x [z0,z1)` whose V3.2.0
+    /// `AllowDecorations` is not true (the stock default): the areas where
+    /// stock suppresses world (biome) decorations inside a POI footprint.
+    /// Parts are skipped like `poiTagsAt` (a part lies inside its parent's
+    /// footprint). Writes at most `out.len` rects and returns the count; the
+    /// caller sizes `out` for its sampling unit and a shortfall shows up as a
+    /// smaller count rather than a wrong answer.
+    ///
+    /// A prefab whose XML cannot be read is skipped, not suppressed: the two
+    /// failure directions are not symmetric (skipping leaves stock-suppressed
+    /// deco in place, over-suppressing strips deco the POI opted into), and
+    /// the loader already logs the read failure.
+    pub fn collectDecoSuppressors(self: *Index, x0: i32, z0: i32, x1: i32, z1: i32, out: []Rect) usize {
+        var n: usize = 0;
+        for (self.items, 0..) |d, i| {
+            if (isPart(d.name)) continue;
+            const b = self.boundsXZ(i);
+            if (b.x1 <= x0 or b.x0 >= x1 or b.z1 <= z0 or b.z0 >= z1) continue;
+            const qd = self.questData(d.name) orelse continue;
+            if (qd.allow_decorations) continue;
+            if (n >= out.len) break;
+            out[n] = .{ .x0 = b.x0, .z0 = b.z0, .x1 = b.x1, .z1 = b.z1 };
+            n += 1;
+        }
+        return n;
     }
 
     /// PoiTags under a world position (the first POI whose AABB contains it,
@@ -1167,6 +1198,52 @@ test "trader POI data: cell and class tag from the stock install" {
     try std.testing.expectEqual(@as(i32, -1), plain.trader_x);
     try std.testing.expect(plain.trader_tag.len == 0);
     try std.testing.expect(!plain.is_trader_area);
+}
+
+test "deco suppressors are the non-AllowDecorations POI footprints" {
+    // V3.2.0 AllowDecorations (changelog-3.2.0 §4.5): world deco is suppressed
+    // inside a POI footprint unless the prefab opts in. The collector answers
+    // one sampled region from the decoration list plus the cached quest data,
+    // so the deco sampler pays it once per deco chunk (RFC 0007).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    try tmp.dir.createDirPath(std.testing.io, "POIs");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "POIs/suppressme.xml", .data =
+        \\<prefab><property name="AllowDecorations" value="false"/></prefab>
+    });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "POIs/allowme.xml", .data =
+        \\<prefab><property name="AllowDecorations" value="true"/></prefab>
+    });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "POIs/suppressme2.xml", .data =
+        \\<prefab><property name="AllowDecorations" value="false"/></prefab>
+    });
+    var idx = try parseXml(std.testing.allocator,
+        \\<prefabs>
+        \\  <decoration type="model" name="suppressme" position="0,0,0" rotation="0" />
+        \\  <decoration type="model" name="allowme" position="200,0,0" rotation="0" />
+        \\  <decoration type="model" name="suppressme2" position="40,0,0" rotation="0" />
+        \\  <decoration type="model" name="part_5m_water_tower" position="2,0,2" rotation="0" />
+        \\</prefabs>
+    , root);
+    defer idx.deinit();
+
+    var rects: [8]Rect = undefined;
+    // All three POIs intersect the sampled window; only the two that did not
+    // opt in are suppressors, and the part inside the first footprint adds
+    // nothing (a part is covered by its parent).
+    const n = idx.collectDecoSuppressors(-256, -256, 512, 512, &rects);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqual(@as(i32, 0), rects[0].x0);
+    try std.testing.expect(rects[0].x1 > rects[0].x0 and rects[0].z1 > rects[0].z0);
+    try std.testing.expectEqual(@as(i32, 40), rects[1].x0);
+    // A window that misses every footprint yields nothing.
+    try std.testing.expectEqual(@as(usize, 0), idx.collectDecoSuppressors(1000, 1000, 1100, 1100, &rects));
+    // A full output slice reports a shortfall as a smaller count, never a
+    // wrong rect: the caller sees it and counts saturation.
+    var one: [1]Rect = undefined;
+    try std.testing.expectEqual(@as(usize, 1), idx.collectDecoSuppressors(-256, -256, 512, 512, &one));
 }
 
 test "teleport clamps keep out-of-range prefab XML from trapping the cast" {

@@ -358,6 +358,10 @@ pub const Game = struct {
     /// from the world name hash (or the worldgen seed for proc worlds), so a
     /// save decorates identically across joins and restarts.
     sub_noise: subbiome_noise.PerlinNoise = .{},
+    /// Per-deco-chunk cache of POI footprints that suppress world decorations
+    /// (V3.2.0 `AllowDecorations`, RFC 0007). Built lazily by the sampler; the
+    /// prefab list is load-fixed, so no invalidation.
+    deco_suppress: game_deco.SuppressCache = .{},
     /// Host callback context for Wasm guests; callbacks recover *Game from
     /// `data` and live in game.zig, so the plugin layer stays Game-free.
     wasm_ctx: plugin_mod.wasm.HostCtx = undefined,

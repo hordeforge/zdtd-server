@@ -186,12 +186,11 @@ builder + the `EntityCreationData` requestedBy/requestKey tail note,
 (POIAround -> POIMetadataResponse). Sim deltas: trap-kill XP party share
 skipped per stock (`[rules.progression] trap_xp_party_share`), timid-animal
 detection/flee split (`[rules.ai] timid_danger_distance` /
-`timid_safe_distance`), `AllowDecorations` parsed into prefab quest data.
+`timid_safe_distance`), `AllowDecorations` parsed into prefab quest data
+(the suppression gate itself landed 2026-09-12, see below).
 Tracked as gaps here: horn-opens-trader-doors (needs a door TE subsystem,
 rules surface deferred until it exists; design [RFC 0006](rfc/0006-honk-doors.md) /
-[PRD 0006](prd/0006-honk-doors.md)), the deco-suppression gate (needs a
-spatial POI index on the deco sampler; design [RFC 0007](rfc/0007-deco-suppression.md) /
-[PRD 0007](prd/0007-deco-suppression.md)), the challenge `forceComplete`
+[PRD 0006](prd/0006-honk-doors.md)), the challenge `forceComplete`
 re-entry guard (no challenge sim), the combine station TE (the server-side
 craft behavior of §4.2; `ItemValue.WasCombined` is parsed but no combine
 craft exists), and the bundled AssignIds dump refresh

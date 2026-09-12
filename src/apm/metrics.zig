@@ -138,6 +138,11 @@ pub const CounterId = enum(u16) {
     /// 3.1's unchecked inverse witness is visible instead of assumed away;
     /// `spawn_zombie` and `glide` are reverted and never counted.
     plugin_effects_not_reverted,
+    /// Deco chunks whose suppressing-POI footprint list hit the cache's rect
+    /// cap (`server/game/deco.zig` `SuppressCache`): world deco inside the
+    /// overflow POIs is NOT suppressed there, so a non-zero value is partial
+    /// suppression the operator can see rather than a silent truncation.
+    deco_suppress_saturated,
     _,
 };
 

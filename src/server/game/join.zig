@@ -14,6 +14,7 @@ const packages = @import("../../wire/packages.zig");
 const world_store = @import("../../world/store.zig");
 const subbiome_noise = @import("../../world/subbiome_noise.zig");
 const deco_mirror = @import("../../world/deco_mirror.zig");
+const game_deco = @import("deco.zig");
 const ecs = @import("../../ecs/root.zig");
 const interest = @import("../../ecs/interest.zig");
 const assets_items = @import("../../assets/items.zig");
@@ -23,65 +24,6 @@ const stock_sign = packages.stock_sign;
 const deco = packages.stock_deco;
 
 // ---------------------------------------------------------------------------
-// Deco helpers required by sendDecoAroundSpawn (local copies so the extracted
-// function compiles without reaching into Game's private fns). Bodies verbatim.
-// ---------------------------------------------------------------------------
-
-/// `stock_deco` height callback over the live chunk store. Unreadable columns
-/// return 0, which the sampler skips (fail closed, no fabricated deco).
-fn decoHeightAt(ctx: ?*anyopaque, wx: i32, wz: i32) u16 {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return 0));
-    return g.world.heightWorld(wx, wz) catch 0;
-}
-
-/// `stock_deco` species callback: the biome under (wx,wz), then that biome's
-/// distant-decoration list from biomes.xml. Fail closed at every step, since
-/// a block id the client cannot resolve does not degrade, it throws inside the
-/// client world-load coroutine: `DecoManager.addLoadedDecoration` →
-/// `TryAddToOccupiedMap` derefs `Block::isMultiBlock` with no null check
-/// (asm.il 1262497), and `DecoChunk.UpdateModels` looks the model up by name,
-/// which is null for a null Block. Both leave the player stuck loading, which
-/// is worse than no trees.
-fn decoSpeciesAt(ctx: ?*anyopaque, wx: i32, wz: i32) packages.stock_deco.SpeciesList {
-    const g: *Game = @ptrCast(@alignCast(ctx orelse return .{}));
-    // Proc worlds carry no biomemap: resolve the biome from the W3 proc biome
-    // field (the same field that drives the surface fill and the chunk wire
-    // biome), mapped through the biome_layers_table exactly like procBiomeAt.
-    const biome_id: u8 = if (g.world.terrain_source == .proc) blk: {
-        if (g.world.worldgen) |*wg| {
-            break :blk g.world.biome_layers_table.biomeIdAt(wg.biomeAt(@floatFromInt(wx), @floatFromInt(wz)));
-        }
-        break :blk 0;
-    } else if (g.world.biomes) |*bm| (bm.atWorld(wx, wz) orelse return .{}) else return .{};
-    // GAP 18: resolve the subbiome per cell (stock decorateChunkRandom ->
-    // GetBiomeOrSubAt). A subbiome hit samples its own list, where the
-    // tree probability mass lives; otherwise the biome's own list applies.
-    const subs = g.world.biome_layers_table.subBiomes(biome_id);
-    var set = g.world.biome_layers_table.decosFor(biome_id);
-    if (subs.len > 0) {
-        const si = subbiome_noise.subBiomeIdx(&g.sub_noise, subs, wx, wz);
-        if (si >= 0) set = subs[@intCast(si)].decos;
-    }
-    var out: packages.stock_deco.SpeciesList = .{};
-    for (set.slice()) |d| {
-        if (out.n >= packages.stock_deco.max_species) break;
-        out.items[out.n] = .{ .block_id = d.block_id, .prob = d.prob };
-        out.n += 1;
-    }
-    return out;
-}
-
-/// Deco species source is available: biome deco lists from biomes.xml, plus
-/// either the biomemap (baked worlds) or the W3 proc biome field (proc
-/// worlds carry no biomemap). Both are game-dir data; fail closed (a bare
-/// proc world without biomes.xml stays bald rather than sending block ids the
-/// client cannot resolve).
-fn decoAvailable(g: *const Game) bool {
-    if (!g.deco_trees or !g.world.biome_layers_table.hasDecos()) return false;
-    if (g.world.terrain_source == .proc) return g.world.worldgen != null;
-    return g.world.biomes != null;
-}
-
 /// Cell offsets per deco block id for one join burst. The AssignIds map is
 /// name-keyed, so resolving a block id back to its `MultiBlockDim` costs a
 /// scan of the whole dump; a burst places thousands of objects but draws them
@@ -156,7 +98,7 @@ pub fn sendStaminaStats(self: *Game, peer: *ln_peer.Peer, entity_id: i32, stamin
 /// Species and density are biome driven: `decoSpeciesAt` resolves the biome
 /// map, and `generateForDecoChunk` runs stock's 128x128 sampler over it.
 pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32, wz: i32) !void {
-    if (!decoAvailable(self)) {
+    if (!game_deco.decoAvailable(self)) {
         // Empty firstPackage is still required: the `isDecorated` marking loop
         // sits inside the `loadedDecos != null` branch, so without it the
         // client keeps retrying local generation it cannot do.
@@ -184,8 +126,8 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
         .z1 = (t.pos.z + r + 1) * deco.chunk_side,
     };
     const sampler: deco.Sampler = .{
-        .height_at = decoHeightAt,
-        .species_at = decoSpeciesAt,
+        .height_at = game_deco.decoHeightAt,
+        .species_at = game_deco.decoSpeciesAt,
         .ctx = self,
     };
 
@@ -251,7 +193,7 @@ pub fn sendDecoAroundSpawn(self: *Game, c: *Client, peer: *ln_peer.Peer, wx: i32
 /// was not RE'd and is wrong). Mirrors like the join burst; the mirror and the
 /// client both dedupe, so overlapping the join window is harmless.
 pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx: i32, cz: i32) !void {
-    if (!decoAvailable(self)) return;
+    if (!game_deco.decoAvailable(self)) return;
     const dcx = deco.worldToDecoChunk(cx * deco.chunk_side);
     const dcz = deco.worldToDecoChunk(cz * deco.chunk_side);
     const key = packages.makeChunkKey(dcx, dcz);
@@ -265,8 +207,8 @@ pub fn sendDecoForStreamedChunk(self: *Game, c: *Client, peer: *ln_peer.Peer, cx
         .z1 = (dcz + 1) * deco.chunk_side,
     };
     const sampler: deco.Sampler = .{
-        .height_at = decoHeightAt,
-        .species_at = decoSpeciesAt,
+        .height_at = game_deco.decoHeightAt,
+        .species_at = game_deco.decoSpeciesAt,
         .ctx = self,
     };
     var chunk_objs: [deco.attempts_per_deco_chunk]deco.DecoObj = undefined;

@@ -1878,6 +1878,59 @@ test "parallel solid/water probes share one world without corruption" {
     try std.testing.expectEqual(s0, g.sim.solid_fn.?(g, 3, 61, 3));
 }
 
+test "deco suppression follows the prefab AllowDecorations property" {
+    // V3.2.0 changelog-3.2.0 §4.5: world (biome) decorations are suppressed
+    // inside a POI footprint unless the prefab sets AllowDecorations="true".
+    // The sampler's per-deco-chunk cache is built from the real Navezgane
+    // decoration list, so this exercises the data path, not a fixture.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map_dir = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map_dir)) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir, .map_dir = map_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const pf = if (g.world.prefabs) |*p| p else return error.SkipZigTest;
+    // One pass over the shipped decorations: the first non-part POI that did
+    // not opt into decorations gives a deterministic point inside a suppressed
+    // footprint, and the map must also ship at least one opted-in prefab so the
+    // gate is not trivially all-true.
+    var inside: ?struct { x: i32, z: i32 } = null;
+    var allowed_found = false;
+    var suppressed_found = false;
+    for (pf.items, 0..) |d, i| {
+        if (world_store.prefabs.isPart(d.name)) continue;
+        const qd = pf.questData(d.name) orelse continue;
+        if (qd.allow_decorations) {
+            allowed_found = true;
+            continue;
+        }
+        suppressed_found = true;
+        if (inside != null) continue;
+        const b = pf.boundsXZ(i);
+        if (b.x1 - b.x0 < 4 or b.z1 - b.z0 < 4) continue;
+        inside = .{ .x = @divTrunc(b.x0 + b.x1, 2), .z = @divTrunc(b.z0 + b.z1, 2) };
+    }
+    try std.testing.expect(suppressed_found);
+    try std.testing.expect(allowed_found);
+    const c0 = inside orelse return error.SkipZigTest;
+    const deco_shard = @import("deco.zig");
+    try std.testing.expect(deco_shard.decoSuppressedAt(g, c0.x, c0.z));
+    // The species sampler turns a suppressed cell into no deco at all: the
+    // client must not receive a block id it would try to model inside the POI.
+    try std.testing.expectEqual(@as(usize, 0), Game.decoSpeciesAt(g, c0.x, c0.z).n);
+    // Far from every footprint nothing is suppressed.
+    try std.testing.expect(!deco_shard.decoSuppressedAt(g, c0.x + 4000, c0.z + 4000));
+}
+
 test "deco burst is biome driven and mirrors into the block store" {
     const g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/deco_biome", 0, .{
         .enable_sample_plugin = false,

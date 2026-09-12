@@ -1,7 +1,7 @@
 # Decoration suppression (AllowDecorations) - Technical Proposal (RFC 0007)
 
 **Number:** RFC 0007
-**Status:** draft
+**Status:** implemented (2026-09-12), with one realization change
 **Source:** `PRD 0007` - the requirements this answers
 
 ## 1. Decision to make
@@ -77,3 +77,35 @@ burst.
   (world-generation.md deco section).
 - Should the gate apply to the streamed-deco path identically to the join
   burst (it should, both go through the same species callback)?
+
+## 6. What shipped (2026-09-12)
+
+Option B, realized **lazily per 128-block deco chunk** rather than as an eager
+map built at prefab load. The reason is the same one that makes the eager map
+attractive: the footprint filter needs each prefab's `AllowDecorations`, which
+lives in the prefab XML that `world/prefabs.zig` reads lazily and caches. An
+eager build would read all ~1487 prefab XMLs at boot; the lazy build reads only
+the prefabs that intersect a deco chunk the sampler actually walks.
+
+- `world/prefabs.zig` `collectDecoSuppressors(region, out)`: one pass over the
+  decoration list for the region, skipping `isPart`, keeping the footprints
+  whose quest data does not opt in.
+- `server/game/deco.zig` `SuppressCache`: eight direct-mapped entries keyed by
+  the deco-chunk key (the sampler walks one deco chunk at a time), each holding
+  up to 16 rects; an entry that fills the rect cap increments `saturated` so
+  partial suppression is visible instead of assumed complete. `decoSuppressedAt`
+  is a key lookup plus a few rect tests per sample cell, no allocation.
+- The gate sits in the single `decoSpeciesAt` resolver, so both the join burst
+  and the streamed-deco path (RFC §5 second question) are covered; the
+  duplicated local copy in `server/game/join.zig` was removed in the same
+  change, so the tests that call `Game.decoSpeciesAt` now exercise the live
+  resolver instead of a stale copy.
+
+`RFC §5` first question (axis-aligned vs rotated containment) is answered by
+the existing `boundsXZ`, which already swaps the axes for rotations 1/3, so the
+AABB is the rotated footprint as stock's decorator uses it.
+
+Gates: `world.prefabs` unit test (both property states, part skip, region miss,
+cap truncation) and the Navezgane integration test (a real non-opted-in POI is
+suppressed, its sampler yields no species, 4000 blocks away is not suppressed,
+and the map ships both kinds).

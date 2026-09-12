@@ -8,7 +8,17 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Loadgen combat smoke 2026-09-12 (round 24,
+`lint-architecture: clean`). **Loadgen Navezgane smoke 2026-09-12 (round 27,
+deco suppression)**: the real map loaded (dtm=6144x6144, 1559 prefabs, 39 water
+sources), one wander bot joined and walked 247 steps with
+`join_fail`/`encode_errors`/`decode_rejects`/`net_send_errors`/`stream_errors`/
+`c2s_malformed` all 0, the join `DecoUpdate` sent 277 objects in one package
+uncapped, and `deco_suppress_saturated` stayed 0 (no deco chunk hit the
+16-footprint cap). The gate itself is pinned by the `world.prefabs` unit test
+and the Navezgane integration test, which asserts a real non-opted-in POI is
+suppressed, its sampler yields no species while 4000 blocks away is not
+suppressed, and the shipped map contains both opted-in and default prefabs.
+**Loadgen combat smoke 2026-09-12 (round 24,
 movement tags)** on the same setup: 2/2 joins, 12 zombie kills, every
 wire/encode/decode/phase/ownership counter 0, and the `survival` section at
 32 us mean / 24.5 us p50 with both the item fold and the movement tag in the
