@@ -8,7 +8,18 @@
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
-`lint-architecture: clean`). **Heat-map spawn rate 2026-09-12**: the chunk-heat
+`lint-architecture: clean`). **Plugin verb interception 2026-09-12
+(composability review F4, ADR 0039)**: a module can declare queued verbs it
+will not issue (`manifest.toml deny`), and `zdtd.toml [plugin] deny`/`allow`
+merge over that declaration right-biased (operator denies add, operator allows
+clear). The `zdtd.queue` boundary checks the effective per-module mask before
+the ECS buffer and the host `bot` family, so a denied verb cannot spawn, chat or
+reach the bot manager; drops land in the new `plugin_verbs_denied` counter and a
+boot log line states the policy per module. Gated by the `plugin.manifest`
+policy-grammar test, the `plugin.wasm` module-deny/right-bias/reload test and
+the `server.game.tests` boundary test (denied dropped and counted, allowed
+queued, native src exempt). `zig build test` 1791 passed / 2 skipped / 0 failed.
+**Heat-map spawn rate 2026-09-12**: the chunk-heat
 spawner now follows the stock `CheckToSpawn` table instead of spawning on every
 threshold crossing: 20% spawn chance, region 240 s (no spawn) / 1320 s
 (`SetLongDelay`), neighbours 180 s / 720 s. The zdtd-only

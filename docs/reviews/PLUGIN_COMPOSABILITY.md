@@ -21,7 +21,7 @@ gaps recorded with realization sketches.
 | 3.2.1-2 coeffect context, satisfaction, `notify` | `_zdtd_requires` is the specification; load rejects a module that cannot satisfy it (fail-closed), so a loaded module never reads an absent binding | **Realized** as a load-time check; no runtime `notify` (no host capability changes at runtime) |
 | 3.2.2 provider ordering / withdrawal before dependents | `WasmHost.claimSlot` (this run) resolves an exclusive point claim against the claimant's liveness; a disabled or hook-less claimant stops providing | **Fixed here** (F1); the general provider-drain ordering has no analogue because dependencies are host-only (F5) |
 | 3.2.3 isolation (`ctx.isolate`) | each module has its own instance, memory and config bytes; no realm table for shared keys | **N/A today**: no two modules share a dependency key with different bindings |
-| 3.2.3 interception (`ctx.intercept`, right-biased metadata) | none: host budget and MCP allowlist are host-fixed, not context-carried metadata a component's own declaration merges with | **Missing** (F4, ADR-worthy) |
+| 3.2.3 interception (`ctx.intercept`, right-biased metadata) | `manifest.toml deny` (module declaration) merged with `zdtd.toml [plugin] deny`/`allow` (operator context, applied last), enforced at the `zdtd.queue` boundary | **Realized** (F4 fixed, ADR 0039) |
 | 5.1.1 `ctx.effect` single mutation primitive | every plugin affordance that mutates the world is a queued command; direct ECS/wire mutation is absent | **Realized** (boundary), with the witness unverified exactly as the paper says a host may leave it |
 | 5.1.2 coeffect operations / 5.1.4 context access | `zdtd.config` (per-module bytes), `zdtd.sense`/`zdtd.query` read-only views; no `ctx[key]` reflection | **Realized in spirit**: capabilities are imports, not a reflective table |
 | 5.1.3 component lifecycle (inertial load/unload, reload chaining) | `Plugin.load` -> `on_enable`; `on_shutdown` -> withdraw -> deinit -> `loadInto` -> `on_enable`; a failed reload drops the slot and re-points backlinks and claims | **Realized** for the single-instance case |
@@ -84,17 +84,28 @@ plugin that broadcast a chat message reports 1. Gate: the `ecs.command` unit
 tests (classification table, per-source residue, compaction) plus the
 `scenario plugin withdrawal despawns applied spawns` assertions.
 
-**F4 (P2, ADR-worthy) - no interception or isolation.** The paper's 3.2.3
-`intercept` (context-carried metadata merged with the component's declaration,
-right-biased so the enclosing context wins) has no counterpart: plugin
-affordances are constrained by host constants (budget) and a fixed MCP
-allowlist, not by an operator-declared policy a module's own manifest merges
-with. This is also the objective's "everything configurable, nothing
-hardcoded" gap. Realization sketch: a per-plugin policy table in `zdtd.toml`
-(deny/scale per verb) applied at the `zdtd.queue` boundary as context metadata,
-with the operator side right-biased over the module's `manifest.toml`
-declaration; extend the boundary deliberately per AGENTS rule 30 rather than
-growing native behavior.
+**F4 (P2, fixed 2026-09-12) - queued-verb interception is now a real policy.**
+The paper's 3.2.3 `intercept` (context-carried metadata merged with the
+component's declaration, right-biased so the enclosing context wins) had no
+counterpart: a module either loaded with every queued verb or did not load. ADR
+0039 adds the missing surface. `manifest.toml deny = "say,damage"` declares
+verbs the module will not queue (validated at load, unknown verb fails the
+manifest); `zdtd.toml [plugin] deny`/`allow` are `module=verb,verb` lists parsed
+at boot (a bad entry or unknown verb is a fatal startup error); the effective
+mask is `(module_deny | operator_deny) & ~operator_allow`, so the operator is
+applied last and can both tighten and relax the module's own declaration.
+Enforcement is at the `zdtd.queue` boundary (`wasm_host.pluginVerbDenied`)
+ahead of the ECS command parse *and* the host `bot` family, so a denied verb
+cannot land in the buffer, spawn an entity, or reach `BotManager`; drops are
+counted in `plugin_verbs_denied` and logged rate-limited. Reload re-reads the
+manifest deny (ADR 0030 F2 path) and keeps the operator masks, so HMR cannot
+wash the policy away. Gated by the `plugin.manifest` grammar test, the
+`plugin.wasm` "queued-verb policy" test (module deny, operator right-bias,
+reload, legacy path) and the `server.game.tests` boundary test (denied verb
+dropped and counted, allowed verb queued, native src exempt, operator allow
+clears a module deny). What is *not* adopted: per-verb scaling or parameter
+rewriting, and live policy reload - both would need a richer merge than a
+bitmask and a runtime config path, and neither is required by the paper's model.
 
 **F5 (P3, open, recorded difference) - no inertial provider ordering.** The
 paper drains a provider's dependents before running its inverses; zdtd has no
@@ -147,6 +158,6 @@ now 32, and the test asserts the shipped set still fits it.
 
 ## Follow-ups
 
-F4 (interception policy, needs an ADR) and F5 (provider ordering, moot until
-plugins provide keys) are the next slices. F1, F2, F3 and F6 are fixed and
-gated by the scenarios and unit tests named above.
+F5 (provider ordering, moot until plugins provide keys) is the only finding
+left open. F1, F2, F3, F4 and F6 are fixed and gated by the scenarios and unit
+tests named above.

@@ -873,6 +873,24 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (tf.plugin.modules) |m| init_opts.plugin_modules = splitPluginModules(gpa, m);
         if (tf.plugin.fuel) |fuel| init_opts.plugin_budget.fuel = fuel;
         if (tf.plugin.max_pages) |pages| init_opts.plugin_budget.max_memory_pages = pages;
+        // Queued-verb interception (ADR 0039): parse the operator policy here so
+        // a typo fails startup loudly instead of silently enforcing a different
+        // policy than the file says. The tables are fixed-size, so this
+        // allocates nothing and the Game copies them by value.
+        if (tf.plugin.deny) |list| {
+            var bad: []const u8 = "";
+            init_opts.plugin_policy_deny_n = @intCast(
+                plugin_mod.manifest.parsePolicyList(list, &init_opts.plugin_policy_deny, &bad) orelse
+                    fatal("[plugin] deny: bad policy entry '{s}' (expected module=verb,verb; known verbs: spawn, despawn, damage, say, glide, bot)", .{bad}),
+            );
+        }
+        if (tf.plugin.allow) |list| {
+            var bad: []const u8 = "";
+            init_opts.plugin_policy_allow_n = @intCast(
+                plugin_mod.manifest.parsePolicyList(list, &init_opts.plugin_policy_allow, &bad) orelse
+                    fatal("[plugin] allow: bad policy entry '{s}' (expected module=verb,verb; known verbs: spawn, despawn, damage, say, glide, bot)", .{bad}),
+            );
+        }
         // authority.mode is validated + canonicalised at parse (binder
         // enum_by_name), so this is a straight apply.
         if (tf.authority.mode) |mode_s| {

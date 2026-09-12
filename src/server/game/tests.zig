@@ -28,6 +28,7 @@ const replicate_te = @import("../replicate_te.zig");
 const containers_mod = @import("../../world/containers.zig");
 const chunk_fill_mod = @import("../game/chunk_fill.zig");
 const c2s_misc = @import("../c2s/misc.zig");
+const plugin_mod = @import("../../plugin/root.zig");
 const plugin_api = @import("../../plugin/api.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
@@ -5575,4 +5576,57 @@ test "a POI reset discards container contents instead of spilling them" {
     g.noteBlockRemoved(cx, cy, cz, 1);
     try std.testing.expect(g.containers.get(.{ .x = cx, .y = cy, .z = cz }) == null);
     try std.testing.expect(g.sim.countKind(.loot_bag) > bags_before_break);
+}
+
+test "queued-verb policy: a denied verb is dropped before the command buffer" {
+    // Interception (paper 3.2.3 / ADR 0039): the effective per-module policy is
+    // checked at the `zdtd.queue` boundary, so a denied verb never reaches the
+    // ECS buffer or the host `bot` family. Operator denies add over the module's
+    // own declaration and operator allows clear it (right-biased merge).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.create(std.testing.allocator, dir, 0);
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const wasm_host = @import("wasm_host.zig");
+    g.wasm_plugins.loadAll(
+        std.testing.allocator,
+        &[_][]const u8{"assets/fixtures/plugin_hello.wasm"},
+        &g.wasm_ctx,
+        .{},
+    );
+    defer g.wasm_plugins.shutdown();
+    try std.testing.expectEqual(@as(usize, 1), g.wasm_plugins.n);
+
+    const say_bit = plugin_mod.manifest.QueueVerb.say.bit();
+    // The operator list names the module by its wasm stem here (`plugin_hello`
+    // for assets/fixtures/plugin_hello.wasm); applyPluginPolicy matches the
+    // manifest name, the stem or the directory, and logs the effective policy.
+    const deny = [_]plugin_mod.manifest.PolicyEntry{.{ .module = "plugin_hello", .mask = say_bit }};
+    wasm_host.applyPluginPolicy(g, &deny, &.{});
+    try std.testing.expectEqual(say_bit, g.wasm_plugins.slots[0].denied);
+
+    const before = g.sim.commands.n;
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "say denied hello");
+    try std.testing.expectEqual(before, g.sim.commands.n);
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.plugin_verbs_denied));
+
+    // A verb the policy allows still reaches the buffer.
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "spawn 1 2 3 10");
+    try std.testing.expectEqual(before + 1, g.sim.commands.n);
+
+    // Native source 0 is not a policy subject.
+    wasm_host.wasmQueue(&g.wasm_ctx, 0, "say native hello");
+    try std.testing.expectEqual(before + 2, g.sim.commands.n);
+
+    // Operator allow clears the module's own deny.
+    g.wasm_plugins.slots[0].op_allow = say_bit;
+    g.wasm_plugins.slots[0].refreshDenied();
+    wasm_host.wasmQueue(&g.wasm_ctx, 1, "say allowed hello");
+    try std.testing.expectEqual(before + 3, g.sim.commands.n);
+    try std.testing.expectEqual(@as(u64, 1), g.harness.counters.get(.plugin_verbs_denied));
 }

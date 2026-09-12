@@ -14,6 +14,7 @@ const clock = @import("../../util/clock.zig");
 const replicate_te = @import("../replicate_te.zig");
 const admin_xml = @import("../admin_xml.zig");
 const io_fs = @import("../../util/io_fs.zig");
+const game_wasm_host = @import("wasm_host.zig");
 
 pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: game_mod.InitOptions, had_saved_entities: bool) !void {
     // Prefab sleeper volumes (stock map only). Prefer POIs near primary spawn
@@ -351,5 +352,14 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
     } else {
         self.wasm_plugins.loadAll(self.allocator, opts.plugin_modules, &self.wasm_ctx, opts.plugin_budget);
     }
+    // Operator queued-verb interception (ADR 0039) over each module's own
+    // `manifest.toml deny`, right-biased: operator denies add, operator allows
+    // clear. Applied after load so every slot exists, and logged so the running
+    // policy is auditable.
+    game_wasm_host.applyPluginPolicy(
+        self,
+        opts.plugin_policy_deny[0..opts.plugin_policy_deny_n],
+        opts.plugin_policy_allow[0..opts.plugin_policy_allow_n],
+    );
     self.wasm_plugins.enable();
 }

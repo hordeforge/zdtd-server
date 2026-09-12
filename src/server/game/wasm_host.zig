@@ -9,6 +9,7 @@ const ecs = @import("../../ecs/root.zig");
 const c2s_text = @import("../c2s_text.zig");
 const nav = @import("../../world/nav.zig");
 const game_step = @import("step.zig");
+const util_log = @import("../../util/log.zig");
 
 const wasm_log_level_tags = [_][]const u8{ "debug", "info", "warn", "err" };
 
@@ -93,6 +94,9 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void 
         std.debug.print("zdtd wasm: queued command too long ({d} bytes); dropped\n", .{cmd.len});
         return;
     }
+    // Interception (paper 3.2.3 / ADR 0039) runs first: a verb the effective
+    // policy denies never reaches the ECS buffer or the host `bot` family.
+    if (pluginVerbDenied(g, src, cmd)) return;
     // `bot <verb>` commands are host-side BotManager calls (ADR 0026), not ECS
     // ops: the BotManager owns spawn/move/look/shoot/remove/count and returns
     // true for any command starting with `bot `. Everything else falls through
@@ -107,6 +111,90 @@ pub fn wasmQueue(ctx: *plugin_mod.wasm.HostCtx, src: i16, cmd: []const u8) void 
         return;
     };
     _ = g.sim.commands.pushSrc(src, op);
+}
+
+/// The effective queued-verb policy for `src` (`Plugin.denied`, computed as
+/// operator-over-module in `Plugin.refreshDenied`). A denied verb is dropped
+/// before anything runs and counted. Native sources (src <= 0), unknown
+/// sources and unknown first tokens are not policy subjects: the latter are
+/// already dropped by the parse below.
+fn pluginVerbDenied(g: *Game, src: i16, cmd: []const u8) bool {
+    if (src <= 0) return false;
+    const idx: usize = @intCast(src - 1);
+    if (idx >= g.wasm_plugins.n) return false;
+    const denied = g.wasm_plugins.slots[idx].denied;
+    if (denied == 0) return false;
+    const verb_end = std.mem.findScalar(u8, cmd, ' ') orelse cmd.len;
+    const vi = plugin_mod.manifest.QueueVerb.indexOf(cmd[0..verb_end]) orelse return false;
+    if (denied & (@as(u16, 1) << vi) == 0) return false;
+    g.harness.counters.inc(.plugin_verbs_denied);
+    const n = g.harness.counters.get(.plugin_verbs_denied);
+    if (n == 1 or n % 100 == 0) {
+        var vb: [32]u8 = undefined;
+        const vn = c2s_text.sanitizePlayerName(&vb, cmd[0..verb_end]);
+        std.debug.print("zdtd wasm: plugin {d} queued denied verb '{s}' (n={d})\n", .{ src, vb[0..vn], n });
+    }
+    return true;
+}
+
+/// Install the operator's `[plugin] deny` / `allow` policy over every loaded
+/// module (paper 3.2.3 right-biased merge; the module's own `manifest.toml
+/// deny` was installed by the loader). An entry's module name matches the
+/// manifest name, the wasm file stem or the mod directory name, so a legacy
+/// `[plugin] modules` path can be named either way. Called once at boot; a
+/// reload keeps the masks and recomputes the effective policy itself.
+pub fn applyPluginPolicy(
+    g: *Game,
+    deny: []const plugin_mod.manifest.PolicyEntry,
+    allow: []const plugin_mod.manifest.PolicyEntry,
+) void {
+    var name_buf: [128]u8 = undefined;
+    var mask_buf: [64]u8 = undefined;
+    var i: usize = 0;
+    while (i < g.wasm_plugins.n) : (i += 1) {
+        const p = &g.wasm_plugins.slots[i];
+        for (deny) |e| {
+            if (policyNameMatches(e.module, p)) p.op_deny |= e.mask;
+        }
+        for (allow) |e| {
+            if (policyNameMatches(e.module, p)) p.op_allow |= e.mask;
+        }
+        p.refreshDenied();
+        if (p.op_deny != 0 or p.op_allow != 0 or p.module_deny != 0) {
+            const nm = pluginPolicyName(p, &name_buf);
+            const eff = plugin_mod.manifest.formatVerbMask(p.denied, &mask_buf);
+            util_log.info("zdtd: mod '{s}' verb policy: denied=[{s}]\n", .{ nm, eff });
+        }
+    }
+}
+
+/// True when `entry_name` names this plugin: its manifest name, its wasm file
+/// stem, or the directory it sits in (all three are how operators refer to a
+/// mod elsewhere in the config).
+fn policyNameMatches(entry_name: []const u8, p: *const plugin_mod.wasm.Plugin) bool {
+    if (entry_name.len == 0) return false;
+    if (p.display.len > 0 and std.mem.eql(u8, entry_name, p.display)) return true;
+    if (std.mem.endsWith(u8, p.name, entry_name)) {
+        // Path suffix match only counts on a component boundary.
+        if (p.name.len == entry_name.len) return true;
+        const before = p.name[p.name.len - entry_name.len - 1];
+        if (before == '/' or before == '\\') return true;
+    }
+    const stem = std.fs.path.stem(p.name);
+    if (std.mem.eql(u8, entry_name, stem)) return true;
+    if (std.fs.path.dirname(p.name)) |dir| {
+        if (std.mem.eql(u8, entry_name, std.fs.path.basename(dir))) return true;
+    }
+    return false;
+}
+
+/// Display name for the policy log: the manifest name, else the wasm stem.
+fn pluginPolicyName(p: *const plugin_mod.wasm.Plugin, buf: []u8) []const u8 {
+    if (p.display.len > 0) return p.display;
+    const stem = std.fs.path.stem(p.name);
+    const n = @min(stem.len, buf.len);
+    @memcpy(buf[0..n], stem[0..n]);
+    return buf[0..n];
 }
 
 fn parsePluginCommand(cmd: []const u8) ?ecs.command.Op {

@@ -197,6 +197,15 @@ pub const Plugin = struct {
     fuel: ?u64 = null,
     /// Max linear-memory pages per module instance (default 1024).
     max_pages: ?u64 = null,
+    /// Per-module queued-verb interception (paper 3.2.3, ADR 0039):
+    /// `module=verb,verb; module2=verb` entries naming commands a module may
+    /// NOT issue. Applied over the module's own `manifest.toml deny` list.
+    /// Known verbs: spawn, despawn, damage, say, glide, bot.
+    deny: ?[]const u8 = null,
+    /// `module=verb` entries that re-allow a verb a module's manifest denies
+    /// (the operator context is right-biased per verb, so it can both tighten
+    /// and relax a module's own declaration). Same syntax as `deny`.
+    allow: ?[]const u8 = null,
 };
 
 /// `[mods]` config section (PRD 0005): module tiers and override.
@@ -678,6 +687,8 @@ test "parse stream and authority" {
         \\modules = "assets/fixtures/plugin_hello.wasm, assets/fixtures/plugin_looper.wasm"
         \\fuel = 25000000
         \\max_pages = 128
+        \\deny = "core_lootgate=damage,say; core_pvp=say"
+        \\allow = "core_announce=say"
     ;
     var f = try parse(std.testing.allocator, src);
     defer f.deinit();
@@ -713,6 +724,9 @@ test "parse stream and authority" {
     );
     try std.testing.expectEqual(@as(u64, 25_000_000), f.plugin.fuel.?);
     try std.testing.expectEqual(@as(u64, 128), f.plugin.max_pages.?);
+    // Interception policy lists ride as scalars (the binder has no arrays).
+    try std.testing.expectEqualStrings("core_lootgate=damage,say; core_pvp=say", f.plugin.deny.?);
+    try std.testing.expectEqualStrings("core_announce=say", f.plugin.allow.?);
 }
 
 test "parse rules overlay sections" {

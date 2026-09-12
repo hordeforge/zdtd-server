@@ -138,6 +138,11 @@ pub const CounterId = enum(u16) {
     /// 3.1's unchecked inverse witness is visible instead of assumed away;
     /// `spawn_zombie` and `glide` are reverted and never counted.
     plugin_effects_not_reverted,
+    /// Queued plugin commands dropped by the interception policy
+    /// (`[plugin] deny` in zdtd.toml or a module's own `manifest.toml` deny
+    /// list, paper 3.2.3). A denied verb never reaches the command buffer, so a
+    /// non-zero value is the operator's policy working, not a fault.
+    plugin_verbs_denied,
     /// Deco chunks whose suppressing-POI footprint list hit the cache's rect
     /// cap (`server/game/deco.zig` `SuppressCache`): world deco inside the
     /// overflow POIs is NOT suppressed there, so a non-zero value is partial

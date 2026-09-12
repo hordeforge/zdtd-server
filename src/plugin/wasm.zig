@@ -187,6 +187,16 @@ pub const Plugin = struct {
     /// Guest contract version from the optional `_zdtd_api` export (paper 6.6).
     /// Null = the module declares none (the permissive legacy path).
     api_version: ?u32 = null,
+    /// Verb mask this module's own `manifest.toml deny` declares.
+    module_deny: manifest.QueueVerbMask = 0,
+    /// Operator verb policy from `[plugin] deny` / `allow` (right-biased over
+    /// the module declaration, paper 3.2.3 / ADR 0039). Preserved across a
+    /// reload like tier/display, since the operator config does not change.
+    op_deny: manifest.QueueVerbMask = 0,
+    op_allow: manifest.QueueVerbMask = 0,
+    /// Effective policy the queue boundary checks: `(module | operator deny)`
+    /// minus the operator's explicit allows. Recomputed by `refreshDenied`.
+    denied: manifest.QueueVerbMask = 0,
     /// Guest offset and size of the host's scratch region for the request/reply
     /// hooks (admin command, chat, login). Reserved lazily; 0/0 until first use.
     scratch_off: u32 = 0,
@@ -263,6 +273,14 @@ pub const Plugin = struct {
         if (self.display.len > 0) self.allocator.free(self.display);
         if (self.config_bytes.len > 0) self.allocator.free(self.config_bytes);
         self.* = undefined;
+    }
+
+    /// Recompute the effective queued-verb policy. Paper 3.2.3 interception is
+    /// a right-biased merge: the enclosing (operator) context is applied last,
+    /// so its denies add to the module's own declaration and its allows clear a
+    /// verb the module denied.
+    pub fn refreshDenied(self: *Plugin) void {
+        self.denied = (self.module_deny | self.op_deny) & ~self.op_allow;
     }
 
     /// A hook is present when the module exports it. Missing exports are
@@ -942,6 +960,15 @@ fn hookIndex(name: []const u8) usize {
     return Hook.names.len;
 }
 
+/// A manifest's `deny` list as a verb mask. The resolver validated it at load,
+/// so a parse failure here is unreachable; it still fails closed (every verb
+/// denied) rather than open, since this is a module's own restriction.
+fn moduleDenyMask(list: ?[]const u8) manifest.QueueVerbMask {
+    const s = list orelse return 0;
+    var bad: []const u8 = "";
+    return manifest.queueVerbMask(s, &bad) orelse (@as(manifest.QueueVerbMask, 1) << manifest.QueueVerb.count) - 1;
+}
+
 pub const WasmHost = struct {
     slots: [max_wasm_plugins]Plugin = undefined,
     n: usize = 0,
@@ -1005,6 +1032,8 @@ pub const WasmHost = struct {
             // declaration (paper 5.2.1) instead of treating the module as a
             // legacy path with no points to reconcile.
             self.slots[self.n].manifest_loaded = true;
+            self.slots[self.n].module_deny = moduleDenyMask(rm.manifest.deny);
+            self.slots[self.n].refreshDenied();
             if (rm.manifest.config.len > 0) {
                 self.slots[self.n].config_bytes = allocator.dupe(u8, rm.manifest.config) catch "";
             } else if (rm.manifest.dir.len == 0) {
@@ -1147,6 +1176,11 @@ pub const WasmHost = struct {
         else
             "";
         const manifest_loaded = self.slots[idx].manifest_loaded;
+        // The operator's interception policy is config-derived, not part of the
+        // module, so a reload keeps it (paper 3.2.3 right-bias must not wash out
+        // on HMR). `refreshDenied` recombines it with the fresh declaration.
+        const op_deny = self.slots[idx].op_deny;
+        const op_allow = self.slots[idx].op_allow;
         _ = self.slots[idx].callHook(.on_shutdown);
         // Withdraw after on_shutdown and before deinit: shutdown may queue
         // (or spawn bots) that a pre-reload withdraw would miss, and those
@@ -1172,10 +1206,13 @@ pub const WasmHost = struct {
         self.slots[idx].display = display_copy;
         self.slots[idx].config_bytes = config_copy;
         self.slots[idx].manifest_loaded = manifest_loaded;
+        self.slots[idx].op_deny = op_deny;
+        self.slots[idx].op_allow = op_allow;
         // Re-read the module's declaration before it goes live: a replaced
         // module may have dropped or added a `points` claim on disk, and the
         // install-time table is load-fixed (paper 5.2.1/5.2.2).
         if (manifest_loaded) self.reconcileClaims(idx, path_owned);
+        self.slots[idx].refreshDenied();
         // Activate the new fiber (paper: reinstantiate + reinstall).
         _ = self.slots[idx].callHook(.on_enable);
         return true;
@@ -1194,9 +1231,16 @@ pub const WasmHost = struct {
         for (&self.claims) |*c| {
             if (c.* == idx) c.* = no_claim;
         }
+        // The declaration on disk is also the only source of the module's
+        // queued-verb deny list; a manifest that vanished means none. Every exit
+        // path below recombines it with the operator masks, so `denied` is
+        // never left stale.
+        self.slots[idx].module_deny = 0;
+        defer self.slots[idx].refreshDenied();
         const dir = std.fs.path.dirname(path) orelse return;
         var m = manifest.bindManifest(self.allocator, dir) catch return;
         defer manifest.free(self.allocator, &m);
+        self.slots[idx].module_deny = moduleDenyMask(m.deny);
         const pts = m.points orelse return;
         var it = std.mem.splitScalar(u8, pts, ',');
         while (it.next()) |raw| {
@@ -2611,6 +2655,72 @@ test "reload reconciles the module's manifest point claims" {
     host.slots[2].manifest_loaded = false;
     try std.testing.expect(host.reload(2, wasm2));
     try std.testing.expectEqual(@as(u8, 2), host.claims[craft]);
+}
+
+test "queued-verb policy: module deny, operator right-bias, reload" {
+    // Paper 3.2.3 interception (ADR 0039): a module declares verbs it will not
+    // queue, the operator context is merged last (denies add, allows clear),
+    // and a reload re-reads the declaration while keeping the operator's masks.
+    const Cap = struct {
+        fn logFn(_: *HostCtx, _: u8, _: []const u8) void {}
+        fn tickFn(_: *HostCtx) u64 {
+            return 1;
+        }
+        fn queueFn(_: *HostCtx, _: i16, _: []const u8) void {}
+    };
+    var ctx = HostCtx{ .log_fn = &Cap.logFn, .tick_fn = &Cap.tickFn, .queue_fn = &Cap.queueFn };
+    const plain = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+        0x01, 0x00, 0x07, 0x0b, 0x01, 0x07, 'o',  'n',
+        '_',  't',  'i',  'c',  'k',  0x00, 0x00, 0x0a,
+        0x04, 0x01, 0x02, 0x00, 0x0b,
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const a = std.testing.allocator;
+    const wasm_path = try std.fs.path.join(a, &.{ dir, "m.wasm" });
+    defer a.free(wasm_path);
+    const man_path = try std.fs.path.join(a, &.{ dir, "manifest.toml" });
+    defer a.free(man_path);
+    try io_fs.writeFile(wasm_path, &plain);
+    try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\ndeny = \"say\"\n");
+
+    var host: WasmHost = .{};
+    host.allocator = a;
+    host.ctx = &ctx;
+    host.budget = .{};
+    defer host.shutdown();
+    try host.loadInto(0, wasm_path);
+    host.n = 1;
+    host.slots[0].manifest_loaded = true;
+    host.slots[0].display = try a.dupe(u8, "m");
+    host.reconcileClaims(0, wasm_path);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].denied);
+
+    // Operator right-bias: a deny adds damage, an allow clears the module's say.
+    host.slots[0].op_deny = manifest.QueueVerb.damage.bit();
+    host.slots[0].op_allow = manifest.QueueVerb.say.bit();
+    host.slots[0].refreshDenied();
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].denied);
+
+    // Reload re-reads the declaration (say dropped) and keeps the operator
+    // masks, so only the operator's damage deny remains.
+    try io_fs.writeFile(man_path, "name = \"m\"\nwasm = \"m.wasm\"\n");
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqual(@as(manifest.QueueVerbMask, 0), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].denied);
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].op_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.say.bit(), host.slots[0].op_allow);
+
+    // A legacy path (no manifest) keeps the operator policy across a reload.
+    host.slots[0].manifest_loaded = false;
+    try std.testing.expect(host.reload(0, wasm_path));
+    try std.testing.expectEqual(@as(manifest.QueueVerbMask, 0), host.slots[0].module_deny);
+    try std.testing.expectEqual(manifest.QueueVerb.damage.bit(), host.slots[0].denied);
 }
 
 test "findByName matches display name and wasm stem suffix" {

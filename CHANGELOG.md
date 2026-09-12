@@ -71,6 +71,23 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- Operators can now refuse individual queued plugin verbs per module. The
+  plugin boundary was all-or-nothing: a module either loaded with every queued
+  verb or did not load, so an operator could not admit a module for one
+  behavior and refuse another. A module may declare its own limits with
+  `manifest.toml deny = "say,damage"` (unknown verbs fail the manifest), and
+  `zdtd.toml [plugin] deny` / `allow` take `module=verb,verb` lists applied
+  over that declaration, right-biased: operator denies add and operator allows
+  clear, so the operator can both tighten and relax a module's own rule. The
+  check runs at the `zdtd.queue` boundary before the ECS command buffer and the
+  host `bot` family, so a refused verb cannot spawn an entity, broadcast chat
+  or reach the bot manager; drops are counted in the `plugin_verbs_denied` APM
+  counter and logged rate-limited, and the running policy is logged once per
+  module at boot. A bad config entry or unknown verb fails startup rather than
+  silently enforcing a different policy than the file says. `plugin reload`
+  re-reads the module declaration and keeps the operator's masks (ADR 0039,
+  composability review F4).
+
 - Plugins can declare the contract version they were built against. Name-set
   linking (`_zdtd_requires`) cannot see a semantic change between two contract
   versions that still share the hook vocabulary, so a guest may now export

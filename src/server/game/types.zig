@@ -413,6 +413,15 @@ pub const InitOptions = struct {
     /// When set, it wins over `plugin_modules` (which are folded in as legacy
     /// explicit modules by the resolver). Owned by main until after Game init.
     plugin_plan: ?*const plugin_mod.resolver.ResolvedResult = null,
+    /// Operator queued-verb interception policy (`zdtd.toml [plugin] deny` /
+    /// `allow`), parsed by main.zig into fixed tables and applied over each
+    /// module's own `manifest.toml deny` (paper 3.2.3 right-biased merge).
+    plugin_policy_deny: [plugin_mod.manifest.max_policy_entries]plugin_mod.manifest.PolicyEntry =
+        [_]plugin_mod.manifest.PolicyEntry{.{}} ** plugin_mod.manifest.max_policy_entries,
+    plugin_policy_deny_n: u8 = 0,
+    plugin_policy_allow: [plugin_mod.manifest.max_policy_entries]plugin_mod.manifest.PolicyEntry =
+        [_]plugin_mod.manifest.PolicyEntry{.{}} ** plugin_mod.manifest.max_policy_entries,
+    plugin_policy_allow_n: u8 = 0,
     /// Per-instance budget for Wasm plugins (fuel + max linear-memory pages;
     /// fuel is lifetime, never re-armed).
     plugin_budget: plugin_mod.wasm.Budget = .{},
