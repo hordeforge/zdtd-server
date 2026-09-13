@@ -15,6 +15,7 @@ const assets_quests = @import("../../assets/quests.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_sandbox = @import("../../assets/sandbox.zig");
+const assets_placeholders = @import("../../assets/blockplaceholders.zig");
 const assets_signs = @import("../../assets/signs.zig");
 const assets_item_modifiers = @import("../../assets/item_modifiers.zig");
 const assets_entities = @import("../../assets/entities.zig");
@@ -230,6 +231,24 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             }
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
+        // blockplaceholders.xml: the prefab paint pass resolves these names per
+        // cell (BlockPlaceholderMap::Replace). Loaded before the first prefab so
+        // the remap can record the placeholder slots; the sandbox gate is a
+        // per-run constant from the decoded server code.
+        if (logged("blockplaceholders.xml", assets_placeholders.tryLoad(
+            allocator,
+            opts.game_dir,
+            opts.config_dir,
+            IdCtx.lookup,
+            &id_ctx,
+            self.sandbox_code,
+        ))) |pt| {
+            self.placeholder_table.deinit();
+            self.placeholder_table = pt;
+            self.placeholders_loaded = self.placeholder_table.placeholders.len > 0;
+            if (self.world.prefabs) |*pf| pf.setPlaceholders(&self.placeholder_table);
+            util_log.info("zdtd: blockplaceholders placeholders={d}\n", .{self.placeholder_table.placeholders.len});
+        }
         if (assets_blocks.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch |err| blk: {
             util_log.err("zdtd: block definitions load failed: {s}\n", .{@errorName(err)});
             break :blk null;

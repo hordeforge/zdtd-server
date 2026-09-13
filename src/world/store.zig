@@ -515,6 +515,17 @@ pub const max_step_up: i32 = 1;
 /// Deepest single-move drop a body takes voluntarily.
 pub const max_drop: i32 = 3;
 
+/// Biome name at a world position for the blockplaceholders biome gate
+/// (stock compares the target's `biome` with `WorldBiomes.GetBiome(...)`'s
+/// name, case-insensitively). Unknown biome answers "" so a biome-gated target
+/// is skipped rather than guessed at.
+fn biomeNameAt(ctx: ?*anyopaque, wx: i32, wz: i32) []const u8 {
+    const w: *const World = @ptrCast(@alignCast(ctx.?));
+    const bm = w.biomes orelse return "";
+    const id = bm.atWorld(wx, wz) orelse return "";
+    return w.biome_layers_table.names[id] orelse "";
+}
+
 pub const World = struct {
     // Pointer-stable chunk store (GAP "Chunk pointer stability", 2026-08-29
     // PARTIAL): the map holds *Chunk (one allocation per chunk) instead of
@@ -963,7 +974,20 @@ pub const World = struct {
                         }
                     };
                     var terr_ctx: TerrainCtx = .{ .c = c, .base_x = pos.x * 16, .base_z = pos.z * 16 };
-                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, TerrainCtx.at, &terr_ctx, PaintCtx.put, &pc);
+                    // blockplaceholders: the world side owns the biome table and
+                    // the map seed, so it builds the resolution context itself
+                    // (Game does the same for the POI-reset paint path).
+                    var ph_here: tts.PlaceholderCtx = undefined;
+                    const ph_arg: ?*const tts.PlaceholderCtx = if (pf.placeholders) |tbl| blk: {
+                        ph_here = .{
+                            .table = tbl,
+                            .world_seed = @truncate(@as(i64, @bitCast(if (self.worldgen) |wg| wg.seed else @import("../util/sim.zig").default_seed))),
+                            .biome_name = biomeNameAt,
+                            .biome_ctx = self,
+                        };
+                        break :blk &ph_here;
+                    } else null;
+                    pf.applyTtsPaintToChunk(pos.x, pos.z, self.terrain_ids.water, self.terrain_ids.terrain_filler, self.terrain_ids.terrain_filler_adaptive, TerrainCtx.at, &terr_ctx, ph_arg, PaintCtx.put, &pc);
                     if (pc.failed > 0) {
                         std.debug.print(
                             "zdtd: TTS paint dropped {d} blocks at chunk ({d},{d})\n",

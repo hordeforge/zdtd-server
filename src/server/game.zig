@@ -11,7 +11,6 @@ const wire_frame = @import("../wire/frame.zig");
 const packages = @import("../wire/packages.zig");
 const world_store = @import("../world/store.zig");
 const subbiome_noise = @import("../world/subbiome_noise.zig");
-const world_tts = @import("../world/tts.zig");
 const deco_mirror = @import("../world/deco_mirror.zig");
 const ecs = @import("../ecs/root.zig");
 const systems = @import("../ecs/systems.zig");
@@ -64,6 +63,8 @@ const assets_items = @import("../assets/items.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_signs = @import("../assets/signs.zig");
 const assets_gameevents = @import("../assets/gameevents.zig");
+const assets_placeholders = @import("../assets/blockplaceholders.zig");
+const world_tts = @import("../world/tts.zig");
 const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
@@ -348,6 +349,14 @@ const VelYSent = struct {
     gen: u32 = 0,
 };
 
+/// The run's map seed: the value `Utils.RandomFromSeedOnPos` (IL=2666) folds
+/// into every per-cell stream. The flat default world has no generator, so the
+/// sim's default seed stands in.
+fn worldSeedOf(self: *const Game) i32 {
+    const s: u64 = if (self.world.worldgen) |wg| wg.seed else @import("../util/sim.zig").default_seed;
+    return @truncate(@as(i64, @bitCast(s)));
+}
+
 pub const Game = struct {
     allocator: std.mem.Allocator,
     net: ln_server.Server = .{},
@@ -502,6 +511,14 @@ pub const Game = struct {
     /// gameevents.xml action sequences (death/respawn families). Empty offline:
     /// the runner then refuses every sequence rather than inventing one.
     gameevents: assets_gameevents.Table = assets_gameevents.Table.empty(),
+    /// blockplaceholders.xml: the per-cell target lists the prefab paint pass
+    /// resolves. Empty when the catalog is absent (cells then keep the remap's
+    /// first-target stand-in).
+    placeholder_table: assets_placeholders.Table = assets_placeholders.Table.empty(),
+    placeholders_loaded: bool = false,
+    /// Scratch the paint call reads the ctx through (it takes a pointer, so a
+    /// stack local in the caller would not do).
+    placeholder_ctx: world_tts.PlaceholderCtx = undefined,
     /// blocks.xml Texture → textureFull defaults (unpainted cells).
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
     painting: assets_painting.Table = assets_painting.Table.empty(),
@@ -2320,7 +2337,9 @@ pub const Game = struct {
             }
         };
         var terr_ctx: TerrCtx = .{ .g = self };
-        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, TerrCtx.at, &terr_ctx, Ctx.put, self);
+        var ph_holder: world_tts.PlaceholderCtx = undefined;
+        const ph_arg = PlaceholderCtx.slot(self, &ph_holder);
+        world_tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, self.world.terrain_ids.water, self.world.terrain_ids.terrain_filler, self.world.terrain_ids.terrain_filler_adaptive, TerrCtx.at, &terr_ctx, ph_arg, Ctx.put, self);
         std.debug.print("zdtd: reset POI {s} at ({d},{d})\n", .{ d.name, d.x, d.z });
     }
 
@@ -3299,6 +3318,31 @@ pub const Game = struct {
 
     /// True when the world biome at (wx,wz) is the stock radiated biome
     /// (biomes.xml <biomemap name="radiated"/>), which deals damage over time.
+    /// blockplaceholders context for the paint pass: the loaded table, the
+    /// world seed stock's per-cell stream folds in, and the biome name at a
+    /// position. Null when no placeholder table loaded (the paint path then
+    /// keeps whatever id the remap left).
+    pub const PlaceholderCtx = struct {
+        fn at(ctx: ?*anyopaque, wx: i32, wz: i32) []const u8 {
+            const s: *const Game = @ptrCast(@alignCast(ctx.?));
+            const id = s.biomeIdAt(wx, wz) orelse return "";
+            return s.world.biome_layers_table.names[id] orelse "";
+        }
+        /// Fill `holder` (caller-owned, outlives the paint call) and return it,
+        /// or null when no placeholder catalog loaded. The biome callback is
+        /// stock's `WorldBiomes.GetBiome(...).m_sBiomeName` for the cell.
+        fn slot(self: *Game, holder: *world_tts.PlaceholderCtx) ?*const world_tts.PlaceholderCtx {
+            if (!self.placeholders_loaded) return null;
+            holder.* = .{
+                .table = &self.placeholder_table,
+                .world_seed = worldSeedOf(self),
+                .biome_name = @This().at,
+                .biome_ctx = self,
+            };
+            return holder;
+        }
+    };
+
     pub fn isRadiatedAt(self: *const Game, wx: i32, wz: i32) bool {
         const id = self.biomeIdAt(wx, wz) orelse return false;
         const name = self.world.biome_layers_table.names[id] orelse return false;

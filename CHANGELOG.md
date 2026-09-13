@@ -37,6 +37,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- **Prefab placeholder blocks resolve to their real targets.** A prefab's block map names cells like `terrStoneHelper` or `carWrecksRandomHelper`, which are not blocks: stock keeps a `blockplaceholders.xml` list per name and picks a target for every cell it stamps (`BlockPlaceholderMap::Replace` IL=185) using a per-position stream (`Utils::RandomFromSeedOnPos` IL=2666 seeds it with `seed + x + (z << 14) + (y << 24)`), skipping targets whose `biome` does not match the cell and whose `sandboxoption` gate fails, then walking the survivors in document order against `RandomFloat() * sum(prob)`. `randomrotation="true"` re-rolls the rotation off the same stream. zdtd had no placeholder support at all, so those cells became air (the remap reported them as unknown blocks). `assets/blockplaceholders.zig` now loads the catalog (targets resolved to block ids, sandbox gate precomputed), the prefab remap records the placeholder index per cell, and the paint pass resolves each cell at its world position with the biome name and the map seed - so a POI's terrain-helper and random-helper cells become the blocks stock would place.
+
+### Added
+
 - **A modlet's added block gets a block id (PRD 0003 G9).** The block loader skipped any name the stock AssignIds dump does not carry, so a modlet that adds a block was inert. It now keeps those rows and assigns them the way `Block.assignLeftOverBlocks` (IL=7528) does: the dump's names mark their ids used, then the leftovers take the first free id - terrain-shaped blocks (`Shape="Terrain"`) scanning from 0, everything else from `0xff` - in document order. A modded client runs the same algorithm on the same document, so both sides agree. The assignment is not a no-op on a stock install either: 11 `blocks.xml` names sit outside the dump (the nine `*Shapes` shape masters plus `cntChickenCoop` and `oldWoodDoorNoHonk`) and take ids 255..268, which a test pins against the real file. Block ids come from the u16 space and exhaustion drops the block rather than stamping a wrong id.
 
 ### Fixed

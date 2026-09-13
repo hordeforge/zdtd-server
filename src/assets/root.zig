@@ -16,6 +16,7 @@ pub const items = @import("items.zig");
 pub const item_modifiers = @import("item_modifiers.zig");
 pub const signs = @import("signs.zig");
 pub const gameevents = @import("gameevents.zig");
+pub const blockplaceholders = @import("blockplaceholders.zig");
 pub const entities = @import("entities.zig");
 pub const recipes = @import("recipes.zig");
 pub const loot = @import("loot.zig");
@@ -54,6 +55,7 @@ test {
     _ = item_modifiers;
     _ = signs;
     _ = gameevents;
+    _ = blockplaceholders;
     _ = entities;
     _ = recipes;
     _ = loot;

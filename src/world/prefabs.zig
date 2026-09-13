@@ -200,6 +200,10 @@ pub const Index = struct {
     /// Runtime AssignIds resolver for the `.blocks.nim` remap; without it the
     /// prefab-local ids are stamped raw (offline / no id table).
     id_lookup: ?IdLookup = null,
+    /// blockplaceholders table (null when the catalog is absent). Set before
+    /// the first prefab load; changing it drops the cached prefabs because
+    /// their remapped ids depend on it.
+    placeholders: ?*const @import("../assets/blockplaceholders.zig").Table = null,
 
     pub fn deinit(self: *Index) void {
         var it = self.tts_cache.iterator();
@@ -342,6 +346,18 @@ pub const Index = struct {
     /// Install the runtime AssignIds resolver used by the `.blocks.nim` remap.
     /// Drops cached prefabs so anything loaded before this point is re-read and
     /// remapped rather than left in prefab-local ids.
+    /// Install the blockplaceholders table and drop the cached prefabs (their
+    /// remapped ids and per-cell placeholder slots depend on it).
+    pub fn setPlaceholders(self: *Index, t: ?*const @import("../assets/blockplaceholders.zig").Table) void {
+        self.placeholders = t;
+        var it = self.tts_cache.iterator();
+        while (it.next()) |e| {
+            e.value_ptr.*.deinit();
+            self.allocator.destroy(e.value_ptr.*);
+        }
+        self.tts_cache.clearRetainingCapacity();
+    }
+
     pub fn setIdLookup(self: *Index, l: IdLookup) void {
         self.id_lookup = l;
         var it = self.tts_cache.iterator();
@@ -382,10 +398,25 @@ pub const Index = struct {
             return;
         };
         defer self.allocator.free(table);
+        // blockplaceholders names are not blocks: the cell keeps the table's
+        // first target as a stand-in and the paint path resolves the real
+        // target at the cell's world position (BlockPlaceholderMap::Replace).
+        const ph_local = self.allocator.alloc(u16, map.names.len) catch null;
+        defer if (ph_local) |p| self.allocator.free(p);
         for (map.names, 0..) |bname, local| {
-            table[local] = if (bname.len == 0)
-                -1
-            else if (resolver.lookup(resolver.ctx, bname)) |rid| @intCast(rid) else -1;
+            if (bname.len == 0) {
+                table[local] = -1;
+                continue;
+            }
+            if (self.placeholders) |pt| {
+                if (pt.find(bname)) |ph_idx| {
+                    const ph = pt.at(ph_idx).?;
+                    table[local] = if (ph.targets.len > 0) @intCast(ph.targets[0].block_id) else -1;
+                    if (ph_local) |p| p[local] = @intCast(ph_idx + 1);
+                    continue;
+                }
+            }
+            table[local] = if (resolver.lookup(resolver.ctx, bname)) |rid| @intCast(rid) else -1;
         }
 
         var unknown: u32 = 0;
@@ -410,6 +441,31 @@ pub const Index = struct {
             }
             // BlockValue::set_type: low 16 bits only, rotation/meta survive.
             raw.* = (raw.* & ~tts.type_mask) | @as(u32, @intCast(mapped));
+        }
+        // Per-cell blockplaceholders index (0 = normal block). Assigned after
+        // the child pass would be cleaner, but children inherit their parent's
+        // placeholder through the same raw value, so filling it here covers
+        // them: a child of a placeholder keeps the parent's resolution.
+        if (self.placeholders != null and ph_local != null) {
+            const ph_tbl = self.placeholders.?;
+            if (tb.placeholders.len != tb.types.len) {
+                if (tb.placeholders.len != 0) self.allocator.free(tb.placeholders);
+                tb.placeholders = self.allocator.alloc(u16, tb.types.len) catch blk: {
+                    tb.placeholders = &.{};
+                    break :blk &.{};
+                };
+            }
+            @memset(tb.placeholders, 0);
+            for (tb.types, 0..) |raw, i| {
+                const typ: u16 = tts.typeId(raw);
+                if (typ == 0 or typ >= ph_local.?.len) continue;
+                const slot = ph_local.?[typ];
+                if (slot == 0) continue;
+                // A target that resolved to air leaves the cell air.
+                if (raw == 0) continue;
+                tb.placeholders[i] = slot;
+            }
+            _ = ph_tbl;
         }
         if (unknown != 0) {
             std.debug.print("zdtd: prefab {s}: {d} cells have no block in this install\n", .{ name, unknown });
@@ -591,6 +647,8 @@ pub const Index = struct {
         filler_adaptive_id: u16,
         terrain_id: ?*const fn (?*anyopaque, i32, i32, i32) u16,
         terrain_ctx: ?*anyopaque,
+        /// blockplaceholders context (null = cells keep the remap stand-in).
+        ph: ?*const tts.PlaceholderCtx,
         set_block: tts.SetBlockFn,
         ctx: ?*anyopaque,
     ) void {
@@ -604,7 +662,7 @@ pub const Index = struct {
             // only the huge RWG clutter parts are skipped.
             if (!isPaintablePart(d)) continue;
             const tb = self.getTtsBlocks(d.name) orelse continue;
-            tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, water_id, filler_id, filler_adaptive_id, terrain_id, terrain_ctx, set_block, ctx);
+            tts.paintDecoration(tb, d.x, d.stampY(), d.z, d.rot, water_id, filler_id, filler_adaptive_id, terrain_id, terrain_ctx, ph, set_block, ctx);
         }
     }
 
@@ -1000,13 +1058,13 @@ test "stock cave_07 stamps its body below the declared ground" {
         }
     };
     var with_offset: Rec = .{};
-    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Rec.onBlock, &with_offset);
+    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, null, Rec.onBlock, &with_offset);
     try std.testing.expect(with_offset.min_wy < 60);
 
     // Same POI with the offset dropped: the delta is exactly the YOffset.
     var without: Rec = .{};
     idx.items[0].y_offset = 0;
-    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, Rec.onBlock, &without);
+    idx.applyTtsPaintToChunk(0, 0, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, null, Rec.onBlock, &without);
     try std.testing.expectEqual(without.min_wy - 33, with_offset.min_wy);
 }
 
@@ -1023,7 +1081,7 @@ test "navezgane paints a real POI into its chunk" {
 
     var c: TestPaintCount = .{};
     // abandoned_house_07 is at (-262,61,450): chunk (-17, 28).
-    idx.applyTtsPaintToChunk(-17, 28, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, TestPaintCount.put, &c);
+    idx.applyTtsPaintToChunk(-17, 28, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, null, TestPaintCount.put, &c);
     try std.testing.expect(c.n > 0);
 }
 
@@ -1285,7 +1343,7 @@ test "part decoration paints its blocks into the chunk" {
     , prefab_root);
     defer idx.deinit();
     var c: TestPaintCount = .{};
-    idx.applyTtsPaintToChunk(6, 6, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, TestPaintCount.put, &c); // chunk x96..112 overlaps the part
+    idx.applyTtsPaintToChunk(6, 6, 0, assignids.terrain_filler, assignids.terrain_filler_adaptive, null, null, null, TestPaintCount.put, &c); // chunk x96..112 overlaps the part
     try std.testing.expect(c.n > 0);
 }
 
