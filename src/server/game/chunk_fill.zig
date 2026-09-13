@@ -16,6 +16,7 @@ const requirements = @import("../../assets/requirements.zig");
 const sandbox = @import("../../assets/sandbox.zig");
 const game_tick = @import("tick.zig");
 const game_player = @import("player.zig");
+const game_loot = @import("loot.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
@@ -528,6 +529,11 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
         else
             0;
         cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = q, .use_times = use_times });
+        // The entry's `mods=` list installs on the stack's own slot, rolled
+        // from the same deterministic per-stack stream.
+        if (stacks[i].mods.len > 0) {
+            game_loot.installLootMods(self, &cont.slots[si], eid, stacks[i].mods, stacks[i].mod_chance, seed ^ @as(u32, @intCast(i)));
+        }
         si += 1;
     }
     // Stock sets `bTouched` and `worldTimeTouched` BEFORE the roll

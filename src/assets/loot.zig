@@ -31,6 +31,13 @@ pub const LootEntry = struct {
     /// joining the group's pick pool (stock SpawnAllItemsFromList /
     /// SpawnLootItemsFromList forceProb branch, asm.il 698816).
     force_prob: bool = false,
+    /// `mods="a,b"` + `mod_chance="p"` (5 stock gun entries): install item mods
+    /// on the spawned item. Each name is a mod tag (a slot tag like
+    /// `barrelAttachments`, or a contributed tag like `scope`); stock rolls
+    /// `p` per install and halves it after each (`ItemValue.createDefaultModItems`
+    /// IL_759). Arena-owned.
+    mods: []const u8 = "",
+    mod_chance: f32 = 0,
     /// `random_durability="true"` (123 stock entries, all explicitly false, so
     /// this is engine/modlet support): the spawned item starts 20-80% worn.
     random_durability: bool = false,
@@ -340,6 +347,10 @@ pub const Stack = struct {
     /// Rolled ItemValue quality (loot_quality_template by loot stage); 1 for
     /// stackables without a quality tier.
     quality: u8 = 1,
+    /// `mods=` / `mod_chance=` from the entry: the fill path resolves them
+    /// against the spawned item's tags and mod slots.
+    mods: []const u8 = "",
+    mod_chance: f32 = 0,
     /// `random_durability="true"` on the entry: the spawned item starts worn
     /// (`LootContainer` sets `UseTimes = (int)(MaxUseTimes * RandomRange(0.2,
     /// 0.8))`). The fill path owns the item's MaxUseTimes, so it resolves the
@@ -533,6 +544,8 @@ pub const LootTable = struct {
                         .count = cnt,
                         .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s ^ @as(u32, i)),
                         .random_durability = e.random_durability,
+                        .mods = e.mods,
+                        .mod_chance = e.mod_chance,
                     };
                     n += 1;
                 }
@@ -582,6 +595,8 @@ pub const LootTable = struct {
                     .count = cnt,
                     .quality = if (picked.quality > 0) picked.quality else self.resolveQuality(qt, loot_stage, s),
                     .random_durability = picked.random_durability,
+                    .mods = picked.mods,
+                    .mod_chance = picked.mod_chance,
                 };
                 n += 1;
             }
@@ -641,6 +656,8 @@ pub const LootTable = struct {
                     .count = self.stageCount(self.scaleCount(cnt, !cont.ignore_abundance, 1.0), e, loot_stage),
                     .quality = if (e.quality > 0) e.quality else self.resolveQuality(cont.quality_template, loot_stage, s),
                     .random_durability = e.random_durability,
+                    .mods = e.mods,
+                    .mod_chance = e.mod_chance,
                 };
                 n += 1;
             }
@@ -681,7 +698,7 @@ pub const LootTable = struct {
                     const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                     const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), e, loot_stage);
                     if (cnt == 0) continue; // disabled category spawns none
-                    out[an] = .{ .item_name = e.name, .count = cnt, .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = e.random_durability };
+                    out[an] = .{ .item_name = e.name, .count = cnt, .quality = if (e.quality > 0) e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = e.random_durability, .mods = e.mods, .mod_chance = e.mod_chance };
                     an += 1;
                 }
             }
@@ -740,7 +757,7 @@ pub const LootTable = struct {
                 const cnt0: u16 = if (cmax == cmin) cmin else cmin + @as(u16, @intCast(s % span));
                 const cnt = self.stageCount(self.scaleCount(cnt0, true, mult), picked_e, loot_stage);
                 if (cnt == 0) continue; // disabled category spawns none
-                out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = if (picked_e.quality > 0) picked_e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = picked_e.random_durability };
+                out[n] = .{ .item_name = picked_e.name, .count = cnt, .quality = if (picked_e.quality > 0) picked_e.quality else self.resolveQuality(qt, loot_stage, s), .random_durability = picked_e.random_durability, .mods = picked_e.mods, .mod_chance = picked_e.mod_chance };
                 n += 1;
             }
         }
@@ -888,6 +905,8 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
     else
         0;
     const stage_mod = xml.parseF32(xml.attr(tag_src, tag_at, "loot_stage_count_mod") orelse "") orelse 0;
+    const mods_list = xml.attr(tag_src, tag_at, "mods") orelse "";
+    const mod_chance = xml.parseF32(xml.attr(tag_src, tag_at, "mod_chance") orelse "") orelse 0;
     const rnd_dura = blk: {
         const v = xml.attr(tag_src, tag_at, "random_durability") orelse break :blk false;
         break :blk std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True") or std.mem.eql(u8, v, "1");
@@ -958,6 +977,8 @@ fn parseItemOrGroup(tag_src: []const u8, tag_at: usize, templates: []const ProbT
         .tags = xml.attr(tag_src, tag_at, "tags") orelse "",
         .loot_stage_count_mod = stage_mod,
         .random_durability = rnd_dura,
+        .mods = mods_list,
+        .mod_chance = mod_chance,
         .buffs = xml.attr(tag_src, tag_at, "buffs") orelse "",
         .force_prob = std.mem.eql(u8, fp, "true") or std.mem.eql(u8, fp, "True"),
         .gate = gate,
@@ -1185,6 +1206,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
                 e.name = try arena.dupe(u8, ent.name);
                 if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
                 if (ent.tags.len > 0) e.tags = try arena.dupe(u8, ent.tags);
+                if (ent.mods.len > 0) e.mods = try arena.dupe(u8, ent.mods);
                 // The gate's biome list points into the freed source text.
                 e.gate = try dupeGate(arena, ent.gate);
                 g.entries[g.entry_n] = e;
@@ -1257,6 +1279,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
                 e.name = try arena.dupe(u8, ent.name);
                 if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
                 if (ent.tags.len > 0) e.tags = try arena.dupe(u8, ent.tags);
+                if (ent.mods.len > 0) e.mods = try arena.dupe(u8, ent.mods);
                 e.gate = try dupeGate(arena, ent.gate);
                 c.entries[c.entry_n] = e;
                 c.entry_n += 1;

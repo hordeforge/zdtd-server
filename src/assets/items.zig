@@ -372,6 +372,56 @@ pub const ItemTable = struct {
         return 0;
     }
 
+    /// Register extra item classes that stock loads from a sibling catalog.
+    /// `item_modifiers.xml` `<item_modifier>` rows are `ItemClassModifier`
+    /// item classes in the same id space as `<item>` rows: stock runs
+    /// `XmlLoadInfo` 9 (`items`) then 10 (`item_modifiers`) and
+    /// `LateInitItems` -> `assignIdsLinear` -> `assignLeftOverItems` hands the
+    /// leftover ids to the unassigned list in that order (RE items.md
+    /// load-time id assignment). The wire carries installed mods as nested
+    /// `ItemValue`s referring to those ids, so the ECS table and the join
+    /// `IdMapping` have to know them; without this a looted gun's `mods=` roll
+    /// (or a client-attached mod) resolves to nothing and fails closed.
+    ///
+    /// `names` is item_modifiers.xml document order. No-op for the builtin
+    /// fixture catalog, which has no arena and no stock id space. Ownership:
+    /// the caller keeps `names`; the table dupes the strings into its arena.
+    pub fn addItemClasses(self: *ItemTable, names: []const []const u8) !void {
+        const ap = self.arena_ptr orelse return;
+        if (names.len == 0) return;
+        if (self.stock_names.len + names.len > max_items) return error.TooManyItems;
+        const arena = ap.allocator();
+        var next_id: u16 = 1;
+        for (self.defs) |d| next_id = @max(next_id, d.id +| 1);
+        var next_stock: i32 = stock_first_item_type;
+        for (self.stock_types) |st| next_stock = @max(next_stock, st + 1);
+        const defs = try arena.alloc(ItemDef, self.defs.len + names.len);
+        @memcpy(defs[0..self.defs.len], self.defs);
+        const sn = try arena.alloc([]const u8, self.stock_names.len + names.len);
+        @memcpy(sn[0..self.stock_names.len], self.stock_names);
+        const st = try arena.alloc(i32, self.stock_names.len + names.len);
+        @memcpy(st[0..self.stock_types.len], self.stock_types);
+        for (names, 0..) |n, i| {
+            const name = try arena.dupe(u8, n);
+            // Stacknumber 1 (modGeneralMaster, which every stock modifier
+            // Extends), no quality, no econ: an installed mod is an
+            // attachment, not a stack or a tradeable.
+            defs[self.defs.len + i] = .{
+                .id = next_id,
+                .name = name,
+                .stack = 1,
+                .stock_type = next_stock,
+            };
+            sn[self.stock_names.len + i] = name;
+            st[self.stock_types.len + i] = next_stock;
+            next_id +%= 1;
+            next_stock += 1;
+        }
+        self.defs = defs;
+        self.stock_names = sn;
+        self.stock_types = st;
+    }
+
     /// Held-tool HarvestCount multiplier for one drop row (RE GameUtils.
     /// HarvestOnAttack IL=623: count = trunc(rolled * GetValue(141, tool,
     /// 1, holder, null, dropTag))). Rows whose tag set intersects the drop

@@ -897,8 +897,11 @@ applied to the opener (63 stock rows, the bookworm success buff). The residual
 is the remaining loot-entry attributes: entry `tags` now feed the `LootProb`
 fold for the opener's perk/attribute, buff and equipped/held item rows (431
 stock entries, e.g. Dead Eye's `ammo762mm` rows and the Farmer Helmet's
-`seedSkill` row), leaving stock's item-tags query fallback, `GetSandboxProb`
-and `mods`/`mod_chance`; the row stays PARTIAL for those.
+`seedSkill` row), and entry `mods=`/`mod_chance=` installs a fitting
+modifier on the spawned gun (5 stock rows; the modifier rows are item classes
+in the same id space as items.xml, so the id rides the wire). The row stays
+PARTIAL only for stock's item-tags query fallback and `GetSandboxProb`
+(treasure-map chance, static default 1.0).
 Then the timid-animals row went WORKS: `approach_attack` is gated by the
 class's inherited AITask-* list (`ai_attack` parsed from entityclasses.xml;
 `ApproachAndAttackTarget` is the only attack task in V3.1.0 b14), so a stag

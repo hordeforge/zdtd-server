@@ -309,7 +309,24 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
         .seed = s.seed,
     };
     out.mods = s.mods;
-    out.mod_n = s.mod_n;
+    out.mod_n = @min(s.mod_n, out.mods.len);
+    // Installed mods ride the wire as *relative* item ids (each nested
+    // ItemValue writes `type - ItemsStartHere`), while the ECS slot holds ECS
+    // ids. Convert each through the same resolver as the item itself; the
+    // builtin fixture catalog passes no resolver and its id equals the
+    // relative index, which keeps the offline pins unchanged. Unknown mod
+    // (resolver 0 or a non-item type) writes 0 = absent slot: fail closed
+    // rather than name the wrong attachment.
+    var mi: u8 = 0;
+    while (mi < out.mod_n and mi < out.mods.len) : (mi += 1) {
+        const mid = s.mods[mi];
+        if (mid == 0) continue;
+        const mt: i32 = if (resolve) |r| r(ctx, mid) else typeFromBuiltinId(mid);
+        out.mods[mi] = if (mt > items_start_here and mt - items_start_here <= 65535)
+            @intCast(mt - items_start_here)
+        else
+            0;
+    }
     return out;
 }
 
@@ -947,6 +964,16 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
     };
     out.mods = s.mods;
     out.mod_n = @min(s.mod_n, out.mods.len);
+    // Reverse of slotFromEcs: the parsed nested mod ids are relative item
+    // ids, the ECS slot wants ECS ids. No resolver keeps the fixture pin
+    // (relative index == ECS id in the builtin catalog).
+    var mi: u8 = 0;
+    while (mi < out.mod_n and mi < out.mods.len) : (mi += 1) {
+        const rel = s.mods[mi];
+        if (rel == 0) continue;
+        const abs: i32 = items_start_here + @as(i32, rel);
+        out.mods[mi] = if (reverse) |rv| rv(ctx, abs) else fallbackEcsId(abs);
+    }
     return out;
 }
 

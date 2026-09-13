@@ -238,6 +238,19 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     if (logged("item_modifiers.xml", assets_item_modifiers.tryLoad(allocator, opts.game_dir, opts.config_dir))) |mt| {
         self.item_mods = mt;
         util_log.info("zdtd: item_modifiers entries={d}\n", .{self.item_mods.defs.len});
+        // Modifiers are item classes in the same id space as items.xml rows
+        // (stock loads items then item_modifiers and assigns leftover ids in
+        // that order). Register them so a mod's ItemValue resolves both ways
+        // and the join IdMapping carries it; see ItemTable.addItemClasses.
+        if (self.item_mods.defs.len > 0) {
+            const names = try allocator.alloc([]const u8, self.item_mods.defs.len);
+            defer allocator.free(names);
+            for (self.item_mods.defs, 0..) |md, i| names[i] = md.name;
+            try self.items.addItemClasses(names);
+            util_log.info("zdtd: item classes={d} (mods +{d}) stock_types={d}\n", .{
+                self.items.defs.len, self.item_mods.defs.len, self.items.stock_names.len,
+            });
+        }
     }
     if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();

@@ -7,6 +7,7 @@ const Game = game_mod.Game;
 const packages = @import("../../wire/packages.zig");
 const ecs = @import("../../ecs/root.zig");
 const assets_loot = @import("../../assets/loot.zig");
+const assets_item_mods = @import("../../assets/item_modifiers.zig");
 
 pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
     const id = self.items.ecsIdByName(name);
@@ -59,7 +60,81 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
             assets_loot.randomUseTimes(self.itemMaxUseTimes(eid, q), seed ^ @as(u32, @intCast(i)))
         else
             0;
-        _ = self.sim.depositLootStack(slot, eid, stacks[i].count, q, use_times);
+        const has_mods = stacks[i].mods.len > 0 and stacks[i].mod_chance > 0;
+        const is_quality = if (self.items.byId(eid)) |d| d.has_quality else false;
+        if (!has_mods and !is_quality) {
+            _ = self.sim.depositItem(slot, eid, stacks[i].count);
+            continue;
+        }
+        // A value-carrying stack goes into a free bag slot so the mods can land
+        // on that same slot (the inventory was cleared above, so the first free
+        // index is deterministic).
+        const inv = &self.sim.inventory[slot];
+        var fi: usize = 0;
+        while (fi < ecs.components.inv_equip_start and inv.slots[fi].count != 0) : (fi += 1) {}
+        if (fi >= ecs.components.inv_equip_start) continue; // full: drop the stack
+        inv.slots[fi] = .{ .item_id = eid, .count = stacks[i].count, .quality = q, .use_times = use_times };
+        if (has_mods) {
+            installLootMods(self, &inv.slots[fi], eid, stacks[i].mods, stacks[i].mod_chance, seed ^ @as(u32, @intCast(i)));
+        }
+    }
+}
+
+/// Pick the modifier a loot `mods=` name resolves to for one item: an exact mod
+/// name wins when it fits, else the first-fitting mod whose slot tag
+/// (`installable_tags`) or contributed tag (`modifier_tags`) carries the name -
+/// stock's `ItemValue.createDefaultModItems` picks with
+/// `GetDesiredItemModWithAnyTags(itemTags, none, tags)`. `pick` selects among
+/// the fitting candidates so a re-roll of the same seed is reproducible.
+fn lootModCandidate(mods: *const assets_item_mods.ModTable, name: []const u8, item_tags: []const u8, pick: u32) ?[]const u8 {
+    if (mods.byName(name)) |m| {
+        if (mods.isSuitable(m.name, item_tags)) return m.name;
+    }
+    var n: u32 = 0;
+    for (mods.defs) |m| {
+        if (!mods.isSuitable(m.name, item_tags)) continue;
+        if (assets_item_mods.ModTable.tagListContains(m.installable, name) or
+            assets_item_mods.ModTable.tagListContains(m.modifier, name)) n += 1;
+    }
+    if (n == 0) return null;
+    var idx = pick % n;
+    for (mods.defs) |m| {
+        if (!mods.isSuitable(m.name, item_tags)) continue;
+        if (!(assets_item_mods.ModTable.tagListContains(m.installable, name) or
+            assets_item_mods.ModTable.tagListContains(m.modifier, name))) continue;
+        if (idx == 0) return m.name;
+        idx -= 1;
+    }
+    return null;
+}
+
+/// Install a loot entry's `mods=` list on a spawned item. Stock's
+/// `ItemValue.createDefaultModItems` (IL=759): for each listed tag resolve a
+/// fitting modifier, install it when `RandomFloat() <= chance` and then halve
+/// the chance for the next (a failed roll does not halve), up to the item's
+/// ModSlots for its quality. Deterministic on the caller's per-stack stream.
+pub fn installLootMods(self: *Game, slot: *ecs.components.InvSlot, item_id: u16, mods_list: []const u8, chance0: f32, seed: u32) void {
+    if (mods_list.len == 0 or chance0 <= 0) return;
+    const def = self.items.byId(item_id) orelse return;
+    if (def.tags.len == 0) return;
+    const cap: u8 = @min(self.items.modSlotsFor(item_id, slot.quality), 4);
+    if (cap == 0) return;
+    var chance = chance0;
+    var stream = seed;
+    var it = std.mem.splitScalar(u8, mods_list, ',');
+    while (it.next()) |raw| {
+        if (slot.mod_n >= cap) break;
+        const name = std.mem.trim(u8, raw, " \t");
+        if (name.len == 0) continue;
+        stream = stream *% 1103515245 +% 12345;
+        const cand = lootModCandidate(&self.item_mods, name, def.tags, stream >> 8) orelse continue;
+        const roll = @as(f32, @floatFromInt(stream >> 8)) / 16777216.0;
+        if (roll > chance) continue;
+        const mid = self.items.ecsIdByName(cand);
+        if (mid == 0) continue;
+        slot.mods[slot.mod_n] = mid;
+        slot.mod_n += 1;
+        chance *= 0.5;
     }
 }
 

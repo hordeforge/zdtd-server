@@ -66,6 +66,17 @@ pub const ModTable = struct {
     }
 
     /// Comma-list tag intersection ("" list = the gate is empty).
+    /// True when the comma list `list` carries `tag` (case-sensitive, like
+    /// FastTags).
+    pub fn tagListContains(list: []const u8, tag: []const u8) bool {
+        if (list.len == 0 or tag.len == 0) return false;
+        var it = std.mem.splitScalar(u8, list, ',');
+        while (it.next()) |seg| {
+            if (std.mem.eql(u8, std.mem.trim(u8, seg, " \t"), tag)) return true;
+        }
+        return false;
+    }
+
     fn tagListIntersects(list: []const u8, tags: []const u8) bool {
         if (list.len == 0 or tags.len == 0) return false;
         var it = std.mem.splitScalar(u8, list, ',');

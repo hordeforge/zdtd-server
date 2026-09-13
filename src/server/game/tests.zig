@@ -5837,6 +5837,75 @@ test "loot prob passives scale tagged entries (stock perkDeadEye)" {
     }
 }
 
+test "loot entry mods install on the spawned gun" {
+    // Stock `ItemValue.createDefaultModItems` (IL=759): a looted item's `mods=`
+    // list names slot tags (`barrelAttachments`) or contributed tags (`scope`);
+    // each resolves to a fitting modifier, installs when the roll passes
+    // `mod_chance`, and halves the chance after every install. The 5 stock gun
+    // entries use 0.5 / 1. The modifiers are item classes in the same id space
+    // as items.xml (`ItemTable.addItemClasses`), so the installed id resolves
+    // back to the modifier catalog and encodes on the wire.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const g = try Game.createWithOptions(std.testing.allocator, dir, 0, .{
+        .game_dir = game_dir,
+        .starter_zombies = false,
+        .demo_seed = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const pistol = g.items.ecsIdByName("gunHandgunT1Pistol");
+    const sniper = g.items.ecsIdByName("gunRifleT3SniperRifle");
+    if (pistol == 0 or sniper == 0) return error.SkipZigTest;
+    // The modifier rows are item classes: their ECS id resolves and maps to an
+    // absolute stock type past ItemsStartHere (the client's item id space).
+    const barrel_mod = g.items.ecsIdByName("modGunBarrelExtender");
+    try std.testing.expect(barrel_mod != 0);
+    try std.testing.expect(g.items.stockTypeFor(barrel_mod) > @import("../../assets/items.zig").items_start_here);
+    g.loot.deinit();
+    g.loot = try @import("../../assets/loot.zig").loadFromSlice(std.testing.allocator,
+        \\<lootgroups>
+        \\<lootgroup name="gunCrate" count="all">
+        \\  <item name="gunHandgunT1Pistol" mods="barrelAttachments" mod_chance="1"/>
+        \\  <item name="gunRifleT3SniperRifle" mods="scope" mod_chance="1"/>
+        \\  <item name="gunHandgunT1Pistol" mods="barrelAttachments" mod_chance="0"/>
+        \\</lootgroup>
+        \\</lootgroups>
+    );
+    var cap: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&cap);
+    const cont = g.containers.getOrCreate(.{ .x = 7, .y = 70, .z = 7 }, 8, 0).?;
+    cont.player_storage = false;
+    cont.loot_list = "gunCrate";
+    cont.touched = false;
+    g.ensureContainerLoot(cont, cl.slot);
+
+    const ModTable = @import("../../assets/item_modifiers.zig").ModTable;
+    // 1) The barrel-tag row installed a fitting barrel mod.
+    try std.testing.expectEqual(pistol, cont.slots[0].item_id);
+    try std.testing.expect(cont.slots[0].mod_n >= 1);
+    const bar_def = g.items.byId(cont.slots[0].mods[0]).?;
+    const bar_m = g.item_mods.byName(bar_def.name).?;
+    try std.testing.expect(ModTable.tagListContains(bar_m.installable, "barrelAttachments") or
+        ModTable.tagListContains(bar_m.modifier, "barrelAttachments"));
+    // 2) The `scope` tag matches a mod's contributed tags.
+    try std.testing.expectEqual(sniper, cont.slots[1].item_id);
+    try std.testing.expect(cont.slots[1].mod_n >= 1);
+    const sc_def = g.items.byId(cont.slots[1].mods[0]).?;
+    const sc_m = g.item_mods.byName(sc_def.name).?;
+    try std.testing.expect(ModTable.tagListContains(sc_m.modifier, "scope") or
+        ModTable.tagListContains(sc_m.installable, "scope"));
+    // 3) mod_chance 0 installs nothing.
+    try std.testing.expectEqual(pistol, cont.slots[2].item_id);
+    try std.testing.expectEqual(@as(u8, 0), cont.slots[2].mod_n);
+}
+
 test "loot bag fill carries the rolled quality, stackables stay quality 1" {
     // A death/airdrop bag is a stock LootContainer roll, so the rolled quality
     // (and random-durability wear) belongs on the deposited stack; a stackable
