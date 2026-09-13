@@ -27,6 +27,13 @@ const resolveItemType = game_mod.Game.resolveItemType;
 const eatProps = game_mod.Game.eatProps;
 const assets_progression = @import("../../assets/progression.zig");
 
+/// Sign-text echo range. Stock `NetPackageTileEntity::ProcessPackage` calls
+/// `SendPackage(..., pos = te.ToWorldCenterPos(), range = 192, exclude = false)`
+/// (NetPackageTileEntity.il.txt IL_00B4), so every spawned client inside 192 m
+/// gets the applied TE - the sender included, which is what clears its
+/// `lockHandleWaitingFor` and unblocks the sign UI.
+const sign_echo_range: f32 = 192;
+
 /// Server-authoritative mod attachment scrub (RE items.md CalcModSlotCount
 /// IL=29 + ItemClassModifier suitability): after an inventory write, a slot's
 /// attached mods must fit the item's ModSlots quality curve (count ≤
@@ -455,6 +462,50 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     };
                 }
                 try replicate_te.sendVendingTe(self, peer, ve.world_x, ve.world_y, ve.world_z);
+                return true;
+            }
+        }
+        // Sign text (stock TEFeatureSignable). Sign data is not its own
+        // package: the client's TileEntity::setModified sends the composite TE
+        // body with a fresh handle and the server applies it to its own TE and
+        // rebroadcasts it verbatim (ProcessPackage never re-encodes, so the
+        // relayed bytes are the applied state). Bodies that also carry
+        // TEFeatureStorage (the writable crates) belong to the storage leg
+        // below, which owns their item list.
+        var sign_text: [stock_te.max_sign_text_bytes]u8 = undefined;
+        if (stock_te.parseSignableTeBody(body, &sign_text) catch |err| blk: {
+            if (err != error.NotSignableTe) self.harness.counters.inc(.c2s_malformed);
+            break :blk null;
+        }) |sign| {
+            if (sign.has_storage) {
+                // fall through to the storage branch
+            } else {
+                const owner = self.sim.playerByPeer(c.slot) orelse return true;
+                const op = self.sim.transform[owner];
+                if (self.rejectIfBeyondEditRange(
+                    c,
+                    peer.local_id,
+                    c.entity_id,
+                    .container,
+                    op.x,
+                    op.y,
+                    op.z,
+                    @floatFromInt(sign.world_x),
+                    @floatFromInt(sign.world_y),
+                    @floatFromInt(sign.world_z),
+                )) return true;
+                // Stock drops the package when the block at the addressed
+                // position no longer matches the claimed type; zdtd also
+                // requires the block to be one whose composite carries the
+                // signable module, so a forged body cannot write sign text
+                // into an unrelated block's TE slot.
+                if (sign.block_id <= 0 or sign.block_id > std.math.maxInt(u16)) return true;
+                const cur = self.world.blockWorld(sign.world_x, sign.world_y, sign.world_z) catch return true;
+                if (@as(i32, cur) != sign.block_id) return true;
+                const bdef = self.blocks.byId(@intCast(sign.block_id)) orelse return true;
+                if (!bdef.signable) return true;
+                self.harness.counters.inc(.c2s_te_sign_echo);
+                try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(sign.world_x), @floatFromInt(sign.world_z), sign_echo_range);
                 return true;
             }
         }

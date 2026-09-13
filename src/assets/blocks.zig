@@ -79,6 +79,12 @@ pub const BlockDef = struct {
     /// is class-assigned, not a blocks.xml property. Zombies open these on
     /// their path instead of chewing.
     is_door: bool = false,
+    /// The block's composite TE carries `TEFeatureSignable`: blocks.xml
+    /// declares it as `<property class="TEFeatureSignable">` inside
+    /// `CompositeFeatures` (9 stock blocks: the player signs, the metal sign
+    /// letters and the writable crates). Only these positions accept a C2S
+    /// sign-text TE write.
+    signable: bool = false,
     /// IndexName="TraderOnOff": trader-area gate/loudspeaker blocks that
     /// TraderArea::SetClosed toggles (doors lock, lights flip meta bit 0x2).
     trader_onoff: bool = false,
@@ -408,6 +414,7 @@ pub fn loadFromPath(
         extends_param1: []const u8 = "",
         trader_onoff: bool = false,
         is_door: bool = false,
+        signable: bool = false,
         heat_strength: f32 = 0,
         has_fuel_module: bool = false,
         has_material_input: bool = false,
@@ -464,6 +471,7 @@ pub fn loadFromPath(
         var extends: ?[]const u8 = null;
         var extends_param1: []const u8 = "";
         var trader_onoff = false;
+        var signable = false;
         var heat_strength: f32 = 0;
         var has_fuel_module = false;
         var has_material_input = false;
@@ -537,6 +545,13 @@ pub fn loadFromPath(
                 continue;
             }
             const pname = xml.attr(clean, pi, "name") orelse {
+                // `<property class="TEFeatureSignable">` is a composite module
+                // declaration, not a named property: stock reads these into the
+                // TE module list (BlocksFromXml CompositeFeatures) and the
+                // module order decides the wire feature order.
+                if (xml.attr(clean, pi, "class")) |cn| {
+                    if (std.ascii.eqlIgnoreCase(cn, "TEFeatureSignable")) signable = true;
+                }
                 p = pi + 10;
                 continue;
             };
@@ -637,6 +652,7 @@ pub fn loadFromPath(
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
             .trader_onoff = trader_onoff,
             .is_door = std.ascii.findIgnoreCase(kn, "door") != null,
+            .signable = signable,
             .heat_strength = heat_strength,
             .has_fuel_module = has_fuel_module,
             .has_material_input = has_material_input,
@@ -677,6 +693,7 @@ pub fn loadFromPath(
         var own_mesh = pb.mesh;
         var own_texture = pb.texture_top;
         var own_map_color = pb.map_color;
+        var own_signable = pb.signable;
         var own_drops = pb.harvest_drops;
         var own_destroy = pb.destroy_drops;
         var own_fall = pb.fall_drops;
@@ -710,6 +727,10 @@ pub fn loadFromPath(
             if (own_mesh == null and !xml.tagListContains(p1, "Mesh")) own_mesh = base_p.mesh;
             if (own_texture == 0 and !xml.tagListContains(p1, "Texture")) own_texture = base_p.texture_top;
             if (own_map_color == 0 and !xml.tagListContains(p1, "MapColor")) own_map_color = base_p.map_color;
+            // A sign block's shape lives on its base (playerSignWood1x3
+            // extends playerSignWood1x1 and declares no CompositeFeatures of
+            // its own), so the module flag follows the chain.
+            if (!own_signable) own_signable = base_p.signable;
             // CopyDroppedFrom (IL=89): base drop rows append per event unless
             // the item name is already present (own wins), so a block that
             // declares its own wood row still inherits the base's stone row.
@@ -726,6 +747,7 @@ pub fn loadFromPath(
         pb.mesh = own_mesh;
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;
+        pb.signable = own_signable;
         pb.harvest_drops = own_drops;
         pb.destroy_drops = own_destroy;
         pb.fall_drops = own_fall;
@@ -741,6 +763,7 @@ pub fn loadFromPath(
             .trader_id = pb.trader_id,
             .trader_onoff = pb.trader_onoff,
             .is_door = pb.is_door,
+            .signable = pb.signable,
             .heat_strength = pb.heat_strength,
             .has_fuel_module = pb.has_fuel_module,
             .has_material_input = pb.has_material_input,
@@ -793,6 +816,48 @@ fn loadLogged(allocator: std.mem.Allocator, path: []const u8, id_by_name: IdByNa
         }
         return null;
     };
+}
+
+test "signable composite flag parses and follows Extends" {
+    // blocks.xml declares a composite TE module as
+    // `<property class="TEFeatureSignable">` (no name attr): 9 stock blocks
+    // carry it, the player signs and the writable crates among them. The C2S
+    // sign-text leg accepts only those positions, and the sign shapes inherit
+    // it (playerSignWood1x3 extends playerSignWood1x1 and declares no
+    // CompositeFeatures of its own).
+    const src =
+        \\<blocks>
+        \\<block name="playerSignWood1x1">
+        \\  <property name="Class" value="CompositeTileEntity"/>
+        \\  <property class="CompositeFeatures">
+        \\    <property class="TEFeatureSignable">
+        \\      <property name="FontSize" value="110"/>
+        \\    </property>
+        \\    <property class="TEFeatureLockable"/>
+        \\  </property>
+        \\</block>
+        \\<block name="playerSignWood1x3">
+        \\  <property name="Extends" value="playerSignWood1x1"/>
+        \\</block>
+        \\<block name="cntWoodCrateWood01">
+        \\  <property name="Class" value="CompositeTileEntity"/>
+        \\  <property class="CompositeFeatures">
+        \\    <property class="TEFeatureStorage">
+        \\      <property name="LootList" value="playerWoodWritableStorage"/>
+        \\    </property>
+        \\  </property>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_signable.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+    try std.testing.expect(t.byName("playerSignWood1x1").?.signable);
+    try std.testing.expect(t.byName("playerSignWood1x3").?.signable); // inherited
+    try std.testing.expect(!t.byName("cntWoodCrateWood01").?.signable); // storage only
 }
 
 test "builtin block table" {
@@ -980,6 +1045,8 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "fallBase", 206 },
         .{ "fallChild", 207 },
         .{ "oreNoExtend", 208 },
+        .{ "playerSignWood1x1", 209 },
+        .{ "playerSignWood1x3", 210 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];

@@ -58,6 +58,9 @@ pub const CounterId = enum(u16) {
     /// mapping is the top remaining wire item; counted so real client
     /// container traffic is visible).
     c2s_stock_invtx,
+    /// C2S sign-text TE writes applied and echoed (stock TEFeatureSignable
+    /// through NetPackageTileEntity).
+    c2s_te_sign_echo,
     /// C2S dropped by an authority gate (phase/ownership/bounds/quest state).
     c2s_rejects,
     /// Named C2S package with no handler arm (falls off handlePackage).

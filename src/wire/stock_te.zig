@@ -34,6 +34,16 @@ const CraftComplete = workstations.CraftComplete;
 /// GetStableHashCode("TEFeatureStorage"): matches Extensions.GetStableHashCode.
 pub const feature_hash_storage: i32 = 731446478;
 
+/// GetStableHashCode("TEFeatureSignable"): the composite module that carries a
+/// block's authored sign text (`<property class="TEFeatureSignable">` inside
+/// `CompositeFeatures`, blocks.xml). Same hash formula as the row above.
+pub const feature_hash_signable: i32 = 924617576;
+
+/// Longest authored sign text zdtd accepts from a client. Stock puts no limit
+/// on the wire (the XUI input caps the typed text), so an over-long claim fails
+/// closed (`error.Overflow`) instead of being truncated mid-string.
+pub const max_sign_text_bytes: usize = 1024;
+
 const unity_hash = @import("../assets/unity_hash.zig");
 
 fn localChunkPos(wx: i32, wy: i32, wz: i32) struct { x: i32, y: i32, z: i32 } {
@@ -215,14 +225,20 @@ pub const ParsedTe = struct {
     size_x: u16 = 0,
     size_y: u16 = 0,
     touched: bool = false,
+    /// The composite carried a TEFeatureStorage module. A composite without
+    /// one is not a storage TE (a sign body used to parse "successfully" and
+    /// created a phantom 8-slot container at the sign).
+    found_storage: bool = false,
     /// Stock `worldTimeTouched`: the world time the container was last looted.
     /// TEFeatureStorage.UpdateTick derives LootRespawnDays from it, so it is
     /// state and not a formality.
     world_time_touched: u32 = 0,
 };
 
-/// Parse NetPackageTileEntity body if stock composite+storage; error if ZTE1 or unknown.
-pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
+/// Parse NetPackageTileEntity body if stock composite+storage; error if ZTE1,
+/// unknown, or a valid composite with no TEFeatureStorage module (that is not a
+/// storage TE: a sign body would otherwise create a phantom container).
+pub fn parseStorageTeBody(body: []const u8) (binary.ReadError || error{NotStorageTe})!ParsedTe {
     var r: binary.Reader = .{ .data = body };
     var out: ParsedTe = .{};
     const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
@@ -260,7 +276,8 @@ pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
         const feat_payload_len = feat_size - 4;
         if (pr.remaining() < feat_payload_len) return error.EndOfStream;
         const feat_start = pr.pos;
-        if (hash == feature_hash_storage or hash == unity_hash.getStableHashCode("TEFeatureStorage")) {
+        if (hash == feature_hash_storage) {
+            out.found_storage = true;
             try parseStorageFeature(&pr, &out);
         } else {
             pr.pos += feat_payload_len;
@@ -270,6 +287,90 @@ pub fn parseStorageTeBody(body: []const u8) binary.ReadError!ParsedTe {
         if (consumed < feat_payload_len) pr.pos = feat_start + feat_payload_len;
         if (consumed > feat_payload_len) return error.InvalidString;
     }
+    if (!out.found_storage) return error.NotStorageTe;
+    return out;
+}
+
+/// A composite TE that carries `TEFeatureSignable` (a sign, or a writable
+/// crate that also has storage). Filled by `parseSignableTeBody`.
+pub const ParsedSignTe = struct {
+    handle: u8 = 255,
+    world_x: i32 = 0,
+    world_y: i32 = 0,
+    world_z: i32 = 0,
+    block_id: i32 = 0,
+    /// AuthoredText present; 0 means the client cleared the sign.
+    has_text: bool = false,
+    text_len: usize = 0,
+    /// The same composite carries TEFeatureStorage: that leg owns the body
+    /// (it must still apply the item list), so the sign leg stands down.
+    has_storage: bool = false,
+};
+
+pub const ParseSignTeError = binary.ReadError || error{ NotSignableTe, Overflow };
+
+/// Parse a NetPackageTileEntity body whose composite carries
+/// `TEFeatureSignable`. `error.NotSignableTe` when the payload is a valid
+/// composite without that module. `text_buf` receives the authored UTF-8 text;
+/// a text longer than the buffer fails closed with `error.Overflow` (stock
+/// truncates nothing, and the echo relays the client's own bytes).
+pub fn parseSignableTeBody(body: []const u8, text_buf: []u8) ParseSignTeError!ParsedSignTe {
+    var r: binary.Reader = .{ .data = body };
+    var out: ParsedSignTe = .{};
+    const pay_len = try readOuterTeHeader(&r, &out.handle, &out.world_x, &out.world_y, &out.world_z, &out.block_id);
+    if (r.remaining() < pay_len) return error.EndOfStream;
+    var pr: binary.Reader = .{ .data = r.data[r.pos .. r.pos + pay_len] };
+
+    // chunkPos + composite size marker (inclusive) + blockID, then the owner
+    // PlatformUserIdentifier and the module list (TileEntityComposite::write).
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    _ = try pr.readI32();
+    const outer_size = try pr.readU32();
+    if (outer_size < 4 or outer_size - 4 > pr.remaining()) return error.InvalidString;
+    const payload_block_id = try pr.readI32();
+    if (out.block_id == 0) out.block_id = payload_block_id;
+    const owner_tag = try pr.readByte();
+    if (owner_tag != 0) {
+        _ = try pr.readByte();
+        try pr.skipString();
+        try pr.skipString();
+    }
+    const mod_n = try pr.readByte();
+    var found = false;
+    var mi: u8 = 0;
+    while (mi < mod_n) : (mi += 1) {
+        const hash = try pr.readI32();
+        const feat_size = try pr.readU32();
+        // feat_size includes its own 4-byte marker (stock FinalizeSizeMarker).
+        if (feat_size < 4) return error.InvalidString;
+        const feat_payload_len = feat_size - 4;
+        if (pr.remaining() < feat_payload_len) return error.EndOfStream;
+        const feat_start = pr.pos;
+        if (hash == feature_hash_signable) {
+            found = true;
+            // TEFeatureSignable::Write: AuthoredText present flag, then the
+            // 7-bit length-prefixed UTF-8 text, then the author identity
+            // (u8 present, u8 version, 2 strings) - all when present.
+            out.has_text = try pr.readBool();
+            if (out.has_text) {
+                const t = try pr.readString(text_buf);
+                out.text_len = t.len;
+            }
+            if (try pr.readBool()) {
+                _ = try pr.readByte();
+                try pr.skipString();
+                try pr.skipString();
+            }
+        } else {
+            if (hash == feature_hash_storage) out.has_storage = true;
+            pr.pos += feat_payload_len;
+        }
+        const consumed = pr.pos - feat_start;
+        if (consumed < feat_payload_len) pr.pos = feat_start + feat_payload_len;
+        if (consumed > feat_payload_len) return error.InvalidString;
+    }
+    if (!found) return error.NotSignableTe;
     return out;
 }
 
@@ -793,6 +894,95 @@ test "workstation array count wider than our store is rejected" {
     // chunkPos (12) and the version byte (1).
     body[21 + 13] = @intCast(max_ws_slots + 1);
     try std.testing.expectError(error.InvalidString, parseWorkstationTeBody(body));
+}
+
+test "signable te parse reads the authored text and flags storage siblings" {
+    // Stock carries a sign's text in the composite TE stream
+    // (NetPackageTileEntity, TEComposite Feature TEFeatureSignable::Write),
+    // not in its own package. The parser walks the module table by hash and by
+    // the inclusive per-feature marker, so an unknown sibling is skipped
+    // without being parsed.
+    const TestBody = struct {
+        fn build(
+            buf: []u8,
+            handle: u8,
+            block_id: i32,
+            text: ?[]const u8,
+            modules: []const i32,
+        ) ![]u8 {
+            var pay: [1024]u8 = undefined;
+            var pw: binary.Writer = .{ .buf = &pay };
+            try pw.writeI32(3);
+            try pw.writeI32(70);
+            try pw.writeI32(5);
+            const om = try reserveU32(&pw);
+            try pw.writeI32(block_id);
+            try pw.writeByte(0); // no owner
+            try pw.writeByte(@intCast(modules.len));
+            for (modules) |hash| {
+                try pw.writeI32(hash);
+                const fm = try reserveU32(&pw);
+                if (hash == feature_hash_signable) {
+                    try pw.writeBool(text != null);
+                    if (text) |t| try pw.writeString(t);
+                    try pw.writeBool(false); // no author identity
+                } else {
+                    try pw.writeU32(0); // opaque sibling body
+                }
+                finalizeU32(&pw, fm);
+            }
+            finalizeU32(&pw, om);
+            var w: binary.Writer = .{ .buf = buf };
+            try w.writeByte(handle);
+            try w.writeI32(3);
+            try w.writeI32(70);
+            try w.writeI32(5);
+            try w.writeI32(block_id);
+            try w.writeI32(@intCast(pw.pos));
+            try w.writeBytes(pay[0..pw.pos]);
+            return w.written();
+        }
+    }.build;
+
+    var body_buf: [1024]u8 = undefined;
+    var text_buf: [64]u8 = undefined;
+    const sign_only = try TestBody(&body_buf, 7, 742, "hello base", &.{feature_hash_signable});
+    const sign = try parseSignableTeBody(sign_only, &text_buf);
+    try std.testing.expectEqual(@as(u8, 7), sign.handle);
+    try std.testing.expectEqual(@as(i32, 742), sign.block_id);
+    try std.testing.expect(sign.has_text);
+    try std.testing.expectEqualStrings("hello base", text_buf[0..sign.text_len]);
+    try std.testing.expect(!sign.has_storage);
+
+    // A clearing write (AuthoredText present = 0) yields no text.
+    var body_buf2: [1024]u8 = undefined;
+    const cleared = try TestBody(&body_buf2, 9, 742, null, &.{feature_hash_signable});
+    const cl = try parseSignableTeBody(cleared, &text_buf);
+    try std.testing.expect(!cl.has_text);
+    try std.testing.expectEqual(@as(usize, 0), cl.text_len);
+
+    // A writable crate's composite carries storage and signable: the sign leg
+    // reports the storage sibling so the storage branch keeps the item list.
+    var body_buf3: [1024]u8 = undefined;
+    const mixed = try TestBody(&body_buf3, 11, 900, "crate label", &.{ feature_hash_storage, feature_hash_signable });
+    const mx = try parseSignableTeBody(mixed, &text_buf);
+    try std.testing.expect(mx.has_storage);
+    try std.testing.expectEqualStrings("crate label", text_buf[0..mx.text_len]);
+
+    // No signable module at all is not a sign body, and the storage parser
+    // refuses the sign body (it used to create a phantom container there).
+    var body_buf4: [1024]u8 = undefined;
+    const storage_only = try TestBody(&body_buf4, 12, 900, null, &.{feature_hash_storage});
+    try std.testing.expectError(error.NotSignableTe, parseSignableTeBody(storage_only, &text_buf));
+    try std.testing.expectError(error.NotStorageTe, parseStorageTeBody(sign_only));
+
+    // A text longer than the buffer fails closed instead of truncating
+    // mid-string (stock has no wire limit; the XUI input caps the typed text).
+    var big: [400]u8 = undefined;
+    @memset(big[0..300], 'x');
+    var body_buf5: [1024]u8 = undefined;
+    const long = try TestBody(&body_buf5, 13, 742, big[0..300], &.{feature_hash_signable});
+    try std.testing.expectError(error.Overflow, parseSignableTeBody(long, &text_buf));
 }
 
 test "stable hash TEFeatureStorage" {

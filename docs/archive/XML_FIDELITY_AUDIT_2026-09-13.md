@@ -203,8 +203,15 @@ branch) and feeds the stealth/heat model, the heat event uses stock's constant
 live path in stock either), and the scan matches element names
 case-insensitively and survives a self-closing `SoundDataNode`. The flat
 `combat_noise_radius` legs (combat hits, cop blasts, AI attacks) stay as
-zdtd-owned floors for sources with no audio package of their own. Everything
-else below is still queued.
+zdtd-owned floors for sources with no audio package of their own. **Fifth
+pass:** sign text is live. `signs.xml`'s layer/warp tree is not the carrier -
+sign text rides the composite `NetPackageTileEntity` stream
+(`TEFeatureSignable`), and the C2S leg now applies and echoes it to every
+spawned client within 192 m including the sender, gated on the block at the
+addressed position still matching the claimed type and declaring a
+`TEFeatureSignable` composite module. `NetPackageSignDataResponse` keeps
+shipping the library shells (layerCount 0), which is the whole of the layer
+data a dedicated server ever sends. Everything else below is still queued.
 
 Fixes land in follow-up commits, worst first, by domain so each change set is
 one loader surface:

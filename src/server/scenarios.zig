@@ -37,6 +37,7 @@ const assets_progression = @import("../assets/progression.zig");
 const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_noise = @import("../assets/noise.zig");
+const assets_blocks = @import("../assets/blocks.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
@@ -871,6 +872,112 @@ test "scenario audio: a player's own sound feeds the AI noise model" {
     try std.testing.expectEqual(@as(u8, 0), g.sim.stealth[ps].noise_n);
     try std.testing.expectEqual(@as(usize, 0), g.sim.director.heat_n);
     std.debug.print("PASS audio-noise: a player's own sound feeds stealth + heat\n", .{});
+}
+
+test "scenario sign: a client's sign text is applied and echoed to everyone" {
+    // Stock carries sign text in the composite TE stream:
+    // NetPackageTileEntity.ProcessPackage reads the body into its own
+    // TileEntitySignable and, on the server, rebroadcasts it within 192 m to
+    // every spawned client INCLUDING the sender (NetPackageTileEntity.il.txt
+    // IL_00B4, exclude = false) with the same handle - that echo is what
+    // clears the sender's lockHandleWaitingFor and unblocks the sign UI. zdtd
+    // dropped the package, so no player ever saw another player's sign text,
+    // and the storage parser's permissive composite scan turned a sign body
+    // into a phantom 8-slot container at the sign.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_sign");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_sign", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    _ = try g.attachJoinedClient(&cap_b);
+
+    // A signable block at the addressed position: the handler requires the
+    // block there to be the claimed type AND to carry a signable composite
+    // module (blocks.xml `<property class="TEFeatureSignable">`).
+    const sign_block: u16 = world_store.block_stone;
+    var defs = [_]assets_blocks.BlockDef{.{
+        .id = sign_block,
+        .name = "playerSignWood1x1",
+        .signable = true,
+    }};
+    g.blocks.deinit();
+    g.blocks = .{ .defs = &defs };
+    try g.setBlock(258, 71, 258, sign_block);
+
+    // Composite TE body: handle | worldPos 3 x i32 | blockId i32 | payloadLen
+    // i32 | chunkPos | inclusive composite marker | blockID | owner | module
+    // count | {nameHash, inclusive marker, body}, the signable body being
+    // AuthoredText-present + 7-bit string + author-present.
+    var pay: [256]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &pay };
+    try pw.writeI32(@mod(258, 16));
+    try pw.writeI32(71);
+    try pw.writeI32(@mod(258, 16));
+    const om: usize = pw.pos;
+    try pw.writeU32(0);
+    try pw.writeI32(sign_block);
+    try pw.writeByte(0); // no owner identity
+    try pw.writeByte(1); // one module
+    try pw.writeI32(924617576); // GetStableHashCode("TEFeatureSignable")
+    const fm: usize = pw.pos;
+    try pw.writeU32(0);
+    try pw.writeBool(true);
+    try pw.writeString("HELLO FROM A");
+    try pw.writeBool(false); // no author identity
+    std.mem.writeInt(u32, pw.buf[fm..][0..4], @intCast(pw.pos - fm), .little);
+    std.mem.writeInt(u32, pw.buf[om..][0..4], @intCast(pw.pos - om), .little);
+
+    var fbuf: [512]u8 = undefined;
+    var fw: binary.Writer = .{ .buf = &fbuf };
+    try fw.writeByte(3); // the client's own handle
+    try fw.writeI32(258);
+    try fw.writeI32(71);
+    try fw.writeI32(258);
+    try fw.writeI32(sign_block);
+    try fw.writeI32(@intCast(pw.pos));
+    try fw.writeBytes(pay[0..pw.pos]);
+    const body = fw.written();
+
+    cap_a.clear();
+    cap_b.clear();
+    var frame_buf: [512]u8 = undefined;
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageTileEntity", body));
+
+    const te_id = packages.idOf("NetPackageTileEntity").?;
+    const a_got = cap_a.findPkgId(te_id) orelse return error.TestUnexpectedResult;
+    const b_got = cap_b.findPkgId(te_id) orelse return error.TestUnexpectedResult;
+    // The relayed body is the applied state: byte-identical, handle included.
+    try std.testing.expectEqualSlices(u8, body, a_got);
+    try std.testing.expectEqualSlices(u8, body, b_got);
+    // No phantom container at the sign.
+    try std.testing.expect(g.containers.get(.{ .x = 258, .y = 71, .z = 258 }) == null);
+    try std.testing.expect(g.harness.counters.get(.c2s_te_sign_echo) >= 1);
+
+    // A body whose claimed block type no longer matches the block at the
+    // position is dropped (stock warns "Block type changed. Dropping
+    // package.").
+    cap_a.clear();
+    std.mem.writeInt(i32, fw.buf[13..17], @as(i32, sign_block) + 1, .little);
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageTileEntity", fw.written()));
+    try std.testing.expect(cap_a.findPkgId(te_id) == null);
+    std.mem.writeInt(i32, fw.buf[13..17], sign_block, .little);
+
+    // A block whose composite carries no signable module is not a sign: the
+    // text is refused rather than applied to an unrelated block.
+    defs[0].signable = false;
+    cap_a.clear();
+    try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageTileEntity", body));
+    try std.testing.expect(cap_a.findPkgId(te_id) == null);
+    defs[0].signable = true;
+    std.debug.print("PASS sign-te: text applied and echoed to the sender and the other player\n", .{});
 }
 
 test "scenario treasure point: the server answers the client's dig-site request" {
