@@ -1277,8 +1277,10 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
             // load. An unknown id keeps whatever the save recorded.
             for (&self.sim.inventory[ps].slots) |*s| {
                 if (s.count == 0 or s.item_id == 0) continue;
-                const d = self.items.byId(s.item_id) orelse continue;
-                if (d.stack > 0) s.count = @min(s.count, d.stack);
+                if (self.items.byId(s.item_id) == null) continue;
+                // The sandbox MaxStackSize multiplier belongs in the cap: the
+                // raw Stacknumber would crush a legitimately scaled stack.
+                s.count = @min(s.count, self.items.stackFor(s.item_id));
             }
         }
         if (self.sim.mask[ps].journal) {

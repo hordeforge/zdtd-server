@@ -1149,8 +1149,10 @@ pub const Game = struct {
     pub fn clampKnownStacks(self: *const Game, slots: []ecs.components.InvSlot) void {
         for (slots) |*s| {
             if (s.count == 0 or s.item_id == 0) continue;
-            const d = self.items.byId(s.item_id) orelse continue;
-            if (d.stack > 0) s.count = @min(s.count, d.stack);
+            if (self.items.byId(s.item_id) == null) continue;
+            // Cap through the stock getter: the sandbox MaxStackSize option
+            // scales Stacknumber, and the raw field would clamp it back.
+            s.count = @min(s.count, self.items.stackFor(s.item_id));
         }
     }
 

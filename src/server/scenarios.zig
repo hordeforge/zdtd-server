@@ -1253,6 +1253,46 @@ test "scenario gameevents: the respawn sequence drives the stat restore" {
     std.debug.print("PASS gameevents: respawn sequence drives stats, buffs and the funnel max\n", .{});
 }
 
+test "scenario sandbox MaxStackSize scales the stackable items" {
+    // Sandbox options 163 StackSizeMultiplier -> ItemClass.MaxStackSizeModifier
+    // (SandboxOptionManager IL_0466-0470), which ItemClass.get_MaxCount (IL=10)
+    // multiplies into every stackable non-quality Stacknumber and clamps at
+    // 30000. The code below carries option 163 (G=6, H=7 -> 6*26+7) at value
+    // index 7 of the MaxStackSize set (0.25,0.5,0.75,1.0,1.25,1.5,1.75,2.0) = 2.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_stacksize");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    {
+        const g = try game_mod.Game.createWithOptions(gpa, "worlds/zdtd_sc_stacksize", 0, .{
+            .sandbox_code = "AGHH",
+        });
+        defer {
+            g.deinit();
+            gpa.destroy(g);
+        }
+        try std.testing.expectApproxEqAbs(@as(f32, 2), g.items.stack_size_modifier, 0.0001);
+        // Builtin wood stacks 60000: stock scales first, then clamps at 30000.
+        try std.testing.expectEqual(@as(u16, 30000), g.items.stackFor(7));
+        // Builtin food stacks 50 -> 100.
+        try std.testing.expectEqual(@as(u16, 100), g.items.stackFor(2));
+        // A non-stacking builtin tool stays at 1.
+        try std.testing.expectEqual(@as(u16, 1), g.items.stackFor(5));
+    }
+    // No code: the stock default multiplier is 1 and every raw stack stands.
+    {
+        const g2 = try game_mod.Game.create(gpa, "worlds/zdtd_sc_stacksize", 0);
+        defer {
+            g2.deinit();
+            gpa.destroy(g2);
+        }
+        try std.testing.expectApproxEqAbs(@as(f32, 1), g2.items.stack_size_modifier, 0.0001);
+        try std.testing.expectEqual(@as(u16, 60000), g2.items.stackFor(7));
+    }
+    std.debug.print("PASS stacksize: sandbox MaxStackSize scales stackables and clamps at 30000\n", .{});
+}
+
 test "scenario treasure point: the server answers the client's dig-site request" {
     // ObjectiveTreasureChest asks the server for a dig site whenever the quest
     // carries no PositionData TreasurePoint(4)/TreasureOffset(8), which zdtd

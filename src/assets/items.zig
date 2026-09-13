@@ -284,6 +284,12 @@ pub const ItemTable = struct {
     stock_stacks: []const u16 = &.{},
     /// Per-item EconomicSellScale (stock ItemClass field, default 1.0; A39).
     stock_econ_scales: []const f32 = &.{},
+    /// Sandbox `MaxStackSize` option (163 `StackSizeMultiplier`, default 1.0):
+    /// stock's `ItemClass.MaxStackSizeModifier` static, which
+    /// `ItemClass.get_MaxCount()` (IL=10) multiplies into the Stacknumber for
+    /// stackable non-quality items and clamps at 30000. Set from the decoded
+    /// server code at init; 1.0 keeps every raw Stacknumber.
+    stack_size_modifier: f32 = 1,
 
     pub fn deinit(self: *ItemTable) void {
         if (self.arena_ptr) |ap| {
@@ -471,12 +477,28 @@ pub const ItemTable = struct {
         return null;
     }
 
-    /// Max stack for an ECS item id (items.xml Stacknumber when loaded).
+    /// Sandbox `MaxStackSize` (option 163). Stock pushes the decoded value into
+    /// the `ItemClass.MaxStackSizeModifier` static
+    /// (SandboxOptionManager IL_0466-0470); 1.0 is the fast path.
+    pub fn setStackSizeModifier(self: *ItemTable, v: f32) void {
+        self.stack_size_modifier = if (v > 0) v else 1;
+    }
+
+    /// Max stack for an ECS item id: stock `ItemClass.get_MaxCount()` (IL=10).
+    /// With the sandbox modifier at 1 (or an item that has quality, or one that
+    /// cannot stack) the raw Stacknumber is returned; otherwise it is scaled and
+    /// clamped at 30000. Quality items are weapons and tools whose stack of 1
+    /// must not follow the option, which is why the check sits inside the
+    /// non-default path in stock too.
     pub fn stackFor(self: *const ItemTable, item_id: u16) u16 {
-        if (self.byId(item_id)) |d| {
-            if (d.stack > 0) return d.stack;
-        }
-        return 1;
+        const d = self.byId(item_id) orelse return 1;
+        if (!(d.stack > 0)) return 1;
+        if (self.stack_size_modifier == 1) return d.stack;
+        if (d.has_quality) return d.stack;
+        if (!(d.stack > 1)) return d.stack;
+        const scaled = fastRoundToInt(@as(f32, @floatFromInt(d.stack)) * self.stack_size_modifier);
+        if (scaled <= 0) return 1;
+        return @intCast(@min(scaled, max_scaled_stack));
     }
 
     /// Stock `ItemClass.HasQuality` (IL=9) for an items.xml name. The trader
@@ -868,6 +890,22 @@ fn firstGiveExp(body: []const u8) u16 {
 }
 
 /// Builtin ECS catalog (stable small ids for sim/save).
+/// Stock's clamp on a sandbox-scaled stack (ItemClass.get_MaxCount IL_003F).
+pub const max_scaled_stack: i32 = 30000;
+
+/// `Utils::FastRoundToInt` (IL=1616): `(int)Math.Round((double)f)`, i.e. .NET's
+/// default midpoint-to-even rounding - not away-from-zero. A 7.5 product is 8
+/// and a 6.5 product is 6, which matters because the stock MaxStackSize
+/// multipliers include .25/.5/.75/1.25/1.5/1.75/2.5.
+fn fastRoundToInt(v: f32) i32 {
+    const f = @floor(v);
+    if (v - f == 0.5) {
+        // Midpoint: the even neighbour wins.
+        return @intFromFloat(if (@mod(f, 2.0) == 0) f else f + 1);
+    }
+    return @intFromFloat(@round(v));
+}
+
 pub const builtin_defs = [_]ItemDef{
     .{ .id = 0, .name = "none", .stack = 0 },
     .{ .id = 1, .name = "scrap", .stack = 60000, .stock_type = 0 },
@@ -1964,6 +2002,68 @@ test "ecs offline inventory catalog mirrors builtins" {
     }
     try std.testing.expect(inv.isArmorOffline(11));
     try std.testing.expect(!inv.isArmorOffline(7));
+}
+
+test "sandbox MaxStackSize scales stackable items but never quality ones" {
+    // Stock ItemClass.get_MaxCount (IL=10): with MaxStackSizeModifier != 1 the
+    // Stacknumber is scaled and clamped at 30000, but only for items that
+    // stack and carry no quality (a weapon's stack of 1 must not follow the
+    // option). The option is 163 StackSizeMultiplier, set from the decoded
+    // server code.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="resourceWood">
+        \\    <property name="Stacknumber" value="5" />
+        \\  </item>
+        \\  <item name="resourceScrapIron">
+        \\    <property name="Stacknumber" value="1000" />
+        \\  </item>
+        \\  <item name="gunHandgunT1Pistol">
+        \\    <property name="Stacknumber" value="1" />
+        \\    <effect_group tiered="true" name="quality">
+        \\      <passive_effect name="DamageModifier" operation="perc_add" value=".1" tier="1,6" />
+        \\    </effect_group>
+        \\  </item>
+        \\  <item name="thrownRock">
+        \\    <property name="Stacknumber" value="1" />
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const wood = t.byName("resourceWood").?.id;
+    const iron = t.byName("resourceScrapIron").?.id;
+    const pistol = t.byName("gunHandgunT1Pistol").?.id;
+    const rock = t.byName("thrownRock").?.id;
+    try std.testing.expect(t.byName("gunHandgunT1Pistol").?.has_quality);
+    try std.testing.expect(!t.byName("resourceWood").?.has_quality);
+
+    // Default: every raw Stacknumber stands.
+    try std.testing.expectEqual(@as(u16, 5), t.stackFor(wood));
+    try std.testing.expectEqual(@as(u16, 1000), t.stackFor(iron));
+
+    // x2: stackables double, quality and non-stacking items are untouched.
+    t.setStackSizeModifier(2.0);
+    try std.testing.expectEqual(@as(u16, 10), t.stackFor(wood));
+    try std.testing.expectEqual(@as(u16, 2000), t.stackFor(iron));
+    try std.testing.expectEqual(@as(u16, 1), t.stackFor(pistol));
+    try std.testing.expectEqual(@as(u16, 1), t.stackFor(rock));
+
+    // x1.5 on a 5-count stack is a .NET midpoint: Math.Round(7.5) = 8.
+    t.setStackSizeModifier(1.5);
+    try std.testing.expectEqual(@as(u16, 8), t.stackFor(wood));
+    // The clamp is stock's 30000, applied only on the scaled path.
+    t.setStackSizeModifier(100.0);
+    try std.testing.expectEqual(@as(u16, 30000), t.stackFor(iron));
+    // A modifier the decoded code does not carry is not one: 0 falls back to 1.
+    t.setStackSizeModifier(0);
+    try std.testing.expectEqual(@as(u16, 1000), t.stackFor(iron));
 }
 
 test "stock type first item is ItemsStartHere+1" {

@@ -14,6 +14,7 @@ const util_log = @import("../../util/log.zig");
 const assets_quests = @import("../../assets/quests.zig");
 const assets_blocks = @import("../../assets/blocks.zig");
 const assets_items = @import("../../assets/items.zig");
+const assets_sandbox = @import("../../assets/sandbox.zig");
 const assets_signs = @import("../../assets/signs.zig");
 const assets_item_modifiers = @import("../../assets/item_modifiers.zig");
 const assets_entities = @import("../../assets/entities.zig");
@@ -279,6 +280,23 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 self.items.defs.len, self.item_mods.defs.len, self.items.stock_names.len,
             });
         }
+    }
+    // Sandbox `MaxStackSize` (option 163 `StackSizeMultiplier`, default 1.0):
+    // stock pushes the decoded value into `ItemClass.MaxStackSizeModifier`
+    // (SandboxOptionManager IL_0466-0470) and `get_MaxCount` scales every
+    // stackable non-quality Stacknumber by it, clamped at 30000. An option the
+    // decoded code does not carry keeps the stock default.
+    if (assets_sandbox.optionByName("StackSizeMultiplier")) |o| {
+        var groups: [assets_sandbox.max_groups]assets_sandbox.Group = undefined;
+        const n = assets_sandbox.decode(self.sandbox_code, &groups);
+        var mult: f32 = o.default_f;
+        for (groups[0..n]) |g| {
+            if (g.option_id != o.id) continue;
+            if (assets_sandbox.findSet(o.set_name)) |set| mult = assets_sandbox.valueF(o, set, g.index);
+            break;
+        }
+        self.items.setStackSizeModifier(mult);
+        if (mult != 1) util_log.info("zdtd: sandbox MaxStackSize multiplier={d:.2}\n", .{mult});
     }
     if (logged("sign libraries", assets_signs.tryLoad(allocator, opts.game_dir))) |sc| {
         self.signs.deinit();
