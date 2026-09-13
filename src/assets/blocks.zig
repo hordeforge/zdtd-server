@@ -7,6 +7,10 @@ const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_log = @import("../util/log.zig");
 const assignids = @import("assignids_comptime.zig");
+/// Test-only: the stock AssignIds dump, to pin that a stock install never
+/// enters the leftover-id path. Production passes the resolver in as a
+/// callback, so the dependency stays one-way.
+const maxdamage_dep = @import("maxdamage.zig");
 
 /// Storage cap on parsed block defs, a zdtd bound rather than a stock rule:
 /// stock assigns ids dynamically and the wire id space is 16 bits
@@ -20,6 +24,14 @@ const assignids = @import("assignids_comptime.zig");
 /// resolves block ids through that map, so the loss is wire-visible. The parse
 /// logs once at the cap rather than shipping a short table in silence.
 pub const max_blocks: usize = 8192;
+
+/// The block id space: stock's `MAX_BLOCKS` bounds the used-id array the
+/// leftover assignment scans, and a zdtd block id is a u16 on the wire.
+pub const max_block_ids: usize = 65536;
+
+/// Where `assignLeftOverBlocks` starts scanning for a non-terrain block
+/// (stock's literal 0xff; terrain scans from 0).
+pub const leftover_id_start: u32 = 0xff;
 
 /// Max `<drop>` rows a block may resolve (own + Extends-inherited; the
 /// largest stock block carries 16 Harvest rows, 1,748 Harvest rows total).
@@ -422,6 +434,13 @@ pub fn loadFromPath(
         trader_onoff: bool = false,
         is_door: bool = false,
         signable: bool = false,
+        /// `Shape="Terrain"` (stock `BlockShape::IsTerrain`, the 17 terrain
+        /// rows): leftovers take ids from 0 rather than 0xff.
+        terrain: bool = false,
+        /// True while the AssignIds dump has no id for this name (a
+        /// modlet-added block). `assignLeftOverBlocks` fills these after every
+        /// pinned id is known.
+        unassigned: bool = false,
         lp_hardness_scale: f32 = 1,
         /// True when this row (or a base) declared LPHardnessScale. The
         /// default 1 is not an override, so the chain needs to tell them apart.
@@ -469,10 +488,11 @@ pub fn loadFromPath(
             i = bi + 7;
             continue;
         }
-        const id = id_by_name(ctx, name) orelse {
-            i = bi + 7;
-            continue;
-        };
+        // A name the AssignIds dump does not carry is a modlet's own block:
+        // stock assigns it an id from the leftover pool (Block.assignIdsLinear
+        // -> assignLeftOverBlocks) instead of dropping the block.
+        const pinned_id = id_by_name(ctx, name);
+        const id: u16 = pinned_id orelse 0;
         const kn = try arena.dupe(u8, name);
         try seen.put(allocator, kn, {});
         // Scan this block's body for Class / TraderID / Extends / IndexName /
@@ -493,6 +513,7 @@ pub fn loadFromPath(
         var radius_effect_buff: ?[]const u8 = null;
         var radius_effect_radius_sq: f32 = 0;
         var pickup_source: ?[]const u8 = null;
+        var terrain = false;
         var mesh: ?[]const u8 = null;
         var texture_top: u16 = 0;
         var map_color: u16 = 0;
@@ -579,6 +600,8 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| {
                     if (std.mem.eql(u8, v, "TraderOnOff")) trader_onoff = true;
                 }
+            } else if (std.mem.eql(u8, pname, "Shape")) {
+                if (xml.attr(clean, pi, "value")) |v| terrain = std.ascii.eqlIgnoreCase(v, "Terrain");
             } else if (std.mem.eql(u8, pname, "LPHardnessScale")) {
                 if (xml.attr(clean, pi, "value")) |v| {
                     lp_hardness_scale = std.fmt.parseFloat(f32, v) catch 1;
@@ -663,6 +686,8 @@ pub fn loadFromPath(
         try name_idx.put(allocator, kn, idx);
         try parsed.append(allocator, .{
             .id = id,
+            .unassigned = pinned_id == null,
+            .terrain = terrain,
             .name = kn,
             .class = class,
             .trader_id = trader_id,
@@ -781,6 +806,45 @@ pub fn loadFromPath(
         pb.harvest_drops = own_drops;
         pb.destroy_drops = own_destroy;
         pb.fall_drops = own_fall;
+    }
+
+    // Block.assignIdsLinear -> assignLeftOverBlocks: every name the dump
+    // carries keeps its pinned id (already set), and the leftovers - a modlet's
+    // added blocks - take the first free id, terrain-shaped blocks scanning up
+    // from 0 and everything else from 0xff (255), in block-list (document)
+    // order. A modded client runs the same algorithm on the same document, so
+    // both sides agree without a mapping row. The pool is the u16 id space;
+    // exhaustion drops the block rather than stamping a wrong id.
+    if (parsed.items.len > 0) {
+        const used = try allocator.alloc(bool, max_block_ids);
+        defer allocator.free(used);
+        @memset(used, false);
+        for (parsed.items) |pb| {
+            if (pb.unassigned) continue;
+            if (pb.id < used.len) used[pb.id] = true;
+        }
+        var pi: usize = 0;
+        while (pi < parsed.items.len) {
+            const pb = &parsed.items[pi];
+            if (!pb.unassigned) {
+                pi += 1;
+                continue;
+            }
+            var cand: u32 = if (pb.terrain) 0 else leftover_id_start;
+            while (cand < used.len and used[cand]) : (cand += 1) {}
+            if (cand >= used.len) {
+                util_log.err(
+                    "zdtd: block id space exhausted; modlet block '{s}' dropped\n",
+                    .{pb.name},
+                );
+                _ = parsed.orderedRemove(pi);
+                continue;
+            }
+            pb.id = @intCast(cand);
+            pb.unassigned = false;
+            used[cand] = true;
+            pi += 1;
+        }
     }
 
     const defs = try arena.alloc(BlockDef, parsed.items.len);
@@ -925,6 +989,121 @@ test "LPHardnessScale parses, defaults to 1 and follows Extends" {
     try std.testing.expectApproxEqAbs(@as(f32, 1), t.byName("plainBlock").?.lp_hardness_scale, 0.001);
     // Extends carries it.
     try std.testing.expectApproxEqAbs(@as(f32, 2), t.byName("terrStoneChild").?.lp_hardness_scale, 0.001);
+}
+
+test "modlet-added blocks get stock's leftover block ids" {
+    // Block.assignIdsLinear -> assignLeftOverBlocks: names the AssignIds dump
+    // carries keep their pinned id, and the leftovers take the first free id -
+    // terrain-shaped blocks (Shape="Terrain", BlockShape::IsTerrain) scanning
+    // from 0, everything else from 0xff (255) - in document order. A modded
+    // client runs the same algorithm, so both sides agree.
+    const src =
+        \\<blocks>
+        \\<block name="air"/>
+        \\<block name="terrStone">
+        \\  <property name="Shape" value="Terrain"/>
+        \\</block>
+        \\<block name="modTerrainBlock">
+        \\  <property name="Shape" value="Terrain"/>
+        \\</block>
+        \\<block name="modSolidBlock">
+        \\  <property name="Shape" value="ModelEntity"/>
+        \\</block>
+        \\<block name="modSolidBlock2">
+        \\  <property name="Class" value="Storage"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_g9.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path, g9FixtureId, null);
+    defer t.deinit();
+    // Pinned names keep their dump id.
+    try std.testing.expectEqual(@as(u16, 0), t.byName("air").?.id);
+    try std.testing.expectEqual(@as(u16, 200), t.byName("terrStone").?.id);
+    // The modlet's terrain block takes the first free id from 0 (0 and 200 are
+    // taken here).
+    try std.testing.expectEqual(@as(u16, 1), t.byName("modTerrainBlock").?.id);
+    // The others scan from 0xff, in document order.
+    try std.testing.expectEqual(@as(u16, 255), t.byName("modSolidBlock").?.id);
+    try std.testing.expectEqual(@as(u16, 256), t.byName("modSolidBlock2").?.id);
+    // Reverse lookup agrees.
+    try std.testing.expectEqualStrings("modSolidBlock", t.byId(255).?.name);
+    try std.testing.expectEqualStrings("modTerrainBlock", t.byId(1).?.name);
+}
+
+fn g9FixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
+    const map = .{
+        .{ "air", 0 },
+        .{ "terrStone", 200 },
+    };
+    inline for (map) |e| {
+        if (std.mem.eql(u8, e[0], name)) return e[1];
+    }
+    return null;
+}
+
+test "the stock leftover block ids match Block.assignLeftOverBlocks" {
+    // `assignLeftOverBlocks` (IL=7528) walks `fixedBlockIds` first and assigns
+    // everything still unassigned - a modlet's blocks *and* the stock rows the
+    // dump omits - from the free pool, terrain from 0 and the rest from 255, in
+    // `nameToBlock` insertion (document) order. The 11 stock leftovers below are
+    // therefore stock's own assignment, not zdtd inventing ids for abstract
+    // bases: they are the `*Shapes` shape masters plus cntChickenCoop and
+    // oldWoodDoorNoHonk, which is why a modded client and this server agree on
+    // where a mod's first block lands.
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const cpath = game ++ "/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(cpath)) return error.SkipZigTest;
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    var mt = (maxdamage_dep.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
+    defer mt.deinit();
+    mt.tryMergeBundledAssignIds(gpa);
+    const Ctx = struct {
+        fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+            const m: *maxdamage_dep.Table = @ptrCast(@alignCast(ctx.?));
+            return m.idByName(name);
+        }
+    };
+    var t = try loadFromPath(gpa, cpath, Ctx.lookup, @ptrCast(&mt));
+    defer t.deinit();
+    try std.testing.expect(t.defs.len > 4000);
+    // Every name the dump carries keeps its pinned id.
+    var pinned_n: usize = 0;
+    for (t.defs) |d| {
+        const pinned = mt.idByName(d.name) orelse continue;
+        try std.testing.expectEqual(pinned, d.id);
+        pinned_n += 1;
+    }
+    try std.testing.expect(pinned_n > 6000);
+    // The dump's leftovers, in document order from 0xff.
+    const expect_leftovers = [_]struct { []const u8, u16 }{
+        .{ "woodShapes", 255 },
+        .{ "brickShapes", 259 },
+        .{ "cobblestoneShapes", 260 },
+        .{ "concreteShapes", 261 },
+        .{ "steelShapes", 262 },
+        .{ "awningShapes", 263 },
+        .{ "corrugatedMetalShapes", 264 },
+        .{ "frameShapes", 265 },
+        .{ "bulletproofShapes", 266 },
+        .{ "cntChickenCoop", 267 },
+        .{ "oldWoodDoorNoHonk", 268 },
+    };
+    for (expect_leftovers) |e| {
+        const d = t.byName(e[0]) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(e[1], d.id);
+        try std.testing.expect(mt.idByName(e[0]) == null);
+    }
+    var leftover: usize = 0;
+    for (t.defs) |d| {
+        if (mt.idByName(d.name) == null) leftover += 1;
+    }
+    try std.testing.expectEqual(expect_leftovers.len, leftover);
 }
 
 test "builtin block table" {

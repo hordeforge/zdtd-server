@@ -339,7 +339,21 @@ Resolved from RE or explicitly documented before the "compatible" claim:
   block loader skips a name the dump does not carry, so a modlet-added block is
   inert server-side (the item, recipe and loot parts of the same mod still
   work, since the item id space is derived from the patched XML).
-  **IL pinned 2026-09-13 (implementation pending):** `Block.assignIdsLinear`
+  **Implemented 2026-09-13.** The loader keeps a name the dump lacks and assigns
+  it a leftover id: pinned ids from the dump mark the used set, then the
+  leftovers take the first free id - terrain-shaped blocks (`Shape="Terrain"`,
+  `BlockShape::IsTerrain`) from 0, the rest from 0xff - in document order, which
+  is what a modded client reproduces locally (the client recomputes the same
+  assignment for names the server's IdMapping does not carry). A stock install
+  is not a no-op: 11 blocks.xml names are outside the dump (the nine `*Shapes`
+  shape masters, `cntChickenCoop`, `oldWoodDoorNoHonk`) and take ids 255..268,
+  exactly as `assignLeftOverBlocks` gives them, pinned by a test against the
+  real file. Modded blocks still read generic HP/category (the AssignIds dump
+  supplies those properties), and the blocks IdMapping we ship stays
+  dump-derived, so a modded *client* relies on its own assignment agreeing -
+  which the shared algorithm makes it. The blocks IdMapping gap is the residual
+  here.
+  **Original pin:** `Block.assignIdsLinear`
   copies `nameToBlock`'s values into a list and calls `assignLeftOverBlocks`,
   which first honours `Block.fixedBlockIds` (name → pinned id) and then assigns
   the remaining blocks out of a `MAX_BLOCKS` used-id array: **terrain-shaped**
