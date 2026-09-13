@@ -1,0 +1,194 @@
+# Stock XML config fidelity audit 2026-09-13
+
+Scope: every XML file the stock dedicated install ships under `Data/Config`
+(44 top-level plus the 10 `XUi_*` rows), reviewed against the zdtd parsers for
+(a) parse correctness and (b) stock values that are still hardcoded in Zig
+instead of derived from the file at load or compile time.
+
+Method: one audit agent per batch (11 batches, evidence-driven: element/attribute
+inventory of the XML, loader read, call-site trace, count comparison, hardcode
+hunt against `docs/prompts/hardcoded-data-review.md`), then an independent
+verifier agent per batch that re-read the source and XML and confirmed, refuted
+or downgraded each candidate. 22 agents total.
+
+Coverage: 54/54 files have a verdict and a loader/call-site trace.
+
+| verdict | files |
+|---|---|
+| `parsed_faithful` | 8 |
+| `parsed_partial` | 18 |
+| `unparsed_server_relevant` | 5 |
+| `unparsed_client_only` | 20 |
+| `unparsed_out_of_scope` | 3 |
+| **total** | **54** |
+
+Findings after verification: 0 P0, 25 P1, 35 P2, 3 P3. No join-breaking
+or id-corrupting defect was found; every P1 is a silent gameplay/wire
+divergence or a hardcoded stock value on a live path.
+
+## 1. Per-file coverage
+
+`findings` is the pre-verification candidate count; refuted candidates were
+dropped in section 2. A file with no server-side consumer is marked
+`unparsed_client_only` / `unparsed_out_of_scope` with its consumer noted.
+
+| file | verdict | loaders / consumers | findings |
+|---|---|---|---|
+| `Data/Config/item_modifiers.xml` | parsed_partial | assets/item_modifiers.zig:109 loadFromPath, assets/item_modifiers.zig:184 tryLoad, server/game/init_assets.zig:238 … | 3 |
+| `Data/Config/items.xml` | parsed_partial | assets/items.zig:897 loadFromPath, assets/items.zig:1855 tryLoad, server/game/init_assets.zig:220 … | 12 |
+| `Data/Config/loot.xml` | parsed_partial | assets/loot.zig, server/game/chunk_fill.zig | 6 |
+| `Data/Config/qualityinfo.xml` | unparsed_client_only | server/game/config_files.zig:33, assets/xml_patch.zig:113 | 0 |
+| `Data/Config/recipes.xml` | parsed_partial | assets/recipes.zig, server/game/craft.zig | 4 |
+| `Data/Config/traders.xml` | parsed_partial | assets/traders.zig, server/game/trader.zig, server/replicate_te.zig | 3 |
+| `XUi_Common/styles.xml` | parsed_faithful | server/game/config_files.zig | 2 |
+| `XUi_Common/templates.xml` | parsed_faithful | server/game/config_files.zig | 2 |
+| `XUi_InGame/styles.xml` | parsed_faithful | server/game/config_files.zig | 1 |
+| `XUi_InGame/templates.xml` | parsed_faithful | server/game/config_files.zig | 2 |
+| `XUi_InGame/windows.xml` | parsed_faithful | server/game/config_files.zig | 2 |
+| `XUi_InGame/xui.xml` | parsed_faithful | server/game/config_files.zig | 2 |
+| `XUi_Menu/styles.xml` | unparsed_client_only | none | 1 |
+| `XUi_Menu/templates.xml` | unparsed_client_only | none | 1 |
+| `XUi_Menu/windows.xml` | unparsed_client_only | none | 1 |
+| `XUi_Menu/xui.xml` | unparsed_client_only | none | 1 |
+| `archetypes.xml` | unparsed_server_relevant | wire/packages.zig, server/game/config_files.zig | 3 |
+| `biomes.xml` | parsed_partial | assets/biome_layers.zig, world/biomes.zig, world/subbiome_noise.zig, world/weather.zig … | 8 |
+| `blockplaceholders.xml` | unparsed_server_relevant | server/game/config_files.zig, world/prefabs.zig | 1 |
+| `blocks.xml` | parsed_partial | assets/maxdamage.zig, assets/blocks.zig, assets/block_textures.zig … | 10 |
+| `buffs.xml` | parsed_partial | assets/buffs.zig | 3 |
+| `challenges.xml` | unparsed_client_only | server/game/config_files.zig | 0 |
+| `dialogs.xml` | unparsed_client_only | server/game/config_files.zig | 0 |
+| `dmscontent.xml` | unparsed_client_only | server/game/config_files.zig | 1 |
+| `entityclasses.xml` | parsed_partial | assets/entities.zig | 7 |
+| `entitygroups.xml` | parsed_faithful | assets/entitygroups.zig | 3 |
+| `events.xml` | unparsed_client_only | server/game/config_files.zig:31, assets/xml_patch.zig:116 | 1 |
+| `gameevents.xml` | unparsed_server_relevant | none, assets/xml_patch.zig:117 | 4 |
+| `gamestages.xml` | parsed_partial | assets/gamestages.zig, server/game/init_assets.zig:414-429, server/game.zig:3336-3387 … | 3 |
+| `loadingscreen.xml` | unparsed_client_only | - | 1 |
+| `materials.xml` | parsed_partial | assets/maxdamage.zig, server/game/config_files.zig | 4 |
+| `misc.xml` | unparsed_client_only | - | 1 |
+| `music.xml` | unparsed_client_only | - | 1 |
+| `nav_objects.xml` | unparsed_client_only | server/game/config_files.zig, server/game/join.zig | 0 |
+| `npc.xml` | parsed_partial | assets/npc.zig, server/game/quest.zig, server/game/hooks.zig … | 2 |
+| `painting.xml` | parsed_faithful | assets/painting.zig | 4 |
+| `physicsbodies.xml` | unparsed_client_only | server/game/config_files.zig | 1 |
+| `progression.xml` | parsed_partial | assets/progression.zig | 3 |
+| `quests.xml` | parsed_partial | assets/quests.zig, ecs/quest.zig, server/game/config_files.zig | 6 |
+| `rwgmixer.xml` | unparsed_out_of_scope | none, assets/xml_patch.zig:108 maps the rwgmixer xpath root to the file so modlet patches still apply to the on-disk file | 1 |
+| `sandbox_overrides.xml` | unparsed_server_relevant | server/game/config_files.zig | 3 |
+| `shapes.xml` | unparsed_client_only | server/game/config_files.zig, assets/xml_patch.zig | 1 |
+| `signs.xml` | parsed_partial | assets/signs.zig, wire/stock_sign.zig | 4 |
+| `sounds.xml` | parsed_partial | assets/noise.zig, server/game/config_files.zig | 4 |
+| `spawning.xml` | parsed_partial | assets/spawning.zig, server/game/init_assets.zig:450-454,497-540, server/game.zig:3193-3332,3389-3403 … | 4 |
+| `subtitles.xml` | unparsed_client_only | - | 1 |
+| `twitch.xml` | unparsed_out_of_scope | server/game/config_files.zig | 1 |
+| `twitch_events.xml` | unparsed_out_of_scope | server/game/config_files.zig | 1 |
+| `ui_display.xml` | unparsed_client_only | server/game/config_files.zig | 1 |
+| `utilityai.xml` | unparsed_client_only | server/game/config_files.zig:34, assets/xml_patch.zig:109 | 1 |
+| `vehicles.xml` | parsed_partial | assets/vehicles.zig | 5 |
+| `videos.xml` | unparsed_client_only | - | 1 |
+| `weathersurvival.xml` | unparsed_client_only | none, assets/xml_patch.zig:110 maps the weathersurvival xpath root to the file for modlets | 1 |
+| `worldglobal.xml` | unparsed_server_relevant | none, assets/xml_patch.zig:104 maps the worldglobal xpath root to the file for modlets | 1 |
+
+## 2. Confirmed P1 findings
+
+Every row below was independently confirmed by a second agent that read the
+loader and the stock file. `zdtd` and `xml` are the two halves of the proof.
+
+| file | kind | finding | zdtd evidence | xml evidence | fix |
+|---|---|---|---|---|---|
+| `Data/Config/item_modifiers.xml` | hardcoded_stock_data | Modifier item classes registered with fabricated econ and quality defaults | items.zig:406-421 addItemClasses builds each modifier def with only id/name/stack=1/stock_type, so econ=0 and has_quality=false; trader.zig:218/234/235 then prices them by the econ==0 fallback (buy 5  | item_modifiers.xml:16 modGeneralMaster EconomicValue 400, inherited by all 106 live Extends rows (19 live rows declare their own); 37 live mods are owner-tiered with tier= rows (modGunMagazineExtender | Parse EconomicValue/Stacknumber/owner-tiered quality in item_modifiers.zig (with Extends) and feed them into addItemClasses. |
+| `Data/Config/items.xml` | missing_parse | Extends not resolved for hand-item Range and DamageBlock | items.zig:1111 (DamageBlock) and :1126 (Range) read the own body only; the Extends pass :1437-1657 covers stack/econ/weight/material/curves but not these. Consumers craft.zig:416-431; fallback floors  | items.xml:9571 meleeHandZombieFeral extends meleeHandZombie01 (:9471, Action0 Range 1.6 at :9477) with no own Range; :9932 meleeHandZombieCopRadiated extends meleeHandZombieCopFeral (Action0 DamageBlo | Add own-wins Extends resolution for melee_range and damage_block in the items.zig second pass. |
+| `Data/Config/loot.xml` | missing_parse | lootcontainer count= is never parsed, so count=0 and count=1 containers roll the wrong number of stacks | loot.zig:313-341 LootContainer has no pick count; loot.zig:610 rollContainer rolls every entry independently. Reached from chunk_fill.zig:552 ensureContainerLoot. | loot.xml:9564 ovenNOPOP count=\"0\" with <item name=\"cobweb\"/>; loot.xml:9915 cashRegister count=\"1\" with 2 entries (blocks.xml:54773 LootList); 302 of 339 containers carry count (33 zero, 268 one). | Parse lootcontainer count into pick_min/pick_max (default 1,1), pick exactly that many entries with the group weighted-prob rule, and treat count 0 as an empty container. |
+| `Data/Config/recipes.xml` | missing_parse | Recipe effect groups (CraftingIngredientCount, CraftingTier) and recipe tags are ignored, so craft costs follow raw XML counts | recipes.zig:221-267 parses no effect_group/passive_effect/tags/use_ingredient_modifier; craft.zig:271-284 checks and consumes the raw ingredient counts. | recipes.xml:475-480 counts 0 for resourceCloth/resourceDuctTape plus passive_effect CraftingIngredientCount base_add value=\"5,10,15\" level=\"4,5,6\"; 559 CraftingIngredientCount and 6 CraftingTier rows; | Load recipe effect groups (level/tag-matched CraftingIngredientCount and CraftingTier) and apply them in tryCraftRecipe, or reject crafts carrying an unimplemented modifier row. |
+| `Data/Config/traders.xml` | parse_bug | traderAlways fallback stocks owner-stocked vending machines that stock leaves empty | trader.zig:178 and replicate_te.zig:315 substitute tt.trader_always_refs when the resolved trader_info has no refs; fillVendingStore then rolls them on first open (c2s/misc.zig:1089). | traders.xml:1470 <trader_info id=\"3\" reset_interval=\"-1\" override_buy_markup=\"1.0\" ... player_owned=\"true\"/> and traders.xml:1489 id=\"5\" ... rentable=\"true\" have no <trader_items> child; blocks.xml:51 | Fall back to traderAlways only when no trader_info row resolves; a resolved row with zero refs must stay empty. |
+| `archetypes.xml` | hardcoded_stock_data | Join ECD profile is hardcoded from archetypes.xml and the client's own profile is discarded | src/wire/packages.zig:539-545 writes archetype=\"BaseMale\", is_male=true, race_name=\"White\", variant_number=1, and :511 writes class_player_male; parseRequestToSpawnPlayer (:1823-1827) reads only chunk | archetypes.xml:4 <archetype name=\"BaseMale\" male=\"true\" race=\"White\" variant=\"1\" eye_color=\"Blue02\"/>; :5 BaseFemale. Stock NetPackageRequestToSpawnPlayer::ProcessPackage IL_0019 forwards playerProfil | Read PlayerProfile from the C2S body and build the ECD/PDF from it (the EntitySpawn leg's null profile is documented at DIVERGENCES.md:858, but the PDF leg fabricating BaseMale contradicts it). |
+| `biomes.xml` | hardcoded_stock_data | Biomemap ids hardcoded in Zig instead of resolved from <biomemap id> | src/server/game/chunk_fill.zig:66 (height band -> 5/1/3); src/world/store.zig:897 and :912 (`else 3`); src/world/biomes.zig:17 and :131 (fallback 3). All run with game-dir set and biomes.xml loaded. | biomes.xml:119-128 `<biomemap id=\"01\" name=\"snow\"/>`, `id=\"03\" name=\"pine_forest\"`, `id=\"05\" name=\"desert\"` (10 rows: 1,3,5,6,7,8,9,13,14,19) | Resolve snow/desert/pine_forest ids once from the loaded <biomemap> name to id table and use them at chunk_fill.zig:66 and store.zig:897/:912; omit the biome byte or fail closed when a name is absent. |
+| `blockplaceholders.xml` | missing_parse | POI/prefab placeholder substitution is missing | src/world/prefabs.zig:387-412 maps each prefab local block name straight through resolver.lookup (idByName) and stamps that id; no placeholder map exists anywhere in src (rg -i placeholder src/world,  | 466 placeholders / 2496 target rows (1761 prob, 192 biome, 180 randomrotation, 24 sandboxoption, 8 questtag). Example Data/Prefabs/Parts/part_car_accident_01.blocks.nim lists carWrecksRandomHelper and | Parse blockplaceholders.xml into name -> weighted targets (biome, sandboxoption, questtag, randomrotation) and apply it in the prefab stamp path with a position-seeded roll. |
+| `blocks.xml` | parse_bug | MaxDamage is never resolved through Extends | src/assets/maxdamage.zig:740 reads only the block's own <property name=\"MaxDamage\">; the Extends pass at maxdamage.zig:852-874 resolves deco/loot/upgrade/downgrade/sleeper but not MaxDamage or Materia | Only 318 of 6643 blocks declare MaxDamage; 1449 inherit it. blocks.xml:268 terrSandStone has only Extends=\"terrStone\" and no Material (terrStone is Material=Mstone, materials.xml MaxDamage 500). | Resolve MaxDamage and Material through Extends in the second pass, then fall back to the resolved material MaxDamage (Block.il IL_136C-138E). |
+| `blocks.xml` | parse_bug | <dropextendsoff/> is ignored so parent drops are inherited anyway | src/assets/blocks.zig:693-695 always merges base drop rows in the Extends walk (mergeDrops, blocks.zig:343); the block body scanner (blocks.zig:479-523) only looks for <property> and <drop>, never <dr | 226 active <dropextendsoff /> rows (e.g. blocks.xml:166, blocks.xml:369). 225 of those blocks have parents with drop rows: cntTiltTruckFull (1 own row) extends cntTiltTruckEmpty (6 rows), terrDirtTwit | Record a per-block drop_extends_off flag and skip mergeDrops for that block. |
+| `blocks.xml` | missing_parse | Material is not resolved through Extends | src/assets/maxdamage.zig:751-754 keys block_material on the block's own Material only; categoryForBlock (maxdamage.zig:308), fallingMassKg (maxdamage.zig:295) and harvestExpFor (maxdamage.zig:179) all | 861 blocks declare Material, 5782 inherit it (terrSandStone, woodMaster family, terrainFillerAdaptive). materials.xml:106 materials ship MaxDamage, 164 Experience, 164 damage_category, 122 forge_categ | Resolve Material through Extends in the second pass, then re-run resolveMaterialMaxDamage. |
+| `blocks.xml` | unsupported_attr | Selective Extends param1 exclusion list is ignored | src/assets/blocks.zig:532-533 and src/assets/maxdamage.zig:759 read only the Extends value= attribute; param1 is never read anywhere in src (rg '\"param1\"' src is empty). | 925 Extends rows carry param1. Excluded names include Class 107, DowngradeBlock 72, MultiBlockDim 33, MaxDamage 12, Mesh 3. Example blocks.xml cntGunSafeOpen: Extends=cntGunSafeInsecure param1=\"Class, | Parse param1 into an exclusion set and skip those keys during the Extends walk in both loaders. |
+| `entityclasses.xml` | missing_parse | Per-class PhysicalDamageResist is never loaded, so those classes take full damage | src/assets/entities.zig:577 keeps only passive rows named HealthMax with operation=base_set; the HP read is :651. Per-entity resist state exists (ecs/world.zig:329, ecs/inventory.zig:169) but is fed o | entityclasses.xml:4126 zombieSoldier <passive_effect name=\"PhysicalDamageResist\" operation=\"base_set\" value=\"50\"/>; :4656 zombieDemolition value=60; :3132 zombieUtilityWorker 20; :5593 animalInsectSwa | Keep hostiles' PhysicalDamageResist/BuffResistance rows (tag-aware) in the class map, resolve through Extends, and seed the spawned entity's resist state. |
+| `entityclasses.xml` | missing_parse | <drop event=\"Harvest\"> butcher yields are unparsed, so corpse harvesting yields nothing | src/assets/entities.zig loadFromPath has no <drop arm (EntityDef carries only loot_list/loot_drop_prob, :873). The only Harvest path is the block one (src/assets/items.zig harvestMultiplier, scenarios | entityclasses.xml:5293 animalWolf <drop event=\"Harvest\" name=\"foodRawMeat\" tag=\"butcherHarvest\" count=\"30\"/>; 111 live Harvest rows across the file. | Parse <drop event> rows per class (inherited via Extends) and roll them on the corpse-harvest hit; fail closed on unknown item names. |
+| `gameevents.xml` | hardcoded_stock_data | respawn stat restore is hardcoded instead of the game_on_respawn_* data | src/ecs/world.zig:830-838 respawnPlayer hardcodes hp=100/max=100 and keeps food/water/stamina (comment at :833-834 claims stock does not touch them); no gameevents respawn sequence is read. | gameevents.xml game_on_respawn_default sets Food, Water, Health, Stamina via SetMax; game_on_respawn_injured sets Food/Water to 50% and adds buffInfectionCatch when cvar infectionCounterRespawn>0; gam | Apply the four game_on_respawn_* effects server-side (Food/Water max for penalty 0/1, 0.5 for 2, item/badge/hazard reset for 3), or parse the sequences. |
+| `gamestages.xml` | wrong_default | gamestages.xml <spawn> duration applied in the wrong unit (50x too short) | src/ecs/aidirector.zig:788-789 setupBmGroup sets bm_group_deadline = worldTimeBits() + duration * 20. worldTimeBits() is the stock scale (src/ecs/aidirector.zig:188-193: day*24000 + hours*1000). | gamestages.xml BloodMoonHorde rows carry duration=\"1\" (e.g. <spawn group=\"feralHordeStageGS1\" duration=\"1\" interval=\"5\"/>). Stock AIDirectorGameStagePartySpawner::SetupGroup IL_0044-0062 adds duration | Multiply duration by 1000 worldTime units per game hour as a named const (SetupGroup IL_005A); keep interval as is. The loader's duration=0 default already matches ParseSpawn IL_009E-00B3. |
+| `materials.xml` | missing_parse | explosionresistance is not parsed and Hardness is not applied to blast damage | src/assets/maxdamage.zig:446-502 reads only MaxDamage/Hardness/Mass/Experience/damage_category/forge_category; there is no explosionresistance field (rg explosionresistance src is empty). The C2S blas | 24 material rows set explosionresistance (values 0.01, 0.02, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1); Hardness is 1 for 106 materials, 5 for one, 10000 for one. Explosion.il.txt:IL_03D0-040E computes damage | Load explosionresistance per material id and apply the stock (1 - resistance) * power / hardness formula in both blast paths. |
+| `materials.xml` | missing_parse | Material-level StabilitySupport default is ignored | src/assets/maxdamage.zig:258 stabilitySupport reads only the block-level map (filled at maxdamage.zig:819-824, defaults true); materials.xml StabilitySupport is not parsed. Consumed by src/server/game | 23 materials set StabilitySupport (19 false, e.g. Mtrash and the awning materials). BlocksFromXml.il.txt:IL_06DE-070F: if the property is absent on the block/parents, Block.StabilitySupport = blockMat | Parse material StabilitySupport and use resolved material as the fallback before the block-level default of true. |
+| `progression.xml` | missing_parse | CraftingTier rows (55) unparsed: crafted quality tier never applied | progression.zig:748-802 parses crafting_skill display_entry/unlock_entry only; CraftingSkill (progression.zig:141-145) has no passives field. craft.zig:310 deposits the output through depositItem with | progression.xml has 55 live <passive_effect name=CraftingTier> rows under <crafting_skill>, e.g. :280 craftingHarvestingTools level=8,12,16,20,25,50 value=1,2,3,4,5,5 tags=meleeToolRepairT1ClawHammer. | Scan the crafting_skill effect_groups with the passive scanner, store the CraftingTier (passive 91) rows on CraftingSkill, resolve the tier per recipe tags at craft time, and set the output slot quality from it in craft.zig and Workstation. |
+| `quests.xml` | missing_parse | POIStayWithin/StayWithin objective radius ignored (read from wrong property) | src/assets/quests.zig:275-278 sets radius from xml.attr(value) only; src/ecs/systems.zig:1239 then falls back to policy.stay_radius(8). Stock carries radius as nested <property name=\"radius\" value=\"25 | quests.xml 15x '<property name=\"radius\" value=\"25\"/>' e.g. line 1105 POIStayWithin in tier2_clear_infested; 17 total radius properties, 0 objectives with value= on stay types. | Read the nested property for stay kinds (xml.propertyValue(el,\"radius\")) in buildPhaseGraph, keeping the value attr for Goto. |
+| `quests.xml` | missing_parse | quest property param1 variable substitution unsupported for biome_filter_type | src/assets/xml_util.zig:74-88 propertyValue returns the value attr without resolving param1, so scanObjectiveMeta (src/assets/quests.zig:413-425) reads the template default. parseVariables already par | quests.xml 18x '<variable name=\"biome_filter_type\" value=\"AnyBiome\|SameBiome\"/>' (e.g. line 854 tier5_fetch, 874 tier6_fetch) overriding 15x '<property name=\"biome_filter_type\" value=\"SameBiome\" param | Resolve param1 against the quest's parsed variables when scanning objective properties (pass vars into scanObjectiveMeta), as resolveDifficultyTier already does. |
+| `sandbox_overrides.xml` | wrong_default | All 25 boolean sandbox option defaults are false; stock default is true | src/assets/sandbox_data.zig:196 ships CraftingProgression default_i=0 (all bool options 0); sandbox.zig:99-102 valueB returns default_i != 0 when the code omits the option; requirements.zig:441-448 an | The census 7dtd-engine-research/tools/sandbox/sandbox_tables.json says option 96 CraftingProgression default 1, and 25 bool options differ; gen_zig_tables.py:107-110 discards bool defaults. Consuming  | Emit the census bool default (di = 1 when default is true) in gen_zig_tables.py and regenerate sandbox_data.zig; add a test asserting CraftingProgression/NewbieCoat fall back to true when the code omits them. |
+| `signs.xml` | missing_parse | SignDataResponse sends every sign with zero layers, discarding the whole drawing tree | wire/stock_sign.zig:23 writes layer count 0 for every entry; assets/signs.zig:1-6 documents the gap; join.zig:242-270 ships the batches at join | signs.xml has 285 <layer> and 101 <warp> children under 8 <sign> rows (e.g. line 10 GroupSignLayer with three warps); Data/Prefabs has 515 *_signs.xml with 1680 signs | Parse layer/warp records into the wire encode, or omit libraries whose layers cannot be encoded (fail closed) instead of sending layerless definitions. |
+| `sounds.xml` | missing_parse | loaded noise rows are never applied; live noise legs use one flat radius | noise_table has no reader: declared src/server/game.zig:498, loaded/logged init_assets.zig:164-167, warned :718, freed lifecycle.zig:60. Live legs push rules.ai.combat_noise_radius (world.zig:543, sys | sounds.xml:12547-12548 SoundDataNode explosion1 carries <Noise ID=\"5\" noise=\"120\" time=\"4\" heat_map_strength=\"5\" heat_map_time=\"300\"/>; lines 12556/12564 repeat it for explosion2/3 | Resolve the emitted clip through noise_table.get and push its volume/time/muffle/heat via World.pushStealthNoise; keep combat_noise_radius as the no-data floor. |
+| `vehicles.xml` | hardcoded_stock_data | Vehicle max HP is a Zig literal whose C# cite is not in the RE dumps | vehicles.zig:172 max_hp 250 gyro / 300 4x4 / else 200; applied at init_world.zig:291, admin_console.zig:1697, persist.zig:1776, world.zig:1638 (else 200) | vehicles.xml defines no Health/MaxHealth property at all; entityclasses.xml:6133-6180 vehicleTruck4x4/vehicleGyrocopter/vehicleMinibike carry no HealthMax | Load DegradationMax for the vehicle<X>Placeable item from items.xml after name resolve (Bucket A), or move vehicle HP to a rules.vehicle field (Bucket B). |
+
+## 3. P2/P3 register (candidates)
+
+The run confirmed 35 P2 and 3 P3 findings. The candidate register below is
+the full pre-verification list, kept so the tail is not lost; severity for a
+row here is the candidate severity and rows already listed as P1 in section 2
+are omitted.
+
+| file | severity | kind | finding | zdtd evidence |
+|---|---|---|---|---|
+| `Data/Config/items.xml` | P2 | missing_parse | Item Tags not inherited through Extends | items.zig:1291 reads Tags from the own body only and no Extends pass covers it. Empty tags fail closed at c2s/inv.zig:58 (mod suitability) and loot.zig:119 (looted mod roll). |
+| `Data/Config/items.xml` | P2 | wrong_default | EconomicValue above 65535 becomes 0 | items.zig:88 types econ as u16 and :1065-1068 parses with parseU16 orelse 0, so a declared value above 65535 becomes 0 while econ_declared stays true. trader.zig:218/234/235 then treat it as untradeable and substitute buy 5 / sell 1. |
+| `Data/Config/items.xml` | P2 | unsupported_attr | items root max_quality_tier ignored, bound hardcoded 6 | ecs/components.zig:28 max_quality_tiers=6, read at items.zig:440, craft.zig:36, tick.zig:300, player.zig:746; no loader reads the root attribute. |
+| `Data/Config/items.xml` | P2 | missing_parse | gs <stats> item stat scaling unparsed | items.zig loadFromPath never scans <stats>; loot records quality only (loot.zig:56-64) and no GSStat table exists anywhere in src. |
+| `Data/Config/items.xml` | P2 | missing_parse | Stacknumber sandbox multiplier and 30000 clamp not applied | items.zig:464-469 stackFor returns the raw XML Stacknumber; nothing in src consumes the MaxStackSize sandbox option (defined only at sandbox_data.zig:263). |
+| `Data/Config/items.xml` | P2 | wrong_default | food/drink name prefix forces is_eat in XML mode | items.zig:1206-1207 marks any food*/drink* item eatable when the XML gives no Eat class and no food or water cvar; live at c2s/inv.zig:108 and :135. |
+| `Data/Config/loot.xml` | P2 | parse_bug | <conditional evaluator="client"> branches are flattened into unconditional loot entries | loot.zig:1203 (groups) and loot.zig:1276 (containers) match every <item in the body, so items nested in <conditional> become plain entries; no code reads evaluator/cond (xml_patch.zig:449 only rejects the patch op). |
+| `Data/Config/loot.xml` | P2 | parse_bug | unique_item is read but stock's loader reads unique_items, inverting one container's dedupe | loot.zig:1265 reads attribute unique_item into struct field unique_item (loot.zig:329) and loot.zig:641-651 dedupes item names when set. |
+| `Data/Config/loot.xml` | P2 | parse_bug | rollContainer emits 0-count stacks that the group path already skips | loot.zig:610-660 rollContainer has no cnt==0 guard, unlike the group path (loot.zig:759), so chunk_fill.zig:531 setSlot writes item_id with count 0. |
+| `Data/Config/recipes.xml` | P2 | wrong_default | Absent craft_time defaults to 1 s where stock derives 0 s | recipes.zig:224 craft_time = parse(...) orelse 1; a malformed value also lands on 1. |
+| `Data/Config/traders.xml` | P2 | missing_parse | TraderItemAbundance / VendingItemAbundance sandbox options are not applied to stock counts | traders.zig:195 hardcodes abundance 1.0 in rollAllRefs/spawnAllRefs; sandbox_data.zig:234 (TraderItemAbundance) and :238 (VendingItemAbundance) exist but no trader path reads them. |
+| `XUi_Common/styles.xml` | P2 | patch_gap | XUi-root patches route nowhere and are dropped with no log | src/assets/xml_patch.zig:486-499 skips an op silently when file_name_match is false and fileFromXPath returns null; :425-428 compares the patch basename with the subdir-qualified target 'XUi_Common/styles'; :86-121 root map has no styles/templates/windows/xui key (stale ':125 Fallback: tag.xml' never fires). |
+| `XUi_Common/templates.xml` | P2 | patch_gap | XUi-root patches route nowhere and are dropped with no log | src/assets/xml_patch.zig:486-499 skips an op silently when file_name_match is false and fileFromXPath returns null; :425-428 compares the patch basename with the subdir-qualified target 'XUi_Common/templates'; :86-121 root map has no styles/templates/windows/xui key. |
+| `XUi_InGame/templates.xml` | P2 | patch_gap | XUi-root patches route nowhere and are dropped with no log | src/assets/xml_patch.zig:486-499 skips an op silently when file_name_match is false and fileFromXPath returns null; :425-428 compares the patch basename with the subdir-qualified target 'XUi_InGame/templates'; :86-121 root map has no templates key. |
+| `XUi_InGame/windows.xml` | P2 | patch_gap | XUi-root patches route nowhere and are dropped with no log | src/assets/xml_patch.zig:486-499 skips an op silently when file_name_match is false and fileFromXPath returns null; :425-428 compares the patch basename with the subdir-qualified target 'XUi_InGame/windows'; :86-121 root map has no windows key. |
+| `XUi_InGame/xui.xml` | P2 | patch_gap | XUi-root patches route nowhere and are dropped with no log | src/assets/xml_patch.zig:486-499 skips an op silently when file_name_match is false and fileFromXPath returns null; :425-428 compares the patch basename with the subdir-qualified target 'XUi_InGame/xui'; :86-121 root map has no xui key. |
+| `archetypes.xml` | P2 | hardcoded_stock_data | Join ECD profile is hardcoded from archetypes.xml and the client's own profile is discarded | src/wire/packages.zig:539-545 writes archetype="BaseMale", is_male=true, race_name="White", variant_number=1, and :511 writes class_player_male; parseRequestToSpawnPlayer (:1823-1827) reads only chunkViewDim and drops the trailing PlayerProfile blob. |
+| `biomes.xml` | P2 | parse_bug | Biome layer stack read from the first subbiome's <layers>, not the biome's own | src/assets/biome_layers.zig:503-511 parseStackBody takes the first <layers> in the biome body; called at :743. src/server/game/init_assets.zig:658 logs burnt_n from stackFor(9), exposing it. |
+| `biomes.xml` | P2 | dropped_rows | Deco cap 12 silently drops 2 distant-deco rows of one pine_forest subbiome | src/assets/biome_layers.zig:63 max_deco_per_biome = 12 enforced at :644 (`set.n < max_deco_per_biome`); the comment at :56-62 claims only two blocks carry IsDistantDecoration. |
+| `biomes.xml` | P2 | wrong_default | Four <biomemap> names without a <biome> def fall back to pine_forest columns | src/assets/biome_layers.zig:275-282 stackFor returns default_stack for a biome id with no stack; biomeCount (:253) counts <biomemap> names and src/world/store.zig:677 feeds it to worldgen (worldgen.zig:280 biomeAt), so those ids are selectable. |
+| `blocks.xml` | P2 | unsupported_attr | Selective Extends param1 exclusion list is ignored | src/assets/blocks.zig:532-533 and src/assets/maxdamage.zig:759 read only the Extends value= attribute; param1 is never read anywhere in src (rg '"param1"' src is empty). |
+| `blocks.xml` | P2 | wrong_default | Stage2Health is not resolved through Extends | src/assets/maxdamage.zig:746-750 stores Stage2Health from the block's own body only; stage2For (maxdamage.zig:187) drives wireBlockDamage (src/server/game/world.zig:267). |
+| `blocks.xml` | P2 | parse_bug | block_textures.zig reads Texture without Extends, so default paint is 0 | src/assets/block_textures.zig:84-107 parses the block's own Texture only, then resolves ids at block_textures.zig:109-116; the default is consumed at src/server/c2s/blocks.zig:522 (base = block_textures.get(cur_id)). |
+| `blocks.xml` | P2 | unsupported_attr | Door detection is a name substring, not the BlockTag property | src/assets/blocks.zig:622 sets is_door from std.ascii.findIgnoreCase(name, "door"); consumers are src/server/game/hooks.zig:508 (blockIsDoor feeds isSolidWorld) and src/server/game/tick.zig:973 (zombie opens the door and broadcasts SetBlock with the open bit). |
+| `blocks.xml` | P2 | missing_parse | ExplosionAffected is never parsed | No reference to ExplosionAffected exists in src. drainExplosions (src/server/game/world.zig:470-541) and the C2S blast handler (src/server/c2s/blocks.zig:581-603) remove/damage every block in the sphere without consulting it. |
+| `buffs.xml` | P2 | missing_parse | onSelfBuffFinish (120 rows) and onSelfBuffStack (93) never evaluate | src/assets/buffs.zig:1212-1219 parseTrigger maps only start/update/remove/entered_game/first_spawn/progression_update, so both names become Trigger.other; evaluateRows (buffs.zig:1271) skips any row whose trigger != the event, and no caller passes a finish/stack event. |
+| `entityclasses.xml` | P2 | missing_parse | AITarget lists (sense radii and target filters) are unparsed | src/assets/entities.zig:372 taskNameToId and :404 resolvedAiTasks read only AITask / AITask-N; no AITarget arm exists. ecs/systems.zig:302 notes only that the class= filter is not modeled. |
+| `entityclasses.xml` | P2 | missing_parse | <drop event="Harvest"> butcher yields are unparsed, so corpse harvesting yields nothing | src/assets/entities.zig loadFromPath has no <drop arm (EntityDef carries only loot_list/loot_drop_prob, :873). The only Harvest path is the block one (src/assets/items.zig harvestMultiplier, scenarios block harvest). |
+| `entityclasses.xml` | P2 | dropped_rows | The 512-class cap truncates silently | src/assets/entities.zig:13 max_entities_defs = 512, and :633 breaks the class loop at the cap with no log, warning or counter. |
+| `gameevents.xml` | P2 | hardcoded_stock_data | death sequence name and root action index are hardcoded | src/server/game/replicate_health.zig:63-64 selects game_on_death_default:0 / game_on_death_injured:0 by death_penalty for NetPackageGameEventResponse. |
+| `materials.xml` | P2 | missing_parse | stability_glue and Mass are unused by the stability plane | material_mass is parsed (src/assets/maxdamage.zig:476-481) but only consumed by fallingMassKg (maxdamage.zig:295); stability_glue is never parsed. The plane uses uniform decay of 1 per step (src/world/stability.zig:1-16, hdirs at stability.zig:52). |
+| `materials.xml` | P2 | unsupported_attr | collidable, movement_factor and lightopacity are not modelled | No reference to collidable, movement_factor or lightopacity exists in src. Block solidity stays a name rule (src/assets/blocks.zig:368-373) and movement caps are zdtd policy in src/server/movement.zig. |
+| `npc.xml` | P2 | hardcoded_stock_data | Class-hash to quest_list name table hardcoded in production code | src/server/game/quest.zig:252-256 maps class_npc_trader_{rekt,bob,hugh,joel} hashes to "trader_*_quests" literals and defaults to "trader_jen_quests"; the preceding branch (247-251) prefers the npc.xml value. |
+| `progression.xml` | P2 | missing_parse | CraftingTier rows (55) unparsed: crafted quality tier never applied | progression.zig:748-802 parses crafting_skill display_entry/unlock_entry only; CraftingSkill (progression.zig:141-145) has no passives field. craft.zig:310 deposits the output through depositItem with no tier or quality argument. |
+| `quests.xml` | P2 | missing_parse | quest_tier_rewards and quest_items blocks have no parser | No consumer: grep for quest_tier_reward/quest_items in src/assets and src/server returns nothing; Catalog has no field for them. |
+| `signs.xml` | P2 | missing_parse | sign modified attribute is dropped and always written as 0 | assets/signs.zig:141-160 parseSignsFile reads guid/name/next_* only; SignEntry.modified_ticks (signs.zig:22) is never assigned; stock_sign.zig:18 writes it |
+| `sounds.xml` | P2 | wrong_default | heat_map_time default 0 diverges from stock 100 | src/assets/noise.zig:29 sets heat_map_time: f32 = 0 and only overwrites when the attribute exists (noise.zig:127); the x10 tick fold is at src/ecs/systems.zig:2786 |
+| `sounds.xml` | P2 | parse_bug | self-closing SoundDataNode truncates the whole scan; tags matched case-sensitively | src/assets/noise.zig:112-117 leaves body_end=clean.len for a self-closing node, then :136 i=body_end+1 ends the loop and drops every later node; lookups are literal "<SoundDataNode " and "<Noise " |
+| `spawning.xml` | P2 | wrong_default | spawning.xml respawndelay list is read only at the Default column | src/assets/spawning.zig:100-103 lowF32List returns the text before the first comma; Rule.respawn_days (spawning.zig:22) feeds aidirector.zig:929-930. |
+| `spawning.xml` | P2 | patch_gap | per-rule spawn budget cap is fixed at 64 while spawning.xml is patchable | src/ecs/aidirector.zig:268 rule_budget_cap = 64; budgetAllows (908-909) returns true and budgetConsume (925) returns early for any index >= 64. |
+| `vehicles.xml` | P2 | wrong_default | Bicycle is refuelled with gas despite vehicles.xml giving it no fuel tank | craft.zig:127-132 tryRefuelVehicle caps at rules.vehicle.fuel_cap when tank_capacity==0; rules.zig:612 fuel_cap=100; vehicles.zig:157-164 leaves vehicleBicycle tank_capacity 0 and the loop has no kind gate |
+| `vehicles.xml` | P2 | hardcoded_stock_data | Per-kind max speed fallback table matches no stock velocityMax | systems.zig:3175-3181 vehicleKindDefaultSpeed returns 6/12/18/14/20, consumed at systems.zig:3191 whenever v.max_speed <= 0.1, with no log |
+| `vehicles.xml` | P2 | hardcoded_stock_data | Vehicle max HP is a Zig literal whose C# cite is not in the RE dumps | vehicles.zig:172 max_hp 250 gyro / 300 4x4 / else 200; applied at init_world.zig:291, admin_console.zig:1697, persist.zig:1776, world.zig:1638 (else 200) |
+| `worldglobal.xml` | P2 | missing_parse | <environment> ambient scales unparsed; night ambient collapses to 0 | src/server/game/step.zig:133 ambient_light = sky.ambientLuma(day_pct) * sky.moonAmbientScale(...); src/world/sky.zig:67-69 ambientLuma = day_pct^0.6 * 0.5 so day_pct 0 gives 0; consumers src/server/game/player.zig:306 (S2C stealth byte) and src/ecs/systems.zig:70 (AI sight gate) |
+
+## 4. Disposition
+
+Fixes land in follow-up commits, worst first, by domain so each change set is
+one loader surface:
+
+1. blocks.xml / materials.xml property inheritance (`Extends`, `param1`
+   exclusions, `dropextendsoff`, material MaxDamage/Material/StabilitySupport,
+   `explosionresistance`) - the block damage and blast paths.
+2. items.xml / item_modifiers.xml inheritance and defaults (Range/DamageBlock,
+   Tags, `max_quality_tier`, modifier econ/quality, econ clamp).
+3. sandbox boolean defaults from the stock census.
+4. small live-path defaults (gamestages spawn duration unit, biome map ids,
+   quest `radius` property and `param1`, trader empty-row fallback,
+   lootcontainer `count`, recipe effect groups).
+5. the larger unparsed surfaces (blockplaceholders, gameevents, sounds noise,
+   entity harvest drops, sign layers, item `<stats>`) each as its own change set.
