@@ -79,6 +79,13 @@ pub const BlockDef = struct {
     /// is class-assigned, not a blocks.xml property. Zombies open these on
     /// their path instead of chewing.
     is_door: bool = false,
+    /// blocks.xml `LPHardnessScale` (stock `Block.LPHardnessScale`, default 1
+    /// when the property is absent - Block's property loader sets it at
+    /// IL_0553-0559 before reading `LPHardnessScale`): the land-claim hardness
+    /// baseline. 0 opts a block out of claim protection entirely (stock ships
+    /// `cntGasPumpRandomLootHelper` at 0), and the value multiplies the claim
+    /// owner's durability modifier. Only 7 stock rows override the default.
+    lp_hardness_scale: f32 = 1,
     /// The block's composite TE carries `TEFeatureSignable`: blocks.xml
     /// declares it as `<property class="TEFeatureSignable">` inside
     /// `CompositeFeatures` (9 stock blocks: the player signs, the metal sign
@@ -415,6 +422,10 @@ pub fn loadFromPath(
         trader_onoff: bool = false,
         is_door: bool = false,
         signable: bool = false,
+        lp_hardness_scale: f32 = 1,
+        /// True when this row (or a base) declared LPHardnessScale. The
+        /// default 1 is not an override, so the chain needs to tell them apart.
+        lp_declared: bool = false,
         heat_strength: f32 = 0,
         has_fuel_module: bool = false,
         has_material_input: bool = false,
@@ -472,6 +483,8 @@ pub fn loadFromPath(
         var extends_param1: []const u8 = "";
         var trader_onoff = false;
         var signable = false;
+        var lp_hardness_scale: f32 = 1;
+        var lp_declared = false;
         var heat_strength: f32 = 0;
         var has_fuel_module = false;
         var has_material_input = false;
@@ -566,6 +579,11 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| {
                     if (std.mem.eql(u8, v, "TraderOnOff")) trader_onoff = true;
                 }
+            } else if (std.mem.eql(u8, pname, "LPHardnessScale")) {
+                if (xml.attr(clean, pi, "value")) |v| {
+                    lp_hardness_scale = std.fmt.parseFloat(f32, v) catch 1;
+                    lp_declared = true;
+                }
             } else if (std.mem.eql(u8, pname, "HeatMapStrength")) {
                 if (xml.attr(clean, pi, "value")) |v| heat_strength = std.fmt.parseFloat(f32, v) catch 0;
             } else if (std.mem.eql(u8, pname, "Modules")) {
@@ -653,6 +671,8 @@ pub fn loadFromPath(
             .trader_onoff = trader_onoff,
             .is_door = std.ascii.findIgnoreCase(kn, "door") != null,
             .signable = signable,
+            .lp_hardness_scale = lp_hardness_scale,
+            .lp_declared = lp_declared,
             .heat_strength = heat_strength,
             .has_fuel_module = has_fuel_module,
             .has_material_input = has_material_input,
@@ -694,6 +714,8 @@ pub fn loadFromPath(
         var own_texture = pb.texture_top;
         var own_map_color = pb.map_color;
         var own_signable = pb.signable;
+        var own_lp = pb.lp_hardness_scale;
+        var own_lp_declared = pb.lp_declared;
         var own_drops = pb.harvest_drops;
         var own_destroy = pb.destroy_drops;
         var own_fall = pb.fall_drops;
@@ -731,6 +753,12 @@ pub fn loadFromPath(
             // extends playerSignWood1x1 and declares no CompositeFeatures of
             // its own), so the module flag follows the chain.
             if (!own_signable) own_signable = base_p.signable;
+            // LPHardnessScale follows the chain like every other blocks.xml
+            // property the loader copies (the default is not an override).
+            if (!own_lp_declared) {
+                own_lp = base_p.lp_hardness_scale;
+                if (base_p.lp_declared) own_lp_declared = true;
+            }
             // CopyDroppedFrom (IL=89): base drop rows append per event unless
             // the item name is already present (own wins), so a block that
             // declares its own wood row still inherits the base's stone row.
@@ -748,6 +776,8 @@ pub fn loadFromPath(
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;
         pb.signable = own_signable;
+        pb.lp_hardness_scale = own_lp;
+        pb.lp_declared = own_lp_declared;
         pb.harvest_drops = own_drops;
         pb.destroy_drops = own_destroy;
         pb.fall_drops = own_fall;
@@ -764,6 +794,7 @@ pub fn loadFromPath(
             .trader_onoff = pb.trader_onoff,
             .is_door = pb.is_door,
             .signable = pb.signable,
+            .lp_hardness_scale = pb.lp_hardness_scale,
             .heat_strength = pb.heat_strength,
             .has_fuel_module = pb.has_fuel_module,
             .has_material_input = pb.has_material_input,
@@ -858,6 +889,42 @@ test "signable composite flag parses and follows Extends" {
     try std.testing.expect(t.byName("playerSignWood1x1").?.signable);
     try std.testing.expect(t.byName("playerSignWood1x3").?.signable); // inherited
     try std.testing.expect(!t.byName("cntWoodCrateWood01").?.signable); // storage only
+}
+
+test "LPHardnessScale parses, defaults to 1 and follows Extends" {
+    // Stock's Block property loader sets LPHardnessScale = 1 before reading the
+    // property (IL_0553-0559), so an absent row means 1, not 0; the 7 stock rows
+    // that do declare it are terrain (2) and cntGasPumpRandomLootHelper (0,
+    // opted out of land-claim protection). The value is the baseline the claim
+    // owner's durability modifier multiplies.
+    const src =
+        \\<blocks>
+        \\<block name="terrStone">
+        \\  <property name="LPHardnessScale" value="2"/>
+        \\</block>
+        \\<block name="cntGasPumpRandomLootHelper">
+        \\  <property name="LPHardnessScale" value="0"/>
+        \\</block>
+        \\<block name="plainBlock">
+        \\  <property name="Class" value="Storage"/>
+        \\</block>
+        \\<block name="terrStoneChild">
+        \\  <property name="Extends" value="terrStone"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_lp.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+    try std.testing.expectApproxEqAbs(@as(f32, 2), t.byName("terrStone").?.lp_hardness_scale, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), t.byName("cntGasPumpRandomLootHelper").?.lp_hardness_scale, 0.001);
+    // No property: the loader default, not zero.
+    try std.testing.expectApproxEqAbs(@as(f32, 1), t.byName("plainBlock").?.lp_hardness_scale, 0.001);
+    // Extends carries it.
+    try std.testing.expectApproxEqAbs(@as(f32, 2), t.byName("terrStoneChild").?.lp_hardness_scale, 0.001);
 }
 
 test "builtin block table" {
@@ -1047,6 +1114,9 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "oreNoExtend", 208 },
         .{ "playerSignWood1x1", 209 },
         .{ "playerSignWood1x3", 210 },
+        .{ "plainBlock", 211 },
+        .{ "cntGasPumpRandomLootHelper", 213 },
+        .{ "terrStoneChild", 212 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];

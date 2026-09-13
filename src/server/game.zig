@@ -2025,6 +2025,12 @@ pub const Game = struct {
         return self.gameevents.addXpDeficitIndex(seq_name);
     }
 
+    /// Stock `World::GetLandProtectionHardnessModifier` for one block: the
+    /// divisor a stranger's blast takes inside somebody else's land claim.
+    pub fn landProtectionHardnessModifier(self: *Game, wx: i32, wy: i32, wz: i32, instigator_entity: i32) f32 {
+        return game_world.landProtectionHardnessModifier(self, wx, wy, wz, instigator_entity);
+    }
+
     /// One block inside a blast (stock Explosion::AttackBlocks damage formula,
     /// destroy/downgrade flow). Both blast paths route through it.
     pub fn blastBlock(
@@ -2036,8 +2042,9 @@ pub const Game = struct {
         power: f32,
         falloff: f32,
         category_mult: f32,
+        instigator_entity: i32,
     ) bool {
-        return game_world.blastBlock(self, wx, wy, wz, id, power, falloff, category_mult);
+        return game_world.blastBlock(self, wx, wy, wz, id, power, falloff, category_mult, instigator_entity);
     }
 
     pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {

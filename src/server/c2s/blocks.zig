@@ -610,7 +610,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         ex.wz,
                         @floatFromInt(rad),
                     );
-                    if (!self.blastBlock(wx, wy, wz, cur, @floatFromInt(ex.block_damage), blast_falloff, 1.0)) continue;
+                    const blast_attacker: i32 = if (c.entity_id > 0) c.entity_id else -1;
+                    if (!self.blastBlock(wx, wy, wz, cur, @floatFromInt(ex.block_damage), blast_falloff, 1.0, blast_attacker)) continue;
                     const after = self.world.blockWorld(wx, wy, wz) catch continue;
                     if (after != 0) continue; // damaged or downgraded, not destroyed
                     // Destroy-event drops (RE Block.DropItemsOnEvent IL=246 +

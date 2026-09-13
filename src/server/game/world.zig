@@ -501,7 +501,7 @@ pub fn drainExplosions(self: *Game) void {
                     }
                     if (mult == 0) continue; // category immune to this blast
                     const falloff = blastFalloff(wx, wy, wz, ex.x, ex.y, ex.z, radius);
-                    _ = self.blastBlock(wx, wy, wz, id, block_dmg, falloff, mult);
+                    _ = self.blastBlock(wx, wy, wz, id, block_dmg, falloff, mult, nid);
                 }
             }
         }
@@ -558,6 +558,44 @@ test "blast falloff measures from the blast position, not the cell index" {
     try std.testing.expectEqual(@as(f32, 0), blastFalloff(6, 0, 0, 0, 0, 0, 5));
 }
 
+/// Stock `World::GetLandProtectionHardnessModifier` (IL=8823/8985) for one
+/// block position: the DIVISOR a blast or attack inside somebody else's land
+/// claim takes.
+///   - 1 when the instigator is an enemy (stock returns early for
+///     `EntityEnemy`) or unattributed: a zombie's blast ignores claims
+///   - 1 when the block's `LPHardnessScale` is 0 (`cntGasPumpRandomLootHelper`)
+///   - otherwise `Max(1, claim owner's durability modifier) x LPHardnessScale`,
+///     where the owner's modifier is the online or offline durability modifier
+///     (stock GameStats 48/49) and only a claim the instigator does not own
+///     counts
+/// A claim modifier below 1 short-circuits exactly like stock's
+/// `if (V_9 < 1) return V_9`. The ally exemption and the vehicle-attacker
+/// doubling stay open (zdtd's claim paths are owner-entity based throughout).
+pub fn landProtectionHardnessModifier(self: *Game, wx: i32, wy: i32, wz: i32, instigator_entity: i32) f32 {
+    if (instigator_entity >= 0) {
+        if (self.sim.slotOfNetId(instigator_entity)) |s| {
+            if (self.sim.kind[s] == .zombie or self.sim.kind[s] == .animal) return 1;
+        }
+    }
+    const id = self.world.blockWorld(wx, wy, wz) catch return 1;
+    if (id == 0) return 1;
+    const scale: f32 = if (self.blocks.byId(id)) |b| b.lp_hardness_scale else 1;
+    if (scale == 0) return 1;
+    var running: f32 = 1;
+    if (self.claimCovering(wx, wz)) |claim| {
+        if (claim.owner_entity != instigator_entity) {
+            const mod: f32 = if (claim.owner_online)
+                @floatFromInt(self.land_claim_online_dur)
+            else
+                @floatFromInt(self.land_claim_offline_dur);
+            if (mod < 1) return mod;
+            running = @max(running, mod);
+        }
+    }
+    if (running > 1) return running * scale;
+    return running;
+}
+
 /// Apply one blast to the block at (wx,wy,wz), stock `Explosion::AttackBlocks`
 /// (IL=553):
 ///   hardness > 0  ->  damage = round((1 - resistance) * power * falloff
@@ -585,20 +623,26 @@ pub fn blastBlock(
     power: f32,
     falloff: f32,
     category_mult: f32,
+    instigator_entity: i32,
 ) bool {
     if (id == 0 or !(power > 0) or !(falloff > 0) or !(category_mult > 0)) return false;
     const max_hp = self.maxDamageForBlock(id);
     if (max_hp == 0) return false;
     const resist = @min(@max(self.maxdamage.explosionResistanceFor(id), 0), 1);
+    // Land claim leg (stock Explosion::AttackBlocks divides by
+    // GetLandProtectionHardnessModifier, IL_03EA): a stranger's blast meets a
+    // tougher block inside somebody else's claim.
+    const land_mod = self.landProtectionHardnessModifier(wx, wy, wz, instigator_entity);
+    if (!(land_mod > 0)) return false;
     var dmg: f32 = undefined;
     if (self.maxdamage.materialHardness(id)) |hardness| {
         if (hardness > 0) {
-            dmg = (1.0 - resist) * power * falloff / hardness * category_mult;
+            dmg = (1.0 - resist) * power * falloff / (hardness * land_mod) * category_mult;
         } else {
-            dmg = @floatFromInt(max_hp);
+            dmg = @as(f32, @floatFromInt(max_hp)) / land_mod;
         }
     } else {
-        dmg = (1.0 - resist) * power * falloff * category_mult;
+        dmg = (1.0 - resist) * power * falloff / land_mod * category_mult;
     }
     const dmg_u16: u16 = @trunc(@min(@max(dmg, 0), 65535.0));
     if (dmg_u16 == 0) return false;

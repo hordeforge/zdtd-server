@@ -1293,6 +1293,64 @@ test "scenario sandbox MaxStackSize scales the stackable items" {
     std.debug.print("PASS stacksize: sandbox MaxStackSize scales stackables and clamps at 30000\n", .{});
 }
 
+test "scenario land claim: a stranger's blast meets the claim hardness" {
+    // Stock Explosion::AttackBlocks divides by
+    // World::GetLandProtectionHardnessModifier (IL_03EA/8823): the modifier is
+    // Max(1, claim owner's durability modifier) x LPHardnessScale, the owner's
+    // own blocks are exempt, and an EntityEnemy instigator returns early with
+    // 1 (a zombie's blast ignores claims entirely).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
+    mt.tryMergeBundledAssignIds(gpa);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+    const stone = g.maxdamage.idByName("terrStone") orelse return error.SkipZigTest;
+    const steel = g.maxdamage.idByName("keystoneBlock") orelse return error.SkipZigTest;
+
+    const axe: i32 = 4242; // a stranger with no claim
+    try g.setBlock(260, 71, 260, stone);
+    _ = g.registerClaim(260, 71, 260, 7777); // someone else's claim
+    try std.testing.expect(g.claimCovering(260, 260) != null);
+
+    // land_mod = 4 (the default online durability modifier): 1000 power at
+    // falloff 1 lands 250 on a 500 HP stone block and it stands.
+    try std.testing.expectApproxEqAbs(@as(f32, 4), g.landProtectionHardnessModifier(260, 71, 260, axe), 0.001);
+    _ = g.blastBlock(260, 71, 260, stone, 1000, 1.0, 1.0, axe);
+    try std.testing.expectEqual(stone, try g.world.blockWorld(260, 71, 260));
+    // Exactly the claim owner: exempt, so the same blast breaks it.
+    _ = g.blastBlock(260, 71, 260, stone, 1000, 1.0, 1.0, 7777);
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(260, 71, 260));
+
+    // A zombie instigator ignores the claim (stock returns 1 for EntityEnemy).
+    const cop = g.sim.spawnZombie(260, 71, 260, 200).?;
+    const cs = g.sim.slotOfNetId(cop).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 1), g.landProtectionHardnessModifier(260, 71, 260, cop), 0.001);
+    try g.setBlock(260, 71, 260, stone);
+    _ = g.blastBlock(260, 71, 260, stone, 1000, 1.0, 1.0, cop);
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(260, 71, 260));
+
+    // Outside the claim the modifier is 1 even for a stranger: steel takes the
+    // full 1000 x 0.5 = 500 and stands on its 7000 HP.
+    try g.setBlock(300, 71, 300, steel);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), g.landProtectionHardnessModifier(300, 71, 300, axe), 0.001);
+    _ = g.blastBlock(300, 71, 300, steel, 1000, 1.0, 1.0, axe);
+    try std.testing.expectEqual(steel, try g.world.blockWorld(300, 71, 300));
+    _ = cs;
+    std.debug.print("PASS landclaim-blast: stranger's blast scaled by the claim, owner and enemies exempt\n", .{});
+}
+
 test "scenario treasure point: the server answers the client's dig-site request" {
     // ObjectiveTreasureChest asks the server for a dig site whenever the quest
     // carries no PositionData TreasurePoint(4)/TreasureOffset(8), which zdtd
