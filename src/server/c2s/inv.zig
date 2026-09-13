@@ -556,8 +556,24 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
             // FetchFromContainer quests (stock's quest object observes the
             // container TE); advance fetch phases so they can reach turn-in.
             systems.questOnFetchItem(&self.sim, c.slot, 1);
-            // Echo stock TE to nearby clients.
-            try replicate_te.broadcastStorageTe(self, cont);
+            // Echo stock TE to nearby clients. Stock applies the client's whole
+            // composite to its own TE and resends it, so when the received body
+            // carries more than the storage module (a writable crate's sign text
+            // and lock state) the echo keeps those modules and swaps in the
+            // server's clamped storage module; if the module cannot be spliced
+            // in place the storage-only body stands, which the client's modern
+            // composite reader accepts.
+            if (stock_te.spliceStorageEcho(&self.body_buf, body, &parsed, cont, Game.resolveItemType, self)) |echo| {
+                try self.broadcastNear(
+                    "NetPackageTileEntity",
+                    echo,
+                    @floatFromInt(cont.pos.x),
+                    @floatFromInt(cont.pos.z),
+                    self.interest_range,
+                );
+            } else {
+                try replicate_te.broadcastStorageTe(self, cont);
+            }
             return true;
         } else |_| {}
         // Workstation TE (type 12 classic): apply arrays + queue into the

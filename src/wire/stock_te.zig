@@ -149,6 +149,45 @@ fn writeCompositeStoragePayload(
     return w.written();
 }
 
+/// Largest storage module body: `<54 slots x item value>` plus the header,
+/// grid, touch and lock fields. The item value is a fixed-shape save blob
+/// (~25 B) plus its nested mods, so this is a generous bound.
+pub const max_storage_feature_bytes: usize = 8192;
+
+/// Splice the server's clamped storage module into a copy of the client's
+/// composite body, so the echo carries every module the client sent - a
+/// writable crate's sign text and lock state included - the way stock's
+/// `TileEntityComposite::write` reserializes the whole TE it just read.
+///
+/// Only an in-place splice is possible here: the module keeps the received
+/// span, so this applies when the re-encoded module has exactly the received
+/// length (same grid, no preferences). Returns null when it does not fit, and
+/// the caller falls back to a storage-only body - which the client's modern
+/// reader accepts: it reads the modules the body declares and warns only about
+/// hashes the block no longer defines (TileEntityComposite::read IL=1227,
+/// version >= 17 branch at IL_0262; the "Skipping TE payload" path at
+/// IL_016C-IL_01FC is the legacy version < 17 branch).
+pub fn spliceStorageEcho(
+    buf: []u8,
+    body: []const u8,
+    parsed: *const ParsedTe,
+    cont: *const containers.Container,
+    resolve: ?stock_inv.TypeResolver,
+    ctx: ?*anyopaque,
+) ?[]u8 {
+    if (!parsed.found_storage or parsed.storage_blob_len == 0) return null;
+    if (parsed.storage_blob_off + parsed.storage_blob_len > body.len) return null;
+    if (body.len > buf.len) return null;
+    var scratch: [max_storage_feature_bytes]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &scratch };
+    writeStorageFeature(&w, cont, resolve, ctx) catch return null;
+    const blob = w.written();
+    if (blob.len != parsed.storage_blob_len) return null;
+    @memcpy(buf[0..body.len], body);
+    @memcpy(buf[parsed.storage_blob_off..][0..blob.len], blob);
+    return buf[0..body.len];
+}
+
 /// Stock world time for the start of `day`, matching WorldClock.worldTimeBits:
 /// 1000 units per hour, 24000 per day, day 1 is the epoch. The store keeps the
 /// touch as a day number (the granularity LootRespawnDays needs), so the
@@ -229,6 +268,11 @@ pub const ParsedTe = struct {
     /// one is not a storage TE (a sign body used to parse "successfully" and
     /// created a phantom 8-slot container at the sign).
     found_storage: bool = false,
+    /// Byte span of the storage module's body inside the parsed `body` (0/0
+    /// when absent). `spliceStorageEcho` writes the server's clamped module
+    /// back over this exact span.
+    storage_blob_off: usize = 0,
+    storage_blob_len: usize = 0,
     /// Stock `worldTimeTouched`: the world time the container was last looted.
     /// TEFeatureStorage.UpdateTick derives LootRespawnDays from it, so it is
     /// state and not a formality.
@@ -278,6 +322,11 @@ pub fn parseStorageTeBody(body: []const u8) (binary.ReadError || error{NotStorag
         const feat_start = pr.pos;
         if (hash == feature_hash_storage) {
             out.found_storage = true;
+            // `pr.data` is the payload slice of `body`, so the module body's
+            // offset in the whole NetPackageTileEntity body is the base delta
+            // plus the sub-reader position.
+            out.storage_blob_off = (@intFromPtr(pr.data.ptr) - @intFromPtr(body.ptr)) + pr.pos;
+            out.storage_blob_len = feat_payload_len;
             try parseStorageFeature(&pr, &out);
         } else {
             pr.pos += feat_payload_len;
@@ -983,6 +1032,74 @@ test "signable te parse reads the authored text and flags storage siblings" {
     var body_buf5: [1024]u8 = undefined;
     const long = try TestBody(&body_buf5, 13, 742, big[0..300], &.{feature_hash_signable});
     try std.testing.expectError(error.Overflow, parseSignableTeBody(long, &text_buf));
+}
+
+test "storage echo keeps the client's other composite modules" {
+    // A writable crate's composite is storage + signable (+ lockable). Stock
+    // reserializes the whole TE it just read, so the echo carries every module;
+    // zdtd replaces only the storage module with the server's clamped state and
+    // leaves the rest of the client's body byte-identical.
+    var server: containers.Container = .{ .pos = .{ .x = 4, .y = 70, .z = 4 }, .block_id = 500, .slot_count = 8 };
+    server.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 1 });
+    const client: containers.Container = blk: {
+        var c: containers.Container = .{ .pos = .{ .x = 4, .y = 70, .z = 4 }, .block_id = 500, .slot_count = 8 };
+        c.setSlot(0, .{ .item_id = 7, .count = 999, .quality = 1 }); // over-stack claim
+        break :blk c;
+    };
+
+    var pay: [8192]u8 = undefined;
+    var pw: binary.Writer = .{ .buf = &pay };
+    try pw.writeI32(4);
+    try pw.writeI32(70);
+    try pw.writeI32(4);
+    const om = try reserveU32(&pw);
+    try pw.writeI32(500);
+    try pw.writeByte(0); // no owner
+    try pw.writeByte(2); // storage + signable
+    try pw.writeI32(feature_hash_storage);
+    const sm = try reserveU32(&pw);
+    try writeStorageFeature(&pw, &client, null, null);
+    finalizeU32(&pw, sm);
+    try pw.writeI32(feature_hash_signable);
+    const gm = try reserveU32(&pw);
+    try pw.writeBool(true);
+    try pw.writeString("crate label");
+    try pw.writeBool(false);
+    finalizeU32(&pw, gm);
+    finalizeU32(&pw, om);
+
+    var body_buf: [8192]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &body_buf };
+    try w.writeByte(4);
+    try w.writeI32(4);
+    try w.writeI32(70);
+    try w.writeI32(4);
+    try w.writeI32(500);
+    try w.writeI32(@intCast(pw.pos));
+    try w.writeBytes(pay[0..pw.pos]);
+    const body = w.written();
+
+    const parsed = try parseStorageTeBody(body);
+    try std.testing.expect(parsed.found_storage);
+    try std.testing.expect(parsed.storage_blob_len > 0);
+    try std.testing.expectEqual(@as(u16, 999), parsed.items[0].count);
+
+    var echo_buf: [8192]u8 = undefined;
+    const echo = spliceStorageEcho(&echo_buf, body, &parsed, &server, null, null) orelse return error.TestUnexpectedResult;
+    // Same length (the module encodes to a fixed span for the same grid), so
+    // everything after the storage module - the sign text and its markers - is
+    // byte-identical to what the client sent.
+    try std.testing.expectEqual(body.len, echo.len);
+    const after = parsed.storage_blob_off + parsed.storage_blob_len;
+    try std.testing.expectEqualSlices(u8, body[after..], echo[after..]);
+    const echoed = try parseStorageTeBody(echo);
+    try std.testing.expectEqual(@as(u16, 12), echoed.items[0].count); // clamped
+
+    // A body whose module would change length cannot be spliced in place: the
+    // caller falls back to the storage-only echo, which the client's modern
+    // reader accepts (it reads the declared modules and warns about the rest).
+    var empty: containers.Container = .{ .pos = .{ .x = 4, .y = 70, .z = 4 }, .block_id = 500, .slot_count = 8 };
+    try std.testing.expect(spliceStorageEcho(&echo_buf, body, &parsed, &empty, null, null) == null);
 }
 
 test "stable hash TEFeatureStorage" {

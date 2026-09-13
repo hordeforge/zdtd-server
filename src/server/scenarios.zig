@@ -1008,6 +1008,84 @@ test "scenario sign: a client's sign text is applied and echoed to everyone" {
     std.debug.print("PASS sign-te: text applied and echoed to the sender and the other player\n", .{});
 }
 
+test "scenario writable crate: the echo keeps the client's sign module" {
+    // A writable crate's blocks.xml composite is storage + signable (+
+    // lockable). Stock applies the client's whole composite to its own TE and
+    // resends it, so the echo the other players receive carries the crate's
+    // label too; a storage-only body would leave the label invisible outside
+    // the editing client.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_crate_sign");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_crate_sign", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const crate_block: u16 = world_store.block_stone;
+    var defs = [_]assets_blocks.BlockDef{.{
+        .id = crate_block,
+        .name = "cntWoodWritableCrate",
+        .signable = true,
+    }};
+    g.blocks.deinit();
+    g.blocks = .{ .defs = &defs };
+    try g.setBlock(258, 71, 258, crate_block);
+
+    // The client's composite: an empty storage module (so the server's clamped
+    // re-encode keeps the same length and the splice applies) plus a signable
+    // module carrying the label.
+    var cont: containers_mod.Container = .{ .pos = .{ .x = 258, .y = 71, .z = 258 }, .block_id = crate_block, .slot_count = 8 };
+    var sbuf: [4096]u8 = undefined;
+    const storage_only = try packages.stock_te.buildStorageTeBody(&sbuf, 4, 258, 71, 258, crate_block, &cont, null, null);
+
+    var sbuf2: [8192]u8 = undefined;
+    @memcpy(sbuf2[0..storage_only.len], storage_only);
+    const pay_len = std.mem.readInt(i32, sbuf2[17..21], .little);
+    const pay_end = 21 + @as(usize, @intCast(pay_len));
+    // signable module: hash | inclusive marker | AuthoredText present + string + no author
+    var mbuf: [128]u8 = undefined;
+    var mw: binary.Writer = .{ .buf = &mbuf };
+    try mw.writeBool(true);
+    try mw.writeString("CRATE LABEL");
+    try mw.writeBool(false);
+    const mbody = mw.written();
+    var add_buf: [128]u8 = undefined;
+    var aw: binary.Writer = .{ .buf = &add_buf };
+    try aw.writeI32(924617576); // TEFeatureSignable
+    try aw.writeU32(@intCast(4 + mbody.len));
+    try aw.writeBytes(mbody);
+    const add = aw.written();
+    @memcpy(sbuf2[pay_end..][0..add.len], add);
+    const new_pay_len = @as(i32, @intCast(pay_end - 21 + add.len));
+    std.mem.writeInt(i32, sbuf2[17..21], new_pay_len, .little);
+    // The composite marker spans from its own start to the payload end.
+    const marker_off = 21 + 12;
+    const old_marker = std.mem.readInt(u32, sbuf2[marker_off..][0..4], .little);
+    std.mem.writeInt(u32, sbuf2[marker_off..][0..4], old_marker + @as(u32, @intCast(add.len)), .little);
+    // Module count (after chunkPos 12 + marker 4 + blockId 4 + owner 1).
+    const count_off = 21 + 12 + 4 + 4 + 1;
+    sbuf2[count_off] = sbuf2[count_off] + 1;
+    const body = sbuf2[0 .. pay_end + add.len];
+
+    cap.clear();
+    var frame_buf: [8192]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageTileEntity", body));
+
+    const te_id = packages.idOf("NetPackageTileEntity").?;
+    const echo = cap.findPkgId(te_id) orelse return error.TestUnexpectedResult;
+    // Same length, and the tail after the storage module is what the client
+    // sent: the sign module rode the echo.
+    try std.testing.expectEqual(body.len, echo.len);
+    const after = 21 + 12 + 4 + 4 + 1 + 1 + 4;
+    try std.testing.expectEqualSlices(u8, body[after..], echo[after..]);
+    std.debug.print("PASS crate-te: echo keeps the storage module and the client's sign module\n", .{});
+}
+
 test "scenario treasure point: the server answers the client's dig-site request" {
     // ObjectiveTreasureChest asks the server for a dig site whenever the quest
     // carries no PositionData TreasurePoint(4)/TreasureOffset(8), which zdtd
