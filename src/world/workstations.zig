@@ -550,7 +550,7 @@ pub const Workstation = struct {
         if (q.output_type == 0 or q.output_count <= 0) return true;
         const count: u16 = @intCast(@min(q.output_count, std.math.maxInt(u16)));
         const res: ResolvedOutput = if (resolve) |rv| rv(ctx, q.output_type) else .{};
-        if (res.item_id != 0 and !addOutput(self.output[0..self.output_len], res.item_id, count)) return false;
+        if (res.item_id != 0 and !addOutput(self.output[0..self.output_len], res.item_id, count, q.quality)) return false;
         self.addCraftComplete(q, res.stock_name, count);
         return true;
     }
@@ -626,16 +626,19 @@ pub const Workstation = struct {
     /// Stock `ItemStack::AddToItemStackArray` (asm.il ~614393): merge into the
     /// first stackable slot, else take the first empty one, else fail. The u16
     /// room check is ours (stock counts are i32).
-    fn addOutput(slots: []components.InvSlot, item_id: u16, count: u16) bool {
+    fn addOutput(slots: []components.InvSlot, item_id: u16, count: u16, quality: u8) bool {
         for (slots) |*s| {
-            if (s.item_id != item_id or s.count == 0) continue;
+            // Stock TileEntityWorkstation builds the output ItemValue with the
+            // queue item's Quality for a HasQuality item, so two crafts at
+            // different tiers never merge.
+            if (s.item_id != item_id or s.count == 0 or s.quality != quality) continue;
             if (std.math.maxInt(u16) - s.count < count) continue;
             s.count += count;
             return true;
         }
         for (slots) |*s| {
             if (s.count != 0) continue;
-            s.* = .{ .item_id = item_id, .count = count };
+            s.* = .{ .item_id = item_id, .count = count, .quality = quality };
             return true;
         }
         return false;

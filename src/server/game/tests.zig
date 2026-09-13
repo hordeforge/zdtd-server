@@ -38,6 +38,7 @@ const requirements = @import("../../assets/requirements.zig");
 const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
+const game_craft = @import("../game/craft.zig");
 const parallel = @import("../../util/parallel.zig");
 const zpv2DropName = game.zpv2DropName;
 
@@ -4659,6 +4660,98 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     // -1 this scenario used to see came from the operand being a constant 0,
     // which kept `$LastPlayerLevel` at 0 forever.
     try std.testing.expectApproxEqAbs(@as(f32, 150), g.sim.health[ps].max_hp, 0.001);
+}
+
+test "crafting tier follows the stock crafting-skill rows" {
+    // Recipe.GetCraftingTier (IL=22): base 1 folded with the player's crafting
+    // skill rows whose tags match the recipe's tag set (which includes the
+    // recipe name), at the skill's purchased level. craftingRepairTools'
+    // claw-hammer row is base_add 1,2,3,4,5,5 at levels 8,12,16,20,25,50.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const recipe = g.recipes.byName("meleeToolRepairT1ClawHammer") orelse return error.SkipZigTest;
+    // No skill points: the row's curve is outside its level window, so the
+    // tier stays at the base 1.
+    try std.testing.expectEqual(@as(u8, 1), game_craft.craftingTierFor(g, cl.slot, recipe));
+    // Level 16 lands inside the 12..16 segment (value 3): base 1 + 3 = 4.
+    cl.skill_levels[0] = .{ .name = "craftingRepairTools", .level = 16 };
+    cl.skill_level_n = 1;
+    try std.testing.expectEqual(@as(u8, 4), game_craft.craftingTierFor(g, cl.slot, recipe));
+    // Level 50 is the last anchor (value 5): base 1 + 5 = 6, the quality cap.
+    cl.skill_levels[0].level = 50;
+    try std.testing.expectEqual(@as(u8, 6), game_craft.craftingTierFor(g, cl.slot, recipe));
+    // A recipe whose tag set matches no Skill/Perk CraftingTier row stays at 1.
+    const stone = g.recipes.byName("resourceWood") orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(u8, 1), game_craft.craftingTierFor(g, cl.slot, stone));
+}
+
+test "crafting consumes tier-scaled ingredients and yields a tier-quality item" {
+    // Recipe.CanCraft: with UseIngredientModifier the required count is the
+    // recipe's CraftingIngredientCount at the crafting tier, so armorPrimitive
+    // Helmet's base 5 fibers/wood becomes 15 at tier 3 (row level 2,3,4,5,6 =
+    // +5,+10,+15,+20,+30). The crafted item then carries the tier as quality.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try Game.createWithOptions(gpa, world_dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var capture: ln_peer.Capture = .{};
+    const cl = try g.attachJoinedClient(&capture);
+    const ps = g.sim.playerByPeer(cl.slot).?;
+    const recipe = g.recipes.byName("armorPrimitiveHelmet") orelse return error.SkipZigTest;
+    const ridx: u16 = blk: {
+        for (g.recipes.defs, 0..) |d, i| {
+            if (std.mem.eql(u8, d.name, recipe.name)) break :blk @intCast(i);
+        }
+        return error.SkipZigTest;
+    };
+    // craftingArmor level 4: the primitive row lands on value 2 (tier 3).
+    cl.skill_levels[0] = .{ .name = "craftingArmor", .level = 4 };
+    cl.skill_level_n = 1;
+    try std.testing.expectEqual(@as(u8, 3), game_craft.craftingTierFor(g, cl.slot, recipe));
+
+    const out_id = g.ecsIdFromItemName("armorPrimitiveHelmet");
+    const fibers = g.ecsIdFromItemName("resourceYuccaFibers");
+    const wood = g.ecsIdFromItemName("resourceWood");
+    const cloth = g.ecsIdFromItemName("resourceCloth");
+    const tape = g.ecsIdFromItemName("resourceDuctTape");
+    // 14 fibers is one short of the tier-3 requirement.
+    try std.testing.expect(g.sim.depositItem(ps, fibers, 14));
+    try std.testing.expect(g.sim.depositItem(ps, wood, 15));
+    try std.testing.expect(g.sim.depositItem(ps, cloth, 1));
+    try std.testing.expect(g.sim.depositItem(ps, tape, 1));
+    try std.testing.expect(!g.tryCraft(cl.slot, ridx, 1));
+    try std.testing.expect(g.sim.depositItem(ps, fibers, 1));
+    try std.testing.expect(g.tryCraft(cl.slot, ridx, 1));
+
+    var found_quality: u8 = 0;
+    for (g.sim.inventory[ps].slots[0..ecs.components.inv_equip_start]) |sl| {
+        if (sl.item_id == out_id and sl.count > 0) found_quality = sl.quality;
+    }
+    try std.testing.expectEqual(@as(u8, 3), found_quality);
 }
 
 test "the survival pass folds the armor query into buff_phys_resist" {

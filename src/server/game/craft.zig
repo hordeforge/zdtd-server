@@ -16,6 +16,8 @@ const Client = game_mod.Client;
 const assets_items = @import("../../assets/items.zig");
 const assets_recipes = @import("../../assets/recipes.zig");
 const assets_progression = @import("../../assets/progression.zig");
+const assets_requirements = @import("../../assets/requirements.zig");
+const assets_sandbox = @import("../../assets/sandbox.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
 const replicate_te = @import("../replicate_te.zig");
@@ -229,6 +231,88 @@ fn resolveWorkstationSmeltScale(ctx: ?*anyopaque, tools: []const components.InvS
 }
 
 /// Craft recipe by index into recipes.defs (InvTx craft op). Consumes ingredients, grants output.
+/// Sandbox option 96 `CraftingProgression` (stock `XUiM_Recipes.CraftingProgression`).
+/// The decoded server code wins; an option the code does not carry keeps its
+/// stock default (Yes).
+fn craftingProgressionOn(self: *const Game) bool {
+    const o = assets_sandbox.optionByName("CraftingProgression") orelse return true;
+    var groups: [assets_sandbox.max_groups]assets_sandbox.Group = undefined;
+    const n = assets_sandbox.decode(self.sandbox_code, &groups);
+    for (groups[0..n]) |g| {
+        if (g.option_id == o.id) return assets_sandbox.valueB(o, g.index);
+    }
+    return o.default_i != 0;
+}
+
+/// Fold one class's `CraftingTier` rows at `lvl` over the running value.
+fn foldCraftingTier(passives: []const assets_buffs.Passive, lvl: u8, ctx: assets_requirements.Ctx, v: *f32, counts: *assets_requirements.Counts) void {
+    for (passives) |p| {
+        if (!std.mem.eql(u8, p.name, "CraftingTier")) continue;
+        if (!assets_buffs.tagsMatch(p.tags, ctx.tags)) continue;
+        if (p.reqs.len > 0 and assets_requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
+        const amount = if (p.value_cvar.len > 0)
+            assets_requirements.cvarValue(ctx, p.value_cvar)
+        else
+            assets_buffs.curveAtAxis(p, @floatFromInt(lvl));
+        switch (p.op) {
+            .base_set, .set => v.* = amount,
+            .base_add, .add => v.* += amount,
+            .base_subtract, .subtract => v.* -= amount,
+            .perc_add => v.* *= 1.0 + amount,
+            .perc_subtract => v.* *= 1.0 - amount,
+            else => {},
+        }
+    }
+}
+
+/// Stock `Recipe.GetCraftingTier(player)` (IL=22): flat 6 when
+/// CraftingProgression is off, else `EffectManager.GetValue(CraftingTier = 91,
+/// null, base 1, player, recipe, recipe.tags)` folded over the player's crafting
+/// skill and perk rows whose tags intersect the recipe's tag set (which stock
+/// builds as `tags + "," + recipe name`), evaluated at the class's purchased
+/// level. The folded float truncates (`conv.i4`) and the item clamps to its own
+/// max quality tier; zdtd clamps 1..max_quality_tiers.
+pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) u8 {
+    if (!craftingProgressionOn(self)) return components.max_quality_tiers;
+    var v: f32 = 1;
+    var counts: assets_requirements.Counts = .{};
+    const ctx: assets_requirements.Ctx = .{ .tags = recipe.tags };
+    for (self.progression_table.crafting_skills) |sk| {
+        foldCraftingTier(sk.passives, self.skillLevelOf(peer_slot, sk.name), ctx, &v, &counts);
+    }
+    for (self.progression_table.perks) |pk| {
+        foldCraftingTier(pk.passives, self.skillLevelOf(peer_slot, pk.name), ctx, &v, &counts);
+    }
+    const tier: f32 = @trunc(v);
+    if (!(tier >= 1)) return 1;
+    return @intFromFloat(@min(tier, @as(f32, @floatFromInt(components.max_quality_tiers))));
+}
+
+/// Deposit a crafted output. A HasQuality item carries the crafting tier as its
+/// quality (stock TileEntityWorkstation builds the output ItemValue with
+/// RecipeQueueItem.Quality; the inventory craft has no queue item and uses
+/// GetCraftingTier). A quality item never merges into a different tier, so it
+/// takes a free slot; a stackable keeps the plain merge path.
+fn depositCrafted(self: *Game, ps: ecs.Slot, item_id: u16, count: u16, quality: u8) bool {
+    const has_quality = if (self.items.byId(item_id)) |d| d.has_quality else false;
+    if (!has_quality) return self.sim.depositItem(ps, item_id, count);
+    const inv = &self.sim.inventory[ps];
+    const max_stack = self.items.stackFor(item_id);
+    if (max_stack > 1) {
+        for (inv.slots[0..components.inv_equip_start]) |*sl| {
+            if (sl.item_id != item_id or sl.quality != quality or sl.count == 0) continue;
+            if (@as(u32, sl.count) + count > max_stack) continue;
+            sl.count += count;
+            return true;
+        }
+    }
+    var fi: usize = 0;
+    while (fi < components.inv_equip_start and inv.slots[fi].count != 0) : (fi += 1) {}
+    if (fi >= components.inv_equip_start) return false;
+    inv.slots[fi] = .{ .item_id = item_id, .count = count, .quality = quality };
+    return true;
+}
+
 pub fn tryCraft(self: *Game, peer_slot: usize, recipe_index: u16, times: u16) bool {
     if (recipe_index >= self.recipes.defs.len) return false;
     return tryCraftRecipe(self, peer_slot, self.recipes.defs[recipe_index], times);
@@ -252,6 +336,9 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     if (assets_progression.unlockRequirement(&self.progression_table, recipe.name)) |req| {
         if (self.skillLevelOf(peer_slot, req[0]) < req[1]) return false;
     }
+    // Crafting tier (Recipe.GetCraftingTier): the ingredient modifier level
+    // and the crafted item's quality tier.
+    const craft_tier: u8 = craftingTierFor(self, peer_slot, recipe);
     var n: u16 = if (times == 0) 1 else @min(times, self.craft_max_times);
     // Wasm-first (AGENTS rule 29): crafting passes the on_craft_request
     // verdict (<0 deny, 0 keep, >0 caps the batch). The recipe name is the
@@ -272,7 +359,11 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
         const ing = recipe.ingredients[i];
         const id = self.ecsIdFromItemName(ing.name);
         if (id == 0) return false;
-        const add: u32 = @as(u32, ing.count) * n;
+        // Recipe.CanCraft: with UseIngredientModifier the count is
+        // GetValue(CraftingIngredientCount = 198) at the crafting tier,
+        // clamped to at least 1.
+        const need_count = assets_recipes.ingredientCount(recipe, ing.name, ing.count, craft_tier);
+        const add: u32 = @as(u32, need_count) * n;
         var merged = false;
         var k: usize = 0;
         while (k < nn) : (k += 1) {
@@ -307,7 +398,11 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
             return false;
         }
     }
-    if (!self.sim.depositItem(ps, out_id, out_count)) {
+    const out_quality: u8 = if (self.items.byId(out_id)) |d|
+        (if (d.has_quality) craft_tier else 1)
+    else
+        1;
+    if (!depositCrafted(self, ps, out_id, out_count, out_quality)) {
         self.sim.inventory[ps] = inventory_before;
         return false;
     }

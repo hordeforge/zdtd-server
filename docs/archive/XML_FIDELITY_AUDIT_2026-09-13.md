@@ -186,7 +186,12 @@ block (the blast-path formula application is queued); `items.xml` Action0
 `EconomicValue` / `Stacknumber` / quality; sandbox boolean defaults; blood-moon
 row duration unit; biomemap ids resolved by name; quest `radius` property and
 `param1` variable substitution; `lootcontainer count` picks; traderAlways
-fallback only for unresolved rows. Everything else below is still queued.
+fallback only for unresolved rows. **Second pass:** `recipes.xml` recipe tags
+(`tags + name`), `use_ingredient_modifier` and the `CraftingIngredientCount`
+rows; `progression.xml` `<crafting_skill>` passives; `Recipe.GetCraftingTier`
+now drives the crafted output quality and the tier-scaled ingredient counts,
+and a workstation output keeps its queue-item quality. Everything else below is
+still queued.
 
 Fixes land in follow-up commits, worst first, by domain so each change set is
 one loader surface:

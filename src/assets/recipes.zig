@@ -5,6 +5,8 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const components = @import("../ecs/components.zig");
+const buffs = @import("buffs.zig");
+const requirements = @import("requirements.zig");
 const util_log = @import("../util/log.zig");
 
 /// Storage cap on parsed recipes, a zdtd bound rather than a stock rule: stock
@@ -51,7 +53,58 @@ pub const RecipeDef = struct {
     wildcard_forge_category: bool = false,
     ingredients: [max_ingredients]Ingredient = [_]Ingredient{.{}} ** max_ingredients,
     ingredient_n: u8 = 0,
+    /// `tags` attribute plus the recipe name. Stock RecipesFromXml builds the
+    /// tag set as `tags + "," + name` (IL_0180-0191), which is what lets a
+    /// `CraftingTier`/`CraftingIngredientCount` row tagged with the output or
+    /// ingredient item name match the recipe query.
+    tags: []const u8 = "",
+    /// `use_ingredient_modifier` (stock ParseBool default true): the recipe's
+    /// CraftingIngredientCount rows fold into each ingredient's count.
+    use_ingredient_modifier: bool = true,
+    /// `<effect_group>` passive rows (CraftingIngredientCount,
+    /// CraftingTier), arena-backed.
+    passives: []const buffs.Passive = &.{},
 };
+
+/// `CraftingIngredientCount` (passive 198) rows on a recipe scale one
+/// ingredient's required count at the crafting tier (stock Recipe.CanCraft:
+/// `EffectManager.GetValue(198, itemValue, count, player, recipe,
+/// FastTags.Parse(itemName), level = craftingTier)` when
+/// `UseIngredientModifier`), clamped to at least 1. The query tags are the
+/// ingredient name; `perc_add`/`perc_subtract` are fractions (+0.25 = +25%,
+/// the non-loot passive convention).
+pub fn ingredientCount(
+    recipe: RecipeDef,
+    ing_name: []const u8,
+    base: u16,
+    crafting_tier: u8,
+) u16 {
+    if (!recipe.use_ingredient_modifier or recipe.passives.len == 0) return @max(1, base);
+    var v: f32 = @floatFromInt(base);
+    var counts: requirements.Counts = .{};
+    const ctx: requirements.Ctx = .{ .tags = ing_name };
+    for (recipe.passives) |p| {
+        if (!std.mem.eql(u8, p.name, "CraftingIngredientCount")) continue;
+        if (!buffs.tagsMatch(p.tags, ctx.tags)) continue;
+        if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, &counts) != .pass) continue;
+        const amount = if (p.value_cvar.len > 0)
+            requirements.cvarValue(ctx, p.value_cvar)
+        else
+            buffs.curveAtAxis(p, @floatFromInt(@max(1, crafting_tier)));
+        switch (p.op) {
+            .base_set, .set => v = amount,
+            .base_add, .add => v += amount,
+            .base_subtract, .subtract => v -= amount,
+            .perc_add => v *= 1.0 + amount,
+            .perc_subtract => v *= 1.0 - amount,
+            else => {},
+        }
+        if (!(v >= 0)) v = 0;
+    }
+    const rounded: f32 = @ceil(v);
+    if (rounded < 1) return 1;
+    return @intFromFloat(@min(rounded, 65535.0));
+}
 
 pub const RecipeTable = struct {
     defs: []const RecipeDef = &.{},
@@ -189,6 +242,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
     const arena = arena_holder.allocator();
 
     var list: std.ArrayList(RecipeDef) = .empty;
+    // effect_group rows: one shared pool in encounter order with a per-recipe
+    // range, patched after the walk (same shape as the item_modifiers loader).
+    var passives_list: std.ArrayList(buffs.Passive) = .empty;
+    var reqs_list: std.ArrayList(requirements.Requirement) = .empty;
+    var req_ranges: std.ArrayList(struct { usize, usize }) = .empty;
+    var ranges: std.ArrayList(struct { usize, usize }) = .empty;
     defer list.deinit(allocator);
 
     var i: usize = 0;
@@ -240,6 +299,27 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         if (xml.attr(clean, tag, "craft_exp_gain")) |ceg| {
             def.craft_exp_gain = xml.parseI32Prefix(ceg) orelse -1;
         }
+        // Stock RecipesFromXml IL_0180-0191: tags = attr("tags") + "," + name.
+        {
+            const raw_tags = xml.attr(clean, tag, "tags") orelse "";
+            def.tags = try std.fmt.allocPrint(arena, "{s},{s}", .{ raw_tags, name });
+        }
+        if (xml.attr(clean, tag, "use_ingredient_modifier")) |uim| {
+            def.use_ingredient_modifier = !(std.mem.eql(u8, uim, "false") or std.mem.eql(u8, uim, "False"));
+        }
+        {
+            const p0 = passives_list.items.len;
+            _ = buffs.scanPassives(
+                arena,
+                arena,
+                body,
+                &passives_list,
+                &reqs_list,
+                &req_ranges,
+                std.math.maxInt(usize),
+            ) catch {};
+            try ranges.append(arena, .{ p0, passives_list.items.len - p0 });
+        }
         // Self-closing or open body tag both mark forge scrap stubs.
         if (std.mem.find(u8, body, "<wildcard_forge_category") != null) {
             def.wildcard_forge_category = true;
@@ -269,12 +349,27 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         // Keep recipes with ingredients; also keep always_unlocked / scrap stubs.
         if (def.ingredient_n > 0 or def.always_unlocked or def.wildcard_forge_category) {
             try list.append(allocator, def);
+        } else {
+            // The recipe is dropped, so drop its passive range too (the rows
+            // stay in the shared pool, unreferenced).
+            _ = ranges.pop();
         }
         i = next_i;
     }
 
     const defs = try arena.alloc(RecipeDef, list.items.len);
     @memcpy(defs, list.items);
+    if (req_ranges.items.len != passives_list.items.len) return error.MalformedRecipes;
+    const req_pool = try arena.alloc(requirements.Requirement, reqs_list.items.len);
+    @memcpy(req_pool, reqs_list.items);
+    const pool = try arena.alloc(buffs.Passive, passives_list.items.len);
+    @memcpy(pool, passives_list.items);
+    for (pool, req_ranges.items) |*pw, rg| {
+        pw.reqs = req_pool[rg[0] .. rg[0] + rg[1]];
+    }
+    for (defs, ranges.items) |*d, rg| {
+        d.passives = pool[rg[0] .. rg[0] + rg[1]];
+    }
     return .{
         .defs = defs,
         .arena_ptr = arena_holder,
@@ -285,6 +380,58 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?RecipeTable {
     const paths = @import("paths.zig");
     return paths.tryLoadConfig("recipes.xml", RecipeTable, loadFromPath, allocator, game_dir, config_dir);
+}
+
+test "recipe tags, ingredient modifier and CraftingIngredientCount" {
+    // Stock RecipesFromXml builds the recipe tag set as `tags + "," + name`
+    // (IL_0180-0191), so a CraftingTier row tagged with the output item name
+    // matches. Recipe.CanCraft folds CraftingIngredientCount (198) per
+    // ingredient at the crafting tier when UseIngredientModifier (default
+    // true; `use_ingredient_modifier="false"` opts out).
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(t.defs.len > 500);
+
+    const hammer = t.byName("meleeToolRepairT1ClawHammer").?;
+    // The declared tags plus the recipe name: the name is what lets the
+    // craftingRepairTools skill's CraftingTier row (tagged with the item name)
+    // match this recipe's query.
+    try std.testing.expect(std.mem.find(u8, hammer.tags, "craftingHarvestingTools") != null);
+    try std.testing.expect(std.mem.find(u8, hammer.tags, "meleeToolRepairT1ClawHammer") != null);
+    try std.testing.expect(hammer.use_ingredient_modifier);
+
+    // armorPrimitiveHelmet: base_add level 2..6 value 5..30 on fibers/wood
+    // (base 5) and level 4..6 on cloth (base 0) and level 5..6 on duct tape.
+    const helmet = t.byName("armorPrimitiveHelmet").?;
+    try std.testing.expectEqual(@as(u16, 5), ingredientCount(helmet, "resourceYuccaFibers", 5, 1));
+    try std.testing.expectEqual(@as(u16, 10), ingredientCount(helmet, "resourceYuccaFibers", 5, 2));
+    try std.testing.expectEqual(@as(u16, 35), ingredientCount(helmet, "resourceYuccaFibers", 5, 6));
+    // A base of 0 stays at the clamp floor of 1 (the row adds nothing at the
+    // tested tier, and stock clamps the requirement to at least 1).
+    try std.testing.expectEqual(@as(u16, 1), ingredientCount(helmet, "resourceCloth", 0, 1));
+    try std.testing.expectEqual(@as(u16, 5), ingredientCount(helmet, "resourceCloth", 0, 4));
+    // An ingredient the rows do not name keeps its base count.
+    try std.testing.expectEqual(@as(u16, 5), ingredientCount(helmet, "resourceDuctTape", 5, 4));
+
+    // perc_add rows are fractions: ammoDartIron unit_iron base 3 at tier 1
+    // (value .25) becomes ceil(3 * 1.25) = 4.
+    const dart = t.byName("ammoDartIron").?;
+    try std.testing.expect(dart.use_ingredient_modifier);
+    try std.testing.expectEqual(@as(u16, 4), ingredientCount(dart, "unit_iron", 3, 1));
+    try std.testing.expectEqual(@as(u16, 3), ingredientCount(dart, "unit_clay", 3, 1));
+
+    // use_ingredient_modifier="false" opts the recipe out entirely (the
+    // forge-emptying rows). Some of those names also have an earlier wildcard
+    // stub that keeps the attribute default, so scan the catalog.
+    var opted_out = false;
+    for (t.defs) |d| {
+        if (d.use_ingredient_modifier) continue;
+        opted_out = true;
+        try std.testing.expectEqual(@as(u16, 7), ingredientCount(d, "unit_iron", 7, 6));
+    }
+    try std.testing.expect(opted_out);
 }
 
 test "builtin recipes" {

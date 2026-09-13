@@ -142,6 +142,12 @@ pub const CraftingSkill = struct {
     name: []const u8 = "",
     max_level: u16 = 100,
     entries: []const UnlockEntry = &.{},
+    /// `<effect_group>` passive rows on the skill. `CraftingTier` (passive 91)
+    /// rows produce the crafted output's quality tier for the recipes whose tag
+    /// set carries this skill's name (`Recipe.GetCraftingTier` IL=22: base 1,
+    /// folded at the skill's purchased level, tag-filtered by the recipe's
+    /// tags); `RecipeTagUnlocked` (73) rows are the unlock gate.
+    passives: []const buffs.Passive = &.{},
 };
 
 pub const Table = struct {
@@ -744,6 +750,14 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     // recipes unlock at the display_entry's mapped level per tier.
     var skills: std.ArrayList(CraftingSkill) = .empty;
     defer skills.deinit(allocator);
+    var skill_passives: std.ArrayList(buffs.Passive) = .empty;
+    defer skill_passives.deinit(allocator);
+    var skill_reqs: std.ArrayList(requirements.Requirement) = .empty;
+    defer skill_reqs.deinit(allocator);
+    var skill_req_ranges: std.ArrayList([2]usize) = .empty;
+    defer skill_req_ranges.deinit(allocator);
+    var skill_ranges: std.ArrayList([2]usize) = .empty;
+    defer skill_ranges.deinit(allocator);
     var si: usize = 0;
     while (si < clean.len and skills.items.len < max_skills) {
         const ski = std.mem.findPos(u8, clean, si, "<crafting_skill ") orelse break;
@@ -794,6 +808,9 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
             }
             ei = dgt + 1;
         }
+        const sp0 = skill_passives.items.len;
+        try scanPassives(allocator, arena, body, &skill_passives, &skill_reqs, &skill_req_ranges);
+        try skill_ranges.append(allocator, .{ sp0, skill_passives.items.len - sp0 });
         const entries_slice = try arena.alloc(UnlockEntry, entries.items.len);
         @memcpy(entries_slice, entries.items);
         sk.entries = entries_slice;
@@ -802,6 +819,17 @@ pub fn loadTableFromPath(allocator: std.mem.Allocator, path: []const u8) !Table 
     }
     const sk_slice = try arena.alloc(CraftingSkill, skills.items.len);
     @memcpy(sk_slice, skills.items);
+    if (skill_req_ranges.items.len != skill_passives.items.len) return error.MalformedProgression;
+    const sk_req_pool = try arena.alloc(requirements.Requirement, skill_reqs.items.len);
+    @memcpy(sk_req_pool, skill_reqs.items);
+    const sk_pool = try arena.alloc(buffs.Passive, skill_passives.items.len);
+    @memcpy(sk_pool, skill_passives.items);
+    for (sk_pool, skill_req_ranges.items) |*pw, rg| {
+        pw.reqs = sk_req_pool[rg[0] .. rg[0] + rg[1]];
+    }
+    for (sk_slice, skill_ranges.items) |*sk, rg| {
+        sk.passives = sk_pool[rg[0] .. rg[0] + rg[1]];
+    }
 
     return .{
         .curve = curve,
@@ -975,6 +1003,41 @@ test "progression triggered rows parse (perkIntellectMastery bookworm cvar)" {
     try std.testing.expectEqual(@as(f32, 1), cr.reqs[0].value);
     // Stock keeps these rows on the perk body, not on attributes.
     for (t.attributes) |a| try std.testing.expectEqual(@as(usize, 0), a.triggered.len);
+}
+
+test "crafting-skill passive_effect rows parse (CraftingTier)" {
+    // The 14 crafting skills carry `<effect_group>` rows: CraftingTier (91)
+    // produce the crafted output's quality tier for the recipes whose tag set
+    // carries the row's tag (the output item name), and RecipeTagUnlocked (73)
+    // is the learn gate. Before this they were parsed as display/unlock entries
+    // only, so a crafted item always came out at tier 1.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/progression.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadTableFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    var tier_rows: usize = 0;
+    var skill: ?CraftingSkill = null;
+    for (t.crafting_skills) |sk| {
+        if (std.mem.eql(u8, sk.name, "craftingRepairTools")) skill = sk;
+        for (sk.passives) |p| {
+            if (std.mem.eql(u8, p.name, "CraftingTier")) tier_rows += 1;
+        }
+    }
+    try std.testing.expect(tier_rows > 40);
+    const sk = skill orelse return error.SkipZigTest;
+    // Claw hammer row: base_add 1,2,3,4,5,5 at levels 8,12,16,20,25,50.
+    var found = false;
+    for (sk.passives) |p| {
+        if (!std.mem.eql(u8, p.name, "CraftingTier")) continue;
+        if (!std.mem.eql(u8, p.tags, "meleeToolRepairT1ClawHammer")) continue;
+        found = true;
+        try std.testing.expectEqual(buffs.Op.base_add, p.op);
+        try std.testing.expectApproxEqAbs(@as(f32, 0), buffs.curveAtAxis(p, 7), 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 1), buffs.curveAtAxis(p, 8), 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 3), buffs.curveAtAxis(p, 16), 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 5), buffs.curveAtAxis(p, 50), 1e-4);
+    }
+    try std.testing.expect(found);
 }
 
 test "perk/attribute passive_effect rows parse (the 649-row surface)" {
