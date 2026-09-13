@@ -1,6 +1,7 @@
 //! Health replicate path - extracted verbatim from game.zig.
 //! Thin forwarder keeps callers unchanged.
 
+const std = @import("std");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -46,30 +47,41 @@ pub fn replicatePlayerHealth(self: *Game) void {
                 if (oc.peer) |op| {
                     // Stock EntityPlayer.HandleClientDeath (IL=71) switches on
                     // GameStats DeathPenalty and runs the matching
-                    // game_on_death_* sequence; the AddXPDeficit client action
-                    // reaches the dead player's client as a
-                    // ClientSequenceAction (12) response, which earns the
-                    // deficit locally (AddXPDeficit IL=65, passive 0x61
-                    // default 0.1 clamped by 0x60 default 0.5). Only the two
-                    // sequences carrying AddXPDeficit send one:
-                    // game_on_death_default (DeathPenalty 1, gameevents.xml:67)
-                    // and game_on_death_injured (DeathPenalty 2,
-                    // gameevents.xml:78); AddXPDeficit is action index 0 in
-                    // both, and root action keys are `Name:index`
-                    // (SetActionKeyData), so the keys below are exact.
-                    // Without this the client's local death flow is the only
-                    // earn path; stock also drives it from the server side.
-                    const seq: ?struct { name: []const u8, key: []const u8 } = switch (self.death_penalty) {
-                        1 => .{ .name = "game_on_death_default", .key = "game_on_death_default:0" },
-                        2 => .{ .name = "game_on_death_injured", .key = "game_on_death_injured:0" },
-                        else => null,
-                    };
-                    if (seq) |sq| {
-                        if (packages.buildGameEventSequenceAction(self.body_buf[200..456], sq.name, oc.entity_id, sq.key)) |sdb| {
-                            self.sendGame(op, "NetPackageGameEventResponse", sdb) catch {
-                                self.harness.counters.inc(.net_send_errors);
-                            };
-                        } else |_| {}
+                    // game_on_death_* sequence. Two halves of that sequence
+                    // matter to a dedicated server:
+                    //  (a) the AddXPDeficit client action reaches the dead
+                    //      player's client as a ClientSequenceAction (12)
+                    //      response, which earns the deficit locally
+                    //      (AddXPDeficit IL=65, passive 0x61 default 0.1
+                    //      clamped by 0x60 default 0.5). Only the sequences
+                    //      that declare it send one, and the root action key is
+                    //      `Name:index` (SetActionKeyData) - both the name and
+                    //      the index come from the parsed gameevents.xml, not
+                    //      from a constant.
+                    //  (b) RemoveDeathBuffs removes the death buffs server
+                    //      side, honouring the injured sequence's
+                    //      `exclude_tags="deathpenalty_injured"` so those
+                    //      survive a DeathPenalty 2 death.
+                    const seq_name = Game.deathSequenceName(self.death_penalty);
+                    if (seq_name) |sname| {
+                        // The index is data (`Name:index` root action key). The
+                        // floor for a server running without the stock Config
+                        // is stock's index 0 for the two sequences that declare
+                        // AddXPDeficit (game_on_death_default / _injured), so
+                        // the client's death flow is still driven offline.
+                        const deficit_i: ?u32 = self.gameEventActionIndex(sname) orelse
+                            (if (self.death_penalty == 1 or self.death_penalty == 2) @as(u32, 0) else null);
+                        if (deficit_i) |deficit_i_v| {
+                            var key_buf: [64]u8 = undefined;
+                            if (std.fmt.bufPrint(&key_buf, "{s}:{d}", .{ sname, deficit_i_v })) |key| {
+                                if (packages.buildGameEventSequenceAction(self.body_buf[200..456], sname, oc.entity_id, key)) |sdb| {
+                                    self.sendGame(op, "NetPackageGameEventResponse", sdb) catch {
+                                        self.harness.counters.inc(.net_send_errors);
+                                    };
+                                } else |_| {}
+                            } else |_| {}
+                        }
+                        _ = self.runGameEventSequence(oc.slot, sname);
                     }
                     const wsp = self.world.primarySpawn();
                     var entries: [2]packages.SpawnPointEntry = undefined;

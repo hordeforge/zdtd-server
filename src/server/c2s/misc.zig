@@ -631,6 +631,13 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         _ = r.readString(&seq_buf) catch "";
         const var_count = r.readByte() catch 0;
         if (self.gameEventVerdict(c.entity_id, event_name, target_eid, @intCast(var_count)) < 0) return true;
+        // A supported sequence runs server side. Stock's client only forwards
+        // the request (GameEventManager::HandleActionClient IL=416 sends
+        // NetPackageGameEventRequest and returns), so this is where the respawn
+        // family's stat restore and buff changes happen. Names that are not
+        // parsed sequences - quest, trader and challenge events included - stay
+        // ack-only.
+        _ = self.runGameEventSequence(c.slot, event_name);
         if (packages.buildGameEventResponse(&self.body_buf, body)) |resp| {
             self.sendGame(peer, "NetPackageGameEventResponse", resp) catch |err| {
                 self.harness.counters.inc(.net_send_errors);

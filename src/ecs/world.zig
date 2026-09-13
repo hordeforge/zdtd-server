@@ -832,15 +832,19 @@ pub const World = struct {
         var cleared_n: u8 = 0;
         if (self.mask[slot].buffs) cleared_n = buff.clearOnDeath(&self.buffs[slot], cleared);
         var h = self.health[slot];
-        h.hp = 100;
-        h.max_hp = 100;
-        h.base_max_hp = 100;
-        // Keep food/water/stamina on respawn; stock does not zero them
-        // (the bug did `Health{hp=100,max=100}` which zeroed food=0/water=0).
-        if (h.food == 0 and h.food_max == 0) h.food_max = 100;
-        if (h.water == 0 and h.water_max == 0) h.water_max = 100;
-        if (h.stamina_max == 0) h.stamina_max = 100;
-        if (h.stamina == 0) h.stamina = h.stamina_max;
+        // Stock's respawn sequences restore the stats with
+        // `ModifyEntityStat <stat> SetMax` (gameevents.xml, run server side by
+        // game/game_events.zig), so this funnel only has to leave each stat at
+        // its own current maximum: the max fields are the entity's state
+        // (spawn max plus the survival pass's passive deltas). It used to
+        // hardcode hp/max/base_max = 100, which also dropped every HealthMax
+        // bonus a player had earned, and it left Food/Water untouched while the
+        // data says SetMax.
+        if (h.max_hp <= 0) h.max_hp = h.base_max_hp;
+        h.hp = h.max_hp;
+        h.food = h.food_max;
+        h.water = h.water_max;
+        h.stamina = h.stamina_max;
         self.health[slot] = h;
         if (self.mask[slot].player) self.player[slot].is_blood_moon_dead = false;
         self.transform[slot] = .{ .x = x, .y = y, .z = z, .yaw = 0 };

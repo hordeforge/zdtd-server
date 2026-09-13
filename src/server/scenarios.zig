@@ -38,7 +38,10 @@ const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_noise = @import("../assets/noise.zig");
 const assets_blocks = @import("../assets/blocks.zig");
+const assets_gameevents = @import("../assets/gameevents.zig");
+const assets_cvars = @import("../assets/cvars.zig");
 const inv_c2s = @import("c2s/inv.zig");
+const c2s_misc = @import("c2s/misc.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
 const evidence_mod = @import("evidence.zig");
@@ -1084,6 +1087,170 @@ test "scenario writable crate: the echo keeps the client's sign module" {
     const after = 21 + 12 + 4 + 4 + 1 + 1 + 4;
     try std.testing.expectEqualSlices(u8, body[after..], echo[after..]);
     std.debug.print("PASS crate-te: echo keeps the storage module and the client's sign module\n", .{});
+}
+
+test "scenario gameevents: the respawn sequence drives the stat restore" {
+    // Stock's client does not apply the respawn sequences itself:
+    // GameEventManager::HandleActionClient (IL=416) only sends
+    // NetPackageGameEventRequest, so the SERVER runs game_on_respawn_*. The
+    // data decides the outcome: _injured sets Food/Water to half their max and
+    // adds buffInfectionCatch when the infection cvar is up, _default does
+    // SetMax on all four stats. The funnel used to hardcode hp/max = 100.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_gameevents");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_gameevents", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/gameevents.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<gameevents>
+        \\  <action_sequence name="game_on_respawn_injured">
+        \\    <action class="ModifyEntityStat">
+        \\      <property name="stat" value="Food" />
+        \\      <property name="value" value=".5" />
+        \\      <property name="is_percent" value="true" />
+        \\      <property name="operation" value="Set" />
+        \\    </action>
+        \\    <action class="ModifyEntityStat">
+        \\      <property name="stat" value="Water" />
+        \\      <property name="value" value=".5" />
+        \\      <property name="is_percent" value="true" />
+        \\      <property name="operation" value="Set" />
+        \\    </action>
+        \\    <action class="AddBuff">
+        \\      <property name="buff_name" value="buffShocked" />
+        \\      <requirement class="CVar">
+        \\        <property name="cvar" value="infectionCounterRespawn"/>
+        \\        <property name="operation" value="GT" />
+        \\        <property name="value" value="0" />
+        \\      </requirement>
+        \\    </action>
+        \\  </action_sequence>
+        \\  <action_sequence name="game_on_respawn_default">
+        \\    <action class="ModifyEntityStat">
+        \\      <property name="stat" value="Food" />
+        \\      <property name="operation" value="SetMax" />
+        \\    </action>
+        \\    <action class="ModifyEntityStat">
+        \\      <property name="stat" value="Water" />
+        \\      <property name="operation" value="SetMax" />
+        \\    </action>
+        \\    <action class="ModifyEntityStat">
+        \\      <property name="stat" value="Health" />
+        \\      <property name="operation" value="SetMax" />
+        \\    </action>
+        \\    <action class="ModifyEntityStat">
+        \\      <property name="stat" value="Stamina" />
+        \\      <property name="operation" value="SetMax" />
+        \\    </action>
+        \\  </action_sequence>
+        \\  <action_sequence name="game_on_respawn_gated">
+        \\    <requirement class="HasBuff">
+        \\      <property name="buff_name" value="buffShocked" />
+        \\    </requirement>
+        \\    <action class="ModifyEntityStat">
+        \\      <property name="stat" value="Health" />
+        \\      <property name="operation" value="SetMax" />
+        \\    </action>
+        \\  </action_sequence>
+        \\</gameevents>
+    );
+    g.gameevents.deinit();
+    g.gameevents = try assets_gameevents.loadFromPath(gpa, path);
+    try std.testing.expect(g.gameevents.sequences.len == 3);
+    // A sequence-level requirement is not evaluated here: the whole sequence
+    // refuses rather than running its action unguarded.
+    try std.testing.expect(!g.gameevents.find("game_on_respawn_gated").?.supported);
+
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.slotOfNetId(c.entity_id).?;
+    const req_of = struct {
+        fn build(event: []const u8) [128]u8 {
+            var b: [128]u8 = undefined;
+            var w = binary.Writer{ .buf = &b };
+            w.writeString(event) catch {};
+            w.writeI32(0) catch {}; // entityID
+            w.writeString("") catch {}; // extraData
+            w.writeString("") catch {}; // tag
+            w.writeBool(false) catch {}; // isTwitchEvent
+            w.writeBool(false) catch {}; // crateShare
+            w.writeBool(false) catch {}; // allowRefunds
+            w.writeString("") catch {}; // sequenceLink
+            w.writeByte(0) catch {}; // variables count
+            return b;
+        }
+    }.build;
+    // Injured: Food/Water to 50% of their max, Health untouched.
+    {
+        var h = g.sim.health[ps];
+        h.hp = 3;
+        h.food = 90;
+        h.water = 80;
+        h.stamina = 10;
+        g.sim.health[ps] = h;
+        const body = req_of("game_on_respawn_injured");
+        _ = try c2s_misc.handle(g, c, c.peer.?, "NetPackageGameEventRequest", body[0..]);
+        try std.testing.expectApproxEqAbs(@as(f32, 50), g.sim.health[ps].food, 0.01);
+        try std.testing.expectApproxEqAbs(@as(f32, 50), g.sim.health[ps].water, 0.01);
+        try std.testing.expectApproxEqAbs(@as(f32, 3), g.sim.health[ps].hp, 0.01);
+        // The AddBuff leg is CVar-gated: with the cvar at 0 nothing is added.
+        try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName("buffShocked").?) == null);
+    }
+    // Same sequence with the cvar up: the infection buff lands.
+    {
+        _ = g.clients[c.slot].cvars.apply("infectionCounterRespawn", .set, 1);
+        const body = req_of("game_on_respawn_injured");
+        _ = try c2s_misc.handle(g, c, c.peer.?, "NetPackageGameEventRequest", body[0..]);
+        try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName("buffShocked").?) != null);
+    }
+    // Default (SetMax): every stat back to its own maximum, and a sequence the
+    // table does not have changes nothing.
+    {
+        var h = g.sim.health[ps];
+        h.hp = 3;
+        h.food = 5;
+        h.water = 5;
+        h.stamina = 5;
+        g.sim.health[ps] = h;
+        const body = req_of("game_on_respawn_default");
+        _ = try c2s_misc.handle(g, c, c.peer.?, "NetPackageGameEventRequest", body[0..]);
+        try std.testing.expectApproxEqAbs(g.sim.health[ps].max_hp, g.sim.health[ps].hp, 0.01);
+        try std.testing.expectApproxEqAbs(g.sim.health[ps].food_max, g.sim.health[ps].food, 0.01);
+        try std.testing.expectApproxEqAbs(g.sim.health[ps].water_max, g.sim.health[ps].water, 0.01);
+        try std.testing.expectApproxEqAbs(g.sim.health[ps].stamina_max, g.sim.health[ps].stamina, 0.01);
+
+        g.sim.health[ps].food = 7;
+        const gated = req_of("game_on_respawn_gated");
+        _ = try c2s_misc.handle(g, c, c.peer.?, "NetPackageGameEventRequest", gated[0..]);
+        try std.testing.expectApproxEqAbs(@as(f32, 7), g.sim.health[ps].food, 0.01);
+        const unknown = req_of("no_such_sequence");
+        _ = try c2s_misc.handle(g, c, c.peer.?, "NetPackageGameEventRequest", unknown[0..]);
+        try std.testing.expectApproxEqAbs(@as(f32, 7), g.sim.health[ps].food, 0.01);
+    }
+    // The respawn funnel leaves the stats at their own maxima (the sequence
+    // above then applies the penalty): a HealthMax bonus must survive.
+    {
+        var h = g.sim.health[ps];
+        h.max_hp = 180;
+        h.base_max_hp = 180;
+        h.hp = 0;
+        g.sim.health[ps] = h;
+        _ = g.sim.respawnPlayer(ps, 256, 70, 256, &.{});
+        try std.testing.expectApproxEqAbs(@as(f32, 180), g.sim.health[ps].hp, 0.01);
+        try std.testing.expectApproxEqAbs(@as(f32, 180), g.sim.health[ps].max_hp, 0.01);
+    }
+    std.debug.print("PASS gameevents: respawn sequence drives stats, buffs and the funnel max\n", .{});
 }
 
 test "scenario treasure point: the server answers the client's dig-site request" {

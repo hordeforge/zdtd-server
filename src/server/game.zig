@@ -36,6 +36,7 @@ const game_deco = @import("game/deco.zig");
 const game_loot = @import("game/loot.zig");
 const game_craft = @import("game/craft.zig");
 const game_chunk_stream = @import("game/chunk_stream.zig");
+const game_game_events = @import("game/game_events.zig");
 const game_chunk_fill = @import("game/chunk_fill.zig");
 const game_weather = @import("game/weather.zig");
 const game_vehicle = @import("game/vehicle.zig");
@@ -62,6 +63,7 @@ const assets_blocks = @import("../assets/blocks.zig");
 const assets_items = @import("../assets/items.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_signs = @import("../assets/signs.zig");
+const assets_gameevents = @import("../assets/gameevents.zig");
 const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
 const assets_loot = @import("../assets/loot.zig");
@@ -497,6 +499,9 @@ pub const Game = struct {
     /// the relay then passes sound through with no AI noise, matching stock
     /// with no data).
     noise_table: assets_noise.Table = assets_noise.Table.empty(),
+    /// gameevents.xml action sequences (death/respawn families). Empty offline:
+    /// the runner then refuses every sequence rather than inventing one.
+    gameevents: assets_gameevents.Table = assets_gameevents.Table.empty(),
     /// blocks.xml Texture → textureFull defaults (unpainted cells).
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
     painting: assets_painting.Table = assets_painting.Table.empty(),
@@ -1990,6 +1995,32 @@ pub const Game = struct {
 
     pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
         return game_world.addBlockDamage(self, x, y, z, dmg);
+    }
+
+    /// Run a parsed gameevents.xml sequence for a player (stock runs these
+    /// server side: the client's respawn only forwards the request). False
+    /// when the table is absent, the name is unknown or the sequence needs an
+    /// action this server does not implement.
+    pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) bool {
+        return game_game_events.runGameEventSequence(self, peer_slot, name);
+    }
+
+    /// `game_on_respawn_*` for a DeathPenalty stat value (0 none, 1 default,
+    /// 2 injured, 3 permanent).
+    pub fn respawnSequenceName(penalty: u8) ?[]const u8 {
+        return game_game_events.respawnSequenceName(penalty);
+    }
+
+    /// `game_on_death_*` for a DeathPenalty stat value.
+    pub fn deathSequenceName(penalty: u8) ?[]const u8 {
+        return game_game_events.deathSequenceName(penalty);
+    }
+
+    /// Index of the AddXPDeficit action inside a sequence, for the
+    /// `Name:index` root action key stock writes into the ClientSequenceAction
+    /// response (null when the sequence has no deficit action).
+    pub fn gameEventActionIndex(self: *Game, seq_name: []const u8) ?u32 {
+        return self.gameevents.addXpDeficitIndex(seq_name);
     }
 
     /// One block inside a blast (stock Explosion::AttackBlocks damage formula,

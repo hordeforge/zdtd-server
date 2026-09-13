@@ -483,6 +483,16 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     const def = self.buffs.byId(rm.def_id) orelse continue;
                     self.relayBuff(c.entity_id, def.name, false, -1, null) catch {};
                 }
+                // The DeathPenalty-selected respawn sequence adjusts what the
+                // funnel restored (game_on_respawn_injured halves Food/Water
+                // and may add buffInfectionCatch; the other two only SetMax).
+                // Data, not code: the client's own respawn flow asks the server
+                // for exactly this sequence (GameEventManager::HandleActionClient
+                // IL=416 forwards the request), and running it here covers the
+                // order where the request has not arrived yet.
+                if (Game.respawnSequenceName(self.death_penalty)) |seq_name| {
+                    _ = self.runGameEventSequence(c.slot, seq_name);
+                }
                 // Arm the next death. The guard exists so one death cannot
                 // produce two bags (the C2S kill path and the hp-replicate
                 // detector both see the same corpse); it used to ride

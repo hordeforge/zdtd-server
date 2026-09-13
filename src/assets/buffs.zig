@@ -172,6 +172,10 @@ pub const BuffDef = struct {
     update_rate_ticks: i32 = default_update_rate_ticks,
     /// BuffClass::RemoveOnDeath (asm.il 1371585), default true per .ctor.
     remove_on_death: bool = true,
+    /// The buff's `<tags value="..."/>` list (buffs.xml element, not an
+    /// attribute). `game_on_death_injured` uses it to keep
+    /// `deathpenalty_injured` buffs through death (16 stock buffs carry it).
+    tags: []const u8 = "",
     passives: []const Passive = &.{},
     stat_mods: []const StatMod = &.{},
     thresholds: []const StatThreshold = &.{},
@@ -679,6 +683,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
             if (xml.attr(body, ui, "value")) |v| meta.update_rate_ticks = parseUpdateRateTicks(v);
         }
         if (xml.attr(clean, bi, "remove_on_death")) |v| meta.remove_on_death = parseBoolAttr(v, true);
+        if (std.mem.find(u8, body, "<tags")) |ti| {
+            if (xml.attr(body, ti, "value")) |v| meta.tags = try arena.dupe(u8, v);
+        }
         const m0 = mods_list.items.len;
         var mj: usize = 0;
         var mn: usize = 0;

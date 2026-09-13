@@ -23,6 +23,7 @@ const assets_entitygroups = @import("../../assets/entitygroups.zig");
 const assets_gamestages = @import("../../assets/gamestages.zig");
 const assets_maxdamage = @import("../../assets/maxdamage.zig");
 const assets_noise = @import("../../assets/noise.zig");
+const assets_gameevents = @import("../../assets/gameevents.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assets_npc = @import("../../assets/npc.zig");
 const assets_biome_layers = @import("../../assets/biome_layers.zig");
@@ -174,6 +175,13 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // Empty without a game-dir: sounds relay with no AI noise (data-gated,
     // matching stock with no data - the table comes from the game's own
     // Data/Config/sounds.xml, never hardcoded values in code).
+    // gameevents.xml action sequences (death/respawn stat restore). Data, not
+    // code: the respawn funnel used to hardcode hp = 100.
+    if (logged("gameevents.xml sequences", assets_gameevents.tryLoad(allocator, opts.game_dir, opts.config_dir))) |gt| {
+        self.gameevents.deinit();
+        self.gameevents = gt;
+        util_log.info("zdtd: gameevents.xml sequences={d}\n", .{self.gameevents.sequences.len});
+    }
     if (logged("sounds.xml noise table", assets_noise.tryLoad(allocator, opts.game_dir, opts.config_dir))) |nt| {
         self.noise_table.deinit();
         self.noise_table = nt;

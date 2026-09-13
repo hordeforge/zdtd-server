@@ -35,6 +35,7 @@ pub const game_join = @import("game/join.zig");
 pub const game_types = @import("game/types.zig");
 pub const game_quest = @import("game/quest.zig");
 pub const game_social = @import("game/social.zig");
+pub const game_game_events = @import("game/game_events.zig");
 pub const game_trader = @import("game/trader.zig");
 pub const game_stability = @import("game/stability.zig");
 pub const game_replicate = @import("game/replicate.zig");
@@ -105,6 +106,7 @@ test {
     _ = replicate_te;
     _ = persist;
     _ = game_net;
+    _ = game_game_events;
     _ = game_tick;
     _ = game_world;
     _ = game_map;
