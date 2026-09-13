@@ -1809,6 +1809,20 @@ A thirteenth pass (2026-08-27) verified the not-a-mod-host boundary
 detects a top-level DLL and warns "code part not hosted, XML patches
 still apply" instead of ever loading one, and never reads Bundles/
 content (stock assetbundle modlets load as data via the patch catalogs).
+A fifteenth pass (2026-09-13) audited the patch engine against the op
+vocabulary stock actually registers (extracted from the V3.2.0 DLL's
+`XmlPatchMethodAttribute` blobs): `csv` (not only the internal
+`csvoperations` spelling), `setattribute` reading `name=` off the patch
+element while `set` handles `/@attr` and element ReplaceNodes, append/
+prepend to an attribute target, a `remove` of an attribute path refused
+like stock, every XPath match patched (not just the first), and the
+predicates real modlets use (`contains`, `starts-with`, `and`/`or`,
+`[@attr]`, `[N]`). `<conditional>` evaluates `mod_loaded`/`mod_version`
+and skips an unevaluable NCalc expression with a warning, and a patch now
+resolves as `<mod>/Config/<configName>` like stock so subdirectory
+configs are covered. Known limit: a modlet-added **block** is inert
+because the block id space is dump-pinned (PRD 0003 G9); modlet items,
+recipes, loot, buffs and progression apply fully.
 A fourteenth pass (2026-08-27) verified persistence via store (rule 21):
 player data saves on reap (tick.zig) through persist.savePlayers, the
 block world is the ZCH3 store (per-cell damage via hdr flag 15, atomic

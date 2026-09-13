@@ -292,12 +292,41 @@ Resolved from RE or explicitly documented before the "compatible" claim:
   only? user-data too?) and the folder iteration order.
 - **G3** Per-mod patch-file order and per-file op order inside
   `LoadPatchStuff`/`PatchXml`; Localization.csv merge order.
+  **Resolved 2026-09-13:** `XmlPatcher.LoadAndPatchConfig` resolves a patch for
+  one config as `<mod>/Config/<configName>` (".xml" appended when the name does
+  not carry it) and calls `PatchXml` on that single file, so no directory
+  enumeration is involved and a config in a subdirectory
+  (`Config/XUi_InGame/windows.xml`) is patchable by relative path. zdtd applies
+  that file first, then keeps its per-file scan as a superset for mods whose
+  patch file is named differently (routed by xpath root). Localization.csv merge
+  remains unimplemented (R10).
 - **G4** `CsvOperationsByXPath` exact element/attribute grammar (`op` values,
-  `value` semantics, separator handling).
+  `value` semantics, separator handling). **Resolved 2026-09-13:** the
+  registered element name is `csv` (`XmlPatchMethodAttribute` blobs on
+  `XmlPatchMethods` are append/prepend/insertAfter/insertBefore/remove/set/
+  setattribute/removeattribute/csv/conditional/include), the patch element
+  carries `op="add|remove|set"` and `xpath` ends in `/@attr`; `add`/`remove`
+  edit the comma list, `set` replaces it. zdtd accepts `csv` (and keeps the
+  internal `csvoperations` spelling).
 - **G5** `Conditional` and `Include` exact element grammar (condition attribute
-  forms, nested container names).
+  forms, nested container names). **Resolved 2026-09-13:** `Conditional` picks
+  the first `<if cond="...">` that evaluates true else `<else>`, and patches
+  with that branch's children; the condition language is NCalc with helper
+  functions `mod_loaded`, `mod_version`, `game_version`, `version`. zdtd
+  evaluates `mod_loaded`/`mod_version` against the scanned mods and skips an
+  expression it cannot evaluate with a warning instead of refusing to boot.
+  `Include` reads `xpath` or `path` with the `@modfolder:` rewrite (G6).
 - **G6** `@modfolder:`/`@modfolder(Name):` token rewrite edge cases (quotes,
   subpaths).
+- **G9** Modded **block** ids. Stock assigns a block id to every `<block>` in
+  the patched `blocks.xml` (XML-declared `Id`, else the leftover scan), so a
+  modlet that adds a block is usable on both sides. zdtd's block id space is
+  pinned from the stock AssignIds dump, and its block loader skips a name the
+  dump does not carry, so a modlet-added block is inert server-side (the item,
+  recipe and loot parts of the same mod still work, since the item id space is
+  derived from the patched XML). Closing this needs the client's runtime id
+  assignment rule or evidence that the client remaps to the server's
+  `NetPackageIdMapping`; recorded, not guessed.
 - **G7** Frame `compressed` bit vs package `Compress` flag layering for
   ConfigFile (single vs double deflate), and zdtd's frame-writer requirements.
   Pin with a loadgen/golden byte test.

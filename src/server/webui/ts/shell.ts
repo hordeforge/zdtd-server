@@ -5,7 +5,7 @@
 const FETCH_TIMEOUT_MS = 8000;
 const HTTP_UNAUTHORIZED = 401;
 const POLL_SLOW_MS = 5000;
-const POLL_FAST_MS = 2000;
+const POLL_FAST_MS = 1000;
 
 /** Element with the poller handles installed by hxPoll (same shape as the
  * _hxStart/_hxStop/_hxOnce hooks the page scripts use; underscores are
@@ -164,7 +164,7 @@ const APM_POLL_MS = POLL_FAST_MS;
 // The right-edge value animation spans exactly one poll interval, so the
 // drawn line catches up to the true value just as the next sample arrives.
 const EDGE_LERP_MS = APM_POLL_MS;
-const CHART_SAMPLES_MAX = 300;
+const CHART_SAMPLES_MAX = 600;
 const TICK_BUDGET_MS = 50;
 const COMPRESS_TAU_MS = 60000;
 const APM_JSON_URL = '/api/apm.json';

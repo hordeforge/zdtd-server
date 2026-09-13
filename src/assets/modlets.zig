@@ -24,6 +24,9 @@ pub const Mod = struct {
     path: []const u8,
     /// The mod's `Config/` dir when present (patch XML source for xml_patch).
     config_dir: ?[]const u8,
+    /// ModInfo `Version` (validated 2-4 numeric components; "0.0" when the
+    /// declared value is invalid). Used by `<conditional>` `mod_version(...)`.
+    version: []const u8,
     /// Stock ModInfo `Icon` property (relative path, e.g. "icon.png").
     /// Metadata only: the host never loads or renders it.
     icon: ?[]const u8 = null,
@@ -35,6 +38,7 @@ pub const Mod = struct {
     pub fn deinit(self: *Mod, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
         allocator.free(self.display_name);
+        allocator.free(self.version);
         allocator.free(self.path);
         if (self.config_dir) |cd| allocator.free(cd);
         if (self.icon) |ic| allocator.free(ic);
@@ -262,6 +266,7 @@ pub fn scan(allocator: std.mem.Allocator, mods_root: []const u8) !Scan {
             .name = try allocator.dupe(u8, parsed.name),
             .display_name = try allocator.dupe(u8, parsed.display_name),
             .path = try allocator.dupe(u8, mod_path),
+            .version = try allocator.dupe(u8, parsed.version),
             .config_dir = config_dir,
             .icon = if (parsed.icon) |ic| (if (ic.len > 0) try allocator.dupe(u8, ic) else null) else null,
             .has_bundles = has_bundles,
@@ -305,6 +310,25 @@ pub fn install(allocator: std.mem.Allocator, mods_root: []const u8) ![]const Mod
     if (installed) |*old| old.deinit(allocator);
     installed = s;
     return s.mod_dirs;
+}
+
+/// True when a scanned mod carries `name` (case-insensitive), for patch
+/// `<conditional>` `mod_loaded('X')` tests.
+pub fn isLoaded(name: []const u8) bool {
+    const s = installed orelse return false;
+    for (s.mods) |*m| {
+        if (std.ascii.eqlIgnoreCase(m.name, name)) return true;
+    }
+    return false;
+}
+
+/// A scanned mod's version by Name, for `mod_version('X')` tests.
+pub fn versionByName(name: []const u8) ?[]const u8 {
+    const s = installed orelse return null;
+    for (s.mods) |*m| {
+        if (std.ascii.eqlIgnoreCase(m.name, name)) return m.version;
+    }
+    return null;
 }
 
 /// Lookup a mod's absolute path by V2 Name, for `@modfolder(Name):` include
