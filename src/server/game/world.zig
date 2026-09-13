@@ -500,7 +500,7 @@ pub fn drainExplosions(self: *Game) void {
                         }
                     }
                     if (mult == 0) continue; // category immune to this blast
-                    const falloff: f32 = 1.0 - @sqrt(d2f) / radius;
+                    const falloff = blastFalloff(wx, wy, wz, ex.x, ex.y, ex.z, radius);
                     _ = self.blastBlock(wx, wy, wz, id, block_dmg, falloff, mult);
                 }
             }
@@ -525,6 +525,37 @@ pub fn drainExplosions(self: *Game) void {
             self.broadcastNear("NetPackageExplosionClient", fxb, ex.x, ex.z, self.interest_range) catch {};
         } else |_| {}
     }
+}
+
+/// Stock `Explosion::AttackBlocks` distance falloff for one cell:
+/// `V_21 = FastMax(0, |blockCenter - blastPos| - 0.5)` then
+/// `1 - V_21 / radius` (IL_0201-0222, IL_02A7-02B5). `Vector3i::ToVector3Center`
+/// is the cell corner plus 0.5 on every axis, and the blast position is the
+/// float world position, so the damage is symmetric around the real blast
+/// rather than around the cell index the loop iterates - the difference is
+/// largest on the diagonals, where the cell index overstates the distance.
+/// 0 or less means the block is outside the blast.
+pub fn blastFalloff(block_x: i32, block_y: i32, block_z: i32, px: f32, py: f32, pz: f32, radius: f32) f32 {
+    const bx = @as(f32, @floatFromInt(block_x)) + 0.5 - px;
+    const by = @as(f32, @floatFromInt(block_y)) + 0.5 - py;
+    const bz = @as(f32, @floatFromInt(block_z)) + 0.5 - pz;
+    const dist = std.math.clamp(@sqrt(bx * bx + by * by + bz * bz) - 0.5, 0, radius);
+    return 1.0 - dist / radius;
+}
+
+test "blast falloff measures from the blast position, not the cell index" {
+    // Stock V_21 = FastMax(0, |blockCentre - blastPos| - 0.5) then
+    // 1 - V_21 / radius (IL_0201-0222). The block centre is the corner plus
+    // 0.5, so the cell the blast sits in takes 1 - (sqrt(0.75) - 0.5)/5 and a
+    // diagonal cell is weaker than its integer cell distance suggests.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.9268), blastFalloff(0, 0, 0, 0, 0, 0, 5), 0.0005);
+    // Cell distance sqrt(18) = 4.243 would give 0.1515; the centre distance is
+    // sqrt(24.75) - 0.5 = 4.475, so 1 - 4.475/5 = 0.1050.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.1050), blastFalloff(3, 0, 3, 0, 0, 0, 5), 0.0005);
+    // The falloff follows the real blast position: half a cell closer is
+    // stronger, and a block beyond the radius reaches 0, not a negative value.
+    try std.testing.expect(blastFalloff(3, 0, 3, 0.5, 0, 0.5, 5) > blastFalloff(3, 0, 3, 0, 0, 0, 5));
+    try std.testing.expectEqual(@as(f32, 0), blastFalloff(6, 0, 0, 0, 0, 0, 5));
 }
 
 /// Apply one blast to the block at (wx,wy,wz), stock `Explosion::AttackBlocks`

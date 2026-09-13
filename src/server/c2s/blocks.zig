@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const chunk_fill = @import("../game/chunk_fill.zig");
+const game_world = @import("../game/world.zig");
 const game_mod = @import("../game.zig");
 const Game = game_mod.Game;
 const Client = game_mod.Client;
@@ -600,8 +601,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     // out merely damaged. Every block the blast destroyed is
                     // re-read below because a downgrade swap also changes the
                     // cell.
-                    const blast_falloff: f32 = 1.0 -
-                        @sqrt(@as(f32, @floatFromInt(dx * dx + dy * dy + dz * dz))) / @as(f32, @floatFromInt(rad));
+                    const blast_falloff = game_world.blastFalloff(
+                        wx,
+                        wy,
+                        wz,
+                        ex.wx,
+                        ex.wy,
+                        ex.wz,
+                        @floatFromInt(rad),
+                    );
                     if (!self.blastBlock(wx, wy, wz, cur, @floatFromInt(ex.block_damage), blast_falloff, 1.0)) continue;
                     const after = self.world.blockWorld(wx, wy, wz) catch continue;
                     if (after != 0) continue; // damaged or downgraded, not destroyed
