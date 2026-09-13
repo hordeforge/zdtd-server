@@ -1589,6 +1589,66 @@ test "scenario party mate's shared quest advances on the killer's kill" {
     std.debug.print("PASS party-quest-kill: in-range mate's shared quest advances\n", .{});
 }
 
+test "scenario an armoured zombie halves the claimed damage" {
+    // entityclasses `PhysicalDamageResist` (passive 41) is victim-side state:
+    // the C2S NetPackageDamageEntity claim carries the attacker's strength and
+    // the server applies the victim's own class row (stock ProcessPackage still
+    // runs EntityAlive.DamageEntity on the victim). zombieSoldier is 50%.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+
+    const armoured = g.sim.spawnZombie(258, 70, 258, 200).?;
+    const as = g.sim.slotOfNetId(armoured).?;
+    g.sim.class_id[as].phys_resist = 50;
+    const plain = g.sim.spawnZombie(260, 70, 260, 200).?;
+    const ps = g.sim.slotOfNetId(plain).?;
+
+    var dmg_body: [256]u8 = undefined;
+    var frame_buf: [512]u8 = undefined;
+    // 100 claimed, no fatal flag: 50 lands on the armoured zombie.
+    const dbody = try packages.buildDamageBody(&dmg_body, armoured, 0, 3, 100, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", dbody));
+    try std.testing.expectEqual(@as(f32, 150.0), g.sim.health[as].hp);
+    // The plain class keeps the full claim.
+    const pbody = try packages.buildDamageBody(&dmg_body, plain, 0, 3, 100, false, c.entity_id);
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageDamageEntity", pbody));
+    try std.testing.expectEqual(@as(f32, 100.0), g.sim.health[ps].hp);
+    // Server-computed damage takes the same leg: drainExplosions calls
+    // World.damageFrom with the cop's class ExplosionData, so an armoured
+    // victim eats half the blast too. The cop and the two victims beside it
+    // share a position, so their distance falloff is exactly 1.0.
+    g.sim.setClassDef(1, .{
+        .name = "zombieCop",
+        .kind = .zombie,
+        .hash = 7,
+        .explosion_radius = 1,
+        .explosion_radius_e = 6,
+        .explosion_entity_dmg = 200,
+    });
+    const cop = g.sim.spawnZombie(258, 70, 258, 400).?;
+    const unarmoured = g.sim.spawnZombie(258, 70, 258, 400).?;
+    const us = g.sim.slotOfNetId(unarmoured).?;
+    g.sim.explode_reqs[0] = .{ .slot = g.sim.slotOfNetId(cop).? };
+    g.sim.explode_n = 1;
+    g.drainExplosions(); // no AI tick in between: the distance stays exactly 0
+    try std.testing.expectEqual(@as(f32, 50.0), g.sim.health[as].hp); // 150 - 100
+    try std.testing.expectEqual(@as(f32, 200.0), g.sim.health[us].hp); // 400 - 200
+    try std.testing.expectEqual(@as(f32, 0.0), g.sim.health[ps].hp); // 100 - 105.6 falloff, dead
+    std.debug.print("PASS zombie-pdr: 50% class resist halved the claim and the blast\n", .{});
+}
+
 test "scenario rejoin restores the player's own buffs via AddRemoveBuff" {
     // Stock carries the player's own buffs in the PDF `buffData`; zdtd writes
     // that section empty (fresh-PlayerDataFile form), so the join bundle must

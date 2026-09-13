@@ -141,6 +141,13 @@ pub const EntityDef = struct {
     /// class when it enters the game (`EntityClass` ctor + the class's
     /// onSelfEnteredGame rows). The player class carries the status checks.
     buffs: []const []const u8 = &.{},
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent: the stock
+    /// armoured classes (zombieSoldier 50, zombieDemolition 60, the swarms 20)
+    /// take that much less damage from every source. Applied where the SERVER
+    /// computes the damage (turret fire and the deferred accumulator); a C2S
+    /// claim already carries the client's own resist-adjusted strength, so the
+    /// claim path must not reduce it again. 0 = no row (unarmoured).
+    phys_resist: f32 = 0,
     /// ExperienceGain kill XP (stock ships 130 rabbit .. 2500 zombieBear;
     /// most zombies resolve through the `^xpNormal01`-style replace_properties
     /// ladder). 0 = unset, which leaves the award at the caller's flat floor.
@@ -576,8 +583,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             if (xml.attr(body, ptag, "value")) |pval| {
                 const keep = if (is_passive) blk: {
                     const op = xml.attr(body, ptag, "operation") orelse "";
-                    // HealthMax base_set is the HP source; anything else that
-                    // reaches this map is ignored by the resolvers below.
+                    // HealthMax base_set is the HP source. PhysicalDamageResist
+                    // (passive 41, the armoured-class rows) is kept as a
+                    // percentage; anything else that reaches this map is
+                    // ignored by the resolvers below.
+                    if (std.mem.eql(u8, pname, "PhysicalDamageResist")) {
+                        // Only the untagged class rows are modelled. Stock also
+                        // ships two tag-gated rows per insect/bee swarm
+                        // (`tags="ranged"` 99, and the inverted 75) which need
+                        // a damage-type query at the hit; applying one of them
+                        // to every source would over-resist, so a tagged row is
+                        // skipped (the swarm then takes full damage, the
+                        // documented residual rather than a guessed number).
+                        const row_tags = xml.attr(body, ptag, "tags") orelse "";
+                        break :blk std.mem.eql(u8, op, "base_set") and row_tags.len == 0;
+                    }
                     break :blk std.mem.eql(u8, pname, "HealthMax") and
                         std.mem.eql(u8, op, "base_set");
                 } else true;
@@ -684,6 +704,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         var class_buffs: []const []const u8 = &.{};
         if (resolveProp(&classes, name, "Buffs", 0)) |bl| {
             if (bl.len > 0) class_buffs = try nameList(arena, bl);
+        }
+        // PhysicalDamageResist (passive 41): a percentage, resolved through
+        // Extends like the other class props. Bounded 0..100 (a negative or
+        // >100 resist would heal or negate the entity).
+        var phys_resist: f32 = 0;
+        if (resolveProp(&classes, name, "PhysicalDamageResist", 0)) |pr| {
+            if (xml.parseF32(pr)) |f| {
+                if (f >= 0 and f <= 100) phys_resist = f;
+            }
         }
         var drop_prob: f32 = 1.0;
         if (resolveProp(&classes, name, "LootDropProb", 0)) |lp| {
@@ -901,6 +930,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .explosion = expl orelse .{},
             .buffs = class_buffs,
             .xp_gain = xp_gain,
+            .phys_resist = phys_resist,
             .hand_item = if (hand.len > 0) try arena.dupe(u8, hand) else "",
         });
     }
@@ -1016,6 +1046,17 @@ test "load stock entityclasses when present" {
     try std.testing.expectEqual(@as(f32, 5.0), boe.sleeper_wake_near_max);
     try std.testing.expectEqual(@as(f32, 340.0), boe.sleeper_wake_far_min);
     try std.testing.expectEqual(@as(f32, 480.0), boe.sleeper_wake_far_max);
+    // PhysicalDamageResist (passive 41): the armoured classes carry an
+    // untagged base_set percentage (soldier 50, demolition 60, biker/utility
+    // worker 20); a plain zombie has none, and demolition's own row wins over
+    // the soldier it extends. The tag-gated swarm rows (ranged 99 / inverted
+    // 75) are deliberately not folded into one number.
+    try std.testing.expectEqual(@as(f32, 50.0), (t.byName("zombieSoldier") orelse return error.TestExpectedEqual).phys_resist);
+    try std.testing.expectEqual(@as(f32, 60.0), (t.byName("zombieDemolition") orelse return error.TestExpectedEqual).phys_resist);
+    try std.testing.expectEqual(@as(f32, 20.0), (t.byName("zombieBiker") orelse return error.TestExpectedEqual).phys_resist);
+    try std.testing.expectEqual(@as(f32, 0.0), boe.phys_resist);
+    try std.testing.expectEqual(@as(f32, 0.0), (t.byName("animalInsectSwarm") orelse return error.TestExpectedEqual).phys_resist);
+
     // MoveSpeedRand (entity-ai.md 3318-3320): the template's "-.2, .25".
     try std.testing.expectEqual(@as(f32, -0.2), boe.move_speed_rand_min);
     try std.testing.expectEqual(@as(f32, 0.25), boe.move_speed_rand_max);

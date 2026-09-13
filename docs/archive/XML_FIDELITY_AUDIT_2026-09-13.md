@@ -190,8 +190,13 @@ fallback only for unresolved rows. **Second pass:** `recipes.xml` recipe tags
 (`tags + name`), `use_ingredient_modifier` and the `CraftingIngredientCount`
 rows; `progression.xml` `<crafting_skill>` passives; `Recipe.GetCraftingTier`
 now drives the crafted output quality and the tier-scaled ingredient counts,
-and a workstation output keeps its queue-item quality. Everything else below is
-still queued.
+and a workstation output keeps its queue-item quality. **Third pass:**
+`entityclasses.xml` per-class `PhysicalDamageResist` (passive 41) parses
+through Extends and resolves in `World.damageFrom` for every immediate hit
+(C2S claims, explosions, bot fire, traps), with the deferred accumulator and
+the parallel turret tick applying their own leg because neither calls it; the
+tag-gated swarm rows stay skipped, recorded. Everything else below is still
+queued.
 
 Fixes land in follow-up commits, worst first, by domain so each change set is
 one loader surface:

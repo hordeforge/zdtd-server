@@ -295,6 +295,7 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             .wander_speed_night = zdef.wander_speed_night,
             .move_speed_rand_min = zdef.move_speed_rand_min,
             .move_speed_rand_max = zdef.move_speed_rand_max,
+            .phys_resist = zdef.phys_resist,
             .attack_damage = self.handItemDamage(zdef.hand_item),
             .block_chew = self.handItemBlockChew(zdef.hand_item),
             .melee_range = self.handItemRange(zdef.hand_item),

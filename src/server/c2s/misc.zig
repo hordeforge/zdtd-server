@@ -772,6 +772,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             }
         }
+        // Non-player victims carry no leg in this function: a victim-side class
+        // PhysicalDamageResist (passive 41) belongs in World.damageFrom, which
+        // is where stock's NetPackageDamageEntity ends up (the victim's
+        // EntityAlive.DamageEntity), so an armoured zombie (soldier 50,
+        // demolition 60) takes half whatever the attacker claimed. Only the
+        // *attacker*-side numbers ride the claim verbatim.
         // Wasm-first (AGENTS rule 29): damage directed at a player passes the
         // on_player_damage plugin verdict after the native gate, so plugins
         // express PvP/friendly-fire and damage-scaling policy. <0 deny, 0
@@ -818,7 +824,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     0;
                 const weapon_chance = if (self.items.byId(held_id)) |idef| idef.dismember_chance else 0;
                 const self_bonus = self.dismemberSelfChance(c.slot, actor_slot);
-                dismember_bits = self.sim.rollDismember(vs, d.body_part, amount, self.sim.health[vs].max_hp, weapon_chance, self_bonus, d.fatal);
+                dismember_bits = self.sim.rollDismember(vs, d.body_part, dmg.applied, self.sim.health[vs].max_hp, weapon_chance, self_bonus, d.fatal);
             }
         }
         // Item durability (GAP "Item durability"): the held tool wears with
@@ -877,7 +883,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.slotOfNetId(d.entity_id)) |vslot| {
             if (self.sim.mask[vslot].transform) {
                 const vt = self.sim.transform[vslot];
-                const applied: u16 = @intCast(@min(@as(u32, @trunc(@max(0, amount))), 65535));
+                const applied: u16 = @intCast(@min(@as(u32, @trunc(@max(0, dmg.applied))), 65535));
                 if (packages.buildDamageBody(self.body_buf[288..544], d.entity_id, d.source, d.dtype, applied, dmg.killed, self.sim.network_id[actor_slot].id)) |db| {
                     // The roll's outcome rides the stock flag bits
                     // (Setup IL=235: CrippleLegs -> 0x2, Dismember -> 0x8,

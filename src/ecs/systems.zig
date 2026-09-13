@@ -616,6 +616,17 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
         // deferred accumulator): <0 denies the hit, >0 scales by percent.
         // The attacker is not tracked here, so it reads -1 (unknown).
         var dmg = amount;
+        // Class PhysicalDamageResist (passive 41): the armoured classes
+        // (zombieSoldier 50, zombieDemolition 60, the swarms 20) take that
+        // percent less from every source the SERVER computes. This
+        // accumulator's writers are AI melee and turret fire, so a zombie
+        // victim resolves its own class row here. Immediate hits (C2S claims,
+        // explosions, bots) take the same leg inside World.damageFrom, which
+        // this accumulator never calls.
+        if (w.kind[i] != .player) {
+            const pr = w.classPhysResist(i);
+            if (pr > 0) dmg *= 1.0 - @min(pr, 100.0) / 100.0;
+        }
         if (w.kind[i] == .player) {
             // GameDifficulty (RE `ItemActionAttack.difficultyModifier`,
             // combat-damage.md): a server (AI) attacker hitting a client-
@@ -3439,12 +3450,16 @@ pub fn systemTurrets(w: *World, dt: f32) TurretTick {
         if (!w.alive[i] or !w.mask[i].health) continue;
         if (w.kind[i] != .zombie) continue;
         const amount = fpDamage(fp);
+        // Class PhysicalDamageResist (passive 41): turret fire is
+        // server-computed, so the zombie's own class row reduces it here.
+        const pr = w.classPhysResist(i);
+        const applied: f32 = if (pr > 0) amount * (1.0 - @min(pr, 100.0) / 100.0) else amount;
         // Report lists full: stop before a kill nobody would be told about
         // (destroy without EntityRemove leaves a permanent client ghost).
         // Remaining damage re-accumulates next tick, like systemDespawnFar.
-        const would_kill = w.health[i].hp - amount <= 0;
+        const would_kill = w.health[i].hp - applied <= 0;
         if (would_kill and (out.killed_n >= out.killed_ids.len or out.loot_n >= out.loot_bag_ids.len)) break;
-        w.health[i].hp -= amount;
+        w.health[i].hp -= applied;
         if (w.health[i].hp <= 0) {
             const x = if (w.mask[i].transform) w.transform[i].x else 0;
             const y = if (w.mask[i].transform) w.transform[i].y else 0;
@@ -5680,6 +5695,42 @@ test "zombie melee marks the victim hp dirty so replication can see it" {
     while (t < 3.0 and w.health[ps].hp >= 100) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
     try std.testing.expect(w.health[ps].hp < 100);
     try std.testing.expect(w.dirty[ps].hp);
+}
+
+test "class PhysicalDamageResist halves server-computed damage" {
+    // entityclasses `PhysicalDamageResist` (passive 41): zombieSoldier 50,
+    // zombieDemolition 60. This deferred accumulator and the turret apply loop
+    // scale their damage by (1 - resist/100); every immediate hit (C2S claims,
+    // explosions, bots, traps) resolves the same stat inside World.damageFrom
+    // instead, because neither of these two paths goes through it.
+    var w: World = .{};
+    defer w.deinit();
+    const z = w.spawnZombie(0, 70, 0, 200).?;
+    const zs = w.slotOfNetId(z).?;
+    w.class_id[zs].phys_resist = 50;
+    var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    dmg_fp[zs] = 1000; // 10.0 hp -> 5.0 after 50%
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(f32, 195.0), w.health[zs].hp);
+    // The class_table row is the fallback when the per-entity stat is unset
+    // (a classe spawned through the plain path).
+    const z2 = w.spawnZombie(2, 70, 2, 200).?;
+    const zs2 = w.slotOfNetId(z2).?;
+    w.class_id[zs2] = .{ .id = 1 }; // zombie kind slot
+    w.class_table[1].phys_resist = 60;
+    dmg_fp[zs] = 0;
+    dmg_fp[zs2] = 1000; // 10.0 -> 4.0
+    _ = applyDeferredDamage(&w, dmg_fp[0..]);
+    try std.testing.expectEqual(@as(f32, 196.0), w.health[zs2].hp);
+    // A plain class (no rows) is unchanged: clear the row the case above set,
+    // since a plain zombie resolves the kind's class_table entry.
+    w.class_table[1].phys_resist = 0;
+    const z3 = w.spawnZombie(4, 70, 4, 200).?;
+    const zs3 = w.slotOfNetId(z3).?;
+    dmg_fp[zs2] = 0;
+    dmg_fp[zs3] = 1000;
+    _ = applyDeferredDamage(&w, dmg_fp[0..]);
+    try std.testing.expectEqual(@as(f32, 190.0), w.health[zs3].hp);
 }
 
 test "deferred damage that kills a player leaves a dirty corpse at hp 0" {

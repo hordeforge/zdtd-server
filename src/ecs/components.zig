@@ -109,6 +109,10 @@ pub const ClassId = struct {
     move_speed_rand_min: f32 = 0,
     move_speed_rand_max: f32 = 0,
     attack_damage: f32 = 0,
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent for this
+    /// class; 0 = class_table[id] then no resist. Applied only at the
+    /// server-computed damage chokes (turrets, deferred accumulator).
+    phys_resist: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
     /// feral 24); 0 = class_table[id] then the Rules chew floor.
     block_chew: f32 = 0,

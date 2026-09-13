@@ -179,6 +179,11 @@ pub const EntityClass = struct {
     /// 0,0 = unset (no roll).
     move_speed_rand_min: f32 = 0,
     move_speed_rand_max: f32 = 0,
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent from the
+    /// class's own rows (Extends-resolved). Applied only where the server
+    /// computes the damage (turrets, the deferred accumulator), never to a
+    /// C2S claim the client already scaled. 0 = no row.
+    phys_resist: f32 = 0,
     /// HandItem Action0 DamageEntity from items.xml; 0 = use systems default.
     attack_damage: f32 = 0,
     /// HandItem DamageBlock from items.xml (per-class block chew: zombie 8,
@@ -1165,6 +1170,7 @@ pub const World = struct {
             self.class_id[s].wander_speed = def.wander_speed;
             self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
+            self.class_id[s].phys_resist = def.phys_resist;
             self.class_id[s].block_chew = def.block_chew;
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
@@ -1260,6 +1266,7 @@ pub const World = struct {
             self.class_id[s].wander_speed_night = def.wander_speed_night;
             self.class_id[s].attack_damage = def.attack_damage;
             self.class_id[s].block_chew = def.block_chew;
+            self.class_id[s].phys_resist = def.phys_resist;
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].sight_light_min = def.sight_light_min;
@@ -1705,10 +1712,28 @@ pub const World = struct {
         /// award scales by this (ADR 0020 verdict convention; the <0 deny
         /// branch already consumed the hit above).
         kill_scale_pct: u32 = 100,
+        /// Damage actually dealt after the victim-side class legs
+        /// (`PhysicalDamageResist`, passive 41), which `amount` still includes.
+        /// The caller reports this on the wire: stock's
+        /// `EntityAlive.ProcessDamageResponse` carries the applied hit, not the
+        /// attacker's claim.
+        applied: f32 = 0,
     };
 
     pub fn damage(self: *World, net_id: NetId, amount: f32) DamageResult {
         return self.damageFrom(net_id, amount, -1);
+    }
+
+    /// entityclasses `PhysicalDamageResist` (passive 41) percent for one slot:
+    /// the value spawn copied onto the entity wins, else the fixed class_table
+    /// row. 0 = no resist. Callers gate the kinds they apply it to.
+    pub fn classPhysResist(self: *const World, s: Slot) f32 {
+        const per = self.class_id[s].phys_resist;
+        if (per > 0) return per;
+        if (!self.mask[s].class_id) return 0;
+        const cid = self.class_id[s].id;
+        if (cid >= self.class_table.len) return 0;
+        return self.class_table[cid].phys_resist;
     }
 
     /// Damage with the attacker's net id (-1 = unattributed). The attacker is
@@ -1740,7 +1765,22 @@ pub const World = struct {
         // Already dead (hp<=0): players stay in-world; a second hit must not
         // report killed again (double DropOnDeath bags / quest XP / loot).
         if (self.health[s].hp <= 0) return .{};
-        self.health[s].hp -= amount;
+        // Victim-side class legs, stock `EntityAlive.DamageEntity` order: the
+        // victim's own `PhysicalDamageResist` (passive 41) percentage, which
+        // entityclasses sets on the armoured zombies (soldier 50, demolition
+        // 60, swarm 20). One leg here covers every immediate server-computed
+        // hit - C2S claims, explosions (both the cop blast and the client
+        // ExplosionData path), bot fire, traps. The tick's deferred accumulator
+        // and the parallel turret tick apply their own (they never reach this
+        // function). Player victims carry 0 on every stock class and take the
+        // armour/EDR legs instead, so the gate matches the existing balance.
+        var applied = amount;
+        if (self.kind[s] != .player) {
+            const pr = self.classPhysResist(s);
+            if (pr > 0) applied = amount * (1.0 - @min(pr, 100.0) / 100.0);
+        }
+        if (!(applied > 0)) return .{};
+        self.health[s].hp -= applied;
         self.markDirty(s, .{ .hp = true });
         if (self.health[s].hp <= 0) {
             // Kill verdict (T15): a plugin may deny the death; the victim
@@ -1752,7 +1792,7 @@ pub const World = struct {
                 const v = vf(self.kill_verdict_ctx, self.kind[s], self.network_id[s].id, attacker_net_id);
                 if (v < 0) {
                     self.health[s].hp = 1;
-                    return .{};
+                    return .{ .applied = applied };
                 }
                 if (v > 0) kill_scale = @intCast(v);
             }
@@ -1788,7 +1828,13 @@ pub const World = struct {
                 }
                 if (!self.rollLootDrop(nid, drop_prob)) {
                     // zPackReg is a 4% bag: most kills drop nothing, like stock.
-                    return .{ .killed = true, .loot_bag_id = -1, .loot_list = loot_name, .kill_scale_pct = kill_scale };
+                    return .{
+                        .killed = true,
+                        .loot_bag_id = -1,
+                        .loot_list = loot_name,
+                        .kill_scale_pct = kill_scale,
+                        .applied = applied,
+                    };
                 }
                 const loot = self.spawnLootBag(x, y, z, 1, 5);
                 return .{
@@ -1796,6 +1842,7 @@ pub const World = struct {
                     .loot_bag_id = if (loot) |id| id else -1,
                     .loot_list = loot_name,
                     .kill_scale_pct = kill_scale,
+                    .applied = applied,
                 };
             }
             // Players stay in the world dead (stock death → respawn flow keeps
@@ -1810,10 +1857,10 @@ pub const World = struct {
                 }
                 self.reviveSlot(s); // no-op here (slot was never removed), but
                 // keeps every alive[] = true in the repo on one path.
-                return .{ .killed = true };
+                return .{ .killed = true, .applied = applied };
             }
             self.destroy(s);
-            return .{ .killed = true };
+            return .{ .killed = true, .applied = applied };
         }
         // Non-fatal zombie/animal hit: knock the victim away from the attacker
         // (melee/gun shove). Players are the client's own body (the client
@@ -1842,10 +1889,10 @@ pub const World = struct {
                     ai.kb_dx = kx;
                     ai.kb_dz = kz;
                 }
-                return .{ .knocked = true };
+                return .{ .knocked = true, .applied = applied };
             }
         }
-        return .{};
+        return .{ .applied = applied };
     }
 
     pub fn setPos(self: *World, net_id: NetId, x: f32, y: f32, z: f32, yaw: f32) void {
