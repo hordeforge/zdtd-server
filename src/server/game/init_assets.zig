@@ -80,7 +80,16 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     else
         null;
     if (mods_root) |root| {
-        const mod_dirs = modlets.install(allocator, root) catch |err| {
+        // Operator enable/disable state next to the world save (webui toggles
+        // and hand edits); a disabled mod is listed but its patches do not
+        // apply, so a restart is required to change the catalogue.
+        var state_buf: [2048]u8 = undefined;
+        const modlet_state: ?[]const u8 = std.fmt.bufPrint(
+            &state_buf,
+            "{s}/{s}",
+            .{ self.world.world_dir, modlets.state_file_name },
+        ) catch null;
+        const mod_dirs = modlets.install(allocator, root, modlet_state) catch |err| {
             util_log.err("zdtd: mods scan '{s}' failed: {s}\n", .{ root, @errorName(err) });
             return err;
         };
@@ -89,7 +98,11 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             return err;
         };
         manifest_tail = merged_mod_dirs.items.len;
-        util_log.info("zdtd: modlets config dirs={d}\n", .{mod_dirs.len});
+        util_log.info("zdtd: modlets enabled={d} disabled={d} state={s}\n", .{
+            mod_dirs.len,
+            modlets.disabledCount(),
+            modlet_state orelse "(none)",
+        });
     }
     if (opts.plugin_plan) |plan| {
         for (plan.config_dirs) |dir| {

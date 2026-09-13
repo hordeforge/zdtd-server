@@ -1624,7 +1624,7 @@ test "a realistic xml-only modlet applies through the scan and patch path" {
 
     const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
     defer std.testing.allocator.free(mods_root);
-    const dirs = try mods.install(std.testing.allocator, mods_root);
+    const dirs = try mods.install(std.testing.allocator, mods_root, null);
     defer mods.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), dirs.len);
     try std.testing.expect(mods.isLoaded("simplemod"));
@@ -1669,7 +1669,7 @@ test "include with @modfolder token pulls another patch file" {
     const inc_f = try std.fmt.bufPrint(&p_buf, "{s}/inc.xml", .{cfg_dir});
     try io_fs.writeFile(inc_f, "<configs file=\"blocks.xml\"><append xpath=\"/blocks/block[@name='a']\"><property name=\"FromInclude\" value=\"1\"/></append></configs>");
 
-    const mod_dirs = try mods.install(std.testing.allocator, mods_root);
+    const mod_dirs = try mods.install(std.testing.allocator, mods_root, null);
     defer mods.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), mod_dirs.len);
 

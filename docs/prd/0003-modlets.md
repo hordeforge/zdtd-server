@@ -260,6 +260,21 @@ Acceptance is per requirement; the whole feature is done only when §9 passes.
   A bundle-only mod that carries no XML patches is a valid install (no-op server
   side).
 
+### Operator enable/disable
+
+- **R13** An operator can enable or disable each installed modlet without
+  moving files: the webui Modules panel lists every scanned mod (name, version,
+  XML-only note for a code mod) with an enable/disable control, and the state is
+  persisted as a text file next to the world save (`modlets_disabled.txt`, one
+  `Name` per line, `#` comments, hand-editable). A disabled mod stays on the
+  roster (listed, with its `Config/` excluded from the patch list) so the choice
+  is visible and reversible; the change applies on the next start, because the
+  patched catalogs and the id mapping are resolved once at init (R7) and a
+  mid-run change would desync ids against the client. The route is the same
+  auth/CSRF-gated POST surface as the console command route; an unknown mod name
+  is refused, and a state write failure is reported rather than silently
+  ignored.
+
 ### Process and budget
 
 - **R12** All patch/compress/merge work is init/load-time (alloc allowed,

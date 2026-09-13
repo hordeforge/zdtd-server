@@ -206,6 +206,7 @@ pub fn initWorld(self: *Game, allocator: std.mem.Allocator, port: u16, opts: gam
             .port = opts.webui_port,
             .bind_host = opts.webui_bind,
             .secret = opts.webui_secret,
+            .allocator = self.allocator,
         }) catch |err| {
             var ts: [19]u8 = undefined;
             std.debug.print("zdtd: {s} webui on {s}:{d} failed: {s}\n", .{

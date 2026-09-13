@@ -13,6 +13,8 @@ const constantTimeEql = @import("../util/secret.zig").constantTimeEql;
 const version = @import("../version.zig");
 const clock = @import("../util/clock.zig");
 const plugin_mod = @import("../plugin/root.zig");
+const modlets = @import("../assets/modlets.zig");
+const io_fs = @import("../util/io_fs.zig");
 
 pub const max_req: usize = 8192;
 pub const max_secret: usize = 128;
@@ -53,6 +55,10 @@ pub const Config = struct {
     port: u16 = 0,
     bind_host: []const u8 = "127.0.0.1",
     secret: []const u8 = "",
+    /// Allocator for the rare mutating admin routes (modlet enable/disable
+    /// rewrites one small text file). Defaults to the page allocator so unit
+    /// tests need no wiring.
+    allocator: std.mem.Allocator = std.heap.page_allocator,
 };
 
 pub const PlayerRow = struct {
@@ -202,6 +208,8 @@ pub const Server = struct {
     recv_len: usize = 0,
     snap: Snapshot = .{},
     set_cookie: bool = false,
+    /// Game allocator for mutating admin routes (modlet state file).
+    allocator: std.mem.Allocator = std.heap.page_allocator,
     /// Queued console line (legacy drain path; POST prefers admin_fn same-request).
     cmd_pending: bool = false,
     cmd_line_buf: [max_cmd_line]u8 = undefined,
@@ -254,6 +262,7 @@ pub const Server = struct {
         // separators so operators cannot accidentally enable CR/LF header injection.
         if (!secretCharsetOk(cfg.secret)) return error.SecretInvalid;
 
+        self.allocator = cfg.allocator;
         const addr_host = try parseIpv4(cfg.bind_host);
         if (!isLoopbackIpv4(addr_host)) return error.LoopbackRequired;
         try self.listener.listen(addr_host, cfg.port, 8);
@@ -640,6 +649,17 @@ pub const Server = struct {
         // keeps headroom for CSS/JS polish (poll path only; the tick thread's stack).
         var body_buf: [max_shell_html]u8 = undefined;
 
+        if (std.mem.eql(u8, path, "/api/modlet")) {
+            if (method != .POST) {
+                try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
+                    .{ .name = "Allow", .value = "POST" },
+                });
+                return;
+            }
+            try handleModletPost(self, &req, body, &body_buf);
+            return;
+        }
+
         if (std.mem.eql(u8, path, "/api/cmd")) {
             if (method != .POST) {
                 try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
@@ -672,7 +692,7 @@ pub const Server = struct {
                 return;
             }
             if (std.mem.eql(u8, path, "/partials/modules")) {
-                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderModules(&body_buf, &self.snap), &.{});
+                try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderModules(&body_buf, &self.snap, self.sessionTok()), &.{});
                 return;
             }
             if (std.mem.eql(u8, path, "/partials/apm")) {
@@ -1668,7 +1688,7 @@ fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
     return w.buffered();
 }
 
-fn renderModules(buf: []u8, s: *const Snapshot) ![]const u8 {
+fn renderModules(buf: []u8, s: *const Snapshot, csrf: []const u8) ![]const u8 {
     var w: std.Io.Writer = .fixed(buf);
     try w.writeAll("<table><caption class=\"sr-only\">Loaded modules</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Module</th><th scope=\"col\">State</th></tr></thead><tbody>");
     var any = false;
@@ -1686,7 +1706,111 @@ fn renderModules(buf: []u8, s: *const Snapshot) ![]const u8 {
     }
     if (!any) try w.writeAll("<tr><td colspan=\"3\" style=\"color:var(--muted)\">No modules loaded. Drop a .wasm under mods/ and restart, or run `plugin reload &lt;name&gt;`.</td></tr>");
     try w.writeAll("</tbody></table>");
+
+    // XML-only modlets: the operator can enable/disable each one. The state is
+    // a text file next to the world save; a change applies on the next start
+    // (the catalog and the id mapping are built once at init).
+    try w.writeAll("<h3>Game modlets</h3><p class=\"meta\">Enable or disable XML-only mods. A change is saved and applies after a restart (patches and item ids are resolved at startup).</p>");
+    const n = modlets.rosterLen();
+    if (n == 0) {
+        try w.writeAll("<p class=\"meta\">No mods scanned (no Mods/ dir under the game dir and no --mods-dir).</p>");
+        return w.buffered();
+    }
+    try w.writeAll("<table><caption class=\"sr-only\">Game modlets</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Modlet</th><th scope=\"col\">Version</th><th scope=\"col\">State</th><th scope=\"col\">Action</th></tr></thead><tbody>");
+    var i: usize = 0;
+    while (modlets.rosterAt(i)) |m| : (i += 1) {
+        const off = modlets.isDisabled(m.name);
+        try w.print("<tr><td class=\"num\">{d}</td><th scope=\"row\">", .{i});
+        try htmlEscape(&w, m.name);
+        if (m.has_code) try w.writeAll(" <span class=\"meta\">(code mod: XML only)</span>");
+        try w.writeAll("</th><td class=\"num\">");
+        try htmlEscape(&w, m.version);
+        const st: []const u8 = if (off) "disabled" else "enabled";
+        const st_cls: []const u8 = if (off) "num err" else "num";
+        try w.print("</td><td class=\"{s}\">{s}</td><td>", .{ st_cls, st });
+        try w.writeAll("<form hx-post=\"/api/modlet\" hx-target=\"#modules\" hx-swap=\"innerHTML\">");
+        try w.writeAll("<input type=\"hidden\" name=\"csrf\" value=\"");
+        try htmlEscapeAttr(&w, csrf);
+        try w.writeAll("\"><input type=\"hidden\" name=\"name\" value=\"");
+        try htmlEscapeAttr(&w, m.name);
+        try w.print("\"><input type=\"hidden\" name=\"action\" value=\"{s}\"><button type=\"submit\">{s}</button></form></td></tr>", .{
+            if (off) "enable" else "disable",
+            if (off) "Enable" else "Disable",
+        });
+    }
+    try w.writeAll("</tbody></table>");
+    if (modlets.statePath()) |sp| {
+        try w.writeAll("<p class=\"meta\">State file: <code>");
+        try htmlEscape(&w, sp);
+        try w.writeAll("</code></p>");
+    }
     return w.buffered();
+}
+
+/// POST /api/modlet: enable/disable one modlet and re-render the Modules
+/// partial (HTMX target). Same auth/CSRF gate as /api/cmd: it mutates
+/// operator state.
+fn handleModletPost(self: *Server, req: *http.Server.Request, body: []u8, html_buf: []u8) !void {
+    if (!isFormContentType(req.head.content_type)) {
+        try self.httpRespond(req, .unsupported_media_type, "text/plain; charset=utf-8", "expected application/x-www-form-urlencoded\n", &.{});
+        return;
+    }
+    const csrf = formField(body, "csrf") orelse formField(body, "token");
+    if (csrf) |c| {
+        const sess_ok = constantTimeEql(c, self.sessionTok());
+        const secret_ok = constantTimeEql(c, self.secret());
+        if (!sess_ok and !secret_ok) {
+            try self.httpRespond(req, .forbidden, "text/plain; charset=utf-8", "session expired or invalid; reload the dashboard and try again\n", &.{});
+            return;
+        }
+    } else if (!requestHeaderAuthorizedHttp(req, self.secret())) {
+        try self.httpRespond(req, .forbidden, "text/plain; charset=utf-8", "missing security token; reload the dashboard and try again\n", &.{});
+        return;
+    }
+    const name = formField(body, "name") orelse {
+        try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "missing modlet name\n", &.{});
+        return;
+    };
+    const action = formField(body, "action") orelse {
+        try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "missing action\n", &.{});
+        return;
+    };
+    if (!std.mem.eql(u8, action, "enable") and !std.mem.eql(u8, action, "disable")) {
+        try self.httpRespond(req, .bad_request, "text/plain; charset=utf-8", "action must be enable or disable\n", &.{});
+        return;
+    }
+    const disable = std.mem.eql(u8, action, "disable");
+    const known = modlets.setDisabled(self.allocator, name, disable) catch |err| {
+        try self.httpRespond(req, .internal_server_error, "text/plain; charset=utf-8", "could not save the modlet state\n", &.{
+            .{ .name = "X-Zdtd-Error", .value = @errorName(err) },
+        });
+        return;
+    };
+    if (!known) {
+        try self.httpRespond(req, .not_found, "text/plain; charset=utf-8", "no such modlet\n", &.{});
+        return;
+    }
+    if (prefersPlainBody(req)) {
+        var line_buf: [256]u8 = undefined;
+        const line = std.fmt.bufPrint(&line_buf, "modlet {s} {s}; restart zdtd to apply\n", .{ name, action }) catch "modlet updated\n";
+        try self.httpRespond(req, .ok, "text/plain; charset=utf-8", line, &.{});
+        return;
+    }
+    try self.httpRespond(req, .ok, "text/html; charset=utf-8", try renderModules(html_buf, &self.snap, self.sessionTok()), &.{});
+}
+
+/// Escape a value for an HTML attribute context (quotes included).
+fn htmlEscapeAttr(w: *std.Io.Writer, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '&' => try w.writeAll("&amp;"),
+            '<' => try w.writeAll("&lt;"),
+            '>' => try w.writeAll("&gt;"),
+            '"' => try w.writeAll("&quot;"),
+            '\'' => try w.writeAll("&#39;"),
+            else => try w.writeByte(c),
+        }
+    }
 }
 
 fn us(ns: u64) u64 {
@@ -2154,6 +2278,65 @@ test "malformed request lines are client faults, not internal errors" {
     }
 }
 
+test "POST /api/modlet toggles a modlet and re-renders the Modules partial" {
+    // The route mutates operator state, so it takes the same CSRF gate as
+    // /api/cmd; a success answers with the refreshed partial (HTMX target).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const root = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const mods_root = try std.fmt.allocPrint(std.testing.allocator, "{s}/Mods", .{root});
+    defer std.testing.allocator.free(mods_root);
+    const cfg_dir = try std.fmt.allocPrint(std.testing.allocator, "{s}/UiMod/Config", .{mods_root});
+    defer std.testing.allocator.free(cfg_dir);
+    io_fs.mkdirPath(cfg_dir);
+    const mi = try std.fmt.allocPrint(std.testing.allocator, "{s}/UiMod/ModInfo.xml", .{mods_root});
+    defer std.testing.allocator.free(mi);
+    try io_fs.writeFile(mi, "<xml><Name value=\"UiMod\"/><DisplayName value=\"UI Mod\"/><Version value=\"1.0\"/></xml>");
+    const state = try std.fmt.allocPrint(std.testing.allocator, "{s}/modlets_disabled.txt", .{root});
+    defer std.testing.allocator.free(state);
+    _ = try modlets.install(std.testing.allocator, mods_root, state);
+    defer modlets.deinit(std.testing.allocator);
+
+    var s: Server = .{};
+    @memcpy(s.secret_buf[0..6], "s3cr3t");
+    s.secret_len = 6;
+    const nonce = [_]u8{0x5a} ** 32;
+    fillSessionToken("s3cr3t", &nonce, &s.session_token);
+    s.allocator = std.testing.allocator;
+
+    // The partial lists the modlet with a Disable form.
+    try testServeHttp(&s, "GET /partials/modules HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "UiMod") != null);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"disable\"") != null);
+
+    const body = "csrf=s3cr3t&name=UiMod&action=disable";
+    var req_buf: [256]u8 = undefined;
+    const req = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ body.len, body });
+    try testServeHttp(&s, req);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 200 ") != null);
+    try std.testing.expect(modlets.isDisabled("UiMod"));
+    // The refreshed partial now offers Enable.
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"enable\"") != null);
+    const saved = try io_fs.readFileAll(std.testing.allocator, state);
+    defer std.testing.allocator.free(saved);
+    try std.testing.expect(std.mem.find(u8, saved, "UiMod") != null);
+
+    // A bad CSRF token is refused; an unknown mod name is a 404.
+    const bad_csrf = "csrf=nope&name=UiMod&action=enable";
+    const req2 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ bad_csrf.len, bad_csrf });
+    try testServeHttp(&s, req2);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 403 ") != null);
+    try std.testing.expect(modlets.isDisabled("UiMod"));
+    const unknown = "csrf=s3cr3t&name=NoSuchMod&action=enable";
+    const req3 = try std.fmt.bufPrint(&req_buf, "POST /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\n\r\n{s}", .{ unknown.len, unknown });
+    try testServeHttp(&s, req3);
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 404 ") != null);
+    // GET is not allowed on the mutating route.
+    try testServeHttp(&s, "GET /api/modlet HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "HTTP/1.1 405 ") != null);
+}
+
 test "HEAD accepted on GET-only dashboard routes" {
     var s: Server = .{};
     @memcpy(s.secret_buf[0..6], "s3cr3t");
@@ -2619,14 +2802,14 @@ test "renderModules lists loaded wasm modules with state" {
     s.modules[1] = .{ .used = true, .name_len = 13, .disabled = true };
     @memcpy(s.modules[1].name[0..13], "core_announce");
     var buf: [4096]u8 = undefined;
-    const html = try renderModules(&buf, &s);
+    const html = try renderModules(&buf, &s, "csrf-token");
     try std.testing.expect(std.mem.find(u8, html, "<th scope=\"row\">fps_bot</th>") != null);
     try std.testing.expect(std.mem.find(u8, html, ">enabled</td>") != null);
     try std.testing.expect(std.mem.find(u8, html, "class=\"num err\">disabled</td>") != null);
     // Empty roster gets a hint row, not a bare table.
     var s2: Snapshot = .{};
     var buf2: [4096]u8 = undefined;
-    const empty = try renderModules(&buf2, &s2);
+    const empty = try renderModules(&buf2, &s2, "csrf-token");
     try std.testing.expect(std.mem.find(u8, empty, "No modules loaded") != null);
 }
 
