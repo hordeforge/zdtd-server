@@ -515,31 +515,37 @@ fn rewriteModFolder(allocator: std.mem.Allocator, path: []const u8, own_mod_path
 }
 
 /// True when `want` is an entry of the comma-separated `cur_val`.
-fn csvHas(cur_val: []const u8, want: []const u8) bool {
+/// Delimiter of a `<csv>` patch: `delim` must be one character or the literal
+/// two-character `\n` (stock CsvOperationsByXPath), default `,`.
+fn csvDelim(clean: []const u8, op_open: usize) !u8 {
+    const d = xml.attr(clean, op_open, "delim") orelse return ',';
+    if (std.mem.eql(u8, d, "\\n") or std.mem.eql(u8, d, "\n")) return '\n';
+    if (d.len != 1) return error.PatchInvalidDelim;
+    return d[0];
+}
+
+fn csvHas(cur_val: []const u8, want: []const u8, delim: u8) bool {
     const want_t = std.mem.trim(u8, want, " \t");
-    var it = std.mem.splitScalar(u8, cur_val, ',');
+    var it = std.mem.splitScalar(u8, cur_val, delim);
     while (it.next()) |entry| {
         if (std.mem.eql(u8, std.mem.trim(u8, entry, " \t"), want_t)) return true;
     }
     return false;
 }
-
-/// Remove an entry from a comma-separated value; caller frees the result when
-/// the value changed.
-fn csvRemove(allocator: std.mem.Allocator, cur_val: []const u8, drop: []const u8) !?[]u8 {
+fn csvRemove(allocator: std.mem.Allocator, cur_val: []const u8, drop: []const u8, delim: u8) !?[]u8 {
     const drop_t = std.mem.trim(u8, drop, " \t");
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     var changed = false;
     var first = true;
-    var it = std.mem.splitScalar(u8, cur_val, ',');
+    var it = std.mem.splitScalar(u8, cur_val, delim);
     while (it.next()) |entry| {
         const e = std.mem.trim(u8, entry, " \t");
         if (std.mem.eql(u8, e, drop_t)) {
             changed = true;
             continue;
         }
-        if (!first) try out.append(allocator, ',');
+        if (!first) try out.append(allocator, delim);
         first = false;
         try out.appendSlice(allocator, entry);
     }
@@ -954,22 +960,32 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
                 const attr_name = xp.set_attr orelse continue;
                 const csv_op = xml.attr(clean, lt, "op") orelse continue;
                 const val = if (body.len > 0) body else (xml.attr(clean, lt, "value") orelse continue);
-                const cur_val = xml.attr(cur, open, attr_name) orelse continue;
-                var owned_csv: ?[]u8 = null;
-                defer if (owned_csv) |o| allocator.free(o);
-                const new_val: []const u8 = if (opNameEq(csv_op, "add")) blk: {
-                    if (csvHas(cur_val, val)) break :blk cur_val;
-                    if (cur_val.len == 0) break :blk std.mem.trim(u8, val, " \t");
-                    owned_csv = try std.fmt.allocPrint(allocator, "{s},{s}", .{ cur_val, std.mem.trim(u8, val, " \t") });
-                    break :blk owned_csv.?;
-                } else if (opNameEq(csv_op, "remove")) blk: {
-                    if (try csvRemove(allocator, cur_val, val)) |rv| {
-                        owned_csv = rv;
-                        break :blk rv;
-                    }
-                    continue;
-                } else if (opNameEq(csv_op, "set")) val else continue;
-                const updated = try setAttribute(allocator, cur, open, attr_name, new_val);
+                const delim = try csvDelim(clean, lt);
+                // Stock splits the patch text on `delim`, trims each entry and
+                // drops the empty ones, then adds/removes each entry against the
+                // target list.
+                var list: std.ArrayList(u8) = .empty;
+                defer list.deinit(allocator);
+                try list.appendSlice(allocator, xml.attr(cur, open, attr_name) orelse "");
+                var vit = std.mem.splitScalar(u8, val, delim);
+                while (vit.next()) |raw_entry| {
+                    const entry = std.mem.trim(u8, raw_entry, " \t\r\n");
+                    if (entry.len == 0) continue;
+                    if (opNameEq(csv_op, "add")) {
+                        if (csvHas(list.items, entry, delim)) continue;
+                        if (list.items.len > 0) try list.append(allocator, delim);
+                        try list.appendSlice(allocator, entry);
+                    } else if (opNameEq(csv_op, "remove")) {
+                        const rv = try csvRemove(allocator, list.items, entry, delim) orelse continue;
+                        defer allocator.free(rv);
+                        list.clearRetainingCapacity();
+                        try list.appendSlice(allocator, rv);
+                    } else if (opNameEq(csv_op, "set")) {
+                        list.clearRetainingCapacity();
+                        try list.appendSlice(allocator, entry);
+                    } else continue;
+                }
+                const updated = try setAttribute(allocator, cur, open, attr_name, list.items);
                 allocator.free(cur);
                 cur = updated;
             }
@@ -1445,6 +1461,63 @@ test "csv op name and attribute append match the stock forms" {
     const out2 = try applyPatchDoc(std.testing.allocator, base, append_patch, "items.xml", .{});
     defer std.testing.allocator.free(out2);
     try std.testing.expect(std.mem.find(u8, out2, "value=\"a,b,d\"") != null);
+}
+
+test "csv honours delim and adds each entry (stock grammar)" {
+    // Stock CsvOperationsByXPath: op add|remove, `delim` exactly one character
+    // or the literal \n, default comma; the patch text is split, trimmed and
+    // each entry added/removed against the target list.
+    const base =
+        \\<items><item name="x"><property name="Groups" value="a;b"/></item></items>
+    ;
+    const patch =
+        \\<configs file="items.xml">
+        \\  <csv op="add" delim=";" xpath="/items/item[@name='x']/property[@name='Groups']/@value">c;d</csv>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "items.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "value=\"a;b;c;d\"") != null);
+
+    // Adding an entry already present is a no-op; removing one works.
+    const dedup =
+        \\<configs file="items.xml">
+        \\  <csv op="add" delim=";" xpath="/items/item[@name='x']/property[@name='Groups']/@value">b</csv>
+        \\</configs>
+    ;
+    const out2 = try applyPatchDoc(std.testing.allocator, base, dedup, "items.xml", .{});
+    defer std.testing.allocator.free(out2);
+    try std.testing.expect(std.mem.find(u8, out2, "value=\"a;b\"") != null);
+    const rm =
+        \\<configs file="items.xml">
+        \\  <csv op="remove" delim=";" xpath="/items/item[@name='x']/property[@name='Groups']/@value">a</csv>
+        \\</configs>
+    ;
+    const out3 = try applyPatchDoc(std.testing.allocator, base, rm, "items.xml", .{});
+    defer std.testing.allocator.free(out3);
+    try std.testing.expect(std.mem.find(u8, out3, "value=\"b\"") != null);
+
+    // The literal `\n` delim splits on real newlines in the patch text.
+    const nl_base = "<items><item name=\"x\"><property name=\"Groups\" value=\"a\"/></item></items>";
+    const nl_patch =
+        \\<configs file="items.xml">
+        \\  <csv op="add" delim="\n" xpath="/items/item[@name='x']/property[@name='Groups']/@value">
+        \\b
+        \\c
+        \\  </csv>
+        \\</configs>
+    ;
+    const out4 = try applyPatchDoc(std.testing.allocator, nl_base, nl_patch, "items.xml", .{});
+    defer std.testing.allocator.free(out4);
+    try std.testing.expect(std.mem.find(u8, out4, "value=\"a\nb\nc\"") != null);
+
+    // A multi-character delimiter is a patch error (stock throws).
+    const bad =
+        \\<configs file="items.xml">
+        \\  <csv op="add" delim=";;" xpath="/items/item[@name='x']/property[@name='Groups']/@value">c</csv>
+        \\</configs>
+    ;
+    try std.testing.expectError(error.PatchInvalidDelim, applyPatchDoc(std.testing.allocator, base, bad, "items.xml", .{}));
 }
 
 test "set on an element replaces its children (stock ReplaceNodes)" {

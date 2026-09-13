@@ -319,14 +319,25 @@ Resolved from RE or explicitly documented before the "compatible" claim:
 - **G6** `@modfolder:`/`@modfolder(Name):` token rewrite edge cases (quotes,
   subpaths).
 - **G9** Modded **block** ids. Stock assigns a block id to every `<block>` in
-  the patched `blocks.xml` (XML-declared `Id`, else the leftover scan), so a
-  modlet that adds a block is usable on both sides. zdtd's block id space is
-  pinned from the stock AssignIds dump, and its block loader skips a name the
-  dump does not carry, so a modlet-added block is inert server-side (the item,
-  recipe and loot parts of the same mod still work, since the item id space is
-  derived from the patched XML). Closing this needs the client's runtime id
-  assignment rule or evidence that the client remaps to the server's
-  `NetPackageIdMapping`; recorded, not guessed.
+  the patched `blocks.xml`, so a modlet that adds a block is usable on both
+  sides; zdtd's block id space is pinned from the stock AssignIds dump and its
+  block loader skips a name the dump does not carry, so a modlet-added block is
+  inert server-side (the item, recipe and loot parts of the same mod still
+  work, since the item id space is derived from the patched XML).
+  **IL pinned 2026-09-13 (implementation pending):** `Block.assignIdsLinear`
+  copies `nameToBlock`'s values into a list and calls `assignLeftOverBlocks`,
+  which first honours `Block.fixedBlockIds` (name → pinned id) and then assigns
+  the remaining blocks out of a `MAX_BLOCKS` used-id array: **terrain-shaped**
+  blocks (`BlockShape.IsTerrain()`) take the first free ids scanning up from 0,
+  and the rest take free ids scanning up from **0xff** (255). `Block.list[id]`
+  is the reverse table and `Block.nameIdMapping` translates a saved id by name
+  on load. A faithful zdtd implementation therefore: after the patched
+  `blocks.xml` load, treat every name the dump already carries as pinned
+  (`usedIds`), then assign the leftovers in block-list (document) order with the
+  same terrain/non-terrain split, parsing the block's `Shape` property for the
+  terrain test. Verify against a client dump with one mod installed before
+  relying on it; the assignment is order-dependent, so the mod's appended blocks
+  must keep document order.
 - **G7** Frame `compressed` bit vs package `Compress` flag layering for
   ConfigFile (single vs double deflate), and zdtd's frame-writer requirements.
   Pin with a loadgen/golden byte test.
