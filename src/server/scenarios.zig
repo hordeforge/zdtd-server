@@ -977,6 +977,34 @@ test "scenario sign: a client's sign text is applied and echoed to everyone" {
     try g.injectFramed(ca, try packages.framed(&frame_buf, "NetPackageTileEntity", body));
     try std.testing.expect(cap_a.findPkgId(te_id) == null);
     defs[0].signable = true;
+
+    // The applied body is kept so the chunk stream can replay it: stock ships a
+    // chunk's TE data with the chunk, so a client that streams the area later
+    // still sees the authored text (the live echo only covers the session).
+    const stored = g.sign_texts.get(.{ .x = 258, .y = 71, .z = 258 }) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, body.len), @as(usize, stored.len));
+    cap_a.clear();
+    try g.sendContainersInChunk(ca.peer.?, 16, 16);
+    // The chunk also carries other TEs (a container at the spawn area), so
+    // scan for the replayed sign rather than taking the first TE packet. An
+    // unsolicited TE send carries stock's Setup(te, 2, 255) handle.
+    var replayed = false;
+    var si: usize = 0;
+    while (si < cap_a.n) : (si += 1) {
+        var pkgs: [8]wire_frame.Package = undefined;
+        const pn = wire_frame.parseChannelPayload(cap_a.slots[si].data[0..cap_a.slots[si].len], &pkgs);
+        for (pkgs[0..pn]) |pk| {
+            if (pk.id != te_id) continue;
+            if (pk.body.len != body.len or pk.body[0] != 255) continue;
+            if (std.mem.eql(u8, pk.body[1..], body[1..])) replayed = true;
+        }
+    }
+    try std.testing.expect(replayed);
+
+    // Breaking the block drops the stored text (the container store does the
+    // same at the same choke points).
+    try g.setBlock(258, 71, 258, 0);
+    try std.testing.expect(g.sign_texts.get(.{ .x = 258, .y = 71, .z = 258 }) == null);
     std.debug.print("PASS sign-te: text applied and echoed to the sender and the other player\n", .{});
 }
 
