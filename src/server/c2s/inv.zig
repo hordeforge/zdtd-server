@@ -504,6 +504,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 if (@as(i32, cur) != sign.block_id) return true;
                 const bdef = self.blocks.byId(@intCast(sign.block_id)) orelse return true;
                 if (!bdef.signable) return true;
+                // Keep the applied body so the chunk stream can replay it to a
+                // client that streams this area later (stock ships the TE with
+                // the chunk). A table-full or oversized body only loses the
+                // replay, never the echo.
+                _ = self.sign_texts.put(.{ .x = sign.world_x, .y = sign.world_y, .z = sign.world_z }, sign.block_id, body);
                 self.harness.counters.inc(.c2s_te_sign_echo);
                 try self.broadcastNear("NetPackageTileEntity", body, @floatFromInt(sign.world_x), @floatFromInt(sign.world_z), sign_echo_range);
                 return true;

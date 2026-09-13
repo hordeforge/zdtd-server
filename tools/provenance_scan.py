@@ -120,7 +120,7 @@ STRUCTURAL_CONSTANTS = {
     "max_recipe_ingredients", "wire_name_max",
     "pending_cap", "pending_bytes", "max_frag_parts", "assemble_cap", "extra_q_len",
     "ack_bitmap_bytes", "resend_ns", "ack_yield_ns",
-    "persisted_container_size", "save_capacity", "meta_shift", "meta2_shift",
+    "persisted_container_size", "persisted_sign_size", "save_capacity", "meta_shift", "meta2_shift",
     "rot_meta3_shift", "nibble", "six_bits", "max_step", "rotation_shift", "rotation_mask",
     "save_header_bytes", "persisted_workstation_size", "samples_x", "samples_y",
     "max_serverconfig_bytes", "max_req", "max_token", "max_client_polls", "max_preset_bytes",

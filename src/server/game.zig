@@ -91,6 +91,7 @@ const webui_mod = @import("webui.zig");
 const mcp_mod = @import("mcp_transport.zig");
 const serverinfo_tcp = @import("serverinfo_tcp.zig");
 const containers_mod = @import("../world/containers.zig");
+const signs_mod = @import("../world/signs.zig");
 const vending_mod = @import("../world/vending.zig");
 const light_te_mod = @import("../world/light_te.zig");
 const workstations_mod = @import("../world/workstations.zig");
@@ -514,6 +515,10 @@ pub const Game = struct {
     npc: assets_npc.NpcTable = assets_npc.NpcTable.empty(),
     sleepers: sleepers_mod.Store = sleepers_mod.Store.empty(),
     containers: containers_mod.ContainerStore = .{},
+    /// Applied sign texts (world/signs.zig): replayed when a client's chunk
+    /// streams in, so a later joiner sees the authored text. Distinct from
+    /// `signs`, the signs.xml catalog.
+    sign_texts: signs_mod.SignStore = .{},
     workstations: workstations_mod.WorkstationStore = .{},
     /// Vending machines (TileEntityVendingMachine, type 7): per-block TraderData
     /// store keyed by world pos. Created on place, cleared on removal.
@@ -990,6 +995,14 @@ pub const Game = struct {
         self.containers.load(self.world.world_dir) catch |e| {
             if (e != error.OpenFailed) {
                 logPersistErr(self, "load containers", e);
+                return e;
+            }
+        };
+        // Sign texts survive restart (signs.zsg): the store is what the chunk
+        // stream replays, so without it every sign comes back blank.
+        self.sign_texts.load(self.world.world_dir) catch |e| {
+            if (e != error.OpenFailed) {
+                logPersistErr(self, "load sign texts", e);
                 return e;
             }
         };

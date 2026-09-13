@@ -353,6 +353,7 @@ pub fn noteBlockRemovedEx(self: *Game, x: i32, y: i32, z: i32, cur_id: u16, spil
     if (spill) self.spillStoredItems(x, y, z);
     if (self.sim.power.removeAt(x, y, z)) self.sim.power.resolve();
     self.containers.remove(.{ .x = x, .y = y, .z = z });
+    self.sign_texts.remove(.{ .x = x, .y = y, .z = z });
     self.vending.removeAt(.{ .x = x, .y = y, .z = z });
     self.light_te.removeAt(.{ .x = x, .y = y, .z = z });
     self.workstations.removeAt(x, y, z);

@@ -23,6 +23,10 @@ pub fn setBlock(self: *Game, x: i32, y: i32, z: i32, id: u16) !void {
     } else {
         self.containers.remove(.{ .x = x, .y = y, .z = z });
     }
+    // The real break/place path clears a sign's stored text at the same choke
+    // points (c2s/blocks.zig); the harness mirrors it so a test that overwrites
+    // a sign block sees the same state.
+    self.sign_texts.remove(.{ .x = x, .y = y, .z = z });
 }
 
 pub fn attachJoinedClient(self: *Game, capture: ?*@import("../../litenet/peer.zig").Capture) !*Client {

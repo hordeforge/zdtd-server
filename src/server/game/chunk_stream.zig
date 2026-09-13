@@ -12,6 +12,7 @@ const apm = @import("../../apm/root.zig");
 const ln_peer = @import("../../litenet/peer.zig");
 const packages = @import("../../wire/packages.zig");
 const containers_mod = @import("../../world/containers.zig");
+const signs_mod = @import("../../world/signs.zig");
 const vending_mod = @import("../../world/vending.zig");
 const light_te_mod = @import("../../world/light_te.zig");
 const workstations_mod = @import("../../world/workstations.zig");
@@ -44,6 +45,14 @@ pub fn sendContainersInChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32)
         const cont = &self.containers.items[i];
         if (cont.pos.x < x0 or cont.pos.x >= x1 or cont.pos.z < z0 or cont.pos.z >= z1) continue;
         try replicate_te.sendStorageTe(self, peer, cont.pos.x, cont.pos.y, cont.pos.z);
+    }
+    // Sign texts (world/signs.zig): stock ships a chunk's TE data with the
+    // chunk, so a client that streams the area after the edit still sees the
+    // authored sign.
+    {
+        var s_out: [signs_mod.max_signs]signs_mod.Sign = undefined;
+        const sn = self.sign_texts.inChunk(cx, cz, &s_out);
+        for (s_out[0..sn]) |sgn| try replicate_te.sendSignTe(self, peer, sgn.pos);
     }
     var vi: usize = 0;
     while (vi < vending_mod.max_vending) : (vi += 1) {

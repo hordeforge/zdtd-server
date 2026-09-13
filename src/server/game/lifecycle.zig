@@ -17,6 +17,7 @@ pub fn deinit(self: *Game) void {
     }
     self.sampleFlushCounters();
     self.containers.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save containers", e);
+    self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save sign texts", e);
     self.workstations.save(self.world.world_dir, self.allocator) catch |e| game_mod.logPersistErr(self, "save workstations", e);
     self.vending.save(self.world.world_dir) catch |e| game_mod.logPersistErr(self, "save vending", e);
     self.saveClaims() catch |e| game_mod.logPersistErr(self, "save claims", e);
@@ -51,6 +52,7 @@ pub fn deinitStores(self: *Game) void {
     self.items.deinit();
     self.item_mods.deinit();
     self.signs.deinit();
+    self.sign_texts.deinit();
     self.entities.deinit();
     self.recipes.deinit();
     self.loot.deinit();

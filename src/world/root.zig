@@ -9,6 +9,7 @@ pub const store = @import("store.zig");
 pub const chunk_flush = @import("chunk_flush.zig");
 pub const terrain_snapshot = @import("terrain_snapshot.zig");
 pub const containers = @import("containers.zig");
+pub const signs = @import("signs.zig");
 pub const workstations = @import("workstations.zig");
 pub const vending = @import("vending.zig");
 pub const light_te = @import("light_te.zig");
@@ -33,6 +34,7 @@ test {
     _ = chunk_flush;
     _ = terrain_snapshot;
     _ = containers;
+    _ = signs;
     _ = workstations;
     _ = vending;
     _ = light_te;

@@ -231,6 +231,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         // under its downgrade. The power node is handled by
                         // the place_id != cur_id swap check further down.
                         self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
+                        self.sign_texts.remove(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.vending.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.light_te.removeAt(.{ .x = b.x, .y = b.y, .z = b.z });
                         self.workstations.removeAt(b.x, b.y, b.z);
@@ -351,6 +352,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
             } else if (self.storagePairId(place_id) == null) {
                 self.containers.remove(.{ .x = b.x, .y = b.y, .z = b.z });
+                self.sign_texts.remove(.{ .x = b.x, .y = b.y, .z = b.z });
             }
             if (mutated) {
                 const stored_raw = self.blockRawAt(b.x, b.y, b.z);

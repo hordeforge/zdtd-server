@@ -278,6 +278,18 @@ pub fn sendStorageTe(self: *Game, peer: *ln_peer.Peer, x: i32, y: i32, z: i32) !
     try self.sendGame(peer, "NetPackageTileEntity", body);
 }
 
+/// Replay a stored sign to one peer (the composite TE body the client's own
+/// edit produced). The handle byte is patched to 255: an unsolicited TE send
+/// carries stock's `Setup(te, 2, 255)` handle, while the edit echo keeps the
+/// client's own handle so its `lockHandleWaitingFor` clears.
+pub fn sendSignTe(self: *Game, peer: *ln_peer.Peer, pos: containers_mod.PosKey) !void {
+    const sign = self.sign_texts.get(pos) orelse return;
+    if (sign.len > self.body_buf.len) return;
+    @memcpy(self.body_buf[0..sign.len], sign.body[0..sign.len]);
+    if (sign.len > 0) self.body_buf[0] = 255;
+    try self.sendGame(peer, "NetPackageTileEntity", self.body_buf[0..sign.len]);
+}
+
 /// Store stock rows as wire TraderStockEntry (ItemStack + markup).
 pub fn vendingEntries(self: *Game, v: *const vending_mod.Vending, out: []packages.TraderStockEntry) usize {
     _ = self;

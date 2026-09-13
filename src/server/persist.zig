@@ -55,6 +55,7 @@ pub fn saveAllStores(self: *Game) bool {
     }.f;
     self.world.saveAll() catch |e| note(&ok, self, "save world", e);
     self.containers.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save containers", e);
+    self.sign_texts.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save sign texts", e);
     self.workstations.save(self.world.world_dir, self.allocator) catch |e| note(&ok, self, "save workstations", e);
     self.vending.save(self.world.world_dir) catch |e| note(&ok, self, "save vending", e);
     self.saveClaims() catch |e| note(&ok, self, "save claims", e);
