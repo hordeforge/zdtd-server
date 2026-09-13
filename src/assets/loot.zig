@@ -386,6 +386,52 @@ pub const QualityTemplate = struct {
     bands: []const QualityBand = &.{},
 };
 
+/// Remove `<conditional evaluator="client">` blocks from a loot body.
+///
+/// Stock applies those in the client build only: `XmlPatcher` runs
+/// `ApplyConditionalXmlBlocks` with an evaluator, and the config a dedicated
+/// server parses must not carry the client-only children. The only stock rows
+/// are seven `event('christmas')` holiday-gear entries, all inside `count="all"`
+/// groups (groupZpackBoss, the reinforced/hardened chest groups,
+/// groupHiddenStash), so a server that flattened them put a christmas item in
+/// every one of those containers all year. Bodies with no client conditional
+/// are returned unchanged (no copy).
+fn hasClientEvaluator(head: []const u8) bool {
+    // XML attribute quoting is either style; stock writes double quotes.
+    return std.mem.find(u8, head, "evaluator=\"client\"") != null or
+        std.mem.find(u8, head, "evaluator='client'") != null;
+}
+
+fn stripClientConditionals(allocator: std.mem.Allocator, body: []const u8) ![]const u8 {
+    const close_tag = "</conditional>";
+    var any = false;
+    var scan: usize = 0;
+    while (std.mem.findPos(u8, body, scan, "<conditional")) |cs| {
+        const gt = std.mem.findPos(u8, body, cs, ">") orelse break;
+        const close = std.mem.findPos(u8, body, gt, close_tag) orelse break;
+        if (hasClientEvaluator(body[cs..gt])) any = true;
+        scan = close + close_tag.len;
+    }
+    if (!any) return body;
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var from: usize = 0;
+    scan = 0;
+    while (std.mem.findPos(u8, body, scan, "<conditional")) |cs| {
+        const gt = std.mem.findPos(u8, body, cs, ">") orelse break;
+        const close = std.mem.findPos(u8, body, gt, close_tag) orelse break;
+        const end = close + close_tag.len;
+        if (hasClientEvaluator(body[cs..gt])) {
+            try out.appendSlice(allocator, body[from..cs]);
+            from = end;
+        }
+        scan = end;
+    }
+    try out.appendSlice(allocator, body[from..]);
+    // toOwnedSlice: the caller frees the returned slice, so it must be the
+    // exact allocation (ArrayList capacity may exceed len).
+    return out.toOwnedSlice(allocator);
+}
+
 pub const LootTable = struct {
     groups: []const LootGroup = &.{},
     containers: []const LootContainer = &.{},
@@ -1235,10 +1281,12 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         if (xml.attr(clean, tag, "abundance_type")) |at| {
             g.abundance_type = try arena.dupe(u8, at);
         }
+        const scan_body = try stripClientConditionals(allocator, body);
+        defer if (scan_body.ptr != body.ptr) allocator.free(scan_body);
         var bi: usize = 0;
-        while (bi < body.len and g.entry_n < max_entries) {
-            const itag = std.mem.findPos(u8, body, bi, "<item") orelse break;
-            if (parseItemOrGroup(body, itag, tpl)) |ent| {
+        while (bi < scan_body.len and g.entry_n < max_entries) {
+            const itag = std.mem.findPos(u8, scan_body, bi, "<item") orelse break;
+            if (parseItemOrGroup(scan_body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
                 if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
@@ -1317,10 +1365,12 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
                 c.pick_max = cr.max;
             }
         }
+        const scan_body = try stripClientConditionals(allocator, body);
+        defer if (scan_body.ptr != body.ptr) allocator.free(scan_body);
         var bi: usize = 0;
-        while (bi < body.len and c.entry_n < max_entries) {
-            const itag = std.mem.findPos(u8, body, bi, "<item") orelse break;
-            if (parseItemOrGroup(body, itag, tpl)) |ent| {
+        while (bi < scan_body.len and c.entry_n < max_entries) {
+            const itag = std.mem.findPos(u8, scan_body, bi, "<item") orelse break;
+            if (parseItemOrGroup(scan_body, itag, tpl)) |ent| {
                 var e = ent;
                 e.name = try arena.dupe(u8, ent.name);
                 if (ent.buffs.len > 0) e.buffs = try arena.dupe(u8, ent.buffs);
@@ -2369,4 +2419,74 @@ test "abundance_type scales the group's counts from the sandbox code" {
     const off_ctx: requirements.Ctx = .{ .sandbox_groups = &off };
     const none = lt.rollGroup("bookGroup", 1, 7, &stacks, 0, "", .{ .player = off_ctx });
     try std.testing.expectEqual(@as(usize, 0), none);
+}
+
+test "stock loot groups drop the seven client-conditional holiday entries" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/loot.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // The seven rows all gate `groupHolidayGear` inside count="all" groups.
+    for ([_][]const u8{
+        "groupZpackBoss",
+        "groupReinforcedChestT1",
+        "groupReinforcedChestT2",
+        "groupReinforcedChestT3",
+        "groupHardenedChestT4",
+        "groupHardenedChestT5",
+        "groupHiddenStash",
+    }) |gname| {
+        const g = t.groupByName(gname) orelse return error.TestUnexpectedResult;
+        var i: u8 = 0;
+        while (i < g.entry_n) : (i += 1) {
+            try std.testing.expect(!std.mem.eql(u8, g.entries[i].name, "groupHolidayGear"));
+        }
+    }
+}
+
+test "client-evaluated loot conditionals never reach the server tables" {
+    // Stock runs XmlPatcher::ApplyConditionalXmlBlocks with an evaluator, so a
+    // `<conditional evaluator="client">` block belongs to the client build
+    // only. The seven stock rows are `event('christmas')` holiday-gear entries
+    // inside count="all" groups; flattening them put a christmas item in every
+    // Zpack boss, reinforced/hardened chest and hidden stash, all year.
+    const src =
+        \\<loot>
+        \\  <lootgroup name="groupMixed" count="all">
+        \\    <item name="resourceWood" count="1"/>
+        \\    <conditional evaluator="client">
+        \\      <if cond="event('christmas')">
+        \\        <item group="groupHolidayGear" loot_prob_template="low" force_prob="true"/>
+        \\      </if>
+        \\    </conditional>
+        \\    <item name="resourceRockSmall" count="1"/>
+        \\  </lootgroup>
+        \\  <lootgroup name="groupHolidayGear" count="1">
+        \\    <item name="resourceWood" count="5"/>
+        \\  </lootgroup>
+        \\  <lootcontainer name="cntMixed" size="8,6" count="1">
+        \\    <item group="groupMixed" count="1"/>
+        \\    <conditional evaluator='client'>
+        \\      <if cond="event('christmas')">
+        \\        <item name="resourceRockSmall" count="3"/>
+        \\      </if>
+        \\    </conditional>
+        \\  </lootcontainer>
+        \\</loot>
+    ;
+    const path = ".zdtd_test_loot_conditional.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const g = t.groupByName("groupMixed").?;
+    try std.testing.expectEqual(@as(u8, 2), g.entry_n);
+    var i: u8 = 0;
+    while (i < g.entry_n) : (i += 1) {
+        try std.testing.expect(!std.mem.eql(u8, g.entries[i].name, "groupHolidayGear"));
+    }
+    const c = t.containerByName("cntMixed").?;
+    try std.testing.expectEqual(@as(u8, 1), c.entry_n);
+    try std.testing.expectEqualStrings("groupMixed", c.entries[0].name);
 }
