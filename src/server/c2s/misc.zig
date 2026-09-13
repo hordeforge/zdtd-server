@@ -400,6 +400,35 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         };
         if (a.sound_group.len == 0) return true; // stock's IsNullOrEmpty early out
         if (a.play_on_entity and self.rejectIfNotSender(c, peer.local_id, a.entity_id, .none)) return true;
+        // AI noise. Stock's package routes the play through Audio.Server::Play
+        // (NetPackageAudio.il.txt IL_0074), whose first act is
+        // Audio.Manager::SignalAI: it returns unless the instigator is an
+        // EntityPlayer (Manager.il.txt IL=4696) and only the entity form
+        // reaches it (the position form passes a null entity), so a player's
+        // own sound - footsteps, gunfire, doors - folds through sounds.xml into
+        // that player's stealth and heat state. `signalOnly` suppresses the
+        // client relay below, never this leg: it is the "AI stimulus, do not
+        // play" flag, so the old "signalOnly -> drop" path lost exactly the
+        // noises the AI model is built on.
+        if (a.play and a.play_on_entity) {
+            if (self.sim.slotOfNetId(a.entity_id)) |is_| {
+                if (self.sim.mask[is_].player and self.sim.mask[is_].transform) {
+                    if (self.noise_table.getClip(a.sound_group)) |n| {
+                        const t = self.sim.transform[is_];
+                        self.sim.pushStealthNoise(
+                            is_,
+                            t.x,
+                            t.y,
+                            t.z,
+                            n.volume * @min(@max(a.volume_scale, 0), self.max_claimed_noise_scale),
+                            @intFromFloat(n.time * 20.0),
+                            n.muffled_when_crouched,
+                            n.heat_map_strength,
+                        );
+                    }
+                }
+            }
+        }
         // signalOnly means "AI stimulus, do not play": stock skips the relay
         // loop entirely for those (Server.il.txt:29, `brtrue` past the loop).
         if (a.signal_only) return true;

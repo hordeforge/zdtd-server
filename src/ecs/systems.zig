@@ -2733,6 +2733,12 @@ fn tickItemDistractions(w: *World) void {
     }
 }
 
+/// Heat window stock gives every noise-driven heat event: `NotifyNoise` passes
+/// the literal 240 s to `AIDirector::NotifyActivity` (AIDirector.il.txt
+/// IL_00D9); the 4th argument decays in seconds (`AIDirectorChunkData::DecayEvents`
+/// subtracts the tick's seconds), and `Director.notifyActivity` takes ticks.
+const stealth_heat_window_s: f32 = 240.0;
+
 /// Player movement-noise model (RE entity-ai.md PlayerStealth): consumes the
 /// stealth-noise ring pushed by the sound relay, folds each event into the
 /// owning player's stealth state (stock PlayerStealth.NotifyNoise), then runs
@@ -2792,9 +2798,11 @@ fn stealthNotifyNoise(w: *World, s: Slot, ev: c.StealthNoiseEvent) void {
         w.pushSleeperVolumeNoise(ev.x, ev.y, ev.z);
     }
     // Heat map (stock AIDirector.NotifyActivity): heatMapStrength x the
-    // (muffled) volumeScale, held for heat_map_time x 10 ticks.
+    // (muffled) volumeScale, held for the fixed window `NotifyNoise` passes
+    // (`ldc.r4 240`, AIDirector.il.txt IL_00D9 - the row's own heat_map_time
+    // never reaches the live path).
     if (ev.heat_map_strength > 0) {
-        w.director.notifyActivity(ev.x, ev.z, ev.heat_map_strength * scale, ev.heat_map_time * 10.0);
+        w.director.notifyActivity(ev.x, ev.z, ev.heat_map_strength * scale, stealth_heat_window_s * 20.0);
     }
 }
 
@@ -7074,7 +7082,7 @@ test "stealth noise: a loud clip folds into the player and alerts a zombie" {
     const zs = w.slotOfNetId(z).?;
     try std.testing.expect(!w.zombie_ai[zs].alert);
     // pipe_pistol_fire (stock V3.1.4): volume 62, 2 s = 40 ticks, muffle 0.8.
-    w.pushStealthNoise(ps, 0, 70, 0, 62, 40, 0.8, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 62, 40, 0.8, 0);
     systemStealth(&w);
     // Radius = min(62 x 0.6, 40) = 37.2 covers 10 m; heard = 108.8 / 6.4 >= 1.
     try std.testing.expect(w.zombie_ai[zs].alert);
@@ -7094,14 +7102,14 @@ test "stealth noise: crouch muffle scales the noise volume" {
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     // stepdirt (V3.1.4): volume 5, muffle 0.507.
-    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0);
     systemStealth(&w);
     const standing = w.stealth[ps].noise_volume;
     // The entry itself is unfolded (5); the muffle scales the fold.
     try std.testing.expectApproxEqAbs(@as(f32, 5), w.stealth[ps].noises[0].volume, 0.001);
     w.stealth[ps] = .{};
     w.player[ps].crouching = true;
-    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 5, 20, 0.507, 0);
     systemStealth(&w);
     const crouched = w.stealth[ps].noise_volume;
     try std.testing.expect(crouched < standing);
@@ -7118,7 +7126,7 @@ test "stealth noise: sleeper-volume cap queues a volume wake, then decays" {
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
     // Loud: volume 120 → eff = 60 + 60^1.4 ~ 368.5 > 360 → cap + wake.
-    w.pushStealthNoise(ps, 0, 70, 0, 120, 80, 1.0, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 120, 80, 1.0, 0);
     systemStealth(&w);
     try std.testing.expectEqual(@as(f32, 360.0), w.stealth[ps].sleeper_noise_volume);
     try std.testing.expectEqual(@as(usize, 1), w.sleeper_volume_noise_n);
@@ -7129,7 +7137,7 @@ test "stealth noise: sleeper-volume cap queues a volume wake, then decays" {
     try std.testing.expect(w.stealth[ps].sleeper_noise_volume < 360.0);
     // Quiet noise (stepcloth 3 < loud 11) decays immediately: 3 - 2.5 = 0.5.
     w.stealth[ps] = .{};
-    w.pushStealthNoise(ps, 0, 70, 0, 3, 20, 1.0, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 3, 20, 1.0, 0);
     systemStealth(&w);
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), w.stealth[ps].sleeper_noise_volume, 0.001);
     systemStealth(&w);
@@ -7148,7 +7156,7 @@ test "stealth noise: a sleeping zombie that hears wakes" {
     const zs = w.slotOfNetId(z).?;
     try std.testing.expect(!w.sleeper[zs].awake);
     // stepbush (V3.1.4): volume 11 - radius 6.6 covers 5 m, heard ~ 7 >= 1.
-    w.pushStealthNoise(ps, 0, 70, 0, 11, 60, 0.507, 0, 0);
+    w.pushStealthNoise(ps, 0, 70, 0, 11, 60, 0.507, 0);
     systemStealth(&w);
     try std.testing.expect(w.sleeper[zs].awake);
     try std.testing.expectEqual(@as(usize, 1), w.sleeper_wake_n);
@@ -7157,17 +7165,18 @@ test "stealth noise: a sleeping zombie that hears wakes" {
 
 test "stealth noise: heat rows feed the activity map" {
     // RE AIDirector.NotifyNoise: heat_map_strength > 0 adds activity to the
-    // heat map for the region (x10 ticks, stock AddAudioData heatMapTime).
+    // heat map for the region, held for the fixed 240 s window NotifyNoise
+    // passes (the row's heat_map_time is not read by stock at all).
     var w: World = .{};
     defer w.deinit();
     const p = w.spawnPlayer(0, 70, 0, 0).?;
     const ps = w.slotOfNetId(p).?;
-    // Auger_Fire_Start (V3.1.4): heat 1.0 for 90 s.
-    w.pushStealthNoise(ps, 0, 70, 0, 60, 40, 1.0, 1.0, 90);
+    // Auger_Fire_Start (V3.1.4): volume 60, 2 s, heat 1.0.
+    w.pushStealthNoise(ps, 0, 70, 0, 60, 40, 1.0, 1.0);
     systemStealth(&w);
     try std.testing.expectEqual(@as(usize, 1), w.director.heat_n);
     // notifyActivity: activity = value, decay = value / (duration_ticks / 20)
-    // per second - 90 s x 10 ticks = 900 ticks → 1.0 / 45 s.
+    // per second - 240 s = 4800 ticks → 1.0 / 240 s.
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), w.director.heat[0].activity, 0.001);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 45.0), w.director.heat[0].decay, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0 / 240.0), w.director.heat[0].decay, 0.0001);
 }

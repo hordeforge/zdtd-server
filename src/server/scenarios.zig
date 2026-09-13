@@ -36,6 +36,7 @@ const assets_items = @import("../assets/items.zig");
 const assets_progression = @import("../assets/progression.zig");
 const requirements = @import("../assets/requirements.zig");
 const assets_item_modifiers = @import("../assets/item_modifiers.zig");
+const assets_noise = @import("../assets/noise.zig");
 const inv_c2s = @import("c2s/inv.zig");
 const platform_user = packages.platform_user;
 const ally_mod = @import("ally.zig");
@@ -787,6 +788,89 @@ test "scenario audio: a client sound relays to the other player, not the sender"
     try g.injectFramed(ca, try packages.framed(&fb, "NetPackageAudio", spoof));
     try std.testing.expect(g.harness.counters.get(.ownership_rejects) > own_before);
     std.debug.print("PASS audio: sound relayed to the other player, sender excluded\n", .{});
+}
+
+test "scenario audio: a player's own sound feeds the AI noise model" {
+    // The dedicated branch of NetPackageAudio.ProcessPackage routes the play
+    // through Audio.Server::Play, whose first act is Audio.Manager::SignalAI
+    // (Manager.il.txt IL=4696): it returns unless the instigator is an
+    // EntityPlayer, so a player's own sound - footsteps, gunfire, doors -
+    // folds through sounds.xml into that player's stealth and heat state.
+    // signalOnly suppresses the relay only: it is the "AI stimulus, do not
+    // play" flag, so the OLD "signalOnly -> drop" path discarded exactly the
+    // noises the AI model is built on.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_audio_noise");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_audio_noise", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // An offline run has no game-dir sounds.xml; install the stock-valued
+    // fixture rows the stealth tests pin.
+    g.noise_table.deinit();
+    g.noise_table = assets_noise.fromEntries(gpa, &assets_noise.fixture_entries);
+    const ps = g.sim.slotOfNetId(c.entity_id).?;
+
+    var abuf: [128]u8 = undefined;
+    var fb: [192]u8 = undefined;
+    // pipe_pistol_fire: volume 62, 2 s = 40 ticks, muffle 0.8, heat 0.75. The
+    // claim comes in mixed case through a path prefix, like a client's clip.
+    const body = try packages.buildAudioPlayBody(&abuf, .{
+        .entity_id = c.entity_id,
+        .sound_group = "Sounds/Pipe_Pistol_Fire",
+        .play = true,
+        .play_on_entity = true,
+        .volume_scale = 1,
+    });
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageAudio", body));
+    try g.step();
+    try std.testing.expectEqual(@as(u8, 1), g.sim.stealth[ps].noise_n);
+    try std.testing.expectEqual(@as(f32, 62), g.sim.stealth[ps].noises[0].volume);
+    // The fold stores `time * 20` ticks; the same tick's NoiseCleanup pass
+    // decrements it once.
+    try std.testing.expectEqual(@as(i32, 39), g.sim.stealth[ps].noises[0].ticks);
+    // The heat leg rides the same row for stock's fixed 240 s window.
+    try std.testing.expectEqual(@as(usize, 1), g.sim.director.heat_n);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75 / 240.0), g.sim.director.heat[0].decay, 0.0001);
+
+    // signalOnly: no relay, but the AI noise still lands.
+    const au_id = packages.idOf("NetPackageAudio").?;
+    cap.clear();
+    g.sim.stealth[ps] = .{};
+    const sig = try packages.buildAudioPlayBody(&abuf, .{
+        .entity_id = c.entity_id,
+        .sound_group = "stepdirt",
+        .play = true,
+        .play_on_entity = true,
+        .signal_only = true,
+    });
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageAudio", sig));
+    try g.step();
+    try std.testing.expect(cap.findPkgId(au_id) == null);
+    try std.testing.expectEqual(@as(f32, 5), g.sim.stealth[ps].noises[0].volume);
+
+    // The position form reaches SignalAI with a null entity, so it never makes
+    // noise: it is a relay only.
+    g.sim.stealth[ps] = .{};
+    g.sim.director.heat_n = 0;
+    const pos = try packages.buildAudioPlayBody(&abuf, .{
+        .entity_id = 0,
+        .sound_group = "pipe_pistol_fire",
+        .play = true,
+        .play_on_entity = false,
+        .volume_scale = 1,
+    });
+    try g.injectFramed(c, try packages.framed(&fb, "NetPackageAudio", pos));
+    try g.step();
+    try std.testing.expectEqual(@as(u8, 0), g.sim.stealth[ps].noise_n);
+    try std.testing.expectEqual(@as(usize, 0), g.sim.director.heat_n);
+    std.debug.print("PASS audio-noise: a player's own sound feeds stealth + heat\n", .{});
 }
 
 test "scenario treasure point: the server answers the client's dig-site request" {
@@ -1763,7 +1847,7 @@ test "scenario stealth meter broadcasts NetPackageEntityStealth to observers" {
     _ = try g.attachJoinedClient(&cap_b);
     const pa = g.sim.playerByPeer(ca.slot).?;
     // A makes noise (the sim fold; the C2S relay is audio-only on a dedi).
-    g.sim.pushStealthNoise(pa, g.sim.transform[pa].x, g.sim.transform[pa].y, g.sim.transform[pa].z, 60, 40, 0.8, 0, 0);
+    g.sim.pushStealthNoise(pa, g.sim.transform[pa].x, g.sim.transform[pa].y, g.sim.transform[pa].z, 60, 40, 0.8, 0);
     // Step until the 16-tick broadcast fires and the sim noise settles.
     var t: usize = 0;
     var got: ?u8 = null;

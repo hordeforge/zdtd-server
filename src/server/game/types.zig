@@ -91,6 +91,10 @@ pub const default_turret_sync_ticks: u64 = 10;
 pub const default_save_interval_ticks: u64 = 100;
 pub const default_spawn_area_radius_max: i32 = 8;
 pub const default_max_claimed_damage: i32 = 200;
+/// Cap on a claimed sound's `volumeScale` (the client multiplies the clip's
+/// sounds.xml `Noise::volume` by it, stock `Audio.Server::Play` -> `SignalAI`).
+/// zdtd policy like the damage claim cap: a legit client sends ~1.
+pub const default_max_claimed_noise_scale: f32 = 8;
 pub const default_max_edit_range: f32 = 96;
 pub const default_interest_range: f32 = 160;
 
@@ -346,6 +350,7 @@ pub const InitOptions = struct {
     save_interval_ticks: u64 = default_save_interval_ticks,
     spawn_area_radius_max: i32 = default_spawn_area_radius_max,
     max_claimed_damage: i32 = default_max_claimed_damage,
+    max_claimed_noise_scale: f32 = default_max_claimed_noise_scale,
     max_edit_range: f32 = default_max_edit_range,
     interest_range: f32 = default_interest_range,
     /// Movement envelope cap (zdtd.toml [authority] max_horizontal_speed_mps).

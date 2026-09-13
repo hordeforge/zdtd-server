@@ -902,7 +902,6 @@ pub const World = struct {
         duration_ticks: i32,
         muffled_when_crouched: f32,
         heat_map_strength: f32,
-        heat_map_time: f32,
     ) void {
         const n = @atomicRmw(usize, &self.stealth_noise_n, .Add, 1, .monotonic);
         if (n >= c.stealth_events_cap) return;
@@ -915,7 +914,6 @@ pub const World = struct {
             .duration_ticks = duration_ticks,
             .muffled_when_crouched = muffled_when_crouched,
             .heat_map_strength = heat_map_strength,
-            .heat_map_time = heat_map_time,
         };
     }
 

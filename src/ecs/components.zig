@@ -1086,8 +1086,6 @@ pub const StealthNoiseEvent = struct {
     muffled_when_crouched: f32,
     /// `heat_map_strength` (> 0 feeds NotifyActivity, the noise-to-heat leg).
     heat_map_strength: f32,
-    /// `heat_map_time` seconds (stock ×10 ticks).
-    heat_map_time: f32,
 };
 
 /// One cell carried by a falling-blocks group entity (world coords + the

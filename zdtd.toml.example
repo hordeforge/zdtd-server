@@ -34,6 +34,9 @@ max_edit_range_blocks = 96.0
 # Vertical envelope (rejects Y-only teleports the horizontal clamp cannot see).
 # max_vertical_speed_mps = 25.0
 max_claimed_damage = 200
+# Cap on a claimed sound's volume scale (multiplies the sounds.xml noise volume
+# before it reaches the AI noise model). Legit clients send ~1.
+# max_claimed_noise_scale = 8.0
 peer_stale_ms = 3000
 # Join rate-limit gap per IP (stock paces ~500 ms/IP; loopback is exempt).
 # join_rate_limit_ms = 500

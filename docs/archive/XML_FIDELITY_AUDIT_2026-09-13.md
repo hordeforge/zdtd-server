@@ -195,8 +195,16 @@ and a workstation output keeps its queue-item quality. **Third pass:**
 through Extends and resolves in `World.damageFrom` for every immediate hit
 (C2S claims, explosions, bot fire, traps), with the deferred accumulator and
 the parallel turret tick applying their own leg because neither calls it; the
-tag-gated swarm rows stay skipped, recorded. Everything else below is still
-queued.
+tag-gated swarm rows stay skipped, recorded. **Fourth pass:** the `sounds.xml`
+noise table is live: the C2S `NetPackageAudio` leg resolves the clip through it
+for a player-instigator sound (`Audio.Manager::SignalAI` on the dedicated
+branch) and feeds the stealth/heat model, the heat event uses stock's constant
+240 s window (`NotifyNoise` IL_00D9 - the row's `heat_map_time` never reaches a
+live path in stock either), and the scan matches element names
+case-insensitively and survives a self-closing `SoundDataNode`. The flat
+`combat_noise_radius` legs (combat hits, cop blasts, AI attacks) stay as
+zdtd-owned floors for sources with no audio package of their own. Everything
+else below is still queued.
 
 Fixes land in follow-up commits, worst first, by domain so each change set is
 one loader surface:
