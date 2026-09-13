@@ -13622,7 +13622,7 @@ test "scenario a vending fill skips items this build cannot resolve" {
         \\    <item name="resourceWood" count="3"/>
         \\    <item name="itemThatDoesNotExistAnywhere" count="2"/>
         \\  </trader_item_group>
-        \\  <trader_info id="1"/>
+        \\  <trader_info id="1"><trader_items><item group="traderAlways"/></trader_items></trader_info>
         \\</traders>
     ;
     var tmp = std.testing.tmpDir(.{});

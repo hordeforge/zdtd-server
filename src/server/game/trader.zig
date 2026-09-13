@@ -161,11 +161,17 @@ pub fn traderRollSeed(self: *const Game, trader_net_id: i32) u64 {
 pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.RolledItem) usize {
     const tt = self.traders;
     var refs: []const assets_traders.ItemRef = &.{};
+    // Only an unresolved trader_info row falls back to traderAlways. A row
+    // that resolved with an empty <trader_items> list is intentionally empty
+    // (traders.xml id 3 player_owned / id 5 rentable vending rows): stocking
+    // it from traderAlways shows items stock leaves off the machine.
+    var resolved_row = false;
     if (self.sim.slotOfNetId(trader_net_id)) |s| {
         if (self.sim.mask[s].trader_stock) {
             const info_id = self.sim.trader_stock[s].trader_info_id;
             if (info_id != 0) {
                 if (tt.traderInfo(info_id)) |ti| {
+                    resolved_row = true;
                     if (ti.refs.len > 0) refs = ti.refs;
                     // Per-trader RestockInterval drives systems.traderRestock
                     // (-1 = never, 0 = daily, N = every N days).
@@ -175,7 +181,7 @@ pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.Roll
             }
         }
     }
-    if (refs.len == 0) refs = tt.trader_always_refs;
+    if (!resolved_row and refs.len == 0) refs = tt.trader_always_refs;
     if (refs.len == 0) return 0;
     var rng = rng_util.XorShift32.initFromU64(traderRollSeed(self, trader_net_id));
     return tt.rollAllRefs(refs, &rng, qualityPolicy(self), out);

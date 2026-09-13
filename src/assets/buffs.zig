@@ -1996,9 +1996,10 @@ test "a buff passive folds only under its effect_group requirement" {
 }
 
 test "SandboxOptionBool gates a passive on the decoded sandbox option" {
-    // PlayerLevelBonusApplied is a stock YesNo option (default No) that gates
-    // buffStatusCheck01's four max-stat rows; the decoded code supplies the
-    // value when it carries the option.
+    // PlayerLevelBonusApplied is a stock YesNo option whose census default is
+    // Yes (SandboxOptionManager IL, option 11), and it gates buffStatusCheck01's
+    // four max-stat rows. The decoded code supplies the value when it carries
+    // the option; index 0 is an explicit No.
     const passives = [_]Passive{.{
         .name = "HealthMax",
         .op = .base_add,
@@ -2010,11 +2011,15 @@ test "SandboxOptionBool gates a passive on the decoded sandbox option" {
         }},
     }};
     var counts: requirements.Counts = .{};
-    try std.testing.expectEqual(@as(f32, 0), trackedDeltasAt(&passives, .{ .level = 1 }, .{}, &counts).hp_max);
+    // No code: the stock default (Yes) lets the row apply.
+    try std.testing.expectApproxEqAbs(@as(f32, 50), trackedDeltasAt(&passives, .{ .level = 1 }, .{}, &counts).hp_max, 0.0001);
     try std.testing.expectEqual(@as(u32, 1), counts.resolved);
     try std.testing.expectEqual(@as(u32, 0), counts.unsupported);
+    // Code index 1 = Yes, index 0 = No (even though the default is Yes).
     const on = [_]sandbox.Group{.{ .option_id = sandbox.optionByName("PlayerLevelBonusApplied").?.id, .index = 1 }};
     try std.testing.expectApproxEqAbs(@as(f32, 50), trackedDeltasAt(&passives, .{ .level = 1 }, .{ .sandbox_groups = &on }, &counts).hp_max, 0.0001);
+    const off = [_]sandbox.Group{.{ .option_id = sandbox.optionByName("PlayerLevelBonusApplied").?.id, .index = 0 }};
+    try std.testing.expectEqual(@as(f32, 0), trackedDeltasAt(&passives, .{ .level = 1 }, .{ .sandbox_groups = &off }, &counts).hp_max);
 }
 
 test "the stock SandboxOptionBool gates resolve instead of refusing" {

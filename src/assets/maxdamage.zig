@@ -131,6 +131,24 @@ pub const Table = struct {
     /// materials.xml forge_category per material id (e.g. Mmetal → "iron").
     /// Forge melt matches this (case-insensitive) against InputMaterials.
     material_forge_category: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// materials.xml StabilitySupport per material id (23 stock rows, 19
+    /// false). BlocksFromXml IL_06DE-070F: a block whose resolved property
+    /// dictionary does not declare StabilitySupport takes the material's value.
+    material_stability_support: std.StringHashMapUnmanaged(bool) = .{},
+    /// Block names whose resolved property dictionary declares StabilitySupport
+    /// (so the material default must not override it).
+    stability_explicit: std.StringHashMapUnmanaged(void) = .{},
+    /// materials.xml explosionresistance per material id (24 stock rows, the
+    /// `(1 - resistance)` numerator of Explosion::AttackBlocks IL_03D0-040E).
+    material_explosion_resist: std.StringHashMapUnmanaged(f32) = .{},
+    /// materials.xml collidable per material id (4 stock rows false: Mair,
+    /// Mwater, Mhay). The block collision default when no Collide mask exists
+    /// (BlocksFromXml IL_04D5-04EB).
+    material_collidable: std.StringHashMapUnmanaged(bool) = .{},
+    /// materials.xml movement_factor per material id (7 stock rows).
+    material_movement_factor: std.StringHashMapUnmanaged(f32) = .{},
+    /// materials.xml lightopacity per material id (18 stock rows).
+    material_light_opacity: std.StringHashMapUnmanaged(i32) = .{},
     arena_ptr: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *Table) void {
@@ -154,6 +172,12 @@ pub const Table = struct {
             self.power_output_per_stack_by_name = .{};
             self.material_max = .{};
             self.material_exp = .{};
+            self.material_stability_support = .{};
+            self.stability_explicit = .{};
+            self.material_explosion_resist = .{};
+            self.material_collidable = .{};
+            self.material_movement_factor = .{};
+            self.material_light_opacity = .{};
             self.stage2_health = .{};
             self.block_material = .{};
             self.distant_deco = .{};
@@ -299,6 +323,24 @@ pub const Table = struct {
         const hmm = h * m;
         const clamped: f32 = @min(hmm, falling_mass_hmm_cap);
         return clamped * falling_mass_scale;
+    }
+
+    /// materials.xml Hardness for a block id (block → Material → Hardness),
+    /// 0 when unresolvable. Explosion::AttackBlocks divides the damage by it
+    /// (IL_03D9-040E) and EntityFallingBlock scales the crush mass by it.
+    pub fn hardnessFor(self: *const Table, block_id: u16) f32 {
+        const name = self.idName(block_id) orelse return 0;
+        const mat = self.block_material.get(name) orelse return 0;
+        return self.material_hardness.get(mat) orelse 0;
+    }
+
+    /// materials.xml explosionresistance for a block id (block → Material),
+    /// 0 when unresolvable (no resistance). Stock's Explosion::AttackBlocks
+    /// multiplies damage by `1 - resistance` (IL_03D0-0405).
+    pub fn explosionResistanceFor(self: *const Table, block_id: u16) f32 {
+        const name = self.idName(block_id) orelse return 0;
+        const mat = self.block_material.get(name) orelse return 0;
+        return self.material_explosion_resist.get(mat) orelse 0;
     }
 
     /// materials.xml damage_category for a block id (block → Material →
@@ -490,6 +532,36 @@ pub const Table = struct {
                 const vv = try arena.dupe(u8, dc);
                 try self.material_category.put(arena, kn, vv);
             }
+            if (xml.propertyValue(body, "StabilitySupport")) |ss| {
+                if (parseBool(ss)) |b| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_stability_support.put(arena, kn, b);
+                }
+            }
+            if (xml.propertyValue(body, "explosionresistance")) |er| {
+                if (xml.parseF32(er)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_explosion_resist.put(arena, kn, v);
+                }
+            }
+            if (xml.propertyValue(body, "collidable")) |cl| {
+                if (parseBool(cl)) |b| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_collidable.put(arena, kn, b);
+                }
+            }
+            if (xml.propertyValue(body, "movement_factor")) |mf| {
+                if (xml.parseF32(mf)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_movement_factor.put(arena, kn, v);
+                }
+            }
+            if (xml.propertyValue(body, "lightopacity")) |lo| {
+                if (xml.parseI32Prefix(lo)) |v| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_light_opacity.put(arena, kn, v);
+                }
+            }
             // Stock MaterialBlock.ForgeCategory (materials.xml forge_category):
             // scrap melt matches this against workstation InputMaterials.
             if (xml.propertyValue(body, "forge_category")) |fc| {
@@ -509,6 +581,14 @@ pub const Table = struct {
             const bname = e.key_ptr.*;
             const mat = e.value_ptr.*;
             if (self.by_name.contains(bname)) continue;
+            // StabilitySupport defaults to the material's value when the
+            // block's resolved properties do not declare it (BlocksFromXml
+            // IL_06DE-070F).
+            if (!self.stability_explicit.contains(bname)) {
+                if (self.material_stability_support.get(mat)) |sup| {
+                    if (!sup) try self.non_support.put(arena, bname, {});
+                }
+            }
             const mhp = self.material_max.get(mat) orelse continue;
             try self.by_name.put(arena, bname, mhp);
             if (self.id_by_name.get(bname)) |id| {
@@ -578,6 +658,11 @@ fn parseBool(s: []const u8) ?bool {
 /// Own (not inherited) deco facts for one `<block>`; null = "ask the parent".
 const DecoFacts = struct {
     extends: ?[]const u8 = null,
+    /// Extends `param1`: the property names this block does NOT inherit from
+    /// its parent (stock BlocksFromXml CreateProperties copies the parent's
+    /// resolved dictionary minus this list). 925 stock Extends rows carry it,
+    /// Class 107 times, DowngradeBlock 72, MultiBlockDim 33, MaxDamage 12.
+    extends_param1: []const u8 = "",
     distant: ?bool = null,
     dim: ?Dim = null,
     /// Direct blocks.xml LootList (resolved through Extends in a second pass).
@@ -599,6 +684,57 @@ const DecoFacts = struct {
     show_model_on_fall: ?bool = null,
 };
 
+/// Resolve a per-block value through the Extends chain, honoring the `param1`
+/// exclusion list on each hop (stock BlocksFromXml CreateProperties: the child
+/// copies the parent's resolved property dictionary minus the names in its
+/// Extends param1). Own value wins; null = no ancestor declares it.
+fn resolveInherited(
+    comptime T: type,
+    map: *const std.StringHashMapUnmanaged(T),
+    facts: *const std.StringHashMapUnmanaged(DecoFacts),
+    name: []const u8,
+    prop: []const u8,
+    prop2: []const u8,
+) ?T {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        if (map.get(cur)) |v| return v;
+        const f = facts.get(cur) orelse return null;
+        const ext = f.extends orelse return null;
+        if (xml.tagListContains(f.extends_param1, prop) or
+            (prop2.len > 0 and xml.tagListContains(f.extends_param1, prop2))) return null;
+        cur = ext;
+    }
+    return null;
+}
+
+/// One field of the per-block turret stats through the Extends chain (the four
+/// properties have different names, so they inherit independently).
+fn resolveTurretField(
+    comptime field_name: []const u8,
+    map: *const std.StringHashMapUnmanaged(components.TurretBlockStats),
+    facts: *const std.StringHashMapUnmanaged(DecoFacts),
+    name: []const u8,
+    prop: []const u8,
+) ?@TypeOf(@field(components.TurretBlockStats{}, field_name)) {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        if (map.get(cur)) |ts| {
+            const v = @field(ts, field_name);
+            if (v != 0) return v;
+        }
+        const f = facts.get(cur) orelse return null;
+        const ext = f.extends orelse return null;
+        if (xml.tagListContains(f.extends_param1, prop)) return null;
+        cur = ext;
+    }
+    return null;
+}
+
 /// Resolve one block's inherited facts by walking `Extends`. Stock chains are
 /// two or three deep (treeOakSml01 → treeMaster); the hop cap only exists so a
 /// modded cycle cannot spin forever.
@@ -609,11 +745,12 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
     var hops: usize = 0;
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse break;
-        if (out.distant == null) out.distant = f.distant;
-        if (out.dim == null) out.dim = f.dim;
-        if (out.stability_support == null) out.stability_support = f.stability_support;
-        if (out.stability_ignore == null) out.stability_ignore = f.stability_ignore;
-        if (out.show_model_on_fall == null) out.show_model_on_fall = f.show_model_on_fall;
+        const p1 = f.extends_param1;
+        if (out.distant == null and !xml.tagListContains(p1, "IsDistantDecoration")) out.distant = f.distant;
+        if (out.dim == null and !xml.tagListContains(p1, "MultiBlockDim")) out.dim = f.dim;
+        if (out.stability_support == null and !xml.tagListContains(p1, "StabilitySupport")) out.stability_support = f.stability_support;
+        if (out.stability_ignore == null and !xml.tagListContains(p1, "StabilityIgnore")) out.stability_ignore = f.stability_ignore;
+        if (out.show_model_on_fall == null and !xml.tagListContains(p1, "ShowModelOnFall")) out.show_model_on_fall = f.show_model_on_fall;
         if (out.distant != null and out.dim != null and
             out.stability_support != null and out.stability_ignore != null and
             out.show_model_on_fall != null) break;
@@ -632,6 +769,7 @@ fn resolveLootList(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.loot_list) |ll| return ll;
+        if (xml.tagListContains(f.extends_param1, "LootList")) return null;
         cur = f.extends orelse return null;
     }
     return null;
@@ -646,6 +784,7 @@ fn resolveUpgrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []c
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.upgrade_to) |tb| return tb;
+        if (xml.tagListContains(f.extends_param1, "UpgradeBlock")) return null;
         cur = f.extends orelse return null;
     }
     return null;
@@ -660,6 +799,7 @@ fn resolveDowngrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
     while (hops < max_hops) : (hops += 1) {
         const f = facts.get(cur) orelse return null;
         if (f.downgrade_to) |db| return db;
+        if (xml.tagListContains(f.extends_param1, "DowngradeBlock")) return null;
         cur = f.extends orelse return null;
     }
     return null;
@@ -758,6 +898,11 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         var facts: DecoFacts = .{};
         if (xml.propertyValue(body, "Extends")) |ext| {
             facts.extends = try arena.dupe(u8, ext);
+            if (xml.propertyTagOffset(body, "Extends")) |tag| {
+                if (xml.attr(body, tag, "param1")) |p1| {
+                    facts.extends_param1 = try arena.dupe(u8, p1);
+                }
+            }
         }
         if (xml.propertyValue(body, "LootList")) |ll| {
             facts.loot_list = try arena.dupe(u8, ll);
@@ -844,11 +989,79 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var distant_deco: std.StringHashMapUnmanaged(void) = .{};
     var multi_block_dim: std.StringHashMapUnmanaged(Dim) = .{};
     var non_support: std.StringHashMapUnmanaged(void) = .{};
+    var stability_explicit: std.StringHashMapUnmanaged(void) = .{};
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
     var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{};
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var sleeper_class_names: std.StringHashMapUnmanaged(void) = .{};
+    // Property inheritance through Extends (stock BlocksFromXml CreateProperties
+    // copies the parent's resolved dictionary minus the child's param1 list).
+    // MaxDamage is the headline case: 318 blocks declare it, 1449 inherit it,
+    // and the rest fall back to the material's MaxDamage (Block.il
+    // IL_136C-138E sets MaxDamage from blockMaterial first, then the property
+    // overrides). Material, Stage2Health, power and turret props inherit the
+    // same way and used to read the own body only.
+    var pit = own_facts.iterator();
+    while (pit.next()) |e| {
+        const nm = e.key_ptr.*;
+        if (!by_name.contains(nm)) {
+            if (resolveInherited(u16, &by_name, &own_facts, nm, "MaxDamage", "")) |v|
+                try by_name.put(arena, nm, v);
+        }
+        if (!stage2_map.contains(nm)) {
+            if (resolveInherited(u16, &stage2_map, &own_facts, nm, "Stage2Health", "")) |v|
+                try stage2_map.put(arena, nm, v);
+        }
+        if (!block_material.contains(nm)) {
+            if (resolveInherited([]const u8, &block_material, &own_facts, nm, "Material", "")) |v|
+                try block_material.put(arena, nm, v);
+        }
+        if (!power_watts_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_watts_by_name, &own_facts, nm, "MaxPower", "RequiredPower")) |v|
+                try power_watts_by_name.put(arena, nm, v);
+        }
+        if (!power_class_by_name.contains(nm)) {
+            if (resolveInherited([]const u8, &power_class_by_name, &own_facts, nm, "Class", "")) |v|
+                try power_class_by_name.put(arena, nm, v);
+        }
+        if (!power_max_fuel_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_max_fuel_by_name, &own_facts, nm, "MaxFuel", "")) |v|
+                try power_max_fuel_by_name.put(arena, nm, v);
+        }
+        if (!power_output_per_fuel_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_output_per_fuel_by_name, &own_facts, nm, "OutputPerFuel", "")) |v|
+                try power_output_per_fuel_by_name.put(arena, nm, v);
+        }
+        if (!power_output_per_charge_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_output_per_charge_by_name, &own_facts, nm, "OutputPerCharge", "")) |v|
+                try power_output_per_charge_by_name.put(arena, nm, v);
+        }
+        if (!power_output_per_stack_by_name.contains(nm)) {
+            if (resolveInherited(f32, &power_output_per_stack_by_name, &own_facts, nm, "OutputPerStack", "")) |v|
+                try power_output_per_stack_by_name.put(arena, nm, v);
+        }
+        var ts = turret_stats_by_name.get(nm) orelse components.TurretBlockStats{};
+        var ts_any = turret_stats_by_name.contains(nm);
+        if (resolveTurretField("max_distance", &turret_stats_by_name, &own_facts, nm, "MaxDistance")) |v| {
+            ts.max_distance = v;
+            ts_any = true;
+        }
+        if (resolveTurretField("entity_damage", &turret_stats_by_name, &own_facts, nm, "EntityDamage")) |v| {
+            ts.entity_damage = v;
+            ts_any = true;
+        }
+        if (resolveTurretField("burst_fire_rate", &turret_stats_by_name, &own_facts, nm, "BurstFireRate")) |v| {
+            ts.burst_fire_rate = v;
+            ts_any = true;
+        }
+        if (resolveTurretField("burst_rounds", &turret_stats_by_name, &own_facts, nm, "BurstRoundCount")) |v| {
+            ts.burst_rounds = v;
+            ts_any = true;
+        }
+        if (ts_any) try turret_stats_by_name.put(arena, nm, ts);
+    }
+
     var fit = own_facts.iterator();
     while (fit.next()) |e| {
         const r = resolveDecoFacts(&own_facts, e.key_ptr.*);
@@ -856,7 +1069,10 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (r.dim) |d| {
             if (d.isMulti()) try multi_block_dim.put(arena, e.key_ptr.*, d);
         }
-        if (r.stability_support orelse true == false) try non_support.put(arena, e.key_ptr.*, {});
+        if (r.stability_support) |sv| {
+            try stability_explicit.put(arena, e.key_ptr.*, {});
+            if (!sv) try non_support.put(arena, e.key_ptr.*, {});
+        }
         if (r.stability_ignore orelse false) try stability_ignore_names.put(arena, e.key_ptr.*, {});
         if (r.show_model_on_fall orelse true == false) try no_show_model_on_fall.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
@@ -893,6 +1109,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .distant_deco = distant_deco,
         .multi_block_dim = multi_block_dim,
         .non_support = non_support,
+        .stability_explicit = stability_explicit,
         .stability_ignore_names = stability_ignore_names,
         .no_show_model_on_fall = no_show_model_on_fall,
         .upgrade_to = upgrade_to_names,
@@ -988,6 +1205,30 @@ test "blocks.xml LootList resolves per block after the AssignIds merge" {
     try std.testing.expect(t.downgradeTarget("cntWallSafeInsecure_Player") == null);
     // A normal upgradeable block has no downgrade path.
     try std.testing.expect(t.downgradeTarget("woodFrameBlock") == null);
+}
+
+test "blocks.xml properties inherit through Extends with param1 exclusions" {
+    // Stock BlocksFromXml CreateProperties copies the parent's resolved
+    // property dictionary minus the child's Extends param1 list. MaxDamage,
+    // Material and Stage2Health used to be read from the own body only:
+    // 318 blocks declare MaxDamage, 1449 inherit it, and 5693 blocks with
+    // neither rely on the Material default (Block.il IL_136C-138E).
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    // Own value.
+    try std.testing.expectEqual(@as(u16, 5000), t.maxDamageByName("cntGunSafe").?);
+    // Inherited MaxDamage (cntGunSafeWhite declares no MaxDamage).
+    try std.testing.expectEqual(@as(u16, 5000), t.maxDamageByName("cntGunSafeWhite").?);
+    // Material inherits, which is what the material MaxDamage default keys on.
+    try std.testing.expectEqualStrings("Mstone", t.block_material.get("terrSandStone").?);
+    try std.testing.expectEqualStrings("Mdirt", t.block_material.get("terrTopSoil").?);
+    // Stage2Health inherits (278 derived door rows).
+    try std.testing.expectEqual(@as(u16, 1), t.stage2_health.get("ironDoorBrown").?);
+    // param1 excludes a property: this row opts out of cntFreezerMaster's 600.
+    try std.testing.expectEqual(@as(u16, 600), t.maxDamageByName("cntFreezerMaster").?);
+    try std.testing.expect(t.maxDamageByName("cntFreezerGroceriesMiddleFullClosed") == null);
 }
 
 test "deco facts follow Extends chains and fail closed" {
@@ -1194,6 +1435,33 @@ test "AssignIds rows are walkable for id negotiation" {
     }
     try std.testing.expectEqual(t.idNameCount(), n);
     try std.testing.expect(saw_oak);
+}
+
+test "material StabilitySupport and explosionresistance resolve per block" {
+    // BlocksFromXml IL_06DE-070F: a block whose resolved properties do not
+    // declare StabilitySupport takes MaterialBlock.StabilitySupport (23 stock
+    // material rows, 19 false). Explosion::AttackBlocks IL_03D0-040E scales
+    // blast damage by `1 - explosionresistance` and divides by Hardness.
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
+    defer t.deinit();
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    // Mtrash is StabilitySupport false and cntAmmoPileSmall declares nothing.
+    try std.testing.expect(!t.stabilitySupport("cntAmmoPileSmall"));
+    // A material with no row keeps the stock default true (terrStone/Mstone).
+    try std.testing.expect(t.stabilitySupport("terrStone"));
+    // An explicit block property wins over the material (declared false here).
+    try std.testing.expect(!t.stabilitySupport("cntWoodenChestClosed"));
+    // Mconcrete explosionresistance 0.1 (terrAsphalt), MtrapSpikesIron 0.4.
+    if (t.idByName("terrAsphalt")) |aid| {
+        try std.testing.expectApproxEqAbs(@as(f32, 0.1), t.explosionResistanceFor(aid), 1e-6);
+        try std.testing.expect(t.hardnessFor(aid) > 0);
+    }
+    if (t.idByName("trapSpikesScrapIronMaster")) |sid| {
+        try std.testing.expectApproxEqAbs(@as(f32, 0.4), t.explosionResistanceFor(sid), 1e-6);
+    }
+    // A block with no material row for resistance reports 0 (no reduction).
+    try std.testing.expectEqual(@as(f32, 0), t.explosionResistanceFor(0));
 }
 
 test "materials.xml MaxDamage fills hayBaleSquare" {

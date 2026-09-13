@@ -307,12 +307,17 @@ pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
     const tt = self.traders;
     var n: usize = 0;
     var refs: []const assets_traders.ItemRef = &.{};
+    // A resolved trader_info with no <trader_items> is intentionally empty
+    // (owner-stocked vending: traders.xml id 3 player_owned, id 5 rentable);
+    // only an unresolved row takes the traderAlways fallback.
+    var resolved_row = false;
     if (v.trader_id > 0 and v.trader_id <= 65535) {
         if (tt.traderInfo(@intCast(v.trader_id))) |ti| {
+            resolved_row = true;
             if (ti.refs.len > 0) refs = ti.refs;
         }
     }
-    if (refs.len == 0) refs = tt.trader_always_refs; // traderAlways fallback
+    if (!resolved_row and refs.len == 0) refs = tt.trader_always_refs; // traderAlways fallback
     if (refs.len == 0) return;
     // Deterministic per machine per day (no entity id on a vending block;
     // the trader_id + day discriminates the stream).

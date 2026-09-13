@@ -403,6 +403,9 @@ pub fn loadFromPath(
         class: ?[]const u8 = null,
         trader_id: i32 = -1, // -1 = not declared
         extends: ?[]const u8 = null,
+        /// Extends `param1`: the property names this block does not inherit
+        /// from its parent (stock CreateProperties; Class is the common one).
+        extends_param1: []const u8 = "",
         trader_onoff: bool = false,
         is_door: bool = false,
         heat_strength: f32 = 0,
@@ -416,6 +419,10 @@ pub fn loadFromPath(
         mesh: ?[]const u8 = null,
         texture_top: u16 = 0,
         map_color: u16 = 0,
+        /// `<dropextendsoff />`: this block does NOT copy the parent's drop
+        /// rows (stock BlocksFromXml reads the element next to the drop list
+        /// and skips LoadExtendedItemDrops; 226 stock rows).
+        drop_extends_off: bool = false,
         /// Own (non-inherited) drop rows per event, arena-backed.
         harvest_drops: []const HarvestDrop = &.{},
         destroy_drops: []const HarvestDrop = &.{},
@@ -455,6 +462,7 @@ pub fn loadFromPath(
         var class: ?[]const u8 = null;
         var trader_id: i32 = -1;
         var extends: ?[]const u8 = null;
+        var extends_param1: []const u8 = "";
         var trader_onoff = false;
         var heat_strength: f32 = 0;
         var has_fuel_module = false;
@@ -468,6 +476,7 @@ pub fn loadFromPath(
         var texture_top: u16 = 0;
         var map_color: u16 = 0;
         var resource_scale: f32 = 1;
+        var drop_extends_off = false;
         var own_drops: std.ArrayList(HarvestDrop) = .empty;
         defer own_drops.deinit(allocator);
         var own_destroy: std.ArrayList(HarvestDrop) = .empty;
@@ -483,8 +492,14 @@ pub fn loadFromPath(
             // stick_chance/tool_category/tag -> SItemDropProb).
             const pi = std.mem.findPos(u8, clean, p, "<property ") orelse body_end;
             const di = std.mem.findPos(u8, clean, p, "<drop ") orelse body_end;
-            const at = @min(pi, di);
+            const dxi = std.mem.findPos(u8, clean, p, "<dropextendsoff") orelse body_end;
+            const at = @min(pi, @min(di, dxi));
             if (at >= body_end) break;
+            if (dxi < pi and dxi < di) {
+                drop_extends_off = true;
+                p = dxi + 15;
+                continue;
+            }
             if (di < pi) {
                 const ev = xml.attr(clean, di, "event") orelse "";
                 const drop_list = if (std.mem.eql(u8, ev, "Harvest"))
@@ -531,6 +546,7 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| trader_id = std.fmt.parseInt(i32, v, 10) catch -1;
             } else if (std.mem.eql(u8, pname, "Extends")) {
                 extends = xml.attr(clean, pi, "value");
+                extends_param1 = xml.attr(clean, pi, "param1") orelse "";
             } else if (std.mem.eql(u8, pname, "IndexName")) {
                 if (xml.attr(clean, pi, "value")) |v| {
                     if (std.mem.eql(u8, v, "TraderOnOff")) trader_onoff = true;
@@ -618,6 +634,7 @@ pub fn loadFromPath(
             .class = class,
             .trader_id = trader_id,
             .extends = extends,
+            .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
             .trader_onoff = trader_onoff,
             .is_door = std.ascii.findIgnoreCase(kn, "door") != null,
             .heat_strength = heat_strength,
@@ -631,6 +648,7 @@ pub fn loadFromPath(
             .mesh = if (mesh) |m| try arena.dupe(u8, m) else "",
             .texture_top = texture_top,
             .map_color = map_color,
+            .drop_extends_off = drop_extends_off,
             .harvest_drops = own_drop_slice,
             .destroy_drops = own_destroy_slice,
             .fall_drops = own_fall_slice,
@@ -681,18 +699,26 @@ pub fn loadFromPath(
             seen_chain[chain_n] = base;
             chain_n += 1;
             const base_p = &parsed.items[base];
-            if (own_class == null) own_class = base_p.class;
-            if (own_trader < 0) own_trader = base_p.trader_id;
-            if (own_mesh == null) own_mesh = base_p.mesh;
-            if (own_texture == 0) own_texture = base_p.texture_top;
-            if (own_map_color == 0) own_map_color = base_p.map_color;
+            // The starting block's Extends param1 excludes those properties
+            // from the whole chain (stock CreateProperties copies the parent's
+            // *resolved* dictionary minus the child's list, so an exclusion
+            // also hides a grandparent value); the excluded field keeps its
+            // default.
+            const p1 = pb.extends_param1;
+            if (own_class == null and !xml.tagListContains(p1, "Class")) own_class = base_p.class;
+            if (own_trader < 0 and !xml.tagListContains(p1, "TraderID")) own_trader = base_p.trader_id;
+            if (own_mesh == null and !xml.tagListContains(p1, "Mesh")) own_mesh = base_p.mesh;
+            if (own_texture == 0 and !xml.tagListContains(p1, "Texture")) own_texture = base_p.texture_top;
+            if (own_map_color == 0 and !xml.tagListContains(p1, "MapColor")) own_map_color = base_p.map_color;
             // CopyDroppedFrom (IL=89): base drop rows append per event unless
             // the item name is already present (own wins), so a block that
             // declares its own wood row still inherits the base's stone row.
             // Bounded by max_harvest_drops like the own-row parse cap.
-            own_drops = try mergeDrops(arena, own_drops, base_p.harvest_drops);
-            own_destroy = try mergeDrops(arena, own_destroy, base_p.destroy_drops);
-            own_fall = try mergeDrops(arena, own_fall, base_p.fall_drops);
+            if (!pb.drop_extends_off) {
+                own_drops = try mergeDrops(arena, own_drops, base_p.harvest_drops);
+                own_destroy = try mergeDrops(arena, own_destroy, base_p.destroy_drops);
+                own_fall = try mergeDrops(arena, own_fall, base_p.fall_drops);
+            }
             ext = base_p.extends;
         }
         pb.class = own_class;
@@ -953,6 +979,7 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "destroyOnly", 205 },
         .{ "fallBase", 206 },
         .{ "fallChild", 207 },
+        .{ "oreNoExtend", 208 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];
@@ -1048,6 +1075,11 @@ test "Harvest drop rows parse with Extends inheritance" {
         \\  <drop event="Destroy" name="terrDirt" count="1" prob="0.75" stick_chance="1"/>
         \\  <drop event="Destroy" count="0"/>
         \\</block>
+        \\<block name="oreNoExtend">
+        \\  <property name="Extends" value="cntOreBase"/>
+        \\  <dropextendsoff />
+        \\  <drop event="Harvest" name="resourceWood" count="7" tag="lumberjackHarvest"/>
+        \\</block>
         \\<block name="fallBase">
         \\  <drop event="Fall" name="terrDirt" count="1" prob="0.25" stick_chance="1"/>
         \\</block>
@@ -1097,6 +1129,14 @@ test "Harvest drop rows parse with Extends inheritance" {
     try std.testing.expectEqualStrings("lumberjackHarvest", cd[0].tag);
     try std.testing.expectEqualStrings("terrStone", cd[1].item_name);
     try std.testing.expectEqual(@as(f32, 0.25), cd[1].prob);
+
+    // <dropextendsoff />: the child keeps its own row only (stock skips
+    // LoadExtendedItemDrops when the element is present; 226 stock rows).
+    const no_ext = t.byName("oreNoExtend").?;
+    const nd = t.harvestDrops(no_ext.id);
+    try std.testing.expectEqual(@as(usize, 1), nd.len);
+    try std.testing.expectEqualStrings("resourceWood", nd[0].item_name);
+    try std.testing.expectEqual(@as(u32, 7), nd[0].count_min);
 
     // ResourceScale multiplies the row prob (0.8 * 0.5 = 0.4).
     const scaled = t.byName("scaledBlock").?;

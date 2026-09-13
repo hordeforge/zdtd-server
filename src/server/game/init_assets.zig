@@ -243,10 +243,17 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // that order). Register them so a mod's ItemValue resolves both ways
         // and the join IdMapping carries it; see ItemTable.addItemClasses.
         if (self.item_mods.defs.len > 0) {
-            const names = try allocator.alloc([]const u8, self.item_mods.defs.len);
-            defer allocator.free(names);
-            for (self.item_mods.defs, 0..) |md, i| names[i] = md.name;
-            try self.items.addItemClasses(names);
+            const classes = try allocator.alloc(@import("../../assets/items.zig").ItemTable.ItemClassStub, self.item_mods.defs.len);
+            defer allocator.free(classes);
+            for (self.item_mods.defs, 0..) |md, i| {
+                classes[i] = .{
+                    .name = md.name,
+                    .econ = md.econ,
+                    .stack = md.stack,
+                    .has_quality = md.has_quality,
+                };
+            }
+            try self.items.addItemClasses(classes);
             util_log.info("zdtd: item classes={d} (mods +{d}) stock_types={d}\n", .{
                 self.items.defs.len, self.item_mods.defs.len, self.items.stock_names.len,
             });

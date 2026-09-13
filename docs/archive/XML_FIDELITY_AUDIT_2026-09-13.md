@@ -178,6 +178,16 @@ are omitted.
 
 ## 4. Disposition
 
+**Fixed in the first pass (2026-09-13):** blocks.xml/materials.xml property
+inheritance (`Extends` + `param1` + `<dropextendsoff />` + material
+`StabilitySupport`); material `explosionresistance` parsed and exposed per
+block (the blast-path formula application is queued); `items.xml` Action0
+`Range` / `DamageBlock` / `Tags` inheritance; modifier rows registered with
+`EconomicValue` / `Stacknumber` / quality; sandbox boolean defaults; blood-moon
+row duration unit; biomemap ids resolved by name; quest `radius` property and
+`param1` variable substitution; `lootcontainer count` picks; traderAlways
+fallback only for unresolved rows. Everything else below is still queued.
+
 Fixes land in follow-up commits, worst first, by domain so each change set is
 one loader surface:
 

@@ -40,6 +40,16 @@ pub const ModDef = struct {
     /// the shared buffs scanner (layer 13). Arena-owned like the other
     /// strings; empty for a mod with no stat rows.
     passives: []const buffs.Passive = &.{},
+    /// `Extends` parent (mods inherit EconomicValue/Stacknumber and the
+    /// owner-tiered quality flag from modGeneralMaster).
+    extends: []const u8 = "",
+    /// items.xml-shape ItemClass fields the mod carries as an item class:
+    /// EconomicValue (modGeneralMaster 400, inherited by 106 live rows),
+    /// Stacknumber (1) and HasQuality (37 live mods are owner-tiered). The
+    /// trader prices a mod from its econ like any item.
+    econ: u16 = 0,
+    stack: u16 = 1,
+    has_quality: bool = false,
 };
 
 pub const ModTable = struct {
@@ -142,6 +152,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
             continue;
         };
         const end = requirements.elementEnd(clean, ii);
+        const body = clean[gt + 1 .. end];
+        const ext = xml.propertyValue(body, "Extends") orelse "";
+        const econ = if (xml.propertyValue(body, "EconomicValue")) |v| xml.parseU16(v) orelse 0 else 0;
+        const stack = if (xml.propertyValue(body, "Stacknumber")) |v| xml.parseU16(v) orelse 1 else 1;
+        const has_quality = xml.hasTieredEffectGroup(body);
         const p0 = passives_list.items.len;
         _ = buffs.scanPassives(
             arena,
@@ -158,6 +173,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
             .installable = try arena.dupe(u8, installable),
             .blocked = try arena.dupe(u8, blocked),
             .modifier = try arena.dupe(u8, modifier),
+            .extends = if (ext.len > 0) try arena.dupe(u8, ext) else "",
+            .econ = econ,
+            .stack = stack,
+            .has_quality = has_quality,
         });
         i = ii + 15;
     }
@@ -176,7 +195,43 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
     for (out, ranges.items) |*d, rg| {
         d.passives = pool[rg[0] .. rg[0] + rg[1]];
     }
+    // Extends pass: EconomicValue/Stacknumber/quality inherit from the parent
+    // (modGeneralMaster carries econ 400). A child can precede its parent in
+    // the file, so this is a second walk.
+    var idx: std.StringHashMapUnmanaged(usize) = .{};
+    for (out, 0..) |d, di| try idx.put(arena, d.name, di);
+    for (out) |*d| {
+        var cur = d.extends;
+        var hops: usize = 0;
+        while (hops < 8 and cur.len > 0) : (hops += 1) {
+            const pi = idx.get(cur) orelse break;
+            const par = out[pi];
+            if (d.econ == 0) d.econ = par.econ;
+            if (d.stack <= 1) d.stack = par.stack;
+            if (!d.has_quality) d.has_quality = par.has_quality;
+            cur = par.extends;
+        }
+    }
     return ModTable{ .defs = out, .arena_ptr = ap };
+}
+
+test "modifier rows carry econ, stack and quality from Extends" {
+    // A modifier is an ItemClassModifier item class: EconomicValue (400 on
+    // modGeneralMaster, inherited by every live row), Stacknumber 1 and the
+    // owner-tiered HasQuality flag (35 live tier= rows) belong to it. Without
+    // these the trader priced a mod at the 5-duke unknown fallback.
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
+    defer t.deinit();
+    const base = t.byName("modGeneralMaster").?;
+    try std.testing.expectEqual(@as(u16, 400), base.econ);
+    const barrel = t.byName("modGunBarrelExtender").?;
+    try std.testing.expectEqual(@as(u16, 400), barrel.econ);
+    try std.testing.expectEqual(@as(u16, 1), barrel.stack);
+    try std.testing.expect(!barrel.has_quality);
+    const mag = t.byName("modGunMagazineExtender").?;
+    try std.testing.expect(mag.has_quality);
+    try std.testing.expectEqual(@as(u16, 400), mag.econ);
 }
 
 /// Load the stock item_modifiers.xml through the standard config path (with

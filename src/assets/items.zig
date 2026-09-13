@@ -372,6 +372,16 @@ pub const ItemTable = struct {
         return 0;
     }
 
+    /// One extra item class to register (item_modifiers.xml row): the fields
+    /// the modifier carries as an ItemClass (name, Stacknumber, EconomicValue,
+    /// HasQuality).
+    pub const ItemClassStub = struct {
+        name: []const u8,
+        econ: u16 = 0,
+        stack: u16 = 1,
+        has_quality: bool = false,
+    };
+
     /// Register extra item classes that stock loads from a sibling catalog.
     /// `item_modifiers.xml` `<item_modifier>` rows are `ItemClassModifier`
     /// item classes in the same id space as `<item>` rows: stock runs
@@ -383,34 +393,35 @@ pub const ItemTable = struct {
     /// `IdMapping` have to know them; without this a looted gun's `mods=` roll
     /// (or a client-attached mod) resolves to nothing and fails closed.
     ///
-    /// `names` is item_modifiers.xml document order. No-op for the builtin
-    /// fixture catalog, which has no arena and no stock id space. Ownership:
-    /// the caller keeps `names`; the table dupes the strings into its arena.
-    pub fn addItemClasses(self: *ItemTable, names: []const []const u8) !void {
+    /// `classes` is item_modifiers.xml document order with each row's econ,
+    /// stack and quality flag (the mod is an ItemClassModifier item class, so
+    /// those item properties apply to it). No-op for the builtin fixture
+    /// catalog, which has no arena and no stock id space. Ownership: the
+    /// caller keeps `classes`; the table dupes the strings into its arena.
+    pub fn addItemClasses(self: *ItemTable, classes: []const ItemClassStub) !void {
         const ap = self.arena_ptr orelse return;
-        if (names.len == 0) return;
-        if (self.stock_names.len + names.len > max_items) return error.TooManyItems;
+        if (classes.len == 0) return;
+        if (self.stock_names.len + classes.len > max_items) return error.TooManyItems;
         const arena = ap.allocator();
         var next_id: u16 = 1;
         for (self.defs) |d| next_id = @max(next_id, d.id +| 1);
         var next_stock: i32 = stock_first_item_type;
         for (self.stock_types) |st| next_stock = @max(next_stock, st + 1);
-        const defs = try arena.alloc(ItemDef, self.defs.len + names.len);
+        const defs = try arena.alloc(ItemDef, self.defs.len + classes.len);
         @memcpy(defs[0..self.defs.len], self.defs);
-        const sn = try arena.alloc([]const u8, self.stock_names.len + names.len);
+        const sn = try arena.alloc([]const u8, self.stock_names.len + classes.len);
         @memcpy(sn[0..self.stock_names.len], self.stock_names);
-        const st = try arena.alloc(i32, self.stock_names.len + names.len);
+        const st = try arena.alloc(i32, self.stock_names.len + classes.len);
         @memcpy(st[0..self.stock_types.len], self.stock_types);
-        for (names, 0..) |n, i| {
-            const name = try arena.dupe(u8, n);
-            // Stacknumber 1 (modGeneralMaster, which every stock modifier
-            // Extends), no quality, no econ: an installed mod is an
-            // attachment, not a stack or a tradeable.
+        for (classes, 0..) |cl, i| {
+            const name = try arena.dupe(u8, cl.name);
             defs[self.defs.len + i] = .{
                 .id = next_id,
                 .name = name,
-                .stack = 1,
+                .stack = cl.stack,
                 .stock_type = next_stock,
+                .econ = cl.econ,
+                .has_quality = cl.has_quality,
             };
             sn[self.stock_names.len + i] = name;
             st[self.stock_types.len + i] = next_stock;
@@ -1454,6 +1465,15 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         defer own_melt_map.deinit(allocator);
         var own_material_map: std.StringHashMapUnmanaged([]const u8) = .{};
         defer own_material_map.deinit(allocator);
+        // Hand-item Range / DamageBlock and the item Tags list inherit too
+        // (meleeHandZombieFeral takes its parent's Action0 Range; the loot mod
+        // roll and the attachment scrub read the inherited Tags).
+        var own_range_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_range_map.deinit(allocator);
+        var own_dmgblock_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_dmgblock_map.deinit(allocator);
+        var own_tags_map: std.StringHashMapUnmanaged([]const u8) = .{};
+        defer own_tags_map.deinit(allocator);
         var ext_map: std.StringHashMapUnmanaged([]const u8) = .{};
         defer ext_map.deinit(allocator);
         for (stock_names.items, 0..) |n, idx| {
@@ -1463,6 +1483,11 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             if (stock_weight_declared.items[idx]) try own_weight_map.put(allocator, n, stock_weights.items[idx]);
             if (stock_melt_declared.items[idx]) try own_melt_map.put(allocator, n, stock_melt_times.items[idx]);
             if (stock_material_declared.items[idx]) try own_material_map.put(allocator, n, stock_materials.items[idx]);
+            // 0 = "unset" for both props (consumers fail closed to the rules
+            // floor), so a declared 0 needs no own-map entry.
+            if (stock_melee_ranges.items[idx] != 0) try own_range_map.put(allocator, n, stock_melee_ranges.items[idx]);
+            if (stock_dmg_blocks.items[idx] != 0) try own_dmgblock_map.put(allocator, n, stock_dmg_blocks.items[idx]);
+            if (stock_tags.items[idx].len > 0) try own_tags_map.put(allocator, n, stock_tags.items[idx]);
             if (ext_names.items[idx].len > 0) try ext_map.put(allocator, n, ext_names.items[idx]);
         }
         const max_hops: usize = 24;
@@ -1517,6 +1542,44 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             while (hops < max_hops) : (hops += 1) {
                 if (own_melt_map.get(cur)) |m| {
                     stock_melt_times.items[idx] = m;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Hand-item Range / DamageBlock (Action0 props) inherit through the
+        // chain: only 44 items declare Range, 24 DamageBlock.
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_range_map.get(cur)) |r| {
+                    stock_melee_ranges.items[idx] = r;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_dmgblock_map.get(cur)) |d| {
+                    stock_dmg_blocks.items[idx] = d;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        // Tags inherit (286 live items declare none of their own: the
+        // schematic masters, melee hands, food masters).
+        for (stock_names.items, 0..) |n, idx| {
+            if (stock_tags.items[idx].len > 0) continue;
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_tags_map.get(cur)) |t| {
+                    stock_tags.items[idx] = t;
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
@@ -1855,6 +1918,26 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ItemTable {
     const paths = @import("paths.zig");
     return paths.tryLoadConfig("items.xml", ItemTable, loadFromPath, allocator, game_dir, config_dir);
+}
+
+test "items inherit Action0 damage and Tags through Extends" {
+    // Range / DamageBlock / Tags used to read the own body only: 1449 items
+    // inherit MaxDamage-style props through Extends and 286 declare no Tags of
+    // their own (schematicNoQualityMaster children), which made the loot mod
+    // roll and the attachment scrub fail closed on them.
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // meleeHandZombieFeral extends meleeHandZombie01 (Range 1.6).
+    const feral = t.byName("meleeHandZombieFeral").?;
+    const plain = t.byName("meleeHandZombie01").?;
+    try std.testing.expect(plain.melee_range > 0);
+    try std.testing.expectApproxEqAbs(plain.melee_range, feral.melee_range, 1e-4);
+    // A schematic master child inherits the master's Tags.
+    const schematic = t.byName("ammoArrowStoneSchematic");
+    if (schematic) |d| try std.testing.expect(d.tags.len > 0);
+    try std.testing.expect(t.byName("schematicNoQualityMaster").?.tags.len > 0);
 }
 
 test "builtin items" {

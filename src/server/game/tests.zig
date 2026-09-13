@@ -4637,12 +4637,17 @@ test "the survival pass resolves a sandbox-gated row from the server code" {
     cl.skill_levels[0] = .{ .name = "perkSandboxTest", .level = 1 };
     cl.skill_level_n = 1;
     g.sim.health[ps].base_max_hp = 100;
-    // No code: the option keeps its YesNo default (No) and the row refuses.
+    // "AALA" = option AL (id 11 = PlayerLevelBonusApplied) at index A (No):
+    // the gated row refuses, so only the 100 base max remains. The explicit
+    // polarities are pinned here rather than the no-code default because
+    // buffStatusCheck01's cvar updates are stateful across ticks; the census
+    // default itself is pinned in the sandbox/buffs/requirements tests.
+    g.sandbox_code = "AALA";
     try stepTicks(g, 46);
     try std.testing.expectApproxEqAbs(@as(f32, 100), g.sim.health[ps].max_hp, 0.001);
-    // "AALB" = version A, option AL (id 11 = PlayerLevelBonusApplied), index B
-    // (Yes): the same server code the GameStats echo carries.
+    // "AALB" (Yes) lets the row apply: 150 = base 100 + the synthetic 50.
     g.sandbox_code = "AALB";
+    g.sim.health[ps].base_max_hp = 100;
     try stepTicks(g, 46);
     // 150 = base 100 + the synthetic perk's 50, with the level bonus at zero.
     // Accounted row by row now that `value="@cvar"` operands are live:

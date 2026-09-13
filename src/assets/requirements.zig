@@ -1273,16 +1273,17 @@ test "SandboxOptionBool reads the decoded option or its default" {
     const newbie = sandbox.optionByName("NewbieCoat").?;
     const req_on = Requirement{ .kind = .sandbox_option_bool, .arg = "NewbieCoat" };
     const req_off = Requirement{ .kind = .sandbox_option_bool, .arg = "NewbieCoat", .negated = true };
-    // Not in the code: the option default (YesNo default 0 = No).
-    try testing.expect(!all(&.{req_on}, .{}));
-    try testing.expect(all(&.{req_off}, .{}));
+    // Not in the code: the option's census default (NewbieCoat is Yes).
+    try testing.expect(all(&.{req_on}, .{}));
+    try testing.expect(!all(&.{req_off}, .{}));
     // Code index 1 = Yes.
     const on = [_]sandbox.Group{.{ .option_id = newbie.id, .index = 1 }};
     try testing.expect(all(&.{req_on}, .{ .sandbox_groups = &on }));
     try testing.expect(!all(&.{req_off}, .{ .sandbox_groups = &on }));
-    // Code index 0 = No even though the option is carried.
+    // Code index 0 = No even though the option default is Yes.
     const off = [_]sandbox.Group{.{ .option_id = newbie.id, .index = 0 }};
     try testing.expect(!all(&.{req_on}, .{ .sandbox_groups = &off }));
+    try testing.expect(all(&.{req_off}, .{ .sandbox_groups = &off }));
     // An unknown option name refuses rather than guessing.
     var counts: Counts = .{};
     const unknown = Requirement{ .kind = .sandbox_option_bool, .arg = "NotAnOption" };

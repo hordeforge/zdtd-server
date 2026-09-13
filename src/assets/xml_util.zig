@@ -90,6 +90,34 @@ pub fn propertyValue(body: []const u8, name: []const u8) ?[]const u8 {
 /// First `<passive_effect name="X" ... value="Y"/>` value in an effect_group
 /// body (items.xml Distraction* / buffs.xml passives, e.g. decoy's
 /// `DistractionRadius` with `operation="base_set"`).
+/// Offset of the `<property name="NAME"` tag in `body`, for the attributes
+/// that sit beside `value` (Extends `param1`, passive_effect `tier`). null when
+/// the property is absent.
+pub fn propertyTagOffset(body: []const u8, name: []const u8) ?usize {
+    var i: usize = 0;
+    while (i < body.len) {
+        const pi = std.mem.findPos(u8, body, i, "<property") orelse break;
+        const name_v = attr(body, pi, "name") orelse {
+            i = pi + 9;
+            continue;
+        };
+        if (std.mem.eql(u8, name_v, name)) return pi;
+        i = pi + 9;
+    }
+    return null;
+}
+
+/// True when the comma list `list` carries `tag` (case-sensitive, like stock
+/// FastTags). Empty list or tag is false.
+pub fn tagListContains(list: []const u8, tag: []const u8) bool {
+    if (list.len == 0 or tag.len == 0) return false;
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |seg| {
+        if (std.mem.eql(u8, std.mem.trim(u8, seg, " \t"), tag)) return true;
+    }
+    return false;
+}
+
 pub fn passiveEffectValue(body: []const u8, name: []const u8) ?[]const u8 {
     var i: usize = 0;
     while (i < body.len) {

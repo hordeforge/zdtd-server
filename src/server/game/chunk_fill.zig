@@ -63,7 +63,11 @@ pub fn sendSpawnChunk(self: *Game, peer: *ln_peer.Peer, cx: i32, cz: i32) !bool 
             var hsum: u32 = 0;
             for (ch.heights) |h| hsum += h;
             const havg: u8 = @intCast(hsum / 256);
-            break :hb if (havg < 40) @as(u8, 5) else if (havg > 90) @as(u8, 1) else 3;
+            // Key on the stock biome names and resolve through the loaded
+            // biomes.xml `<biomemap id>` table; the offline pins apply only
+            // when the table is missing (no game-dir).
+            const want: []const u8 = if (havg < 40) "snow" else if (havg > 90) "desert" else "pine_forest";
+            break :hb @import("../../world/biomes.zig").biomeIdForName(&self.biome_colors, want);
         };
         ch.biome_id = b;
         break :blk b;

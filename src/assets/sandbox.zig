@@ -95,8 +95,14 @@ pub fn valueI(o: *const Option, set: *const ValueSet, index: u8) i32 {
     return o.default_i;
 }
 
-/// Value of a bool option at a code index; only index 1 is "true".
+/// Value of a bool option at a code index (`YesNo` set: 0 = No, 1 = Yes). The
+/// caller resolves an option the code does not carry to `default_i`; an
+/// out-of-range index is that default too, so malformed code fails closed to
+/// the stock default instead of to a truthiness. Index 0 must stay false even
+/// for an option whose default is Yes (25 of 32 stock bools), which the old
+/// `index == 1 else default` form got wrong.
 pub fn valueB(o: *const Option, index: u8) bool {
+    if (index == 0) return false;
     if (index == 1) return true;
     return o.default_i != 0;
 }
@@ -158,4 +164,9 @@ test "bool options decode from index" {
     try std.testing.expectEqual(false, valueB(shb, 0));
     try std.testing.expectEqual(true, valueB(shb, 1));
     try std.testing.expectEqual(false, valueB(shb, 5)); // invalid -> default (false)
+    // 25 of the 32 stock bool options default true; the census carries the IL
+    // default, so an unset option must read true, not the generator's old 0.
+    try std.testing.expectEqual(true, valueB(optionByName("CraftingProgression").?, 5));
+    try std.testing.expectEqual(true, valueB(optionByName("NewbieCoat").?, 5));
+    try std.testing.expectEqual(false, valueB(optionByName("SillySounds").?, 5));
 }

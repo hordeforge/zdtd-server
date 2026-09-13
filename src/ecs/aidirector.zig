@@ -193,6 +193,9 @@ pub const WorldClock = struct {
     }
 };
 
+/// World time units per game hour (stock `DayTimeToWorldTime`, 24000/day).
+const world_time_units_per_hour: u64 = 1000;
+
 /// Resolved gamestages.xml `<spawn>` row: which entitygroup, and how many.
 /// Carries the pacing fields stock's party spawner walks (`SetupGroup`:
 /// `interval` seconds between spawns, `duration` seconds before the next
@@ -778,15 +781,19 @@ pub const Director = struct {
 
     /// Advance the nightly group walk to the next row (stock `SetupGroup`:
     /// row = stage row at `groupIndex`; `interval` paces spawns, `duration`
-    /// arms the row deadline in world ticks, `num` sizes the row). A null row
-    /// ends the walk for the night. World ticks run 20 Hz (50 ms).
+    /// arms the row deadline in world-time units, `num` sizes the row). A null
+    /// row ends the walk for the night.
     fn setupBmGroup(self: *Director, w: *ecs_world.World) void {
         _ = w;
         if (self.stageGroupAt(self.bm_group_index)) |sg| {
             self.bm_spawned_in_group = 0;
             self.bm_spawn_at = 0;
+            // Stock AIDirectorGameStagePartySpawner::SetupGroup IL_0044-0062:
+            // nextStageTime = world.worldTime + duration * 1000. World time is
+            // 1000 units per game hour (DayTimeToWorldTime), not 20 Hz ticks;
+            // the old *20 armed every row deadline 50x too early.
             self.bm_group_deadline = if (sg.duration > 0)
-                self.clock.worldTimeBits() + @as(u64, sg.duration) * 20
+                self.clock.worldTimeBits() + @as(u64, sg.duration) * world_time_units_per_hour
             else
                 0;
         } else {
@@ -2200,6 +2207,32 @@ test "blood moon spawns past the ordinary world budget (1.9x CanSpawn)" {
     // ceiling by its own size (stock CanSpawn behaves the same); the count
     // stays well under the 64 stock MaxSpawnedZombies default.
     try std.testing.expect(w.countKind(.zombie) <= 64);
+}
+
+test "blood moon row duration converts to world time units" {
+    // AIDirectorGameStagePartySpawner::SetupGroup IL_0044-0062:
+    // nextStageTime = world.worldTime + duration * 1000 (1000 units per game
+    // hour, 24000 per day). The old *20 armed every row deadline 50x early.
+    const Ctx = struct {
+        fn at(_: ?*anyopaque, spawner: []const u8, stage: i32, index: u32) ?StageGroup {
+            if (!std.mem.eql(u8, spawner, Director.bloodmoon_spawner)) return null;
+            if (stage != 61) return null;
+            if (index == 0) return .{ .group = "ZombiesNight", .num = 1, .max_alive = 8, .interval = 5, .duration = 1 };
+            if (index == 1) return .{ .group = "ZombiesNight", .num = 1, .max_alive = 8, .interval = 5, .duration = 0 };
+            return null;
+        }
+    };
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    var d: Director = .{ .clock = .{ .day = 7, .hours = 23.0 } };
+    d.bm_stage_frozen = 61;
+    d.stage_group_at_fn = &Ctx.at;
+    d.setupBmGroup(&w);
+    try std.testing.expectEqual(d.clock.worldTimeBits() + world_time_units_per_hour, d.bm_group_deadline);
+    // duration 0 leaves the row ungated (stock writes 0).
+    d.bm_group_index = 1;
+    d.setupBmGroup(&w);
+    try std.testing.expectEqual(@as(u64, 0), d.bm_group_deadline);
 }
 
 test "blood moon kills the horde when the party is wiped" {

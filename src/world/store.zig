@@ -894,7 +894,7 @@ pub const World = struct {
                         // water_surface_cell) does not apply to it.
                         wg.fillHeights(pos.x, pos.z, &c.heights);
                         projectPlane(&c.heights, geo, profile_max);
-                        const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
+                        const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else biomes_mod.offline_default_biome_id;
                         const stack = self.biome_layers_table.stackFor(biome_id);
                         try c.ensureBlocksWithStack(self.allocator, stack);
                     }
@@ -909,7 +909,7 @@ pub const World = struct {
                     @memset(&c.heights, @intCast(geo.project(geo.sea_level, profile_max)));
                 }
                 // Terrain columns from biomes.xml layers (before POI paint / disk load).
-                const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else 3;
+                const biome_id: u8 = if (self.biomes) |*bm| bm.chunkDominant(pos.x, pos.z) else biomes_mod.offline_default_biome_id;
                 const stack = self.biome_layers_table.stackFor(biome_id);
                 try c.ensureBlocksWithStack(self.allocator, stack);
                 if (self.prefabs) |*pf| {

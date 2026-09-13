@@ -273,7 +273,17 @@ fn buildPhaseGraph(arena: std.mem.Allocator, body: []const u8, tier: u8, kinds: 
         // count requirement stays 1 and the radius is carried on the spec.
         var radius: f32 = 0;
         if (kind == .goto_point or kind == .stay_within) {
-            if (xml.attr(body, oi, "value")) |v| radius = std.fmt.parseFloat(f32, v) catch 0;
+            // ObjectiveStayWithin carries its radius as a nested
+            // `<property name="radius" value="25"/>` (15 stock rows); the
+            // ObjectiveGoto distance rides the objective `value` attribute
+            // (ObjectiveGoto::distance, asm.il 966955-966966). Read both so a
+            // stay objective no longer falls back to the policy default.
+            const el0 = body[oi..elem_end];
+            const rad_src = if (kind == .stay_within)
+                (xml.propertyValue(el0, "radius") orelse xml.attr(body, oi, "value"))
+            else
+                (xml.attr(body, oi, "value") orelse xml.propertyValue(el0, "radius"));
+            if (rad_src) |rv| radius = std.fmt.parseFloat(f32, rv) catch 0;
             if (radius > 0) target = 1;
         }
         // The XML body text is transient; the marker class must live in the
@@ -390,7 +400,22 @@ const ObjectiveMeta = struct {
     allow_current_poi: bool = false,
 };
 
-fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8) !ObjectiveMeta {
+/// Property value with stock's `param1` variable substitution: a property
+/// carrying `param1="X"` takes the quest's `<variable name="X" value=...>`
+/// override when one exists, else the property's own value. Stock ships 18
+/// `biome_filter_type` variables (8 AnyBiome, 10 SameBiome) overriding the
+/// objective template default.
+fn propertyValueVars(el: []const u8, name: []const u8, vars: []const QuestVar) ?[]const u8 {
+    const pi = xml.propertyTagOffset(el, name) orelse return null;
+    if (xml.attr(el, pi, "param1")) |param| {
+        for (vars) |v| {
+            if (std.mem.eql(u8, v.name, param)) return v.value;
+        }
+    }
+    return xml.attr(el, pi, "value");
+}
+
+fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8, vars: []const QuestVar) !ObjectiveMeta {
     var m: ObjectiveMeta = .{};
     var i: usize = 0;
     while (i < body.len) {
@@ -411,7 +436,7 @@ fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8) !ObjectiveMeta 
         }
         const el = body[oi..elem_end];
         if (m.biome_type == quest.biome_filter_none) {
-            if (xml.propertyValue(el, "biome_filter_type")) |bt| {
+            if (propertyValueVars(el, "biome_filter_type", vars)) |bt| {
                 if (std.mem.eql(u8, bt, "ExcludeBiome")) {
                     m.biome_type = quest.biome_filter_exclude;
                 } else if (std.mem.eql(u8, bt, "OnlyBiome")) {
@@ -419,7 +444,7 @@ fn scanObjectiveMeta(arena: std.mem.Allocator, body: []const u8) !ObjectiveMeta 
                 } else if (std.mem.eql(u8, bt, "SameBiome")) {
                     m.biome_type = quest.biome_filter_same;
                 }
-                if (xml.propertyValue(el, "biome_filter")) |bf| {
+                if (propertyValueVars(el, "biome_filter", vars)) |bf| {
                     if (bf.len > 0) m.biome_filter = try arena.dupe(u8, bf);
                 }
             }
@@ -499,7 +524,7 @@ fn parseQuestDefBody(
     const ev_count = parseQuestEvents(arena, body, &event_specs);
 
     const graph = try buildPhaseGraph(arena, body, tier, kinds, policy);
-    const meta = try scanObjectiveMeta(arena, body);
+    const meta = try scanObjectiveMeta(arena, body, vars[0..var_n]);
 
     return .{
         .id = numeric_id,
@@ -1502,7 +1527,7 @@ test "objective meta scan derives quest tags / POI select kind / biome filter" {
         \\  <objective type="ReturnToNPC" phase="4"/>
         \\</quest>
     ;
-    const m = try scanObjectiveMeta(arena, body);
+    const m = try scanObjectiveMeta(arena, body, &.{});
     try std.testing.expectEqual(@intFromEnum(quest.QuestTag.clear), m.tags_mask);
     // RandomPOIGoto wins the selector kind; ClearSleepers never does.
     try std.testing.expectEqual(quest.PoiSelectKind.random, m.poi_select);
@@ -1519,7 +1544,7 @@ test "objective meta scan derives quest tags / POI select kind / biome filter" {
         \\  </objective>
         \\</quest>
     ;
-    const m2 = try scanObjectiveMeta(arena, body2);
+    const m2 = try scanObjectiveMeta(arena, body2, &.{});
     try std.testing.expectEqual(quest.PoiSelectKind.closest, m2.poi_select);
     try std.testing.expectEqual(quest.biome_filter_exclude, m2.biome_type);
     try std.testing.expectEqualStrings("wasteland", m2.biome_filter);
@@ -1528,10 +1553,43 @@ test "objective meta scan derives quest tags / POI select kind / biome filter" {
     const body3 =
         \\<quest id="q"><objective type="FetchFromContainer" id="1" value="1"/></quest>
     ;
-    const m3 = try scanObjectiveMeta(arena, body3);
+    const m3 = try scanObjectiveMeta(arena, body3, &.{});
     try std.testing.expectEqual(@intFromEnum(quest.QuestTag.fetch), m3.tags_mask);
     try std.testing.expectEqual(quest.PoiSelectKind.none, m3.poi_select);
     try std.testing.expectEqual(quest.biome_filter_none, m3.biome_type);
+
+    // param1 variable substitution: the objective template default is
+    // SameBiome, but the quest's `<variable name="biome_filter_type"
+    // value="AnyBiome"/>` wins (18 stock variables, 8 AnyBiome). AnyBiome is
+    // not a filter spelling, so the kind stays none.
+    const body4 =
+        \\<quest id="q">
+        \\  <variable name="biome_filter_type" value="AnyBiome"/>
+        \\  <objective type="RandomPOIGoto">
+        \\    <property name="biome_filter_type" value="SameBiome" param1="biome_filter_type"/>
+        \\  </objective>
+        \\</quest>
+    ;
+    var vars4: [max_quest_vars]QuestVar = undefined;
+    const vn4 = parseVariables(body4, &vars4);
+    const m4 = try scanObjectiveMeta(arena, body4, vars4[0..vn4]);
+    try std.testing.expectEqual(quest.biome_filter_none, m4.biome_type);
+    // Without the variable the property default applies (SameBiome).
+    const m5 = try scanObjectiveMeta(arena, body4, &.{});
+    try std.testing.expectEqual(quest.biome_filter_same, m5.biome_type);
+
+    // StayWithin carries its radius as a nested property (15 stock rows); the
+    // phase graph must pick it up instead of the policy default.
+    const body6 =
+        \\<quest id="q">
+        \\  <objective type="POIStayWithin" phase="1">
+        \\    <property name="radius" value="25"/>
+        \\  </objective>
+        \\</quest>
+    ;
+    const graph = try buildPhaseGraph(arena, body6, 1, quest.builtin_objective_kinds[0..], .{});
+    try std.testing.expectEqual(@as(usize, 1), graph.phases.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 25), graph.phases[0].radius, 1e-4);
 }
 
 test "SpawnGSEnemy action parses count range and gamestage list" {
