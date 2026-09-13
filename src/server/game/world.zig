@@ -501,42 +501,7 @@ pub fn drainExplosions(self: *Game) void {
                     }
                     if (mult == 0) continue; // category immune to this blast
                     const falloff: f32 = 1.0 - @sqrt(d2f) / radius;
-                    // Clamp to u16 like the chew path and the ExplosionClient
-                    // broadcast below: the loader caps BlockDamage at 1e6, and
-                    // a modded blast times a DamageBonus multiplier can exceed
-                    // 65535, which would trap the @trunc cast.
-                    const dmg: u16 = @trunc(@min(block_dmg * falloff * mult, 65535.0));
-                    if (dmg == 0) continue;
-                    const max_hp = self.maxDamageForBlock(id);
-                    const total = self.addBlockDamage(wx, wy, wz, dmg) catch continue;
-                    if (total >= max_hp) {
-                        // Downgrade swap (stock Block.OnBlockDamaged; the
-                        // explosion routes through DamageBlock): a block with
-                        // a DowngradeBlock turns into it instead of breaking.
-                        const down_raw = self.downgradeBreakRaw(wx, wy, wz, id);
-                        if (down_raw != 0) {
-                            // The downgrade displaces the old block and lands
-                            // a new one, same pair as the other downgrade
-                            // arms: this one cleared neither side.
-                            self.noteBlockRemoved(wx, wy, wz, id);
-                            _ = self.world.setBlockRawWorld(wx, wy, wz, down_raw) catch continue;
-                            self.noteBlockAdded(wx, wy, wz, world_store.typeId(down_raw));
-                            self.clearBlockHp(wx, wy, wz);
-                            self.clearBlockRaw(wx, wy, wz);
-                            if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, down_raw, 0, -1, -1)) |sb| {
-                                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
-                            } else |_| {}
-                        } else {
-                            // A removed bedroll clears the owner's respawn point.
-                            self.noteBlockRemoved(wx, wy, wz, id);
-                            self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
-                            self.clearBlockHp(wx, wy, wz);
-                            self.clearBlockRaw(wx, wy, wz);
-                            if (packages.buildSetBlockBody(&self.body_buf, wx, wy, wz, 0)) |sb| {
-                                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
-                            } else |_| {}
-                        }
-                    }
+                    _ = self.blastBlock(wx, wy, wz, id, block_dmg, falloff, mult);
                 }
             }
         }
@@ -560,6 +525,93 @@ pub fn drainExplosions(self: *Game) void {
             self.broadcastNear("NetPackageExplosionClient", fxb, ex.x, ex.z, self.interest_range) catch {};
         } else |_| {}
     }
+}
+
+/// Apply one blast to the block at (wx,wy,wz), stock `Explosion::AttackBlocks`
+/// (IL=553):
+///   hardness > 0  ->  damage = round((1 - resistance) * power * falloff
+///                                    / (hardness * land_mod) * category_mult)
+///   hardness == 0 ->  the block is destroyed outright (stock switches to the
+///                     `MaxDamage / land_mod` branch, IL_0449)
+/// `power` is the explosion's BlockDamage, `falloff` the 0..1 distance scalar
+/// and `category_mult` the ExplosionData DamageMultiplier for the block's
+/// `damage_category` (the caller skips a block whose multiplier is 0, which is
+/// how stock's earth/stone bonuses keep terrain intact).
+///
+/// An unresolvable material (builtin catalog, or a block with no blocks.xml
+/// Material row) keeps the raw numeric damage instead: stock's hardness comes
+/// from data zdtd does not have there, and inventing the destroy branch would
+/// break the offline paths. `land_mod` stays 1 (no land-claim hardness leg on
+/// this path yet, GAP "Land claim blast hardness").
+///
+/// Returns true when the block changed (damaged, downgraded or destroyed).
+pub fn blastBlock(
+    self: *Game,
+    wx: i32,
+    wy: i32,
+    wz: i32,
+    id: u16,
+    power: f32,
+    falloff: f32,
+    category_mult: f32,
+) bool {
+    if (id == 0 or !(power > 0) or !(falloff > 0) or !(category_mult > 0)) return false;
+    const max_hp = self.maxDamageForBlock(id);
+    if (max_hp == 0) return false;
+    const resist = @min(@max(self.maxdamage.explosionResistanceFor(id), 0), 1);
+    var dmg: f32 = undefined;
+    if (self.maxdamage.materialHardness(id)) |hardness| {
+        if (hardness > 0) {
+            dmg = (1.0 - resist) * power * falloff / hardness * category_mult;
+        } else {
+            dmg = @floatFromInt(max_hp);
+        }
+    } else {
+        dmg = (1.0 - resist) * power * falloff * category_mult;
+    }
+    const dmg_u16: u16 = @trunc(@min(@max(dmg, 0), 65535.0));
+    if (dmg_u16 == 0) return false;
+    const total = self.addBlockDamage(wx, wy, wz, dmg_u16) catch return false;
+    if (total < max_hp) {
+        // Stock's explosion sends the changed cells as one SetBlockAndDamage
+        // batch, damage-only entries included, so a blast that only cracks a
+        // block still shows on every client. Same echo the chew path uses
+        // (wire damage capped at the block's stage-2 threshold).
+        const raw = self.blockRawAt(wx, wy, wz);
+        if (raw != 0) {
+            const wire_dmg = self.wireBlockDamage(id, total);
+            if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, raw, wire_dmg, -1, -1)) |sb| {
+                self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+            } else |_| {}
+        }
+        return true;
+    }
+    // Downgrade swap (stock Block.OnBlockDamaged; the explosion routes through
+    // DamageBlock): a block with a DowngradeBlock turns into it instead of
+    // breaking.
+    const down_raw = self.downgradeBreakRaw(wx, wy, wz, id);
+    if (down_raw != 0) {
+        // The downgrade displaces the old block and lands a new one, same pair
+        // as the other downgrade arms: this one cleared neither side.
+        self.noteBlockRemoved(wx, wy, wz, id);
+        _ = self.world.setBlockRawWorld(wx, wy, wz, down_raw) catch return true;
+        self.noteBlockAdded(wx, wy, wz, world_store.typeId(down_raw));
+        self.clearBlockHp(wx, wy, wz);
+        self.clearBlockRaw(wx, wy, wz);
+        if (packages.buildSetBlockBodyRaw(&self.body_buf, wx, wy, wz, down_raw, 0, -1, -1)) |sb| {
+            self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+        } else |_| {}
+        return true;
+    }
+    // A removed bedroll clears the owner's respawn point.
+    self.noteBlockRemoved(wx, wy, wz, id);
+    self.world.setBlockWorld(wx, wy, wz, 0) catch return true;
+    self.clearBlockHp(wx, wy, wz);
+    self.clearBlockRaw(wx, wy, wz);
+    if (packages.buildSetBlockBody(&self.body_buf, wx, wy, wz, 0)) |sb| {
+        self.broadcastNear("NetPackageSetBlock", sb, @floatFromInt(wx), @floatFromInt(wz), self.interest_range) catch {};
+    } else |_| {}
+    return true;
 }
 
 pub fn setBlockRaw(self: *Game, x: i32, y: i32, z: i32, raw: u32) void {

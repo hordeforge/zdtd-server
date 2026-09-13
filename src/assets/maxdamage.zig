@@ -334,6 +334,21 @@ pub const Table = struct {
         return self.material_hardness.get(mat) orelse 0;
     }
 
+    /// materials.xml `Hardness` for a block id, with the three states stock
+    /// distinguishes: null when the block or its material cannot be resolved
+    /// (builtin catalog / no blocks.xml `Material` row), the declared value
+    /// when it is, and 0 when the material exists without a `Hardness` row
+    /// (stock builds `DataItem<float>()` there, so `Block::GetHardness()` is 0
+    /// and `Explosion::AttackBlocks` takes the destroy-outright branch at
+    /// IL_0449). Only 108 of 166 stock materials declare it.
+    pub fn materialHardness(self: *const Table, block_id: u16) ?f32 {
+        const name = self.idName(block_id) orelse return null;
+        const mat = self.block_material.get(name) orelse return null;
+        if (self.material_hardness.get(mat)) |h| return h;
+        if (self.material_category.contains(mat)) return 0;
+        return null;
+    }
+
     /// materials.xml explosionresistance for a block id (block → Material),
     /// 0 when unresolvable (no resistance). Stock's Explosion::AttackBlocks
     /// multiplies damage by `1 - resistance` (IL_03D0-0405).

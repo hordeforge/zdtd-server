@@ -2108,6 +2108,10 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
     g.maxdamage = mt;
     const stone_id = g.maxdamage.idByName("terrStone") orelse return error.SkipZigTest;
     const dirt_id = g.maxdamage.idByName("terrDirt") orelse return error.SkipZigTest;
+    // keystoneBlock is Msteel: explosionresistance 0.5, MaxDamage 7000
+    // (materials.xml). A blast whose power would break stone (500) twice over
+    // still leaves it standing, which is the (1 - resistance) leg.
+    const steel_id = g.maxdamage.idByName("keystoneBlock") orelse return error.SkipZigTest;
 
     const pushBlast = struct {
         fn push(g2: *game_mod.Game, s: u16) !void {
@@ -2136,7 +2140,10 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
         .hash = 7,
         .explosion_radius = 5,
         .explosion_radius_e = 6,
-        .explosion_block_dmg = 5000,
+        // 10000: at one cell (falloff 0.8) a steel block takes
+        // (1 - 0.5) * 10000 * 0.8 = 4000 < 7000 and survives, while stone at
+        // the same distance takes 8000 >= 500 and breaks.
+        .explosion_block_dmg = 10000,
         .explosion_entity_dmg = 800,
         .explosion_bonus_cat = .{ "earth", "", "", "" },
         .explosion_bonus_mult = .{ 0, 1, 1, 1 },
@@ -2146,9 +2153,15 @@ test "scenario demolish blast uses per-class ExplosionData and the earth DamageB
     const sa = g.sim.slotOfNetId(zid_a).?;
     try g.setBlock(gx + 3, gy, gz + 3, stone_id); // dist 4.24: 5000*0.152=760 >= 500 HP
     try g.setBlock(gx + 2, gy, gz + 2, dirt_id); // earth category -> bonus 0 -> survives
+    try g.setBlock(gx + 1, gy, gz, steel_id); // distance 1: resistance halves 8000 to 4000
     try pushBlast(g, sa);
     try std.testing.expect((try g.world.blockWorld(gx + 3, gy, gz + 3)) == 0); // stone broken
     try std.testing.expect((try g.world.blockWorld(gx + 2, gy, gz + 2)) != 0); // dirt survived
+    // Stock Explosion::AttackBlocks: damage = (1 - resistance) * power *
+    // falloff / hardness (materials.xml). The steel block keeps its 0.5
+    // resistance (4000 < 7000 MaxDamage) where the raw 8000 would have broken
+    // it.
+    try std.testing.expect((try g.world.blockWorld(gx + 1, gy, gz)) == steel_id);
     try std.testing.expect(!g.sim.alive[sa]); // the cop died with the blast
     // Blast FX: stock GameManager.explode sends NetPackageExplosionClient for
     // every explosion (cops included); the observing client must receive it.
@@ -4083,6 +4096,20 @@ test "scenario explosion damages entities and credits the kill" {
     const c = try g.attachJoinedClient(&cap);
     const zid = g.sim.spawnZombie(257, 70, 257, 30).?;
     const tank_id = g.sim.spawnZombie(258, 70, 256, 500).?;
+    // Blast blocks: the claimed ExplosionData.BlockDamage is the power, and the
+    // block's material decides the outcome (stock Explosion::AttackBlocks).
+    // terrStone is 500 HP with no explosionresistance; keystoneBlock is Msteel
+    // (0.5 resistance, 7000 HP). The old path deleted every block in the
+    // sphere regardless of material.
+    const game_blocks = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var mt = (maxdamage.tryLoad(gpa, game_blocks, null) catch null) orelse return error.SkipZigTest;
+    mt.tryMergeBundledAssignIds(gpa);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+    const stone_bid = g.maxdamage.idByName("terrStone") orelse return error.SkipZigTest;
+    const steel_bid = g.maxdamage.idByName("keystoneBlock") orelse return error.SkipZigTest;
+    try g.setBlock(256, 71, 256, stone_bid);
+    try g.setBlock(257, 71, 256, steel_bid);
     const far_id = g.sim.spawnZombie(276, 70, 256, 500).?;
 
     var body: [256]u8 = undefined;
@@ -4103,7 +4130,7 @@ test "scenario explosion damages entities and credits the kill" {
     try w.writeI16(60); // blockRadius 3.0
     try w.writeI16(20_000); // forged entityRadius 1000.0; server caps to 6
     try w.writeI16(100); // blastPower
-    try w.writeF32(50); // blockDamage
+    try w.writeF32(2000); // blockDamage: breaks stone (500), not steel (7000, x0.5)
     try w.writeF32(65_535); // forged entityDamage; server caps to authority limit
     try w.writeI32(c.entity_id);
     try w.writeF32(0); // delay
@@ -4117,6 +4144,11 @@ test "scenario explosion damages entities and credits the kill" {
     try std.testing.expect(g.sim.health[tank].hp >= 300); // at most max_claimed_damage
     const far = g.sim.slotOfNetId(far_id) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(f32, 500), g.sim.health[far].hp); // outside capped radius
+    // Block damage follows the stock formula: 2000 x 1 (falloff at the centre)
+    // breaks the 500 HP stone; the steel block takes (1 - 0.5) x 2000 = 1000
+    // and stands. The old path deleted both.
+    try std.testing.expectEqual(@as(u16, 0), try g.world.blockWorld(256, 71, 256));
+    try std.testing.expectEqual(steel_bid, try g.world.blockWorld(257, 71, 256));
     const score_id = packages.idOf("NetPackageEntityAddScoreClient").?;
     const sb = cap.findPkgIdEntity(score_id, c.entity_id) orelse return error.TestUnexpectedResult;
     var sr = binary.Reader{ .data = sb };
@@ -5050,7 +5082,18 @@ test "scenario craft invtx + explosion dig + lock deny" {
         try w.writeF32(0);
         try w.writeF32(0);
         try w.writeF32(1);
-        try w.writeU16(0);
+        // ExplosionData must carry a block damage: the blast is now stock's
+        // Explosion::AttackBlocks, where a 0 power breaks nothing (this used to
+        // be "delete every block in the sphere"). Radius 3 m, 2000 block
+        // damage: 2000 x falloff clears the 500 HP stone at the centre.
+        try w.writeU16(18); // blob len
+        try w.writeI16(0); // particleIndex
+        try w.writeI16(10); // duration
+        try w.writeI16(60); // blockRadius 3.0
+        try w.writeI16(20); // entityRadius 1.0
+        try w.writeI16(100); // blastPower
+        try w.writeF32(2000); // blockDamage
+        try w.writeF32(0); // entityDamage
         try w.writeI32(ca.entity_id);
         try w.writeF32(0);
         var fb: [256]u8 = undefined;

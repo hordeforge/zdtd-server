@@ -593,9 +593,18 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                     if (wy <= 0) continue;
                     const cur = self.world.blockWorld(wx, wy, wz) catch continue;
                     if (cur == 0 or cur == world_store.block_bedrock) continue;
-                    self.world.setBlockWorld(wx, wy, wz, 0) catch continue;
-                    const sb = packages.buildSetBlockBody(self.body_buf[0..64], wx, wy, wz, 0) catch continue;
-                    self.broadcastNear("NetPackageSetBlock", sb, ex.wx, ex.wz, self.interest_range) catch {};
+                    // Stock Explosion::AttackBlocks, not "delete everything in
+                    // the sphere": the claimed ExplosionData.BlockDamage is the
+                    // power, the block's material decides whether it breaks
+                    // (hardness and explosionresistance), and a block can come
+                    // out merely damaged. Every block the blast destroyed is
+                    // re-read below because a downgrade swap also changes the
+                    // cell.
+                    const blast_falloff: f32 = 1.0 -
+                        @sqrt(@as(f32, @floatFromInt(dx * dx + dy * dy + dz * dz))) / @as(f32, @floatFromInt(rad));
+                    if (!self.blastBlock(wx, wy, wz, cur, @floatFromInt(ex.block_damage), blast_falloff, 1.0)) continue;
+                    const after = self.world.blockWorld(wx, wy, wz) catch continue;
+                    if (after != 0) continue; // damaged or downgraded, not destroyed
                     // Destroy-event drops (RE Block.DropItemsOnEvent IL=246 +
                     // GameManager.ExplodeGroupFrameUpdate IL=145): the
                     // destroyed block's `<drop event="Destroy">` rows roll at

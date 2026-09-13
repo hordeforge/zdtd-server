@@ -1992,6 +1992,21 @@ pub const Game = struct {
         return game_world.addBlockDamage(self, x, y, z, dmg);
     }
 
+    /// One block inside a blast (stock Explosion::AttackBlocks damage formula,
+    /// destroy/downgrade flow). Both blast paths route through it.
+    pub fn blastBlock(
+        self: *Game,
+        wx: i32,
+        wy: i32,
+        wz: i32,
+        id: u16,
+        power: f32,
+        falloff: f32,
+        category_mult: f32,
+    ) bool {
+        return game_world.blastBlock(self, wx, wy, wz, id, power, falloff, category_mult);
+    }
+
     pub fn clearBlockHp(self: *Game, x: i32, y: i32, z: i32) void {
         return game_world.clearBlockHp(self, x, y, z);
     }
