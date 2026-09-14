@@ -359,12 +359,16 @@ fn tryCraftRecipe(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDe
     var i: u8 = 0;
     while (i < recipe.ingredient_n) : (i += 1) {
         const ing = recipe.ingredients[i];
+        // Recipe.CanCraft IL_0041: with UseIngredientModifier the count is
+        // EffectManager.GetValue(CraftingIngredientCount = 198) at the crafting
+        // tier, truncated; a non-positive result means the ingredient is not
+        // required at all - IL_0083 skips the scan before the item is ever
+        // resolved - while a positive one is floored to 1 by FastMax (IL_0097).
+        const mod_count = assets_recipes.ingredientCount(recipe, ing.name, ing.count, craft_tier);
+        if (mod_count == 0) continue;
         const id = self.ecsIdFromItemName(ing.name);
         if (id == 0) return false;
-        // Recipe.CanCraft: with UseIngredientModifier the count is
-        // GetValue(CraftingIngredientCount = 198) at the crafting tier,
-        // clamped to at least 1.
-        const need_count = assets_recipes.ingredientCount(recipe, ing.name, ing.count, craft_tier);
+        const need_count = @max(1, mod_count);
         const add: u32 = @as(u32, need_count) * n;
         var merged = false;
         var k: usize = 0;

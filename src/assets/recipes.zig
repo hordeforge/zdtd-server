@@ -67,20 +67,28 @@ pub const RecipeDef = struct {
 };
 
 /// `CraftingIngredientCount` (passive 198) rows on a recipe scale one
-/// ingredient's required count at the crafting tier (stock Recipe.CanCraft:
-/// `EffectManager.GetValue(198, itemValue, count, player, recipe,
-/// FastTags.Parse(itemName), level = craftingTier)` when
-/// `UseIngredientModifier`), clamped to at least 1. The query tags are the
-/// ingredient name; `perc_add`/`perc_subtract` are fractions (+0.25 = +25%,
-/// the non-loot passive convention).
+/// ingredient's required count at the crafting tier. Stock `Recipe::CanCraft`
+/// (IL=128, `../7dtd-engine-research/il/full-v3.2.0/_global/Recipe.il.txt`)
+/// IL_0041 calls `EffectManager.GetValue(198, null, xmlCount, player, recipe,
+/// FastTags.Parse(ingredientName), ..., craftingTier, ...)` when
+/// `UseIngredientModifier`, whose IL_03BC returns `base * perc` - the base ops
+/// fold into one accumulator and the percent ops into another, multiplied
+/// once, not op-by-op. The caller's `conv.i4` **truncates** toward zero. A
+/// result `<= 0` makes the ingredient not required at all: IL_0083 skips the
+/// scan entirely rather than clamping to 1, so a `count="0"` row with no
+/// matching modifier is free while the same row plus a `base_add` at this tier
+/// is charged. The query tags are the ingredient name; `perc_add` /
+/// `perc_subtract` are fractions (+0.25 = +25%, the non-loot passive
+/// convention) and `perc_set` replaces the accumulator rather than adding.
 pub fn ingredientCount(
     recipe: RecipeDef,
     ing_name: []const u8,
     base: u16,
     crafting_tier: u8,
 ) u16 {
-    if (!recipe.use_ingredient_modifier or recipe.passives.len == 0) return @max(1, base);
-    var v: f32 = @floatFromInt(base);
+    if (!recipe.use_ingredient_modifier or recipe.passives.len == 0) return base;
+    var base_v: f32 = @floatFromInt(base);
+    var perc: f32 = 1.0;
     var counts: requirements.Counts = .{};
     const ctx: requirements.Ctx = .{ .tags = ing_name };
     for (recipe.passives) |p| {
@@ -92,18 +100,22 @@ pub fn ingredientCount(
         else
             buffs.curveAtAxis(p, @floatFromInt(@max(1, crafting_tier)));
         switch (p.op) {
-            .base_set, .set => v = amount,
-            .base_add, .add => v += amount,
-            .base_subtract, .subtract => v -= amount,
-            .perc_add => v *= 1.0 + amount,
-            .perc_subtract => v *= 1.0 - amount,
+            .base_set, .set => base_v = amount,
+            .base_add, .add => base_v += amount,
+            .base_subtract, .subtract => base_v -= amount,
+            .perc_set => perc = amount,
+            .perc_add => perc += amount,
+            .perc_subtract => perc -= amount,
             else => {},
         }
-        if (!(v >= 0)) v = 0;
     }
-    const rounded: f32 = @ceil(v);
-    if (rounded < 1) return 1;
-    return @intFromFloat(@min(rounded, 65535.0));
+    const v = base_v * perc;
+    // Stock skips a non-positive count instead of clamping it to 1: the
+    // ingredient is not required. Positive counts are floored to 1 by the
+    // caller (Recipe::CanCraft IL_0097 FastMax), after the sandbox
+    // CraftingInput multiplier.
+    if (!(v > 0)) return 0;
+    return @intFromFloat(@min(@trunc(v), 65535.0));
 }
 
 pub const RecipeTable = struct {
@@ -408,18 +420,20 @@ test "recipe tags, ingredient modifier and CraftingIngredientCount" {
     try std.testing.expectEqual(@as(u16, 5), ingredientCount(helmet, "resourceYuccaFibers", 5, 1));
     try std.testing.expectEqual(@as(u16, 10), ingredientCount(helmet, "resourceYuccaFibers", 5, 2));
     try std.testing.expectEqual(@as(u16, 35), ingredientCount(helmet, "resourceYuccaFibers", 5, 6));
-    // A base of 0 stays at the clamp floor of 1 (the row adds nothing at the
-    // tested tier, and stock clamps the requirement to at least 1).
-    try std.testing.expectEqual(@as(u16, 1), ingredientCount(helmet, "resourceCloth", 0, 1));
+    // A base of 0 with no row matching this tier is not required at all:
+    // the scan is skipped (Recipe::CanCraft IL_0083), not clamped to 1.
+    try std.testing.expectEqual(@as(u16, 0), ingredientCount(helmet, "resourceCloth", 0, 1));
+    // At tier 4 the cloth row's base_add 5 lands on the 0 base, so stock
+    // charges 5 - the skip happens on the *modified* count.
     try std.testing.expectEqual(@as(u16, 5), ingredientCount(helmet, "resourceCloth", 0, 4));
     // An ingredient the rows do not name keeps its base count.
     try std.testing.expectEqual(@as(u16, 5), ingredientCount(helmet, "resourceDuctTape", 5, 4));
 
-    // perc_add rows are fractions: ammoDartIron unit_iron base 3 at tier 1
-    // (value .25) becomes ceil(3 * 1.25) = 4.
+    // perc_add rows are fractions and the caller truncates: ammoDartIron
+    // unit_iron base 3 at tier 1 (value .25) becomes trunc(3 * 1.25) = 3.
     const dart = t.byName("ammoDartIron").?;
     try std.testing.expect(dart.use_ingredient_modifier);
-    try std.testing.expectEqual(@as(u16, 4), ingredientCount(dart, "unit_iron", 3, 1));
+    try std.testing.expectEqual(@as(u16, 3), ingredientCount(dart, "unit_iron", 3, 1));
     try std.testing.expectEqual(@as(u16, 3), ingredientCount(dart, "unit_clay", 3, 1));
 
     // use_ingredient_modifier="false" opts the recipe out entirely (the
