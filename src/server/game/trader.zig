@@ -232,7 +232,13 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
             @floatFromInt(@max(1, d.econ_bundle_size))
         else
             1.0;
-        const qmod = ecs.systems.qualityPriceMod(qmin, qmax, r.quality);
+        // An item's own TraderQualityMod pair wins over the trader's
+        // (XUiM_Trader GetBuyPrice/GetSellPrice IL_0127-0168); the 4 stock rows
+        // are the cooking pot/grill, whose Q6 prices 20x.
+        const idef = self.items.byId(iid);
+        const iqmin = if (idef != null and idef.?.trader_quality_min_mod > 0) idef.?.trader_quality_min_mod else qmin;
+        const iqmax = if (idef != null and idef.?.trader_quality_max_mod > 0) idef.?.trader_quality_max_mod else qmax;
+        const qmod = ecs.systems.qualityPriceMod(iqmin, iqmax, r.quality);
         self.sim.trader_stock[s].entries[n] = .{
             .item = iid,
             .count = r.count,

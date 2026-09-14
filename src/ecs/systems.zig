@@ -1507,7 +1507,17 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
         else
             return false;
         if (unit == 0) return false;
-        const qmod = qualityPriceMod(w.trader_quality_min_mod, w.trader_quality_max_mod, sold_quality);
+        // The sold item's own TraderQualityMod pair wins over the trader's
+        // (stock's GetSellPrice lerps the item's pair when declared).
+        var qmin = w.trader_quality_min_mod;
+        var qmax = w.trader_quality_max_mod;
+        if (w.item_quality_mod_fn) |f| {
+            if (f(w.item_quality_mod_ctx, item)) |pair| {
+                qmin = pair[0];
+                qmax = pair[1];
+            }
+        }
+        const qmod = qualityPriceMod(qmin, qmax, sold_quality);
         var scaled: f64 = @as(f64, @floatFromInt(unit)) * qmod;
         if (w.percent_uses_left_fn) |p| {
             scaled *= @as(f64, p(w.percent_uses_left_ctx, item, sold_quality, sold_use_times));

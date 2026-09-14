@@ -505,6 +505,18 @@ pub fn blockSightBlocked(ctx: ?*anyopaque, id: u16) bool {
     return true;
 }
 
+/// Per-item `TraderQualityMod="min,max"` pair for the price lerp: stock's
+/// `XUiM_Trader.GetBuyPrice`/`GetSellPrice` use the item's own
+/// `TraderQualityMinMod`/`MaxMod` when declared, else the trader's. Null when
+/// the item declares no pair (or the table has no entry), which keeps the
+/// trader's pair.
+pub fn itemQualityMod(ctx: ?*anyopaque, item: u16) ?[2]f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const d = g.items.byId(item) orelse return null;
+    if (d.trader_quality_min_mod <= 0 and d.trader_quality_max_mod <= 0) return null;
+    return .{ d.trader_quality_min_mod, d.trader_quality_max_mod };
+}
+
 /// Ground half of stock `Chunk::CanMobsSpawnAtPos` (IL_0043/IL_004E): the block
 /// at (x, y, z) must carry `CanMobsSpawnOn` AND be movement-solid, so a
 /// player-built floor (which declares neither) stops hosting spawns while

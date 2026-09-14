@@ -643,6 +643,12 @@ pub const World = struct {
     /// Root traders.xml quality_mod lerp bounds (QL1 -> min, QL6 -> max),
     /// wired by the Game next to sell_price_fn for the non-stocked sell path.
     trader_quality_min_mod: f32 = 1,
+    /// Per-item `TraderQualityMod="min,max"` override (items.xml): stock's
+    /// GetBuyPrice/GetSellPrice lerp between the item's pair when the item
+    /// declares one, else the trader's. Game wires the items table; null (and
+    /// an item with no pair) keeps the trader's pair.
+    item_quality_mod_ctx: ?*anyopaque = null,
+    item_quality_mod_fn: ?*const fn (?*anyopaque, u16) ?[2]f32 = null,
     trader_quality_max_mod: f32 = 1,
     /// Stock ItemValue.PercentUsesLeft for a sold stack (RE
     /// ItemValue.get_PercentUsesLeft IL=17): the durability fraction the

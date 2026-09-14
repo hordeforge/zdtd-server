@@ -112,6 +112,13 @@ pub const ItemDef = struct {
     stock_type: i32 = 0,
     /// items.xml EconomicValue (0 = not tradeable).
     econ: f32 = 0,
+    /// items.xml `TraderQualityMod="min,max"` (4 stock rows, toolCookingPot and
+    /// toolCookingGrill variants): the quality price lerp this item uses
+    /// instead of the trader's own `quality_mod` (stock
+    /// `ItemClass.TraderQualityMinMod`/`MaxMod`, XUiM_Trader GetBuyPrice /
+    /// GetSellPrice IL_0127-0168). 0 = not declared -> the trader's pair.
+    trader_quality_min_mod: f32 = 0,
+    trader_quality_max_mod: f32 = 0,
     /// items.xml EconomicSellScale (stock `ItemClass.EconomicSellScale`,
     /// IL default 1.0; the sell price base is EconomicValue * scale, RE
     /// loot-economy.md GetSellPrice). A39.
@@ -1037,6 +1044,12 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_bundle_declared.deinit(allocator);
     var stock_econ_scales: std.ArrayList(f32) = .empty;
     defer stock_econ_scales.deinit(allocator);
+    var stock_tq_min: std.ArrayList(f32) = .empty;
+    defer stock_tq_min.deinit(allocator);
+    var stock_tq_max: std.ArrayList(f32) = .empty;
+    defer stock_tq_max.deinit(allocator);
+    var stock_tq_declared: std.ArrayList(bool) = .empty;
+    defer stock_tq_declared.deinit(allocator);
     var stock_edmgs: std.ArrayList(f32) = .empty;
     defer stock_edmgs.deinit(allocator);
     var stock_place_names: std.ArrayList([]const u8) = .empty;
@@ -1201,6 +1214,30 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try stock_bundles.append(allocator, bundle);
             try stock_bundle_declared.append(allocator, bundle_declared);
             // A39: EconomicSellScale (default 1.0 = stock ItemClass ctor IL).
+            // TraderQualityMod: a "min,max" pair (or the two separate keys a
+            // modlet may use). Either value present marks the row declared, so
+            // an explicit 1 is honoured over the trader's pair.
+            var tq_min: f32 = 0;
+            var tq_max: f32 = 0;
+            var tq_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "TraderQualityMod")) |v| {
+                var it = std.mem.splitScalar(u8, v, ',');
+                if (it.next()) |lo| tq_min = xml.parseF32(std.mem.trim(u8, lo, " \t")) orelse 0;
+                if (it.next()) |hi| tq_max = xml.parseF32(std.mem.trim(u8, hi, " \t")) orelse tq_min;
+                if (tq_max == 0) tq_max = tq_min;
+                tq_declared = true;
+            }
+            if (xml.propertyValue(clean[ii..item_end], "TraderQualityMinMod")) |v| {
+                tq_min = xml.parseF32(v) orelse tq_min;
+                tq_declared = true;
+            }
+            if (xml.propertyValue(clean[ii..item_end], "TraderQualityMaxMod")) |v| {
+                tq_max = xml.parseF32(v) orelse tq_max;
+                tq_declared = true;
+            }
+            try stock_tq_min.append(allocator, tq_min);
+            try stock_tq_max.append(allocator, tq_max);
+            try stock_tq_declared.append(allocator, tq_declared);
             var econ_scale: f32 = 1.0;
             if (xml.propertyValue(clean[ii..item_end], "EconomicSellScale")) |v| {
                 econ_scale = xml.parseF32(v) orelse 1.0;
@@ -1634,6 +1671,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         defer own_stack_map.deinit(allocator);
         var own_sellable_map: std.StringHashMapUnmanaged(bool) = .{};
         defer own_sellable_map.deinit(allocator);
+        var own_tq_min_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_tq_min_map.deinit(allocator);
+        var own_tq_max_map: std.StringHashMapUnmanaged(f32) = .{};
+        defer own_tq_max_map.deinit(allocator);
         var own_econ_map: std.StringHashMapUnmanaged(f32) = .{};
         defer own_econ_map.deinit(allocator);
         var own_bundle_map: std.StringHashMapUnmanaged(u16) = .{};
@@ -1658,6 +1699,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         for (stock_names.items, 0..) |n, idx| {
             if (own_stacks.items[idx] != 0) try own_stack_map.put(allocator, n, own_stacks.items[idx]);
             if (stock_econ_declared.items[idx]) try own_econ_map.put(allocator, n, stock_econs.items[idx]);
+            if (stock_tq_declared.items[idx]) {
+                try own_tq_min_map.put(allocator, n, stock_tq_min.items[idx]);
+                try own_tq_max_map.put(allocator, n, stock_tq_max.items[idx]);
+            }
             if (stock_sellable_declared.items[idx]) try own_sellable_map.put(allocator, n, stock_sellable.items[idx]);
             if (stock_bundle_declared.items[idx]) try own_bundle_map.put(allocator, n, stock_bundles.items[idx]);
             if (stock_weight_declared.items[idx]) try own_weight_map.put(allocator, n, stock_weights.items[idx]);
@@ -1688,6 +1733,18 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             while (hops < max_hops) : (hops += 1) {
                 if (own_sellable_map.get(cur)) |b| {
                     stock_sellable.items[idx] = b;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_tq_min_map.get(cur)) |lo| {
+                    stock_tq_min.items[idx] = lo;
+                    stock_tq_max.items[idx] = own_tq_max_map.get(cur) orelse lo;
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
@@ -1967,6 +2024,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.econ = stock_econs.items[idx];
                 def.econ_bundle_size = stock_bundles.items[idx];
                 def.econ_sell_scale = stock_econ_scales.items[idx];
+                def.trader_quality_min_mod = stock_tq_min.items[idx];
+                def.trader_quality_max_mod = stock_tq_max.items[idx];
                 def.degradation_min = stock_degrad_min.items[idx];
                 def.degradation_max = stock_degrad_max.items[idx];
                 def.has_quality = stock_has_quality.items[idx];
@@ -2036,6 +2095,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .econ = stock_econs.items[idx],
             .econ_bundle_size = stock_bundles.items[idx],
             .econ_sell_scale = stock_econ_scales.items[idx],
+            .trader_quality_min_mod = stock_tq_min.items[idx],
+            .trader_quality_max_mod = stock_tq_max.items[idx],
             .degradation_min = stock_degrad_min.items[idx],
             .degradation_max = stock_degrad_max.items[idx],
             .has_quality = stock_has_quality.items[idx],
@@ -2990,4 +3051,58 @@ test "stock items.xml SellableToTrader rows load" {
     try std.testing.expect(!t.byName("meleeWpnBladeT0BoneKnife").?.sellable_to_trader);
     // The default is true for the bulk of the catalog.
     try std.testing.expect(t.byName("gunHandgunT0PipePistol").?.sellable_to_trader);
+}
+
+test "TraderQualityMod parses and inherits through Extends" {
+    // Stock ItemClass reads the quality price pair
+    // (TraderQualityMinMod/MaxMod, written as the comma pair TraderQualityMod
+    // in items.xml; 4 stock rows, all "1,20") and XUiM_Trader's GetBuyPrice /
+    // GetSellPrice lerp it over (Quality-1)/5, falling back to the trader's
+    // pair when the item declares none.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items_tqm.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="cookMaster">
+        \\    <property name="TraderQualityMod" value="1,20"/>
+        \\  </item>
+        \\  <item name="cookChild">
+        \\    <property name="Extends" value="cookMaster"/>
+        \\  </item>
+        \\  <item name="splitKeys">
+        \\    <property name="TraderQualityMinMod" value="2"/>
+        \\    <property name="TraderQualityMaxMod" value="7"/>
+        \\  </item>
+        \\  <item name="plain"/>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(f32, 1), t.byName("cookMaster").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 20), t.byName("cookMaster").?.trader_quality_max_mod);
+    // Extends carries both halves.
+    try std.testing.expectEqual(@as(f32, 1), t.byName("cookChild").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 20), t.byName("cookChild").?.trader_quality_max_mod);
+    // The two separate keys work too, and an absent pair stays 0 (the
+    // trader's own pair applies).
+    try std.testing.expectEqual(@as(f32, 2), t.byName("splitKeys").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 7), t.byName("splitKeys").?.trader_quality_max_mod);
+    try std.testing.expectEqual(@as(f32, 0), t.byName("plain").?.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 0), t.byName("plain").?.trader_quality_max_mod);
+}
+
+test "stock items.xml TraderQualityMod rows load" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const pot = t.byName("toolCookingPot") orelse return error.SkipZigTest;
+    try std.testing.expectEqual(@as(f32, 1), pot.trader_quality_min_mod);
+    try std.testing.expectEqual(@as(f32, 20), pot.trader_quality_max_mod);
+    // A normal tool declares no pair: the trader's own quality mod applies.
+    try std.testing.expectEqual(@as(f32, 0), t.byName("meleeToolAxeT1IronFireaxe").?.trader_quality_min_mod);
 }

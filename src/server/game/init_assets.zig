@@ -620,6 +620,9 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // CanMobsSpawnOn + the Collide movement bit.
         self.sim.director.mob_spawn_ok_ctx = self;
         self.sim.director.mob_spawn_ok_fn = &game_hooks.blockMobSpawnGround;
+        // Per-item trader quality price pair (items.xml TraderQualityMod).
+        self.sim.item_quality_mod_ctx = self;
+        self.sim.item_quality_mod_fn = &game_hooks.itemQualityMod;
         self.sim.director.stage_group_ctx = self;
         self.sim.director.stage_group_fn = &Game.pickStageGroup;
         self.sim.director.stage_group_at_ctx = self;
