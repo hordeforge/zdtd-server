@@ -66,6 +66,31 @@ fn typeFromBuiltinId(item_id: u16) i32 {
 /// base_set -> base=value, perc_add -> base*(1+value); a quality curve
 /// evaluates at the tool's quality (piecewise-linear, quality 1..6, RE
 /// PassiveEffect.ModValue IL=796).
+/// Per-item cap on parsed `<stat>` rows (stock items.xml peaks at 40 on one
+/// item) and the pool cap across the file.
+pub const max_gs_stats_per_item: usize = 64;
+pub const max_gs_stats_total: usize = 4096;
+
+/// Stock `ItemClass/GSStat` (`min`/`max` are the XML values divided by
+/// `gs_stat_scale` and stored as i16, so the XML precision is 1/200).
+pub const gs_stat_scale: f32 = 0.005;
+/// Stock rejects a row whose |min| or |max| reaches this (GSStatsParseXml
+/// IL_0134-0147) instead of letting the i16 cast overflow.
+pub const gs_stat_limit: f32 = 163.835;
+
+/// One `<stat name="..." value="quality,gameStage,chance,min,max"/>` row of an
+/// item's `<stats>` block (stock `ItemClass::GSStatsParseXml` IL=181). The
+/// effect stays a name: zdtd keys passive effects by name, and the wire's
+/// numeric id is resolved where the stat is written.
+pub const GsStat = struct {
+    effect: []const u8 = "",
+    quality: i16 = 0,
+    game_stage: i16 = 0,
+    chance: f32 = 0,
+    min: i16 = 0,
+    max: i16 = 0,
+};
+
 pub const HarvestOp = enum(u8) { base_add, base_set, perc_add };
 
 pub const HarvestCountRow = struct {
@@ -201,6 +226,11 @@ pub const ItemDef = struct {
     /// full EffectManager aggregation over worn items - the recorded
     /// passive-effects-VM non-goal; only the held-tool leg is wired here.
     harvest_rows: []const HarvestCountRow = &.{},
+    /// items.xml `<stats>` rows: the gamestage-scaled stat rolls stock applies
+    /// when the item value is created (`ItemClass::AddGSStats`). Own element
+    /// only - stock parses the item's own `<stats>`, and no stock item inherits
+    /// one (the two apparent inheritors sit in commented-out blocks).
+    stats: []const GsStat = &.{},
     /// items.xml Action1 Class=PlaceAsBlock `Blockname` (b14: exactly two  -
     /// meleeToolTorch → wallTorchLightPlayer, candle → candleWallLightPlayer).
     /// Resolved to a block id via AssignIds at place time; empty = not
@@ -951,6 +981,16 @@ pub fn builtinStockName(item_id: u16) ?[]const u8 {
 
 /// Load items.xml: assign stock types like ItemClass.assignLeftOverItems
 /// (first free id = ItemsStartHere+1, then sequential in document order).
+/// Body of an item element's `<stats>` child, or null when it is absent or
+/// self-closing (stock scans `_element.Elements("stats")`).
+fn itemStatsBody(body: []const u8) ?[]const u8 {
+    const si = std.mem.findPos(u8, body, 0, "<stats") orelse return null;
+    const gt = std.mem.findPos(u8, body, si, ">") orelse return null;
+    if (gt == si or body[gt - 1] == '/') return null;
+    const close = std.mem.findPos(u8, body, gt, "</stats>") orelse return null;
+    return body[gt + 1 .. close];
+}
+
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     const clean = try xml.readCleanFile(allocator, path);
     defer allocator.free(clean);
@@ -1061,6 +1101,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_target_armor_tagged.deinit(allocator);
     var stock_target_armor_tag: std.ArrayList([]const u8) = .empty;
     defer stock_target_armor_tag.deinit(allocator);
+    var stock_gs_stats: std.ArrayList([]const GsStat) = .empty;
+    defer stock_gs_stats.deinit(allocator);
+    var gs_stats_total: usize = 0;
     var stock_harvest_rows: std.ArrayList([]const HarvestCountRow) = .empty;
     defer stock_harvest_rows.deinit(allocator);
     defer stock_dradius.deinit(allocator);
@@ -1455,6 +1498,63 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 try stock_harvest_rows.append(allocator, slice);
             } else {
                 try stock_harvest_rows.append(allocator, &.{});
+            }
+            // `<stats>`: the gamestage-scaled stat rows (stock
+            // ItemClass::GSStatsParseXml IL=181). A row needs a name and at
+            // least five comma fields; stock rejects a row whose |min| or |max|
+            // reaches 163.835 rather than overflow the i16 cast, and so does
+            // this parse.
+            var gs_rows: std.ArrayList(GsStat) = .empty;
+            defer gs_rows.deinit(allocator);
+            if (itemStatsBody(body)) |sbody| {
+                var sp: usize = 0;
+                while (sp < sbody.len and gs_rows.items.len < max_gs_stats_per_item and
+                    gs_stats_total < max_gs_stats_total)
+                {
+                    const sti = std.mem.findPos(u8, sbody, sp, "<stat ") orelse break;
+                    const sname = xml.attr(sbody, sti, "name") orelse {
+                        sp = sti + 6;
+                        continue;
+                    };
+                    const sval = xml.attr(sbody, sti, "value") orelse {
+                        sp = sti + 6;
+                        continue;
+                    };
+                    sp = sti + 6;
+                    if (sname.len == 0 or sval.len == 0) continue;
+                    var parts: [5][]const u8 = undefined;
+                    var pn: usize = 0;
+                    var vit = std.mem.splitScalar(u8, sval, ',');
+                    while (vit.next()) |raw| {
+                        if (pn >= parts.len) break;
+                        parts[pn] = std.mem.trim(u8, raw, " \t");
+                        pn += 1;
+                    }
+                    if (pn < parts.len) continue;
+                    const quality = std.fmt.parseInt(i16, parts[0], 10) catch continue;
+                    const game_stage = std.fmt.parseInt(i16, parts[1], 10) catch continue;
+                    const chance = xml.parseF32(parts[2]) orelse continue;
+                    const vmin = xml.parseF32(parts[3]) orelse continue;
+                    const vmax = xml.parseF32(parts[4]) orelse continue;
+                    if (@abs(vmin) >= gs_stat_limit or @abs(vmax) >= gs_stat_limit) continue;
+                    try gs_rows.append(allocator, .{
+                        .effect = try arena.dupe(u8, sname),
+                        .quality = quality,
+                        .game_stage = game_stage,
+                        .chance = chance,
+                        // C# `(short)float` truncates toward zero.
+                        .min = @intFromFloat(@trunc(vmin / gs_stat_scale)),
+                        .max = @intFromFloat(@trunc(vmax / gs_stat_scale)),
+                    });
+                }
+            }
+            if (gs_rows.items.len > 0) {
+                const slice = try arena.alloc(GsStat, gs_rows.items.len);
+                @memcpy(slice, gs_rows.items);
+                gs_stats_total += slice.len;
+                try stock_gs_stats.append(allocator, slice);
+            } else {
+                try stock_gs_stats.append(allocator, &.{});
             }
             var deat: i32 = 0;
             if (xml.passiveEffectValue(body, "DistractionEatTicks")) |v| {
@@ -1853,6 +1953,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.target_armor_tagged = stock_target_armor_tagged.items[idx];
                 def.target_armor_tag = stock_target_armor_tag.items[idx];
                 def.harvest_rows = stock_harvest_rows.items[idx];
+                def.stats = stock_gs_stats.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
                 def.weight = stock_weights.items[idx];
                 def.melt_time_per_unit = stock_melt_times.items[idx];
@@ -1935,6 +2036,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .target_armor_tagged = stock_target_armor_tagged.items[idx],
             .target_armor_tag = stock_target_armor_tag.items[idx],
             .harvest_rows = stock_harvest_rows.items[idx],
+            .stats = stock_gs_stats.items[idx],
             .distraction_lifetime = stock_dlifetime.items[idx],
             .distraction_strength = stock_dstrength.items[idx],
             .distraction_eat_ticks = stock_deat.items[idx],
@@ -2722,4 +2824,82 @@ test "EconomicValue keeps stock's float range and fraction" {
     try std.testing.expectEqual(@as(f32, 2.5), t.byName("fraction").?.econ);
     // No EconomicValue anywhere: 0, the trader's untradeable marker.
     try std.testing.expectEqual(@as(f32, 0), t.byName("plain").?.econ);
+}
+
+test "items.xml stats rows parse with stock's field grammar and guards" {
+    // Stock ItemClass::GSStatsParseXml IL=181: each `<stat>` needs a name and a
+    // value with at least five comma fields (quality, gameStage, chance, min,
+    // max); |min| or |max| at 163.835 or above is rejected rather than
+    // overflowing the i16 cast, and the stored value is the XML number divided
+    // by 0.005.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items_stats.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="gunMaster">
+        \\    <stats>
+        \\      <stat name="EntityDamage" value="0,0,1,0,.1"/>
+        \\      <stat name="DegradationMax" value="0,60,.5,-.1,.2"/>
+        \\    </stats>
+        \\  </item>
+        \\  <item name="badRows">
+        \\    <stats>
+        \\      <stat name="EntityDamage" value="0,0,1,0"/>
+        \\      <stat name="" value="0,0,1,0,.1"/>
+        \\      <stat name="Range" value="0,0,1,0,200"/>
+        \\      <stat name="BlockDamage" value="0,0,1,notanumber,.1"/>
+        \\    </stats>
+        \\  </item>
+        \\  <item name="emptyStats"><stats></stats></item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    const gm = t.byName("gunMaster").?;
+    try std.testing.expectEqual(@as(usize, 2), gm.stats.len);
+    try std.testing.expectEqualStrings("EntityDamage", gm.stats[0].effect);
+    try std.testing.expectEqual(@as(i16, 0), gm.stats[0].quality);
+    try std.testing.expectEqual(@as(i16, 0), gm.stats[0].game_stage);
+    try std.testing.expectEqual(@as(f32, 1), gm.stats[0].chance);
+    try std.testing.expectEqual(@as(i16, 0), gm.stats[0].min);
+    try std.testing.expectEqual(@as(i16, 20), gm.stats[0].max); // .1 / .005
+    try std.testing.expectEqualStrings("DegradationMax", gm.stats[1].effect);
+    try std.testing.expectEqual(@as(i16, 60), gm.stats[1].game_stage);
+    try std.testing.expectEqual(@as(f32, 0.5), gm.stats[1].chance);
+    try std.testing.expectEqual(@as(i16, -20), gm.stats[1].min); // -.1 / .005
+    try std.testing.expectEqual(@as(i16, 40), gm.stats[1].max); // .2 / .005
+    // Every malformed row is dropped; the well-formed ones stay.
+    try std.testing.expectEqual(@as(usize, 0), t.byName("badRows").?.stats.len);
+    try std.testing.expectEqual(@as(usize, 0), t.byName("emptyStats").?.stats.len);
+}
+
+test "stock items.xml stats rows load" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // A tool carries the Base_Random_Roll rows; EntityDamage is
+    // "0,0,1,0,.1" (chance 1, min 0, max 20 after the /0.005 scale).
+    const axe = t.byName("meleeToolAxeT1IronFireaxe") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(axe.stats.len >= 4);
+    // Two EntityDamage rows: the quality-0 base roll (chance 1, max .1) and the
+    // quality-1 boosted roll (chance .3, min .1, max .5).
+    var base: ?GsStat = null;
+    var boosted: ?GsStat = null;
+    for (axe.stats) |r| {
+        if (!std.mem.eql(u8, r.effect, "EntityDamage")) continue;
+        if (r.quality == 0) base = r;
+        if (r.quality == 1) boosted = r;
+    }
+    try std.testing.expectEqual(@as(i16, 20), base.?.max);
+    try std.testing.expectEqual(@as(f32, 1), base.?.chance);
+    try std.testing.expectEqual(@as(i16, 20), boosted.?.min);
+    try std.testing.expectEqual(@as(i16, 100), boosted.?.max);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), boosted.?.chance, 0.0001);
+    // An item with no <stats> block stays empty (fail closed, no invented rows).
+    try std.testing.expectEqual(@as(usize, 0), t.byName("resourceWood").?.stats.len);
 }
