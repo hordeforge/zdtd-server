@@ -91,6 +91,116 @@ pub const GsStat = struct {
     max: i16 = 0,
 };
 
+/// One rolled stat entry in the wire pair shape (`slot_a`/`slot_b`; stock's
+/// `Stat` ctor makes `isBoosted = slot_b > 0`, and the writer emits
+/// `slotA = isBoosted ? 0 : value`, `slotB = isBoosted ? value : 0`).
+pub const RolledGsStat = struct {
+    /// `PassiveEffects` ordinal (`assets/passive_effects.zig`).
+    effect: u8 = 0,
+    slot_a: i16 = 0,
+    slot_b: i16 = 0,
+};
+
+/// `passive_effects`
+const passive_effects = @import("passive_effects.zig");
+const game_random = @import("../util/game_random.zig");
+
+/// One `FindGSStat` (stock `ItemClass::FindGSStat` IL=90) over the rows of one
+/// effect: the highest-stage row at or below `stage` whose `chance` gate
+/// passes. Null is stock's "not found" sentinel (the returned `quality == -1`),
+/// which the caller distinguishes from a real row by the quality it asks for.
+/// The RNG draw happens only when the matched row's `chance < 1`.
+fn findGsStat(
+    stats: []const GsStat,
+    effect: []const u8,
+    quality: i32,
+    stage_in: i32,
+    r: *game_random.GameRandom,
+) ?GsStat {
+    var stage = stage_in;
+    if (stage < 0) {
+        // Trader path: the stage comes from the first row of that quality.
+        for (stats) |s| {
+            if (!std.mem.eql(u8, s.effect, effect)) continue;
+            if (@as(i32, s.quality) == quality) {
+                stage = s.game_stage;
+                break;
+            }
+        }
+    }
+    var best: i32 = -1;
+    var i: usize = stats.len;
+    while (i > 0) {
+        i -= 1;
+        const s = stats[i];
+        if (!std.mem.eql(u8, s.effect, effect)) continue;
+        if (@as(i32, s.quality) != quality) continue;
+        const cur: i32 = s.game_stage;
+        if (cur > stage) continue;
+        if (best < 0) {
+            best = cur;
+        } else if (cur < best) {
+            return null; // stock breaks out of the loop to its sentinel
+        }
+        if (s.chance < 1) {
+            const roll: f32 = @floatCast(r.nextDouble());
+            if (!(s.chance > roll)) continue;
+        }
+        return s;
+    }
+    return null;
+}
+
+/// Stock `ItemClass::AddGSStats` (IL=100): one entry per distinct effect at
+/// `quality`/`stage`, drawing from `r` in stock's exact order - the base roll
+/// (`FindGSStat(list, 0, 0, r)` then `RandomRange(min, max+1)`), then the
+/// quality roll (`FindGSStat(list, quality, stage, r)`). The result is the
+/// summed value split by `isBoosted = added > 0`, and an entry whose sum is 0
+/// is dropped (stock's `RemoveUnusedStats`). An effect name the enum does not
+/// know is skipped (the wire has no id for it).
+pub fn rollGsStats(
+    stats: []const GsStat,
+    quality: u8,
+    stage: i32,
+    r: *game_random.GameRandom,
+    out: []RolledGsStat,
+) usize {
+    var n: usize = 0;
+    for (stats, 0..) |s, idx| {
+        // First-occurrence order, and one entry per effect (stock's dictionary).
+        var seen = false;
+        for (stats[0..idx]) |prev| {
+            if (std.mem.eql(u8, prev.effect, s.effect)) {
+                seen = true;
+                break;
+            }
+        }
+        if (seen) continue;
+        var base: i32 = 0;
+        if (findGsStat(stats, s.effect, 0, 0, r)) |g0| {
+            if (g0.max >= g0.min) base = r.nextRange(g0.min, @as(i32, g0.max) + 1);
+        }
+        var added: i32 = 0;
+        if (findGsStat(stats, s.effect, quality, stage, r)) |g1| {
+            if (g1.quality > 0 and g1.max >= g1.min) {
+                added = r.nextRange(g1.min, @as(i32, g1.max) + 1);
+            }
+        }
+        if (base + added == 0) continue;
+        const ordinal = passive_effects.idOfName(s.effect) orelse continue;
+        if (n >= out.len) break;
+        // Stock casts the sum to i16 with a wrapping `conv.i2`.
+        const value: i16 = @truncate(base + added);
+        out[n] = .{
+            .effect = ordinal,
+            .slot_a = if (added > 0) 0 else value,
+            .slot_b = if (added > 0) value else 0,
+        };
+        n += 1;
+    }
+    return n;
+}
+
 pub const HarvestOp = enum(u8) { base_add, base_set, perc_add };
 
 pub const HarvestCountRow = struct {
@@ -3105,4 +3215,72 @@ test "stock items.xml TraderQualityMod rows load" {
     try std.testing.expectEqual(@as(f32, 20), pot.trader_quality_max_mod);
     // A normal tool declares no pair: the trader's own quality mod applies.
     try std.testing.expectEqual(@as(f32, 0), t.byName("meleeToolAxeT1IronFireaxe").?.trader_quality_min_mod);
+}
+
+test "the gamestage stat roll follows stock's draw order" {
+    // The stock axe rows (items.xml meleeToolAxeT1IronFireaxe): a quality-0
+    // base row (chance 1, min 0, max .1) and a quality-1 boosted row
+    // (chance .3, min .1, max .5); the stored i16s are the XML value / 0.005,
+    // so the ranges are 0..20 and 20..100.
+    const rows = [_]GsStat{
+        .{ .effect = "EntityDamage", .quality = 0, .game_stage = 0, .chance = 1, .min = 0, .max = 20 },
+        .{ .effect = "EntityDamage", .quality = 1, .game_stage = 0, .chance = 0.3, .min = 20, .max = 100 },
+        .{ .effect = "DegradationMax", .quality = 0, .game_stage = 0, .chance = 1, .min = 0, .max = 0 },
+    };
+    var out: [6]RolledGsStat = undefined;
+
+    // Deterministic: the same seed draws the same entries, and the base roll
+    // stays inside the base row's range.
+    var r1 = game_random.GameRandom.init(1234);
+    const n1 = rollGsStats(&rows, 1, 0, &r1, &out);
+    try std.testing.expect(n1 >= 1);
+    // EntityDamage is the first effect and `None`=0, `EntityDamage`=1.
+    try std.testing.expectEqual(@as(u8, 1), out[0].effect);
+    const value1: i32 = @as(i32, out[0].slot_a) + @as(i32, out[0].slot_b);
+    try std.testing.expect(value1 >= 0 and value1 <= 120);
+    var r2 = game_random.GameRandom.init(1234);
+    var out2: [6]RolledGsStat = undefined;
+    const n2 = rollGsStats(&rows, 1, 0, &r2, &out2);
+    try std.testing.expectEqual(n1, n2);
+    try std.testing.expectEqualSlices(RolledGsStat, out[0..n1], out2[0..n2]);
+
+    // The zero-sum row contributes nothing: an all-zero base row and no
+    // quality row emit no entry (stock's RemoveUnusedStats).
+    const zero_rows = [_]GsStat{
+        .{ .effect = "BlockDamage", .quality = 0, .game_stage = 0, .chance = 1, .min = 0, .max = 0 },
+    };
+    var r3 = game_random.GameRandom.init(7);
+    var out3: [6]RolledGsStat = undefined;
+    try std.testing.expectEqual(@as(usize, 0), rollGsStats(&zero_rows, 1, 0, &r3, &out3));
+
+    // A row whose chance gate fails leaves the base roll alone and the added
+    // roll out: chance 0 never passes, so the entry is the base only.
+    const gated = [_]GsStat{
+        .{ .effect = "EntityDamage", .quality = 0, .game_stage = 0, .chance = 1, .min = 5, .max = 5 },
+        .{ .effect = "EntityDamage", .quality = 3, .game_stage = 0, .chance = 0, .min = 50, .max = 60 },
+    };
+    var r4 = game_random.GameRandom.init(99);
+    var out4: [6]RolledGsStat = undefined;
+    const n4 = rollGsStats(&gated, 3, 0, &r4, &out4);
+    try std.testing.expectEqual(@as(usize, 1), n4);
+    // Base 5..5 (RandomRange(5, 6) = 5), no added value, so the value is a
+    // non-boosted slot_a.
+    try std.testing.expectEqual(@as(i16, 5), out4[0].slot_a);
+    try std.testing.expectEqual(@as(i16, 0), out4[0].slot_b);
+
+    // A stage below the row's gameStage skips it (the quality-1 row declares
+    // stage 20: at stage 0 the added roll finds nothing).
+    const staged = [_]GsStat{
+        .{ .effect = "EntityDamage", .quality = 1, .game_stage = 20, .chance = 1, .min = 40, .max = 40 },
+    };
+    var r5 = game_random.GameRandom.init(3);
+    var out5: [6]RolledGsStat = undefined;
+    try std.testing.expectEqual(@as(usize, 0), rollGsStats(&staged, 1, 0, &r5, &out5));
+    var r6 = game_random.GameRandom.init(3);
+    var out6: [6]RolledGsStat = undefined;
+    try std.testing.expectEqual(@as(usize, 0), rollGsStats(&staged, 1, 0, &r6, &out6));
+    var r7 = game_random.GameRandom.init(3);
+    var out7: [6]RolledGsStat = undefined;
+    const n7 = rollGsStats(&staged, 0, 0, &r7, &out7);
+    try std.testing.expectEqual(@as(usize, 0), n7);
 }

@@ -109,6 +109,7 @@ const guard_policy = @import("guard_policy.zig");
 const ally_mod = @import("ally.zig");
 const io_fs = @import("../util/io_fs.zig");
 const util_sim = @import("../util/sim.zig");
+const util_game_random = @import("../util/game_random.zig");
 const plugin_mod = @import("../plugin/root.zig");
 
 // Stock body modules via packages facade (leaf files stay importable elsewhere).
@@ -3634,6 +3635,31 @@ pub const Game = struct {
 
     pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
         return game_loot.ecsIdFromItemName(self, name);
+    }
+
+    /// Stock `ItemClass::AddGSStats` (IL=100) for a rolled item: the
+    /// gamestage stat entries an item value carries, drawn from a per-item
+    /// stream (`seed ^ index`, like the rest of the loot roll, so a re-roll is
+    /// reproducible). Empty for an item with no `<stats>` rows.
+    pub fn rollItemStats(self: *Game, item_id: u16, quality: u8, loot_stage: i32, seed: u32) struct {
+        stats: [ecs.components.max_item_stats]ecs.components.ItemStat,
+        n: u8,
+    } {
+        var out: [ecs.components.max_item_stats]ecs.components.ItemStat = .{ecs.components.ItemStat{}} ** ecs.components.max_item_stats;
+        var rolled: [ecs.components.max_item_stats]assets_items.RolledGsStat = undefined;
+        const d = self.items.byId(item_id) orelse return .{ .stats = out, .n = 0 };
+        if (d.stats.len == 0) return .{ .stats = out, .n = 0 };
+        var r = util_game_random.GameRandom.init(@bitCast(seed));
+        const n = assets_items.rollGsStats(d.stats, quality, loot_stage, &r, &rolled);
+        var i: usize = 0;
+        while (i < n and i < out.len) : (i += 1) {
+            out[i] = .{
+                .effect = rolled[i].effect,
+                .slot_a = rolled[i].slot_a,
+                .slot_b = rolled[i].slot_b,
+            };
+        }
+        return .{ .stats = out, .n = @intCast(@min(n, out.len)) };
     }
 
     pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8, seed: u32, loot_stage: i32) void {

@@ -532,7 +532,15 @@ pub fn fillContainerFromLoot(self: *Game, cont: *containers_mod.Container, loot_
             assets_loot.randomUseTimes(self.itemMaxUseTimes(eid, q), seed ^ @as(u32, @intCast(i)))
         else
             0;
-        cont.setSlot(si, .{ .item_id = eid, .count = stacks[i].count, .quality = q, .use_times = use_times });
+        const rolled = self.rollItemStats(eid, q, loot_stage, seed ^ @as(u32, @intCast(i)));
+        cont.setSlot(si, .{
+            .item_id = eid,
+            .count = stacks[i].count,
+            .quality = q,
+            .use_times = use_times,
+            .stats = rolled.stats,
+            .stats_n = rolled.n,
+        });
         // The entry's `mods=` list installs on the stack's own slot, rolled
         // from the same deterministic per-stack stream.
         if (stacks[i].mods.len > 0) {

@@ -73,7 +73,15 @@ pub fn fillLootBagFromTable(self: *Game, bag_net_id: i32, loot_list: []const u8,
         var fi: usize = 0;
         while (fi < ecs.components.inv_equip_start and inv.slots[fi].count != 0) : (fi += 1) {}
         if (fi >= ecs.components.inv_equip_start) continue; // full: drop the stack
-        inv.slots[fi] = .{ .item_id = eid, .count = stacks[i].count, .quality = q, .use_times = use_times };
+        const rolled = self.rollItemStats(eid, q, loot_stage, seed ^ @as(u32, @intCast(i)));
+        inv.slots[fi] = .{
+            .item_id = eid,
+            .count = stacks[i].count,
+            .quality = q,
+            .use_times = use_times,
+            .stats = rolled.stats,
+            .stats_n = rolled.n,
+        };
         if (has_mods) {
             installLootMods(self, &inv.slots[fi], eid, stacks[i].mods, stacks[i].mod_chance, seed ^ @as(u32, @intCast(i)));
         }
