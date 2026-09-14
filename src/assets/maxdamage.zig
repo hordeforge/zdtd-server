@@ -1584,3 +1584,60 @@ test "Class=Sleeper resolves through Extends (infestedSleeper included)" {
     // per the RE count in world-generation.md.
     try std.testing.expectEqual(@as(usize, 34), t.sleeper_class_names.count());
 }
+
+test "MaxDamage falls back to the Extends-resolved material's own MaxDamage" {
+    // Stock BlocksFromXml CreateProperties copies the parent's resolved
+    // dictionary, and Block.il IL_136C-138E then sets MaxDamage from the
+    // block's material, so a block that declares neither MaxDamage nor Material
+    // takes both from its ancestor and the ancestor's material. 318 stock
+    // blocks declare MaxDamage and 1449 inherit it; 5782 inherit Material.
+    // terrSandStone (Extends terrStone -> Material Mstone, materials.xml
+    // MaxDamage 500) is the real-data case.
+    const blocks_src =
+        \\<blocks>
+        \\<block name="terrStone">
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\<block name="terrSandStone">
+        \\  <property name="Extends" value="terrStone" />
+        \\</block>
+        \\<block name="ownDamage">
+        \\  <property name="Extends" value="terrStone" />
+        \\  <property name="MaxDamage" value="42" />
+        \\</block>
+        \\<block name="noMaterial">
+        \\  <property name="MaxDamage" value="7" />
+        \\</block>
+        \\</blocks>
+    ;
+    const materials_src =
+        \\<materials>
+        \\<material id="Mstone">
+        \\  <property name="damage_category" value="stone" />
+        \\  <property name="MaxDamage" value="500" />
+        \\</material>
+        \\</materials>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var blocks_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_mhp.xml", .{dir});
+    var mats_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const mats_path = try std.fmt.bufPrint(&mats_buf, "{s}/materials.xml", .{dir});
+    try io_fs.writeFile(blocks_path, blocks_src);
+    try io_fs.writeFile(mats_path, materials_src);
+
+    var t = try loadFromBlocksXml(std.testing.allocator, blocks_path);
+    defer t.deinit();
+    try t.mergeMaterialsXml(std.testing.allocator, mats_path);
+    // The fallback pass runs after the Extends pass, so the child's resolved
+    // Material is what it keys on.
+    try t.resolveMaterialMaxDamage(std.testing.allocator);
+    try std.testing.expectEqual(@as(u16, 500), t.maxDamageByName("terrSandStone").?);
+    // An own MaxDamage still wins over the material's.
+    try std.testing.expectEqual(@as(u16, 42), t.maxDamageByName("ownDamage").?);
+    // No material and no ancestor: keep the block's own value.
+    try std.testing.expectEqual(@as(u16, 7), t.maxDamageByName("noMaterial").?);
+}
