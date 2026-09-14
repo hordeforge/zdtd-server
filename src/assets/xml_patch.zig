@@ -419,7 +419,28 @@ pub const PatchCtx = struct {
     patch_file_name: ?[]const u8 = null,
     /// Absolute path of the issuing mod folder, for `@modfolder:` tokens.
     mod_path: ?[]const u8 = null,
+    /// Directory of the patch file being applied. Stock resolves an
+    /// `<include filename="...">` relative to the including file, so a mod's
+    /// subdirectory patch (`Config/Agility/main.xml`) is reachable.
+    patch_file_dir: ?[]const u8 = null,
 };
+
+/// Directory part of `path` ("" when it has none). Used to resolve an
+/// `<include filename>` against the including patch file, which is what stock
+/// does.
+fn dirnameOf(path: []const u8) []const u8 {
+    const i = std.mem.findLast(u8, path, "/") orelse return "";
+    return path[0..i];
+}
+
+/// Join a relative include path onto the including file's directory. An
+/// absolute path (leading `/`) is left alone.
+fn resolveRelativeInclude(allocator: std.mem.Allocator, path: []const u8, dir: ?[]const u8) ![]const u8 {
+    if (path.len > 0 and path[0] == '/') return allocator.dupe(u8, path);
+    const d = dir orelse return allocator.dupe(u8, path);
+    if (d.len == 0) return allocator.dupe(u8, path);
+    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ d, path });
+}
 
 /// Strip a trailing `.xml` (case-insensitive) for file-name routing.
 fn stripXmlExt(s: []const u8) []const u8 {
@@ -709,6 +730,28 @@ fn findConditionalBranch(clean: []const u8, op_open: usize, op_body: []const u8)
     return null;
 }
 
+/// True when `op` is one of the op local names this engine applies. Stock
+/// resolves the op through a name lookup; a miss warns and skips the element.
+fn isKnownOp(op: []const u8) bool {
+    const names = [_][]const u8{
+        "set",                    "setbyxpath",    "setattribute",       "setattributebyxpath",
+        "setattributewithxpath",  "remove",        "removebyxpath",      "removeattribute",
+        "removeattributebyxpath", "append",        "appendbyxpath",      "prepend",
+        "prependbyxpath",         "insertafter",   "insertafterbyxpath", "insertbefore",
+        "insertbeforebyxpath",    "csvoperations", "csv",                "include",
+        "conditional",
+    };
+    for (names) |n| {
+        if (opNameEq(op, n)) return true;
+    }
+    return false;
+}
+
+/// First 160 bytes of a rejected xpath, for one-line logging.
+fn truncLog(v: []const u8) []const u8 {
+    return v[0..@min(v.len, 160)];
+}
+
 /// Apply one patch document to base XML. Caller frees result.
 /// Errors are load-time fatal (PRD R6): a patch that cannot be applied must
 /// stop the server rather than silently desync AssignIds against the client.
@@ -717,6 +760,12 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
     defer allocator.free(clean);
     var cur = try allocator.dupe(u8, base);
     errdefer allocator.free(cur);
+    // Elements skipped because this engine's XPath subset could not parse
+    // them. Counted (not just logged) so a partial patch is visible.
+    var rejected_xpath_count: usize = 0;
+    defer if (rejected_xpath_count > 0) {
+        util_log.warn("zdtd: {d} patch element(s) skipped in this file (unsupported xpath)\n", .{rejected_xpath_count});
+    };
 
     // Optional file= on configs root (explicit wins over everything).
     var patch_file_filter: ?[]const u8 = null;
@@ -758,11 +807,6 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
         const is_include = opNameEq(op, "include");
         const is_conditional = opNameEq(op, "conditional");
         const xpath = xml.attr(clean, lt, "xpath");
-        if (!is_include and !is_conditional and xpath == null) {
-            // include may carry the path in `path=`; no other op works
-            // without xpath (fail closed rather than silently skip, PRD R6).
-            return error.UnknownPatchOp;
-        }
         const gt = std.mem.findPos(u8, clean, lt, ">") orelse break;
         const self_close = gt > lt and clean[gt - 1] == '/';
         var body: []const u8 = "";
@@ -786,6 +830,23 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
             next_i = cl + ct.len;
         }
 
+        if (!is_include and !is_conditional and xpath == null) {
+            // An element with no xpath is either a container root (stock walks
+            // the root's children and never treats it as an op, e.g. 0-SCore's
+            // `<SCore name="XUi_Common/styles.xml">`) or a known op missing its
+            // required xpath. Stock warns for the first and raises
+            // XmlPatchException (abandoning that one file, continuing the boot)
+            // for the second; both keep the ops already applied.
+            if (isKnownOp(op)) {
+                util_log.warn("zdtd: patch op '{s}' has no xpath; abandoning this patch file\n", .{op});
+                return cur;
+            }
+            // A container: stock iterates the root's children, so the element
+            // itself is not an op and its *children* are. Step just inside it.
+            util_log.warn("zdtd: patch element '{s}' is not an op; treating it as a container\n", .{op});
+            i = gt + 1;
+            continue;
+        }
         if (is_conditional) {
             // Stock `XmlPatchMethods.Conditional`: pick the active
             // `<if cond="...">` / `<else>` branch and patch with its children.
@@ -828,21 +889,41 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
             }
         }
 
-        // include needs no xpath (path= form); handle it before the common
-        // xpath parse.
+        // include needs no xpath; handle it before the common xpath parse.
+        // Stock reads `filename=` (XmlPatchMethods::Include) and resolves it
+        // against the *including file's* directory; `path=`/`xpath=` stay as
+        // tolerated aliases for older zdtd behaviour.
         if (is_include) {
-            const inc_path = xpath orelse (xml.attr(clean, lt, "path") orelse return error.MissingIncludePath);
-            const resolved = try rewriteModFolder(allocator, inc_path, ctx.mod_path);
+            const inc_attr = xml.attr(clean, lt, "filename") orelse
+                xml.attr(clean, lt, "path") orelse
+                xml.attr(clean, lt, "xpath") orelse {
+                util_log.warn("zdtd: include without filename/path; element skipped\n", .{});
+                i = next_i;
+                continue;
+            };
+            const rewritten = rewriteModFolder(allocator, inc_attr, ctx.mod_path) catch |err| {
+                util_log.warn("zdtd: include '{s}' not resolvable: {s}; element skipped\n", .{ inc_attr, @errorName(err) });
+                i = next_i;
+                continue;
+            };
+            defer allocator.free(rewritten);
+            const resolved = try resolveRelativeInclude(allocator, rewritten, ctx.patch_file_dir);
             defer allocator.free(resolved);
             const included = io_fs.readFileAll(allocator, resolved) catch |err| {
-                std.debug.print("zdtd: include '{s}' unreadable: {s}\n", .{ resolved, @errorName(err) });
-                return err;
+                // Stock raises XmlPatchException, which LoadAndPatchConfig
+                // catches: that one patch file is dropped and the boot goes on.
+                util_log.warn("zdtd: include '{s}' unreadable: {s}; file skipped\n", .{ resolved, @errorName(err) });
+                return cur;
             };
             defer allocator.free(included);
-            const next = try applyPatchDoc(allocator, cur, included, target_file, .{
+            const next = applyPatchDoc(allocator, cur, included, target_file, .{
                 .patch_file_name = basenameOf(resolved),
                 .mod_path = ctx.mod_path,
-            });
+                .patch_file_dir = dirnameOf(resolved),
+            }) catch |err| {
+                util_log.warn("zdtd: include '{s}' failed: {s}; file skipped\n", .{ resolved, @errorName(err) });
+                return cur;
+            };
             allocator.free(cur);
             cur = next;
             i = next_i;
@@ -850,7 +931,13 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
         }
 
         const xp = parseXPath(xpath.?) orelse {
-            // Malformed xpath: stock logs and skips the element.
+            // The XPath subset here is narrower than XPath 1.0: a nested
+            // predicate, `last()`, `*` or `//` lands here. Stock compiles the
+            // real thing, so an xpath that reaches this arm may be valid stock
+            // (logged loudly rather than skipped in silence): abandoning the
+            // whole file would lose the ops the subset does handle.
+            util_log.warn("zdtd: patch xpath not supported, element skipped: {s}\n", .{truncLog(xpath.?)});
+            rejected_xpath_count += 1;
             i = next_i;
             continue;
         };
@@ -875,7 +962,12 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
         const is_insert = opNameEq(op, "insertafter") or opNameEq(op, "insertafterbyxpath") or opNameEq(op, "insertbefore") or opNameEq(op, "insertbeforebyxpath");
         const is_csv = opNameEq(op, "csvoperations") or opNameEq(op, "csv");
         if (!is_set and !is_set_attr and !is_remove and !is_remove_attr and !is_append and !is_insert and !is_csv) {
-            return error.UnknownPatchOp;
+            // Stock's local-name lookup miss warns and skips the element; the
+            // boot continues (a code mod that registers its own op must not
+            // take the whole config load with it).
+            util_log.warn("zdtd: patch op '{s}' is not supported; element skipped\n", .{op});
+            i = next_i;
+            continue;
         }
         var mi: usize = nm;
         while (mi > 0) {
@@ -1141,6 +1233,7 @@ fn applyOnePatchFile(
     return applyPatchDoc(allocator, cur_in, patch_raw, target_file, .{
         .patch_file_name = route_name,
         .mod_path = mod_path,
+        .patch_file_dir = dirnameOf(patch_path),
     });
 }
 
@@ -1355,7 +1448,11 @@ test "file name routes a patch with an unresolvable xpath root" {
     try std.testing.expectEqualStrings("<blocks><block name=\"a\"/></blocks>", out2);
 }
 
-test "unknown op fails closed" {
+test "unknown op is skipped, the rest of the file still applies" {
+    // Stock resolves the op through a local-name lookup and warns on a miss
+    // (XmlPatcher IL_0176-0204); killing the server instead turned a code
+    // modlet that registers its own op into a boot failure. Everything else
+    // in the file still applies.
     const base =
         \\<blocks><block name="a"/></blocks>
     ;
@@ -1365,7 +1462,9 @@ test "unknown op fails closed" {
         \\  <frobnicate xpath="/blocks/block[@name='a']"/>
         \\</configs>
     ;
-    try std.testing.expectError(error.UnknownPatchOp, applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{}));
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "name=\"b\"") != null);
 }
 
 test "conditional picks the if/else branch, unknown expressions skip" {
@@ -1705,4 +1804,102 @@ test "include with @modfolder token pulls another patch file" {
 test "fileFromXPath" {
     try std.testing.expectEqualStrings("blocks.xml", fileFromXPath("/blocks/block[@name='x']").?);
     try std.testing.expectEqualStrings("items.xml", fileFromXPath("/items/item[@name='y']").?);
+}
+
+test "include filename resolves against the including patch file's directory" {
+    // Stock `XmlPatchMethods::Include` reads `filename=` and joins it with the
+    // *including file's* directory, which is how a mod reaches a subdirectory
+    // patch (SphereII's `Config/Agility/main.xml` includes `Init.xml` next to
+    // it). zdtd used to read `xpath`/`path`, resolve against the CWD and treat
+    // a miss as fatal, so those modlets refused the boot.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var sub_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const sub = try std.fmt.bufPrint(&sub_buf, "{s}/Agility", .{dir});
+    io_fs.mkdirPath(sub);
+    var main_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const main_path = try std.fmt.bufPrint(&main_buf, "{s}/main.xml", .{sub});
+    var inc_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const inc_path = try std.fmt.bufPrint(&inc_buf, "{s}/Init.xml", .{sub});
+    try io_fs.writeFile(main_path,
+        \\<configs>
+        \\  <include filename="Init.xml" />
+        \\</configs>
+    );
+    try io_fs.writeFile(inc_path,
+        \\<configs>
+        \\  <set xpath="/blocks/block[@name='terrStone']/@maxdamage">42</set>
+        \\  <unknownop xpath="/blocks/block[@name='terrStone']/@maxdamage">7</unknownop>
+        \\</configs>
+    );
+    const base =
+        \\<blocks>
+        \\<block name="terrStone" maxdamage="500" />
+        \\</blocks>
+    ;
+    const patch = try io_fs.readFileAll(std.testing.allocator, main_path);
+    defer std.testing.allocator.free(patch);
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{
+        .patch_file_name = "main.xml",
+        .patch_file_dir = sub,
+    });
+    defer std.testing.allocator.free(out);
+    // The included op applied, and the unknown op in the same file was skipped
+    // rather than aborting the load.
+    try std.testing.expect(std.mem.find(u8, out, "maxdamage=\"42\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, "maxdamage=\"7\"") == null);
+
+    // A missing include drops the file, never the boot.
+    try io_fs.writeFile(main_path,
+        \\<configs>
+        \\  <include filename="nope.xml" />
+        \\</configs>
+    );
+    const patch2 = try io_fs.readFileAll(std.testing.allocator, main_path);
+    defer std.testing.allocator.free(patch2);
+    const out2 = try applyPatchDoc(std.testing.allocator, base, patch2, "blocks.xml", .{
+        .patch_file_name = "main.xml",
+        .patch_file_dir = sub,
+    });
+    defer std.testing.allocator.free(out2);
+    try std.testing.expectEqualStrings(base, out2);
+}
+
+test "a patch root that is not <configs> is a container, not an op" {
+    // Stock walks the root element's children, so the root tag is irrelevant:
+    // 0-SCore ships `<SCore name="XUi_Common/styles.xml">` and zdtd used to
+    // fail the whole load on it.
+    const base =
+        \\<blocks>
+        \\<block name="terrStone" maxdamage="500" />
+        \\</blocks>
+    ;
+    const patch =
+        \\<SCore name="XUi_Common/styles.xml">
+        \\  <set xpath="/blocks/block[@name='terrStone']/@maxdamage">9</set>
+        \\</SCore>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "maxdamage=\"9\"") != null);
+}
+
+test "a known op with no xpath abandons the file instead of the boot" {
+    // Stock raises XmlPatchException here; LoadAndPatchConfig catches it, so
+    // the one patch file is dropped and the boot continues.
+    const base = "<blocks><block name=\"terrStone\" maxdamage=\"500\" /></blocks>";
+    const patch =
+        \\<configs>
+        \\  <set xpath="/blocks/block[@name='terrStone']/@maxdamage">9</set>
+        \\  <set>10</set>
+        \\  <set xpath="/blocks/block[@name='terrStone']/@maxdamage">11</set>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    // Ops before the malformed element are applied; the ones after are not.
+    try std.testing.expect(std.mem.find(u8, out, "maxdamage=\"9\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, "maxdamage=\"11\"") == null);
 }
