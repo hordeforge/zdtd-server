@@ -616,6 +616,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // is not preloaded into the fixed class_table (A35).
         self.sim.director.class_resolve_ctx = self;
         self.sim.director.class_resolve_fn = &Game.resolveSpawnClass;
+        // Ground permission for a spawn (Chunk::CanMobsSpawnAtPos): blocks.xml
+        // CanMobsSpawnOn + the Collide movement bit.
+        self.sim.director.mob_spawn_ok_ctx = self;
+        self.sim.director.mob_spawn_ok_fn = &game_hooks.blockMobSpawnGround;
         self.sim.director.stage_group_ctx = self;
         self.sim.director.stage_group_fn = &Game.pickStageGroup;
         self.sim.director.stage_group_at_ctx = self;

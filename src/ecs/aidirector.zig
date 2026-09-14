@@ -338,6 +338,14 @@ pub const Director = struct {
     /// entities table; null keeps the old class_table-only resolution.
     class_resolve_ctx: ?*anyopaque = null,
     class_resolve_fn: ?*const fn (?*anyopaque, []const u8) ?ecs_world.EntityClass = null,
+    /// Ground permission for a mob spawn: (ctx, x, y, z) -> true when the block
+    /// at that cell may carry a spawn. Stock `Chunk::CanMobsSpawnAtPos`
+    /// (IL_0043/IL_004E) requires the block under the spawn cell to be
+    /// `CanMobsSpawnOn` AND movement-solid. Game wires the blocks table; null
+    /// keeps every position allowed (the pre-parse behaviour and the offline
+    /// world, where no blocks.xml table exists).
+    mob_spawn_ok_ctx: ?*anyopaque = null,
+    mob_spawn_ok_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
 
     /// Party game stage (CalcGameStageAround over the online players). Drives
     /// the scout tier and the blood moon stage lookup. 0 = no players / unknown.
@@ -1105,6 +1113,17 @@ pub const Director = struct {
         return self.spawnOneZombieLoot(w, x, y, z, group_override, seed, mark_horde, .none);
     }
     fn spawnOneZombieLoot(self: *Director, w: *ecs_world.World, x: f32, y: f32, z: f32, group_override: []const u8, seed: u32, mark_horde: bool, loot_kind: LootKind) ?ecs_world.Slot {
+        // Stock `Chunk::CanMobsSpawnAtPos` ground gate: the cell under the
+        // spawn must carry CanMobsSpawnOn and be movement-solid, so a
+        // player-built floor (which declares neither) does not host spawns.
+        // The caller's y is the stand cell (groundY = surface + 1), so the
+        // ground block sits one below it.
+        if (self.mob_spawn_ok_fn) |ok| {
+            const gx: i32 = @intFromFloat(@floor(x));
+            const gy: i32 = @as(i32, @intFromFloat(@floor(y))) - 1;
+            const gz: i32 = @intFromFloat(@floor(z));
+            if (!ok(self.mob_spawn_ok_ctx, gx, gy, gz)) return null;
+        }
         var ct = w.class_table[1];
         const fallback = if (self.clock.isNight()) self.night_group else self.day_group;
         const grp = if (group_override.len > 0)
@@ -2411,4 +2430,38 @@ test "difficulty damage scale uses the comptime XML ladder" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.7), d.damageScale(false, true, r), 1e-4);
     d.sandbox_incoming = 0; // unset -> ladder back
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), d.damageScale(false, true, r), 1e-4);
+}
+
+test "a spawn whose ground forbids mobs is refused" {
+    // Stock `Chunk::CanMobsSpawnAtPos` IL_0043/IL_004E: the block under the
+    // spawn cell must be CanMobsSpawnOn and movement-solid, so a player-built
+    // floor hosts no spawns. The director asks through a hook; with no hook
+    // every position stays allowed (offline/builtin world), which the second
+    // half pins.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
+    const Gate = struct {
+        var allow = false;
+        var seen_y: i32 = 0;
+        fn ok(_: ?*anyopaque, _: i32, y: i32, _: i32) bool {
+            seen_y = y;
+            return allow;
+        }
+    };
+    d.mob_spawn_ok_ctx = null;
+    d.mob_spawn_ok_fn = &Gate.ok;
+
+    Gate.allow = false;
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 10.0, 70.0, 10.0, "", 7, false, .none) == null);
+    // The gate sees the GROUND cell: the caller's y is the stand cell.
+    try std.testing.expectEqual(@as(i32, 69), Gate.seen_y);
+
+    Gate.allow = true;
+    try std.testing.expect(d.spawnOneZombieLoot(&w, 10.0, 70.0, 10.0, "", 7, false, .none) != null);
+
+    // No hook: the same position spawns (pre-parse behaviour).
+    var d2: Director = .{ .clock = .{ .time_of_day_inc_per_sec = 1000 } };
+    try std.testing.expect(d2.spawnOneZombieLoot(&w, 12.0, 70.0, 12.0, "", 9, false, .none) != null);
 }

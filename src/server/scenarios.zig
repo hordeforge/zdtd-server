@@ -10,6 +10,7 @@ const game_movement_helpers = @import("game/movement_helpers.zig");
 const game_wasm_host = @import("game/wasm_host.zig");
 const replicate_te = @import("replicate_te.zig");
 const game_join = @import("game/join.zig");
+const game_hooks = @import("game/hooks.zig");
 const game_weather = @import("game/weather.zig");
 const plugin_api = @import("../plugin/api.zig");
 const ln_peer = @import("../litenet/peer.zig");
@@ -18170,4 +18171,47 @@ test "scenario ElementalDamageResist: non-physical damage takes passive 43, tagg
         "PASS elemental resist: bare heat {d:.1}, armored heat {d:.1}, cold {d:.1}, bash {d:.1}\n",
         .{ bare_heat, armored_heat, armored_cold, armored_bash },
     );
+}
+
+test "scenario mob spawn ground follows blocks.xml CanMobsSpawnOn" {
+    // Stock Chunk::CanMobsSpawnAtPos IL_0043/IL_004E: a spawn needs the block
+    // under it to be CanMobsSpawnOn AND movement-solid. The director asks
+    // through blockMobSpawnGround; this drives the wired hook against the real
+    // blocks.xml on a stock map: terrain allows, a player-built concrete floor
+    // does not.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const map = game_dir ++ "/Data/Worlds/Navezgane";
+    if (!io_fs.dirExists(map)) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var world_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = try std.fmt.bufPrint(&world_buf, "{s}/spawn_ground", .{dir});
+    const g = try game_mod.Game.createWithOptions(std.testing.allocator, world_dir, 0, .{
+        .map_dir = map,
+        .game_dir = game_dir,
+        .demo_seed = false,
+        .starter_zombies = false,
+    });
+    defer {
+        g.deinit();
+        std.testing.allocator.destroy(g);
+    }
+    const sp = g.world.primarySpawn();
+    const surf_u16 = try g.world.heightWorld(sp.x, sp.z);
+    const surf: i32 = @intCast(surf_u16);
+    // Terrain: stock's terr* rows declare CanMobsSpawnOn="true".
+    try std.testing.expect(game_hooks.blockMobSpawnGround(@ptrCast(g), sp.x, surf, sp.z));
+    // Air / an unmaterialized cell stays allowed: the gate answers only for a
+    // block the stock table knows, so an offline probe cannot silence spawns.
+    try std.testing.expect(game_hooks.blockMobSpawnGround(@ptrCast(g), sp.x, surf + 1, sp.z));
+    // A concrete floor declares neither property, so it hosts no spawns.
+    // A player-built block: stock declares no CanMobsSpawnOn on the wood and
+    // concrete masters, so the default (false) refuses the spawn.
+    const frame = g.blocks.byName("woodMaster") orelse return error.SkipZigTest;
+    const concrete = frame.id;
+    try g.setBlock(sp.x, surf + 1, sp.z, concrete);
+    try std.testing.expect(!game_hooks.blockMobSpawnGround(@ptrCast(g), sp.x, surf + 1, sp.z));
+    std.debug.print("PASS mob-spawn-ground: terrain allows, a concrete floor does not\n", .{});
 }

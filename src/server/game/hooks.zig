@@ -505,6 +505,28 @@ pub fn blockSightBlocked(ctx: ?*anyopaque, id: u16) bool {
     return true;
 }
 
+/// Ground half of stock `Chunk::CanMobsSpawnAtPos` (IL_0043/IL_004E): the block
+/// at (x, y, z) must carry `CanMobsSpawnOn` AND be movement-solid, so a
+/// player-built floor (which declares neither) stops hosting spawns while
+/// terrain keeps them. A block the table does not know (builtin/offline world)
+/// stays allowed, which is the pre-parse behaviour; a probe failure fails open
+/// so a chunk border cannot silence the director.
+pub fn blockMobSpawnGround(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    // The gate is authoritative only when the operator's blocks.xml is loaded:
+    // the builtin offline table carries synthetic ids and no CanMobsSpawnOn, so
+    // a flat/offline world keeps the pre-parse "allowed" answer (it has no
+    // terrain materialized at the probe either).
+    if (g.blocks.source != .xml) return true;
+    const id = g.world.blockWorld(x, y, z) catch return true; // probe failure fails open
+    if (id == 0) return true; // air / unmaterialized chunk: the caller's placement decides
+    if (g.blocks.byId(id)) |d| {
+        if (!d.can_mobs_spawn_on) return false;
+        return (d.collide & assets_blocks.collide_movement) != 0;
+    }
+    return true;
+}
+
 /// Coordinate-level sight probe for the AI/voxel LOS paths: the same
 /// `sightBlockedWorld` the bot gate uses, through a function pointer so
 /// `ecs/systems.zig` does not need the store's chunk machinery.
