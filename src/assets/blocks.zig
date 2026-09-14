@@ -197,6 +197,15 @@ pub const BlockDef = struct {
     /// `Block.BlockingType`), resolved through Extends. Absent at the end of
     /// the chain -> `collide_default` (255). Recorded only; see `collideMask`.
     collide: CollideMask = collide_default,
+    /// `<property name="CanPlayersSpawnOn">`: stock `Block::CanPlayersSpawnOn`
+    /// defaults TRUE (Block.il IL_01BF-01F4) and 24 stock rows declare false
+    /// (treeMaster and the vehicle masters), so a forest or vehicle column does
+    /// not spawn a player on top of it. Resolved through Extends.
+    can_players_spawn_on: bool = true,
+    /// `<property name="CanMobsSpawnOn">`: stock's default is FALSE and 24
+    /// stock rows declare true (terrain, terrainFiller, farm plots, a few
+    /// trees). Recorded; the AI spawn gate reads it through `canMobsSpawnOn`.
+    can_mobs_spawn_on: bool = false,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -253,6 +262,21 @@ pub const BlockTable = struct {
         if (id == 0) return false;
         if (self.byId(id)) |d| return d.solid;
         return true;
+    }
+
+    /// `<property name="CanPlayersSpawnOn">` for a block, default true
+    /// (stock `Chunk::CanPlayersSpawnAtPos` IL_0023 requires the block under
+    /// the feet to allow it).
+    pub fn canPlayersSpawnOn(self: *const BlockTable, id: u16) bool {
+        if (self.byId(id)) |d| return d.can_players_spawn_on;
+        return true;
+    }
+
+    /// `<property name="CanMobsSpawnOn">` for a block, default false (stock
+    /// `Chunk::CanMobsSpawnAtPos` IL_0043).
+    pub fn canMobsSpawnOn(self: *const BlockTable, id: u16) bool {
+        if (self.byId(id)) |d| return d.can_mobs_spawn_on;
+        return false;
     }
 
     /// Blocking-type mask for a block (stock `Block.BlockingType`): the
@@ -516,6 +540,10 @@ pub fn loadFromPath(
         /// value (including a zero mask) from "ask the parent".
         collide: CollideMask = collide_default,
         collide_declared: bool = false,
+        can_players_spawn_on: bool = true,
+        can_players_spawn_declared: bool = false,
+        can_mobs_spawn_on: bool = false,
+        can_mobs_spawn_declared: bool = false,
         /// `<dropextendsoff />`: this block does NOT copy the parent's drop
         /// rows (stock BlocksFromXml reads the element next to the drop list
         /// and skips LoadExtendedItemDrops; 226 stock rows).
@@ -579,6 +607,10 @@ pub fn loadFromPath(
         var map_color: u16 = 0;
         var collide: CollideMask = collide_default;
         var collide_declared = false;
+        var can_players_spawn_on = true;
+        var can_players_spawn_declared = false;
+        var can_mobs_spawn_on = false;
+        var can_mobs_spawn_declared = false;
         var resource_scale: f32 = 1;
         var drop_extends_off = false;
         var own_drops: std.ArrayList(HarvestDrop) = .empty;
@@ -716,6 +748,16 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| {
                     map_color = parseMapColor5(v);
                 }
+            } else if (std.mem.eql(u8, pname, "CanPlayersSpawnOn")) {
+                if (xml.attr(clean, pi, "value")) |v| {
+                    can_players_spawn_on = std.ascii.eqlIgnoreCase(v, "true");
+                    can_players_spawn_declared = true;
+                }
+            } else if (std.mem.eql(u8, pname, "CanMobsSpawnOn")) {
+                if (xml.attr(clean, pi, "value")) |v| {
+                    can_mobs_spawn_on = std.ascii.eqlIgnoreCase(v, "true");
+                    can_mobs_spawn_declared = true;
+                }
             } else if (std.mem.eql(u8, pname, "Collide")) {
                 // Presence alone starts the mask at 0 and ORs a bit per verb
                 // found (BlocksFromXml IL_0404-04F0), so a property with no
@@ -779,6 +821,10 @@ pub fn loadFromPath(
             .map_color = map_color,
             .collide = collide,
             .collide_declared = collide_declared,
+            .can_players_spawn_on = can_players_spawn_on,
+            .can_players_spawn_declared = can_players_spawn_declared,
+            .can_mobs_spawn_on = can_mobs_spawn_on,
+            .can_mobs_spawn_declared = can_mobs_spawn_declared,
             .drop_extends_off = drop_extends_off,
             .harvest_drops = own_drop_slice,
             .destroy_drops = own_destroy_slice,
@@ -810,6 +856,10 @@ pub fn loadFromPath(
         var own_map_color = pb.map_color;
         var own_collide = pb.collide;
         var own_collide_declared = pb.collide_declared;
+        var own_can_players = pb.can_players_spawn_on;
+        var own_can_players_declared = pb.can_players_spawn_declared;
+        var own_can_mobs = pb.can_mobs_spawn_on;
+        var own_can_mobs_declared = pb.can_mobs_spawn_declared;
         var own_signable = pb.signable;
         var own_lp = pb.lp_hardness_scale;
         var own_lp_declared = pb.lp_declared;
@@ -855,6 +905,14 @@ pub fn loadFromPath(
                 own_collide = base_p.collide;
                 if (base_p.collide_declared) own_collide_declared = true;
             }
+            if (!own_can_players_declared and !xml.tagListContains(p1, "CanPlayersSpawnOn")) {
+                own_can_players = base_p.can_players_spawn_on;
+                if (base_p.can_players_spawn_declared) own_can_players_declared = true;
+            }
+            if (!own_can_mobs_declared and !xml.tagListContains(p1, "CanMobsSpawnOn")) {
+                own_can_mobs = base_p.can_mobs_spawn_on;
+                if (base_p.can_mobs_spawn_declared) own_can_mobs_declared = true;
+            }
             // A sign block's shape lives on its base (playerSignWood1x3
             // extends playerSignWood1x1 and declares no CompositeFeatures of
             // its own), so the module flag follows the chain.
@@ -883,6 +941,10 @@ pub fn loadFromPath(
         pb.map_color = own_map_color;
         pb.collide = own_collide;
         pb.collide_declared = own_collide_declared;
+        pb.can_players_spawn_on = own_can_players;
+        pb.can_players_spawn_declared = own_can_players_declared;
+        pb.can_mobs_spawn_on = own_can_mobs;
+        pb.can_mobs_spawn_declared = own_can_mobs_declared;
         pb.signable = own_signable;
         pb.lp_hardness_scale = own_lp;
         pb.lp_declared = own_lp_declared;
@@ -953,6 +1015,8 @@ pub fn loadFromPath(
             .texture_top = pb.texture_top,
             .map_color = pb.map_color,
             .collide = pb.collide,
+            .can_players_spawn_on = pb.can_players_spawn_on,
+            .can_mobs_spawn_on = pb.can_mobs_spawn_on,
             .harvest_drops = pb.harvest_drops,
             .destroy_drops = pb.destroy_drops,
             .fall_drops = pb.fall_drops,
@@ -1390,6 +1454,9 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "glassBusinessCTRSheet", 221 },
         .{ "opaqueBusinessGlass", 222 },
         .{ "collideNoValue", 223 },
+        .{ "treeMaster", 224 },
+        .{ "treeOakSml01", 225 },
+        .{ "terrStone", 226 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];
@@ -1682,4 +1749,43 @@ test "the stock Collide rows match BlocksFromXml" {
     try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessSheet").?.collide);
     try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessCTRSheet").?.collide);
     try std.testing.expectEqual(@as(CollideMask, 255), t.byName("opaqueBusinessGlass").?.collide);
+}
+
+test "CanPlayersSpawnOn and CanMobsSpawnOn parse and inherit through Extends" {
+    // Stock Block.il IL_01BF-01F4 sets CanMobsSpawnOn = false and
+    // CanPlayersSpawnOn = true before ParseBool, so the defaults are asymmetric;
+    // 24 stock rows declare players=false (treeMaster, the vehicle masters) and
+    // 24 mobs=true (terrain, farm plots, a few trees).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_spawn.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<blocks>
+        \\<block name="treeMaster">
+        \\  <property name="CanPlayersSpawnOn" value="false" />
+        \\</block>
+        \\<block name="treeOakSml01">
+        \\  <property name="Extends" value="treeMaster" />
+        \\</block>
+        \\<block name="terrStone">
+        \\  <property name="CanMobsSpawnOn" value="true" />
+        \\</block>
+        \\<block name="terrStoneChild">
+        \\  <property name="Extends" value="terrStone" />
+        \\</block>
+        \\<block name="plainBlock" />
+        \\</blocks>
+    );
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+    try std.testing.expect(!t.canPlayersSpawnOn(fixtureId(null, "treeMaster").?));
+    try std.testing.expect(!t.canPlayersSpawnOn(fixtureId(null, "treeOakSml01").?));
+    try std.testing.expect(t.canPlayersSpawnOn(fixtureId(null, "plainBlock").?));
+    try std.testing.expect(t.canMobsSpawnOn(fixtureId(null, "terrStone").?));
+    try std.testing.expect(t.canMobsSpawnOn(fixtureId(null, "terrStoneChild").?));
+    // Absent keeps stock's false default for mobs.
+    try std.testing.expect(!t.canMobsSpawnOn(fixtureId(null, "plainBlock").?));
 }

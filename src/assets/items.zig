@@ -246,6 +246,10 @@ pub const ItemDef = struct {
     /// items.xml Material (MadeOfMaterial id, e.g. Mmetal). Empty = none.
     /// Forge melt resolves materials.xml forge_category through this.
     material: []const u8 = "",
+    /// items.xml `SellableToTrader` (ItemClass ParseBool, default true,
+    /// inherited through Extends): a trader refuses to buy the item, which is
+    /// what greys the client's sell button and what the server enforces.
+    sellable_to_trader: bool = true,
     /// items.xml NoScrapping: item cannot be scrap-salvaged
     /// (GetScrapableRecipe, RE crafting-recipes.md IL=77).
     no_scrapping: bool = false,
@@ -983,6 +987,15 @@ pub fn builtinStockName(item_id: u16) ?[]const u8 {
 /// (first free id = ItemsStartHere+1, then sequential in document order).
 /// Body of an item element's `<stats>` child, or null when it is absent or
 /// self-closing (stock scans `_element.Elements("stats")`).
+/// `<property value="true"/>`: stock's XML bool for an item property, null
+/// when the text is neither spelling (the caller keeps the default).
+fn boolProp(v: []const u8) ?bool {
+    const t = std.mem.trim(u8, v, " \t\r\n");
+    if (std.ascii.eqlIgnoreCase(t, "true") or std.mem.eql(u8, t, "1")) return true;
+    if (std.ascii.eqlIgnoreCase(t, "false") or std.mem.eql(u8, t, "0")) return false;
+    return null;
+}
+
 fn itemStatsBody(body: []const u8) ?[]const u8 {
     const si = std.mem.findPos(u8, body, 0, "<stats") orelse return null;
     const gt = std.mem.findPos(u8, body, si, ">") orelse return null;
@@ -1050,6 +1063,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_material_declared.deinit(allocator);
     var stock_no_scrapping: std.ArrayList(bool) = .empty;
     defer stock_no_scrapping.deinit(allocator);
+    var stock_sellable: std.ArrayList(bool) = .empty;
+    defer stock_sellable.deinit(allocator);
+    var stock_sellable_declared: std.ArrayList(bool) = .empty;
+    defer stock_sellable_declared.deinit(allocator);
     var stock_is_eat: std.ArrayList(bool) = .empty;
     defer stock_is_eat.deinit(allocator);
     var stock_food_amt: std.ArrayList(f32) = .empty;
@@ -1276,6 +1293,16 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 no_scrap = std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
             }
             try stock_no_scrapping.append(allocator, no_scrap);
+            // items.xml SellableToTrader (ItemClass ParseBool; default true):
+            // the trader refuses to buy these, so the sell path gates on it.
+            var sellable = true;
+            var sellable_declared = false;
+            if (xml.propertyValue(clean[ii..item_end], "SellableToTrader")) |v| {
+                sellable = boolProp(v) orelse true;
+                sellable_declared = true;
+            }
+            try stock_sellable.append(allocator, sellable);
+            try stock_sellable_declared.append(allocator, sellable_declared);
             // ItemActionEat: Action0 Class=Eat + effect_group cvars.
             const body = clean[ii..item_end];
             // Every `<passive_effect>` row on the item, through the buffs
@@ -1605,6 +1632,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     {
         var own_stack_map: std.StringHashMapUnmanaged(u16) = .{};
         defer own_stack_map.deinit(allocator);
+        var own_sellable_map: std.StringHashMapUnmanaged(bool) = .{};
+        defer own_sellable_map.deinit(allocator);
         var own_econ_map: std.StringHashMapUnmanaged(f32) = .{};
         defer own_econ_map.deinit(allocator);
         var own_bundle_map: std.StringHashMapUnmanaged(u16) = .{};
@@ -1629,6 +1658,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         for (stock_names.items, 0..) |n, idx| {
             if (own_stacks.items[idx] != 0) try own_stack_map.put(allocator, n, own_stacks.items[idx]);
             if (stock_econ_declared.items[idx]) try own_econ_map.put(allocator, n, stock_econs.items[idx]);
+            if (stock_sellable_declared.items[idx]) try own_sellable_map.put(allocator, n, stock_sellable.items[idx]);
             if (stock_bundle_declared.items[idx]) try own_bundle_map.put(allocator, n, stock_bundles.items[idx]);
             if (stock_weight_declared.items[idx]) try own_weight_map.put(allocator, n, stock_weights.items[idx]);
             if (stock_melt_declared.items[idx]) try own_melt_map.put(allocator, n, stock_melt_times.items[idx]);
@@ -1647,6 +1677,17 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             while (hops < max_hops) : (hops += 1) {
                 if (own_stack_map.get(cur)) |s| {
                     stock_stacks.items[idx] = s;
+                    break;
+                }
+                cur = ext_map.get(cur) orelse break;
+            }
+        }
+        for (stock_names.items, 0..) |n, idx| {
+            var cur = n;
+            var hops: usize = 0;
+            while (hops < max_hops) : (hops += 1) {
+                if (own_sellable_map.get(cur)) |b| {
+                    stock_sellable.items[idx] = b;
                     break;
                 }
                 cur = ext_map.get(cur) orelse break;
@@ -1959,6 +2000,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.melt_time_per_unit = stock_melt_times.items[idx];
                 def.material = stock_materials.items[idx];
                 def.no_scrapping = stock_no_scrapping.items[idx];
+                def.sellable_to_trader = stock_sellable.items[idx];
                 def.is_eat = stock_is_eat.items[idx];
                 def.food_amount = stock_food_amt.items[idx];
                 def.food_health = stock_food_hp.items[idx];
@@ -2007,6 +2049,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .melt_time_per_unit = stock_melt_times.items[idx],
             .material = stock_materials.items[idx],
             .no_scrapping = stock_no_scrapping.items[idx],
+            .sellable_to_trader = stock_sellable.items[idx],
             // ItemActionEat props (was missing; stack-loss isEat relied on name heuristic only).
             .is_eat = stock_is_eat.items[idx],
             .food_amount = stock_food_amt.items[idx],
@@ -2902,4 +2945,49 @@ test "stock items.xml stats rows load" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.3), boosted.?.chance, 0.0001);
     // An item with no <stats> block stays empty (fail closed, no invented rows).
     try std.testing.expectEqual(@as(usize, 0), t.byName("resourceWood").?.stats.len);
+}
+
+test "SellableToTrader parses and inherits through Extends" {
+    // Stock `ItemClass` reads SellableToTrader with ParseBool (default true)
+    // and the property dictionary is copied through Extends, so a child of an
+    // unsellable master is unsellable too. 48 stock items declare it.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items_sell.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="questItemMaster">
+        \\    <property name="SellableToTrader" value="false"/>
+        \\  </item>
+        \\  <item name="questItemChild">
+        \\    <property name="Extends" value="questItemMaster"/>
+        \\  </item>
+        \\  <item name="plainItem"/>
+        \\  <item name="declaredTrue">
+        \\    <property name="SellableToTrader" value="true"/>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expect(!t.byName("questItemMaster").?.sellable_to_trader);
+    try std.testing.expect(!t.byName("questItemChild").?.sellable_to_trader);
+    // Absent keeps stock's true default.
+    try std.testing.expect(t.byName("plainItem").?.sellable_to_trader);
+    try std.testing.expect(t.byName("declaredTrue").?.sellable_to_trader);
+}
+
+test "stock items.xml SellableToTrader rows load" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/items.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // meleeWpnBladeT0BoneKnife carries value="false" (items.xml:40) and the
+    // quest masters inherit it.
+    try std.testing.expect(!t.byName("meleeWpnBladeT0BoneKnife").?.sellable_to_trader);
+    // The default is true for the bulk of the catalog.
+    try std.testing.expect(t.byName("gunHandgunT0PipePistol").?.sellable_to_trader);
 }

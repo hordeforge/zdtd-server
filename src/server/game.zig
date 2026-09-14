@@ -205,6 +205,11 @@ pub const map_window_radius = game_types.map_window_radius;
 pub const map_window_n = game_types.map_window_n;
 pub const critical_retry_budget_ns = game_types.critical_retry_budget_ns;
 pub const default_view_radius = game_types.default_view_radius;
+
+/// Bound on the spawn-surface descent over blocks whose `CanPlayersSpawnOn` is
+/// false (a tree or vehicle column): a modded world cannot spin the join path
+/// in a loop.
+pub const max_spawn_ground_scan: usize = 32;
 pub const default_max_players = game_types.default_max_players;
 pub const replicate_frame_cap = game_types.replicate_frame_cap;
 pub const speeds_body_off = game_types.speeds_body_off;
@@ -2618,9 +2623,21 @@ pub const Game = struct {
     pub fn spawnSurface(self: *Game, sx: i32, sz: i32) struct { x: i32, y: i32, z: i32 } {
         const fallback: u16 = @intCast(@max(1, self.world.primarySpawn().y));
         const h_u16: u16 = self.world.heightWorld(sx, sz) catch fallback;
-        const h: i32 = @intCast(h_u16);
-        // heightWorld = top solid; PDF/entity feet use that block Y; entity float y = h+1.
-        const feet_y = @max(h, 1);
+        // heightWorld = top solid; PDF/entity feet use that block Y; entity
+        // float y = h+1.
+        var feet_y: i32 = @max(@as(i32, @intCast(h_u16)), 1);
+        // Stock Chunk::CanPlayersSpawnAtPos IL_0023 requires the block below the
+        // feet to carry CanPlayersSpawnOn (default true; treeMaster and the
+        // vehicle masters declare false), so a forest or parked-vehicle column
+        // walks down to the ground instead of spawning the player on top of it.
+        var scan: usize = 0;
+        while (scan < max_spawn_ground_scan) : (scan += 1) {
+            if (feet_y <= 1) break;
+            const below = self.world.blockWorld(sx, feet_y - 1, sz) catch break;
+            if (below == 0) break; // nothing to stand on: keep the surface
+            if (self.blocks.canPlayersSpawnOn(below)) break;
+            feet_y -= 1;
+        }
         // Live AssignIds resolved at init (A05); the module pin is the offline
         // default until resolveTerrainIds runs, so modded dumps stay correct.
         const dirt = self.world.terrain_ids.dirt;

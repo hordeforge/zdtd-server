@@ -50,6 +50,16 @@ pub fn handleTrade(self: *Game, c: *Client, body: []const u8) !void {
         }
     } else return;
     if (t.side == 1) {
+        // items.xml SellableToTrader (ItemClass ParseBool, default true): the
+        // client greys its Sell button for these and stock's ItemActionEntrySell
+        // refuses, so a request that names one is not a legitimate sell.
+        // Unknown ids fall through to systems.trade, which rejects them.
+        if (self.items.byId(t.item)) |def| {
+            if (!def.sellable_to_trader) {
+                self.harness.counters.inc(.bounds_rejects);
+                return;
+            }
+        }
         if (self.sim.slotOfNetId(t.trader_entity)) |ts| {
             const info_id = self.sim.trader_stock[ts].trader_info_id;
             if (info_id != 0) {
