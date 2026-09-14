@@ -729,6 +729,22 @@ pub const InvSlot = struct {
     mods: [4]u16 = .{0} ** 4,
     /// Active mod count (<= mods.len).
     mod_n: u8 = 0,
+    /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
+    /// deltas a client-created item carries. Kept as the wire pair so an echo
+    /// round-trips exactly (stock's `Stat` ctor sets `isBoosted = slot_b > 0`).
+    stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
+    stats_n: u8 = 0,
+};
+
+/// Stock items carry at most five distinct stat effects; see
+/// `wire/stock_inv.zig` (`max_item_stats`), which owns the wire cap.
+pub const max_item_stats: usize = 6;
+
+/// One `ItemValue/Stat` entry in the same shape the wire uses.
+pub const ItemStat = struct {
+    effect: u8 = 0,
+    slot_a: i16 = 0,
+    slot_b: i16 = 0,
 };
 
 /// Offline stack caps when `World.stack_fn` is null. Must match

@@ -59,6 +59,25 @@ pub const StockSlot = struct {
     /// Attached mod item ids (stock ItemValue.Modifications; 4 slots).
     mods: [4]u16 = .{0} ** 4,
     mod_n: u8 = 0,
+    /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
+    /// deltas a client-created item carries. Stock writes them as
+    /// `type u8 | slotA i16 | slotB i16` and its `Stat` ctor makes
+    /// `isBoosted = slotB > 0`, so keeping the wire pair verbatim
+    /// round-trips the entry exactly.
+    stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats,
+    stats_n: u8 = 0,
+};
+
+/// Stock items carry at most five distinct stat effects (the `<stats>` blocks
+/// peak at five); 6 leaves the writer room without growing the slot much.
+pub const max_item_stats: usize = 6;
+
+/// One `ItemValue/Stat` entry as the wire carries it.
+pub const StatEntry = struct {
+    /// `PassiveEffects` numeric value (`assets/passive_effects.zig`).
+    effect: u8 = 0,
+    slot_a: i16 = 0,
+    slot_b: i16 = 0,
 };
 
 /// ItemValue.Flags bit 0: Activated (get_Activated = Flags & 1; the old
@@ -100,13 +119,28 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
         flags |= 1;
         wire_type -= items_start_here;
     }
-    // no Stats → flag bit 1 clear
+    // Bit 2 = `Stats != null` on the reader side (`flags & 2`).
+    if (s.stats_n > 0) flags |= 2;
     try w.writeByte(flags);
     try w.writeU16(@intCast(wire_type));
     try w.writeF32(s.use_times);
     try w.writeU16(s.quality);
     try w.writeU16(s.meta);
     try w.writeByte(0); // metadata count
+    // ItemValue stats (stock ItemValue.Write IL=323: flag bit 2, then a u8
+    // count and one `type u8 | slotA i16 | slotB i16` per entry, written
+    // before the mod arrays). Dropping them stripped the passive deltas a
+    // client-created item carries (the `<stats>` roll), so an echo changed the
+    // item's damage.
+    if (s.stats_n > 0) {
+        try w.writeByte(s.stats_n);
+        var sti: u8 = 0;
+        while (sti < s.stats_n and sti < s.stats.len) : (sti += 1) {
+            try w.writeByte(s.stats[sti].effect);
+            try w.writeI16(s.stats[sti].slot_a);
+            try w.writeI16(s.stats[sti].slot_b);
+        }
+    }
     // not ItemClassModifier path: write mod arrays
     try w.writeByte(s.mod_n); // Modifications.Length
     var mi: u8 = 0;
@@ -310,6 +344,7 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
     };
     out.mods = s.mods;
     out.mod_n = @min(s.mod_n, out.mods.len);
+    copyStatsToWire(&out, s.stats, s.stats_n);
     // Installed mods ride the wire as *relative* item ids (each nested
     // ItemValue writes `type - ItemsStartHere`), while the ECS slot holds ECS
     // ids. Convert each through the same resolver as the item itself; the
@@ -594,13 +629,19 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         }
     }
 
+    var stats: [max_item_stats]StatEntry = .{StatEntry{}} ** max_item_stats;
+    var stats_n: u8 = 0;
     if ((flags & 2) != 0) {
         const sc = try r.readByte();
         var si: u8 = 0;
         while (si < sc) : (si += 1) {
-            _ = try r.readByte(); // type
-            _ = try r.readI16();
-            _ = try r.readI16();
+            const effect = try r.readByte();
+            const slot_a = try r.readI16();
+            const slot_b = try r.readI16();
+            if (stats_n < stats.len) {
+                stats[stats_n] = .{ .effect = effect, .slot_a = slot_a, .slot_b = slot_b };
+                stats_n += 1;
+            }
         }
     }
 
@@ -659,6 +700,8 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
         out2.mods = out.mods;
         out2.mod_n = out.mod_n;
     }
+    out2.stats = stats;
+    out2.stats_n = stats_n;
     return out2;
 }
 
@@ -964,6 +1007,7 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
     };
     out.mods = s.mods;
     out.mod_n = @min(s.mod_n, out.mods.len);
+    copyStatsToEcs(&out, s.stats, s.stats_n);
     // Reverse of slotFromEcs: the parsed nested mod ids are relative item
     // ids, the ECS slot wants ECS ids. No resolver keeps the fixture pin
     // (relative index == ECS id in the builtin catalog).
@@ -975,6 +1019,27 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
         out.mods[mi] = if (reverse) |rv| rv(ctx, abs) else fallbackEcsId(abs);
     }
     return out;
+}
+
+/// Copy the ECS slot's stats onto the wire slot (the two structs live in
+/// different layers on purpose: `ecs` must not import `wire`).
+fn copyStatsToWire(out: *StockSlot, src: [components.max_item_stats]components.ItemStat, n: u8) void {
+    const k = @min(n, out.stats.len);
+    var i: usize = 0;
+    while (i < k) : (i += 1) {
+        out.stats[i] = .{ .effect = src[i].effect, .slot_a = src[i].slot_a, .slot_b = src[i].slot_b };
+    }
+    out.stats_n = k;
+}
+
+/// Reverse of `copyStatsToWire`.
+fn copyStatsToEcs(out: *components.InvSlot, src: [max_item_stats]StatEntry, n: u8) void {
+    const k = @min(n, out.stats.len);
+    var i: usize = 0;
+    while (i < k) : (i += 1) {
+        out.stats[i] = .{ .effect = src[i].effect, .slot_a = src[i].slot_a, .slot_b = src[i].slot_b };
+    }
+    out.stats_n = k;
 }
 
 fn fallbackEcsId(stock_type: i32) u16 {
@@ -1974,4 +2039,50 @@ test "bag blob parses the stock Bag.Write layout" {
     try w3.writeByte(7);
     try w3.writeU16(0);
     try std.testing.expectError(error.Overflow, parseBagSlots(w3.written(), out[0..]));
+}
+
+test "ItemValue stats survive a parse and a re-write" {
+    // Stock ItemValue.Write (IL=323): flag bit 2, a u8 count, then one
+    // `type u8 | slotA i16 | slotB i16` per entry, ahead of the mod arrays.
+    // The server used to skip the block on read and never write it, so an
+    // echo stripped the passive deltas a client-created item carries.
+    var buf: [128]u8 = undefined;
+    var w: binary.Writer = .{ .buf = &buf };
+    var slot: StockSlot = .{
+        .type_id = items_start_here + 7,
+        .count = 1,
+        .quality = 6,
+        .stats_n = 2,
+    };
+    // `EntityDamage` base 20 (no boost) and `DegradationMax` boosted by 5.
+    slot.stats[0] = .{ .effect = 1, .slot_a = 20, .slot_b = 0 };
+    slot.stats[1] = .{ .effect = 8, .slot_a = 0, .slot_b = 5 };
+    try writeItemValue(&w, slot);
+    const body = w.written();
+
+    var r: binary.Reader = .{ .data = body };
+    const parsed = try readItemValue(&r);
+    try std.testing.expectEqual(@as(u8, 2), parsed.stats_n);
+    try std.testing.expectEqual(@as(u8, 1), parsed.stats[0].effect);
+    try std.testing.expectEqual(@as(i16, 20), parsed.stats[0].slot_a);
+    try std.testing.expectEqual(@as(i16, 0), parsed.stats[0].slot_b);
+    try std.testing.expectEqual(@as(u8, 8), parsed.stats[1].effect);
+    try std.testing.expectEqual(@as(i16, 5), parsed.stats[1].slot_b);
+
+    // Byte-for-byte round-trip: the writer reproduces what the reader took.
+    var buf2: [128]u8 = undefined;
+    var w2: binary.Writer = .{ .buf = &buf2 };
+    try writeItemValue(&w2, parsed);
+    try std.testing.expectEqualSlices(u8, body, w2.written());
+
+    // An item without stats keeps the old shape: no bit 2, no count block.
+    const plain: StockSlot = .{ .type_id = items_start_here + 7, .count = 1 };
+    var buf3: [64]u8 = undefined;
+    var w3: binary.Writer = .{ .buf = &buf3 };
+    try writeItemValue(&w3, plain);
+    var r3: binary.Reader = .{ .data = w3.written() };
+    try std.testing.expectEqual(@as(u8, item_value_save_version), try r3.readByte());
+    try std.testing.expectEqual(@as(u8, 0), (try r3.readByte()) & 2);
+    const parsed3 = try readItemValue(&r3);
+    try std.testing.expectEqual(@as(u8, 0), parsed3.stats_n);
 }
