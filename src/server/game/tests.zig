@@ -2736,8 +2736,15 @@ test "POI reset restores baked blocks over player edits" {
     const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
     const map = game_dir ++ "/Data/Worlds/Navezgane";
     if (!io_fs.dirExists(map)) return error.SkipZigTest;
-    io_fs.mkdirPath(".zdtd_cfg_cache");
-    var g = try Game.createWithOptions(std.testing.allocator, ".zdtd_cfg_cache/poi_reset", 0, .{
+    // Own throwaway world dir: a `.zdtd_cfg_cache/poi_reset` world left by an
+    // older run of this test is painted by a previous code generation, so the
+    // reset would compare against stale baked blocks (AGENTS: tests never
+    // write into the repo).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const world_dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var g = try Game.createWithOptions(std.testing.allocator, world_dir, 0, .{
         .map_dir = map,
         .game_dir = game_dir,
     });
