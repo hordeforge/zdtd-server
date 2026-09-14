@@ -235,15 +235,17 @@ pub const bm_parties_cap: usize = 8;
 /// worldTime + RandomRange(12000, 24000) ticks (12-24 in-game hours); the
 /// schedule is player-gated (no players -> re-choose) and only starts after
 /// day 1 (worldTime > 28000).
-/// Wandering horde (RE: aidirector.md wandering-horde scheduling): a group
-/// of `wandering_horde_size` zombies spawns `wandering_spawn_dist` blocks out
-/// every wander_min_gap..wander_max_gap (12-24 in-game hours of world time)
-/// once the world is past wander_start_after. `wandering_spawn_dist` 92 is
+/// Wandering horde (RE: aidirector.md wandering-horde scheduling): the pack
+/// spawns `wandering_spawn_dist` blocks out every
+/// wander_min_gap..wander_max_gap (12-24 in-game hours of world time) once the
+/// world is past wander_start_after, sized and grouped by the `WanderingHorde`
+/// gamestages.xml ladder (that is the "gamestage-group driven" size observed
+/// live on 2026-08-11: "enemy max 5" for GS 1). `wandering_spawn_dist` 92 is
 /// the `FindTargets` inline start offset (`RandomOnUnitCircle * 92f`, IL_018B,
-/// aidirector.md placement constants); the per-horde size is gamestage-group
-/// driven in stock (live-observed 2026-08-11: "enemy max 5" for GS 1), so the
-/// fixed 6 here is an approximation. Both are `[rules.director]` tunables
-/// (ADR 0021); these aliases are the builtin defaults (tests reference them).
+/// aidirector.md placement constants). `wandering_horde_size` is only the
+/// fallback for when no ladder is wired (offline or builtin tables). Both are
+/// `[rules.director]` tunables (ADR 0021); these aliases are the builtin
+/// defaults (tests reference them).
 pub const wandering_horde_size: u32 = director_defaults.wandering_horde_size;
 pub const wandering_spawn_dist: f32 = director_defaults.wandering_spawn_dist;
 pub const wander_min_gap: u64 = director_defaults.wander_min_gap;
@@ -361,6 +363,15 @@ pub const Director = struct {
     /// null out of range). Feeds the nightly group walk.
     stage_group_at_ctx: ?*anyopaque = null,
     stage_group_at_fn: ?*const fn (?*anyopaque, []const u8, i32, u32) ?StageGroup = null,
+    /// Optional lookup: (ctx, wx, wz, radius) → the weighted party game stage
+    /// of the players around that point, stock
+    /// `GameStageDefinition::CalcGameStageAround`. The wandering-horde ladder
+    /// scales its spawner's own member players rather than the whole server, so
+    /// a wired hook beats the tick's `party_stage` (which is the group high
+    /// water mark). Null keeps `party_stage`.
+    stage_around_ctx: ?*anyopaque = null,
+    stage_around_fn: ?*const fn (?*anyopaque, f32, f32, f32) i32 = null,
+
     /// Optional lookup: (ctx, entityspawner_name) → EntityGroupName from
     /// spawning.xml, for the code-named scout spawners.
     spawner_group_ctx: ?*anyopaque = null,
@@ -766,6 +777,22 @@ pub const Director = struct {
 
     /// gamestages.xml spawner name the blood moon draws from.
     pub const bloodmoon_spawner = "BloodMoonHorde";
+
+    /// gamestages.xml spawner name the wandering horde draws from
+    /// (`AIWanderingHordeSpawner::.ctor` IL_0056/IL_0066; the Bandits spawn
+    /// type uses "WanderingBandits" instead, which zdtd does not schedule).
+    pub const wandering_spawner = "WanderingHorde";
+
+    /// `AIWanderingHordeSpawner::.ctor` IL_0066 passes this as
+    /// `ResetPartyLevel(mod)`: the wandering ladder wraps at 50 because the
+    /// XML's 50 rows stop there (its own comment). Only this ladder wraps -
+    /// the blood moon and ScoutGSList spawners pass 0.
+    pub const wandering_stage_mod = 50;
+
+    /// Radius for `GameStageDefinition::CalcGameStageAround` (IL=38):
+    /// `World::GetPlayersAround(pos, 100f)`, i.e. the weighted party level of
+    /// the players near the spawner.
+    pub const gamestage_around_radius: f32 = 100.0;
 
     /// Resolve a gamestages.xml spawner at the current party stage (the
     /// blood-moon ladder reads the night-frozen stage once set).
@@ -1229,23 +1256,34 @@ pub const Director = struct {
         return wt + min_gap + off;
     }
 
-    /// Spawn one wandering-horde group of 6 at ~92 m around the first online
-    /// player, marked IsHordeZombie and set to chase the party. Stock walks the
-    /// pack as a startPos->endPos path (AstarManager location line) with
-    /// pit-stop commands; the direct-chase simplification keeps the client
-    /// visible behaviour (a scheduled pack arriving from outside) without the
+    /// Spawn one wandering-horde pack at ~92 m around the first online player,
+    /// marked IsHordeZombie and set to chase the party. Stock walks the pack as
+    /// a startPos->endPos path (AstarManager location line) with pit-stop
+    /// commands; the direct-chase simplification keeps the client visible
+    /// behaviour (a scheduled pack arriving from outside) without the
     /// path-command AI, which stays a residual (GAP wandering hordes row).
+    ///
+    /// The pack's size and entity group come from the `WanderingHorde` ladder
+    /// in gamestages.xml, not from a rule: `AIWanderingHordeSpawner::.ctor`
+    /// IL_0066 builds its `AIDirectorGameStagePartySpawner` with `mod = 50`
+    /// (the ladder's own "These will wrap around at 50" comment) and
+    /// `UpdateSpawn` IL_006D spawns the resolved stage row's `group` `num`
+    /// times. Without a ladder (offline or builtin tables, or a wrapped stage
+    /// below the first row) it falls back to the rules-sized biome-group pack.
     fn spawnWanderingHorde(self: *Director, w: *ecs_world.World) u32 {
         for (w.kind_groups.slice(.player)) |p| {
             if (!w.alive[p] or !w.mask[p].player or !w.mask[p].transform) continue;
+            const row = self.wanderingHordeRow(w.transform[p].x, w.transform[p].z);
+            const count: u32 = if (row) |r| @max(1, @as(u32, r.num)) else w.rules.director.wandering_horde_size;
+            const group: []const u8 = if (row) |r| r.group else "";
             var n: u32 = 0;
             var i: u32 = 0;
-            while (i < w.rules.director.wandering_horde_size) : (i += 1) {
+            while (i < count) : (i += 1) {
                 const ang = @as(f32, @floatFromInt(self.total_spawned +% n)) * 1.7 + @as(f32, @floatFromInt(i)) * 1.0472;
                 const x = w.transform[p].x + @cos(ang) * w.rules.director.wandering_spawn_dist;
                 const z = w.transform[p].z + @sin(ang) * w.rules.director.wandering_spawn_dist;
                 const y = w.groundY(x, z) orelse w.transform[p].y;
-                const slot = self.spawnOneZombieLoot(w, x, y, z, "", self.total_spawned +% n, true, .wandering) orelse continue;
+                const slot = self.spawnOneZombieLoot(w, x, y, z, group, self.total_spawned +% n, true, .wandering) orelse continue;
                 w.zombie_ai[slot].state = .chase;
                 w.zombie_ai[slot].target_id = w.network_id[p].id;
                 w.zombie_ai[slot].alert = true;
@@ -1254,6 +1292,28 @@ pub const Director = struct {
             return n;
         }
         return 0;
+    }
+
+    /// The `WanderingHorde` stage row for a pack around (wx,wz).
+    /// `AIDirectorGameStagePartySpawner::ResetPartyLevel` IL_0000-0015 keeps
+    /// the weighted party level inside the ladder (`if (mod != 0) level %=
+    /// mod`, `mod = 50` for this spawner), and the level itself is
+    /// `CalcPartyLevel` over the spawner's member players. A stage the ladder
+    /// has no row at or below (0, or a wrap to 0) yields null.
+    fn wanderingHordeRow(self: *const Director, wx: f32, wz: f32) ?StageGroup {
+        const f = self.stage_group_fn orelse return null;
+        const stage = @mod(self.stageAround(wx, wz), wandering_stage_mod);
+        if (stage <= 0) return null;
+        const sg = f(self.stage_group_ctx, wandering_spawner, stage) orelse return null;
+        if (sg.group.len == 0) return null;
+        return sg;
+    }
+
+    /// `GameStageDefinition::CalcGameStageAround` over the wired radius when
+    /// the Game supplies one, else the tick's party stage.
+    fn stageAround(self: *const Director, wx: f32, wz: f32) i32 {
+        if (self.stage_around_fn) |f| return f(self.stage_around_ctx, wx, wz, gamestage_around_radius);
+        return self.party_stage;
     }
 
     /// 5x5-chunk region key for a world position (AIDirectorChunkData map).
@@ -2025,6 +2085,64 @@ test "wandering horde size and distance follow [rules.director]" {
     const hs = horde_slot orelse return error.TestUnexpectedResult;
     const dist = @sqrt(w.transform[hs].x * w.transform[hs].x + w.transform[hs].z * w.transform[hs].z);
     try std.testing.expect(dist > 30.0 and dist < 50.0); // config 40 m, not 92
+}
+
+test "wandering horde takes its size and group from the WanderingHorde ladder" {
+    // AIWanderingHordeSpawner::.ctor IL_0066 builds its party spawner with
+    // mod = 50, and UpdateSpawn IL_006D spawns the resolved stage row's group
+    // `num` times. The ladder index is the weighted party level wrapped at 50,
+    // so a stage of 71 resolves row 21, and the pack is that row's size/group
+    // rather than the rules fallback.
+    const Hooks = struct {
+        var asked_stage: i32 = -1;
+        fn stageGroup(_: ?*anyopaque, spawner: []const u8, stage: i32) ?StageGroup {
+            if (!std.mem.eql(u8, spawner, Director.wandering_spawner)) return null;
+            asked_stage = stage;
+            if (stage != 21) return null;
+            return .{ .group = "wanderingHordeStageGS21", .num = 7, .max_alive = 30, .interval = 2, .duration = 9 };
+        }
+        fn around(_: ?*anyopaque, _: f32, _: f32, radius: f32) i32 {
+            // The wired hook is asked with the stock CalcGameStageAround radius.
+            if (radius != Director.gamestage_around_radius) return 0;
+            return 71;
+        }
+        fn pick(_: ?*anyopaque, _: []const u8, _: u32) ?[]const u8 {
+            return null; // class_table rotation fallback
+        }
+    };
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{
+        .clock = .{ .day = 3, .hours = 12.0, .time_of_day_inc_per_sec = 1000 },
+        .stage_group_ctx = undefined,
+        .stage_group_fn = &Hooks.stageGroup,
+        .stage_around_ctx = undefined,
+        .stage_around_fn = &Hooks.around,
+        .group_pick_ctx = undefined,
+        .group_pick_fn = &Hooks.pick,
+    };
+    d.wandering_next = d.clock.worldTimeBits() + 1; // due
+    _ = d.tick(&w, 0.05);
+    try std.testing.expectEqual(@as(i32, 21), Hooks.asked_stage); // 71 % 50
+    var horde: u32 = 0;
+    var s: ecs_world.Slot = 0;
+    while (s < ecs_world.max_entities) : (s += 1) {
+        if (w.alive[s] and w.zombie_ai[s].is_horde) horde += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 7), horde); // the row's num, not the rule's 6
+
+    // A stage that wraps to 0 (party stage 50, 100, ...) has no ladder row at
+    // or below it, so the pack falls back to the rules size rather than
+    // vanishing.
+    var d2: Director = .{
+        .clock = .{ .day = 3, .hours = 12.0 },
+        .party_stage = 50,
+        .stage_group_ctx = undefined,
+        .stage_group_fn = &Hooks.stageGroup,
+    };
+    try std.testing.expectEqual(@as(i32, 0), @mod(d2.party_stage, Director.wandering_stage_mod));
+    try std.testing.expect(d2.wanderingHordeRow(0, 0) == null);
 }
 
 test "wandering horde skips with no players and re-arms" {

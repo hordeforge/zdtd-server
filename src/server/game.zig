@@ -3503,6 +3503,16 @@ pub const Game = struct {
         return .{ .group = sg.group, .num = sg.num, .max_alive = sg.max_alive, .interval = sg.interval, .duration = sg.duration };
     }
 
+    /// `GameStageDefinition::CalcGameStageAround`: the weighted party level of
+    /// the joined players within `radius` of a point, for the wandering-horde
+    /// ladder (`partyStageAround` is the same primitive the sleeper volumes
+    /// use; stock also filters to the same PrefabInstance, which zdtd cannot
+    /// yet).
+    pub fn pickStageAround(ctx: ?*anyopaque, wx: f32, wz: f32, radius: f32) i32 {
+        const g: *Game = @ptrCast(@alignCast(ctx.?));
+        return g.partyStageAround(wx, wz, radius);
+    }
+
     /// gamestages.xml spawner ladder → the stage's `<spawn>` row at `index`
     /// (stock `Stage.GetSpawnGroup`, null past the end - not clamped; the
     /// walk ends when it returns null). Feeds the nightly group walk.

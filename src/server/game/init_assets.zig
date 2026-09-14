@@ -627,6 +627,8 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         self.sim.director.stage_group_fn = &Game.pickStageGroup;
         self.sim.director.stage_group_at_ctx = self;
         self.sim.director.stage_group_at_fn = &Game.pickStageGroupAt;
+        self.sim.director.stage_around_ctx = self;
+        self.sim.director.stage_around_fn = &Game.pickStageAround;
         self.sim.director.spawner_group_ctx = self;
         self.sim.director.spawner_group_fn = &Game.pickSpawnerGroup;
         self.sim.director.spawner_wave_ctx = self;
