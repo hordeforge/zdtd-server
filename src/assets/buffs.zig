@@ -375,9 +375,25 @@ pub const Quality = struct { level: u8, max: u8 };
 /// Anchor-pair curve evaluation (stock `PassiveEffect.ModValue` over the
 /// `level=`/`duration=` anchors): piecewise-linear between (levels[i],
 /// values[i]); an axis outside every segment applies nothing (0), matching
-/// ModValue's fall-through.
+/// ModValue's fall-through. Stock pairs the arrays **by shape** rather than by
+/// padding them to equal length (`PassiveEffect::ModValue` IL_0016 `bne.un`
+/// IL_01D4), so the two unequal shapes are evaluated explicitly:
+/// `levels.len >= 2` with a single value holds `values[0]` flat across
+/// `levels[0]..levels[1]` (IL_0348), and a single level with two values rolls
+/// between them (IL_01D4, stock `RandomRange` / mean when the cached seed is 0,
+/// for which the deterministic mean is the sim-safe projection). Every other
+/// mismatch applies nothing (IL_057C).
 pub fn curveValueAtLevels(axis: f32, levels: []const f32, values: []const f32) f32 {
-    if (levels.len == 0 or values.len != levels.len) return 0;
+    if (levels.len == 0 or values.len == 0) return 0;
+    if (values.len != levels.len) {
+        if (levels.len >= 2 and values.len == 1) {
+            return if (axis >= levels[0] and axis <= levels[1]) values[0] else 0;
+        }
+        if (levels.len == 1 and values.len == 2) {
+            return if (@floor(axis) == @floor(levels[0])) (values[0] + values[1]) * 0.5 else 0;
+        }
+        return 0;
+    }
     // Single anchor: stock (PassiveEffect::ModValue IL=161) applies values[0]
     // only when FloorToInt(axis) == FloorToInt(levels[0]); it does not
     // interpolate or extrapolate. This is the shape of every `<book>` passive
@@ -385,12 +401,15 @@ pub fn curveValueAtLevels(axis: f32, levels: []const f32, values: []const f32) f
     if (levels.len == 1) {
         return if (@floor(axis) == @floor(levels[0])) values[0] else 0;
     }
-    for (1..levels.len) |i| {
-        const l0 = levels[i - 1];
-        const l1 = levels[i];
+    // Highest matching bracket wins (stock scans i = n-1 down to 1, IL_0155).
+    var i: usize = levels.len;
+    while (i > 1) : (i -= 1) {
+        const j = i - 1;
+        const l0 = levels[j - 1];
+        const l1 = levels[j];
         if (axis >= l0 and axis <= l1) {
             const t: f32 = if (l1 > l0) (axis - l0) / (l1 - l0) else 0;
-            return values[i - 1] + (values[i] - values[i - 1]) * t;
+            return values[j - 1] + (values[j] - values[j - 1]) * t;
         }
     }
     return 0;
@@ -402,7 +421,10 @@ pub fn curveValueAtLevels(axis: f32, levels: []const f32, values: []const f32) f
 /// (ModValue IL=3C4).
 pub fn curveAtAxis(p: Passive, axis: f32) f32 {
     if (p.curve_levels_len > 0) {
-        return curveValueAtLevels(axis, p.curve_levels[0..p.curve_levels_len], p.curve[0..p.curve_levels_len]);
+        // The value array keeps its own length: a `level="1,5" value="-1"` row
+        // has two anchors and one value, which stock holds flat rather than
+        // ramping to 0.
+        return curveValueAtLevels(axis, p.curve_levels[0..p.curve_levels_len], p.curve[0..p.curve_len]);
     }
     if (p.curve_len == 0) return p.value;
     if (p.curve_len == 1) return p.curve[0];
@@ -2380,4 +2402,34 @@ test "explicit level= curve pairs evaluate piecewise-linearly" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.2), curveAt(one_anchor, 1), 0.001);
     try std.testing.expectEqual(@as(f32, 0), curveAt(one_anchor, 2));
     try std.testing.expectEqual(@as(f32, 0), curveAt(one_anchor, 0));
+
+    // Two anchors with a single value hold it flat across the bracket
+    // (PassiveEffect::ModValue IL_0348): 305 stock rows are this shape, e.g.
+    // LootProb level="2,3" value="8" and CraftingIngredientCount level="1,5"
+    // value="-1". Padding the value slice to the anchor count ramped it to 0
+    // instead, so perkMasterChef 3 folded LootProb 0 and resourceGlue's bone
+    // cost faded out by tier 5.
+    const flat = Passive{
+        .curve = .{ 8, 0, 0, 0, 0, 0, 0, 0 },
+        .curve_len = 1,
+        .curve_levels = .{ 2, 3, 0, 0, 0, 0, 0, 0 },
+        .curve_levels_len = 2,
+    };
+    try std.testing.expectEqual(@as(f32, 0), curveAt(flat, 1));
+    try std.testing.expectApproxEqAbs(@as(f32, 8), curveAt(flat, 2), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 8), curveAt(flat, 3), 0.001);
+    try std.testing.expectEqual(@as(f32, 0), curveAt(flat, 4));
+
+    // The mirror shape - one anchor, two values - is stock's per-item roll
+    // (IL_01D4 RandomRange, mean when the cached seed is 0); with the mean the
+    // primitive-armor resist rows give the same value at every quality instead
+    // of a Q1..Q6 ramp. No stock row uses it today, but the shapes pair.
+    const roll = Passive{
+        .curve = .{ -0.2, 0.2, 0, 0, 0, 0, 0, 0 },
+        .curve_len = 2,
+        .curve_levels = .{ 1, 0, 0, 0, 0, 0, 0, 0 },
+        .curve_levels_len = 1,
+    };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), curveAt(roll, 1), 0.001);
+    try std.testing.expectEqual(@as(f32, 0), curveAt(roll, 2));
 }
