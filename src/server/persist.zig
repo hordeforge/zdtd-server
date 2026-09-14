@@ -1,4 +1,4 @@
-//! Save/restore for zdtd-owned persistence: players.zsv (ZPV15), entities.zen
+//! Save/restore for zdtd-owned persistence: players.zsv (ZPV16), entities.zen
 //! (ZENT), claims.zlc (ZCLC), clock.zcl, weather.zwt (ZWTH1) and the chunk
 //! blockmeta/raw planes.
 //!
@@ -112,12 +112,19 @@ pub const Zpv2Drop = struct {
 /// follows this one, since the next record's own name_len byte would be
 /// misread as this record's bed_present. Only the file's own magic decides
 /// whether a bedroll field is present, the same way `prog` already gates the
-/// rest of the v3 tail.
+/// rest of the v3 tail. 16 (ZPV16, magic byte 'G') widens every inventory slot
+/// record to `stats_n:u8 | stats_n x (effect:u8, slot_a:i16, slot_b:i16)` -
+/// stock `ItemValue`'s `Stats` (wire blob flag bit 2), so a rolled or
+/// client-sent stat entry survives a restart instead of being dropped on save.
 /// Inventory slot-record stride in bytes: 7 through v6
 /// (item:u16, count:u16, quality:u8, meta:u16), 11 from v7 (those plus
 /// use_times: f32), 13 from v10 (plus seed:u16 - the stock ItemValue.Seed,
 /// so a plantable's per-item seed survives a restart).
+/// Version this build writes (ZPV16). Older files stay readable.
+pub const persist_version: u8 = 16;
+
 pub fn zpvSlotStride(version: u8) usize {
+    if (version >= 16) return 52; // 21 + stats_n u8 + 6 x (effect u8, two i16) (ZPV16)
     if (version >= 12) return 21; // 13 + 4 mod ids (ZPV12)
     if (version >= 10) return 13;
     return if (version >= 7) 11 else 7;
@@ -134,7 +141,7 @@ fn emitZpv12SlotsFrom(
     inv_n: usize,
     src_stride: usize,
 ) !void {
-    const dst_stride = zpvSlotStride(12);
+    const dst_stride = zpvSlotStride(persist_version);
     std.debug.assert(src_stride <= dst_stride);
     try out.append(allocator, old[inv_n_pos]); // inv_n byte
     var p = inv_n_pos + 1;
@@ -577,9 +584,9 @@ pub fn savePlayers(self: *Game) !void {
     if (io_fs.readFileAll(self.allocator, path)) |old_data| {
         old_file = old_data;
         if (old_data.len < 8 or !std.mem.eql(u8, old_data[0..3], "ZPV") or
-            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D' and old_data[3] != 'E' and old_data[3] != 'F'))
+            (old_data[3] != '2' and old_data[3] != '3' and old_data[3] != '4' and old_data[3] != '5' and old_data[3] != '6' and old_data[3] != '7' and old_data[3] != '8' and old_data[3] != '9' and old_data[3] != 'A' and old_data[3] != 'B' and old_data[3] != 'C' and old_data[3] != 'D' and old_data[3] != 'E' and old_data[3] != 'F' and old_data[3] != 'G'))
             return error.CorruptPlayersFile;
-        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else if (old_data[3] == 'E') 14 else if (old_data[3] == 'F') 15 else old_data[3] - '0';
+        old_version = if (old_data[3] == 'A') 10 else if (old_data[3] == 'B') 11 else if (old_data[3] == 'C') 12 else if (old_data[3] == 'D') 13 else if (old_data[3] == 'E') 14 else if (old_data[3] == 'F') 15 else if (old_data[3] == 'G') 16 else old_data[3] - '0';
         old_count = std.mem.readInt(u32, old_data[4..8], .little);
         old_recs = old_data[8..];
         // Unreadable existing file: abort save so offline player records in
@@ -592,7 +599,7 @@ pub fn savePlayers(self: *Game) !void {
     // Header count is patched in last, from records actually appended. A
     // count predicted up front drifts whenever a joined client has no ECS
     // player slot, and the loader then walks past the last record.
-    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'F', 0, 0, 0, 0 });
+    try out.appendSlice(self.allocator, &[_]u8{ 'Z', 'P', 'V', 'G', 0, 0, 0, 0 });
     var written: u32 = 0;
     {
         var ri: u32 = 0;
@@ -825,15 +832,18 @@ pub fn savePlayers(self: *Game) !void {
         // The slot loop below breaks on a short buffer rather than failing,
         // so a record that cannot hold a full inventory would silently drop
         // the tail slots. Prove at compile time that it never has to: name
-        // header + position + wallet + inv_n + every slot at the v12 stride
-        // must fit, or the cap moved and this buffer needs to move with it.
+        // header + position + wallet + inv_n + every slot at the version this
+        // build writes must fit, or the cap moved and this buffer needs to
+        // move with it. (ZPV16 widened the slot record, which is what caught
+        // the v12 literal that had been left in this assert.)
+        const rec_capacity = 4096;
         comptime {
             const head = 1 + 32 + 3 * 4 + 4 + 1;
-            const inv_bytes = ecs.components.max_inv_slots * zpvSlotStride(12);
-            if (head + inv_bytes > 2048)
-                @compileError("player record buffer too small for a full v12 inventory");
+            const inv_bytes = ecs.components.max_inv_slots * zpvSlotStride(persist_version);
+            if (head + inv_bytes > rec_capacity)
+                @compileError("player record buffer too small for a full inventory at the current stride");
         }
-        var rec: [2048]u8 = undefined;
+        var rec: [rec_capacity]u8 = undefined;
         var o: usize = 0;
         rec[o] = @intCast(cl.name_len);
         o += 1;
@@ -859,7 +869,7 @@ pub fn savePlayers(self: *Game) !void {
             // v10 stride left behind when v12 appended the mod ids, so the
             // guard admitted a slot with room for the head and none for the
             // tail.
-            const slot_bytes = zpvSlotStride(12);
+            const slot_bytes = zpvSlotStride(persist_version);
             for (self.sim.inventory[ps].slots) |s| {
                 // ZPV12 slot record: item:u16, count:u16, quality:u8, meta:u16,
                 // use_times:f32 (stock ItemValue.UseTimes), seed:u16 (stock
@@ -876,6 +886,15 @@ pub fn savePlayers(self: *Game) !void {
                 var mz: usize = 0;
                 while (mz < s.mods.len) : (mz += 1) {
                     std.mem.writeInt(u16, rec[o + 13 + mz * 2 ..][0..2], s.mods[mz], .little);
+                }
+                // ZPV16: the ItemValue stats (wire blob bit 2), so a rolled or
+                // client-sent item keeps its passive deltas across a restart.
+                rec[o + 21] = s.stats_n;
+                var sz: usize = 0;
+                while (sz < s.stats.len) : (sz += 1) {
+                    rec[o + 22 + sz * 5] = s.stats[sz].effect;
+                    std.mem.writeInt(i16, rec[o + 23 + sz * 5 ..][0..2], s.stats[sz].slot_a, .little);
+                    std.mem.writeInt(i16, rec[o + 25 + sz * 5 ..][0..2], s.stats[sz].slot_b, .little);
                 }
                 o += slot_bytes;
                 inv_n += 1;
@@ -1058,12 +1077,12 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
     };
     defer self.allocator.free(data);
     if (data.len < 8 or data[0] != 'Z' or data[1] != 'P' or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F' and data[3] != 'G'))
     {
         std.debug.print("zdtd: restore player: bad players file header\n", .{});
         return;
     }
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else if (data[3] == 'G') 16 else data[3] - '0';
     const v3 = version >= 3;
     const slot_stride: usize = zpvSlotStride(version);
     const n = std.mem.readInt(u32, data[4..8], .little);
@@ -1126,6 +1145,19 @@ pub fn tryRestorePlayer(self: *Game, c: *Client) void {
                     if (mod_id == 0) continue;
                     inv[k].mods[mz] = mod_id;
                     if (mz >= inv[k].mod_n) inv[k].mod_n = @intCast(mz + 1);
+                }
+            }
+            // ZPV16: stats_n, then 6 x (effect u8, slot_a i16, slot_b i16).
+            if (k < inv.len and slot_stride >= 52) {
+                const sn = @min(ib[21], inv[k].stats.len);
+                inv[k].stats_n = @intCast(sn);
+                var sz: usize = 0;
+                while (sz < sn) : (sz += 1) {
+                    inv[k].stats[sz] = .{
+                        .effect = ib[22 + sz * 5],
+                        .slot_a = std.mem.readInt(i16, ib[23 + sz * 5 ..][0..2], .little),
+                        .slot_b = std.mem.readInt(i16, ib[25 + sz * 5 ..][0..2], .little),
+                    };
                 }
             }
         }
@@ -2188,9 +2220,9 @@ pub fn loadTraders(self: *Game) !void {
 pub fn zpv2DropName(allocator: std.mem.Allocator, data: []const u8, name: []const u8) !Zpv2Drop {
     if (name.len == 0 or name.len > 32) return .{};
     if (data.len < 8 or !std.mem.eql(u8, data[0..3], "ZPV") or
-        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F'))
+        (data[3] != '2' and data[3] != '3' and data[3] != '4' and data[3] != '5' and data[3] != '6' and data[3] != '7' and data[3] != '8' and data[3] != '9' and data[3] != 'A' and data[3] != 'B' and data[3] != 'C' and data[3] != 'D' and data[3] != 'E' and data[3] != 'F' and data[3] != 'G'))
         return error.CorruptPlayersFile;
-    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else data[3] - '0';
+    const version: u8 = if (data[3] == 'A') 10 else if (data[3] == 'B') 11 else if (data[3] == 'C') 12 else if (data[3] == 'D') 13 else if (data[3] == 'E') 14 else if (data[3] == 'F') 15 else if (data[3] == 'G') 16 else data[3] - '0';
     const n = std.mem.readInt(u32, data[4..8], .little);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
