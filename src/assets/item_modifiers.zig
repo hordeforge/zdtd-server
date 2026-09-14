@@ -47,7 +47,7 @@ pub const ModDef = struct {
     /// EconomicValue (modGeneralMaster 400, inherited by 106 live rows),
     /// Stacknumber (1) and HasQuality (37 live mods are owner-tiered). The
     /// trader prices a mod from its econ like any item.
-    econ: u16 = 0,
+    econ: f32 = 0,
     stack: u16 = 1,
     has_quality: bool = false,
 };
@@ -154,7 +154,9 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ModTable {
         const end = requirements.elementEnd(clean, ii);
         const body = clean[gt + 1 .. end];
         const ext = xml.propertyValue(body, "Extends") orelse "";
-        const econ = if (xml.propertyValue(body, "EconomicValue")) |v| xml.parseU16(v) orelse 0 else 0;
+        // Single in stock (ItemClass IL_0666 parses it with ParseFloat): a
+        // modifier priced above 65535 or with a fraction must not become 0.
+        const econ = if (xml.propertyValue(body, "EconomicValue")) |v| xml.parseF32(v) orelse 0 else 0;
         const stack = if (xml.propertyValue(body, "Stacknumber")) |v| xml.parseU16(v) orelse 1 else 1;
         const has_quality = xml.hasTieredEffectGroup(body);
         const p0 = passives_list.items.len;
@@ -224,14 +226,14 @@ test "modifier rows carry econ, stack and quality from Extends" {
     var t = (tryLoad(std.testing.allocator, game, null) catch null) orelse return error.SkipZigTest;
     defer t.deinit();
     const base = t.byName("modGeneralMaster").?;
-    try std.testing.expectEqual(@as(u16, 400), base.econ);
+    try std.testing.expectEqual(@as(f32, 400), base.econ);
     const barrel = t.byName("modGunBarrelExtender").?;
-    try std.testing.expectEqual(@as(u16, 400), barrel.econ);
+    try std.testing.expectEqual(@as(f32, 400), barrel.econ);
     try std.testing.expectEqual(@as(u16, 1), barrel.stack);
     try std.testing.expect(!barrel.has_quality);
     const mag = t.byName("modGunMagazineExtender").?;
     try std.testing.expect(mag.has_quality);
-    try std.testing.expectEqual(@as(u16, 400), mag.econ);
+    try std.testing.expectEqual(@as(f32, 400), mag.econ);
 }
 
 /// Load the stock item_modifiers.xml through the standard config path (with

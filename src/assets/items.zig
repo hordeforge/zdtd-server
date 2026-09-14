@@ -86,7 +86,7 @@ pub const ItemDef = struct {
     /// Absolute stock ItemValue.type (ItemsStartHere + …). 0 = unknown.
     stock_type: i32 = 0,
     /// items.xml EconomicValue (0 = not tradeable).
-    econ: u16 = 0,
+    econ: f32 = 0,
     /// items.xml EconomicSellScale (stock `ItemClass.EconomicSellScale`,
     /// IL default 1.0; the sell price base is EconomicValue * scale, RE
     /// loot-economy.md GetSellPrice). A39.
@@ -391,7 +391,7 @@ pub const ItemTable = struct {
     /// HasQuality).
     pub const ItemClassStub = struct {
         name: []const u8,
-        econ: u16 = 0,
+        econ: f32 = 0,
         stack: u16 = 1,
         has_quality: bool = false,
     };
@@ -974,7 +974,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer own_stacks.deinit(allocator);
     var ext_names: std.ArrayList([]const u8) = .empty;
     defer ext_names.deinit(allocator);
-    var stock_econs: std.ArrayList(u16) = .empty;
+    var stock_econs: std.ArrayList(f32) = .empty;
     defer stock_econs.deinit(allocator);
     var stock_econ_declared: std.ArrayList(bool) = .empty;
     defer stock_econ_declared.deinit(allocator);
@@ -1117,10 +1117,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             try own_stacks.append(allocator, if (stack_own != null) stack else 0);
             const ext = xml.propertyValue(clean[ii..item_end], "Extends");
             try ext_names.append(allocator, if (ext) |e| try arena.dupe(u8, e) else "");
-            var econ: u16 = 0;
+            // Single, not an integer: stock fields EconomicValue as `Single`
+            // and parses it with ParseFloat (ItemClass IL_0666), so a modlet
+            // can price an item above 65535 or with a fraction. Typing this
+            // u16 turned either into 0, i.e. "not purchasable".
+            var econ: f32 = 0;
             var econ_declared = false;
             if (xml.propertyValue(clean[ii..item_end], "EconomicValue")) |v| {
-                econ = xml.parseU16(v) orelse 0;
+                econ = xml.parseF32(v) orelse 0;
                 econ_declared = true;
             }
             try stock_econs.append(allocator, econ);
@@ -1501,7 +1505,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     {
         var own_stack_map: std.StringHashMapUnmanaged(u16) = .{};
         defer own_stack_map.deinit(allocator);
-        var own_econ_map: std.StringHashMapUnmanaged(u16) = .{};
+        var own_econ_map: std.StringHashMapUnmanaged(f32) = .{};
         defer own_econ_map.deinit(allocator);
         var own_bundle_map: std.StringHashMapUnmanaged(u16) = .{};
         defer own_bundle_map.deinit(allocator);
@@ -2417,7 +2421,7 @@ test "load stock items.xml when present" {
     // EconomicValue resolves through the Extends chain (286 stock items get
     // their econ from a master) and EconomicBundleSize divides the price.
     if (t.byName("armorAssassinBoots")) |boots| {
-        try std.testing.expectEqual(@as(u16, 1000), boots.econ);
+        try std.testing.expectEqual(@as(f32, 1000), boots.econ);
     }
     if (t.byName("ammoGasCan")) |gas| {
         try std.testing.expectEqual(@as(u16, 100), gas.econ_bundle_size);
@@ -2688,4 +2692,34 @@ test "items root max_quality_tier bounds the quality axes" {
     var t2 = try loadFromPath(std.testing.allocator, path);
     defer t2.deinit();
     try std.testing.expectEqual(@as(u8, 6), t2.max_quality_tier);
+}
+
+test "EconomicValue keeps stock's float range and fraction" {
+    // Stock fields EconomicValue as `Single` and parses it with ParseFloat
+    // (ItemClass IL_0666). Typing it u16 turned a modlet's 1000000-duke relic
+    // (or a 2.5 value) into 0, which the trader then prices at the
+    // "econ == 0" fallback of buy 5 / sell 1, i.e. not tradeable as authored.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items>
+        \\  <item name="relic">
+        \\    <property name="EconomicValue" value="1000000"/>
+        \\  </item>
+        \\  <item name="fraction">
+        \\    <property name="EconomicValue" value="2.5"/>
+        \\  </item>
+        \\  <item name="plain"/>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(f32, 1000000), t.byName("relic").?.econ);
+    try std.testing.expectEqual(@as(f32, 2.5), t.byName("fraction").?.econ);
+    // No EconomicValue anywhere: 0, the trader's untradeable marker.
+    try std.testing.expectEqual(@as(f32, 0), t.byName("plain").?.econ);
 }

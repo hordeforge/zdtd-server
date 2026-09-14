@@ -221,7 +221,7 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         if (n >= ecs.components.max_stock) break;
         const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
-        const econ: u16 = if (self.items.byId(iid)) |d| d.econ else 0;
+        const econ: f32 = if (self.items.byId(iid)) |d| d.econ else 0;
         // A39: the sell base is EconomicValue * EconomicSellScale (stock
         // GetSellPrice; default scale 1.0, a few items mark down to .5).
         const sell_scale: f32 = if (self.items.byId(iid)) |d| d.econ_sell_scale else 1.0;
