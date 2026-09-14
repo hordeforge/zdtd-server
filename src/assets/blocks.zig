@@ -37,6 +37,31 @@ pub const leftover_id_start: u32 = 0xff;
 /// largest stock block carries 16 Harvest rows, 1,748 Harvest rows total).
 pub const max_harvest_drops: usize = 16;
 
+/// `<property name="Collide" value="movement,melee,..."/>` blocking-type mask
+/// (stock `Block.BlockingType`): one bit per verb, OR-ed from zero when the
+/// property is present (BlocksFromXml IL_0404-04F0).
+pub const CollideMask = u8;
+
+// Bits in stock OR order: sight 1, movement 2, bullet(s) 4, rocket(s) 8,
+// arrow(s) 32, melee 16 (BlocksFromXml IL_0431-04CE); all six = 63. The needle
+// is the singular verb, matched as a case-insensitive SUBSTRING of the value
+// (`Extensions::ContainsCaseInsensitive`, Extensions.il IL=9:
+// value.IndexOf(verb, OrdinalIgnoreCase) >= 0), not a token-exact compare.
+pub const collide_sight: CollideMask = 1;
+pub const collide_movement: CollideMask = 2;
+pub const collide_bullets: CollideMask = 4;
+pub const collide_rockets: CollideMask = 8;
+pub const collide_melee: CollideMask = 16;
+pub const collide_arrows: CollideMask = 32;
+
+/// The absent-`Collide` value: `blockMaterial.IsCollidable ? 255 : 0`
+/// (BlocksFromXml IL_04D5-04EB), i.e. 255 blocks every verb for a collidable
+/// material. zdtd parses materials.xml `collidable` in maxdamage.zig
+/// (`mergeMaterialsXml`), but blocks.zig is not given a material handle at this
+/// layer, so the 0 half (the 4 stock non-collidable materials) is the later
+/// step; 255 is the stock value for every collidable material.
+pub const collide_default: CollideMask = 0xff;
+
 /// The three stock drop events (`EnumDropEvent`: Destroy=0, Fall=1,
 /// Harvest=2, il/full-v3.1.0/_global/EnumDropEvent.il.txt).
 pub const DropEvent = enum { destroy, fall, harvest };
@@ -168,6 +193,10 @@ pub const BlockDef = struct {
     /// Resolved `<drop event="Fall">` rows (falling-block debris, 587 stock
     /// rows; e.g. terrDestroyedStone crumbles into itself at prob .75).
     fall_drops: []const HarvestDrop = &.{},
+    /// `<property name="Collide" ...>` blocking-type mask (stock
+    /// `Block.BlockingType`), resolved through Extends. Absent at the end of
+    /// the chain -> `collide_default` (255). Recorded only; see `collideMask`.
+    collide: CollideMask = collide_default,
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
@@ -224,6 +253,16 @@ pub const BlockTable = struct {
         if (id == 0) return false;
         if (self.byId(id)) |d| return d.solid;
         return true;
+    }
+
+    /// Blocking-type mask for a block (stock `Block.BlockingType`): the
+    /// `Collide` property resolved through Extends, or `collide_default` (255)
+    /// when no block in the chain declares it, and for an unknown id. Nothing
+    /// consumes it yet (solidity still runs through `isSolid`); it is the
+    /// recorded stock value for the later change.
+    pub fn collideMask(self: *const BlockTable, id: u16) CollideMask {
+        if (self.byId(id)) |d| return d.collide;
+        return collide_default;
     }
 
     /// True for blocks whose resolved Class is VendingMachine (own or inherited
@@ -390,6 +429,22 @@ fn mergeDrops(
     return merged[0..n];
 }
 
+/// BlocksFromXml IL_0404-04F0: when `Collide` is present the mask starts at 0
+/// and ORs one bit per verb found in the value by a case-insensitive SUBSTRING
+/// test (`Extensions::ContainsCaseInsensitive`, Extensions.il IL=9:
+/// value.IndexOf(verb, OrdinalIgnoreCase) >= 0), so "bullets" sets the bullet
+/// bit and "Movement,MELEE" sets both. The caller supplies the absent default.
+fn parseCollideMask(v: []const u8) CollideMask {
+    var m: CollideMask = 0;
+    if (std.ascii.findIgnoreCase(v, "sight") != null) m |= collide_sight;
+    if (std.ascii.findIgnoreCase(v, "movement") != null) m |= collide_movement;
+    if (std.ascii.findIgnoreCase(v, "bullet") != null) m |= collide_bullets;
+    if (std.ascii.findIgnoreCase(v, "rocket") != null) m |= collide_rockets;
+    if (std.ascii.findIgnoreCase(v, "arrow") != null) m |= collide_arrows;
+    if (std.ascii.findIgnoreCase(v, "melee") != null) m |= collide_melee;
+    return m;
+}
+
 fn isSolidName(name: []const u8) bool {
     if (std.mem.eql(u8, name, "air")) return false;
     if (std.mem.startsWith(u8, name, "water")) return false;
@@ -456,6 +511,11 @@ pub fn loadFromPath(
         mesh: ?[]const u8 = null,
         texture_top: u16 = 0,
         map_color: u16 = 0,
+        /// Own `Collide` blocking-type mask. Only a declared property can be
+        /// nonzero-based, so `collide_declared` tells the Extends walk an own
+        /// value (including a zero mask) from "ask the parent".
+        collide: CollideMask = collide_default,
+        collide_declared: bool = false,
         /// `<dropextendsoff />`: this block does NOT copy the parent's drop
         /// rows (stock BlocksFromXml reads the element next to the drop list
         /// and skips LoadExtendedItemDrops; 226 stock rows).
@@ -517,6 +577,8 @@ pub fn loadFromPath(
         var mesh: ?[]const u8 = null;
         var texture_top: u16 = 0;
         var map_color: u16 = 0;
+        var collide: CollideMask = collide_default;
+        var collide_declared = false;
         var resource_scale: f32 = 1;
         var drop_extends_off = false;
         var own_drops: std.ArrayList(HarvestDrop) = .empty;
@@ -654,6 +716,12 @@ pub fn loadFromPath(
                 if (xml.attr(clean, pi, "value")) |v| {
                     map_color = parseMapColor5(v);
                 }
+            } else if (std.mem.eql(u8, pname, "Collide")) {
+                // Presence alone starts the mask at 0 and ORs a bit per verb
+                // found (BlocksFromXml IL_0404-04F0), so a property with no
+                // value attr is 0, not the absent default.
+                collide = if (xml.attr(clean, pi, "value")) |v| parseCollideMask(v) else 0;
+                collide_declared = true;
             } else if (std.mem.eql(u8, pname, "ResourceScale")) {
                 // Block-level drop probability multiplier (BlocksFromXml:
                 // each drop's prob is scaled by ResourceScale). Zero V3.1.0
@@ -709,6 +777,8 @@ pub fn loadFromPath(
             .mesh = if (mesh) |m| try arena.dupe(u8, m) else "",
             .texture_top = texture_top,
             .map_color = map_color,
+            .collide = collide,
+            .collide_declared = collide_declared,
             .drop_extends_off = drop_extends_off,
             .harvest_drops = own_drop_slice,
             .destroy_drops = own_destroy_slice,
@@ -738,6 +808,8 @@ pub fn loadFromPath(
         var own_mesh = pb.mesh;
         var own_texture = pb.texture_top;
         var own_map_color = pb.map_color;
+        var own_collide = pb.collide;
+        var own_collide_declared = pb.collide_declared;
         var own_signable = pb.signable;
         var own_lp = pb.lp_hardness_scale;
         var own_lp_declared = pb.lp_declared;
@@ -774,6 +846,15 @@ pub fn loadFromPath(
             if (own_mesh == null and !xml.tagListContains(p1, "Mesh")) own_mesh = base_p.mesh;
             if (own_texture == 0 and !xml.tagListContains(p1, "Texture")) own_texture = base_p.texture_top;
             if (own_map_color == 0 and !xml.tagListContains(p1, "MapColor")) own_map_color = base_p.map_color;
+            // Collide follows the chain like the other blocks.xml properties
+            // (the absent default is not an override). The starting block's
+            // Extends param1 hides an ancestor's mask: `opaqueBusinessGlass`
+            // extends glassBusinessCTRSheet with param1="Mesh,Collide", so it
+            // keeps collide_default (255) instead of the glass mask.
+            if (!own_collide_declared and !xml.tagListContains(p1, "Collide")) {
+                own_collide = base_p.collide;
+                if (base_p.collide_declared) own_collide_declared = true;
+            }
             // A sign block's shape lives on its base (playerSignWood1x3
             // extends playerSignWood1x1 and declares no CompositeFeatures of
             // its own), so the module flag follows the chain.
@@ -800,6 +881,8 @@ pub fn loadFromPath(
         pb.mesh = own_mesh;
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;
+        pb.collide = own_collide;
+        pb.collide_declared = own_collide_declared;
         pb.signable = own_signable;
         pb.lp_hardness_scale = own_lp;
         pb.lp_declared = own_lp_declared;
@@ -869,6 +952,7 @@ pub fn loadFromPath(
             .mesh = if (pb.mesh) |m| try arena.dupe(u8, m) else "",
             .texture_top = pb.texture_top,
             .map_color = pb.map_color,
+            .collide = pb.collide,
             .harvest_drops = pb.harvest_drops,
             .destroy_drops = pb.destroy_drops,
             .fall_drops = pb.fall_drops,
@@ -1296,6 +1380,16 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "plainBlock", 211 },
         .{ "cntGasPumpRandomLootHelper", 213 },
         .{ "terrStoneChild", 212 },
+        .{ "collideSix", 214 },
+        .{ "collideBullets", 215 },
+        .{ "collideMixed", 216 },
+        .{ "collideAbsent", 217 },
+        .{ "collideBase", 218 },
+        .{ "collideChild", 219 },
+        .{ "glassBusinessSheet", 220 },
+        .{ "glassBusinessCTRSheet", 221 },
+        .{ "opaqueBusinessGlass", 222 },
+        .{ "collideNoValue", 223 },
     };
     inline for (map) |e| {
         if (std.mem.eql(u8, name, e[0])) return e[1];
@@ -1486,4 +1580,106 @@ test "Harvest drop rows parse with Extends inheritance" {
     // The base's own Fall row (terrDirt) was overridden, not duplicated.
     const fb = t.byName("fallBase").?;
     try std.testing.expectEqual(@as(usize, 1), t.dropsFor(fb.id, .fall).len);
+}
+
+test "Collide parses the blocking bits and follows Extends" {
+    // BlocksFromXml IL_0404-04F0: when the property is present the mask starts
+    // at 0 and ORs one bit per verb found by a case-insensitive SUBSTRING test
+    // (Extensions::ContainsCaseInsensitive, Extensions.il IL=9), so "bullets"
+    // sets the bullet bit and "Movement,MELEE" sets movement + melee. An absent
+    // property keeps the stock collidable default 255 (IL_04D5-04EB), and the
+    // child's Extends param1 hides the parent's mask.
+    const src =
+        \\<blocks>
+        \\<block name="collideSix">
+        \\  <property name="Collide" value="sight,movement,bullet,rocket,arrow,melee"/>
+        \\</block>
+        \\<block name="collideBullets">
+        \\  <property name="Collide" value="bullets"/>
+        \\</block>
+        \\<block name="collideMixed">
+        \\  <property name="Collide" value="Movement,MELEE"/>
+        \\</block>
+        \\<block name="collideAbsent">
+        \\  <property name="Class" value="Storage"/>
+        \\</block>
+        \\<block name="collideNoValue">
+        \\  <property name="Collide"/>
+        \\</block>
+        \\<block name="collideBase">
+        \\  <property name="Collide" value="movement,melee"/>
+        \\</block>
+        \\<block name="collideChild">
+        \\  <property name="Extends" value="collideBase"/>
+        \\</block>
+        \\<block name="glassBusinessSheet">
+        \\  <property name="Collide" value="movement,melee,bullet,arrow,rocket"/>
+        \\</block>
+        \\<block name="glassBusinessCTRSheet">
+        \\  <property name="Extends" value="glassBusinessSheet"/>
+        \\</block>
+        \\<block name="opaqueBusinessGlass">
+        \\  <property name="Extends" value="glassBusinessCTRSheet" param1="Mesh,Collide"/>
+        \\  <property name="Texture" value="532"/>
+        \\</block>
+        \\</blocks>
+    ;
+    const path = ".zdtd_test_blocks_collide.xml";
+    try io_fs.writeFile(path, src);
+    defer io_fs.deleteFile(path);
+
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+
+    // All six verbs: 1 | 2 | 4 | 8 | 32 | 16 = 63.
+    const six = t.byName("collideSix").?;
+    try std.testing.expectEqual(
+        collide_sight | collide_movement | collide_bullets |
+            collide_rockets | collide_arrows | collide_melee,
+        six.collide,
+    );
+    try std.testing.expectEqual(@as(CollideMask, 63), t.collideMask(six.id));
+    // Substring, not token-exact: "bullets" contains "bullet" (4) and nothing
+    // else matches.
+    try std.testing.expectEqual(collide_bullets, t.byName("collideBullets").?.collide);
+    // Case-insensitive: "Movement,MELEE" = 2 | 16 = 18.
+    try std.testing.expectEqual(@as(CollideMask, 18), t.byName("collideMixed").?.collide);
+    // Absent property: the stock collidable default, not 0.
+    try std.testing.expectEqual(collide_default, t.byName("collideAbsent").?.collide);
+    try std.testing.expectEqual(@as(CollideMask, 255), t.collideMask(t.byName("collideAbsent").?.id));
+    // Present but valueless: 0 (the property is in the dictionary, no verb
+    // matches), not the absent default.
+    try std.testing.expectEqual(@as(CollideMask, 0), t.byName("collideNoValue").?.collide);
+    // Extends carries the mask when the child declares none.
+    try std.testing.expectEqual(@as(CollideMask, 18), t.byName("collideChild").?.collide);
+    // param1="Collide" on the child: the mask is NOT inherited, the child keeps
+    // the absent default, while the middle block does inherit it (stock's
+    // opaqueBusinessGlass / glassBusinessCTRSheet / glassBusinessSheet chain).
+    try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessSheet").?.collide);
+    try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessCTRSheet").?.collide);
+    try std.testing.expectEqual(@as(CollideMask, 255), t.byName("opaqueBusinessGlass").?.collide);
+}
+
+test "the stock Collide rows match BlocksFromXml" {
+    // Stock carries 418 `Collide` rows. The param1 case is the one that matters:
+    // opaqueBusinessGlass extends glassBusinessCTRSheet with
+    // param1="Mesh,Collide", so it must NOT inherit the parent's mask and reads
+    // the absent default 255; glassBusinessCTRSheet itself inherits
+    // "movement,melee,bullet,arrow,rocket" = 2+16+4+32+8 = 62 from
+    // glassBusinessSheet.
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const cpath = game ++ "/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(cpath)) return error.SkipZigTest;
+    const Ctx = struct {
+        // Ids are irrelevant here (lookups are by name), so every block takes
+        // the leftover path instead of pinning the AssignIds dump.
+        fn lookup(_: ?*anyopaque, _: []const u8) ?u16 {
+            return null;
+        }
+    };
+    var t = try loadFromPath(std.testing.allocator, cpath, Ctx.lookup, null);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessSheet").?.collide);
+    try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessCTRSheet").?.collide);
+    try std.testing.expectEqual(@as(CollideMask, 255), t.byName("opaqueBusinessGlass").?.collide);
 }
