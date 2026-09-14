@@ -453,6 +453,20 @@ pub fn parseCurveLevels(s: []const u8, out: *[max_curve_len]f32) u8 {
     return n;
 }
 
+/// Stock's anchor attribute chain (`PassiveEffect::ParsePassiveEffect`): the
+/// first non-empty of `level=` (IL_01D3), `tier=` (IL_026C) or `duration=`
+/// (IL_0304) fills the same Levels array, because each branch jumps past the
+/// ones after it (`br IL_0394`). `tier=` is the items.xml quality axis (633
+/// stock rows) and `duration=` the buff elapsed-time axis.
+pub fn parseAnchors(body: []const u8, tag: usize, out: *[max_curve_len]f32) u8 {
+    for ([_][]const u8{ "level", "tier", "duration" }) |attr_name| {
+        const s = xml.attr(body, tag, attr_name) orelse continue;
+        const n = parseCurveLevels(s, out);
+        if (n > 0) return n;
+    }
+    return 0;
+}
+
 /// Append one `<passive_effect>` row with the gates stock applies to it: the
 /// enclosing `<effect_group>`'s direct `<requirement>` children plus the row's
 /// own nested ones (`MinEffectGroup::ParseXml` IL=103 and
@@ -483,13 +497,7 @@ fn appendGatedPassive(
     var curve: [max_curve_len]f32 = .{0} ** max_curve_len;
     const curve_len = if (val_cvar.len > 0) 0 else parseCurveValue(val_s, &curve);
     var curve_levels: [max_curve_len]f32 = .{0} ** max_curve_len;
-    var curve_levels_len = if (xml.attr(body, tag, "level")) |lv|
-        parseCurveLevels(lv, &curve_levels)
-    else
-        0;
-    // `duration="0,20"` fills the same Levels array and is parsed after
-    // `level=` (PassiveEffect::ParsePassiveEffect IL=305), so it wins.
-    if (xml.attr(body, tag, "duration")) |dv| curve_levels_len = parseCurveLevels(dv, &curve_levels);
+    const curve_levels_len = parseAnchors(body, tag, &curve_levels);
     try passives.append(allocator, .{
         .name = try arena.dupe(u8, en),
         .op = parseOp(op_s),
@@ -1115,17 +1123,19 @@ pub fn lootProbFold(passives: []const Passive, axis: Axis, ctx: requirements.Ctx
 }
 
 /// Value of a passive row at an item's quality tier. Stock seeds
-/// `PassiveEffect.ModValue` with `ItemValue.Quality`, and the IL branches are:
-/// explicit `_levels` anchors interpolate; a single `_values` entry applies
-/// flat at any level (`_levels == null`, `_values.Length == 1`); a
-/// multi-segment curve spreads its segments across the tier range
-/// (1..`q.max`), so a level below the first segment applies nothing (a
-/// no-quality item's level 0). Matches the items.xml PDR/EDR curve path.
+/// `PassiveEffect.ModValue` with `ItemValue.Quality` and evaluates the row the
+/// same way it evaluates any other axis: a row with `tier=`/`level=` anchors
+/// (the 633 items.xml `tier=` rows, e.g. `PhysicalDamageResist "8,12.3"
+/// tier="1,6"`) interpolates over them, and a row without anchors takes
+/// ModValue's `_levels == null` branch - one value flat, two values rolled
+/// (the mean here, since the sim is deterministic), more applies nothing
+/// (IL_03C4). The old fall-through spread an anchor-less value list over the
+/// quality range, inventing a Q1..Q6 ramp for the two-value
+/// `-.2,.2` resist rolls stock randomizes per item.
 fn itemQualityValue(p: Passive, q: Quality) f32 {
     if (p.curve_levels_len > 0) return curveAtAxis(p, @floatFromInt(q.level));
-    if (p.curve_len <= 1) return p.value;
-    if (q.level == 0) return 0;
-    return curveValueAt(q.level, q.max, p.curve[0..p.curve_len]);
+    // No anchors: the shape rule ignores the axis, so the quality is moot.
+    return curveAtAxis(p, 0);
 }
 
 /// `PassiveEffect::hasMatchingTag` (IL=53) with the stock defaults (`MatchAnyTags`
@@ -1455,22 +1465,47 @@ test "the quality axis evaluates item rows at the item's tier" {
         const d = trackedDeltasAt(&.{flat}, .{ .quality = .{ .level = q, .max = 6 } }, .{}, &counts);
         try std.testing.expectApproxEqAbs(@as(f32, 0.05), d.general_resist, 0.0001);
     }
-    // Six segments spread across tiers 1..6 (armorAthleticOutfit HealthMax
-    // "2,4,6,8,10,20"): Q1 = 2, Q6 = 20. The level axis would average a
-    // two-segment curve, which is why items need their own axis.
-    var curve: Passive = .{ .name = "HealthMax", .op = .base_add, .curve_len = 6 };
+    // Six values anchored by tier="1,2,3,4,5,6" (armorAthleticOutfit
+    // HealthMax "2,4,6,8,10,20" at items.xml:14305): Q1 = 2, Q6 = 20.
+    var curve: Passive = .{ .name = "HealthMax", .op = .base_add, .curve_len = 6, .curve_levels_len = 6 };
     curve.curve = .{ 2, 4, 6, 8, 10, 20, 0, 0 };
+    curve.curve_levels = .{ 1, 2, 3, 4, 5, 6, 0, 0 };
     try std.testing.expectApproxEqAbs(@as(f32, 20), trackedDeltasAt(&.{curve}, .{ .quality = .{ .level = 6, .max = 6 } }, .{}, &counts).hp_max, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 2), trackedDeltasAt(&.{curve}, .{ .quality = .{ .level = 1, .max = 6 } }, .{}, &counts).hp_max, 0.001);
-    // A no-quality item sits below the first segment: nothing applies (stock
+    // A no-quality item sits below the first anchor: nothing applies (stock
     // returns from ModValue without touching the value).
     try std.testing.expectEqual(@as(f32, 0), trackedDeltasAt(&.{curve}, .{ .quality = .{ .level = 0, .max = 6 } }, .{}, &counts).hp_max);
-    // Two segments (the armor resist shape "8,12.3") spread over 1..6 too:
-    // Q1 = 8, Q6 = 12.3.
-    var pair: Passive = .{ .name = "PhysicalDamageResist", .op = .base_add, .curve_len = 2 };
+    // Two values anchored by tier="1,6" (the armor resist row
+    // PhysicalDamageResist "8,12.3" at items.xml:13620): Q1 = 8, Q6 = 12.3.
+    var pair: Passive = .{ .name = "PhysicalDamageResist", .op = .base_add, .curve_len = 2, .curve_levels_len = 2 };
     pair.curve = .{ 8, 12.3, 0, 0, 0, 0, 0, 0 };
+    pair.curve_levels = .{ 1, 6, 0, 0, 0, 0, 0, 0 };
     try std.testing.expectApproxEqAbs(@as(f32, 8), trackedDeltasAt(&.{pair}, .{ .quality = .{ .level = 1, .max = 6 } }, .{}, &counts).phys_resist, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 12.3), trackedDeltasAt(&.{pair}, .{ .quality = .{ .level = 6, .max = 6 } }, .{}, &counts).phys_resist, 0.001);
+    // An anchor-less two-value row is stock's per-item roll
+    // (PassiveEffect::ModValue IL_0427); the deterministic sim projects the
+    // mean, so the old quality spread must not come back.
+    var roll: Passive = .{ .name = "PhysicalDamageResist", .op = .base_add, .curve_len = 2 };
+    roll.curve = .{ -0.2, 0.2, 0, 0, 0, 0, 0, 0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0), trackedDeltasAt(&.{roll}, .{ .quality = .{ .level = 1, .max = 6 } }, .{}, &counts).phys_resist, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), trackedDeltasAt(&.{roll}, .{ .quality = .{ .level = 6, .max = 6 } }, .{}, &counts).phys_resist, 0.001);
+    // Anchors come from `level=`, else `tier=`, else `duration=` in that order
+    // (PassiveEffect::ParsePassiveEffect IL_01D3 / IL_026C / IL_0304), each
+    // branch jumping past the attributes after it.
+    const tier_row = "<passive_effect name=\"PhysicalDamageResist\" operation=\"base_add\" value=\"8,12.3\" tier=\"1,6\"/>";
+    var tl: [max_curve_len]f32 = .{0} ** max_curve_len;
+    try std.testing.expectEqual(@as(u8, 2), parseAnchors(tier_row, 0, &tl));
+    try std.testing.expectApproxEqAbs(@as(f32, 1), tl[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), tl[1], 0.001);
+    const all_three = "<passive_effect name=\"x\" value=\"1\" level=\"1,5\" tier=\"2,6\" duration=\"0,20\"/>";
+    var al: [max_curve_len]f32 = .{0} ** max_curve_len;
+    try std.testing.expectEqual(@as(u8, 2), parseAnchors(all_three, 0, &al));
+    try std.testing.expectApproxEqAbs(@as(f32, 1), al[0], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), al[1], 0.001); // level=, not tier=/duration=
+    const duration_row = "<passive_effect name=\"x\" value=\"1,5\" duration=\"0,3,60\"/>";
+    var dl: [max_curve_len]f32 = .{0} ** max_curve_len;
+    try std.testing.expectEqual(@as(u8, 3), parseAnchors(duration_row, 0, &dl));
+    try std.testing.expectApproxEqAbs(@as(f32, 60), dl[2], 0.001);
 }
 
 test "stack_type parse is case-insensitive and falls back to ignore" {

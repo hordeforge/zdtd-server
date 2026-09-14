@@ -366,13 +366,7 @@ fn appendPassive(
     var curve: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
     const curve_len = buffs.parseCurveValue(val_s, &curve);
     var curve_levels: [buffs.max_curve_len]f32 = .{0} ** buffs.max_curve_len;
-    var curve_levels_len = if (xml.attr(body, tag, "level")) |lv|
-        buffs.parseCurveLevels(lv, &curve_levels)
-    else
-        0;
-    // `duration="0,20"` fills the same Levels array and is parsed after
-    // `level=` (PassiveEffect::ParsePassiveEffect IL=305), so it wins.
-    if (xml.attr(body, tag, "duration")) |dv| curve_levels_len = buffs.parseCurveLevels(dv, &curve_levels);
+    const curve_levels_len = buffs.parseAnchors(body, tag, &curve_levels);
     try pool.append(allocator, .{
         .name = try arena.dupe(u8, en),
         .op = buffs.parseOp(op_s),
