@@ -39,6 +39,13 @@ pub const Class = enum {
     /// itself (passive 0x61), which the server drives with a ClientSequenceAction
     /// response; server-side it is a no-op, so the sequence stays runnable.
     add_xp_deficit,
+    /// `RemoveItems` / `AddStartingItems`: item actions extend
+    /// `ActionBaseClientAction` and only implement `OnClientPerform`
+    /// (ActionBaseItemAction IL=5, ActionAddStartingItems IL=5), so the server's
+    /// leg is the ClientSequenceAction response - the client removes or grants
+    /// its own stack.
+    remove_items,
+    add_starting_items,
 };
 
 pub const Action = struct {
@@ -93,18 +100,6 @@ pub const Table = struct {
         const i = self.by_name.get(name) orelse return null;
         return &self.sequences[i];
     }
-
-    /// Index of the first `AddXPDeficit` action of a sequence: the root action
-    /// key stock writes into the `ClientSequenceAction` response is
-    /// `Name:index` (SetActionKeyData), so the index is data, not a constant.
-    /// Null when the sequence has no deficit action.
-    pub fn addXpDeficitIndex(self: *const Table, name: []const u8) ?u32 {
-        const sq = self.find(name) orelse return null;
-        for (sq.actions, 0..) |a, i| {
-            if (a.class == .add_xp_deficit) return @intCast(i);
-        }
-        return null;
-    }
 };
 
 fn statOf(name: []const u8) Stat {
@@ -121,7 +116,21 @@ fn classOf(name: []const u8) ?Class {
     if (std.mem.eql(u8, name, "AddBuff")) return .add_buff;
     if (std.mem.eql(u8, name, "ModifyCVar")) return .modify_cvar;
     if (std.mem.eql(u8, name, "AddXPDeficit")) return .add_xp_deficit;
+    if (std.mem.eql(u8, name, "RemoveItems")) return .remove_items;
+    if (std.mem.eql(u8, name, "AddStartingItems")) return .add_starting_items;
     return null;
+}
+
+/// True when the action's real work happens on the client
+/// (`ActionBaseClientAction` descendants: the server sends the
+/// ClientSequenceAction and the client runs `OnClientPerform`). The
+/// `ActionBaseTargetAction` legs (RemoveDeathBuffs, AddBuff) are the ones this
+/// server executes itself.
+pub fn isClientAction(c: Class) bool {
+    return switch (c) {
+        .modify_entity_stat, .modify_cvar, .add_xp_deficit, .remove_items, .add_starting_items => true,
+        .remove_death_buffs, .add_buff => false,
+    };
 }
 
 fn cmpOf(name: []const u8) CmpOp {
@@ -207,8 +216,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                 .modify_entity_stat => {
                     a.stat = statOf(xml.propertyValue(abody, "stat") orelse "");
                     if (a.stat == .unknown) supported = false;
+                    // Only the two operations that converge when both the
+                    // server and the client leg apply them: stock performs a
+                    // client action on the server too (ActionBaseClientAction
+                    // IL=50 sends the response and leaves OnServerPerform to the
+                    // subclass), so an Add/Subtract here would land twice.
                     const op = xml.propertyValue(abody, "operation") orelse "Set";
-                    a.op = if (std.ascii.eqlIgnoreCase(op, "SetMax")) .set_max else .set;
+                    if (std.ascii.eqlIgnoreCase(op, "SetMax")) {
+                        a.op = .set_max;
+                    } else if (std.ascii.eqlIgnoreCase(op, "Set")) {
+                        a.op = .set;
+                    } else {
+                        supported = false;
+                    }
                     a.value = if (xml.propertyValue(abody, "value")) |v| xml.parseF32(v) orelse 0 else 0;
                     if (xml.propertyValue(abody, "is_percent")) |b| {
                         a.is_percent = b.len > 0 and (b[0] == 't' or b[0] == 'T' or b[0] == '1');
@@ -237,7 +257,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
                         }
                     }
                 },
-                .add_xp_deficit => {},
+                .add_xp_deficit, .remove_items, .add_starting_items => {},
                 .modify_cvar => {
                     a.cvar = try arena.dupe(u8, xml.propertyValue(abody, "cvar") orelse "");
                     a.cvar_op = try arena.dupe(u8, xml.propertyValue(abody, "operation") orelse "");
@@ -348,10 +368,28 @@ test "gameevents respawn sequences parse into runnable actions" {
     // runs. The deficit action index rides the parsed order.
     const dd = t.find("game_on_death_default").?;
     try std.testing.expect(dd.supported);
-    try std.testing.expectEqual(@as(?u32, 0), t.addXpDeficitIndex("game_on_death_default"));
-    try std.testing.expectEqual(@as(?u32, null), t.addXpDeficitIndex("game_on_respawn_default"));
     // A gate makes the action list conditional: also refused.
     try std.testing.expect(!t.find("conditional").?.supported);
+    // Item actions are client legs: they carry no server work but the
+    // sequence stays runnable (their ClientSequenceAction is the server leg).
+    const items_src =
+        \\<gameevents><action_sequence name="permanent">
+        \\  <action class="RemoveItems">
+        \\    <property name="items_location" value="Toolbelt,Backpack,Equipment,BiomeBadge" param1="itemlocation" />
+        \\  </action>
+        \\  <action class="RemoveDeathBuffs" />
+        \\  <action class="AddStartingItems" />
+        \\</action_sequence></gameevents>
+    ;
+    try io_fs.writeFile(path, items_src);
+    var t3 = try loadFromPath(std.testing.allocator, path);
+    defer t3.deinit();
+    const perm = t3.find("permanent").?;
+    try std.testing.expect(perm.supported);
+    try std.testing.expectEqual(@as(usize, 3), perm.actions.len);
+    try std.testing.expect(isClientAction(perm.actions[0].class));
+    try std.testing.expect(!isClientAction(perm.actions[1].class));
+    try std.testing.expect(isClientAction(perm.actions[2].class));
     try std.testing.expect(t.find("nope") == null);
 }
 
@@ -360,12 +398,24 @@ test "stock gameevents.xml respawn family parses when present" {
     if (!io_fs.fileExists(p)) return error.SkipZigTest;
     var t = try loadFromPath(std.testing.allocator, p);
     defer t.deinit();
-    // The three respawn sequences a server can express, and the fourth that
-    // needs RemoveItems/AddStartingItems.
-    for ([_][]const u8{ "game_on_respawn_none", "game_on_respawn_default", "game_on_respawn_injured" }) |n| {
+    // All four respawn sequences now run: permanent's RemoveItems and
+    // ModifyCVar legs are client actions (answered with a
+    // ClientSequenceAction), RemoveDeathBuffs is the server leg.
+    for ([_][]const u8{
+        "game_on_respawn_none",
+        "game_on_respawn_default",
+        "game_on_respawn_injured",
+        "game_on_respawn_permanent",
+    }) |n| {
         const sq = t.find(n) orelse return error.TestUnexpectedResult;
         try std.testing.expect(sq.supported);
         try std.testing.expect(sq.actions.len > 0);
     }
-    try std.testing.expect(!t.find("game_on_respawn_permanent").?.supported);
+    // The death family: none/default/injured run (RemoveDeathBuffs and, for the
+    // first two, AddXPDeficit). `permanent` holds ResetMap/ResetPlayerData,
+    // which this server does not implement, so it stays refused whole.
+    for ([_][]const u8{ "game_on_death_none", "game_on_death_default", "game_on_death_injured" }) |n| {
+        try std.testing.expect(t.find(n).?.supported);
+    }
+    try std.testing.expect(!t.find("game_on_death_permanent").?.supported);
 }

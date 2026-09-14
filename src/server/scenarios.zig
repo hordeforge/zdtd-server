@@ -15428,7 +15428,96 @@ test "scenario player death sends the deficit sequence action under XPOnly" {
     cap.clear();
     g.replicatePlayerHealth();
     try std.testing.expect(cap.findPkgId(resp_id) == null);
-    std.debug.print("PASS death-deficit: XPOnly/Injured send the deficit action, None sends nothing\n", .{});
+
+    // With the catalog loaded the runner is what sends the client legs, one
+    // type-12 response per `Name<index>` leg, and the AddBuff leg stays a
+    // server-side action (no response of its own).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/gameevents.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<gameevents>
+        \\  <action_sequence name="game_on_death_default">
+        \\    <action class="AddXPDeficit" />
+        \\    <action class="AddStartingItems" />
+        \\    <action class="AddBuff">
+        \\      <property name="buff_name" value="buffShocked" />
+        \\    </action>
+        \\  </action_sequence>
+        \\  <action_sequence name="game_on_death_injured">
+        \\    <action class="AddXPDeficit" />
+        \\  </action_sequence>
+        \\</gameevents>
+    );
+    g.gameevents.deinit();
+    g.gameevents = try assets_gameevents.loadFromPath(gpa, path);
+
+    const Keys = struct {
+        buf: [4][64]u8 = undefined,
+        len: [4]usize = .{ 0, 0, 0, 0 },
+        n: usize = 0,
+
+        fn collect(self: *@This(), cp: *const ln_peer.Capture, pkg_id: u16) void {
+            var pkgs: [8]wire_frame.Package = undefined;
+            for (cp.slots[0..cp.n]) |s| {
+                const pn = wire_frame.parseChannelPayload(s.data[0..s.len], &pkgs);
+                for (pkgs[0..pn]) |p| {
+                    if (p.id != pkg_id or p.body.len < 2) continue;
+                    var rr = binary.Reader{ .data = p.body };
+                    var ev_buf: [64]u8 = undefined;
+                    _ = rr.readString(&ev_buf) catch continue;
+                    _ = rr.readI32() catch continue;
+                    var ex_buf: [64]u8 = undefined;
+                    _ = rr.readString(&ex_buf) catch continue;
+                    var tag_buf: [64]u8 = undefined;
+                    _ = rr.readString(&tag_buf) catch continue;
+                    if ((rr.readByte() catch 0) != 12) continue;
+                    _ = rr.readI32() catch continue;
+                    var key_buf: [64]u8 = undefined;
+                    const key = rr.readString(&key_buf) catch continue;
+                    if (self.n >= self.buf.len) return;
+                    @memcpy(self.buf[self.n][0..key.len], key);
+                    self.len[self.n] = key.len;
+                    self.n += 1;
+                }
+            }
+        }
+
+        fn at(self: *const @This(), i: usize) []const u8 {
+            return self.buf[i][0..self.len[i]];
+        }
+    };
+    {
+        g.death_penalty = 1;
+        g.sim.health[ps].hp = 100;
+        g.sim.markDirty(ps, .{ .hp = true });
+        _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+        cap.clear();
+        g.replicatePlayerHealth();
+        var keys: Keys = .{};
+        keys.collect(&cap, resp_id);
+        try std.testing.expectEqual(@as(usize, 2), keys.n);
+        try std.testing.expectEqualStrings("game_on_death_default0", keys.at(0));
+        try std.testing.expectEqualStrings("game_on_death_default1", keys.at(1));
+        // AddBuff is a target action: it ran server side and sent no type-12.
+        try std.testing.expect(g.sim.buffs[ps].find(g.buffs.indexOfName("buffShocked").?) != null);
+    }
+    {
+        g.death_penalty = 2;
+        g.sim.health[ps].hp = 100;
+        g.sim.markDirty(ps, .{ .hp = true });
+        _ = g.sim.damageFrom(g.sim.network_id[ps].id, 1000, -1);
+        cap.clear();
+        g.replicatePlayerHealth();
+        var keys: Keys = .{};
+        keys.collect(&cap, resp_id);
+        try std.testing.expectEqual(@as(usize, 1), keys.n);
+        try std.testing.expectEqualStrings("game_on_death_injured0", keys.at(0));
+    }
+    std.debug.print("PASS death-deficit: table-driven client legs keyed Name<index>, buff leg server side\n", .{});
 }
 
 test "scenario playerdata: a spoofed entity id cannot reach another player's inventory" {

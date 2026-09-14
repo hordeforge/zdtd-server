@@ -4204,6 +4204,8 @@ pub fn buildGameEventResponse(buf: []u8, request_body: []const u8) ![]u8 {
 /// against its own gameevents.xml copy). Body: eventName str |
 /// targetEntityID i32 | extraData str | tag str | responseType u8 |
 /// entitySpawnedID i32 (-1 stock) | actionKey str (read IL=89, write IL=144).
+/// The key is stock's `BaseAction.actionKey`: `<sequenceName><index>` for a
+/// root action (`SetActionKeyData` IL=23), `<parentKey>:<index>` when nested.
 pub fn buildGameEventSequenceAction(
     buf: []u8,
     event_name: []const u8,
@@ -4223,7 +4225,7 @@ pub fn buildGameEventSequenceAction(
 
 test "game event sequence action carries type 12 plus the action key" {
     var buf: [128]u8 = undefined;
-    const body = try buildGameEventSequenceAction(&buf, "game_on_death_default", 107, "game_on_death_default:0");
+    const body = try buildGameEventSequenceAction(&buf, "game_on_death_default", 107, "game_on_death_default0");
     var r: binary.Reader = .{ .data = body };
     var nb: [64]u8 = undefined;
     try std.testing.expectEqualStrings("game_on_death_default", try r.readString(&nb));
@@ -4235,7 +4237,7 @@ test "game event sequence action carries type 12 plus the action key" {
     try std.testing.expectEqual(@as(u8, 12), try r.readByte());
     try std.testing.expectEqual(@as(i32, -1), try r.readI32());
     var kb: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("game_on_death_default:0", try r.readString(&kb));
+    try std.testing.expectEqualStrings("game_on_death_default0", try r.readString(&kb));
     try std.testing.expectEqual(body.len, r.pos);
 }
 

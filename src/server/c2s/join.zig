@@ -485,7 +485,8 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 }
                 // The DeathPenalty-selected respawn sequence adjusts what the
                 // funnel restored (game_on_respawn_injured halves Food/Water
-                // and may add buffInfectionCatch; the other two only SetMax).
+                // and may add buffInfectionCatch; the others SetMax, and
+                // _permanent also clears the biome badges and hazard timers).
                 // Data, not code: the client's own respawn flow asks the server
                 // for exactly this sequence (GameEventManager::HandleActionClient
                 // IL=416 forwards the request), and running it here covers the

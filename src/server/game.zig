@@ -2035,13 +2035,6 @@ pub const Game = struct {
         return game_game_events.deathSequenceName(penalty);
     }
 
-    /// Index of the AddXPDeficit action inside a sequence, for the
-    /// `Name:index` root action key stock writes into the ClientSequenceAction
-    /// response (null when the sequence has no deficit action).
-    pub fn gameEventActionIndex(self: *Game, seq_name: []const u8) ?u32 {
-        return self.gameevents.addXpDeficitIndex(seq_name);
-    }
-
     /// Stock `World::GetLandProtectionHardnessModifier` for one block: the
     /// divisor a stranger's blast takes inside somebody else's land claim.
     pub fn landProtectionHardnessModifier(self: *Game, wx: i32, wy: i32, wz: i32, instigator_entity: i32) f32 {

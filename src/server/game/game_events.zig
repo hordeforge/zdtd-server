@@ -20,6 +20,7 @@ const assets_gameevents = @import("../../assets/gameevents.zig");
 const ecs = @import("../../ecs/root.zig");
 const xml = @import("../../assets/xml_util.zig");
 const social = @import("social.zig");
+const packages = @import("../../wire/packages.zig");
 
 /// Which `game_on_respawn_*` sequence the DeathPenalty stat selects
 /// (PlayerMoveController::updateRespawn IL=0E38 switches 0..3). Null for a
@@ -55,7 +56,12 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
     if (!seq.supported) return false;
     const ps = self.sim.playerByPeer(peer_slot) orelse return false;
     if (!self.sim.mask[ps].health) return false;
-    for (seq.actions) |a| {
+    // Client legs ride one ClientSequenceAction response each, keyed
+    // `Name<index>` off the parsed order (SetActionKeyData), which is how stock
+    // hands the work back to the client that asked for the sequence
+    // (ActionBaseClientAction: the server has no OnPerform for those legs).
+    const entity_id = self.sim.network_id[ps].id;
+    for (seq.actions, 0..) |a, idx| {
         switch (a.class) {
             .modify_entity_stat => applyStat(self, ps, a),
             .remove_death_buffs => removeDeathBuffs(self, peer_slot, ps, a.exclude_tags),
@@ -64,9 +70,6 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
                     applyBuff(self, peer_slot, ps, a.buff_name);
                 }
             },
-            // The deficit is earned by the dead client (passive 0x61) from the
-            // ClientSequenceAction response the death path already sends.
-            .add_xp_deficit => {},
             .modify_cvar => {
                 const op = assetOp(a.cvar_op) orelse continue;
                 const cl = &self.clients[peer_slot];
@@ -74,9 +77,32 @@ pub fn runGameEventSequence(self: *Game, peer_slot: usize, name: []const u8) boo
                 // from the parsed table is what goes in.
                 _ = cl.cvars.apply(a.cvar, op, a.value);
             },
+            // Item actions and AddXPDeficit have no server-side work; the
+            // response above is the whole server leg.
+            .remove_items, .add_starting_items, .add_xp_deficit => {},
+        }
+        if (assets_gameevents.isClientAction(a.class)) {
+            sendClientSequenceAction(self, peer_slot, name, entity_id, idx);
         }
     }
     return true;
+}
+
+/// One `ClientSequenceAction` (response type 12) telling the client to run the
+/// action at `index` of `seq_name`. Keyed `Name<index>`, stock's root action key.
+fn sendClientSequenceAction(self: *Game, peer_slot: usize, seq_name: []const u8, entity_id: i32, index: usize) void {
+    const cl = &self.clients[peer_slot];
+    const peer = cl.peer orelse return;
+    var key_buf: [96]u8 = undefined;
+    // Stock keys a root action `<sequenceName><index>` and a nested one
+    // `<parentKey>:<index>` (BaseAction::SetActionKeyData IL=23). The parsed
+    // sequences here are flat, so the root form is the one that matters.
+    const key = std.fmt.bufPrint(&key_buf, "{s}{d}", .{ seq_name, index }) catch return;
+    if (packages.buildGameEventSequenceAction(self.body_buf[200..456], seq_name, entity_id, key)) |body| {
+        self.sendGame(peer, "NetPackageGameEventResponse", body) catch {
+            self.harness.counters.inc(.net_send_errors);
+        };
+    } else |_| {}
 }
 
 const assets_cvars = @import("../../assets/cvars.zig");

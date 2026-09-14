@@ -4306,10 +4306,17 @@ than the client's claim ([DIVERGENCES](DIVERGENCES.md) 1.2).
   so the server performs it by sending a `ClientSequenceAction` (12) response
   the client runs locally (`HandleGameEventSequenceItemForClient`). The server
   sends that response on authoritative player death in the hp-replicate pass
-  (exactly once per death - the dirty bit drains there): DeathPenalty 1 sends
-  `game_on_death_default:0`, 2 sends `game_on_death_injured:0` (AddXPDeficit is
-  action index 0 in both stock gameevents.xml sequences; root keys are
-  `Name:index`). 0 and 3 send nothing (no deficit arm). The earn math itself
+  (exactly once per death - the dirty bit drains there): the parsed
+  `game_on_death_*` sequence runs through `runGameEventSequence`, which answers
+  every `ActionBaseClientAction` leg with one type-12 response keyed by stock's
+  `BaseAction.actionKey` (`SetActionKeyData` IL=23: root `<name><index>`, nested
+  `<parentKey>:<index>`), so `game_on_death_default`/`_injured` earn their
+  AddXPDeficit (action index 0). The same runner covers the respawn family, so
+  `game_on_respawn_permanent` (RemoveItems + 5 ModifyCVar + RemoveDeathBuffs +
+  ModifyEntityStat) runs instead of being refused for an unknown item action.
+  DeathPenalty 0 sends no response (`game_on_death_none` carries only
+  RemoveDeathBuffs). `game_on_death_permanent` stays refused whole: it holds
+  ResetMap/ResetPlayerData, which this server does not implement. The earn math itself
   (passive 0x61 default 0.1 over next-level XP, clamped by 0x60 default 0.5)
   and the consume path (`AddLevelExpRecursive` burns deficit before XP) stay
   client-side, exactly as on stock - the server carries no deficit ledger.
