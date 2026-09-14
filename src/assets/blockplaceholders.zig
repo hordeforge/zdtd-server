@@ -12,7 +12,11 @@
 //!   - the survivors are walked in document order with `roll =
 //!     RandomFloat() * sum(prob)`, taking the first target whose `prob` exceeds
 //!     the remaining roll; `prob` defaults to 1
-//!   - `randomrotation="true"` re-rolls the target's rotation
+//!   - `randomrotation="true"` re-rolls the target's rotation off the same
+//!     stream: `RandomRange(4)` for a normal shape, `RandomRange(8)` with rolls
+//!     above 3 offset by 20 (24..27, the 45 degree band) when the target
+//!     block's shape is `DistantDecoTree`, the only `BlockShape` whose
+//!     constructor sets `Has45DegreeRotations`
 //! A placeholder whose target list is empty or whose roll finds nothing keeps
 //! the authored block, and a target equal to the placeholder becomes Air.
 //!
@@ -41,10 +45,15 @@ pub const Target = struct {
     /// False when the row's `sandboxoption` gate fails for the decoded code.
     allowed: bool = true,
     random_rotation: bool = false,
+    /// Resolved `Has45DegreeRotations` of the target block's shape: the random
+    /// rotation then draws from stock's eight-way band.
+    shape45: bool = false,
 };
 
 /// One resolved replacement: the block id and, when the target asked for a
-/// random rotation, the 0..3 rotation stock would stamp.
+/// random rotation, the rotation stock would stamp - 0..3 for a four-way shape
+/// and 0..3 / 24..27 (the 45 degree band) when the target's shape carries
+/// `Has45DegreeRotations`.
 pub const Replacement = struct {
     block_id: u16 = 0,
     rotation: ?u8 = null,
@@ -56,10 +65,16 @@ pub const Placeholder = struct {
 };
 
 pub const IdByNameFn = *const fn (?*anyopaque, []const u8) ?u16;
+/// True when a block name's resolved shape carries the 45 degree rotations
+/// (`Has45DegreeRotations`), i.e. the random-rotation band is eight wide.
+pub const Shape45Fn = *const fn (?*anyopaque, []const u8) bool;
 
 pub const LoadCtx = struct {
     id_by_name: IdByNameFn,
     id_ctx: ?*anyopaque = null,
+    /// Resolved per run, like the sandbox gate: the shape is a blocks.xml fact.
+    shape45_by_name: ?Shape45Fn = null,
+    shape45_ctx: ?*anyopaque = null,
     /// The decoded server SandboxCode (`SandboxOptionManager.GetBool` reads it
     /// at runtime in stock; the value is fixed for a server run).
     sandbox_code: []const u8 = "",
@@ -148,11 +163,17 @@ pub const Table = struct {
         const picked = ph.targets[eligible[chosen]];
         var rep = Replacement{ .block_id = picked.block_id };
         if (picked.random_rotation) {
-            // Stock rerolls the rotation off the same per-cell stream
-            // (`RandomRange(8)` plus the 0x14 offset when the shape has 45
-            // degree bands, else `RandomRange(4)`); zdtd does not track
-            // Has45DegreeRotations, so it takes the four-way band.
-            rep.rotation = @intCast(r.rangeInt(4));
+            // Stock rerolls the rotation off the same per-cell stream: a shape
+            // with 45 degree rotations draws `RandomRange(8)` and maps 4..7 to
+            // 24..27, every other shape draws `RandomRange(4)`
+            // (BlockPlaceholderMap IL_027D-02AD).
+            if (picked.shape45) {
+                var q: u8 = @intCast(r.rangeInt(8));
+                if (q > 3) q += 20;
+                rep.rotation = q;
+            } else {
+                rep.rotation = @intCast(r.rangeInt(4));
+            }
         }
         return rep;
     }
@@ -230,6 +251,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8, ctx: LoadCtx
                 .biome = if (xml.attr(body, bi_pos, "biome")) |b| try arena.dupe(u8, b) else "",
                 .random_rotation = if (xml.attr(body, bi_pos, "randomrotation")) |rr| parseBoolAttr(rr) else false,
                 .allowed = if (xml.attr(body, bi_pos, "sandboxoption")) |so| sandboxAllowed(ctx.sandbox_code, so) else true,
+                // Shape fact: a per-run constant, resolved once here like the
+                // sandbox gate. No callback = the four-way band (the shape
+                // table is absent).
+                .shape45 = if (ctx.shape45_by_name) |f| f(ctx.shape45_ctx, bname) else false,
             };
             if (!(tg.prob > 0)) tg.prob = 0;
             try targets.append(arena, tg);
@@ -258,12 +283,9 @@ pub fn tryLoad(
     allocator: std.mem.Allocator,
     game_dir: ?[]const u8,
     config_dir: ?[]const u8,
-    id_by_name: IdByNameFn,
-    id_ctx: ?*anyopaque,
-    sandbox_code: []const u8,
+    ctx: LoadCtx,
 ) !?Table {
     const paths = @import("paths.zig");
-    const ctx = LoadCtx{ .id_by_name = id_by_name, .id_ctx = id_ctx, .sandbox_code = sandbox_code };
     const logFail = struct {
         fn f(what: []const u8, err: anyerror) void {
             std.debug.print("zdtd: blockplaceholders.xml {s} failed: {s}\n", .{ what, @errorName(err) });
@@ -304,11 +326,21 @@ test "placeholders parse, weigh and resolve deterministically" {
         \\    <block name="carWreck1" prob="3"/>
         \\    <block name="carWreck2" prob="1" randomrotation="true"/>
         \\  </placeholder>
+        \\  <placeholder name="trees">
+        \\    <block name="treeOak" randomrotation="true"/>
+        \\  </placeholder>
+        \\  <placeholder name="plants">
+        \\    <block name="plantShrub" randomrotation="true"/>
+        \\  </placeholder>
         \\</blockplaceholders>
     ;
-    const path = ".zdtd_test_placeholders.xml";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/placeholders.xml", .{dir});
     try io_fs.writeFile(path, src);
-    defer io_fs.deleteFile(path);
 
     const Fx = struct {
         fn id(_: ?*anyopaque, name: []const u8) ?u16 {
@@ -316,10 +348,19 @@ test "placeholders parse, weigh and resolve deterministically" {
             if (std.mem.eql(u8, name, "terrSandStone")) return 101;
             if (std.mem.eql(u8, name, "carWreck1")) return 200;
             if (std.mem.eql(u8, name, "carWreck2")) return 201;
+            if (std.mem.eql(u8, name, "treeOak")) return 300;
+            if (std.mem.eql(u8, name, "plantShrub")) return 301;
             return null;
         }
+        /// `Shape="DistantDecoTree"` resolves to the 45 degree band.
+        fn shape45(_: ?*anyopaque, name: []const u8) bool {
+            return std.mem.eql(u8, name, "treeOak");
+        }
     };
-    var t = try loadFromPath(std.testing.allocator, path, .{ .id_by_name = Fx.id });
+    var t = try loadFromPath(std.testing.allocator, path, .{
+        .id_by_name = Fx.id,
+        .shape45_by_name = Fx.shape45,
+    });
     defer t.deinit();
 
     const helper = t.find("terrStoneHelper").?;
@@ -339,6 +380,27 @@ test "placeholders parse, weigh and resolve deterministically" {
         if (r.block_id == 200) one += 1;
     }
     try std.testing.expect(one > 32);
+    // Random rotation: a four-way shape only ever lands on 0..3, a shape with
+    // `Has45DegreeRotations` also lands on 24..27 (`RandomRange(8)` with rolls
+    // above 3 offset by 20), which is what stock stamps into BlockValue.
+    const t45 = t.find("trees").?;
+    const p4 = t.find("plants").?;
+    var saw_band = false;
+    var saw_plain = false;
+    x = 0;
+    while (x < 256) : (x += 1) {
+        if (t.resolve(t45, x, 70, 5, 7, "")) |r| {
+            const rot = r.rotation.?;
+            try std.testing.expect((rot <= 3) or (rot >= 24 and rot <= 27));
+            if (rot >= 24) saw_band = true;
+        }
+        if (t.resolve(p4, x, 70, 5, 7, "")) |r| {
+            try std.testing.expect(r.rotation.? <= 3);
+            saw_plain = true;
+        }
+    }
+    try std.testing.expect(saw_band);
+    try std.testing.expect(saw_plain);
     // The sandbox gate drops a row whose option is off.
     const gated =
         \\<blockplaceholders>

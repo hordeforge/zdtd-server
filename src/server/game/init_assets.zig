@@ -229,20 +229,25 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
                 const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
                 return self_t.t.idByName(name);
             }
+            /// `BlockShape::Has45DegreeRotations` after Extends resolution: the
+            /// shape fact a random placeholder rotation keys on.
+            fn shape45(ctx: ?*anyopaque, name: []const u8) bool {
+                const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
+                return self_t.t.has45Rotations(name);
+            }
         };
         var id_ctx: IdCtx = .{ .t = &self.maxdamage };
         // blockplaceholders.xml: the prefab paint pass resolves these names per
         // cell (BlockPlaceholderMap::Replace). Loaded before the first prefab so
         // the remap can record the placeholder slots; the sandbox gate is a
         // per-run constant from the decoded server code.
-        if (logged("blockplaceholders.xml", assets_placeholders.tryLoad(
-            allocator,
-            opts.game_dir,
-            opts.config_dir,
-            IdCtx.lookup,
-            &id_ctx,
-            self.sandbox_code,
-        ))) |pt| {
+        if (logged("blockplaceholders.xml", assets_placeholders.tryLoad(allocator, opts.game_dir, opts.config_dir, .{
+            .id_by_name = IdCtx.lookup,
+            .id_ctx = &id_ctx,
+            .shape45_by_name = IdCtx.shape45,
+            .shape45_ctx = &id_ctx,
+            .sandbox_code = self.sandbox_code,
+        }))) |pt| {
             self.placeholder_table.deinit();
             self.placeholder_table = pt;
             self.placeholders_loaded = self.placeholder_table.placeholders.len > 0;

@@ -121,6 +121,10 @@ pub const Table = struct {
     /// blocks.xml ShowModelOnFall="false" names (default true per Block.il.txt
     /// 1876-18A2; only explicit false is stored).
     no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{},
+    /// `Shape == "DistantDecoTree"` names after Extends resolution: the shape
+    /// whose `BlockShape::Has45DegreeRotations` is true, which makes a random
+    /// placeholder rotation use stock's eight-way band.
+    shape45_names: std.StringHashMapUnmanaged(void) = .{},
     /// materials.xml Hardness (float) / Mass (int) per material id; feed the
     /// falling-block massKg formula (EntityFallingBlock IL=232-250).
     material_hardness: std.StringHashMapUnmanaged(f32) = .{},
@@ -309,6 +313,14 @@ pub const Table = struct {
     /// to showing nothing).
     pub fn showModelOnFall(self: *const Table, name: []const u8) bool {
         return !self.no_show_model_on_fall.contains(name);
+    }
+
+    /// True when the block's resolved `Shape` is `DistantDecoTree`, the one
+    /// BlockShape with `Has45DegreeRotations` (BlockShapeDistantDecoTree IL=6).
+    /// A placeholder target on such a block rolls its random rotation off the
+    /// eight-way band (BlockPlaceholderMap IL_027D-02AD).
+    pub fn has45Rotations(self: *const Table, name: []const u8) bool {
+        return self.shape45_names.contains(name);
     }
 
     /// Falling-block massKg for a block name (RE EntityFallingBlock IL=232-250):
@@ -697,6 +709,13 @@ const DecoFacts = struct {
     /// default TRUE when the chain is exhausted - Block.il.txt 1876-18A2:
     /// absent property -> true, explicit false disables the falling model).
     show_model_on_fall: ?bool = null,
+    /// `Shape == "DistantDecoTree"`: the only BlockShape whose constructor
+    /// sets `BlockShape::Has45DegreeRotations` (BlockShapeDistantDecoTree
+    /// IL=6). A random placeholder rotation then rolls `RandomRange(8)` and
+    /// maps 4..7 to 24..27 instead of taking the four-way band
+    /// (BlockPlaceholderMap IL_027D-02AD). Resolved through Extends (treeMaster
+    /// declares the shape; every tree inherits it).
+    shape45: ?bool = null,
 };
 
 /// Resolve a per-block value through the Extends chain, honoring the `param1`
@@ -766,9 +785,10 @@ fn resolveDecoFacts(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: [
         if (out.stability_support == null and !xml.tagListContains(p1, "StabilitySupport")) out.stability_support = f.stability_support;
         if (out.stability_ignore == null and !xml.tagListContains(p1, "StabilityIgnore")) out.stability_ignore = f.stability_ignore;
         if (out.show_model_on_fall == null and !xml.tagListContains(p1, "ShowModelOnFall")) out.show_model_on_fall = f.show_model_on_fall;
+        if (out.shape45 == null and !xml.tagListContains(p1, "Shape")) out.shape45 = f.shape45;
         if (out.distant != null and out.dim != null and
             out.stability_support != null and out.stability_ignore != null and
-            out.show_model_on_fall != null) break;
+            out.show_model_on_fall != null and out.shape45 != null) break;
         cur = f.extends orelse break;
     }
     return out;
@@ -985,6 +1005,9 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (xml.propertyValue(body, "ShowModelOnFall")) |sm| {
             facts.show_model_on_fall = parseBool(sm);
         }
+        if (xml.propertyValue(body, "Shape")) |sh| {
+            facts.shape45 = std.ascii.eqlIgnoreCase(std.mem.trim(u8, sh, " \t"), "DistantDecoTree");
+        }
         // UpgradeBlock is a `<property class="UpgradeBlock">` block whose
         // `ToBlock` names the upgrade target (stock Block.UpgradeBlock, hammer
         // upgrade path). ToBlock appears only inside that class.
@@ -1007,6 +1030,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var stability_explicit: std.StringHashMapUnmanaged(void) = .{};
     var stability_ignore_names: std.StringHashMapUnmanaged(void) = .{};
     var no_show_model_on_fall: std.StringHashMapUnmanaged(void) = .{};
+    var shape45_names: std.StringHashMapUnmanaged(void) = .{};
     var upgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var downgrade_to_names: std.StringHashMapUnmanaged([]const u8) = .{};
     var sleeper_class_names: std.StringHashMapUnmanaged(void) = .{};
@@ -1090,6 +1114,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         }
         if (r.stability_ignore orelse false) try stability_ignore_names.put(arena, e.key_ptr.*, {});
         if (r.show_model_on_fall orelse true == false) try no_show_model_on_fall.put(arena, e.key_ptr.*, {});
+        if (r.shape45 orelse false) try shape45_names.put(arena, e.key_ptr.*, {});
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
         }
@@ -1127,6 +1152,7 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .stability_explicit = stability_explicit,
         .stability_ignore_names = stability_ignore_names,
         .no_show_model_on_fall = no_show_model_on_fall,
+        .shape45_names = shape45_names,
         .upgrade_to = upgrade_to_names,
         .downgrade_to = downgrade_to_names,
         .arena_ptr = arena_holder,
@@ -1220,6 +1246,27 @@ test "blocks.xml LootList resolves per block after the AssignIds merge" {
     try std.testing.expect(t.downgradeTarget("cntWallSafeInsecure_Player") == null);
     // A normal upgradeable block has no downgrade path.
     try std.testing.expect(t.downgradeTarget("woodFrameBlock") == null);
+}
+
+test "blocks.xml Shape=DistantDecoTree resolves the 45 degree rotation band" {
+    // BlockShapeDistantDecoTree's constructor is the only place that sets
+    // BlockShape::Has45DegreeRotations (IL=6), and stock's treeMaster declares
+    // that shape, so every tree inherits it. The placeholder random-rotation
+    // band keys on this fact (BlockPlaceholderMap IL_027D-02AD).
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    // Own Shape (treeMaster) and every Extends descendant.
+    try std.testing.expect(t.has45Rotations("treeMaster"));
+    try std.testing.expect(t.has45Rotations("treeOakSml01"));
+    try std.testing.expect(t.has45Rotations("treeDeadTree01"));
+    // A non-tree keeps the four-way band, and so does a block whose shape is
+    // the plain `DistantDeco` rather than the `...Tree` variant: only the Tree
+    // class sets the flag. 50 stock blocks inherit `DistantDecoTree`.
+    try std.testing.expect(!t.has45Rotations("terrStone"));
+    try std.testing.expect(!t.has45Rotations("plantShrub"));
+    try std.testing.expect(!t.has45Rotations("treeCactus01"));
 }
 
 test "blocks.xml properties inherit through Extends with param1 exclusions" {
