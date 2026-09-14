@@ -1322,6 +1322,11 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
         var matches: [max_xpath_matches]usize = undefined;
         const nm = findAll(cur, xp, &matches);
         if (nm == 0) {
+            // Stock logs a zero-match op and carries on (`XML patch for "X"
+            // from mod "Y" did not apply`); the same signal is what tells an
+            // operator a modlet's target moved. A/B against the stock server
+            // on the installed SphereII corpus shows exactly two such rows.
+            util_log.warn("zdtd: patch did not apply (no match) for {s}: {s}\n", .{ target_file, truncLog(xpath.?) });
             i = next_i;
             continue;
         }
