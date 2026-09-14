@@ -62,6 +62,7 @@ pub fn deinitStores(self: *Game) void {
     self.noise_table.deinit();
     self.gameevents.deinit();
     self.placeholder_table.deinit();
+    self.localization.deinit();
     self.block_textures.deinit();
     self.painting.deinit();
     self.spawning.deinit();

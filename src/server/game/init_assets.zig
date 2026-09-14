@@ -16,6 +16,7 @@ const assets_blocks = @import("../../assets/blocks.zig");
 const assets_items = @import("../../assets/items.zig");
 const assets_sandbox = @import("../../assets/sandbox.zig");
 const assets_placeholders = @import("../../assets/blockplaceholders.zig");
+const assets_localization = @import("../../assets/localization.zig");
 const assets_signs = @import("../../assets/signs.zig");
 const assets_item_modifiers = @import("../../assets/item_modifiers.zig");
 const assets_entities = @import("../../assets/entities.zig");
@@ -253,6 +254,17 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             self.placeholders_loaded = self.placeholder_table.placeholders.len > 0;
             if (self.world.prefabs) |*pf| pf.setPlaceholders(&self.placeholder_table);
             util_log.info("zdtd: blockplaceholders placeholders={d}\n", .{self.placeholder_table.placeholders.len});
+        }
+        // Config/Localization.csv: the base header plus the cells the modlets
+        // write, merged in mod order like stock's ModManager.LoadLocalizations.
+        // Null when no modlet patches localization (then nothing is sent).
+        if (assets_localization.tryLoad(allocator, opts.game_dir, opts.config_dir) catch |err| blk: {
+            util_log.err("zdtd: localization merge failed: {s}\n", .{@errorName(err)});
+            break :blk null;
+        }) |lt| {
+            self.localization.deinit();
+            self.localization = lt;
+            util_log.info("zdtd: localization patched keys={d} columns={d}\n", .{ lt.entries.len, lt.header_n });
         }
         if (assets_blocks.tryLoad(allocator, opts.game_dir, opts.config_dir, IdCtx.lookup, &id_ctx) catch |err| blk: {
             util_log.err("zdtd: block definitions load failed: {s}\n", .{@errorName(err)});

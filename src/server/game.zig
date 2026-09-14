@@ -64,6 +64,7 @@ const assets_item_modifiers = @import("../assets/item_modifiers.zig");
 const assets_signs = @import("../assets/signs.zig");
 const assets_gameevents = @import("../assets/gameevents.zig");
 const assets_placeholders = @import("../assets/blockplaceholders.zig");
+const assets_localization = @import("../assets/localization.zig");
 const world_tts = @import("../world/tts.zig");
 const assets_entities = @import("../assets/entities.zig");
 const assets_recipes = @import("../assets/recipes.zig");
@@ -525,6 +526,10 @@ pub const Game = struct {
     /// resolves. Empty when the catalog is absent (cells then keep the remap's
     /// first-target stand-in).
     placeholder_table: assets_placeholders.Table = assets_placeholders.Table.empty(),
+    /// Merged `Config/Localization.csv` patch set: the base header plus every
+    /// cell the modlets write, shipped as NetPackageLocalization (stock sends
+    /// it between the id mapping and the config files).
+    localization: assets_localization.Table = .{},
     placeholders_loaded: bool = false,
     /// Scratch the paint call reads the ctx through (it takes a pointer, so a
     /// stack local in the caller would not do).
@@ -2440,6 +2445,12 @@ pub const Game = struct {
 
     pub fn sendLocalConfigFiles(self: *Game, peer: *ln_peer.Peer) !void {
         return game_config_files.sendLocalConfigFiles(self, peer);
+    }
+
+    /// Stock sends the localization patch blob between the id mapping and the
+    /// config files (RequestToEnterGame IL_0222/IL_0242).
+    pub fn sendLocalization(self: *Game, peer: *ln_peer.Peer) !void {
+        return game_config_files.sendLocalization(self, peer);
     }
 
     /// If feet Y is deep void / far below DTM surface, snap to surface+0.9 and

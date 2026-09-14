@@ -260,6 +260,10 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         // ConfigFile package (WorldStaticData LoadBlocks IL_0058, asm.il
         // 2014542), and stock sends the mapping at this same point.
         try self.sendBlockIdMapping(peer);
+        // Stock order: NetPackageLocalization (IL_0222) before
+        // SendXmlsToClient (IL_0242), so the client has the modlet names before
+        // it renders anything from the catalogs.
+        try self.sendLocalization(peer);
         try self.sendLocalConfigFiles(peer);
         const wi = try packages.buildWorldInfoBody(self.body_buf[0..256], self.world_name, 6144, 6144, sp.x, sp.y, sp.z, 0);
         try self.sendGameCritical(peer, "NetPackageWorldInfo", wi);
