@@ -678,3 +678,78 @@ Conclusion: for the loadgen surface (challenge, ids, login, enter, spawn,
 movement, teleport), zdtd behaves like the stock dedicated server on the same
 workload. The full stock-client suite remains the visual oracle and is covered
 by the automated demo runs recorded in STATUS.
+
+## Modlet + join A/B vs the stock V3.2.0 dedicated server (2026-09-14)
+
+Run through the workspace sandbox (`7dtd-sandbox`), instance `ab-mods`
+(pristine steamcmd base, ports 27160..27164), with a real XML-only modlet set
+staged into `game/Mods`: 0-SCore, Blooms Family Farming, SphereII A Better
+Life, SphereII Challenges, SphereII Item Mod Degradation, SphereII Learn By
+Doing. Both legs use the same game dir, the same `Mods/`, and the same
+Navezgane world.
+
+**Mod loading.** Stock reports 7 loaded mods (the six above plus the
+code-only `TFP_Harmony`); zdtd reports six XML modlets, which is the same set
+minus the Harmony loader it deliberately does not host. Load order agrees:
+both sort by the `Mods/` folder name, so `0-SCore` first, then `Blooms`,
+then the `SphereII*` folders in byte order (`A Better Life`, `Challenges`,
+`Item Mod Degradation`, `Learn By Doing`).
+
+**Patch application.** Stock warns `XML patch ... did not apply` for exactly
+two rows: Blooms Family Farming's
+`/blocks/block[@name='cropsGrowingMaster']/property[@name='PlantGrowing.GrowthRate']`
+and Item Mod Degradation's
+`//item[@name='toolAnvil']/effect_group[@tiered='false']`. zdtd now logs the
+same two (the op that matches nothing used to be skipped in silence). zdtd
+also reports rows stock does not: Item Mod Degradation's
+`<ref_file snippet=...>` is a custom op registered by 0-SCore's DLL, which
+this server does not host, so the `<set>` ops that depend on the snippet it
+merges match nothing; and each catalog is loaded more than once (blocks.xml
+by the block, texture and maxdamage tables), so a warning can repeat.
+
+**Localization.** Stock logs `Loading localization from mod:` for all six
+modlets. zdtd does not read `Config/Localization.csv` at all, so a joining
+stock client shows the mod's raw keys instead of its names (PRD 0003 R10,
+G8).
+
+**Join path.** `7dtd-loadgen --join --host 127.0.0.1 --port <LiteNet> --count 1
+--no-spawn-zombies` against each leg, same client build:
+
+| Stage | Stock dedi | zdtd |
+|---|---|---|
+| PackageIdsReceived | `ver=V 3.2.0 (1.3.20.10) maps=224` | `ver=V 3.2.0 (1.3.20.10) maps=191` |
+| LoginAnswered | allowed=True dataLen=1686 | allowed=True dataLen=344 |
+| AuthState | nativeplatform, encryption, authenticated | confirmation echo only (EAC off) |
+| WorldInfo bodyLen | 362 first join / 476 after | 97 |
+| WorldSpawnPoints bodyLen | 213 | 213 |
+| GameStats bodyLen | 231 | 212 |
+| PlayerId bodyLen | 360 | 1512 |
+| Joined / spawn | entity set, `(256,72,256)` then world spawn | same |
+
+The package-id count differs in *slots*, not names: stock sends a fixed array
+whose holes the client skips (the loadgen's own parse guards
+`!string.IsNullOrEmpty`), while zdtd sends a compact list. zdtd's 191 names
+cover every V3.2.0 `NetPackage*` type in the RE census (which lists 196 rows
+including the base/helper types) plus four the census predates
+(`NetPackageDroneDataSync`, `NetPackageDroneParticleEffect`, `NetPackageLight`,
+`NetPackageTreeFade`), and the same join resolves the same package ids by
+name on both legs. Index-for-index parity with stock is not required, because
+the client builds its table from the server's list.
+
+Open follow-ups this A/B surfaced: the `WorldInfo` body is ~4x smaller than
+stock's, `GameStats` is 19 bytes smaller, and the `PlayerId` body is ~4x
+larger; none of them stopped the join, but each is a candidate fidelity gap
+worth a byte-level diff.
+
+## Reproducing
+
+```bash
+# stock leg (sandbox instance with the modlet set staged in game/Mods)
+7dtd-sandbox/scripts/sb create-server ab-mods && 7dtd-sandbox/scripts/sb launch-server ab-mods
+# zdtd leg (same game dir + Mods, its own world dir)
+zig-out/bin/zdtd --port 27160 --game-dir <instance>/game --mods-dir <instance>/game/Mods \
+  --world /tmp/zdtd_ab --world-name Navezgane
+# both legs
+dotnet 7dtd-loadgen/src/LoadGen/bin/Release/net8.0/7dtd-loadgen.dll \
+  --join --host 127.0.0.1 --port 27162 --count 1 --actions 3 --no-spawn-zombies
+```
