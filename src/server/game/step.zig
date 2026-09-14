@@ -103,6 +103,9 @@ pub fn step(self: *Game) !void {
             self.harness.counters.add(.terrain_snap_chunks, covered);
         }
         self.sim.director.party_stage = self.partyHighestGameStage();
+        // The blood-moon freeze reads this one (stock InitParty IL_0006
+        // freezes the weighted party level, not the high-water mark).
+        self.sim.director.party_stage_weighted = self.partyWeightedGameStage();
         // Nightly bonus-loot cadence (stock SetPartyLevel, pushed at the
         // InitParty freeze): resolve max(stageSpawnMax / LootBonusMaxCount,
         // LootBonusEvery) + LootBonusScale from the gamestage table against

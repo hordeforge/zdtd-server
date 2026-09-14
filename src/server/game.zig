@@ -1764,6 +1764,10 @@ pub const Game = struct {
         return game_player.partyHighestGameStage(self);
     }
 
+    pub fn partyWeightedGameStage(self: *Game) i32 {
+        return game_player.partyWeightedGameStage(self);
+    }
+
     pub fn partyLootStage(self: *const Game) i32 {
         return game_player.partyLootStage(self);
     }

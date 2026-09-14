@@ -352,6 +352,14 @@ pub const Director = struct {
     /// Party game stage (CalcGameStageAround over the online players). Drives
     /// the scout tier and the blood moon stage lookup. 0 = no players / unknown.
     party_stage: i32 = 0,
+    /// Weighted party level (`GameStageDefinition::CalcPartyLevel` over the
+    /// party members), pushed by the Game each tick. The blood moon freezes
+    /// this rather than `party_stage`, because stock's
+    /// `AIDirectorBloodMoonParty::InitParty` IL_0006 resolves the ladder from
+    /// `partySpawner.CalcPartyLevel()`; a two-player party at stage 40/80
+    /// therefore rolls its waves at the weighted level, not the 80 high-water
+    /// mark. 0 = not pushed, fall back to `party_stage`.
+    party_stage_weighted: i32 = 0,
     /// Optional lookup: (ctx, spawner_name, stage) → entitygroup name plus wave
     /// size, resolving gamestages.xml. Game wires it; the ECS layer stays free
     /// of asset imports, matching the group_pick_fn contract above. First-row
@@ -595,7 +603,10 @@ pub const Director = struct {
                 // (the stage sum lives in the asset table, not in this layer);
                 // until it does, the stock XML defaults below stand in.
                 if (self.bm_stage_frozen == 0) {
-                    self.bm_stage_frozen = self.party_stage;
+                    self.bm_stage_frozen = if (self.party_stage_weighted > 0)
+                        self.party_stage_weighted
+                    else
+                        self.party_stage;
                     // Seed the bonus counter once per night, the way stock
                     // InitParty does. Keep whatever cadence the Game already
                     // pushed from the ladder; only fall back to the stock XML
@@ -1768,6 +1779,9 @@ test "blood moon walks the stage spawn groups across the night" {
         .bloodmoon_cd = 0,
         .horde_cd = 999,
         .party_stage = 61,
+        // The Game pushes the weighted party level next to the high-water
+        // mark; the freeze must take the weighted one (InitParty IL_0006).
+        .party_stage_weighted = 61,
         .group_pick_fn = &Hooks.pick,
         .stage_group_at_ctx = undefined,
         .stage_group_at_fn = &Hooks.stageGroupAt,
@@ -2085,6 +2099,34 @@ test "wandering horde size and distance follow [rules.director]" {
     const hs = horde_slot orelse return error.TestUnexpectedResult;
     const dist = @sqrt(w.transform[hs].x * w.transform[hs].x + w.transform[hs].z * w.transform[hs].z);
     try std.testing.expect(dist > 30.0 and dist < 50.0); // config 40 m, not 92
+}
+
+test "the blood-moon freeze takes the weighted party level, not the high-water mark" {
+    // AIDirectorBloodMoonParty::InitParty IL_0006 resolves the ladder from
+    // partySpawner.CalcPartyLevel() over the party members, so a two-player
+    // party at stage 40/80 freezes the weighted level (40 + 80*0.5 = 80 with
+    // the stock DiminishingReturns of 0.5 ... the exact value comes from
+    // GameStageDefinition::CalcPartyLevel), never the 80 max alone.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    w.rules.director.initial_population_frac = 0;
+    _ = w.spawnPlayer(0, 70, 0, 0).?;
+    var d: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7 },
+        .horde_cd = 999,
+        .party_stage = 80,
+        .party_stage_weighted = 52,
+    };
+    _ = d.tick(&w, 0.1);
+    try std.testing.expectEqual(@as(i32, 52), d.bm_stage_frozen);
+    // With nothing pushed (offline tables, tests) the high-water mark stands.
+    var d2: Director = .{
+        .clock = .{ .hours = 23.0, .day = 7 },
+        .horde_cd = 999,
+        .party_stage = 80,
+    };
+    _ = d2.tick(&w, 0.1);
+    try std.testing.expectEqual(@as(i32, 80), d2.bm_stage_frozen);
 }
 
 test "wandering horde takes its size and group from the WanderingHorde ladder" {

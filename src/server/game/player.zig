@@ -468,12 +468,51 @@ pub fn partyLootStage(self: *const Game) i32 {
     return best;
 }
 
+/// `GameStageDefinition::CalcPartyLevel` over the largest party's members (or
+/// every joined player when nobody is grouped): stock's blood-moon party builds
+/// its spawner from exactly this (`AIDirectorBloodMoonParty::InitParty` IL_0006
+/// calls `partySpawner.CalcPartyLevel()`, and `Party::get_GameStage` =
+/// `CalcPartyLevel(members)`), so the nightly ladder resolves at the weighted
+/// level rather than the high-water mark of `partyHighestGameStage`.
+pub fn partyWeightedGameStage(self: *Game) i32 {
+    var stages: [max_clients]i32 = undefined;
+    var n: usize = 0;
+    var best_party: ?*const ecs_party.Party = null;
+    var best_n: usize = 0;
+    for (&self.parties.parties, &self.parties.used) |*p, *u| {
+        if (!u.*) continue;
+        if (p.n > best_n) {
+            best_n = p.n;
+            best_party = p;
+        }
+    }
+    if (best_party) |p| {
+        for (p.members[0..p.n]) |m| {
+            if (self.clientByEntityId(m)) |mc| {
+                if (mc.slot >= self.clients.len) continue;
+                stages[n] = gameStageOf(self, mc.slot);
+                n += 1;
+            }
+        }
+    } else {
+        for (&self.clients, 0..) |*c, i| {
+            if (!c.joined) continue;
+            stages[n] = gameStageOf(self, i);
+            n += 1;
+        }
+    }
+    if (n == 0) return 0;
+    return assets_gamestages.partyLevel(self.gamestages.config, stages[0..n]);
+}
+
 /// Party.get_HighestGameStage (parties-factions.md "Group gamestage /
 /// loot"): the max member game stage of the largest party, or of all joined
-/// players when nobody is grouped. Stock feeds this to the blood-moon
-/// director and horde difficulty, which scale to the group high water mark
-/// rather than the weighted CalcPartyLevel. Sleeper volumes keep
-/// partyStageAround (CalcGameStageAround) below.
+/// players when nobody is grouped. This is the per-player director stage
+/// aggregate (a director blip scales with its own player); the blood-moon
+/// ladder freezes `partyWeightedGameStage` instead, because
+/// `AIDirectorBloodMoonParty::InitParty` IL_0006 builds its party spawner from
+/// `CalcPartyLevel`. Sleeper volumes keep partyStageAround
+/// (CalcGameStageAround) below.
 pub fn partyHighestGameStage(self: *Game) i32 {
     var best: i32 = 0;
     var best_party: ?*const ecs_party.Party = null;
