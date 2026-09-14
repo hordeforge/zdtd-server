@@ -1176,6 +1176,27 @@ test "set MaxFuel on generatorbank" {
     try std.testing.expect(std.mem.find(u8, out, "12250") != null);
 }
 
+test "set the root element attribute a modlet raises the quality tier with" {
+    // The stock-supported way to move `ItemClass.MaxQualityTier`: a root
+    // attribute patch (`/items/@max_quality_tier`), which `items.zig` then
+    // reads as the quality-axis bound.
+    const base =
+        \\<items>
+        \\<item name="gunMaster">
+        \\  <property name="Stacknumber" value="1"/>
+        \\</item>
+        \\</items>
+    ;
+    const patch =
+        \\<configs file="items.xml">
+        \\  <set xpath="/items/@max_quality_tier">10</set>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "items.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "max_quality_tier=\"10\"") != null);
+}
+
 test "remove block" {
     const base =
         \\<blocks>

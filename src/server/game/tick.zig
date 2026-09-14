@@ -257,7 +257,7 @@ fn itemTrackedDeltas(
     ctx: requirements.Ctx,
     counts: *requirements.Counts,
 ) assets_buffs.TrackedDeltas {
-    const axis = itemQualityAxis(quality);
+    const axis = itemQualityAxis(self, quality);
     return assets_buffs.deltasPlus(
         assets_buffs.trackedDeltasAt(def.passives, axis, ctx, counts),
         modTrackedDeltas(self, mods, quality, ctx, counts, null),
@@ -278,7 +278,7 @@ fn modTrackedDeltas(
     counts: *requirements.Counts,
     phys_out: ?*f32,
 ) assets_buffs.TrackedDeltas {
-    const axis = itemQualityAxis(quality);
+    const axis = itemQualityAxis(self, quality);
     var out: assets_buffs.TrackedDeltas = .{};
     for (mods) |mod_id| {
         if (mod_id == 0) continue;
@@ -296,8 +296,8 @@ fn modTrackedDeltas(
     return out;
 }
 
-fn itemQualityAxis(quality: u8) assets_buffs.Axis {
-    const qmax: u8 = ecs.components.max_quality_tiers;
+fn itemQualityAxis(self: *const Game, quality: u8) assets_buffs.Axis {
+    const qmax = self.items.max_quality_tier;
     return .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
 }
 
@@ -616,7 +616,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                 if (held.count > 0) {
                     item_ctx.item_equipped = false;
                     if (self.items.byId(held.item_id)) |def| {
-                        ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(held.quality), item_ctx, &req_counts));
+                        ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, held.quality), item_ctx, &req_counts));
                         // The holding item's mod rows fold for their stats, but
                         // its physical resist is not armour: stock
                         // GetTotalPhysicalArmorRating walks the Equipment slots
@@ -632,7 +632,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                     const slot = self.sim.inventory[ps].slots[esi];
                     if (slot.count == 0) continue;
                     const def = self.items.byId(slot.item_id) orelse continue;
-                    ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(slot.quality), item_ctx, &req_counts));
+                    ivm = assets_buffs.deltasPlus(ivm, assets_buffs.trackedDeltasAt(def.passives, itemQualityAxis(self, slot.quality), item_ctx, &req_counts));
                     ivm = assets_buffs.deltasPlus(ivm, modTrackedDeltas(self, slot.mods, slot.quality, item_ctx, &req_counts, &mod_phys));
                 }
                 // The item's own resist rows stay owned by the items.xml

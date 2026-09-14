@@ -727,7 +727,7 @@ pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const 
         const held = inv.heldItem();
         if (held.count > 0) {
             if (self.items.byId(held.item_id)) |def| {
-                v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(held.quality), ctx, v, &counts);
+                v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(self, held.quality), ctx, v, &counts);
             }
         }
         var esi: usize = ecs.components.inv_equip_start;
@@ -735,15 +735,15 @@ pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const 
             const slot = inv.slots[esi];
             if (slot.count == 0) continue;
             const def = self.items.byId(slot.item_id) orelse continue;
-            v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(slot.quality), ctx, v, &counts);
+            v = assets_buffs.lootProbFold(def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
         }
     }
     return v;
 }
 
 /// Item quality as the passive-fold axis (matches the tick's item fold).
-fn itemQualityAxis(quality: u8) assets_buffs.Axis {
-    const qmax: u8 = ecs.components.max_quality_tiers;
+fn itemQualityAxis(self: *const Game, quality: u8) assets_buffs.Axis {
+    const qmax = self.items.max_quality_tier;
     return .{ .quality = .{ .level = @min(quality, qmax), .max = qmax } };
 }
 

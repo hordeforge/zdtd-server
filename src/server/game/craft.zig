@@ -35,8 +35,9 @@ pub fn armorPdr(ctx: ?*anyopaque, item_id: u16, quality: u8) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     if (g.items.byId(item_id)) |d| {
         if (d.phys_resist_n > 0) {
-            const q: u8 = @intCast(@max(1, @min(quality, components.max_quality_tiers)));
-            return assets_buffs.curveValueAt(q, components.max_quality_tiers, d.phys_resist_curve[0..d.phys_resist_n]);
+            const qmax = g.items.max_quality_tier;
+            const q: u8 = @max(1, @min(quality, qmax));
+            return assets_buffs.curveValueAt(q, qmax, d.phys_resist_curve[0..d.phys_resist_n]);
         }
     }
     return 0;
@@ -271,9 +272,10 @@ fn foldCraftingTier(passives: []const assets_buffs.Passive, lvl: u8, ctx: assets
 /// skill and perk rows whose tags intersect the recipe's tag set (which stock
 /// builds as `tags + "," + recipe name`), evaluated at the class's purchased
 /// level. The folded float truncates (`conv.i4`) and the item clamps to its own
-/// max quality tier; zdtd clamps 1..max_quality_tiers.
+/// max quality tier; zdtd clamps 1..ItemClass.MaxQualityTier.
 pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) u8 {
-    if (!craftingProgressionOn(self)) return components.max_quality_tiers;
+    const qmax = self.items.max_quality_tier;
+    if (!craftingProgressionOn(self)) return qmax;
     var v: f32 = 1;
     var counts: assets_requirements.Counts = .{};
     const ctx: assets_requirements.Ctx = .{ .tags = recipe.tags };
@@ -285,7 +287,7 @@ pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.Rec
     }
     const tier: f32 = @trunc(v);
     if (!(tier >= 1)) return 1;
-    return @intFromFloat(@min(tier, @as(f32, @floatFromInt(components.max_quality_tiers))));
+    return @intFromFloat(@min(tier, @as(f32, @floatFromInt(qmax))));
 }
 
 /// Deposit a crafted output. A HasQuality item carries the crafting tier as its

@@ -290,6 +290,14 @@ pub const ItemTable = struct {
     /// stackable non-quality items and clamps at 30000. Set from the decoded
     /// server code at init; 1.0 keeps every raw Stacknumber.
     stack_size_modifier: f32 = 1,
+    /// Stock `ItemClass.MaxQualityTier` static: the `<items>` root attribute
+    /// `max_quality_tier` when present, else stock's own fallback
+    /// (`ItemClassesFromXml.CreateItems` reads the root attribute into the
+    /// static and assigns 6 when it is absent, `components.max_quality_tiers`).
+    /// V3.2.0 ships no attribute. Bounds every quality axis: the passive folds
+    /// (`itemQualityAxis`), armour PDR curves, the crafting tier clamp and
+    /// `harvestMultiplier`'s quality curve.
+    max_quality_tier: u8 = components.max_quality_tiers,
 
     pub fn deinit(self: *ItemTable) void {
         if (self.arena_ptr) |ap| {
@@ -454,7 +462,7 @@ pub const ItemTable = struct {
         for (d.harvest_rows) |r| {
             if (!tagsIntersect(r.tags, drop_tags)) continue;
             const v = if (r.curve_n > 0)
-                buffs.curveValueAt(quality, components.max_quality_tiers, r.curve[0..r.curve_n])
+                buffs.curveValueAt(quality, self.max_quality_tier, r.curve[0..r.curve_n])
             else
                 r.value;
             switch (r.op) {
@@ -1950,7 +1958,21 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
         .stock_types = st,
         .stock_stacks = ss,
         .stock_econ_scales = ssc,
+        .max_quality_tier = rootMaxQualityTier(clean),
     };
+}
+
+/// `<items max_quality_tier="N">`: stock parses it into the static and falls
+/// back to 6 when absent or unparsable. A value outside 1..255 keeps the
+/// default rather than producing a degenerate quality axis.
+fn rootMaxQualityTier(src: []const u8) u8 {
+    const ri = std.mem.findPos(u8, src, 0, "<items") orelse return components.max_quality_tiers;
+    const v = xml.attr(src, ri, "max_quality_tier") orelse return components.max_quality_tiers;
+    const n = xml.parseU8(v) orelse return components.max_quality_tiers;
+    // 0 would collapse every quality axis (stock assigns the parsed value
+    // unchecked and divides by it); fail closed on the default instead.
+    if (n == 0) return components.max_quality_tiers;
+    return n;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?ItemTable {
@@ -2630,4 +2652,40 @@ test "HasQuality follows owner-tiered effect groups and inherits through Extends
     // name fails closed.
     try std.testing.expect(t.hasQualityByName("gunChild"));
     try std.testing.expect(!t.hasQualityByName("noSuchItem"));
+}
+
+test "items root max_quality_tier bounds the quality axes" {
+    // Stock `ItemClassesFromXml.CreateItems` parses the `<items>` root
+    // attribute into the static `ItemClass.MaxQualityTier` and assigns 6 when
+    // it is absent. V3.2.0 ships no attribute; a modlet that sets it (XPath
+    // `/items/@max_quality_tier`) has to move the quality axis with it, or the
+    // server clamps a tier the client accepts.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/items.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<items max_quality_tier="10">
+        \\  <item name="gunMaster">
+        \\    <property name="Stacknumber" value="1"/>
+        \\    <effect_group name="gunMaster" tiered="true">
+        \\      <passive_effect name="ModSlots" operation="base_set" value="1"/>
+        \\    </effect_group>
+        \\  </item>
+        \\</items>
+    );
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    try std.testing.expectEqual(@as(u8, 10), t.max_quality_tier);
+    // The harvest curve spreads over the table's tier count, not the default.
+    const no_rows = t.harvestMultiplier(t.byName("gunMaster").?.id, 7, "wood");
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), no_rows, 0.001);
+
+    // Absent attribute: stock's 6. A degenerate value keeps it too.
+    try io_fs.writeFile(path, "<items max_quality_tier=\"0\">\n</items>\n");
+    var t2 = try loadFromPath(std.testing.allocator, path);
+    defer t2.deinit();
+    try std.testing.expectEqual(@as(u8, 6), t2.max_quality_tier);
 }
