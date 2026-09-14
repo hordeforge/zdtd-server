@@ -730,6 +730,10 @@ now (`DeflateOutputStream(_, 3)`).
 | PlayerId bodyLen | 360 | 1512 |
 | Joined / spawn | entity set, `(256,72,256)` then world spawn | same |
 
+**Re-run 2026-09-14 (after the item-stat, craft-count, passive-curve, wandering-horde and blood-moon-stage changes)**, scripted as `scripts/ab-join-smoke.sh ab-mods <out> both` so the two legs are one command: both legs join, spawn and are driven by the same loadgen. Same stage table as above (`maps=224/191`, `LoginAnswered dataLen=1686/466`, `WorldInfo 590/97`, `WorldSpawnPoints 213/213`, `GameStats 231/231`, `Localization 19554/19010`, `PlayerId 360/1512`, spawn `(256,72,256)` via `PlayerId` on both).
+
+`WorldInfo` moved from the 362 first recorded to 590 on this run: the sandbox instance's `userdata` has accumulated player saves from the earlier A/B runs, and the gap is entirely the persistent-player list stock writes and zdtd replaces with the empty form (presence byte `false`). That is the expected growth, not a regression, and it is why the zdtd body stays 97.
+
 The package-id count differs in *slots*, not names: stock sends a fixed array
 whose holes the client skips (the loadgen's own parse guards
 `!string.IsNullOrEmpty`), while zdtd sends a compact list. zdtd's 191 names
