@@ -722,7 +722,7 @@ G8).
 | AuthState | nativeplatform, encryption, authenticated | confirmation echo only (EAC off) |
 | WorldInfo bodyLen | 362 first join / 476 after | 97 |
 | WorldSpawnPoints bodyLen | 213 | 213 |
-| GameStats bodyLen | 231 | 212 |
+| GameStats bodyLen | 231 | 212 without `--serverconfig`, **231 with it** |
 | PlayerId bodyLen | 360 | 1512 |
 | Joined / spawn | entity set, `(256,72,256)` then world spawn | same |
 
@@ -736,10 +736,15 @@ including the base/helper types) plus four the census predates
 name on both legs. Index-for-index parity with stock is not required, because
 the client builds its table from the server's list.
 
-Open follow-ups this A/B surfaced: the `WorldInfo` body is ~4x smaller than
-stock's, `GameStats` is 19 bytes smaller, and the `PlayerId` body is ~4x
-larger; none of them stopped the join, but each is a candidate fidelity gap
-worth a byte-level diff.
+Method note: the zdtd leg must be given the same `--serverconfig` the stock
+instance runs with. Without it the sandbox-code and preset strings are empty
+and `GameStats` reads 212 bytes; with it the body is 231, byte-for-byte the
+stock length. The remaining size gaps are real: `WorldInfo` is 97 bytes
+against stock's 362 (the world-file CRC table and the persistent-player list
+are the two fields this server does not fill), `LoginAnswered` is 466 against
+1686 (stock's login answer carries the player-profile blob), and `PlayerId`
+is 1512 against 360. None of them stopped the join, but each is a candidate
+fidelity gap worth a byte-level diff.
 
 ## Reproducing
 

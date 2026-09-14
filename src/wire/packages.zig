@@ -3589,6 +3589,25 @@ pub const GameStatsValues = struct {
     air_drop_frequency: i32 = 0,
     party_shared_kill_range: i32 = 100,
     show_friend_player_on_map: bool = true,
+    /// GameStats[18]/[20] IsCreativeMenuEnabled / IsFlyingEnabled: stock seeds
+    /// both from GamePrefs 58 `BuildCreate`
+    /// (server-lifecycle.md GameStats table), so a server running with cheat
+    /// mode on hands the client its creative menu and flight.
+    build_create: bool = false,
+    /// GameStats[53] AirDropMarker (sandbox option, default on).
+    air_drop_marker: bool = true,
+    /// GameStats[34] DropOnQuit (sandbox option `DropOnQuit`, distinct from
+    /// DropOnDeath).
+    drop_on_quit: i32 = 0,
+    /// GameStats[66] BiomeProgression (sandbox option, default on).
+    biome_progression: bool = true,
+    /// GameStats[68] CameraRestrictionMode (serverconfig).
+    camera_restriction_mode: i32 = 0,
+    /// GameStats[29] ScorePlayerKillMultiplier: `GameModeSurvival::Init`
+    /// IL_0035-0038 sets it to 0 (a player kill scores nothing), while
+    /// [28] ScoreZombieKillMultiplier is 1 and [30] ScoreDiedMultiplier -5
+    /// (IL_003D-0049). Mode semantics, not a tunable.
+    score_player_kill_multiplier: i32 = 0,
     is_spawn_enemies: bool = true,
     enemy_spawn_mode: bool = true,
     /// GameStats[11] TimeOfDayIncPerSec = 24000 / (DayNightLength * 60) in
@@ -3656,18 +3675,18 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeBool(false); // ShowSpawnWindow
     try w.writeBool(false); // IsSpawnNearOtherPlayer
     try w.writeI32(v.time_of_day_inc_per_sec); // TimeOfDayIncPerSec
-    try w.writeBool(false); // IsCreativeMenuEnabled
+    try w.writeBool(v.build_create); // IsCreativeMenuEnabled (GamePrefs 58)
     try w.writeBool(false); // IsTeleportEnabled
-    try w.writeBool(false); // IsFlyingEnabled
+    try w.writeBool(v.build_create); // IsFlyingEnabled (GamePrefs 58)
     try w.writeBool(true); // IsPlayerDamageEnabled
     try w.writeBool(true); // IsPlayerCollisionEnabled
     try w.writeBool(v.is_spawn_enemies); // IsSpawnEnemies
     try w.writeI32(v.player_killing_mode); // PlayerKillingMode
-    try w.writeI32(1); // ScorePlayerKillMultiplier
+    try w.writeI32(v.score_player_kill_multiplier); // ScorePlayerKillMultiplier
     try w.writeI32(1); // ScoreZombieKillMultiplier
     try w.writeI32(-5); // ScoreDiedMultiplier
     try w.writeI32(v.drop_on_death); // DropOnDeath
-    try w.writeI32(0); // DropOnQuit
+    try w.writeI32(v.drop_on_quit); // DropOnQuit (sandbox)
     try w.writeI32(v.game_difficulty); // GameDifficulty
     try w.writeI32(v.blood_moon_enemy_count); // BloodMoonEnemyCount
     try w.writeBool(v.enemy_spawn_mode); // EnemySpawnMode
@@ -3683,7 +3702,7 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeI32(v.land_claim_offline_delay); // LandClaimOfflineDelay
     try w.writeI32(v.bedroll_expiry_time); // BedrollExpiryTime
     try w.writeI32(v.air_drop_frequency); // AirDropFrequency
-    try w.writeBool(true); // AirDropMarker
+    try w.writeBool(v.air_drop_marker); // AirDropMarker (sandbox)
     try w.writeI32(v.party_shared_kill_range); // PartySharedKillRange
     try w.writeBool(false); // AutoParty
     try w.writeI32(0); // OptionsPOICulling
@@ -3694,9 +3713,9 @@ pub fn buildGameStatsBodyValues(buf: []u8, v: GameStatsValues) ![]u8 {
     try w.writeBool(true); // TwitchBloodMoonAllowed
     try w.writeI32(v.death_penalty); // DeathPenalty
     try w.writeI32(v.quest_progression_daily_limit); // QuestProgressionDailyLimit
-    try w.writeBool(true); // BiomeProgression
+    try w.writeBool(v.biome_progression); // BiomeProgression (sandbox)
     try w.writeI32(v.storm_freq); // StormFreq
-    try w.writeI32(0); // CameraRestrictionMode
+    try w.writeI32(v.camera_restriction_mode); // CameraRestrictionMode
     try w.writeI32(v.jar_refund); // JarRefund
     try w.writeString(v.sandbox_preset); // SandboxPreset
     try w.writeString(v.sandbox_code); // SandboxCode
@@ -3813,7 +3832,10 @@ test "GameStats body is i16 len + full persistent blob" {
     // observable.
     try std.testing.expectEqual(false, try dr.readBool()); // 21: IsSpawnEnemies
     try std.testing.expectEqual(@as(i32, 2), try dr.readI32()); // 22: PlayerKillingMode
-    try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 23: ScorePlayerKillMultiplier
+    // 23 is 0 and 24 is 1: `GameModeSurvival::Init` IL_0035-0040 sets the
+    // player-kill multiplier to nothing and the zombie one to 1, so the pair
+    // is no longer two identical constants.
+    try std.testing.expectEqual(@as(i32, 0), try dr.readI32()); // 23: ScorePlayerKillMultiplier
     try std.testing.expectEqual(@as(i32, 1), try dr.readI32()); // 24: ScoreZombieKillMultiplier
     try std.testing.expectEqual(@as(i32, -5), try dr.readI32()); // 25: ScoreDiedMultiplier
     try std.testing.expectEqual(@as(i32, 3), try dr.readI32()); // 26: DropOnDeath
@@ -3867,13 +3889,12 @@ test "GameStats body is i16 len + full persistent blob" {
     // Nothing left: the blob ends exactly here.
     try std.testing.expectEqual(@as(usize, 0), dr.remaining());
 
-    // Ten adjacent pairs remain indistinguishable because both sides are the
-    // same hardcoded constant, not because the fixture is weak: the empty
-    // strings at 8/9 and 58/59, the false runs at 13/14 and 16..18, the true
-    // pair at 19/20, the two score multipliers at 23/24, and the four 100s at
-    // 65..68. No caller input can separate those; initPropertyDecl holds the
-    // order, and the swap-mutation audit reports them as survivors by
-    // construction.
+    // Pairs that remain indistinguishable because both sides are the same
+    // constant, not because the fixture is weak: the empty strings at 8/9 and
+    // 58/59, the false runs at 13/14 and 16..18, the true pair at 19/20, and
+    // the four 100s at 65..68. No caller input can separate those;
+    // initPropertyDecl holds the order, and the swap-mutation audit reports
+    // them as survivors by construction.
 }
 
 test "lock response for a trader carries the context and trader data" {
@@ -7332,4 +7353,33 @@ test "explosion blob decodes radii at their stock scales" {
     try std.testing.expectApproxEqAbs(@as(f32, 6), ex.entity_radius, 0.001);
     try std.testing.expectEqual(@as(u16, 120), ex.block_damage);
     try std.testing.expectApproxEqAbs(@as(f32, 45), ex.entity_damage, 0.001);
+}
+
+test "GameStats carries the config-driven creative, marker and camera values" {
+    // GameStats[18]/[20] come from GamePrefs 58 BuildCreate, [53] from the
+    // sandbox AirDropMarker, [34] from DropOnQuit, [66] from BiomeProgression
+    // and [68] from serverconfig CameraRestrictionMode. They used to be
+    // constants in the writer, so an operator could not turn creative mode,
+    // flight, the air-drop marker or the camera restriction on.
+    var on_buf: [512]u8 = undefined;
+    const on = try buildGameStatsBodyValues(&on_buf, .{
+        .build_create = true,
+        .air_drop_marker = false,
+        .drop_on_quit = 2,
+        .biome_progression = false,
+        .camera_restriction_mode = 1,
+    });
+    var off_buf: [512]u8 = undefined;
+    const off = try buildGameStatsBodyValues(&off_buf, .{});
+    // Same field set, so only the values differ: the writer's field order is
+    // the propertyList contract.
+    try std.testing.expectEqual(off.len, on.len);
+    try std.testing.expect(!std.mem.eql(u8, on, off));
+    // ScorePlayerKillMultiplier is 0 in both (GameModeSurvival::Init IL_0035).
+    const defaults = GameStatsValues{};
+    try std.testing.expectEqual(@as(i32, 0), defaults.score_player_kill_multiplier);
+    try std.testing.expectEqual(@as(i32, 0), defaults.drop_on_quit);
+    try std.testing.expect(!defaults.build_create);
+    try std.testing.expect(defaults.air_drop_marker);
+    try std.testing.expect(defaults.biome_progression);
 }

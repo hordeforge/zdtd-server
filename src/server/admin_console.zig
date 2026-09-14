@@ -791,6 +791,12 @@ pub fn replyGameStats(self: *Game, filter: []const u8) void {
     gameStat(self, filter, "XPMultiplier", "{d}", .{v.xp_multiplier});
     gameStat(self, filter, "PlayerKillingMode", "{d}", .{v.player_killing_mode});
     gameStat(self, filter, "DropOnDeath", "{d}", .{v.drop_on_death});
+    gameStat(self, filter, "DropOnQuit", "{d}", .{v.drop_on_quit});
+    gameStat(self, filter, "IsCreativeMenuEnabled", "{s}", .{boolWord(v.build_create)});
+    gameStat(self, filter, "IsFlyingEnabled", "{s}", .{boolWord(v.build_create)});
+    gameStat(self, filter, "AirDropMarker", "{s}", .{boolWord(v.air_drop_marker)});
+    gameStat(self, filter, "BiomeProgression", "{s}", .{boolWord(v.biome_progression)});
+    gameStat(self, filter, "CameraRestrictionMode", "{d}", .{v.camera_restriction_mode});
     gameStat(self, filter, "LandClaimSize", "{d}", .{v.land_claim_size});
     gameStat(self, filter, "LandClaimOnlineDurabilityModifier", "{d}", .{v.land_claim_online_dur});
     gameStat(self, filter, "LandClaimOfflineDurabilityModifier", "{d}", .{v.land_claim_offline_dur});

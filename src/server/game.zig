@@ -462,6 +462,16 @@ pub const Game = struct {
     /// the [rules.difficulty] ladder drives the AI->player scale).
     incoming_damage_modifier: f32 = 0,
     drop_on_death: u8 = 1,
+    /// serverconfig `BuildCreate` (stock seeds GameStats[18]/[20] from it).
+    build_create: bool = false,
+    /// serverconfig `CameraRestrictionMode` -> GameStats[68].
+    camera_restriction_mode: u8 = 0,
+    /// Sandbox option `AirDropMarker` -> GameStats[53].
+    air_drop_marker: bool = true,
+    /// Sandbox option `DropOnQuit` -> GameStats[34].
+    drop_on_quit: u8 = 0,
+    /// Sandbox option `BiomeProgression` -> GameStats[66].
+    biome_progression: bool = true,
     death_penalty: u8 = 1,
     land_claim_size: u16 = 41,
     land_claim_online_dur: u16 = 4,
@@ -763,6 +773,11 @@ pub const Game = struct {
             .incoming_damage_modifier = opts.incoming_damage_modifier,
             .death_penalty = opts.death_penalty,
             .drop_on_death = opts.drop_on_death,
+            .build_create = opts.build_create,
+            .camera_restriction_mode = opts.camera_restriction_mode,
+            .air_drop_marker = opts.air_drop_marker,
+            .drop_on_quit = opts.drop_on_quit,
+            .biome_progression = opts.biome_progression,
             .land_claim_size = opts.land_claim_size,
             .land_claim_online_dur = opts.land_claim_online_durability_modifier,
             .land_claim_offline_dur = opts.land_claim_offline_durability_modifier,
@@ -2921,6 +2936,11 @@ pub const Game = struct {
             .death_penalty = self.death_penalty,
             .player_killing_mode = self.pvp_mode,
             .drop_on_death = self.drop_on_death,
+            .drop_on_quit = self.drop_on_quit,
+            .build_create = self.build_create,
+            .camera_restriction_mode = self.camera_restriction_mode,
+            .air_drop_marker = self.air_drop_marker,
+            .biome_progression = self.biome_progression,
             .land_claim_size = self.land_claim_size,
             .land_claim_online_dur = self.land_claim_online_dur,
             .land_claim_offline_dur = self.land_claim_offline_dur,

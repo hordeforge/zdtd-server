@@ -306,6 +306,17 @@ pub const InitOptions = struct {
     max_spawned_animals: u16 = 50,
     air_drop_frequency: u16 = 72,
     drop_on_death: u8 = 1,
+    /// serverconfig `BuildCreate` (creative menu + flight, stock GameStats
+    /// [18]/[20]).
+    build_create: bool = false,
+    /// serverconfig `CameraRestrictionMode` (GameStats[68]).
+    camera_restriction_mode: u8 = 0,
+    /// Sandbox `AirDropMarker` (GameStats[53]).
+    air_drop_marker: bool = true,
+    /// Sandbox `DropOnQuit` (GameStats[34]).
+    drop_on_quit: u8 = 0,
+    /// Sandbox `BiomeProgression` (GameStats[66]).
+    biome_progression: bool = true,
     death_penalty: u8 = 1,
     land_claim_size: u16 = 41,
     land_claim_online_durability_modifier: u16 = 4,

@@ -100,7 +100,12 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `BlockDamageAIBM` | 100 | 0..1000 | as above during a blood moon |
 | `AirDropFrequency` | 72 | 0..8760 | game-hours between supply-crate drops; 0 off (`tickAirDrop`) |
 | `DropOnDeath` | 1 | 0..4 | 0 nothing / 1 all / 2 toolbelt / 3 backpack / 4 delete → loot bag on death |
+| `BuildCreate` | false | bool | cheat/build mode; stock seeds GameStats[18] IsCreativeMenuEnabled and [20] IsFlyingEnabled from it (`GameModeAbstract.Init`), so the client's creative menu and flight follow the server |
+| `CameraRestrictionMode` | 0 | 0..2 | 0 free / 1 first person / 2 third person; rides GameStats[68] |
 | `DeathPenalty` | 1 | 0..3 | 0 nothing / 1 XP-only / 2 backpack / 3 delete; rides GameStat.DeathPenalty (wire GameStats blob) and the client-side death flow switches on it |
+| sandbox `DropOnQuit` | 0 | 0..5 | quit-drop mode, distinct from DropOnDeath; rides GameStats[34] |
+| sandbox `AirDropMarker` | true | bool | crate marker on the map; rides GameStats[53] |
+| sandbox `BiomeProgression` | true | bool | biome gamestage/lootstage progression; rides GameStats[66] |
 | `LandClaimSize` | 41 | 1..255 (odd) | keystone protection area; even values forced odd |
 | `LandClaimOnlineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner online |
 | `LandClaimOfflineDurabilityModifier` | 4 | 0..64 | own-claim block hp ×N while owner offline |
