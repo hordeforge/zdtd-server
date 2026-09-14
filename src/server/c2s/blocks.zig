@@ -23,6 +23,10 @@ const replicate_te = @import("../replicate_te.zig");
 /// carve the whole map or damage every loaded entity.
 const max_claimed_explosion_radius: f32 = 6.0;
 
+/// Bound on the `PassThroughDamage` downgrade-chain walk. Stock recurses the
+/// whole damage handler with no cap; a modded chain cannot spin the tick here.
+const max_passthrough_depth: usize = 8;
+
 pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, body: []const u8) anyerror!bool {
     if (std.mem.eql(u8, name, "NetPackageBlockTrigger")) {
         // Divergence (DIVERGENCES 3): stock consumes this package server-side
@@ -245,6 +249,44 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         self.clearBlockHp(b.x, b.y, b.z);
                         self.clearBlockRaw(b.x, b.y, b.z);
                         place_down_raw = down_raw;
+                        // Stock Block.OnBlockDamaged IL_0384-03AE: with
+                        // PassThroughDamage the leftover damage
+                        // (claimed - max_hp) hits the replacement block at the
+                        // same cell, recursively down the downgrade chain
+                        // (102 stock rows: doors, gates, hatches, the vehicle
+                        // and wood/steel masters). The walk is bounded;
+                        // stock's own recursion is not. Only the swap chain is
+                        // walked here: stock re-runs the whole damage handler,
+                        // so its intermediate stages also roll harvest drops
+                        // and XP, which this arm does not.
+                        if (self.blocks.passThrough(base_cur)) {
+                            var left: u32 = abs - max_hp;
+                            var cur_down: u32 = down_raw;
+                            var depth: usize = 0;
+                            while (cur_down != 0 and left > 0 and depth < max_passthrough_depth) : (depth += 1) {
+                                const nid = world_store.typeId(cur_down);
+                                const nmax: u32 = self.maxDamageForBlock(nid);
+                                if (nmax == 0 or !self.blocks.passThrough(nid)) break;
+                                if (left < nmax) {
+                                    self.setBlockHp(b.x, b.y, b.z, @intCast(@min(left, std.math.maxInt(u16)))) catch break;
+                                    break;
+                                }
+                                left -= nmax;
+                                const next = self.downgradeBreakRaw(b.x, b.y, b.z, nid);
+                                if (next == 0) {
+                                    // The chain ends: the last stage is gone.
+                                    place_id = 0;
+                                    place_down_raw = 0;
+                                    out_dmg = 0;
+                                    break;
+                                }
+                                self.clearBlockHp(b.x, b.y, b.z);
+                                self.clearBlockRaw(b.x, b.y, b.z);
+                                place_id = world_store.typeId(next);
+                                place_down_raw = next;
+                                cur_down = next;
+                            }
+                        }
                     } else {
                         self.noteBlockBreak(c);
                         self.removeClaimAt(b.x, b.y, b.z);

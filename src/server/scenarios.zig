@@ -18215,3 +18215,81 @@ test "scenario mob spawn ground follows blocks.xml CanMobsSpawnOn" {
     try std.testing.expect(!game_hooks.blockMobSpawnGround(@ptrCast(g), sp.x, surf + 1, sp.z));
     std.debug.print("PASS mob-spawn-ground: terrain allows, a concrete floor does not\n", .{});
 }
+
+test "scenario PassThroughDamage walks the downgrade chain" {
+    // Stock Block.OnBlockDamaged IL_0384-03AE: the leftover damage
+    // (claimed - max_hp) hits the replacement block when the destroyed block
+    // declares PassThroughDamage. 36 stock blocks carry it together with a
+    // DowngradeBlock; cntCar03SedanDamage0Master is one (its stages are the
+    // wrecks). A hit just past the first stage's HP must leave the next stage
+    // standing with the leftover damage on it.
+    io_fs.mkdirPath("worlds");
+    freshScenarioDir("worlds/zdtd_sc_passthrough");
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, "worlds/zdtd_sc_passthrough", 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    var mt = (maxdamage.tryLoad(gpa, game, null) catch null) orelse return error.SkipZigTest;
+    mt.tryMergeBundledAssignIds(gpa);
+    g.maxdamage.deinit();
+    g.maxdamage = mt;
+    const master_id = g.maxdamage.idByName("cntCar03SedanDamage0Master") orelse return error.SkipZigTest;
+    const next_name = g.maxdamage.downgradeTarget("cntCar03SedanDamage0Master") orelse return error.SkipZigTest;
+    const next_id = g.maxdamage.idByName(next_name) orelse return error.SkipZigTest;
+    // The pass-through fact comes from the blocks table (the parse that owns
+    // the Collide/spawn properties), so load it over the same ids.
+    const IdCtx = struct {
+        t: *const maxdamage.Table,
+        fn lookup(ctx: ?*anyopaque, name: []const u8) ?u16 {
+            const self_t: *const @This() = @ptrCast(@alignCast(ctx.?));
+            return self_t.t.idByName(name);
+        }
+    };
+    var id_ctx: IdCtx = .{ .t = &g.maxdamage };
+    const bt = (assets_blocks.tryLoad(gpa, game, null, IdCtx.lookup, &id_ctx) catch null) orelse return error.SkipZigTest;
+    g.blocks.deinit();
+    g.blocks = bt;
+    try std.testing.expect(g.blocks.passThrough(master_id));
+    try std.testing.expect(g.blocks.passThrough(next_id));
+
+    const x: i32 = 240;
+    const y: i32 = 150;
+    const z: i32 = 240;
+    var frame_buf: [512]u8 = undefined;
+    var body: [64]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, x, y, z, master_id)));
+    try std.testing.expectEqual(master_id, try g.world.blockWorld(x, y, z));
+    const master_hp = g.maxDamageForBlock(master_id);
+    const next_hp = g.maxDamageForBlock(next_id);
+    try std.testing.expect(master_hp > 0 and next_hp > 1);
+    // Claim just past the master's HP: the leftover stays under the next
+    // stage's HP, so that stage survives with the leftover as its damage.
+    const leftover: u16 = 5;
+    const claim: u16 = @intCast(@min(@as(u32, master_hp) + leftover, std.math.maxInt(u16)));
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBodyDamage(&body, x, y, z, master_id, claim, c.entity_id, c.entity_id)));
+    try std.testing.expectEqual(next_id, try g.world.blockWorld(x, y, z));
+    try std.testing.expectEqual(@as(u16, leftover), g.getBlockHp(x, y, z));
+
+    // Claim past the whole chain: the cell ends empty (each stage's HP is
+    // subtracted until nothing is left).
+    // A claim past two stages walks further than the first replacement: the
+    // cell must no longer hold the master or its immediate downgrade. (A fresh
+    // cell, because an id-0 SetBlock is a break, not a removal, so the first
+    // cell cannot simply be reset.)
+    const x2: i32 = x + 3;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBody(&body, x2, y, z, master_id)));
+    try std.testing.expectEqual(master_id, try g.world.blockWorld(x2, y, z));
+    const deep_claim: u16 = @intCast(@min(@as(u32, master_hp) + next_hp + 3, std.math.maxInt(u16)));
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSetBlock", try packages.buildSetBlockBodyDamage(&body, x2, y, z, master_id, deep_claim, c.entity_id, c.entity_id)));
+    const after_deep = try g.world.blockWorld(x2, y, z);
+    try std.testing.expect(after_deep != master_id);
+    try std.testing.expect(after_deep != next_id);
+    std.debug.print("PASS pass-through: leftover damages the next stage, a deeper claim walks the chain\n", .{});
+}

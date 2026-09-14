@@ -202,6 +202,11 @@ pub const BlockDef = struct {
     /// (treeMaster and the vehicle masters), so a forest or vehicle column does
     /// not spawn a player on top of it. Resolved through Extends.
     can_players_spawn_on: bool = true,
+    /// `<property name="PassThroughDamage">` (102 stock rows, all true: the
+    /// door/gate/hatch chains and the wood/steel/vehicle masters). Stock
+    /// `Block.OnBlockDamaged` IL_0384-03AE hands the leftover damage
+    /// (incoming - MaxDamage) to the replacement block at the same cell.
+    pass_through: bool = false,
     /// `<property name="CanMobsSpawnOn">`: stock's default is FALSE and 24
     /// stock rows declare true (terrain, terrainFiller, farm plots, a few
     /// trees). Recorded; the AI spawn gate reads it through `canMobsSpawnOn`.
@@ -262,6 +267,13 @@ pub const BlockTable = struct {
         if (id == 0) return false;
         if (self.byId(id)) |d| return d.solid;
         return true;
+    }
+
+    /// `PassThroughDamage` for a block (default false), resolved through
+    /// Extends like the other blocks.xml properties.
+    pub fn passThrough(self: *const BlockTable, id: u16) bool {
+        if (self.byId(id)) |d| return d.pass_through;
+        return false;
     }
 
     /// `<property name="CanPlayersSpawnOn">` for a block, default true
@@ -544,6 +556,8 @@ pub fn loadFromPath(
         can_players_spawn_declared: bool = false,
         can_mobs_spawn_on: bool = false,
         can_mobs_spawn_declared: bool = false,
+        pass_through: bool = false,
+        pass_through_declared: bool = false,
         /// `<dropextendsoff />`: this block does NOT copy the parent's drop
         /// rows (stock BlocksFromXml reads the element next to the drop list
         /// and skips LoadExtendedItemDrops; 226 stock rows).
@@ -611,6 +625,8 @@ pub fn loadFromPath(
         var can_players_spawn_declared = false;
         var can_mobs_spawn_on = false;
         var can_mobs_spawn_declared = false;
+        var pass_through = false;
+        var pass_through_declared = false;
         var resource_scale: f32 = 1;
         var drop_extends_off = false;
         var own_drops: std.ArrayList(HarvestDrop) = .empty;
@@ -753,6 +769,11 @@ pub fn loadFromPath(
                     can_players_spawn_on = std.ascii.eqlIgnoreCase(v, "true");
                     can_players_spawn_declared = true;
                 }
+            } else if (std.mem.eql(u8, pname, "PassThroughDamage")) {
+                if (xml.attr(clean, pi, "value")) |v| {
+                    pass_through = std.ascii.eqlIgnoreCase(v, "true");
+                    pass_through_declared = true;
+                }
             } else if (std.mem.eql(u8, pname, "CanMobsSpawnOn")) {
                 if (xml.attr(clean, pi, "value")) |v| {
                     can_mobs_spawn_on = std.ascii.eqlIgnoreCase(v, "true");
@@ -825,6 +846,8 @@ pub fn loadFromPath(
             .can_players_spawn_declared = can_players_spawn_declared,
             .can_mobs_spawn_on = can_mobs_spawn_on,
             .can_mobs_spawn_declared = can_mobs_spawn_declared,
+            .pass_through = pass_through,
+            .pass_through_declared = pass_through_declared,
             .drop_extends_off = drop_extends_off,
             .harvest_drops = own_drop_slice,
             .destroy_drops = own_destroy_slice,
@@ -860,6 +883,8 @@ pub fn loadFromPath(
         var own_can_players_declared = pb.can_players_spawn_declared;
         var own_can_mobs = pb.can_mobs_spawn_on;
         var own_can_mobs_declared = pb.can_mobs_spawn_declared;
+        var own_pass_through = pb.pass_through;
+        var own_pass_through_declared = pb.pass_through_declared;
         var own_signable = pb.signable;
         var own_lp = pb.lp_hardness_scale;
         var own_lp_declared = pb.lp_declared;
@@ -913,6 +938,10 @@ pub fn loadFromPath(
                 own_can_mobs = base_p.can_mobs_spawn_on;
                 if (base_p.can_mobs_spawn_declared) own_can_mobs_declared = true;
             }
+            if (!own_pass_through_declared and !xml.tagListContains(p1, "PassThroughDamage")) {
+                own_pass_through = base_p.pass_through;
+                if (base_p.pass_through_declared) own_pass_through_declared = true;
+            }
             // A sign block's shape lives on its base (playerSignWood1x3
             // extends playerSignWood1x1 and declares no CompositeFeatures of
             // its own), so the module flag follows the chain.
@@ -945,6 +974,8 @@ pub fn loadFromPath(
         pb.can_players_spawn_declared = own_can_players_declared;
         pb.can_mobs_spawn_on = own_can_mobs;
         pb.can_mobs_spawn_declared = own_can_mobs_declared;
+        pb.pass_through = own_pass_through;
+        pb.pass_through_declared = own_pass_through_declared;
         pb.signable = own_signable;
         pb.lp_hardness_scale = own_lp;
         pb.lp_declared = own_lp_declared;
@@ -1017,6 +1048,7 @@ pub fn loadFromPath(
             .collide = pb.collide,
             .can_players_spawn_on = pb.can_players_spawn_on,
             .can_mobs_spawn_on = pb.can_mobs_spawn_on,
+            .pass_through = pb.pass_through,
             .harvest_drops = pb.harvest_drops,
             .destroy_drops = pb.destroy_drops,
             .fall_drops = pb.fall_drops,
@@ -1455,6 +1487,8 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "opaqueBusinessGlass", 222 },
         .{ "collideNoValue", 223 },
         .{ "treeMaster", 224 },
+        .{ "woodMaster", 227 },
+        .{ "woodDoor", 228 },
         .{ "treeOakSml01", 225 },
         .{ "terrStone", 226 },
     };
@@ -1788,4 +1822,44 @@ test "CanPlayersSpawnOn and CanMobsSpawnOn parse and inherit through Extends" {
     try std.testing.expect(t.canMobsSpawnOn(fixtureId(null, "terrStoneChild").?));
     // Absent keeps stock's false default for mobs.
     try std.testing.expect(!t.canMobsSpawnOn(fixtureId(null, "plainBlock").?));
+}
+
+test "PassThroughDamage parses and inherits through Extends" {
+    // Stock `Block.OnBlockDamaged` IL_0384-03AE recurses the leftover damage
+    // into the replacement block when the destroyed block declares
+    // PassThroughDamage (102 stock rows, all true: the door/gate/hatch chains
+    // and the wood/steel/vehicle masters, e.g. woodMaster and
+    // cntCar03SedanDamage0Master).
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/blocks_pt.xml", .{dir});
+    try io_fs.writeFile(path,
+        \\<blocks>
+        \\<block name="woodMaster">
+        \\  <property name="PassThroughDamage" value="true" />
+        \\</block>
+        \\<block name="woodDoor">
+        \\  <property name="Extends" value="woodMaster" />
+        \\</block>
+        \\<block name="treeMaster">
+        \\  <property name="PassThroughDamage" value="true" />
+        \\</block>
+        \\<block name="treeOakSml01">
+        \\  <property name="Extends" value="treeMaster" param1="PassThroughDamage" />
+        \\</block>
+        \\<block name="plainBlock" />
+        \\</blocks>
+    );
+    var t = try loadFromPath(std.testing.allocator, path, fixtureId, null);
+    defer t.deinit();
+    try std.testing.expect(t.passThrough(fixtureId(null, "woodMaster").?));
+    try std.testing.expect(t.passThrough(fixtureId(null, "woodDoor").?));
+    // param1 excludes the property: the child keeps the false default.
+    try std.testing.expect(!t.passThrough(fixtureId(null, "treeOakSml01").?));
+    try std.testing.expect(!t.passThrough(fixtureId(null, "plainBlock").?));
+    // Unknown ids fail closed (no pass-through).
+    try std.testing.expect(!t.passThrough(60000));
 }
