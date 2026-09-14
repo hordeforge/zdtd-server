@@ -25,7 +25,7 @@ const arena_util = @import("../util/arena.zig");
 const xml = @import("xml_util.zig");
 const io_fs = @import("../util/io_fs.zig");
 const sandbox = @import("sandbox.zig");
-const rng = @import("../util/rng.zig");
+const game_random = @import("../util/game_random.zig");
 
 pub const max_placeholders: usize = 1024;
 pub const max_targets_per_placeholder: usize = 64;
@@ -111,9 +111,9 @@ pub const Table = struct {
     ) ?Replacement {
         const ph = self.at(index) orelse return null;
         if (ph.targets.len == 0) return null;
-        // Utils.RandomFromSeedOnPos(IL=2666).
-        const s: u32 = @bitCast(world_seed +% wx +% (wz << 14) +% (wy << 24));
-        var r = rng.XorShift32.init(s);
+        // Utils.RandomFromSeedOnPos(IL=2666) + the GameRandom port, so the
+        // draw is the one stock makes for this cell.
+        var r = game_random.seededOnPos(wx, wy, wz, world_seed);
         var sum: f32 = 0;
         var eligible: [max_targets_per_placeholder]u16 = undefined;
         var n: usize = 0;
@@ -152,7 +152,7 @@ pub const Table = struct {
             // (`RandomRange(8)` plus the 0x14 offset when the shape has 45
             // degree bands, else `RandomRange(4)`); zdtd does not track
             // Has45DegreeRotations, so it takes the four-way band.
-            rep.rotation = @intCast(r.next() % 4);
+            rep.rotation = @intCast(r.rangeInt(4));
         }
         return rep;
     }

@@ -37,6 +37,10 @@ and compatibility rules in [docs/RELEASES.md](docs/RELEASES.md).
 
 ### Added
 
+- **The stock random generator is ported, and placeholders draw from it.** `GameRandom` (`GameRandom.il.txt`) is the .NET Framework `System.Random` algorithm - the 56-entry `SeedArray`, `MBIG` 2147483647, `MSEED` 161803398, the `inext`/`inextp` subtractive step, `Sample() = InternalSample() * 4.6566128752458E-10` - and `src/util/game_random.zig` implements it together with `Utils::RandomFromSeedOnPos`'s coordinate fold (`seed + x + (z << 14) + (y << 24)`). Its test pins eight seeds against goldens generated from Mono's `System.Random`, the same algorithm. The blockplaceholders per-cell roll now uses it instead of zdtd's xorshift stream, so a placeholder cell resolves to the target stock would pick, and the `randomrotation` reroll uses stock's `RandomRange(4)`.
+
+### Added
+
 - **Prefab placeholder blocks resolve to their real targets.** A prefab's block map names cells like `terrStoneHelper` or `carWrecksRandomHelper`, which are not blocks: stock keeps a `blockplaceholders.xml` list per name and picks a target for every cell it stamps (`BlockPlaceholderMap::Replace` IL=185) using a per-position stream (`Utils::RandomFromSeedOnPos` IL=2666 seeds it with `seed + x + (z << 14) + (y << 24)`), skipping targets whose `biome` does not match the cell and whose `sandboxoption` gate fails, then walking the survivors in document order against `RandomFloat() * sum(prob)`. `randomrotation="true"` re-rolls the rotation off the same stream. zdtd had no placeholder support at all, so those cells became air (the remap reported them as unknown blocks). `assets/blockplaceholders.zig` now loads the catalog (targets resolved to block ids, sandbox gate precomputed), the prefab remap records the placeholder index per cell, and the paint pass resolves each cell at its world position with the biome name and the map seed - so a POI's terrain-helper and random-helper cells become the blocks stock would place.
 
 ### Added
