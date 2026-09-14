@@ -1864,6 +1864,12 @@ encoding is one day high.
   `spawnBloodMoonWalk`, `stageGroupAt`), `src/server/game.zig`
   (`pickStageGroupAt`), `src/server/game/init_assets.zig` (hook wiring),
   test `blood moon walks the stage spawn groups across the night`
+  *Updated 2026-09-14:* the frozen stage is the **weighted** party level
+  (`Game.partyWeightedGameStage` -> `Director.party_stage_weighted`), because
+  `AIDirectorBloodMoonParty::InitParty` IL_0006 resolves it from
+  `partySpawner.CalcPartyLevel()`; the high-water mark stays only as the
+  no-push fallback and as the per-player director stage. A solo player's
+  weighted level is its own stage, so single-player nights are unchanged.
 
 - **BloodMoonEnemyCount semantics** `WORKS` (2026-08-20 reconciliation)
   Parsed (clamped 0..60). The party spawner enforces the stock per-party
