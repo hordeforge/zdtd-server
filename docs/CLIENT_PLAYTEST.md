@@ -743,12 +743,54 @@ the client builds its table from the server's list.
 Method note: the zdtd leg must be given the same `--serverconfig` the stock
 instance runs with. Without it the sandbox-code and preset strings are empty
 and `GameStats` reads 212 bytes; with it the body is 231, byte-for-byte the
-stock length. The remaining size gaps are real: `WorldInfo` is 97 bytes
-against stock's 362 (the world-file CRC table and the persistent-player list
-are the two fields this server does not fill), `LoginAnswered` is 466 against
-1686 (stock's login answer carries the player-profile blob), and `PlayerId`
-is 1512 against 360. None of them stopped the join, but each is a candidate
-fidelity gap worth a byte-level diff.
+stock length.
+
+`WorldInfo` (97 vs stock 362) is **shape-correct**, not truncated. Stock's
+tail is `worldHashesData` - a pre-serialized `count:i32 + count x (path:string,
+crc:u32)` block - followed by `worldDataSize:i64`. `NetPackageWorldInfo::write`
+IL=007D passes it to `BinaryWriter::Write(Byte[])`, but `PooledBinaryWriter::Write(Byte[])`
+(IL=14) writes the raw array straight to the stream, with **no** .NET 7-bit
+length prefix, so the client's `read` IL=006F sees the inner `count` first;
+an empty table is the legal `i32 0` form, which is what zdtd sends (it serves
+no world files - the client loads its own DTM/splat data). The 265 missing
+bytes are the CRC rows for a RWG map's raw world files, which a client only
+needs to *download* files it lacks. The other stock field here is the
+persistent-player list: stock writes presence `true` plus
+`PersistentPlayerList::Write`, zdtd writes presence `false`, and the client's
+`read` IL=0037 substitutes an empty `PersistentPlayerList` - legal, but it means
+the client's player list shows no offline owners, land claims or bedrolls.
+
+Two remaining size gaps are **not** fidelity bugs, and are documented here so
+they stop reading like one:
+
+- `LoginAnswered` (loadgen's stage name; the package is
+  `NetPackagePlayerLoginAnswer`) is measured on the **`data` string length**,
+  not the body: 1686 stock against 344 (466 in the run whose optional GSI keys
+  are set). Body is `dataLen + 8` on both legs because the trailing
+  `platformLobbyId` + two identity/token pairs are the headless default
+  (one `0x00` per null identity, `PlatformUserIdentifierExtensions::ToStream`).
+  `data` is `GameServerInfo::ToString(true)` - a flat `Key:Value;\r\n` table
+  (`GameServerInfo.il.txt:1198-1371`) filled by 79 `SetValue` calls, which zdtd
+  mirrors with 18 fixed + 7 optional keys. Nothing in join, spawn or the sim
+  reads those keys; the two the client gates on (`GameInfoBool` 9
+  `ModdedConfig` and 10 `RequiresMod`, `ConnectionManager.il.txt:167A-16C0`)
+  are absent and therefore read false, which is the permissive value. It is
+  server-browser/info display text - except for one latent difference: zdtd
+  never sets `ModdedConfig`, so a client can never hit stock's
+  `auth_moddedconfigdetected` disconnect on a config-modded server.
+- `PlayerId` (1512 vs 360) is zdtd sending a **usable** player file where stock
+  sends the fresh, empty one: `RequestToSpawnPlayer` leaves `ecd.entityClass`
+  0 and `bLoaded` false, so the stock client never calls
+  `PlayerDataFile::ToPlayer` and builds its own local player
+  (`GameManager.il.txt:4929-5003`). zdtd sends `bLoaded = true` with its
+  server-authoritative bag, toolbelt, starter quest and unlocked-recipe list so
+  the client adopts the server's state. The +1152 breaks down as
+  `unlockedRecipeList` +858 (41 `always_unlocked` rows), bag padding +90,
+  the ECD player branch +44, toolbelt +20, less the v37 ECD tail -24 and the v1
+  challenge journal -9, plus the starter quest entry. Matching stock's 360
+  exactly would flip the client to `RespawnType.NewGame` and discard that
+  restore, so it is a deliberate divergence: see
+  [DIVERGENCES.md](DIVERGENCES.md).
 
 ## Reproducing
 

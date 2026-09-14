@@ -924,6 +924,19 @@ Recorded because they are easy to mistake for one:
   actions) and are tracked as gaps in [GAP_ANALYSIS](GAP_ANALYSIS.md), not as
   decisions to behave differently. Per-class XML lists now omit them rather
   than mapping them onto ApproachAndAttackTarget.
+- **`NetPackagePlayerId` carries a populated player file, stock's carries an
+  empty one.** Stock's `GameManager.RequestToSpawnPlayer` builds a fresh
+  `PlayerDataFile` (`GameManager.il.txt:4371`), `Load` returns early when no
+  `.ttp` exists, and only `ecd.pos` + `ecd.playerProfile` are set, so
+  `bLoaded` stays false: the client never calls `PlayerDataFile::ToPlayer` and
+  builds its own local player (`GameManager.il.txt:4929-5003`), which is why
+  stock's body is ~360 bytes. zdtd sends `bLoaded = true` with the bag,
+  toolbelt, starter quest and unlocked-recipe list it owns, so the client
+  adopts the server's state on a relog instead of starting fresh; matching
+  stock byte-for-byte would mean dropping the server-authoritative restore and
+  flipping the client to `RespawnType.NewGame`. Measured 1512 against 360 in
+  the A/B capture; the breakdown is in
+  [CLIENT_PLAYTEST](CLIENT_PLAYTEST.md#reproducing).
 - **A `DayNightLength` over 400 real minutes freezes world time.** Stock's
   `TimeOfDayIncPerSec` is `24000 / (DayNightLength * 60)` in integer arithmetic,
   so past 400 the result is 0 ticks per second and time does not advance. zdtd

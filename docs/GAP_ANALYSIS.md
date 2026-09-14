@@ -619,6 +619,16 @@ area and the concrete work.
     the stock startPos→endPos pack path (AstarManager location line) is
     simplified to direct chase, and heat input is driven from game events
     rather than `AIDirectorData.noisySounds` named-sound volume/strength.
+    **Updated 2026-09-14:** the pack's size and entity group now come from the
+    `WanderingHorde` gamestages.xml ladder at `party stage % 50`
+    (`AIWanderingHordeSpawner::.ctor` IL_0066 passes `mod = 50`;
+    `UpdateSpawn` IL_006D spawns the resolved row), with the stage from
+    `GameStageDefinition::CalcGameStageAround` (weighted level of the players
+    within 100 m), instead of a fixed 6 of the biome's day/night group.
+    `wandering_horde_size` remains the fallback when no ladder is wired.
+    Still residual: the ladder *walk* (stock paces rows by `interval` and
+    `duration` and advances `groupIndex`, zdtd fires one pack per schedule
+    tick), and the `ScoutGSList`/`AIHordeSpawner` sub-horde.
 
 24. ~~**World: add the stability plane and falling blocks.**~~
     **Shipped** (`src/world/stability.zig`, commits 6daf9ca + 02a373a): the
