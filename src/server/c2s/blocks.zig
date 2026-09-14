@@ -210,6 +210,12 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 } else if (wire_abs < cur_dmg) {
                     abs = wire_abs;
                 }
+                // materials.xml CanDestroy=false (Mbedrock): the stock client
+                // never sends damage for it (`ItemActionAttack::Hit`
+                // IL_028A-029D zeroes the scalar), so a request that does is a
+                // forged edit. Drop this block's entry and keep the rest of the
+                // batch.
+                if (!self.maxdamage.canDestroyFor(base_cur)) continue;
                 var max_hp = self.maxDamageForBlock(base_cur);
                 if (self.claimCovering(b.x, b.z)) |claim| {
                     if (claim.owner_entity == editor_ent) {

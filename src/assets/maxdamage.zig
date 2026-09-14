@@ -149,6 +149,10 @@ pub const Table = struct {
     /// Mwater, Mhay). The block collision default when no Collide mask exists
     /// (BlocksFromXml IL_04D5-04EB).
     material_collidable: std.StringHashMapUnmanaged(bool) = .{},
+    /// materials.xml `CanDestroy` (only Mbedrock declares false). Stock only
+    /// consults it in `ItemActionAttack::Hit` IL_028A-029D, where it zeroes the
+    /// block-damage scalar; `MaterialBlock::.ctor` defaults it true.
+    material_can_destroy: std.StringHashMapUnmanaged(bool) = .{},
     /// materials.xml movement_factor per material id (7 stock rows).
     material_movement_factor: std.StringHashMapUnmanaged(f32) = .{},
     /// materials.xml lightopacity per material id (18 stock rows).
@@ -180,6 +184,7 @@ pub const Table = struct {
             self.stability_explicit = .{};
             self.material_explosion_resist = .{};
             self.material_collidable = .{};
+            self.material_can_destroy = .{};
             self.material_movement_factor = .{};
             self.material_light_opacity = .{};
             self.stage2_health = .{};
@@ -368,6 +373,21 @@ pub const Table = struct {
         const name = self.idName(block_id) orelse return 0;
         const mat = self.block_material.get(name) orelse return 0;
         return self.material_explosion_resist.get(mat) orelse 0;
+    }
+
+    /// materials.xml `CanDestroy` for a block id (block → Material →
+    /// CanDestroy). True when the material is absent, the block is unknown or
+    /// the builtin table is in use: stock's MaterialBlock default is true, and
+    /// the only stock false row is Mbedrock. The damage paths fail closed on a
+    /// false value, which is stricter than stock's dedicated server (which
+    /// applies a forged NetPackageSetBlock verbatim) and matches what a stock
+    /// client can produce, since `ItemActionAttack::Hit`
+    /// (IL_028A-029D) zeroes the damage scalar first.
+    pub fn canDestroyFor(self: *const Table, block_id: u16) bool {
+        if (block_id == 0) return true;
+        const name = self.idName(block_id) orelse return true;
+        const mat = self.block_material.get(name) orelse return true;
+        return self.material_can_destroy.get(mat) orelse true;
     }
 
     /// materials.xml damage_category for a block id (block → Material →
@@ -575,6 +595,12 @@ pub const Table = struct {
                 if (parseBool(cl)) |b| {
                     const kn = try arena.dupe(u8, mid);
                     try self.material_collidable.put(arena, kn, b);
+                }
+            }
+            if (xml.propertyValue(body, "CanDestroy")) |cd| {
+                if (parseBool(cd)) |b| {
+                    const kn = try arena.dupe(u8, mid);
+                    try self.material_can_destroy.put(arena, kn, b);
                 }
             }
             if (xml.propertyValue(body, "movement_factor")) |mf| {
@@ -1687,4 +1713,79 @@ test "MaxDamage falls back to the Extends-resolved material's own MaxDamage" {
     try std.testing.expectEqual(@as(u16, 42), t.maxDamageByName("ownDamage").?);
     // No material and no ancestor: keep the block's own value.
     try std.testing.expectEqual(@as(u16, 7), t.maxDamageByName("noMaterial").?);
+}
+
+test "materials.xml CanDestroy gates block damage" {
+    // Stock MaterialBlock defaults CanDestroy to true and only Mbedrock
+    // declares false (materials.xml), where ItemActionAttack::Hit
+    // IL_028A-029D zeroes the block-damage scalar. The damage paths fail
+    // closed on it, so bedrock resists a forged NetPackageSetBlock.
+    const blocks_src =
+        \\<blocks>
+        \\<block name="terrBedrock">
+        \\  <property name="Material" value="Mbedrock" />
+        \\</block>
+        \\<block name="bedrockChild">
+        \\  <property name="Extends" value="terrBedrock" />
+        \\</block>
+        \\<block name="terrStone">
+        \\  <property name="Material" value="Mstone" />
+        \\</block>
+        \\</blocks>
+    ;
+    const materials_src =
+        \\<materials>
+        \\<material id="Mbedrock">
+        \\  <property name="MaxDamage" value="50000" />
+        \\  <property name="CanDestroy" value="false" />
+        \\</material>
+        \\<material id="Mstone">
+        \\  <property name="MaxDamage" value="500" />
+        \\</material>
+        \\</materials>
+    ;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var blocks_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const blocks_path = try std.fmt.bufPrint(&blocks_buf, "{s}/blocks_cd.xml", .{dir});
+    var mats_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const mats_path = try std.fmt.bufPrint(&mats_buf, "{s}/materials_cd.xml", .{dir});
+    try io_fs.writeFile(blocks_path, blocks_src);
+    try io_fs.writeFile(mats_path, materials_src);
+
+    var t = try loadFromBlocksXml(std.testing.allocator, blocks_path);
+    defer t.deinit();
+    try t.mergeMaterialsXml(std.testing.allocator, mats_path);
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    const bed = t.idByName("terrBedrock") orelse return error.TestUnexpectedResult;
+    const stone = t.idByName("terrStone") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!t.canDestroyFor(bed));
+    // Extends carries the material, so the child resolves to the protected
+    // material too (the fixture name has no AssignIds id, so assert the
+    // resolved material rather than the id-keyed accessor).
+    try std.testing.expectEqualStrings("Mbedrock", t.block_material.get("bedrockChild").?);
+    // A material without the property keeps stock's true default.
+    try std.testing.expect(t.canDestroyFor(stone));
+    // Air and unknown ids fail open (stock's MaterialBlock default is true).
+    try std.testing.expect(t.canDestroyFor(0));
+    try std.testing.expect(t.canDestroyFor(60000));
+}
+
+test "stock materials.xml only bedrock refuses destruction" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/blocks.xml";
+    const mats = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/materials.xml";
+    if (!io_fs.fileExists(path) or !io_fs.fileExists(mats)) return error.SkipZigTest;
+    var t = try loadFromBlocksXml(std.testing.allocator, path);
+    defer t.deinit();
+    try t.mergeMaterialsXml(std.testing.allocator, mats);
+    t.tryMergeBundledAssignIds(std.testing.allocator);
+    const bed = t.idByName("terrBedrock") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(!t.canDestroyFor(bed));
+    // Every other stock block resolves to the default.
+    const stone = t.idByName("terrStone") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(t.canDestroyFor(stone));
+    const chest = t.idByName("cntWoodenChestClosed") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(t.canDestroyFor(chest));
 }

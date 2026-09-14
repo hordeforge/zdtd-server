@@ -297,6 +297,13 @@ pub fn setBlockHp(self: *Game, x: i32, y: i32, z: i32, abs: u16) !void {
 /// chew and admin edits). pub so scenarios can drive the on_block_damage
 /// plugin verdict through the real path.
 pub fn addBlockDamage(self: *Game, x: i32, y: i32, z: i32, dmg: u16) !u16 {
+    // materials.xml CanDestroy=false (Mbedrock): stock zeroes the block-damage
+    // scalar for such a block (ItemActionAttack::Hit IL_028A-029D), so no path
+    // may accumulate damage on it. The choke point covers every non-C2S
+    // damage funnel (zombie chew, traps, blasts).
+    if (!self.maxdamage.canDestroyFor(self.world.blockWorld(x, y, z) catch 0)) {
+        return self.getBlockHp(x, y, z);
+    }
     // on_block_damage verdict (T15): <0 denies the damage, >0 applies that
     // percent. No plugin exports the hook -> 0 -> today's behaviour.
     var applied = dmg;
@@ -626,6 +633,9 @@ pub fn blastBlock(
     instigator_entity: i32,
 ) bool {
     if (id == 0 or !(power > 0) or !(falloff > 0) or !(category_mult > 0)) return false;
+    // materials.xml CanDestroy=false: stock zeroes the damage scalar for such
+    // a block (ItemActionAttack::Hit IL_028A-029D), so a blast never carves it.
+    if (!self.maxdamage.canDestroyFor(id)) return false;
     const max_hp = self.maxDamageForBlock(id);
     if (max_hp == 0) return false;
     const resist = @min(@max(self.maxdamage.explosionResistanceFor(id), 0), 1);
