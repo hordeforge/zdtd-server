@@ -428,6 +428,12 @@ pub const World = struct {
     /// unblocked.
     solid_ctx: ?*anyopaque = null,
     solid_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
+    /// Sight oracle (stock `Block.IsSeeThrough`): a cell blocks sight when its
+    /// Collide mask keeps the sight bit, and water always blocks. Wired from
+    /// the game; when absent, `losClear` falls back to `solid_fn`, which is the
+    /// pre-Collide behaviour.
+    sight_ctx: ?*anyopaque = null,
+    sight_fn: ?*const fn (?*anyopaque, i32, i32, i32) bool = null,
     /// Falling-block landing callback (Fall-event debris drops): the ECS
     /// has no block/item tables, so the Game rolls the landed cells'
     /// `<drop event="Fall">` rows (systemFallingBlocks fires it at contact,

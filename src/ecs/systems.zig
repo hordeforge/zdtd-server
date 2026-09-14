@@ -84,8 +84,11 @@ const TargetSnap = struct { id: i32, slot: Slot, d2: f32, px: f32, pz: f32 };
 /// `Voxel.Raycast`, entity-ai.md). A solid cell anywhere between blocks sight;
 /// an unloaded/missing chunk counts as clear (nothing to hide behind yet).
 fn losClear(w: *const World, zx: f32, zy: f32, zz: f32, px: f32, py: f32, pz: f32) bool {
-    const solid_fn = w.solid_fn orelse return true; // no terrain hook: sight unblocked
-    const solid_ctx = w.solid_ctx;
+    // Sight uses its own oracle (stock `IsSeeThrough` reads the Collide sight
+    // bit and treats water as opaque); without one it keeps the old movement
+    // predicate, so an offline or fixture world behaves exactly as before.
+    const solid_fn = w.sight_fn orelse (w.solid_fn orelse return true);
+    const solid_ctx = if (w.sight_fn != null) w.sight_ctx else w.solid_ctx;
     const zy2 = zy + 1.6;
     const py2 = py + 1.6;
     const dx = px - zx;

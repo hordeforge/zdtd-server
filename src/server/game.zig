@@ -945,6 +945,12 @@ pub const Game = struct {
         // AI sense LOS probe: block-solid ray cast (stock CanSee Voxel.Raycast).
         self.sim.solid_ctx = self;
         self.sim.solid_fn = &blockSolidAt;
+        self.sim.sight_ctx = self;
+        self.sim.sight_fn = &game_hooks.blockSightBlockedAt;
+        self.world.movement_solid_ctx = self;
+        self.world.movement_solid_fn = &game_hooks.blockMovementSolid;
+        self.world.sight_block_ctx = self;
+        self.world.sight_block_fn = &game_hooks.blockSightBlocked;
         // Falling-block landing -> Fall-event debris drops (game/chunk_fill).
         self.sim.fall_land_ctx = self;
         self.sim.fall_land_fn = &game_chunk_fill.fallBlocksLanded;

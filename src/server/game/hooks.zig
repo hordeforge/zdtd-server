@@ -13,6 +13,7 @@ const prefabs_mod = @import("../../world/prefabs.zig");
 const items = @import("../../assets/items.zig");
 const assets_traders = @import("../../assets/traders.zig");
 const assignids = @import("../../assets/assignids_comptime.zig");
+const assets_blocks = @import("../../assets/blocks.zig");
 
 pub fn heightAtWorld(ctx: ?*anyopaque, wx: i32, wz: i32) f32 {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
@@ -484,6 +485,34 @@ pub fn heldItemLight(ctx: ?*anyopaque, item_id: u16) f32 {
 /// Runs on parallel AI/turret workers (LOS, movement probes, gravity), so the
 /// world probe holds `terrain_mu`: `isSolidWorld` reaches `World.getOrCreate`,
 /// which mutates shared state (chunk-map insert/evict/rehash, touch_seq) and
+/// `blocks.xml` Collide `movement` verb for a block id: stock
+/// `Block.IsCollideMovement`. Wired onto `World.movement_solid_fn`, so the
+/// block id is resolved by the store and the table stays out of `world/`. An id
+/// the table does not know keeps the pre-parse behaviour (solid).
+pub fn blockMovementSolid(ctx: ?*anyopaque, id: u16) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.blocks.byId(id)) |d| return (d.collide & assets_blocks.collide_movement) != 0;
+    return true;
+}
+
+/// `blocks.xml` Collide `sight` verb for a block id: the `IsCollideSight` half
+/// of stock `Block.IsSeeThrough` (water is handled by the store, since it
+/// always blocks sight). An id the table does not know keeps the pre-parse
+/// behaviour (sight blocked).
+pub fn blockSightBlocked(ctx: ?*anyopaque, id: u16) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    if (g.blocks.byId(id)) |d| return (d.collide & assets_blocks.collide_sight) != 0;
+    return true;
+}
+
+/// Coordinate-level sight probe for the AI/voxel LOS paths: the same
+/// `sightBlockedWorld` the bot gate uses, through a function pointer so
+/// `ecs/systems.zig` does not need the store's chunk machinery.
+pub fn blockSightBlockedAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    return g.world.sightBlockedWorld(x, y, z);
+}
+
 /// allocates from the non-thread-safe World allocator.
 pub fn blockSolidAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));

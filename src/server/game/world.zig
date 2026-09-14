@@ -752,8 +752,8 @@ pub fn clearBlockRaw(self: *Game, x: i32, y: i32, z: i32) void {
 
 /// Voxel line-of-sight between two world points, used to gate `bot shoot`
 /// (RFC 0001 §4: the host rejects an LOS-blocked shot). Samples
-/// `World.isSolidWorld` every 0.5 blocks along the line; returns false when a
-/// solid block intersects. Chunk-probe errors (unloaded / I/O) fail OPEN
+/// `World.sightBlockedWorld` every 0.5 blocks along the line; returns false
+/// when a sight-blocking block intersects. Chunk-probe errors (unloaded / I/O) fail OPEN
 /// (treated as clear) so a bot is not permanently silenced across a chunk
 /// border; the guest brain already gates the shot on its own accuracy rolls.
 pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
@@ -770,7 +770,7 @@ pub fn botLosClear(self: *Game, from: [3]f32, to: [3]f32) bool {
         const ix: i32 = @floor(from[0] + dx * t);
         const iy: i32 = @floor(from[1] + dy * t);
         const iz: i32 = @floor(from[2] + dz * t);
-        if (self.world.isSolidWorld(ix, iy, iz) catch continue) return false;
+        if (self.world.sightBlockedWorld(ix, iy, iz)) return false;
     }
     return true;
 }

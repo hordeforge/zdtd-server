@@ -573,6 +573,15 @@ pub const World = struct {
     /// door block, so `isSolidWorld` treats an open door as passable.
     door_id_ctx: ?*anyopaque = null,
     door_id_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    /// `blocks.xml` Collide verb oracles (Game wires the blocks table, world
+    /// must stay table-free). `movement_solid_fn` is stock
+    /// `Block.IsCollideMovement`; `sight_block_fn` is the `IsCollideSight` half
+    /// of `Block.IsSeeThrough`. Absent = the pre-parse behaviour (every non-air
+    /// non-water block blocks movement and sight).
+    movement_solid_ctx: ?*anyopaque = null,
+    movement_solid_fn: ?*const fn (?*anyopaque, u16) bool = null,
+    sight_block_ctx: ?*anyopaque = null,
+    sight_block_fn: ?*const fn (?*anyopaque, u16) bool = null,
     /// Water-fill notifier: called per cell the leveler fills so the Game can
     /// broadcast the change. The chunk `dirty` flag only drives persistence,
     /// so without this a pour is saved but never sent, and a client sees the
@@ -1131,6 +1140,34 @@ pub const World = struct {
                 return (@as(u8, @intCast((raw >> 22) & 15)) & 2) == 0;
             }
         }
+        // Stock `Block.IsCollideMovement` (Block.il IL=90): the movement bit of
+        // the block's Collide mask. 66 stock rows clear it (grass, plants,
+        // cobwebs, campfires, trash piles, spikes, barbed wire, quest markers),
+        // so those stop blocking movement; a block with no Collide property
+        // keeps the all-bits default, i.e. today's behaviour.
+        if (self.movement_solid_fn) |f| return f(self.movement_solid_ctx, id);
+        return true;
+    }
+
+    /// Stock `Block.IsSeeThrough` (Block.il IL=61): sight is blocked when the
+    /// block's shape carries the sight collide bit, and WATER ALWAYS BLOCKS
+    /// SIGHT (`IsSeeThrough` returns true only when the bit is clear and the
+    /// cell is not water). Air never blocks; an open door is passable like the
+    /// movement predicate. A chunk-probe failure fails OPEN (clear), matching
+    /// the bot LOS contract that a border probe must not silence a bot.
+    pub fn sightBlockedWorld(self: *World, x: i32, y: i32, z: i32) bool {
+        const raw = self.rawWorld(x, y, z) catch return false;
+        const id: u16 = tts.typeId(raw);
+        if (id == self.terrain_ids.air) return false;
+        if (id == self.terrain_ids.water) return true;
+        if (self.door_id_fn) |f| {
+            if (f(self.door_id_ctx, id)) {
+                return (@as(u8, @intCast((raw >> 22) & 15)) & 2) != 0;
+            }
+        }
+        // Only 53 stock Collide rows keep the sight bit, so most containers and
+        // glass become see-through once this runs.
+        if (self.sight_block_fn) |f| return f(self.sight_block_ctx, id);
         return true;
     }
 
@@ -2584,4 +2621,75 @@ test "chunk pointers stay valid across map resizes (pointer-stable store)" {
     const mid_h = mid.heightAt(0, 0);
     _ = try w.getOrCreate(.{ .x = 42, .z = 0 });
     try std.testing.expectEqual(mid_h, mid.heightAt(0, 0));
+}
+
+test "Collide verbs decide movement and sight" {
+    // Stock `Block.IsCollideMovement` (movement bit) gates movement and
+    // `Block.IsSeeThrough` (sight bit) gates sight; water always blocks sight.
+    // 66 of the 418 stock Collide rows clear the movement bit (grass, plants,
+    // cobwebs, campfires, spikes, barbed wire) and 365 clear the sight bit
+    // (containers, most glass), so both predicates matter.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var w = try World.init(std.testing.allocator, dir);
+    defer w.deinit();
+
+    const Ids = struct {
+        const plant: u16 = 501; // Collide "melee,bullet,arrow,rocket": no movement, no sight
+        const glass: u16 = 502; // "movement,melee,bullet,arrow,rocket": movement, no sight
+        const wall: u16 = 503; // all six bits
+        const unknown: u16 = 504; // not in the table
+    };
+    const Table = struct {
+        fn movement(_: ?*anyopaque, id: u16) bool {
+            return switch (id) {
+                Ids.plant => false,
+                Ids.glass, Ids.wall => true,
+                else => true, // unknown id keeps the pre-parse behaviour
+            };
+        }
+        fn sight(_: ?*anyopaque, id: u16) bool {
+            return switch (id) {
+                Ids.plant, Ids.glass => false,
+                Ids.wall => true,
+                else => true,
+            };
+        }
+    };
+    w.movement_solid_ctx = null;
+    w.movement_solid_fn = &Table.movement;
+    w.sight_block_ctx = null;
+    w.sight_block_fn = &Table.sight;
+
+    try w.setBlockWorld(3, 70, 3, Ids.plant);
+    try w.setBlockWorld(4, 70, 3, Ids.glass);
+    try w.setBlockWorld(5, 70, 3, Ids.wall);
+    try w.setBlockWorld(6, 70, 3, Ids.unknown);
+
+    // Movement: the plant stops blocking, glass and the wall do.
+    try std.testing.expect(!try w.isSolidWorld(3, 70, 3));
+    try std.testing.expect(try w.isSolidWorld(4, 70, 3));
+    try std.testing.expect(try w.isSolidWorld(5, 70, 3));
+    try std.testing.expect(try w.isSolidWorld(6, 70, 3));
+
+    // Sight: only the wall blocks (glass and the plant are see-through).
+    try std.testing.expect(!w.sightBlockedWorld(3, 70, 3));
+    try std.testing.expect(!w.sightBlockedWorld(4, 70, 3));
+    try std.testing.expect(w.sightBlockedWorld(5, 70, 3));
+    try std.testing.expect(w.sightBlockedWorld(6, 70, 3));
+    // Air never blocks sight, and water always does (IsSeeThrough returns true
+    // only when the sight bit is clear AND the cell is not water).
+    try std.testing.expect(!w.sightBlockedWorld(3, 71, 3));
+    try w.setBlockWorld(3, 71, 3, w.terrain_ids.water);
+    try std.testing.expect(w.sightBlockedWorld(3, 71, 3));
+
+    // With no oracle the pre-parse behaviour stands: every non-air, non-water
+    // block blocks both verbs.
+    var w2 = try World.init(std.testing.allocator, dir);
+    defer w2.deinit();
+    try w2.setBlockWorld(3, 70, 3, Ids.plant);
+    try std.testing.expect(try w2.isSolidWorld(3, 70, 3));
+    try std.testing.expect(w2.sightBlockedWorld(3, 70, 3));
 }
