@@ -18,6 +18,7 @@ pub const signs = @import("signs.zig");
 pub const gameevents = @import("gameevents.zig");
 pub const blockplaceholders = @import("blockplaceholders.zig");
 pub const localization = @import("localization.zig");
+pub const passive_effects = @import("passive_effects.zig");
 pub const entities = @import("entities.zig");
 pub const recipes = @import("recipes.zig");
 pub const loot = @import("loot.zig");
@@ -58,6 +59,7 @@ test {
     _ = gameevents;
     _ = blockplaceholders;
     _ = localization;
+    _ = passive_effects;
     _ = entities;
     _ = recipes;
     _ = loot;
