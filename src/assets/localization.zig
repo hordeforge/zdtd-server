@@ -135,7 +135,9 @@ pub fn deflate(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
     // sink starts big enough for the first block.
     try aw.ensureTotalCapacity(src.len / 2 + 64);
     var window: [flate.max_window_len]u8 = undefined;
-    var comp = try flate.Compress.init(&aw.writer, &window, .raw, .default);
+    // Stock's `DeflateOutputStream(_, 3)`: level 3 (`Options.level_3`), so the
+    // compressed size sits where stock's does rather than at the default.
+    var comp = try flate.Compress.init(&aw.writer, &window, .raw, flate.Compress.Options.level_3);
     try comp.writer.writeAll(src);
     try comp.finish();
     return try aw.toOwnedSlice();

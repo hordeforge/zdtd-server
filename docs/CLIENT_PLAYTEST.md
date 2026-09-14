@@ -711,10 +711,10 @@ by the block, texture and maxdamage tables), so a warning can repeat.
 modlets and sends the merged patch blob to each joining client. zdtd used to
 send nothing, so a stock client showed the mod's raw keys instead of its
 names; it now sends `NetPackageLocalization` at the same point in the
-enter-game sequence, and the loadgen sees it on both legs (zdtd 18143 bytes
-against stock's 19554 - the patch set is the same 459 keys and the gap is
-consistent with stock deflating at level 3 where this server uses the default
-level).
+enter-game sequence, and the loadgen sees it on both legs (zdtd 19010 bytes
+against stock's 19554). The patch set is the same 459 keys, so the remaining
+2.8% is text stock writes and this server does not; both deflate at level 3
+now (`DeflateOutputStream(_, 3)`).
 
 **Join path.** `7dtd-loadgen --join --host 127.0.0.1 --port <LiteNet> --count 1
 --no-spawn-zombies` against each leg, same client build:
