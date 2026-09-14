@@ -25,7 +25,17 @@ const util_log = @import("../util/log.zig");
 
 /// One predicate inside a `[...]` group (stock evaluates real XPath 1.0; a
 /// modlet uses a small subset of it).
-const XPredKind = enum { attr_eq, attr_contains, attr_starts_with, attr_exists, index_eq };
+const XPredKind = enum {
+    attr_eq,
+    attr_contains,
+    attr_starts_with,
+    attr_exists,
+    index_eq,
+    /// `[child]` / `[child[@a='b']]`: the candidate must contain a child
+    /// element with that tag (and, when `val` is non-empty, matching that
+    /// inner predicate clause).
+    child_exists,
+};
 
 const XPred = struct {
     kind: XPredKind = .attr_exists,
@@ -43,6 +53,8 @@ const XSeg = struct {
     /// `or` chain (`[@name='a' or @name='b']`; simple modlets use one or the
     /// other).
     any: bool = false,
+    /// `[last()]`: select the last node of this segment's match list.
+    last: bool = false,
 };
 
 const ParsedXPath = struct {
@@ -73,7 +85,7 @@ fn parseXPath(xpath: []const u8) ?ParsedXPath {
             // [@a='1' and @b='2'], [@a='1' or @a='2'], [2], [@tag].
             var rest = raw[br..];
             while (std.mem.findScalar(u8, rest, '[')) |b2| {
-                const e2 = std.mem.findScalar(u8, rest, ']') orelse return null;
+                const e2 = matchingBracket(rest, b2) orelse return null;
                 if (!tryParsePredicateGroup(&seg, rest[b2 + 1 .. e2])) return null;
                 rest = rest[e2 + 1 ..];
             }
@@ -121,6 +133,9 @@ pub fn fileFromXPath(xpath: []const u8) ?[]const u8 {
         .{ "weathersurvival", "weathersurvival.xml" },
         .{ "challenges", "challenges.xml" },
         .{ "item_modifiers", "item_modifiers.xml" },
+        // The item_modifiers.xml root is the singular `<item_modifier>`, which
+        // is also what its patches address (`//item_modifier/...`).
+        .{ "item_modifier", "item_modifiers.xml" },
         .{ "qualityinfo", "qualityinfo.xml" },
         .{ "shapes", "shapes.xml" },
         .{ "sounds", "sounds.xml" },
@@ -142,15 +157,31 @@ pub fn fileFromXPath(xpath: []const u8) ?[]const u8 {
 fn tryParsePredicateGroup(seg: *XSeg, inner_raw: []const u8) bool {
     const inner = std.mem.trim(u8, inner_raw, " \t\r\n");
     if (inner.len == 0) return false;
-    const has_or = std.mem.find(u8, inner, " or ") != null;
-    const has_and = std.mem.find(u8, inner, " and ") != null;
-    if (has_or and has_and) return false; // mixed precedence: not modelled
+    const depth0_or = depthZeroFind(inner, " or ") != null;
+    const depth0_and = depthZeroFind(inner, " and ") != null;
+    if (depth0_or and depth0_and) return false; // mixed precedence: not modelled
     // Sticky: a later positional group (`[1]`) must not reset an earlier
     // `or` group's mode.
-    if (has_or) seg.any = true;
-    var it = std.mem.splitSequence(u8, inner, if (has_or) " or " else " and ");
-    while (it.next()) |clause_raw| {
-        const clause = std.mem.trim(u8, clause_raw, " \t\r\n");
+    if (depth0_or) seg.any = true;
+    // Depth-aware split: a nested predicate carries its own ` and `
+    // (`property[@name='a' and @value='b']`), so a plain substring split would
+    // cut the group in half and reject the xpath.
+    var clauses: [8][]const u8 = undefined;
+    var nc: usize = 0;
+    {
+        const sep: []const u8 = if (depth0_or) " or " else " and ";
+        var pos: usize = 0;
+        while (pos <= inner.len) {
+            const end = depthZeroFind(inner[pos..], sep) orelse (inner.len - pos);
+            if (nc >= clauses.len) return false;
+            clauses[nc] = std.mem.trim(u8, inner[pos .. pos + end], " \t\r\n");
+            nc += 1;
+            if (pos + end >= inner.len) break;
+            pos += end + sep.len;
+        }
+    }
+    for (clauses[0..nc]) |clause_raw| {
+        const clause = clause_raw;
         if (clause.len == 0) return false;
         if (seg.pred_n >= seg.preds.len) return false;
         var pred: XPred = .{};
@@ -177,17 +208,111 @@ fn tryParsePredicateGroup(seg: *XSeg, inner_raw: []const u8) bool {
                 pred.attr = std.mem.trim(u8, rest, " \t");
             }
             if (pred.attr.len == 0) return false;
-        } else {
+        } else if (std.mem.eql(u8, clause, "last()")) {
+            seg.last = true;
+            continue;
+        } else if (std.fmt.parseInt(u32, clause, 10)) |n| {
             // Bare number = positional predicate.
-            const n = std.fmt.parseInt(u32, clause, 10) catch return false;
             if (n == 0) return false;
             pred.kind = .index_eq;
             pred.index = n;
+        } else |_| {
+            // `[child]` / `[child[@a='b' and @c='d']]`: an element-existence
+            // test, the form Real modlets use to select by a child property
+            // (`block[property[@name='Tags' and @value='treasureHunter']]`).
+            // The inner clause is kept verbatim and parsed at match time, so a
+            // nested predicate is evaluated rather than ignored.
+            const br = std.mem.findScalar(u8, clause, '[');
+            const child = std.mem.trim(u8, if (br) |b| clause[0..b] else clause, " \t");
+            if (child.len == 0 or !std.ascii.isAlphabetic(child[0])) return false;
+            pred.kind = .child_exists;
+            pred.attr = child;
+            if (br) |b| {
+                const close_in = matchingBracket(clause, b) orelse return false;
+                if (close_in <= b + 1) return false;
+                pred.val = std.mem.trim(u8, clause[b + 1 .. close_in], " \t");
+                if (pred.val.len == 0) return false;
+            }
         }
         seg.preds[seg.pred_n] = pred;
         seg.pred_n += 1;
     }
     return true;
+}
+
+/// Index of the `)` matching the `(` at `open_at` (depth- and quote-aware, so
+/// a nested call's own parentheses are skipped: `xpath('a[fn(@b, "c")]')`).
+fn matchingParen(hay: []const u8, open_at: usize) ?usize {
+    var depth: usize = 0;
+    var quote: u8 = 0;
+    var i: usize = open_at;
+    while (i < hay.len) : (i += 1) {
+        const c = hay[i];
+        if (quote != 0) {
+            if (c == quote) quote = 0;
+            continue;
+        }
+        switch (c) {
+            '\'', '"' => quote = c,
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if (depth == 0) return i;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+/// Index of the `]` matching the `[` at `open_at` (depth- and quote-aware, so
+/// a nested predicate's own brackets are skipped).
+fn matchingBracket(hay: []const u8, open_at: usize) ?usize {
+    var depth: usize = 0;
+    var quote: u8 = 0;
+    var i: usize = open_at;
+    while (i < hay.len) : (i += 1) {
+        const c = hay[i];
+        if (quote != 0) {
+            if (c == quote) quote = 0;
+            continue;
+        }
+        switch (c) {
+            '\'', '"' => quote = c,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if (depth == 0) return i;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+/// First occurrence of `needle` at bracket depth 0 and outside quotes. A
+/// nested predicate's own separators live at depth 1, so they are skipped.
+fn depthZeroFind(hay: []const u8, needle: []const u8) ?usize {
+    var depth: usize = 0;
+    var quote: u8 = 0;
+    var i: usize = 0;
+    while (i + needle.len <= hay.len) : (i += 1) {
+        const c = hay[i];
+        if (quote != 0) {
+            if (c == quote) quote = 0;
+            continue;
+        }
+        switch (c) {
+            '\'', '"' => quote = c,
+            '[' => depth += 1,
+            ']' => {
+                if (depth > 0) depth -= 1;
+            },
+            else => {},
+        }
+        if (depth == 0 and std.mem.startsWith(u8, hay[i..], needle)) return i;
+    }
+    return null;
 }
 
 /// Strip one layer of matching quotes from a predicate value.
@@ -214,6 +339,29 @@ fn predicateHolds(hay: []const u8, open_at: usize, p: XPred) bool {
         },
         // Positional predicates are resolved by the match counter.
         .index_eq => return true,
+        .child_exists => {
+            const span = elementSpan(hay, open_at) orelse return false;
+            // Skip the candidate's own opening tag so `[div]` on a `<div>`
+            // does not match the element itself.
+            const gt = std.mem.findPos(u8, hay, open_at, ">") orelse return false;
+            if (gt >= span.end) return false;
+            var inner_seg = XSeg{ .tag = p.attr };
+            if (p.val.len > 0) {
+                if (!tryParsePredicateGroup(&inner_seg, p.val)) return false;
+            }
+            var from = gt + 1;
+            while (from < span.end) {
+                const lt = std.mem.findPos(u8, hay, from, "<") orelse return false;
+                if (lt >= span.end) return false;
+                if (lt + 1 < hay.len and (hay[lt + 1] == '/' or hay[lt + 1] == '!' or hay[lt + 1] == '?')) {
+                    from = lt + 1;
+                    continue;
+                }
+                if (elementMatches(hay, lt, inner_seg)) return true;
+                from = lt + 1;
+            }
+            return false;
+        },
     }
 }
 
@@ -263,19 +411,65 @@ pub const max_xpath_matches: usize = 512;
 
 /// Every open index matching `xp`, in document order (stock `singlePatch`
 /// applies an op to each node in the XPath result list).
-fn findAll(hay: []const u8, xp: ParsedXPath, out: []usize) usize {
-    var n: usize = 0;
-    var from: usize = 0;
-    while (n < out.len) {
-        const rel = findElementIn(hay[from..], xp, 0) orelse break;
-        const abs = from + rel;
-        out[n] = abs;
-        n += 1;
-        // Continue after this match's opening tag; a nested/subsequent match
-        // is found by the same scan.
-        from = abs + 1;
-        if (from >= hay.len) break;
+/// One matched element as a byte range in the document.
+const Range = struct { start: usize, end: usize };
+
+/// Collect matches of `xp.segs[seg..]` inside `hay[from_in..limit]` into `out`.
+/// Offsets stay absolute, so a descendant search passes the parent's body
+/// bounds rather than a sub-slice.
+fn collectRanges(
+    hay: []const u8,
+    xp: ParsedXPath,
+    seg: usize,
+    from_in: usize,
+    limit: usize,
+    out: []Range,
+    n: *usize,
+) void {
+    if (seg >= xp.n) return;
+    var scan = from_in;
+    while (scan < limit) {
+        const lt = std.mem.findPos(u8, hay, scan, "<") orelse return;
+        if (lt >= limit) return;
+        if (lt + 1 < hay.len and (hay[lt + 1] == '/' or hay[lt + 1] == '!' or hay[lt + 1] == '?')) {
+            scan = lt + 1;
+            continue;
+        }
+        if (elementMatches(hay, lt, xp.segs[seg])) {
+            const span = elementSpan(hay, lt) orelse {
+                scan = lt + 1;
+                continue;
+            };
+            if (seg + 1 == xp.n) {
+                if (n.* >= out.len) return;
+                out[n.*] = .{ .start = lt, .end = span.end };
+                n.* += 1;
+                // Keep scanning after this element so a nested or later
+                // sibling match is still found.
+                scan = lt + 1;
+                continue;
+            }
+            const gt = std.mem.findPos(u8, hay, lt, ">") orelse return;
+            if (gt > lt and hay[gt - 1] == '/') {
+                scan = gt + 1;
+                continue;
+            }
+            collectRanges(hay, xp, seg + 1, gt + 1, @min(span.end, limit), out, n);
+        }
+        scan = lt + 1;
     }
+}
+
+fn findAll(hay: []const u8, xp: ParsedXPath, out: []usize) usize {
+    // Collect every match of the whole path, not just the first per ancestor:
+    // restarting the scan for the full path after a match only finds further
+    // matches when the path's FIRST segment is the repeated element
+    // (`//item[x]`), so `/blocks/block[x]` stopped after one block.
+    var ranges: [max_xpath_matches]Range = undefined;
+    var n: usize = 0;
+    collectRanges(hay, xp, 0, 0, hay.len, &ranges, &n);
+    for (0..@min(n, out.len)) |i| out[i] = ranges[i].start;
+    if (n > out.len) n = out.len;
     // Positional predicates (`[2]`) select one node out of the result list.
     // Stock's XPath applies the predicate per segment; the common modlet form
     // puts it on the final segment, where the full-path ordinal is the same.
@@ -285,7 +479,20 @@ fn findAll(hay: []const u8, xp: ParsedXPath, out: []usize) usize {
         out[0] = out[idx - 1];
         return 1;
     }
+    if (pathLast(xp)) {
+        if (n == 0) return 0;
+        out[0] = out[n - 1];
+        return 1;
+    }
     return n;
+}
+
+/// True when the path ends in a `[last()]` group.
+fn pathLast(xp: ParsedXPath) bool {
+    for (xp.segs[0..xp.n]) |seg| {
+        if (seg.last) return true;
+    }
+    return false;
 }
 
 /// Positional index of the last segment that carries one (0 = none).
@@ -631,17 +838,184 @@ fn appendToAttributeValue(
     return try setAttribute(allocator, hay, open_at, attr_name, joined);
 }
 
-/// Evaluate the NCalc subset a simple modlet's `<if cond="...">` uses.
-/// Null = not evaluable here (the caller skips the whole conditional with a
-/// warning rather than guessing).
-fn evaluateCondition(expr_in: []const u8) ?bool {
-    var expr = std.mem.trim(u8, expr_in, " \t\r\n");
+/// XML entity unescape for a `cond` attribute value (the corpus writes
+/// `&gt;` and `&quot;` inside the expression). Returns `in` when there is
+/// nothing to unescape; otherwise writes into `buf` (a too-small buffer
+/// leaves the text as-is, which then fails closed at the evaluator).
+fn unescapeEntities(buf: []u8, in: []const u8) []const u8 {
+    var out: usize = 0;
+    var i: usize = 0;
+    while (i < in.len) {
+        if (in[i] == '&') {
+            const rest = in[i..];
+            const pair: ?struct { []const u8, u8 } = if (std.mem.startsWith(u8, rest, "&amp;"))
+                .{ "&amp;", '&' }
+            else if (std.mem.startsWith(u8, rest, "&lt;"))
+                .{ "&lt;", '<' }
+            else if (std.mem.startsWith(u8, rest, "&gt;"))
+                .{ "&gt;", '>' }
+            else if (std.mem.startsWith(u8, rest, "&quot;"))
+                .{ "&quot;", '"' }
+            else if (std.mem.startsWith(u8, rest, "&apos;"))
+                .{ "&apos;", '\'' }
+            else
+                null;
+            if (pair) |pr| {
+                if (out >= buf.len) return in;
+                buf[out] = pr[1];
+                out += 1;
+                i += pr[0].len;
+                continue;
+            }
+        }
+        if (out >= buf.len) return in;
+        buf[out] = in[i];
+        out += 1;
+        i += 1;
+    }
+    return buf[0..out];
+}
+
+/// A 4-component version, the shape NCalc's `version(a,b,c,d)` produces.
+const Version = struct { c: [4]u16 = .{ 0, 0, 0, 0 } };
+
+fn parseVersionString(s: []const u8) Version {
+    var v: Version = .{};
+    var it = std.mem.splitScalar(u8, std.mem.trim(u8, s, " \t"), '.');
+    var i: usize = 0;
+    while (it.next()) |p| : (i += 1) {
+        if (i >= 4) break;
+        v.c[i] = std.fmt.parseInt(u16, std.mem.trim(u8, p, " \t"), 10) catch 0;
+    }
+    return v;
+}
+
+/// `version(1,0,81,1048)` or `mod_version('Name')` as a comparable version.
+/// Null when the operand is neither (the caller then tries the string forms).
+fn versionOperand(text_in: []const u8) ?Version {
+    const t = std.mem.trim(u8, text_in, " \t");
+    if (startsWithIgnoreCase(t, "version(")) {
+        const open_paren = std.mem.findScalar(u8, t, '(') orelse return null;
+        const close = matchingParen(t, open_paren) orelse return null;
+        var v: Version = .{};
+        var it = std.mem.splitScalar(u8, t[open_paren + 1 .. close], ',');
+        var i: usize = 0;
+        while (it.next()) |p| : (i += 1) {
+            if (i >= 4) break;
+            v.c[i] = std.fmt.parseInt(u16, std.mem.trim(u8, p, " \t"), 10) catch return null;
+        }
+        return v;
+    }
+    if (startsWithIgnoreCase(t, "mod_version(")) {
+        const open_paren = std.mem.findScalar(u8, t, '(') orelse return null;
+        const close = matchingParen(t, open_paren) orelse return null;
+        const name = unquote(std.mem.trim(u8, t[open_paren + 1 .. close], " \t"));
+        if (name.len == 0) return null;
+        // An absent mod compares as 0.0.0.0, which is what stock's
+        // version-less ModInfo yields.
+        return parseVersionString(mods.versionByName(name) orelse "");
+    }
+    return null;
+}
+
+const CmpOp = enum { eq, ne, gt, lt, ge, le };
+
+fn compareVersions(a: Version, b: Version, op: CmpOp) bool {
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        if (a.c[i] == b.c[i]) continue;
+        const less = a.c[i] < b.c[i];
+        return switch (op) {
+            .eq => false,
+            .ne => true,
+            .gt => !less,
+            .lt => less,
+            .ge => !less,
+            .le => less,
+        };
+    }
+    return switch (op) {
+        .eq, .ge, .le => true,
+        .ne, .gt, .lt => false,
+    };
+}
+
+/// Split `LHS OP RHS` on the first comparison operator outside quotes and
+/// parentheses. Null when the expression carries no operator.
+fn findComparison(expr: []const u8) ?struct { lhs: []const u8, rhs: []const u8, op: CmpOp } {
+    var quote: u8 = 0;
+    var depth: usize = 0;
+    var i: usize = 0;
+    while (i < expr.len) : (i += 1) {
+        const c = expr[i];
+        if (quote != 0) {
+            if (c == quote) quote = 0;
+            continue;
+        }
+        switch (c) {
+            '\'', '"' => quote = c,
+            '(' => depth += 1,
+            ')' => {
+                if (depth > 0) depth -= 1;
+            },
+            '=', '!', '>', '<' => {
+                // Only a top-level operator compares: one inside `xpath(...)`
+                // or a quoted value is part of an operand.
+                if (depth != 0) continue;
+                const two = i + 1 < expr.len and expr[i + 1] == '=';
+                const op: CmpOp = if (c == '=') .eq else if (c == '!') .ne else if (c == '>') (if (two) .ge else .gt) else (if (two) .le else .lt);
+                const skip: usize = if (two) 2 else 1;
+                return .{
+                    .lhs = std.mem.trim(u8, expr[0..i], " \t"),
+                    .rhs = std.mem.trim(u8, expr[i + skip ..], " \t"),
+                    .op = op,
+                };
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+/// `null` / `!= null` / `== null` operand, the second half of an `xpath()`
+/// existence test.
+fn isNullLiteral(t: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(std.mem.trim(u8, t, " \t"), "null");
+}
+
+/// Evaluate the NCalc subset a modlet's `<if cond="...">` uses: `mod_loaded`,
+/// `mod_version`, `version(a,b,c,d)` comparisons and the `xpath('...')`
+/// existence test against the document being patched. Null = not evaluable
+/// here (the caller skips the whole conditional with a warning rather than
+/// guessing).
+fn evaluateCondition(expr_in: []const u8, base: ?[]const u8) ?bool {
+    var unesc_buf: [512]u8 = undefined;
+    const unescaped = unescapeEntities(&unesc_buf, expr_in);
+    var expr = std.mem.trim(u8, unescaped, " \t\r\n");
     var negate = false;
     while (expr.len > 0 and (expr[0] == '!')) {
         negate = !negate;
         expr = std.mem.trim(u8, expr[1..], " \t");
     }
     const answer: ?bool = blk: {
+        if (findComparison(expr)) |cmp| {
+            const lv = versionOperand(cmp.lhs);
+            const rv = versionOperand(cmp.rhs);
+            if (lv != null and rv != null) break :blk compareVersions(lv.?, rv.?, cmp.op);
+            // xpath('...') == null / != null: an existence test against the
+            // document being patched (stock evaluates the NCalc xpath()
+            // function on the live XmlDocument).
+            if (startsWithIgnoreCase(cmp.lhs, "xpath(") and isNullLiteral(cmp.rhs)) {
+                const doc = base orelse break :blk null;
+                const open_paren = std.mem.findScalar(u8, cmp.lhs, '(') orelse break :blk null;
+                const close = matchingParen(cmp.lhs, open_paren) orelse break :blk null;
+                const inner = unquote(std.mem.trim(u8, cmp.lhs[open_paren + 1 .. close], " \t"));
+                const xp = parseXPath(inner) orelse break :blk null;
+                var matches: [max_xpath_matches]usize = undefined;
+                const exists = findAll(doc, xp, &matches) > 0;
+                break :blk if (cmp.op == .ne) exists else !exists;
+            }
+        }
         if (startsWithIgnoreCase(expr, "mod_loaded(")) {
             const close = std.mem.findScalar(u8, expr, ')') orelse break :blk null;
             const arg = unquote(std.mem.trim(u8, expr["mod_loaded(".len..close], " \t"));
@@ -676,7 +1050,7 @@ fn startsWithIgnoreCase(hay: []const u8, prefix: []const u8) bool {
 /// Inner XML of the conditional branch that applies: the first `<if cond=...>`
 /// whose expression evaluates true, else the `<else>` body. Null when no
 /// branch applies (or the expression language is not evaluable -> warn).
-fn findConditionalBranch(clean: []const u8, op_open: usize, op_body: []const u8) ?[]const u8 {
+fn findConditionalBranch(clean: []const u8, op_open: usize, op_body: []const u8, base: ?[]const u8) ?[]const u8 {
     var else_body: ?[]const u8 = null;
     var saw_if = false;
     var i: usize = 0;
@@ -710,7 +1084,7 @@ fn findConditionalBranch(clean: []const u8, op_open: usize, op_body: []const u8)
                 util_log.warn("zdtd: conditional patch 'if' without cond; block skipped\n", .{});
                 return null;
             };
-            if (evaluateCondition(cond)) |ok| {
+            if (evaluateCondition(cond, base)) |ok| {
                 if (ok) return inner;
             } else {
                 util_log.warn(
@@ -857,7 +1231,7 @@ pub fn applyPatchDoc(allocator: std.mem.Allocator, base: []const u8, patch_xml: 
             // worse than not applying one conditional block (the fail-closed
             // stance stays for a *malformed* patch, not for an unported
             // expression language).
-            const branch = findConditionalBranch(clean, lt, body) orelse {
+            const branch = findConditionalBranch(clean, lt, body, cur) orelse {
                 i = next_i;
                 continue;
             };
@@ -1902,4 +2276,150 @@ test "a known op with no xpath abandons the file instead of the boot" {
     // Ops before the malformed element are applied; the ones after are not.
     try std.testing.expect(std.mem.find(u8, out, "maxdamage=\"9\"") != null);
     try std.testing.expect(std.mem.find(u8, out, "maxdamage=\"11\"") == null);
+}
+
+test "element-existence predicates and last() resolve the real modlet xpaths" {
+    // Three xpaths that the installed SphereII/0-SCore corpus uses and the
+    // subset used to reject (silently, before the logging change):
+    //   /blocks/block[property[@name='Tags' and @value='treasureHunter']]
+    //   //item_modifier/effect_group[passive_effect]
+    //   /entitygroups/entitygroup[last()]
+    const base =
+        \\<blocks>
+        \\<block name="a"><property name="Tags" value="treasureHunter"/></block>
+        \\<block name="b"><property name="Tags" value="other"/></block>
+        \\</blocks>
+    ;
+    const patch =
+        \\<configs>
+        \\  <set xpath="/blocks/block[property[@name='Tags' and @value='treasureHunter']]/@name">hit</set>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "name=\"hit\"") != null);
+    // The non-matching sibling keeps its name.
+    try std.testing.expect(std.mem.find(u8, out, "name=\"b\"") != null);
+
+    // `[passive_effect]`: existence of a child element, evaluated on the
+    // candidate's body.
+    const mod_base =
+        \\<item_modifiers>
+        \\<item_modifier name="m1"><effect_group><passive_effect name="DamageModifier"/></effect_group></item_modifier>
+        \\<item_modifier name="m2"><effect_group/></item_modifier>
+        \\</item_modifiers>
+    ;
+    const mod_patch =
+        \\<configs>
+        \\  <set xpath="//item_modifier/effect_group[passive_effect]/@name">hit</set>
+        \\</configs>
+    ;
+    // Routed by the patch file name, as production does (`<mod>/Config/
+    // item_modifiers.xml`); the xpath root `<item_modifier>` is the singular
+    // form the file itself uses.
+    const mod_out = try applyPatchDoc(std.testing.allocator, mod_base, mod_patch, "item_modifiers.xml", .{
+        .patch_file_name = "item_modifiers.xml",
+    });
+    defer std.testing.allocator.free(mod_out);
+    try std.testing.expect(std.mem.find(u8, mod_out, "name=\"hit\"") != null);
+
+    // `[last()]` selects the final match of the path.
+    const grp_base =
+        \\<entitygroups>
+        \\<entitygroup name="g1"/>
+        \\<entitygroup name="g2"/>
+        \\</entitygroups>
+    ;
+    const grp_patch =
+        \\<configs>
+        \\  <set xpath="/entitygroups/entitygroup[last()]/@name">last</set>
+        \\</configs>
+    ;
+    const grp_out = try applyPatchDoc(std.testing.allocator, grp_base, grp_patch, "entitygroups.xml", .{});
+    defer std.testing.allocator.free(grp_out);
+    try std.testing.expect(std.mem.find(u8, grp_out, "name=\"last\"") != null);
+    try std.testing.expect(std.mem.find(u8, grp_out, "name=\"g1\"") != null);
+}
+
+test "conditional evaluates version() comparisons and xpath() existence" {
+    // The two expressions the installed 0-SCore / SphereII corpus uses:
+    //   cond="mod_version('0-SCore_sphereii') &gt;= version(1,0,81,1048)"
+    //   cond="xpath('//entity_class[starts-with(@name, &quot;vehicle&quot;)]/property[@name=&quot;Buffs&quot;]') != null"
+    // Both used to be skipped as "not evaluable", dropping their patch blocks.
+    const base =
+        \\<blocks>
+        \\<block name="a" Buffs="yes"/>
+        \\</blocks>
+    ;
+    const with_buffs =
+        \\<configs>
+        \\  <conditional>
+        \\    <if cond="xpath('/blocks/block[@name=&quot;a&quot;]/@Buffs') != null">
+        \\      <set xpath="/blocks/block[@name='a']/@Buffs">hit</set>
+        \\    </if>
+        \\    <else>
+        \\      <set xpath="/blocks/block[@name='a']/@Buffs">miss</set>
+        \\    </else>
+        \\  </conditional>
+        \\</configs>
+    ;
+    const out = try applyPatchDoc(std.testing.allocator, base, with_buffs, "blocks.xml", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "Buffs=\"hit\"") != null);
+
+    // `!= null` takes the else branch when the node is absent.
+    const absent =
+        \\<configs>
+        \\  <conditional>
+        \\    <if cond="xpath('/blocks/block[@name=&quot;zzz&quot;]') != null">
+        \\      <set xpath="/blocks/block[@name='a']/@Buffs">hit</set>
+        \\    </if>
+        \\    <else>
+        \\      <set xpath="/blocks/block[@name='a']/@Buffs">miss</set>
+        \\    </else>
+        \\  </conditional>
+        \\</configs>
+    ;
+    const out2 = try applyPatchDoc(std.testing.allocator, base, absent, "blocks.xml", .{});
+    defer std.testing.allocator.free(out2);
+    try std.testing.expect(std.mem.find(u8, out2, "Buffs=\"miss\"") != null);
+
+    // The corpus form nests a call inside xpath(): the closing paren must be
+    // the matching one, not the first `)` (which closes `starts-with(...)`).
+    const nested =
+        \\<configs>
+        \\  <conditional>
+        \\    <if cond="xpath('//block[starts-with(@name, &quot;a&quot;)]/property[@name=&quot;Tags&quot;]') != null">
+        \\      <set xpath="/blocks/block[@name='a']/@Buffs">hit</set>
+        \\    </if>
+        \\  </conditional>
+        \\</configs>
+    ;
+    const nested_base =
+        \\<blocks>
+        \\<block name="a"><property name="Tags" value="x"/></block>
+        \\</blocks>
+    ;
+    const out_nested = try applyPatchDoc(std.testing.allocator, nested_base, nested, "blocks.xml", .{});
+    defer std.testing.allocator.free(out_nested);
+    try std.testing.expect(std.mem.find(u8, out_nested, "Buffs=\"hit\"") != null);
+
+    // version(): a mod that is not installed compares as 0.0.0.0, so
+    // `>= version(1,0,0,0)` is false and the else branch wins. The escaped
+    // `&gt;=` must be decoded for the comparison to be seen at all.
+    const ver_patch =
+        \\<configs>
+        \\  <conditional>
+        \\    <if cond="mod_version('no_such_mod') &gt;= version(1,0,0,0)">
+        \\      <set xpath="/blocks/block[@name='a']/@Buffs">hit</set>
+        \\    </if>
+        \\    <else>
+        \\      <set xpath="/blocks/block[@name='a']/@Buffs">miss</set>
+        \\    </else>
+        \\  </conditional>
+        \\</configs>
+    ;
+    const out3 = try applyPatchDoc(std.testing.allocator, base, ver_patch, "blocks.xml", .{});
+    defer std.testing.allocator.free(out3);
+    try std.testing.expect(std.mem.find(u8, out3, "Buffs=\"miss\"") != null);
 }
