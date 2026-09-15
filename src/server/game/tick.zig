@@ -550,11 +550,6 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
     // requirement (SandboxOptionBool reads it through SandboxOptionManager).
     var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
     const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
-    // Worn armor groups for the ArmorGroupLowestQuality gate; stock caps this
-    // at one entry per worn item (12 equipment slots, one group name each).
-    var armor_group_buf: [ecs.components.inv_equip_count * 2]requirements.ArmorGroup = undefined;
-    // One Tags string per worn equipment item, for WornItems (IL=54).
-    var worn_tags_buf: [ecs.components.inv_equip_count][]const u8 = undefined;
     // Active def ids snapshotted for the lifecycle sweep (a row may add buffs).
     var life_buf: [ecs.components.max_buffs_per_entity]u16 = undefined;
     var life_ids_n: usize = 0;
@@ -644,79 +639,12 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // total. Revertible: removing a stage buff recomputes the deltas
             // without it (additive deltas, recompute-from-set).
             //
-            // Requirement-gate context (ADR 0023 §2): the live player state a
-            // `<requirement>` reads.
-            var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
-            const buff_lookup = BuffNameLookup{ .table = &self.buffs };
-            const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
-            var sink_impl = BuffSink{ .game = self, .entity_id = c.entity_id, .ps = ps };
-            const req_ctx = requirements.Ctx{
-                .levels = c.skill_levels[0..c.skill_level_n],
-                .player_level = c.level,
-                .alive = self.sim.alive[ps],
-                // Seated in a vehicle (`Entity::AttachedToEntity`): scan the
-                // vehicle seats for this entity id.
-                .attached_to_entity = isSeated(&self.sim, c.entity_id),
-                .biome_id = self.biomeIdAt(@trunc(self.sim.transform[ps].x), @trunc(self.sim.transform[ps].z)),
-                .active_buffs = activeBuffIds(&self.sim.buffs[ps], &buff_ids),
-                .buff_names = &buff_names,
-                .held_tags = heldItemTags(self, ps),
-                .sandbox_groups = sandbox_groups,
-                .armor_groups = armorGroups(self, ps, &armor_group_buf),
-                .cvars = &c.cvars,
-                // Per-event roll seed for `RandomRoll seed_type="Random"`
-                // (stock seeds a fresh GameRandom from MinEventParams.Seed):
-                // entity id mixed with the tick, deterministic per sim.
-                .roll_seed = @as(u32, @bitCast(c.entity_id)) *% 0x9E3779B9 +% @as(u32, @truncate(self.tick_n)),
-                // Skill children for `PerksUnlocked` (progression table
-                // parent_attr): the sum reads purchased perk levels by name.
-                .skill_children_ctx = &self.progression_table,
-                .skill_children_total = struct {
-                    fn f(holder: *const anyopaque, skill: []const u8, levels: []const requirements.NameLevel) u16 {
-                        const t: *const assets_progression.Table = @ptrCast(@alignCast(holder));
-                        var total: u16 = 0;
-                        for (t.perks) |p| {
-                            if (!std.mem.eql(u8, p.parent_attr, skill)) continue;
-                            for (levels) |l| {
-                                if (std.mem.eql(u8, l.name, p.name)) {
-                                    total += l.level;
-                                    break;
-                                }
-                            }
-                        }
-                        return total;
-                    }
-                }.f,
-                // The armour rating the previous tick's coredamageresist fold
-                // produced (see requirements.Ctx.armor_rating).
-                .armor_rating = self.sim.buff_phys_resist[ps],
-                .live_buff = &sink_impl,
-                .buff_active = BuffSink.has,
-                .sink = .{ .ctx = &sink_impl, .add_buff = BuffSink.add, .remove_buff = BuffSink.remove },
-                .worn_items = wornItemTags(self, ps, &worn_tags_buf),
-                .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
-                .hp_max = h.max_hp,
-                // `Stat::Max` is the pre-modifier base (`base_max_hp`); the VM
-                // recomputes the modified max one line below every tick.
-                .hp_base_max = h.base_max_hp,
-                .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
-                .stamina_max = h.stamina_max,
-                .stamina_base_max = base_consumable_stat_max,
-                .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
-                .food_max = h.food_max,
-                .food_base_max = base_consumable_stat_max,
-                .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
-                .water_max = h.water_max,
-                .water_base_max = base_consumable_stat_max,
-                // The sim clock's own day/night split (`World.IsDaytime`).
-                .is_night = self.sim.director.clock.isNight(),
-                // The entity's class Tags (`entityclasses.xml`), read by
-                // EntityTagCompare for the default self target.
-                .entity_tags = entityClassTags(self, ps),
-                // CurrentMovementTag (`EntityHasMovementTag`): the client's
-                // reported movement state folded to idle/walking/running.
-                .movement_tags = c.move_tag.name(),
-            };
+            // Requirement-gate context (ADR 0023 §2): the shared PlayerCtx
+            // builder, so the tick fold reads the same gates as the
+            // finish/damage paths.
+            var pctx: PlayerCtx = .{};
+            pctx.init(self, c, ps);
+            const req_ctx = pctx.build(self, c, ps, h, sandbox_groups);
             var req_counts: requirements.Counts = .{};
             // Buff lifecycle events, driven from the active set rather than by
             // id (stock fires them from AddBuff / the entered-game path /
