@@ -74,10 +74,10 @@ pub const LootEntry = struct {
 
 /// One entry's roll-time gate. `none` = ungated; `biome` = the
 /// `LootEntryRequirementBiome` name list (the roll path carries the container's
-/// biome); `progression` / `cvar` / `random_roll` = the classes the roll path
-/// can answer from the opener's requirement context; `other` = a class whose
-/// state the roll path does not carry (`SandboxOption`, `QuestTags`), so the
-/// entry is omitted.
+/// biome); `progression` / `cvar` / `random_roll` / `sandbox` = the classes the
+/// roll path answers from the opener's requirement context; `other` = a class
+/// with no live rows (`QuestTags` is commented out in stock), so the entry is
+/// omitted.
 pub const GateKind = enum { none, biome, progression, cvar, random_roll, sandbox, other };
 
 pub const EntryGate = struct {
