@@ -721,6 +721,15 @@ pub const Client = struct {
     puid_primary: platform_user.Stored = .{},
     puid_native: platform_user.Stored = .{},
 
+    /// The character profile the client sent in
+    /// `NetPackageRequestToSpawnPlayer` (stock keeps it on the
+    /// EntityCreationData: `GameManager::RequestToSpawnPlayer`
+    /// `GameManager.il.txt:4614-4617`). `profile_ok` is false until a body with
+    /// a parseable profile arrives, and the builders then keep the offline
+    /// default appearance rather than sending half a character.
+    profile: @import("../../wire/stock_entity.zig").OwnedProfile = .{},
+    profile_ok: bool = false,
+
     /// Track a bag this player just dropped. At the cap the oldest marker is
     /// evicted rather than the new one dropped, matching stock's
     /// timestamp-ordered eviction: the bags a player is most likely to still

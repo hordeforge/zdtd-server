@@ -448,6 +448,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         } else |_| {
             c.view_radius = self.view_radius;
         }
+        // The client's own character profile rides the same body. Stock stores
+        // it on the ECD it writes back (GameManager::RequestToSpawnPlayer
+        // GameManager.il.txt:4614-4617) so the player sees their real
+        // appearance and everyone nearby sees it too; a malformed or absent
+        // profile keeps the previous/default one instead of failing the spawn.
+        if (packages.parseRequestToSpawnProfile(body)) |prof| {
+            c.profile = prof;
+            c.profile_ok = true;
+        } else |_| {}
         const surf = self.spawnSurface(sp.x, sp.z);
         if (c.entity_id <= 0) {
             c.entity_id = self.sim.spawnPlayer(@floatFromInt(surf.x), @floatFromInt(surf.y), @floatFromInt(surf.z), @intCast(c.slot)) orelse return true;

@@ -104,6 +104,89 @@ pub const PlayerProfile = struct {
 /// Stock PlayerProfile v5 (RE: protocol.md §5 profile body).
 pub const player_profile_version: i32 = 5;
 
+/// Capacity of one profile name field. The stock archetype/race/hair/colour
+/// names are asset identifiers well under this (the longest shipped is 18);
+/// a longer string is treated as a malformed profile rather than truncated, so
+/// a fabricated appearance never reaches the wire.
+pub const profile_name_cap = 32;
+
+/// A `PlayerProfile` copied out of a packet buffer. The client sends its own
+/// profile in `NetPackageRequestToSpawnPlayer` (stock `PlayerProfile::Read`
+/// IL=59 behind `chunkViewDim:i16`, `NetPackageRequestToSpawnPlayer.il.txt`
+/// read IL=14), and stock stores it on the `EntityCreationData` it later writes
+/// back to that player (`GameManager::RequestToSpawnPlayer`,
+/// `GameManager.il.txt:4614-4617`) and to everyone who can see them. zdtd read
+/// only the dim and replaced the profile with a fabricated BaseMale, so every
+/// player appeared as the same default character. The receive buffers are
+/// transient, so the parsed names are copied into fixed storage here.
+pub const OwnedProfile = struct {
+    archetype: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    archetype_len: u8 = 0,
+    is_male: bool = true,
+    race_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    race_name_len: u8 = 0,
+    variant_number: u8 = 0,
+    hair_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    hair_name_len: u8 = 0,
+    hair_color: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    hair_color_len: u8 = 0,
+    mustache_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    mustache_name_len: u8 = 0,
+    chops_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    chops_name_len: u8 = 0,
+    beard_name: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    beard_name_len: u8 = 0,
+    eye_color: [profile_name_cap]u8 = [_]u8{0} ** profile_name_cap,
+    eye_color_len: u8 = 0,
+
+    /// Borrowed view of the owned names, for the writers that take slices.
+    /// The result points into `self`, so it must not outlive it.
+    pub fn view(self: *const OwnedProfile) PlayerProfile {
+        return .{
+            .archetype = self.archetype[0..self.archetype_len],
+            .is_male = self.is_male,
+            .race_name = self.race_name[0..self.race_name_len],
+            .variant_number = self.variant_number,
+            .hair_name = self.hair_name[0..self.hair_name_len],
+            .hair_color = self.hair_color[0..self.hair_color_len],
+            .mustache_name = self.mustache_name[0..self.mustache_name_len],
+            .chops_name = self.chops_name[0..self.chops_name_len],
+            .beard_name = self.beard_name[0..self.beard_name_len],
+            .eye_color = self.eye_color[0..self.eye_color_len],
+        };
+    }
+};
+
+fn copyName(dst: *[profile_name_cap]u8, src: []const u8) !u8 {
+    if (src.len > profile_name_cap) return error.ProfileNameTooLong;
+    @memcpy(dst[0..src.len], src);
+    return @intCast(src.len);
+}
+
+/// `PlayerProfile::Read` (IL=59) into owned storage. The version gates the
+/// optional tails: >1 hairName, >2 hairColor, >3 mustache/chops/beard, >4
+/// eyeColor; a version above the one this build writes is read with the v5
+/// shape and anything below 1 is rejected (stock's ctor defaults stand).
+pub fn readOwnedProfile(r: *binary.Reader) !OwnedProfile {
+    const version = try r.readI32();
+    if (version < 1) return error.UnsupportedProfileVersion;
+    var p: OwnedProfile = .{};
+    var buf: [profile_name_cap]u8 = undefined;
+    p.archetype_len = try copyName(&p.archetype, try r.readString(&buf));
+    p.is_male = try r.readBool();
+    p.race_name_len = try copyName(&p.race_name, try r.readString(&buf));
+    p.variant_number = try r.readByte();
+    if (version > 1) p.hair_name_len = try copyName(&p.hair_name, try r.readString(&buf));
+    if (version > 2) p.hair_color_len = try copyName(&p.hair_color, try r.readString(&buf));
+    if (version > 3) {
+        p.mustache_name_len = try copyName(&p.mustache_name, try r.readString(&buf));
+        p.chops_name_len = try copyName(&p.chops_name, try r.readString(&buf));
+        p.beard_name_len = try copyName(&p.beard_name, try r.readString(&buf));
+    }
+    if (version > 4) p.eye_color_len = try copyName(&p.eye_color, try r.readString(&buf));
+    return p;
+}
+
 /// Stock TraderData primary-inventory entry: ItemStack + runtime markup delta
 /// (i8; stock Increase +100 / Decrease -4) + AddedByPlayer. We have no per-item
 /// markup source, so callers pass 0: the client shows the base econ price.
