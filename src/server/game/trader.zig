@@ -184,7 +184,9 @@ pub fn rollStockRefs(self: *Game, trader_net_id: i32, out: []assets_traders.Roll
     if (!resolved_row and refs.len == 0) refs = tt.trader_always_refs;
     if (refs.len == 0) return 0;
     var rng = rng_util.XorShift32.initFromU64(traderRollSeed(self, trader_net_id));
-    return tt.rollAllRefs(refs, &rng, qualityPolicy(self), out);
+    // Sandbox TraderItemAbundance (default 1.0): stock multiplies each rolled
+    // count before the floor.
+    return tt.rollAllRefs(refs, &rng, qualityPolicy(self), self.trader_item_abundance, out);
 }
 
 pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {

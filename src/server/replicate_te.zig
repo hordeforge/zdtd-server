@@ -332,10 +332,11 @@ pub fn fillVendingStore(self: *Game, v: *vending_mod.Vending) void {
     if (!resolved_row and refs.len == 0) refs = tt.trader_always_refs; // traderAlways fallback
     if (refs.len == 0) return;
     // Deterministic per machine per day (no entity id on a vending block;
-    // the trader_id + day discriminates the stream).
+    // the trader_id + day discriminates the stream). Sandbox
+    // VendingItemAbundance (default 1.0) scales each rolled count.
     var rng = rng_util.XorShift32.initFromU64(game_trader.traderRollSeed(self, @intCast(v.trader_id)));
     var rolled: [assets_traders.max_expand]assets_traders.RolledItem = undefined;
-    const rn = tt.rollAllRefs(refs, &rng, game_trader.qualityPolicy(self), &rolled);
+    const rn = tt.rollAllRefs(refs, &rng, game_trader.qualityPolicy(self), self.vending_item_abundance, &rolled);
     if (rn == 0) return;
     // Vending is owner-priced: the renter sets each entry's markup, so the
     // trader_info buy/sell multipliers do not apply here (loot-economy.md

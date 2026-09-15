@@ -186,15 +186,16 @@ pub const TraderTable = struct {
 
     /// Roll every ref in a list the way stock TraderInfo::Spawn does
     /// (SpawnAllItemsFromList, asm.il 863190): each ref always spawns, its
-    /// count rolls in [min,max], and a group ref expands through
-    /// spawnItemsFromGroup. Writes into out[]; returns count written.
-    pub fn rollAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, policy: QualityPolicy, out: []RolledItem) usize {
+    /// count rolls in [min,max] and multiplies by the sandbox abundance
+    /// (TraderItemAbundance for traders, VendingItemAbundance for vending;
+    /// both 1.0 in the stock default), then `FastMax(1, ...)` floors it, and
+    /// a group ref expands through spawnItemsFromGroup. Writes into out[];
+    /// returns count written.
+    pub fn rollAllRefs(self: *const TraderTable, refs: []const ItemRef, rng: *rng_util.XorShift32, policy: QualityPolicy, abundance: f32, out: []RolledItem) usize {
         var n: usize = 0;
         for (refs) |r| {
             const count = randomSpawnCount(rng, r.count_min, r.count_max);
-            // Stock abundance is 1.0 by default (TraderItemAbundance); the
-            // FastMax(1, count*abundance) floor stays so a 0 roll still sells 1.
-            const count_final: i32 = @max(1, count);
+            const count_final: i32 = @intFromFloat(@max(1.0, @as(f32, @floatFromInt(count)) * abundance));
             if (r.group) {
                 spawnItemsFromGroup(self, r.name, count_final, rng, r.unique_only, policy, out, &n, 0);
             } else {
@@ -660,11 +661,11 @@ test "trader table parses trader_info blocks with per-trader items and attrs" {
     const jen = t.traderInfo(2).?;
     var outj: [128]RolledItem = undefined;
     var rng_j = rng_util.XorShift32.init(7);
-    const ojn = t.rollAllRefs(jen.refs, &rng_j, .{}, &outj);
+    const ojn = t.rollAllRefs(jen.refs, &rng_j, .{}, 1.0, &outj);
     try std.testing.expect(ojn > 0);
     var out_joel: [128]RolledItem = undefined;
     var rng_j2 = rng_util.XorShift32.init(7);
-    const ojn2 = t.rollAllRefs(joel.refs, &rng_j2, .{}, &out_joel);
+    const ojn2 = t.rollAllRefs(joel.refs, &rng_j2, .{}, 1.0, &out_joel);
     try std.testing.expect(ojn2 > 0);
     try std.testing.expect(!std.mem.eql(u8, out_joel[0].name, outj[0].name));
 }
@@ -702,7 +703,7 @@ test "roll stays deterministic and honours count ranges and unique_only" {
     var t = TraderTable.empty();
     var out: [16]RolledItem = undefined;
     var rng_a = rng_util.XorShift32.init(99);
-    const n = t.rollAllRefs(&refs, &rng_a, policy, &out);
+    const n = t.rollAllRefs(&refs, &rng_a, policy, 1.0, &out);
     try std.testing.expectEqual(@as(usize, 3), n);
     try std.testing.expect(out[0].count >= 40 and out[0].count <= 150);
     try std.testing.expectEqual(@as(u16, 1), out[1].count);
@@ -710,13 +711,20 @@ test "roll stays deterministic and honours count ranges and unique_only" {
     // Same seed → same roll (deterministic sim input).
     var rng_b = rng_util.XorShift32.init(99);
     var out2: [16]RolledItem = undefined;
-    const n2 = t.rollAllRefs(&refs, &rng_b, policy, &out2);
+    const n2 = t.rollAllRefs(&refs, &rng_b, policy, 1.0, &out2);
     try std.testing.expectEqual(n, n2);
     for (out[0..n], out2[0..n2]) |a, b| {
         try std.testing.expectEqualStrings(a.name, b.name);
         try std.testing.expectEqual(a.count, b.count);
         try std.testing.expectEqual(a.quality, b.quality);
     }
+    // Sandbox abundance (TraderItemAbundance; the LowDefaultHigh set) scales
+    // the rolled count, then floors at 1 - same seed, same roll first.
+    var rng_c = rng_util.XorShift32.init(99);
+    var out3: [16]RolledItem = undefined;
+    const n3 = t.rollAllRefs(&refs, &rng_c, policy, 2.0, &out3);
+    try std.testing.expectEqual(n, n3);
+    try std.testing.expectEqual(out[0].count * 2, out3[0].count);
 }
 
 test "unique_only group picks distinct refs" {
@@ -742,7 +750,7 @@ test "unique_only group picks distinct refs" {
     const refs = [_]ItemRef{.{ .name = gname, .group = true, .count_min = 3, .count_max = 3 }};
     var out: [16]RolledItem = undefined;
     var rng = rng_util.XorShift32.init(5);
-    const n = t.rollAllRefs(&refs, &rng, .{}, &out);
+    const n = t.rollAllRefs(&refs, &rng, .{}, 1.0, &out);
     try std.testing.expect(n >= 3);
     var seen: [3]bool = .{false} ** 3;
     for (out[0..n]) |r| {
@@ -848,7 +856,7 @@ test "quality-less entry rolls the default range for a quality item only" {
     while (seed <= 32) : (seed += 1) {
         var rng = rng_util.XorShift32.init(seed);
         var out: [8]RolledItem = undefined;
-        const n = t.rollAllRefs(&refs, &rng, quality_names.policy(), &out);
+        const n = t.rollAllRefs(&refs, &rng, quality_names.policy(), 1.0, &out);
         try std.testing.expectEqual(@as(usize, 2), n);
         try std.testing.expectEqualStrings("gunPistol", out[0].name);
         try std.testing.expect(out[0].quality >= 1 and out[0].quality <= 6);
@@ -868,7 +876,7 @@ test "explicit quality attribute wins over the default range" {
     while (seed <= 8) : (seed += 1) {
         var rng = rng_util.XorShift32.init(seed);
         var out: [4]RolledItem = undefined;
-        const n = t.rollAllRefs(&refs, &rng, quality_names.policy(), &out);
+        const n = t.rollAllRefs(&refs, &rng, quality_names.policy(), 1.0, &out);
         try std.testing.expectEqual(@as(usize, 1), n);
         try std.testing.expectEqual(@as(u8, 3), out[0].quality);
     }
@@ -891,7 +899,7 @@ test "TraderMaxTier clamps the roll and gates the spawn" {
     while (seed <= 32) : (seed += 1) {
         var rng = rng_util.XorShift32.init(seed);
         var out: [8]RolledItem = undefined;
-        const n = t.rollAllRefs(&refs, &rng, policy_clamped, &out);
+        const n = t.rollAllRefs(&refs, &rng, policy_clamped, 1.0, &out);
         try std.testing.expectEqual(@as(usize, 2), n);
         try std.testing.expect(out[0].quality >= 1 and out[0].quality <= 2);
     }
@@ -901,7 +909,7 @@ test "TraderMaxTier clamps the roll and gates the spawn" {
     policy_zero.max_tier = 0;
     var rng_zero = rng_util.XorShift32.init(11);
     var out_zero: [8]RolledItem = undefined;
-    const nz = t.rollAllRefs(&refs, &rng_zero, policy_zero, &out_zero);
+    const nz = t.rollAllRefs(&refs, &rng_zero, policy_zero, 1.0, &out_zero);
     try std.testing.expectEqual(@as(usize, 1), nz);
     try std.testing.expectEqualStrings("resourceWood", out_zero[0].name);
 
@@ -911,7 +919,7 @@ test "TraderMaxTier clamps the roll and gates the spawn" {
     policy_low.max_tier = 3;
     var rng_low = rng_util.XorShift32.init(11);
     var out_low: [8]RolledItem = undefined;
-    try std.testing.expectEqual(@as(usize, 0), t.rollAllRefs(&high_refs, &rng_low, policy_low, &out_low));
+    try std.testing.expectEqual(@as(usize, 0), t.rollAllRefs(&high_refs, &rng_low, policy_low, 1.0, &out_low));
 
     // max_tier -1 disables the clamp: the full default range comes back.
     var policy_uncapped = quality_names.policy();
@@ -921,7 +929,7 @@ test "TraderMaxTier clamps the roll and gates the spawn" {
     while (seed <= 64) : (seed += 1) {
         var rng = rng_util.XorShift32.init(seed);
         var out: [8]RolledItem = undefined;
-        _ = t.rollAllRefs(&refs, &rng, policy_uncapped, &out);
+        _ = t.rollAllRefs(&refs, &rng, policy_uncapped, 1.0, &out);
         if (out[0].quality == 6) saw_six = true;
     }
     try std.testing.expect(saw_six);
@@ -958,6 +966,6 @@ test "quality-less trader entries parse as the stock -1 base pair" {
     var t = TraderTable.empty();
     var rng = rng_util.XorShift32.init(3);
     var out: [4]RolledItem = undefined;
-    try std.testing.expectEqual(@as(usize, 1), t.rollAllRefs(wild_refs[0..1], &rng, policy, &out));
+    try std.testing.expectEqual(@as(usize, 1), t.rollAllRefs(wild_refs[0..1], &rng, policy, 1.0, &out));
     try std.testing.expectEqual(@as(u8, 255), out[0].quality);
 }

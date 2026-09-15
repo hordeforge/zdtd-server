@@ -462,6 +462,13 @@ pub const Game = struct {
     pvp_mode: u8 = 3,
     /// Gameplay multipliers/settings from serverconfig (percent unless noted).
     xp_multiplier: u16 = 100,
+    /// Sandbox stock-count multipliers for trader windows and vending
+    /// machines (`TraderItemAbundance` / `VendingItemAbundance`, default 1.0;
+    /// stock `TraderInfo::SpawnAllItemsFromList` multiplies each rolled count
+    /// by the matching one, then `FastMax(1, ...)` floors). Float, like the
+    /// parsed sandbox table - LowDefaultHigh is 0.25..2.0.
+    trader_item_abundance: f32 = 1.0,
+    vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100,
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,
@@ -778,6 +785,8 @@ pub const Game = struct {
             .password = opts.password,
             .pvp_mode = opts.player_killing_mode,
             .xp_multiplier = opts.xp_multiplier,
+            .trader_item_abundance = opts.trader_item_abundance,
+            .vending_item_abundance = opts.vending_item_abundance,
             .block_damage_player = opts.block_damage_player,
             .block_damage_ai = opts.block_damage_ai,
             .block_damage_ai_bm = opts.block_damage_ai_bm,

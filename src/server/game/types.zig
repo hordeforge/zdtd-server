@@ -297,6 +297,15 @@ pub const InitOptions = struct {
     enemy_difficulty: u8 = 0,
     loot_abundance: u16 = 100,
     xp_multiplier: u16 = 100,
+    /// Sandbox stock-count multiplier for trader windows
+    /// (`TraderItemAbundance`, default 1.0; stock
+    /// `TraderInfo::SpawnAllItemsFromList` multiplies each rolled count by it,
+    /// then `FastMax(1, ...)` floors). Follows the same float path as the
+    /// parsed sandbox table, not a percent.
+    trader_item_abundance: f32 = 1.0,
+    /// Sandbox stock-count multiplier for vending machines
+    /// (`VendingItemAbundance`, default 1.0; same formula).
+    vending_item_abundance: f32 = 1.0,
     block_damage_player: u16 = 100,
     block_damage_ai: u16 = 100,
     block_damage_ai_bm: u16 = 100,

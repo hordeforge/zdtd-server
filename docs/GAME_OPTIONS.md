@@ -95,6 +95,7 @@ Webui flags (`--webui-port/bind/secret`) in [WEBUI.md](WEBUI.md); MCP flags
 | `LootAbundance` | 100 | 1..1000 | percent multiplier on rolled loot stack counts (`LootTable.scaleCount`) |
 | `LootRespawnDays` | 7 | 0..365 | days after a world container is touched until it re-rolls loot on its next open (0 = never respawn; `Game.loot_respawn_days`, `maybeRespawnContainer`) |
 | `XPMultiplier` | 100 | 1..1000 | scales server XP awarded per kill (`Game.awardXp`, `Client.xp`) |
+| `TraderItemAbundance` / `VendingItemAbundance` | 1.0 / 1.0 | LowDefaultHigh (0.25/0.5/1.0/1.5/2.0) | multiplies each rolled trader/vending stock count, then `FastMax(1, ...)` (`TraderTable.rollAllRefs`); sandbox-code-only, no serverconfig property |
 | `BlockDamagePlayer` | 100 | 1..1000 | scales player dig damage in `NetPackageSetBlock` |
 | `BlockDamageAI` | 100 | 0..1000 | zombies chew through cover blocks (`tickZombieBlockDamage`) |
 | `BlockDamageAIBM` | 100 | 0..1000 | as above during a blood moon |

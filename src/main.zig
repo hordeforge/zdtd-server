@@ -690,6 +690,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         .enemy_difficulty = cfg.enemy_difficulty,
         .loot_abundance = cfg.loot_abundance,
         .xp_multiplier = cfg.xp_multiplier,
+        .trader_item_abundance = cfg.trader_item_abundance,
+        .vending_item_abundance = cfg.vending_item_abundance,
         .block_damage_player = cfg.block_damage_player,
         .block_damage_ai = cfg.block_damage_ai,
         .block_damage_ai_bm = cfg.block_damage_ai_bm,
