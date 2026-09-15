@@ -554,6 +554,11 @@ pub const World = struct {
     /// tags); unset = no foreign rows, today's behaviour exactly.
     foreign_resist_ctx: ?*anyopaque = null,
     foreign_resist_fn: ?*const fn (?*anyopaque, u16, u16) f32 = null,
+    /// Victim-side hit trigger (ctx, victim_slot, attacker_slot): Game wires
+    /// this to the `onOtherAttackedSelf` rows (concussion/fatigue counters,
+    /// PackMule display). Unset = no victim rows, today's behaviour exactly.
+    attacked_self_ctx: ?*anyopaque = null,
+    attacked_self_fn: ?*const fn (?*anyopaque, u16, u16) void = null,
     /// Server chat broadcast for plugin announcements (`zdtd.queue say`):
     /// (ctx, msg) -> void. Game wires this to the stock chat broadcast; unset
     /// = announcements are dropped (today's behaviour).

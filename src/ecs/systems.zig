@@ -678,6 +678,11 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32, dmg_attacker: []const u16
             if (w.foreign_resist_fn) |frf| {
                 dmg *= 1.0 - frf(w.foreign_resist_ctx, i, dmg_attacker[i]);
             }
+            // Victim-side hit trigger: the victim's `onOtherAttackedSelf`
+            // rows fire with the accumulator's attacker.
+            if (w.attacked_self_fn) |asf| {
+                asf(w.attacked_self_ctx, i, dmg_attacker[i]);
+            }
             if (w.player[i].peer_slot >= 0) {
                 // Attacker-aware armor (Preacher vs zombies): the Vs form
                 // folds the piece's foreign-gated rows against the

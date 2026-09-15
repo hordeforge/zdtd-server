@@ -686,6 +686,10 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // filter. Unset hook = no foreign rows.
         self.sim.foreign_resist_ctx = self;
         self.sim.foreign_resist_fn = &game_mod.foreignResistHook;
+        // Victim-side hit trigger for the ECS damage path: the accumulator's
+        // attacker slot fires the victim's `onOtherAttackedSelf` rows.
+        self.sim.attacked_self_ctx = self;
+        self.sim.attacked_self_fn = &game_mod.attackedSelfHook;
         // `zdtd.queue say` announcements: routed to the stock chat broadcast
         // (sender 0 = server). Unset hook = announcements dropped.
         self.sim.say_ctx = self;

@@ -18721,3 +18721,43 @@ test "scenario buff stack fires its rows" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.5), c.cvars.get("$buffHarvestBonus"), 0.001);
     std.debug.print("PASS stack: harvest bonus accumulates across stacks\n", .{});
 }
+
+test "scenario victim hit fires concussion counter" {
+    // buffInjuryConcussion's onOtherAttackedSelf rows add $concussionCounter
+    // on every landed hit. Two AI melee hits raise the counter twice.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const vs = g.sim.playerByPeer(c.slot).?;
+    _ = g.addCatalogBuff(c.entity_id, vs, "buffInjuryConcussion");
+    const zdef = g.entities.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
+    const zid = g.sim.spawnZombie(258, 70, 258, 200).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.class_id[zs].hash = zdef.hash;
+    g.sim.transform[vs] = .{ .x = 258, .y = 70, .z = 259 };
+    g.sim.transform[zs] = .{ .x = 258, .y = 70, .z = 258 };
+    g.sim.zombie_ai[zs].target_id = c.entity_id;
+    g.sim.zombie_ai[zs].state = .attack;
+    g.sim.zombie_ai[zs].attack_cd = 0;
+    const hp0 = g.sim.health[vs].hp;
+    var ticks: usize = 0;
+    while (ticks < 400 and g.sim.health[vs].hp >= hp0) : (ticks += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+    }
+    try std.testing.expect(g.sim.health[vs].hp < hp0);
+    try std.testing.expect(c.cvars.get("$concussionCounter") > 0);
+    std.debug.print("PASS victim-hit: concussion counter {d}\n", .{c.cvars.get("$concussionCounter")});
+}

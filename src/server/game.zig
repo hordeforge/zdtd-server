@@ -263,6 +263,17 @@ pub fn foreignResistHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16)
     return fg;
 }
 
+/// Victim-side hit trigger for the ECS damage path: fires the victim's
+/// `onOtherAttackedSelf` rows with the accumulator's attacker slot.
+pub fn attackedSelfHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) void {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const vs: ecs.Slot = victim_slot;
+    const as: ecs.Slot = attacker_slot;
+    if (vs >= ecs.world.max_entities or as >= ecs.world.max_entities) return;
+    if (!g.sim.mask[vs].player or !g.sim.alive[as]) return;
+    g.fireAttackedSelf(vs, as);
+}
+
 /// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
 /// Wasm-first): runs the static then wasm hosts with the given attacker and
 /// returns the post-verdict amount - 0 when denied (<0), percent-scaled
@@ -1850,6 +1861,10 @@ pub const Game = struct {
 
     pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
         return game_tick.fireBuffStack(self, ps, def_id);
+    }
+
+    pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot) void {
+        return game_tick.fireAttackedSelf(self, ps, attacker);
     }
 
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS

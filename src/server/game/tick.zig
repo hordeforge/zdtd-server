@@ -255,6 +255,13 @@ pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u
 /// instance. Shares the PlayerCtx builder; cvar rows apply through the ctx
 /// store, AddBuff/RemoveBuff through the sink.
 pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
+    fireBuffEvent(self, ps, def_id, .stack, null);
+}
+
+/// Fire a victim buff's `onOtherAttackedSelf` rows when another entity lands
+/// a hit (concussion/fatigue counters, PackMule display buff). The attacker's
+/// tags ride `other_tags` so victim rows can filter on them.
+pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot) void {
     const peer_slot = self.sim.player[ps].peer_slot;
     if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
     const c = &self.clients[@intCast(peer_slot)];
@@ -264,8 +271,32 @@ pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
     var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
     const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
     var req_counts: requirements.Counts = .{};
-    const ctx = pctx.build(self, c, ps, h, sandbox_groups);
-    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, .stack, ctx, &req_counts);
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    ctx.other_tags = entityClassTags(self, attacker);
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const n = activeBuffIds(&self.sim.buffs[ps], &buff_ids).len;
+    for (buff_ids[0..n]) |id| {
+        const res = assets_buffs.evaluateTriggered(&self.buffs, id, .other_attacked_self, ctx, &req_counts);
+        if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+        applyTriggeredBuffs(self, c.entity_id, ps, &res);
+    }
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+}
+
+fn fireBuffEvent(self: *Game, ps: ecs.Slot, def_id: u16, event: assets_buffs.Trigger, other: ?ecs.Slot) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    var ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    if (other) |o| ctx.other_tags = entityClassTags(self, o);
+    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, event, ctx, &req_counts);
     self.harness.counters.add(.requirement_gates, req_counts.resolved);
     self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
     if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
@@ -277,21 +308,7 @@ pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
 /// cvar rows apply through the ctx store, AddBuff/RemoveBuff through the
 /// sink.
 pub fn fireBuffFinish(self: *Game, ps: ecs.Slot, def_id: u16) void {
-    const peer_slot = self.sim.player[ps].peer_slot;
-    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
-    const c = &self.clients[@intCast(peer_slot)];
-    const h = &self.sim.health[ps];
-    var pctx: PlayerCtx = .{};
-    pctx.init(self, c, ps);
-    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
-    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
-    var req_counts: requirements.Counts = .{};
-    const ctx = pctx.build(self, c, ps, h, sandbox_groups);
-    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, .finish, ctx, &req_counts);
-    self.harness.counters.add(.requirement_gates, req_counts.resolved);
-    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
-    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
-    applyTriggeredBuffs(self, c.entity_id, ps, &res);
+    fireBuffEvent(self, ps, def_id, .finish, null);
 }
 
 /// One entry per worn equipment item: its `Tags` property (comma list), the
