@@ -26,7 +26,12 @@ pub const Ingredient = struct {
 pub const RecipeDef = struct {
     name: []const u8 = "",
     count: u16 = 1,
-    craft_time: f32 = 1,
+    /// recipes.xml `craft_time` (seconds; stock `Recipe.craftingTime`). -1 =
+    /// not declared: stock `Recipe::Init` (IL=79) resolves it to the sum of
+    /// ingredient `CraftComponentTime * count`. 506 of 639 stock recipes omit
+    /// it, and no stock item declares `CraftTimeValue`, so every stock
+    /// derivation is 0.
+    craft_time: f32 = -1,
     always_unlocked: bool = false,
     craft_area: []const u8 = "",
     /// recipes.xml craft_exp_gain: crafting XP granted on completion
@@ -292,7 +297,10 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !RecipeTable
         var def: RecipeDef = .{
             .name = try arena.dupe(u8, name),
             .count = xml.parseU16(xml.attr(clean, tag, "count") orelse "1") orelse 1,
-            .craft_time = xml.parseF32(xml.attr(clean, tag, "craft_time") orelse "1") orelse 1,
+            // Absent or malformed lands on the -1 sentinel (stock's
+            // RecipesFromXml leaves craftingTime at -1 when the attribute is
+            // missing or fails TryParseFloat); `resolveCraftTime` derives it.
+            .craft_time = xml.parseF32(xml.attr(clean, tag, "craft_time") orelse "-1") orelse -1,
             .always_unlocked = false,
             .craft_area = "",
         };
@@ -394,6 +402,21 @@ pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: 
     return paths.tryLoadConfig("recipes.xml", RecipeTable, loadFromPath, allocator, game_dir, config_dir);
 }
 
+/// Stock `Recipe::Init` (IL=79): a `craft_time` left at -1 resolves to the
+/// sum of ingredient `CraftComponentTime * count`. `componentTime` resolves an
+/// ingredient name to its per-unit time (0 when the item is unknown or
+/// declares none); a declared time (>= 0, including an explicit 0) is kept.
+/// Contextful callers wrap their table lookup in a closure-compatible fn.
+pub fn resolveCraftTime(def: RecipeDef, componentTime: fn ([]const u8) f32) f32 {
+    if (def.craft_time >= 0) return def.craft_time;
+    var total: f32 = 0;
+    var i: usize = 0;
+    while (i < def.ingredient_n) : (i += 1) {
+        total += componentTime(def.ingredients[i].name) * @as(f32, @floatFromInt(def.ingredients[i].count));
+    }
+    return total;
+}
+
 test "recipe tags, ingredient modifier and CraftingIngredientCount" {
     // Stock RecipesFromXml builds the recipe tag set as `tags + "," + name`
     // (IL_0180-0191), so a CraftingTier row tagged with the output item name
@@ -465,6 +488,56 @@ test "load stock recipes when present" {
     // forge clay recipe has ingredients
     const clay = t.byName("resourceClayLump");
     try std.testing.expect(clay != null);
+}
+
+test "craft_time defaults to the -1 sentinel and resolves like Recipe::Init" {
+    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/recipes.xml";
+    if (!io_fs.fileExists(path)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, path);
+    defer t.deinit();
+    // Declared times are kept verbatim (the forge resourceClayLump row
+    // declares craft_time="1"; the salvage stub of the same name omits it).
+    var clay: ?RecipeDef = null;
+    for (t.defs) |d| {
+        if (std.mem.eql(u8, d.name, "resourceClayLump") and d.craft_time == 1) {
+            clay = d;
+            break;
+        }
+    }
+    const c = clay orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 1), resolveCraftTime(c, struct {
+        fn f(_: []const u8) f32 {
+            return 0;
+        }
+    }.f));
+    // 506 of 639 stock recipes omit the attribute: the sentinel stays -1.
+    var omitted: ?RecipeDef = null;
+    for (t.defs) |d| {
+        if (d.craft_time == -1) {
+            omitted = d;
+            break;
+        }
+    }
+    const o = omitted orelse return error.TestUnexpectedResult;
+    // No stock item declares CraftTimeValue, so every stock derivation is 0
+    // (stock's own `Recipe::Init` sum over the same data).
+    try std.testing.expectEqual(@as(f32, 0), resolveCraftTime(o, struct {
+        fn f(_: []const u8) f32 {
+            return 0;
+        }
+    }.f));
+    // The sum shape: time * count per ingredient.
+    const S = struct {
+        fn f(name: []const u8) f32 {
+            if (std.mem.eql(u8, name, "a")) return 2.5;
+            if (std.mem.eql(u8, name, "b")) return 1.0;
+            return 0;
+        }
+    };
+    var synth: RecipeDef = .{ .name = "s", .craft_time = -1, .ingredient_n = 2 };
+    synth.ingredients[0] = .{ .name = "a", .count = 2 };
+    synth.ingredients[1] = .{ .name = "b", .count = 3 };
+    try std.testing.expectEqual(@as(f32, 8.0), resolveCraftTime(synth, S.f));
 }
 
 test "craft_exp_gain parses the declared 0 and defaults undeclared to -1" {

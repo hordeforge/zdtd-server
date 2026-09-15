@@ -356,6 +356,12 @@ pub const ItemDef = struct {
     place_block_name: []const u8 = "",
     /// items.xml FuelValue (generator/vehicle fuel units per item; 0 = not fuel).
     fuel_value: f32 = 0,
+    /// items.xml `CraftTimeValue` property (stock `ItemClass.CraftComponentTime`,
+    /// IL_061D): per-unit craft time this ingredient contributes to a recipe's
+    /// derived `craftingTime` (`Recipe::Init` IL=79 sums `time * count`). 0 =
+    /// not declared (no stock item declares it, so every stock derivation is
+    /// 0).
+    craft_component_time: f32 = 0,
     /// items.xml Weight (forge melt units added per input item; 0 = unset).
     weight: u16 = 0,
     /// items.xml MeltTimePerUnit (seconds per weight unit; 0 = stock default 1).
@@ -1172,6 +1178,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
     defer stock_melee_ranges.deinit(allocator);
     var stock_fuels: std.ArrayList(f32) = .empty;
     defer stock_fuels.deinit(allocator);
+    var stock_craft_times: std.ArrayList(f32) = .empty;
+    defer stock_craft_times.deinit(allocator);
     var stock_weights: std.ArrayList(u16) = .empty;
     defer stock_weights.deinit(allocator);
     var stock_weight_declared: std.ArrayList(bool) = .empty;
@@ -1405,6 +1413,14 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 fuel = xml.parseF32(v) orelse 0;
             }
             try stock_fuels.append(allocator, fuel);
+            // Stock `ItemClass.CraftComponentTime` (IL_061D): the
+            // `CraftTimeValue` property, parsed with TryParseFloat (a bad
+            // value leaves the 0 default, like the FuelValue arm above).
+            var cct: f32 = 0;
+            if (xml.propertyValue(clean[ii..item_end], "CraftTimeValue")) |v| {
+                cct = xml.parseF32(v) orelse 0;
+            }
+            try stock_craft_times.append(allocator, cct);
             var weight: u16 = 0;
             var weight_declared = false;
             if (xml.propertyValue(clean[ii..item_end], "Weight")) |v| {
@@ -2170,6 +2186,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 def.harvest_rows = stock_harvest_rows.items[idx];
                 def.stats = stock_gs_stats.items[idx];
                 def.fuel_value = stock_fuels.items[idx];
+                def.craft_component_time = stock_craft_times.items[idx];
                 def.weight = stock_weights.items[idx];
                 def.melt_time_per_unit = stock_melt_times.items[idx];
                 def.material = stock_materials.items[idx];
@@ -2221,6 +2238,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
             .light_value = stock_light_values.items[idx],
             .melee_range = stock_melee_ranges.items[idx],
             .fuel_value = stock_fuels.items[idx],
+            .craft_component_time = stock_craft_times.items[idx],
             .weight = stock_weights.items[idx],
             .melt_time_per_unit = stock_melt_times.items[idx],
             .material = stock_materials.items[idx],

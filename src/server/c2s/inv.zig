@@ -26,6 +26,7 @@ const reverseItemType = game_mod.Game.reverseItemType;
 const resolveItemType = game_mod.Game.resolveItemType;
 const eatProps = game_mod.Game.eatProps;
 const assets_progression = @import("../../assets/progression.zig");
+const game_craft = @import("../game/craft.zig");
 
 /// Sign-text echo range. Stock `NetPackageTileEntity::ProcessPackage` calls
 /// `SendPackage(..., pos = te.ToWorldCenterPos(), range = 192, exclude = false)`
@@ -662,8 +663,11 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         }
                         dst.* = q;
                         dst.output_count = rd.count;
-                        dst.one_item_craft_time = rd.craft_time;
-                        dst.craft_time_left = rd.craft_time;
+                        // Stock `Recipe::Init` (IL=79): an omitted craft_time
+                        // resolves through the item table, not the old 1 s
+                        // default (and never the client's spoofed time).
+                        dst.one_item_craft_time = game_craft.craftTimeFor(self, rd);
+                        dst.craft_time_left = dst.one_item_craft_time;
                         dst.craft_exp_gain = if (rd.craft_exp_gain >= 0) rd.craft_exp_gain else 0;
                     }
                 } else {

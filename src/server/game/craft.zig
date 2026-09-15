@@ -277,6 +277,24 @@ fn foldCraftingTier(passives: []const assets_buffs.Passive, lvl: u8, ctx: assets
 /// builds as `tags + "," + recipe name`), evaluated at the class's purchased
 /// level. The folded float truncates (`conv.i4`) and the item clamps to its own
 /// max quality tier; zdtd clamps 1..ItemClass.MaxQualityTier.
+/// Stock `Recipe::Init` (IL=79): resolve a recipe's effective craft time in
+/// seconds. A declared `craft_time` (>= 0) is kept; the -1 sentinel derives
+/// from the live item table's `CraftComponentTime` sum. Passed to the
+/// workstation queue validator so a modlet's CraftTimeValue rows change the
+/// derivation with no code change.
+pub fn craftTimeFor(self: *const Game, recipe: assets_recipes.RecipeDef) f32 {
+    if (recipe.craft_time >= 0) return recipe.craft_time;
+    var total: f32 = 0;
+    var i: usize = 0;
+    while (i < recipe.ingredient_n) : (i += 1) {
+        const ing = recipe.ingredients[i];
+        const id = self.items.ecsIdByName(ing.name);
+        const per: f32 = if (id != 0) (if (self.items.byId(id)) |d| d.craft_component_time else 0) else 0;
+        total += per * @as(f32, @floatFromInt(ing.count));
+    }
+    return total;
+}
+
 pub fn craftingTierFor(self: *Game, peer_slot: usize, recipe: assets_recipes.RecipeDef) u8 {
     const qmax = self.items.max_quality_tier;
     if (!craftingProgressionOn(self)) return qmax;
