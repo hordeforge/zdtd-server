@@ -233,6 +233,12 @@ pub const Ctx = struct {
     /// target reads it; null = the caller has no class tag set, which refuses
     /// the gate rather than treating the entity as untagged.
     entity_tags: ?[]const u8 = null,
+    /// The `other` entity's `Tags` for `target="other"` rows
+    /// (`TargetedCompareRequirementBase` resolves `other`/`instigator` from
+    /// `MinEventParams`; the damage path supplies the attacker's tags). Null
+    /// = no other entity in scope, which refuses foreign-target rows rather
+    /// than reading self.
+    other_tags: ?[]const u8 = null,
     /// One entry per worn equipment item: the item's `Tags` property as a comma
     /// list (`WornItems` IL=54 walks `Equipment::GetSlotCount` and asks each
     /// item's `ItemClass::HasAnyTags`). Empty = nothing worn.
@@ -819,9 +825,20 @@ fn evalOne(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
 
 fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
     // TargetedCompareRequirementBase::IsValid (IL=51) resolves `other` and
-    // `instigator` from MinEventParams; zdtd's context carries self only, so a
-    // foreign target refuses the gate rather than silently reading self.
-    if (r.target != .self) return .unsupported;
+    // `instigator` from MinEventParams. Only `EntityTagCompare` evaluates
+    // foreign: against `ctx.other_tags` (the damage path's attacker tags)
+    // when supplied, refusing without it rather than reading self. Every
+    // other foreign kind refuses (its input is the other's stat/buff/cvar,
+    // which no caller supplies).
+    // `instigator` has no supplier yet and always refuses.
+    if (r.target != .self and r.kind != .entity_tag_compare) return .unsupported;
+    var use_ctx = ctx;
+    if (r.target == .other) {
+        const ot = ctx.other_tags orelse return .unsupported;
+        use_ctx.entity_tags = ot;
+    } else if (r.target == .instigator) {
+        return .unsupported;
+    }
     switch (r.kind) {
         .unsupported => return .unsupported,
         .in_biome => {
@@ -849,7 +866,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .stat_compare_max => return evalStatCompareMax(r, ctx),
         .stat_compare_perc_mod_max_to_max => return evalStatComparePercModMaxToMax(r, ctx),
         .stat_compare_current => return evalStatCompareCurrent(r, ctx),
-        .entity_tag_compare => return evalEntityTagCompare(r, ctx),
+        .entity_tag_compare => return evalEntityTagCompare(r, use_ctx),
         .is_night => return evalIsNight(r, ctx),
         .is_equipped => return evalIsEquipped(r, ctx),
         .entity_has_movement_tag => return evalEntityHasMovementTag(r, ctx),
@@ -1702,6 +1719,24 @@ test "InSafeZone reads false without a Twitch integration" {
     try std.testing.expectEqual(Verdict.fail, evaluate(&.{safe}, .{}, &counts));
     try std.testing.expectEqual(Verdict.pass, evaluate(&.{not_safe}, .{}, &counts));
     try std.testing.expectEqual(@as(u32, 2), counts.resolved);
+}
+
+test "EntityTagCompare target=other reads the other tags" {
+    // `TargetedCompareRequirementBase` resolves `other` from MinEventParams;
+    // the ctx carries it as `other_tags`. Without it the row refuses (never
+    // reads self); with it the stock any-of/negation shape applies.
+    const other = Requirement{ .kind = .entity_tag_compare, .target = .other, .list = "zombie,animal" };
+    const not_other = Requirement{ .kind = .entity_tag_compare, .target = .other, .negated = true, .list = "trader" };
+    var counts: Counts = .{};
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{other}, .{ .entity_tags = "player" }, &counts));
+    counts = .{};
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{other}, .{ .entity_tags = "player", .other_tags = "zombie" }, &counts));
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{not_other}, .{ .entity_tags = "player", .other_tags = "zombie" }, &counts));
+    try std.testing.expectEqual(@as(u32, 2), counts.resolved);
+    // A non-tag foreign kind still refuses (its input is the other's state).
+    counts = .{};
+    const alive_other = Requirement{ .kind = .is_alive, .target = .other };
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{alive_other}, .{ .other_tags = "zombie" }, &counts));
 }
 
 test "all() is the AND over an empty and a multi-gate list" {

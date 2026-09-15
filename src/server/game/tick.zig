@@ -354,6 +354,62 @@ pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) 
     return std.math.clamp(total / 100.0, 0, 1);
 }
 
+/// Foreign-gated GeneralDamageResist at damage time: the victim's perk rows
+/// whose gates name the attacker (`target="other"`, e.g. Spectral Grace's
+/// zombie/animal filter) evaluate here, where the attacker is known. The
+/// per-tick fold refuses those rows (no other in scope), so a passing row
+/// lands only on this hit. Returns the resist fraction (Grace = 1).
+/// `other_tags` overrides the attacker-slot lookup (the accumulator passes
+/// the slot; the hook resolves tags itself, so this form is for callers that
+/// already hold the tag string).
+pub fn foreignGatedResist(self: *Game, victim: ecs.Slot, attacker: ecs.Slot) f32 {
+    return foreignGatedResistTags(self, victim, entityClassTags(self, attacker) orelse "");
+}
+
+/// Tag-string form of foreignGatedResist: an empty tag string matches nothing
+/// (refuses the foreign rows, like a missing other).
+pub fn foreignGatedResistTags(self: *Game, victim: ecs.Slot, other_tags: []const u8) f32 {
+    if (!self.sim.mask[victim].health) return 0;
+    const h = &self.sim.health[victim];
+    const peer_slot = self.sim.player[victim].peer_slot;
+    const c: ?*Client = if (peer_slot >= 0 and @as(usize, @intCast(peer_slot)) < self.clients.len)
+        &self.clients[@intCast(peer_slot)]
+    else
+        null;
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const buff_lookup = BuffNameLookup{ .table = &self.buffs };
+    const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
+    const ctx = requirements.Ctx{
+        .levels = if (c) |cc| cc.skill_levels[0..cc.skill_level_n] else &.{},
+        .player_level = if (c) |cc| cc.level else 0,
+        .alive = self.sim.alive[victim],
+        .cvars = if (c) |cc| &cc.cvars else null,
+        .active_buffs = activeBuffIds(&self.sim.buffs[victim], &buff_ids),
+        .buff_names = &buff_names,
+        .is_night = self.sim.director.clock.isNight(),
+        .entity_tags = entityClassTags(self, victim),
+        .other_tags = if (other_tags.len > 0) other_tags else null,
+        .attached_to_entity = false,
+        .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
+        .hp_max = h.max_hp,
+        .hp_base_max = h.base_max_hp,
+        .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
+        .stamina_max = h.stamina_max,
+        .stamina_base_max = base_consumable_stat_max,
+        .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
+        .food_max = h.food_max,
+        .food_base_max = base_consumable_stat_max,
+        .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
+        .water_max = h.water_max,
+        .water_base_max = base_consumable_stat_max,
+    };
+    var counts: requirements.Counts = .{};
+    const total = assets_progression.perkTotals(&self.progression_table, ctx.levels, ctx, &counts).general_resist;
+    self.harness.counters.add(.requirement_gates, counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, counts.unsupported);
+    return std.math.clamp(total, 0, 1);
+}
+
 pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player effects pass (passive-effects VM + triggered
     // engine + stat application) is bounded by the client table; the section
     // timer + survival_players/vm_recomputes counters keep it inside the

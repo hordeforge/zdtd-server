@@ -788,6 +788,17 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
         if (self.sim.slotOfNetId(d.entity_id)) |ei| {
             if (self.sim.mask[ei].player) {
                 amount *= 1.0 - invsys.generalDamageResist(&self.sim, ei);
+                // Spectral Grace (perkAgilityMastery): the victim's
+                // foreign-gated GDR rows evaluate here, where the attacker
+                // (`other`) is known. The per-tick fold refuses them (no
+                // other in scope), so a passing row lands only on this hit.
+                // A passing Grace also starts the 60 s recharge buff, whose
+                // own start row sets the cvar that closes the gate.
+                const fg = self.foreignGatedResist(ei, actor_slot);
+                if (fg > 0) {
+                    _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace");
+                }
+                amount *= 1.0 - fg;
                 if (self.sim.player[ei].peer_slot >= 0) {
                     // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
                     if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))

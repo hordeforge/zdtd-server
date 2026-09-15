@@ -18435,3 +18435,62 @@ test "scenario sign data request serves the layered catalog" {
     try std.testing.expect(start == g.signs.entries.len);
     std.debug.print("PASS sign-request: {d} layered signs served in batches\n", .{layered});
 }
+
+test "scenario spectral grace deflects a zombie hit and recharges" {
+    // perkAgilityMastery Grace: CVarCompare(perkSpectersGrace <= 0) +
+    // ProgressionLevel(agility >= 4) + !attached + other(zombie,animal) gates
+    // GeneralDamageResist 1. The per-tick fold refuses the group (no other),
+    // so the damage path evaluates it with the attacker's tags.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const vs = g.sim.playerByPeer(c.slot).?;
+    // Victim: agility mastery 4, no recharge cvar set.
+    c.skill_levels[0] = .{ .name = "perkAgilityMastery", .level = 4 };
+    c.skill_level_n = 1;
+    const hp0 = g.sim.health[vs].hp;
+    // Zombie attacker next to the victim, classed as the stock template so
+    // its Tags read entity,zombie,walker (the Grace other filter). The blow
+    // lands through the AI melee accumulator (zombie attackers have no
+    // client, so no C2S damage packet carries them).
+    const zid = g.sim.spawnZombie(258, 70, 258, 200).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    const zdef = g.entities.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
+    g.sim.class_id[zs].hash = zdef.hash;
+    g.sim.transform[vs] = .{ .x = 258, .y = 70, .z = 259 };
+    g.sim.transform[zs] = .{ .x = 258, .y = 70, .z = 258 };
+    g.sim.zombie_ai[zs].target_id = c.entity_id;
+    g.sim.zombie_ai[zs].state = .attack;
+    g.sim.zombie_ai[zs].attack_cd = 0;
+    var ticks: usize = 0;
+    while (ticks < 200 and g.sim.health[vs].hp >= hp0 and !gracedHere(g, vs)) : (ticks += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+    }
+    // Grace deflected the blow: no HP lost, and the recharge buff applied.
+    try std.testing.expectEqual(hp0, g.sim.health[vs].hp);
+    try std.testing.expect(gracedHere(g, vs));
+    std.debug.print("PASS grace: zombie hit deflected, recharge buff applied\n", .{});
+}
+
+fn gracedHere(g: *game_mod.Game, vs: ecs.Slot) bool {
+    for (g.sim.buffs[vs].slots) |b| {
+        if (!b.active) continue;
+        if (g.buffs.byId(b.def_id)) |def| {
+            if (std.mem.eql(u8, def.name, "buffSpectersGrace")) return true;
+        }
+    }
+    return false;
+}

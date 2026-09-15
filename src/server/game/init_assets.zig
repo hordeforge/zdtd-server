@@ -681,6 +681,11 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         // attacker unknown. Unset hook = no plugins = today's behaviour.
         self.sim.player_damage_verdict_ctx = self;
         self.sim.player_damage_verdict_fn = &game_mod.playerDamageVerdict;
+        // Foreign-gated victim resist for the ECS damage path (Spectral
+        // Grace): the accumulator's attacker slot resolves the `other`
+        // filter. Unset hook = no foreign rows.
+        self.sim.foreign_resist_ctx = self;
+        self.sim.foreign_resist_fn = &game_mod.foreignResistHook;
         // `zdtd.queue say` announcements: routed to the stock chat broadcast
         // (sender 0 = server). Unset hook = announcements dropped.
         self.sim.say_ctx = self;

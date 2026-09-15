@@ -241,6 +241,28 @@ pub fn playerDamageVerdict(ctx: ?*anyopaque, victim: i32, amount: f32) i32 {
     return if (sv != 0) sv else g.wasm_plugins.playerDamage(-1, victim, @trunc(amount));
 }
 
+/// Foreign-gated victim resist for the ECS damage path (zombie melee /
+/// deferred accumulator): evaluates the victim's `target="other"` GDR rows
+/// against the attacker's real class tags, and starts the Grace recharge
+/// buff when a row passes. Unset hook = no foreign rows.
+pub fn foreignResistHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const vs: ecs.Slot = victim_slot;
+    const as: ecs.Slot = attacker_slot;
+    if (as >= ecs.world.max_entities or !g.sim.alive[as]) return 0;
+    const hash = if (g.sim.class_id[as].hash != 0)
+        g.sim.class_id[as].hash
+    else
+        return 0;
+    const def = g.entities.byHash(hash) orelse return 0;
+    const fg = game_tick.foreignGatedResistTags(g, vs, def.tags);
+    if (fg > 0) {
+        const eid = g.sim.network_id[vs].id;
+        _ = g.addCatalogBuff(eid, vs, "buffSpectersGrace");
+    }
+    return fg;
+}
+
 /// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
 /// Wasm-first): runs the static then wasm hosts with the given attacker and
 /// returns the post-verdict amount - 0 when denied (<0), percent-scaled
@@ -1810,6 +1832,14 @@ pub const Game = struct {
     /// `game/tick.zig` for the fold and its fail-closed ctx rule.
     pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) f32 {
         return game_tick.elementalDamageResist(self, ps, damage_tag);
+    }
+
+    pub fn foreignGatedResist(self: *Game, victim: ecs.Slot, attacker: ecs.Slot) f32 {
+        return game_tick.foreignGatedResist(self, victim, attacker);
+    }
+
+    pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8) bool {
+        return game_tick.addCatalogBuff(self, entity_id, ps, name);
     }
 
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS

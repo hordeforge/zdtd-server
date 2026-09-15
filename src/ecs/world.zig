@@ -542,6 +542,12 @@ pub const World = struct {
     /// unset = no plugins, today's behaviour exactly.
     player_damage_verdict_ctx: ?*anyopaque = null,
     player_damage_verdict_fn: ?*const fn (?*anyopaque, i32, f32) i32 = null,
+    /// Foreign-gated victim resist at damage time (ctx, victim_slot,
+    /// attacker_slot, max_entities = unset) -> resist fraction 0..1. Game wires this to the
+    /// Spectral Grace evaluation (victim perk rows gated on the attacker's
+    /// tags); unset = no foreign rows, today's behaviour exactly.
+    foreign_resist_ctx: ?*anyopaque = null,
+    foreign_resist_fn: ?*const fn (?*anyopaque, u16, u16) f32 = null,
     /// Server chat broadcast for plugin announcements (`zdtd.queue say`):
     /// (ctx, msg) -> void. Game wires this to the stock chat broadcast; unset
     /// = announcements are dropped (today's behaviour).

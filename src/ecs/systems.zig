@@ -621,7 +621,7 @@ fn fpDamage(fp: u32) f32 {
     return @as(f32, @floatFromInt(fp)) / @as(f32, @floatFromInt(dmg_scale));
 }
 
-fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
+fn applyDeferredDamage(w: *World, dmg_fp: []const u32, dmg_attacker: []const u16) u32 {
     var applied: u32 = 0;
     // O(live) via the packed alive set. The accumulator is slot-indexed, but
     // only living entities can have been written; scanning the 512-slot table
@@ -671,6 +671,13 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32) u32 {
             // so the armor leg applies. Without this a full-armor player took
             // exactly the naked damage from a zombie.
             dmg *= 1.0 - inventory.generalDamageResist(w, i);
+            // Foreign-gated victim rows (Spectral Grace): the accumulator's
+            // attacker kind resolves the `other` filter the per-tick fold
+            // cannot. A passing Grace also starts its recharge buff through
+            // the Game hook (the buff's own start row sets the cvar gate).
+            if (w.foreign_resist_fn) |frf| {
+                dmg *= 1.0 - frf(w.foreign_resist_ctx, i, dmg_attacker[i]);
+            }
             if (w.player[i].peer_slot >= 0) {
                 dmg *= 1.0 - inventory.armorMitigation(w, @intCast(w.player[i].peer_slot));
             }
@@ -1837,6 +1844,12 @@ const AiCtx = struct {
     slots: []const Slot,
     /// Fixed-point damage accumulators, one per entity slot (atomic adds).
     dmg_fp: []u32,
+    /// Attacker slot per victim slot, written alongside dmg_fp
+    /// (max_entities = unset; zombie melee writes its own slot, turret fire
+    /// leaves unset since turrets match no victim filter). Lets the apply
+    /// pass resolve victim-side foreign-gated rows (Spectral Grace's
+    /// other=zombie,animal filter) against the attacker's real class tags.
+    dmg_attacker: []u16,
     hits: *std.atomic.Value(u32),
     /// Snapshotted before forRanges so workers never reread a field the
     /// director (or another tick phase) may rewrite on the main thread.
@@ -2507,6 +2520,10 @@ fn approachUpdate(ctx: AiCtx, s: Slot, ai: *c.ZombieAi, np: TargetSnap, cspd: f3
             } else {
                 const add: u32 = @trunc(adm * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[np.slot], .Add, add, .monotonic);
+                // Attacker slot for the foreign-gated victim rows; the
+                // victim slot may be shared so the write is best-effort (a
+                // same-tick second attacker wins).
+                ctx.dmg_attacker[np.slot] = s;
             }
             _ = ctx.hits.fetchAdd(1, .monotonic);
             ai.attack_cd = ctx.w.rules.combat.attack_cooldown_s;
@@ -2963,6 +2980,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     var snaps: [64]PlayerSnap = undefined;
     const pn = snapshotPlayers(w, &snaps, true);
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var dmg_attacker: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     var hits_a: std.atomic.Value(u32) = .init(0);
     // Positions as of the phase start. Workers write only their own slots, so
     // any cross-slot position read has to come from this copy.
@@ -2974,6 +2992,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
         .pos = &pos_snap,
         .slots = ai_slots[0..ai_n],
         .dmg_fp = dmg_fp[0..],
+        .dmg_attacker = dmg_attacker[0..],
         .hits = &hits_a,
         .zombie_speed_scale = w.zombie_speed_scale,
     };
@@ -2981,7 +3000,7 @@ pub fn systemZombieAi(w: *World, dt: f32) u32 {
     // scanned, and the pool wakeup is skipped while the population is small.
     if (ai_n < 64) AiCtx.work(ctx, 0, ai_n) else parallel.forRanges(ai_n, ctx, AiCtx.work);
     consumeCombatNoise(w);
-    _ = applyDeferredDamage(w, dmg_fp[0..]);
+    _ = applyDeferredDamage(w, dmg_fp[0..], dmg_attacker[0..]);
     return hits_a.load(.monotonic);
 }
 
@@ -3445,6 +3464,7 @@ const TurretCtx = struct {
                 t.ammo -%= 1;
                 const add: u32 = @trunc(t.damage * @as(f32, @floatFromInt(dmg_scale)));
                 _ = @atomicRmw(u32, &ctx.dmg_fp[zi], .Add, add, .monotonic);
+                // Turret fire leaves dmg_attacker unset (matches no filter).
                 recordTurretOwner(&ctx.owner_hit[zi], s, t.owner_slot);
             }
         }
@@ -5768,12 +5788,13 @@ test "class PhysicalDamageResist halves server-computed damage" {
     // instead, because neither of these two paths goes through it.
     var w: World = .{};
     defer w.deinit();
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     const z = w.spawnZombie(0, 70, 0, 200).?;
     const zs = w.slotOfNetId(z).?;
     w.class_id[zs].phys_resist = 50;
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
     dmg_fp[zs] = 1000; // 10.0 hp -> 5.0 after 50%
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 195.0), w.health[zs].hp);
     // The class_table row is the fallback when the per-entity stat is unset
     // (a classe spawned through the plain path).
@@ -5783,7 +5804,7 @@ test "class PhysicalDamageResist halves server-computed damage" {
     w.class_table[1].phys_resist = 60;
     dmg_fp[zs] = 0;
     dmg_fp[zs2] = 1000; // 10.0 -> 4.0
-    _ = applyDeferredDamage(&w, dmg_fp[0..]);
+    _ = applyDeferredDamage(&w, dmg_fp[0..], zk[0..]);
     try std.testing.expectEqual(@as(f32, 196.0), w.health[zs2].hp);
     // A plain class (no rows) is unchanged: clear the row the case above set,
     // since a plain zombie resolves the kind's class_table entry.
@@ -5792,7 +5813,7 @@ test "class PhysicalDamageResist halves server-computed damage" {
     const zs3 = w.slotOfNetId(z3).?;
     dmg_fp[zs2] = 0;
     dmg_fp[zs3] = 1000;
-    _ = applyDeferredDamage(&w, dmg_fp[0..]);
+    _ = applyDeferredDamage(&w, dmg_fp[0..], zk[0..]);
     try std.testing.expectEqual(@as(f32, 190.0), w.health[zs3].hp);
 }
 
@@ -5806,14 +5827,15 @@ test "deferred damage that kills a player leaves a dirty corpse at hp 0" {
     w.health[ps].hp = 1;
     w.dirty[ps] = .{};
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     dmg_fp[ps] = 500; // 5.0 hp
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 0), w.health[ps].hp);
     try std.testing.expect(w.alive[ps]);
     try std.testing.expect(w.dirty[ps].hp);
     // A corpse takes no further hits, so nothing re-dirties it.
     w.dirty[ps].hp = false;
-    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expect(!w.dirty[ps].hp);
 }
 
@@ -5838,13 +5860,14 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     const ps = w.slotOfNetId(p).?;
     w.health[ps].hp = 100;
     var dmg_fp: [max_entities]u32 = .{0} ** max_entities;
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
     dmg_fp[ps] = 800; // 8.0 hp
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
     // Config wins: an operator raising the Adventurer incoming scale lifts it.
     w.rules.difficulty.incoming_damage_1 = 1.25; // difficulty 1 = Adventurer
     w.health[ps].hp = 100;
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, dmg_fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 90.0), w.health[ps].hp); // 8 x 1.25 = 10
     // AI -> AI (turret fire on a zombie) is unchanged by the difficulty scale.
     const z = w.spawnZombie(1, 70, 0, 40).?;
@@ -5852,7 +5875,7 @@ test "GameDifficulty damage scale: AI->player x IncomingDamage at the deferred c
     w.health[zs].hp = 100;
     var zfp: [max_entities]u32 = .{0} ** max_entities;
     zfp[zs] = 800;
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, zfp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, zfp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 92.0), w.health[zs].hp); // 8.0 flat
 }
 
@@ -5870,23 +5893,24 @@ test "deferred AI damage passes GeneralDamageResist and the armor leg" {
     var fp: [max_entities]u32 = .{0} ** max_entities;
     fp[ps] = 800; // 8.0 hp
     // Bare: no armor, no VM fold -> 8.0 x Adventurer 0.75 = 6.0.
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    var zk: [max_entities]u16 = .{std.math.maxInt(Slot)} ** max_entities;
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 94.0), w.health[ps].hp);
     // GeneralDamageResist .25 (perkPainTolerance 5): 6.0 x 0.75 = 4.5.
     w.buff_general_resist[ps] = 0.25;
     w.health[ps].hp = 100;
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 95.5), w.health[ps].hp);
     // A full resist clamps at 1 (stock min(1, value)): the hit is negated.
     w.buff_general_resist[ps] = 5;
     w.health[ps].hp = 100;
-    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(u32, 0), applyDeferredDamage(&w, fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 100.0), w.health[ps].hp);
     // Negative totals are kept: stock does not clamp at 0, so a vulnerability
     // row raises the damage taken (6.0 x 1.5 = 9.0).
     w.buff_general_resist[ps] = -0.5;
     w.health[ps].hp = 100;
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
     try std.testing.expectEqual(@as(f32, 91.0), w.health[ps].hp);
     // Worn armor joins the same choke (offline pieces-rate floor: one piece =
     // 0.1), so 8.0 x 0.75 = 6.0 -> x 0.9 = 5.4.
@@ -5902,7 +5926,7 @@ test "deferred AI damage passes GeneralDamageResist and the armor leg" {
     }
     try std.testing.expect(inventory.equip(&w, 0, armor_slot, 0));
     try std.testing.expect(inventory.armorMitigation(&w, 0) >= 0.09);
-    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..]));
+    try std.testing.expectEqual(@as(u32, 1), applyDeferredDamage(&w, fp[0..], zk[0..]));
     try std.testing.expectApproxEqAbs(@as(f32, 94.6), w.health[ps].hp, 0.001);
 }
 
