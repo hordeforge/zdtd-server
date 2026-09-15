@@ -18377,3 +18377,61 @@ test "scenario PassThroughDamage walks the downgrade chain" {
     try std.testing.expect(after_deep != next_id);
     std.debug.print("PASS pass-through: leftover damages the next stage, a deeper claim walks the chain\n", .{});
 }
+
+test "scenario sign data request serves the layered catalog" {
+    // worldInfoCo blocks on SignDataResponse(isLastBatch=true). The request
+    // must serve the layered stock catalog through the batcher: at least one
+    // batch, the last flagged, carrying a nonzero layer count.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    try std.testing.expect(g.signs.entries.len > 0);
+    var layered: usize = 0;
+    for (g.signs.entries) |e| {
+        if (e.layers.len > 0) layered += 1;
+    }
+    try std.testing.expect(layered > 0);
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    cap.clear();
+    var frame_buf: [64]u8 = undefined;
+    try g.injectFramed(c, try packages.framed(&frame_buf, "NetPackageSignDataRequest", &[_]u8{}));
+    // At least one SignDataResponse was captured (the bodies are
+    // deflate-compressed, so assert delivery + the batcher's own chaining
+    // rather than parsing the flag out of the capture).
+    const resp_id = packages.idOf("NetPackageSignDataResponse").?;
+    _ = cap.findPkgId(resp_id) orelse return error.TestUnexpectedResult;
+    // The served catalog batches end-to-end with the last flagged: drive
+    // the same builder the join path uses over the live entries.
+    var buf: [128 * 1024]u8 = undefined;
+    var start: usize = 0;
+    var batches: usize = 0;
+    var last_flag = false;
+    const stock_sign = @import("../wire/stock_sign.zig");
+    while (start < g.signs.entries.len) {
+        // Probe-then-send shape mirrors sendSignDataBatches: the probe sizes
+        // the batch, the flagged build carries is_last.
+        const probe = try stock_sign.buildSignDataResponseBatch(&buf, g.signs.entries, start, false);
+        const is_last = probe.next >= g.signs.entries.len;
+        const r = try stock_sign.buildSignDataResponseBatch(&buf, g.signs.entries, start, is_last);
+        try std.testing.expect(r.next > start);
+        last_flag = r.body[0] == 1;
+        batches += 1;
+        start = r.next;
+        if (batches > 4096) return error.TestUnexpectedResult;
+    }
+    try std.testing.expect(last_flag);
+    try std.testing.expect(start == g.signs.entries.len);
+    std.debug.print("PASS sign-request: {d} layered signs served in batches\n", .{layered});
+}
