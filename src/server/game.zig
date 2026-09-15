@@ -2779,6 +2779,12 @@ pub const Game = struct {
                     .player_kills = c.player_kills,
                     .zombie_kills = c.zombie_kills,
                     .deaths = c.deaths,
+                    // The client's own character: stock stores the profile it
+                    // sent in RequestToSpawnPlayer on the PDF's ECD, and the
+                    // client applies it with bLoaded=true instead of falling
+                    // back to its local profile.
+                    .profile = if (c.profile_ok) c.profile.view() else null,
+                    .player_name = c.name[0..c.name_len],
                 },
             );
             try self.sendGameCritical(peer, "NetPackagePlayerId", pid);

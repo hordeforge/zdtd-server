@@ -571,7 +571,9 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
                 .entity_name = owner.name[0..owner.name_len],
                 .holding_item = self.playerHoldingStock(i),
                 .team_number = 0,
-                .profile = null,
+                // The profile that player presented at spawn, so the joining
+                // client renders the same character its owner does.
+                .profile = if (owner.profile_ok) owner.profile.view() else null,
             },
         });
         try self.sendGame(peer, "NetPackageEntitySpawn", body);
@@ -600,7 +602,10 @@ pub fn sendPlayerSpawns(self: *Game, peer: *ln_peer.Peer, c: *Client, px: i32, p
             .entity_name = c.name[0..c.name_len],
             .holding_item = self.playerHoldingStock(js),
             .team_number = 0,
-            .profile = null,
+            // The profile the client presented at spawn, so every observer
+            // renders the same character the owner sees (stock carries the
+            // client's PlayerProfile on the broadcast ECD).
+            .profile = if (c.profile_ok) c.profile.view() else null,
         },
     });
     for (&self.clients, 0..) |*cl, ci| {
