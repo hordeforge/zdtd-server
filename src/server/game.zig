@@ -3493,7 +3493,9 @@ pub const Game = struct {
             return .{
                 .index = @intCast(ri),
                 .maxcount = r.maxcount,
-                .respawn_days = r.respawn_days,
+                // Default sandbox column (index 0); the Biome*Respawn sandbox
+                // options select the other columns when they are decoded.
+                .respawn_days = assets_spawning.respawnDays(r.*, 0),
             };
         }
         return .{};

@@ -982,8 +982,15 @@ pub const Director = struct {
         const st = &self.rule_budgets[i];
         st.count +|= 1;
         if (st.count == 1 and st.next_respawn_wt == std.math.maxInt(u64)) {
-            const days: u64 = @floor(budget.respawn_days);
-            st.next_respawn_wt = w.director.clock.worldTimeBits() + days *% ticks_per_day;
+            // Stock scales days to world ticks (BiomeSpawningFromXml IL_0191:
+            // ParseFloat * 24000) and arms delayWorldTime = now + delay *
+            // RandomRange(0.9, 1.1) (ResetRespawn IL_0146-0159). The delay is
+            // fractional days (dz02 day respawns in 0.3 d), so no whole-day
+            // floor: a floor would stretch a 7-hour respawn to a full day.
+            // Deterministic midpoint (1.0x) instead of the 0.9-1.1 roll: the
+            // budget has no per-rule RNG stream.
+            const ticks: u64 = @intFromFloat(@max(0, budget.respawn_days) * @as(f32, ticks_per_day));
+            st.next_respawn_wt = w.director.clock.worldTimeBits() + ticks;
         }
     }
 

@@ -18,8 +18,11 @@ pub const Rule = struct {
     maxcount: u8 = 1,
     time: TimeOfDay = .any,
     kind: SpawnKind = .zombie,
-    /// Default sandbox column of respawndelay (game days), low bound.
-    respawn_days: f32 = 1.0,
+    /// Full `respawndelay` list in game days, in XML order: Default, Very
+    /// Slow, Slow, Normal, Fast, Very Fast (stock `BiomeSpawningFromXml`
+    /// IL_015D-0192 splits on comma and scales each by 24000 world ticks).
+    /// Short lists pad with the first element; absent = 1 day.
+    respawn_days: [6]f32 = [_]f32{1.0} ** 6,
     /// Comma list of POI tags: the rule only fires where the area's POI tags
     /// contain any of these (stock POITags.Test_AnySet, spawning.md §2).
     tags: []const u8 = "",
@@ -27,6 +30,16 @@ pub const Rule = struct {
     /// (stock noPOITags.Test_AnySet).
     notags: []const u8 = "",
 };
+
+/// Respawn delay for one rule in game days. Stock indexes the 6-element list
+/// by the sandbox day/night delay column (`ChunkAreaBiomeSpawnData`
+/// RespawnDay/NightDelayIndexEnemies/Animals, driven by the Biome*Respawn
+/// sandbox options; 0 = Default). zdtd decodes no sandbox column yet, so the
+/// Default (index 0) always applies; the list is parsed whole so the column
+/// select is data, not a re-parse, when the options land.
+pub fn respawnDays(r: Rule, column: usize) f32 {
+    return r.respawn_days[@min(column, r.respawn_days.len - 1)];
+}
 
 /// `<entityspawner name=…>` with its `EntityGroupName` property. Stock's
 /// screamer system names these spawners in code (AIDirectorChunkEventComponent
@@ -97,9 +110,26 @@ fn parseKind(s: ?[]const u8) SpawnKind {
     return .zombie;
 }
 
-fn lowF32List(s: []const u8) f32 {
-    const comma = std.mem.findScalar(u8, s, ',') orelse s.len;
-    return std.fmt.parseFloat(f32, s[0..comma]) catch 1.0;
+/// Full 6-element respawndelay list (game days, XML order). Stock splits on
+/// comma with `ParseFloat(s, 0, -1, 511)` (BiomeSpawningFromXml IL_0187):
+/// unparseable elements read 0, and a short list simply has fewer entries
+/// (the index side guards the length). Empty slots pad with the first
+/// element so a 1-element list behaves like the old Default-only read.
+fn respawnDaysList(s: []const u8) [6]f32 {
+    var out: [6]f32 = [_]f32{1.0} ** 6;
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |part| {
+        if (n >= out.len) break;
+        const t = std.mem.trim(u8, part, " \t");
+        if (t.len == 0) continue;
+        out[n] = std.fmt.parseFloat(f32, t) catch 0;
+        n += 1;
+    }
+    if (n == 0) return out;
+    var i: usize = n;
+    while (i < out.len) : (i += 1) out[i] = out[0];
+    return out;
 }
 
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
@@ -156,7 +186,7 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
                 .maxcount = mc,
                 .time = parseTime(time_s),
                 .kind = parseKind(type_s),
-                .respawn_days = lowF32List(rd_s),
+                .respawn_days = respawnDaysList(rd_s),
                 .tags = try arena.dupe(u8, tags_s),
                 .notags = try arena.dupe(u8, notags_s),
             });
@@ -232,6 +262,33 @@ test "load spawning.xml when present" {
     const n = t.rulesForBiome("burnt_forest", &buf);
     try std.testing.expect(n >= 1);
     try std.testing.expect(buf[0].entitygroup.len > 0);
+}
+
+test "respawndelay parses the full 6-column list (BiomeSpawningFromXml IL_015D)" {
+    // Stock splits on comma and scales each element by 24000 world ticks;
+    // the pine_forest dz01 row carries 2.9,5.075,3.915,2.9,1.885,1.015.
+    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/spawning.xml";
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    var t = try loadFromPath(std.testing.allocator, p);
+    defer t.deinit();
+    var found = false;
+    for (t.rules) |r| {
+        if (!std.mem.eql(u8, r.biome, "pine_forest")) continue;
+        if (!std.mem.eql(u8, r.entitygroup, "ZombiesAll")) continue;
+        if (r.time != .day or r.maxcount != 1) continue;
+        try std.testing.expectApproxEqAbs(@as(f32, 2.9), r.respawn_days[0], 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 5.075), r.respawn_days[1], 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 3.915), r.respawn_days[2], 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 2.9), r.respawn_days[3], 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 1.885), r.respawn_days[4], 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 1.015), r.respawn_days[5], 1e-4);
+        // Column select: Default today, the sandbox columns when decoded.
+        try std.testing.expectApproxEqAbs(@as(f32, 2.9), respawnDays(r, 0), 1e-4);
+        try std.testing.expectApproxEqAbs(@as(f32, 1.015), respawnDays(r, 5), 1e-4);
+        found = true;
+        break;
+    }
+    try std.testing.expect(found);
 }
 
 test "stock entityspawners feed the gamestage scout thresholds" {
