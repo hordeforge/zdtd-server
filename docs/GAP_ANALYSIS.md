@@ -676,11 +676,13 @@ area and the concrete work.
     immediate, the tail paces via `drainSpawnArea` (see the PARTIAL row:
     62-join loadgen cycle, join_fail=0, chunk stream bounded 50 ms).
     Remaining: W2b async chunk gen (moves gen + te_scan off the join
-    tick) and an apm section for the join handler so the residual max-tick
-    (1.13 s) is attributed - both are join-timing changes gated on
-    stock-client validation
+    tick), gated on stock-client validation
     (no client installed; the mesh-core race is documented in c2s/join.zig
-    DynamicClientArrive). The per-poll send byte budget direction is
+    DynamicClientArrive). DONE 2026-09-15: the join-handler apm section the
+    row asked for already exists - the whole C2S join handler runs inside
+    `apm.profiler.scope(.join)` (c2s/join.zig), separate from the paced
+    `.replicate`/`.join_drain` chunk work, so the residual synchronous join
+    time is attributed. The per-poll send byte budget direction is
     subsumed by the ACK-yield fix
     (the reliable window drains between spawn-area chunks, so the fragment
     pump no longer spins; a separate budget would be redundant). Details +
