@@ -18510,3 +18510,49 @@ fn gracedHere(g: *game_mod.Game, vs: ecs.Slot) bool {
     }
     return false;
 }
+
+test "scenario buff finish chains the injury cooldown" {
+    // buffInjuryKnockdown01 (4 s) fires onSelfBuffFinish -> AddBuff
+    // buffInjuryKnockdown01Cooldown. The finish path relays Adds through the
+    // same sink as the start/update paths.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const vs = g.sim.playerByPeer(c.slot).?;
+    _ = g.addCatalogBuff(c.entity_id, vs, "buffInjuryKnockdown01");
+    // Shorten the 4 s instance so the test does not run 80 ticks of sim.
+    const kid = g.buffs.indexOfName("buffInjuryKnockdown01") orelse return error.TestUnexpectedResult;
+    const slot = g.sim.buffs[vs].find(kid) orelse return error.TestUnexpectedResult;
+    slot.duration_max = 0.05;
+    var eticks: usize = 0;
+    while (eticks < 20 and !hasBuffNamed(g, vs, "buffInjuryKnockdown01Cooldown")) : (eticks += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+        g.tickSurvival(0.05);
+        try g.step();
+    }
+    try std.testing.expect(hasBuffNamed(g, vs, "buffInjuryKnockdown01Cooldown"));
+    std.debug.print("PASS finish-chain: knockdown expiry adds its cooldown\n", .{});
+}
+
+fn hasBuffNamed(g: *game_mod.Game, vs: ecs.Slot, name: []const u8) bool {
+    for (g.sim.buffs[vs].slots) |b| {
+        if (!b.active) continue;
+        if (g.buffs.byId(b.def_id)) |def| {
+            if (std.mem.eql(u8, def.name, name)) return true;
+        }
+    }
+    return false;
+}
