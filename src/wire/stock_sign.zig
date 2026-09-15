@@ -278,3 +278,34 @@ test "sign layer encode round-trips the stock field order" {
     for ([_]f32{ 6, 7, 8, 9 }) |want| try std.testing.expectEqual(want, try rd.readF32());
     try std.testing.expectEqual(@as(usize, 0), rd.remaining());
 }
+
+test "sign batches carry the stock layered catalog" {
+    // The [D] Default Sign parses ~30 layers; the batcher must emit it with
+    // a nonzero layer count and correct is_last, not split or drop it.
+    const gd = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!@import("../util/io_fs.zig").dirExists(gd)) return error.SkipZigTest;
+    var path_buf: [2048]u8 = undefined;
+    const p = try std.fmt.bufPrint(&path_buf, "{s}/Data/Prefabs", .{gd});
+    var cfg_buf: [2048]u8 = undefined;
+    const cfg = try std.fmt.bufPrint(&cfg_buf, "{s}/Data/Config/signs.xml", .{gd});
+    var cat = try signs.loadFromPrefabsRoot(std.testing.allocator, p, cfg);
+    defer cat.deinit();
+    try std.testing.expect(cat.entries.len > 0);
+    var buf: [128 * 1024]u8 = undefined;
+    var start: usize = 0;
+    var batches: usize = 0;
+    var layered: usize = 0;
+    while (start < cat.entries.len) {
+        const last = start + 1 >= cat.entries.len;
+        const r = try buildSignDataResponseBatch(&buf, cat.entries, start, last);
+        try std.testing.expect(r.next > start);
+        for (cat.entries[start..r.next]) |e| {
+            if (e.layers.len > 0) layered += 1;
+        }
+        batches += 1;
+        start = r.next;
+        if (batches > 4096) return error.TestUnexpectedResult;
+    }
+    try std.testing.expect(layered > 0);
+    try std.testing.expect(start == cat.entries.len);
+}
