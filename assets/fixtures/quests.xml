@@ -28,6 +28,31 @@
   <reward type="Exp" value="1000"/>
 </quest>
 
+<quest id="tier2_clear">
+  <property name="name_key" value="quest_tier2_clear"/>
+  <property name="difficulty_tier" value="2"/>
+  <property name="category_key" value="quest"/>
+  <property name="completiontype" value="TurnIn"/>
+  <objective type="RandomPOIGoto" phase="1"/>
+  <objective type="ClearSleepers" phase="3"/>
+  <objective type="ReturnToNPC" phase="4"/>
+  <reward type="Exp" value="2000"/>
+</quest>
+
+<quest id="quest_tier1complete">
+  <property name="name_key" value="quest_tier1complete"/>
+  <property name="difficulty_tier" value="1"/>
+  <property name="completiontype" value="Auto"/>
+  <objective type="RandomPOIGoto" phase="1"/>
+  <reward type="Exp" value="2500"/>
+</quest>
+
+<quest_tier_rewards>
+  <quest_tier_reward tier="2">
+    <reward type="Quest" id="quest_tier1complete"/>
+  </quest_tier_reward>
+</quest_tier_rewards>
+
 <quest id="tier1_fetch">
   <property name="name_key" value="quest_tier1_fetch"/>
   <property name="difficulty_tier" value="1"/>

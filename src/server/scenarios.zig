@@ -3343,6 +3343,10 @@ test "scenario stock fixture quests.xml load" {
     systems.drainQuestCoins(&g.sim, c.slot);
     try std.testing.expect(systems.questCoins(&g.sim, c.slot) >= 10);
 
+    // The starter's TurnIn completion consumed its ring entry above, so the
+    // tier-2 completion below owns the ring alone. (The ring pays each entry
+    // independently; the drain is what lets two completions share one tick.)
+
     // Accept clear: Goto POI (phase1) → ClearSleepers (phase3) → ReturnToNPC (phase4).
     try std.testing.expect(systems.questAccept(&g.sim, c.slot, clear.id));
     // Reach the quest POI to clear phase 1; the rally scaffolding (phase 2) auto-skips.
@@ -3353,6 +3357,24 @@ test "scenario stock fixture quests.xml load" {
     try std.testing.expect(systems.questHasActive(&g.sim, c.slot, clear.id));
     systems.questOnTraderOpen(&g.sim, c.slot);
     try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, clear.id));
+
+    // The Goto phase must resolve first (one tick), then the
+    // ClearSleepers kills land, then the trader turn-in completes - exactly
+    // the tier-1 sequence above. A second questTickGoto between kills is
+    // harmless (the phase has moved on) but must not reorder the phases.
+    {
+        const t2 = g.sim.catalog.byName("tier2_clear").?;
+        try std.testing.expect(systems.questAccept(&g.sim, c.slot, t2.id));
+        systems.questTickGoto(&g.sim, c.slot, t2.tx, t2.ty, t2.tz);
+        var kk2: u16 = 0;
+        while (kk2 < t2.target_count) : (kk2 += 1) questKillAtPoi(g, c);
+        try std.testing.expect(systems.questHasActive(&g.sim, c.slot, t2.id));
+        systems.questOnTraderOpen(&g.sim, c.slot);
+        try std.testing.expect(!systems.questHasActive(&g.sim, c.slot, t2.id));
+        try g.step();
+        const tc = g.sim.catalog.byName("quest_tier1complete").?;
+        try std.testing.expect(systems.questHasActive(&g.sim, c.slot, tc.id));
+    }
 
     std.debug.print(
         "PASS quests-xml: defs={d} starter={s} coins={d} lists={d}\n",
