@@ -196,6 +196,10 @@ pub const EntityClass = struct {
     time_stay: f32 = 0,
     /// entityclasses SightRange in metres; 0 = use the Rules sense floor.
     sight_range: f32 = 0,
+    /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres;
+    /// 0 = unset (the sense path falls back to sight_range). Negative stock
+    /// values (never target) stay negative so the gate keeps them denied.
+    target_player_see: f32 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
     /// zombie template; cctor default 30/100). 0,0 = use the Rules floor.
     sight_light_min: f32 = 0,
@@ -1188,6 +1192,7 @@ pub const World = struct {
             self.class_id[s].block_chew = def.block_chew;
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
+            self.class_id[s].target_player_see = def.target_player_see;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
             self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
@@ -1283,6 +1288,7 @@ pub const World = struct {
             self.class_id[s].phys_resist = def.phys_resist;
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
+            self.class_id[s].target_player_see = def.target_player_see;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
             self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;

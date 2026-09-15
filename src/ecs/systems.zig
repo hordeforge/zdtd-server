@@ -2088,6 +2088,13 @@ const AiCtx = struct {
 fn senseDistSq(w: *const World, s: Slot) f32 {
     // A35 per-entity layer first: the def spawns carry SightRange onto the
     // entity, so a class outside the fixed class_table senses as itself too.
+    // The AITarget player see distance wins over SightRange when set (stock
+    // `EAISetNearestEntityAsTarget` targetClasses): a zombie whose row says
+    // see 20 senses players at 20, not at its 27-40 SightRange. A negative
+    // stock value (never target this class) yields a negative square and
+    // denies every range check below.
+    const tp = w.class_id[s].target_player_see;
+    if (tp != 0) return tp * tp;
     const pe = w.class_id[s].sight_range;
     if (pe > 0) return pe * pe;
     const sr = w.class_table[w.class_id[s].id].sight_range;

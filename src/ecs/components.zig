@@ -122,6 +122,12 @@ pub const ClassId = struct {
     /// entityclasses SightRange in metres; 0 = class_table[id] then the Rules
     /// sense floor (systems.senseDistSq).
     sight_range: f32 = 0,
+    /// `SetNearestEntityAsTarget class=` EntityPlayer seeDistMax in metres
+    /// (stock `EAISetNearestEntityAsTarget` targetClasses); 0 = unset, and
+    /// the sense path falls back to sight_range. A negative stock value
+    /// (bandits at -10/-8: never target) stays negative so the gate below
+    /// keeps it denied rather than reading it as unset.
+    target_player_see: f32 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
     /// zombie template; cctor default 30/100). 0,0 = class_table[id] then the
     /// Rules floor (systems.sightLightThreshold).

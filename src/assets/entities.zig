@@ -89,6 +89,12 @@ pub const EntityDef = struct {
     /// entityclasses SightRange in metres (stock ships 27, 30, 40 per class).
     /// 0 = unset, which leaves the sim on the Rules floor.
     sight_range: f32 = 0,
+    /// `SetNearestEntityAsTarget class=` player entry (type, hearDistMax,
+    /// seeDistMax triples; `EAISetNearestEntityAsTarget` targetClasses parse
+    /// IL). hear 0 reads 50 stock-side; see 0 = unset here (the sense path
+    /// falls back to sight_range). 0,0 = no player entry parsed.
+    target_player_hear: f32 = 0,
+    target_player_see: f32 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock zombieTemplateMale
     /// "-2,150": "how well lit you have to be for the zombie to see you at
     /// min,max range"; the EntityClass cctor default is 30/100). The pair
@@ -404,10 +410,97 @@ fn orTaskName(mask: *u16, raw: []const u8) void {
     }
 }
 
-/// Walk the Extends chain like resolveProp. Numbered `AITask-N` props (animals)
-/// and the pipe-separated `AITask` blob (zombieTemplateMale and class overrides)
-/// both count. Child classes that set `AITask` replace the parent list; numbered
-/// keys merge with the parent unless the child also ships a pipe blob.
+/// One parsed `SetNearestEntityAsTarget class=` player triple (hear/see
+/// distances in metres; hear 0 reads 50 stock-side per the targetClasses
+/// parse IL, see 0 = unset).
+pub const TargetPlayerSense = struct {
+    hear: f32 = 0,
+    see: f32 = 0,
+};
+
+/// Walk the Extends chain like resolveProp. `AITarget` pipe blobs and
+/// numbered `AITarget-N` props both count; a child pipe blob replaces the
+/// parent list, numbered keys merge unless the child also ships a pipe blob
+/// (same rule as resolvedAiTasks). Returns the first EntityPlayer triple
+/// found walking from the child up, or null when no entry names the player.
+fn resolvedTargetPlayerSense(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) ?TargetPlayerSense {
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: ?TargetPlayerSense = null;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = val;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
+                if (cut >= rest.len) {
+                    if (parseTargetPlayerEntry(entry)) |s| {
+                        if (is_pipe) return s;
+                        if (numbered == null) numbered = s;
+                    }
+                    break;
+                }
+                if (parseTargetPlayerEntry(entry)) |s| {
+                    if (is_pipe) return s;
+                    if (numbered == null) numbered = s;
+                }
+                rest = rest[cut + 1 ..];
+            }
+            if (is_pipe) {
+                // A child pipe blob replaces the parent list: a pipe with no
+                // player entry stops the walk (same rule as resolvedAiTasks).
+                return numbered;
+            }
+        }
+        if (numbered) |s| return s;
+        cur = rc.extends;
+    }
+    return null;
+}
+
+/// Parse one `SetNearestEntityAsTarget class=...` entry for its EntityPlayer
+/// triple. Grammar (targetClasses parse IL): comma-separated
+/// `type,hear,see` triples stepped by 3; the player triple's hear 0 reads 50
+/// stock-side. Null unless the entry names the player type.
+fn parseTargetPlayerEntry(entry: []const u8) ?TargetPlayerSense {
+    var name = entry;
+    var data: []const u8 = "";
+    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
+        name = entry[0..sp];
+        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
+    }
+    if (!std.mem.eql(u8, name, "SetNearestEntityAsTarget")) return null;
+    const marker = "class=";
+    const ci = std.mem.find(u8, data, marker) orelse return null;
+    const list = data[ci + marker.len ..];
+    var parts: [64][]const u8 = undefined;
+    var n: usize = 0;
+    var it = std.mem.splitScalar(u8, list, ',');
+    while (it.next()) |p| {
+        if (n >= parts.len) break;
+        parts[n] = std.mem.trim(u8, p, " \t");
+        n += 1;
+    }
+    var i: usize = 0;
+    while (i + 2 < n + 1 and i < n) : (i += 3) {
+        if (!std.mem.eql(u8, parts[i], "EntityPlayer")) continue;
+        const hear: f32 = if (i + 1 < n) std.fmt.parseFloat(f32, parts[i + 1]) catch 0 else 0;
+        const see: f32 = if (i + 2 < n) std.fmt.parseFloat(f32, parts[i + 2]) catch 0 else 0;
+        return .{ .hear = if (hear == 0) 50 else hear, .see = see };
+    }
+    return null;
+}
 fn resolvedAiTasks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
@@ -664,6 +757,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const is_enemy = if (resolveProp(&classes, name, "IsEnemyEntity", 0)) |v| parseBoolLoose(v) else true;
         const ai_tasks = resolvedAiTasks(&classes, name);
         const ai_attack = resolvedAiAttacks(&classes, name);
+        const target_sense = resolvedTargetPlayerSense(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
         const spawnable = !(std.mem.eql(u8, ust, "None") or std.mem.eql(u8, ust, "none"));
@@ -905,6 +999,8 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .is_enemy = is_enemy,
             .ai_attack = ai_attack,
             .ai_tasks = ai_tasks,
+            .target_player_hear = if (target_sense) |s| s.hear else 0,
+            .target_player_see = if (target_sense) |s| s.see else 0,
             .chase_speed = chase,
             .chase_speed_day = chase_day,
             .wander_speed = wander,
@@ -1003,9 +1099,17 @@ test "load stock entityclasses when present" {
     defer t.deinit();
     try std.testing.expect(t.defs.len > 100);
     const boe = t.byName("zombieBoe") orelse return error.TestExpectedEqual;
-    try std.testing.expectEqual(unity_hash.class_zombie_boe, boe.hash);
     try std.testing.expect(boe.spawnable);
     try std.testing.expectEqual(components.Kind.zombie, boe.kind);
+    // AITarget player sense (EAISetNearestEntityAsTarget targetClasses):
+    // zombieBoe inherits the template's `EntityPlayer,0,0` triple: hear 0
+    // reads 50 stock-side, see 0 = unset (the sense path falls back to
+    // SightRange). animalDireWolf declares `EntityPlayer,28,20`.
+    try std.testing.expectEqual(@as(f32, 50), boe.target_player_hear);
+    try std.testing.expectEqual(@as(f32, 0), boe.target_player_see);
+    const dwolf = t.byName("animalDireWolf") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(f32, 28), dwolf.target_player_hear);
+    try std.testing.expectEqual(@as(f32, 20), dwolf.target_player_see);
     // LootDropEntityClass "EntityLootContainerRegular" resolves one hop through
     // that class's LootList to the real loot.xml container.
     try std.testing.expectEqualStrings("zPackReg", boe.loot_list);

@@ -3313,6 +3313,7 @@ pub const Game = struct {
             .attack_damage = self.handItemDamage(d.hand_item),
             .time_stay = d.time_stay,
             .sight_range = d.sight_range,
+            .target_player_see = d.target_player_see,
             .sight_light_min = d.sight_light_min,
             .sight_light_max = d.sight_light_max,
             .sleeper_wake_near_min = d.sleeper_wake_near_min,
