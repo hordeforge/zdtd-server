@@ -18623,3 +18623,39 @@ test "scenario preacher armor resists zombie hits more" {
     try std.testing.expect(loss_naked > loss_wearing);
     std.debug.print("PASS preacher: zombie-mit {d:.3} vs unset {d:.3}\n", .{ mz, m0 });
 }
+
+test "scenario seated players read attached" {
+    // IsAttachedToEntity answers from the vehicle seats: a mounted rider
+    // reads true, a standing player false.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap_a: ln_peer.Capture = .{};
+    var cap_b: ln_peer.Capture = .{};
+    const ca = try g.attachJoinedClient(&cap_a);
+    const cb = try g.attachJoinedClient(&cap_b);
+    const pa = g.sim.slotOfNetId(ca.entity_id).?;
+    const t = g.sim.transform[pa];
+    const ve = g.sim.spawnVehicleEx(.four_by_four, t.x, t.y, t.z, 300, 14, 4).?;
+    const vs = g.sim.slotOfNetId(ve).?;
+    const tick = @import("game/tick.zig");
+    try std.testing.expect(!tick.isSeated(&g.sim, ca.entity_id));
+    try std.testing.expect(!tick.isSeated(&g.sim, cb.entity_id));
+    var body: [32]u8 = undefined;
+    var fb: [64]u8 = undefined;
+    const mount_a = try packages.buildEntityAttach(&body, .attach_server, ca.entity_id, ve, packages.slot_any);
+    try g.injectFramed(ca, try packages.framed(&fb, "NetPackageEntityAttach", mount_a));
+    try std.testing.expectEqual(ca.entity_id, g.sim.vehicle[vs].driverNetId());
+    try std.testing.expect(tick.isSeated(&g.sim, ca.entity_id));
+    try std.testing.expect(!tick.isSeated(&g.sim, cb.entity_id));
+    std.debug.print("PASS seated: rider attached, bystander not\n", .{});
+}

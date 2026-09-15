@@ -246,6 +246,21 @@ fn heldItemTags(self: *const Game, ps: ecs.Slot) []const u8 {
     return def.tags;
 }
 
+/// Whether the entity rides in any vehicle seat (`Entity::AttachedToEntity`
+/// for `IsAttachedToEntity`; stock attaches on EntityVehicle). Linear scan
+/// over live vehicles; seated players are rare and the fold runs per player.
+pub fn isSeated(sim: *const ecs.World, entity_id: i32) bool {
+    var it = sim.alive_bits.iterator(.{});
+    while (it.next()) |idx| {
+        const i: ecs.Slot = @intCast(idx);
+        if (!sim.mask[i].vehicle) continue;
+        for (sim.vehicle[i].seats[0..sim.vehicle[i].usableSeats()]) |rider| {
+            if (rider == entity_id) return true;
+        }
+    }
+    return false;
+}
+
 /// Passive-effects VM recomputes per player per tick: the untagged stats query
 /// and the `coredamageresist` armor query, each over the buff and perk legs.
 const vm_recomputes_per_player = 4;
@@ -573,8 +588,7 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // without it (additive deltas, recompute-from-set).
             //
             // Requirement-gate context (ADR 0023 §2): the live player state a
-            // `<requirement>` reads. `attached_to_entity` stays false because
-            // the sim tracks no vehicle/attachment state yet.
+            // `<requirement>` reads.
             var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
             const buff_lookup = BuffNameLookup{ .table = &self.buffs };
             const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
@@ -583,6 +597,9 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                 .levels = c.skill_levels[0..c.skill_level_n],
                 .player_level = c.level,
                 .alive = self.sim.alive[ps],
+                // Seated in a vehicle (`Entity::AttachedToEntity`): scan the
+                // vehicle seats for this entity id.
+                .attached_to_entity = isSeated(&self.sim, c.entity_id),
                 .biome_id = self.biomeIdAt(@trunc(self.sim.transform[ps].x), @trunc(self.sim.transform[ps].z)),
                 .active_buffs = activeBuffIds(&self.sim.buffs[ps], &buff_ids),
                 .buff_names = &buff_names,
