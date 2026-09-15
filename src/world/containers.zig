@@ -359,14 +359,22 @@ test "container store saves past the old 256 cap (GAP 12)" {
     defer tmp.cleanup();
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     var i: usize = 0;
     while (i < 300) : (i += 1) {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = @intCast(i * 3) }, 8, 42).?;
         c.setSlot(0, .{ .item_id = 7, .count = 1, .quality = 1, .meta = 0 });
     }
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     var found: usize = 0;
     for (s2.used) |u| {
@@ -379,7 +387,12 @@ test "container store saves past the old 256 cap (GAP 12)" {
 }
 
 test "container store save load roundtrip" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 8, 42).?;
     c.setSlot(0, .{ .item_id = 7, .count = 12, .quality = 2, .meta = 3 });
     var tmp = std.testing.tmpDir(.{});
@@ -387,7 +400,10 @@ test "container store save load roundtrip" {
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
     try std.testing.expectEqual(@as(u16, 7), c2.slots[0].item_id);
@@ -397,7 +413,12 @@ test "container store save load roundtrip" {
 }
 
 test "container store ZCT2 persists the observed grid size" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     const c = s.getOrCreate(.{ .x = 5, .y = 70, .z = 6 }, 12, 42).?;
     c.size_x = 6;
     c.size_y = 2; // stock 6x2 wooden chest
@@ -406,7 +427,10 @@ test "container store ZCT2 persists the observed grid size" {
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     const c2 = s2.get(.{ .x = 5, .y = 70, .z = 6 }).?;
     try std.testing.expectEqual(@as(u8, 6), c2.size_x);
@@ -445,7 +469,12 @@ test "a legacy ZCT1 file loads without the touched_day and size tail" {
     std.mem.writeInt(i32, buf[r2 + 12 .. r2 + 16][0..4], 43, .little); // block_id
     std.mem.writeInt(u16, buf[r2 + 16 .. r2 + 18][0..2], 2, .little); // slot_count
 
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     try s.loadFromSlice(&buf);
     const c = s.get(.{ .x = 5, .y = 70, .z = 6 }) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(i32, 42), c.block_id);
@@ -465,7 +494,12 @@ test "a legacy ZCT1 file loads without the touched_day and size tail" {
 
 test "container save order is pos-sorted not slot-order" {
     // Reverse-insert so sparse slot indices disagree with world-pos order.
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     _ = s.getOrCreate(.{ .x = 9, .y = 70, .z = 0 }, 8, 1).?;
     _ = s.getOrCreate(.{ .x = 1, .y = 70, .z = 0 }, 8, 2).?;
     var tmp = std.testing.tmpDir(.{});
@@ -484,7 +518,12 @@ test "container save order is pos-sorted not slot-order" {
 }
 
 test "container get or create" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     const c = s.getOrCreate(.{ .x = 1, .y = 70, .z = 2 }, 8, 100).?;
     c.setSlot(0, .{ .item_id = 7, .count = 3, .quality = 1 });
     try std.testing.expectEqual(@as(u16, 7), s.get(.{ .x = 1, .y = 70, .z = 2 }).?.slots[0].item_id);
@@ -501,14 +540,24 @@ test "container guid decode rejects a foreign tag and round-trips" {
     var foreign = g;
     foreign[15] = 2; // wrong tag byte; must not decode to a position
     try std.testing.expect(posFromGuid(&foreign) == null);
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     _ = s.getOrCreate(pos, 8, 100).?;
     try std.testing.expect(s.getByGuid(&g) != null);
     try std.testing.expect(s.getByGuid(&foreign) == null);
 }
 
 test "container persistence retains every full-capacity container" {
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     var i: usize = 0;
     while (i < max_containers) : (i += 1) {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 70, .z = 0 }, max_container_slots, 42).?;
@@ -519,7 +568,10 @@ test "container persistence retains every full-capacity container" {
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
     try s.save(dir, std.testing.allocator);
-    var s2: ContainerStore = .{};
+    const s2_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s2_box);
+    s2_box.* = .{};
+    const s2 = s2_box;
     try s2.load(dir);
     try std.testing.expectEqual(max_containers, s2.n);
     const last = s2.get(.{ .x = max_containers - 1, .y = 70, .z = 0 }).?;
@@ -532,7 +584,12 @@ test "a dropped ZCT2 record does not desync the records after it" {
     // loader has to consume that record whole: its slots AND the touched_day +
     // size tail. Skipping only the slots left the cursor on the tail bytes, so
     // every following container parsed garbage.
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     var i: usize = 0;
     while (i < max_containers) : (i += 1) {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 0, .z = 0 }, 8, 1).?;
@@ -591,7 +648,12 @@ test "container store evicts world containers before dropping (cap 4096)" {
     // table is full, getOrCreate reuses a WORLD container (player_storage =
     // false, regenerated deterministically on the next chunk scan) and never
     // evicts a player-placed chest.
-    var s: ContainerStore = .{};
+    // Heap, not stack: ContainerStore is ~10 MB (4096 x 54-slot
+    // containers) and overflows the 8 MB test thread stack.
+    const s_box = try std.testing.allocator.create(ContainerStore);
+    defer std.testing.allocator.destroy(s_box);
+    s_box.* = .{};
+    const s = s_box;
     var i: usize = 0;
     while (i < max_containers) : (i += 1) {
         const c = s.getOrCreate(.{ .x = @intCast(i), .y = 0, .z = 0 }, 8, 1).?;
