@@ -18659,3 +18659,35 @@ test "scenario seated players read attached" {
     try std.testing.expect(!tick.isSeated(&g.sim, cb.entity_id));
     std.debug.print("PASS seated: rider attached, bystander not\n", .{});
 }
+
+test "scenario comma buff lists apply each name" {
+    // Stock splits AddBuff `buff=` on comma (MinEventActionBuffModifierBase
+    // IL). A list with one renamed (unknown) entry still applies its
+    // siblings instead of dropping the row.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.create(gpa, dir, 0);
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    // Two buffs the offline catalog carries.
+    const n0 = "buffShocked";
+    const n1 = "buffIsOnFire";
+    if (g.buffs.indexOfName(n0) == null or g.buffs.indexOfName(n1) == null) return error.SkipZigTest;
+    var list_buf: [256]u8 = undefined;
+    const list = try std.fmt.bufPrint(&list_buf, "{s},noSuchBuffXYZ,{s}", .{ n0, n1 });
+    const tick = @import("game/tick.zig");
+    tick.applyCommaBuffs(g, c.entity_id, ps, list);
+    try std.testing.expect(hasBuffNamed(g, ps, n0));
+    try std.testing.expect(hasBuffNamed(g, ps, n1));
+    std.debug.print("PASS comma-buffs: siblings apply past a renamed entry\n", .{});
+}

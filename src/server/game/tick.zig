@@ -189,13 +189,18 @@ const BuffSink = struct {
 
     fn add(ctx: *const anyopaque, name: []const u8) void {
         const s: *const BuffSink = @ptrCast(@alignCast(ctx));
-        _ = addCatalogBuff(s.game, s.entity_id, s.ps, name);
+        applyCommaBuffs(s.game, s.entity_id, s.ps, name);
     }
 
     fn remove(ctx: *const anyopaque, name: []const u8) void {
         const s: *const BuffSink = @ptrCast(@alignCast(ctx));
-        const def_id = s.game.buffs.indexOfName(name) orelse return;
-        _ = ecs.buff.remove(s.game.sim.buffsMut(s.ps), def_id);
+        var it = std.mem.splitScalar(u8, name, ',');
+        while (it.next()) |seg| {
+            const n = std.mem.trim(u8, seg, " \t");
+            if (n.len == 0) continue;
+            const def_id = s.game.buffs.indexOfName(n) orelse continue;
+            _ = ecs.buff.remove(s.game.sim.buffsMut(s.ps), def_id);
+        }
     }
 
     fn has(ctx: *const anyopaque, name: []const u8) bool {
@@ -204,6 +209,19 @@ const BuffSink = struct {
         return s.game.sim.buffs[s.ps].find(def_id) != null;
     }
 };
+
+/// Apply a (possibly comma-separated) AddBuff `buff=` list: stock splits on
+/// comma (MinEventActionBuffModifierBase ParseXmlAttribute IL splits char
+/// 44); each name resolves alone so a renamed modlet buff fails closed
+/// without dropping its siblings.
+pub fn applyCommaBuffs(game: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8) void {
+    var it = std.mem.splitScalar(u8, name, ',');
+    while (it.next()) |seg| {
+        const n = std.mem.trim(u8, seg, " \t");
+        if (n.len == 0) continue;
+        _ = addCatalogBuff(game, entity_id, ps, n);
+    }
+}
 
 /// Add one catalog buff to the entity's set unless it is already active, and
 /// relay the add. Returns whether it was added. Unknown names are skipped (fail
