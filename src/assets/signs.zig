@@ -651,6 +651,15 @@ test "default [D] sign library loads from Data/Config/signs.xml" {
     // Parts set); all must parse to nonzero ticks.
     try std.testing.expect(prefab_total > 0);
     try std.testing.expectEqual(prefab_total, prefab_modified);
+    // Prefab signs carry next_* counters (unlike signs.xml): the Beanthere
+    // Coffee sign pins all four through the catalog.
+    for (cat.entries) |e| {
+        if (!std.mem.eql(u8, e.name, "Beanthere Coffee")) continue;
+        try std.testing.expectEqual(@as(i32, 8), e.next_poly);
+        try std.testing.expectEqual(@as(i32, 5), e.next_text);
+        try std.testing.expectEqual(@as(i32, 10), e.next_noise);
+        try std.testing.expectEqual(@as(i32, 32), e.next_group);
+    }
 }
 
 test "prefab sign libraries parse deep nesting and enum values" {
