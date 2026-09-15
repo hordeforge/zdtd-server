@@ -2520,7 +2520,7 @@ test "scenario zombie opens a door on its path instead of chewing" {
             return null;
         }
     };
-    const src = "<blocks><block name=\"terrStone\"><property name=\"Class\" value=\"Terrain\"/></block><block name=\"doorWoodLargeGate\"><property name=\"Class\" value=\"CompositeTileEntity\"/></block></blocks>";
+    const src = "<blocks><block name=\"terrStone\"><property name=\"Class\" value=\"Terrain\"/></block><block name=\"doorWoodLargeGate\"><property name=\"Class\" value=\"CompositeTileEntity\"/><property name=\"BlockTag\" value=\"Door\"/></block></blocks>";
     const path = ".zdtd_test_blocks_door.xml";
     try io_fs.writeFile(path, src);
     defer io_fs.deleteFile(path);
@@ -13871,6 +13871,7 @@ test "scenario powered door opens while powered, closes on power loss" {
         \\<blocks>
         \\  <block name="doorWoodLargeGate">
         \\    <property name="Class" value="Door"/>
+        \\    <property name="BlockTag" value="Door"/>
         \\  </block>
         \\</blocks>
     );

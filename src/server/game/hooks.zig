@@ -565,9 +565,9 @@ pub fn blockIsWaterAt(ctx: ?*anyopaque, x: i32, y: i32, z: i32) bool {
     return g.world.isWaterId(id);
 }
 
-/// Door-id oracle: true when the block id resolves to a door (name-based, per
-/// the stock door-naming set). Feeds `isSolidWorld` so open doors are
-/// passable and closed doors block.
+/// Door-id oracle: true when the block id resolves to a `BlockTag="Door"`
+/// block (stock `BlockTags` bit 2, resolved through Extends). Feeds
+/// `isSolidWorld` so open doors are passable and closed doors block.
 pub fn blockIsDoor(ctx: ?*anyopaque, id: u16) bool {
     const g: *Game = @ptrCast(@alignCast(ctx.?));
     const def = g.blocks.byId(id) orelse return false;

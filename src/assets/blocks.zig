@@ -110,11 +110,12 @@ pub const BlockDef = struct {
     class: []const u8 = "",
     /// TraderID property (blocks.xml), resolved through the Extends chain.
     trader_id: i32 = 0,
-    /// Door block (RE entity-ai.md CheckForDoorAndOpen): stock doors carry the
-    /// door FastTag (bit 2) and a TEFeatureDoor; zdtd detects them by the
-    /// stock naming (672 door-named blocks, all door classes) since the tag
-    /// is class-assigned, not a blocks.xml property. Zombies open these on
-    /// their path instead of chewing.
+    /// Door block: stock tags the openables with `BlockTag="Door"`
+    /// (`BlockTags` bit 2 in the code-side FastTag set), resolved through
+    /// Extends like every string property (79 shipped rows; the chainlink
+    /// gates, hatches and porta-potties carry the tag with no "door" in the
+    /// name). Zombies open these on their path instead of chewing, and powered
+    /// doors actuate on them.
     is_door: bool = false,
     /// blocks.xml `LPHardnessScale` (stock `Block.LPHardnessScale`, default 1
     /// when the property is absent - Block's property loader sets it at
@@ -523,6 +524,9 @@ pub fn loadFromPath(
         /// from its parent (stock CreateProperties; Class is the common one).
         extends_param1: []const u8 = "",
         trader_onoff: bool = false,
+        /// Raw `BlockTag` value (`"Door"` for the openables), resolved through
+        /// Extends during the chain walk. `is_door` below is derived from it.
+        block_tag: ?[]const u8 = null,
         is_door: bool = false,
         signable: bool = false,
         /// `Shape="Terrain"` (stock `BlockShape::IsTerrain`, the 17 terrain
@@ -604,6 +608,7 @@ pub fn loadFromPath(
         var extends: ?[]const u8 = null;
         var extends_param1: []const u8 = "";
         var trader_onoff = false;
+        var block_tag: ?[]const u8 = null;
         var signable = false;
         var lp_hardness_scale: f32 = 1;
         var lp_declared = false;
@@ -701,6 +706,12 @@ pub fn loadFromPath(
             };
             if (std.mem.eql(u8, pname, "Class")) {
                 class = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "BlockTag")) {
+                // Stock tags the openables with `BlockTag="Door"` (bit 2 of the
+                // code-side FastTag set; `EAIBreakBlock` IL_003D,
+                // `EntityMoveHelper` IL_0053), including the gates, hatches and
+                // porta-potties whose names carry no "door".
+                block_tag = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "TraderID")) {
                 if (xml.attr(clean, pi, "value")) |v| trader_id = std.fmt.parseInt(i32, v, 10) catch -1;
             } else if (std.mem.eql(u8, pname, "Extends")) {
@@ -825,7 +836,8 @@ pub fn loadFromPath(
             .extends = extends,
             .extends_param1 = if (extends_param1.len > 0) try arena.dupe(u8, extends_param1) else "",
             .trader_onoff = trader_onoff,
-            .is_door = std.ascii.findIgnoreCase(kn, "door") != null,
+            .block_tag = if (block_tag) |bt| try arena.dupe(u8, bt) else null,
+            .is_door = false, // resolved from BlockTag after the Extends walk
             .signable = signable,
             .lp_hardness_scale = lp_hardness_scale,
             .lp_declared = lp_declared,
@@ -886,6 +898,7 @@ pub fn loadFromPath(
         var own_pass_through = pb.pass_through;
         var own_pass_through_declared = pb.pass_through_declared;
         var own_signable = pb.signable;
+        var own_tag = pb.block_tag;
         var own_lp = pb.lp_hardness_scale;
         var own_lp_declared = pb.lp_declared;
         var own_drops = pb.harvest_drops;
@@ -946,6 +959,11 @@ pub fn loadFromPath(
             // extends playerSignWood1x1 and declares no CompositeFeatures of
             // its own), so the module flag follows the chain.
             if (!own_signable) own_signable = base_p.signable;
+            // BlockTag follows the chain like the other string properties
+            // (own wins; no stock row excludes it through param1). An
+            // explicitly-tagged row never changes the result down-chain, so
+            // one walk covers it.
+            if (own_tag == null) own_tag = base_p.block_tag;
             // LPHardnessScale follows the chain like every other blocks.xml
             // property the loader copies (the default is not an override).
             if (!own_lp_declared) {
@@ -966,6 +984,8 @@ pub fn loadFromPath(
         pb.class = own_class;
         pb.trader_id = @max(own_trader, 0);
         pb.mesh = own_mesh;
+        pb.block_tag = own_tag;
+        pb.is_door = own_tag != null and std.ascii.eqlIgnoreCase(own_tag.?, "Door");
         pb.texture_top = own_texture;
         pb.map_color = own_map_color;
         pb.collide = own_collide;
@@ -1322,6 +1342,13 @@ test "vending class and TraderID resolve with Extends inheritance" {
         \\</block>
         \\<block name="doorWoodLargeGate">
         \\  <property name="IndexName" value="TraderOnOff"/>
+        \\  <property name="BlockTag" value="Door"/>
+        \\</block>
+        \\<block name="woodHatchChild">
+        \\  <property name="Extends" value="woodHatchBase"/>
+        \\</block>
+        \\<block name="woodHatchBase">
+        \\  <property name="BlockTag" value="Door"/>
         \\</block>
         \\<block name="campfire">
         \\  <property name="HeatMapStrength" value="5"/>
@@ -1371,8 +1398,11 @@ test "vending class and TraderID resolve with Extends inheritance" {
     const gate = t.byName("doorWoodLargeGate").?;
     try std.testing.expect(t.isTraderOnOff(gate.id));
     try std.testing.expect(!t.isTraderOnOff(crate.id));
-    // Door detection (stock door-naming set): a door is a door, a crate is not.
+    // Door detection (stock `BlockTag="Door"`, resolved through Extends):
+    // a tagged door stays a door, an untagged crate is not, and the tag
+    // reaches the nameless gates and hatches the old substring missed.
     try std.testing.expect(t.byName("doorWoodLargeGate").?.is_door);
+    try std.testing.expect(t.byName("woodHatchChild").?.is_door); // inherited tag
     try std.testing.expect(!t.byName("cntWoodCrateWood01").?.is_door);
     // HeatMapStrength feeds the AI heat map while the block runs.
     const fire = t.byName("campfire").?;
@@ -1489,6 +1519,8 @@ fn fixtureId(_: ?*anyopaque, name: []const u8) ?u16 {
         .{ "treeMaster", 224 },
         .{ "woodMaster", 227 },
         .{ "woodDoor", 228 },
+        .{ "woodHatchBase", 229 },
+        .{ "woodHatchChild", 230 },
         .{ "treeOakSml01", 225 },
         .{ "terrStone", 226 },
     };
