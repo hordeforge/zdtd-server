@@ -732,6 +732,8 @@ now (`DeflateOutputStream(_, 3)`).
 
 **Re-run 2026-09-14 (after the item-stat, craft-count, passive-curve, wandering-horde and blood-moon-stage changes)**, scripted as `scripts/ab-join-smoke.sh ab-mods <out> both` so the two legs are one command: both legs join, spawn and are driven by the same loadgen. Same stage table as above (`maps=224/191`, `LoginAnswered dataLen=1686/466`, `WorldInfo 590/97`, `WorldSpawnPoints 213/213`, `GameStats 231/231`, `Localization 19554/19010`, `PlayerId 360/1512`, spawn `(256,72,256)` via `PlayerId` on both).
 
+**Re-run 2026-09-15 (after the trader-abundance, quest-reward-stats, craft_time-sentinel, vehicle-speed, AITarget-sense, RandomRoll/PerksUnlocked, signs-tree and worldglobal-ambient changes)**: both legs exit 0, join, spawn at `(256,72,256)` via `PlayerId`, and the stage table is unchanged (`maps=224/191`, `GameStats 231/231`, `WorldSpawnPoints 213/213`, `Localization 19554/19010`, `WorldInfo 590/97`). None of the round 74-91 changes moved a join-stage byte, which is the expected result: they touch trader windows, reward rolls, craft timing, sense distances, requirement gates, sign payloads and night ambient, all post-join behavior.
+
 `WorldInfo` moved from the 362 first recorded to 590 on this run: the sandbox instance's `userdata` has accumulated player saves from the earlier A/B runs, and the gap is entirely the persistent-player list stock writes and zdtd replaces with the empty form (presence byte `false`). That is the expected growth, not a regression, and it is why the zdtd body stays 97.
 
 The package-id count differs in *slots*, not names: stock sends a fixed array
