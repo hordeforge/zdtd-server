@@ -458,7 +458,7 @@ pub fn step(self: *Game) !void {
                 switch (spec.kind) {
                     .item => {
                         const eid = self.items.ecsIdByName(spec.item_name);
-                        if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
+                        if (eid != 0) giveRewardItem(self, peer, cq.def_id, eid, @intCast(@min(scaled, 65535)));
                     },
                     .loot_item => {
                         // A LootItem reward id is a stock item name OR a loot
@@ -480,11 +480,11 @@ pub fn step(self: *Game) !void {
                             var si: usize = 0;
                             while (si < n) : (si += 1) {
                                 const eid = self.items.ecsIdByName(stacks[si].item_name);
-                                if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(stacks[si].count, 65535)));
+                                if (eid != 0) giveRewardItem(self, peer, cq.def_id, eid, @intCast(@min(stacks[si].count, 65535)));
                             }
                         } else {
                             const eid = self.items.ecsIdByName(spec.item_name);
-                            if (eid != 0) _ = invsys.give(&self.sim, peer, eid, @intCast(@min(scaled, 65535)));
+                            if (eid != 0) giveRewardItem(self, peer, cq.def_id, eid, @intCast(@min(scaled, 65535)));
                         }
                     },
                     .exp => self.awardXp(peer, scaled),
@@ -597,6 +597,32 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     // truncates out of i32 range.
     if (base >= 2147483648.0) return std.math.maxInt(i32);
     return @max(1, @as(i32, @floor(base)));
+}
+
+/// Grant one quest-reward item stack with its stock stat roll (stock
+/// `ItemClass::CreateItemStacks` IL_0099 calls `AddGSStats` on every reward
+/// stack). Fixed-item rewards create quality-1 items (the name-filter range
+/// defaults to 1..6, unfiltered to 1), so the roll is quality 1 at stage
+/// (quality-1)*20 = 0; an item with no `<stats>` rows grants stat-free, and
+/// the deterministic seed (clock ^ quest def) matches the group-pick stream
+/// beside it. Deposits through `addSlotStacked` so the stats ride the slot
+/// instead of being dropped by the stat-less `give` path.
+fn giveRewardItem(self: *Game, peer: usize, quest_def_id: u16, item_id: u16, count: u16) void {
+    const rolled = self.rollItemStats(item_id, 1, 0, @truncate(self.sim.director.clock.worldTimeBits() ^ @as(u64, @intCast(quest_def_id))));
+    const ps = self.sim.playerByPeer(peer) orelse return;
+    if (!self.sim.mask[ps].inventory) return;
+    const ok = self.sim.inventory[ps].addSlotStacked(.{
+        .item_id = item_id,
+        .count = count,
+        .quality = 1,
+        .stats = rolled.stats,
+        .stats_n = rolled.n,
+    }, self.sim.maxStack(item_id));
+    // The ledger delta is i16; clamp like `give` (reward counts are u16).
+    if (ok) {
+        const p: u16 = if (peer > std.math.maxInt(u16)) std.math.maxInt(u16) else @intCast(peer);
+        self.sim.inv_ledger.record(p, item_id, @intCast(@min(count, std.math.maxInt(i16))), .give);
+    }
 }
 
 /// Grant the `quest_tierNcomplete` quest whose tier the just-finished quest

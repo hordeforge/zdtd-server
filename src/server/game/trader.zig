@@ -223,6 +223,11 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
         if (n >= ecs.components.max_stock) break;
         const iid = self.ecsIdFromItemName(r.name);
         if (iid == 0) continue;
+        // Stock `TraderInfo::SpawnItem` IL_022F calls `AddGSStats` with stage
+        // -1 (derived from the first row of the entry's quality) on every
+        // stocked stack. Deterministic per trader + day + entry index, like
+        // the rest of the fill.
+        const srolled = self.rollItemStats(iid, r.quality, -1, @truncate(traderRollSeed(self, trader_net_id) ^ @as(u64, n)));
         const econ: f32 = if (self.items.byId(iid)) |d| d.econ else 0;
         // A39: the sell base is EconomicValue * EconomicSellScale (stock
         // GetSellPrice; default scale 1.0, a few items mark down to .5).
@@ -247,6 +252,8 @@ pub fn fillTraderFromXml(self: *Game, trader_net_id: i32) void {
             .quality = r.quality,
             .price = if (econ > 0) @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, buy_markup) * @as(f64, qmod) / bundle)), 65535)) else 5,
             .sell = if (econ > 0) @max(1, @as(u16, @intCast(@min(@as(u64, @trunc(@as(f64, econ) * @as(f64, sell_scale) * @as(f64, sell_markup) * @as(f64, qmod) / bundle)), 65535)))) else 1,
+            .stats = srolled.stats,
+            .stats_n = srolled.n,
         };
         n += 1;
     }

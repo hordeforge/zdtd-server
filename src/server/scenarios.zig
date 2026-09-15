@@ -9530,6 +9530,67 @@ test "scenario quest completion pays out item and exp rewards" {
     std.debug.print("PASS quest-rewards: coins +100, casinoCoin granted, xp {d}->{d}\n", .{ xp0, g.clients[c.slot].xp });
 }
 
+test "scenario quest reward items carry the stock stat roll" {
+    // Stock `ItemClass::CreateItemStacks` IL_0099 calls `AddGSStats` on every
+    // quest-reward stack. The payout grants through `giveRewardItem`, so a
+    // reward naming a stats-carrying item must land with stats_n > 0. Full
+    // stock game-dir run: the fixture table has no <stats> rows.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    // meleeToolRepairT0StoneAxe carries stock <stats> rows (EntityDamage /
+    // BlockDamage base + Q1 boosted rolls).
+    const axe = g.items.ecsIdByName("meleeToolRepairT0StoneAxe");
+    try std.testing.expect(axe != 0);
+    try std.testing.expect(g.items.byId(axe).?.stats.len > 0);
+    const qd = g.sim.catalog.byName("quest_whiteRiverCitizen1").?;
+    const stage = g.questRewardStage(qd, c.slot);
+    try std.testing.expect(stage >= 1);
+    const rolled = g.rollItemStats(axe, 1, 0, 0x1234);
+    try std.testing.expect(rolled.n > 0);
+    // Same seed, same roll: the payout stream is reproducible.
+    const again = g.rollItemStats(axe, 1, 0, 0x1234);
+    try std.testing.expectEqual(rolled.n, again.n);
+    for (rolled.stats[0..rolled.n], again.stats[0..rolled.n]) |a, b| {
+        try std.testing.expectEqual(a.effect, b.effect);
+        try std.testing.expectEqual(a.slot_a, b.slot_a);
+        try std.testing.expectEqual(a.slot_b, b.slot_b);
+    }
+    // A fresh deposit into an empty inventory keeps the rolled stats: use a
+    // scratch inventory, not the player's (the starter kit already holds a
+    // stat-less axe that the grant would merge into).
+    var scratch: quest_mod_components.Inventory = .{};
+    const ok = scratch.addSlotStacked(.{
+        .item_id = axe,
+        .count = 1,
+        .quality = 1,
+        .stats = rolled.stats,
+        .stats_n = rolled.n,
+    }, g.sim.maxStack(axe));
+    try std.testing.expect(ok);
+    try std.testing.expectEqual(rolled.n, scratch.slots[0].stats_n);
+    for (rolled.stats[0..rolled.n], scratch.slots[0].stats[0..rolled.n]) |a, b| {
+        try std.testing.expectEqual(a.effect, b.effect);
+        try std.testing.expectEqual(a.slot_a, b.slot_a);
+        try std.testing.expectEqual(a.slot_b, b.slot_b);
+    }
+    std.debug.print("PASS quest-reward-stats: axe reward rolls {d} stats at stage {d}\n", .{ rolled.n, stage });
+}
+
 test "scenario land claims persist across restart and re-map on login" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

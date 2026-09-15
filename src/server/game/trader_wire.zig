@@ -27,9 +27,23 @@ pub fn stockEntries(self: *Game, s: ecs.Slot, out: []packages.TraderStockEntry) 
         if (ent.count == 0) continue;
         const type_id: i32 = Game.resolveItemType(self, ent.item);
         out[n] = .{
-            .item = .{ .type_id = type_id, .count = if (ent.count > 0) ent.count else 1, .quality = ent.quality },
+            .item = .{
+                .type_id = type_id,
+                .count = if (ent.count > 0) ent.count else 1,
+                .quality = ent.quality,
+            },
             .markup = ent.markup,
         };
+        // The stocked stat roll rides the ItemValue blob (stock's TraderData
+        // entries are full ItemStacks, and `AddGSStats` ran at fill time).
+        // Same field triple as `copyStatsToWire`; the two structs are
+        // distinct types with identical layout.
+        const k = @min(ent.stats_n, out[n].item.stats.len);
+        var i: usize = 0;
+        while (i < k) : (i += 1) {
+            out[n].item.stats[i] = .{ .effect = ent.stats[i].effect, .slot_a = ent.stats[i].slot_a, .slot_b = ent.stats[i].slot_b };
+        }
+        out[n].item.stats_n = @intCast(k);
         n += 1;
     }
     return n;

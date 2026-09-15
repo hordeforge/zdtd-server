@@ -1464,7 +1464,16 @@ pub fn trade(w: *World, player_peer: usize, trader_net: i32, item: u16, qty: u16
                     return false;
                 }
             }
-            if (!w.depositItem(ps, item, qty)) {
+            // The bought stack carries the entry's stat roll (stock's trader
+            // ItemStacks are created with `AddGSStats` at fill time): deposit
+            // the whole value, not the stat-less triple.
+            if (!w.inventory[ps].addSlotStacked(.{
+                .item_id = item,
+                .count = qty,
+                .quality = en.quality,
+                .stats = en.stats,
+                .stats_n = en.stats_n,
+            }, w.maxStack(item))) {
                 w.inventory[ps] = inventory_before;
                 return false;
             }

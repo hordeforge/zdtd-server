@@ -839,7 +839,11 @@ pub const Inventory = struct {
             const s = &self.slots[i];
             if (s.item_id != 0 and s.count != 0) continue;
             const put: u16 = @min(max_stack, left);
-            s.* = .{ .item_id = item.item_id, .count = put, .quality = item.quality, .meta = item.meta };
+            // A fresh slot carries the whole value (stats/mods/use_times/seed),
+            // not just the stack triple: merging into an existing stack keeps
+            // the resident's value, but a new stack must not drop the deposit's.
+            s.* = item;
+            s.count = put;
             left -= put;
         }
         return left == 0;
@@ -941,6 +945,12 @@ pub const StockEntry = struct {
     /// player-owned/rentable machines) prices from 1 + Markup*0.2. Fresh stock
     /// and restocks reset it to 0.
     markup: i8 = 0,
+    /// Stock `ItemValue` stats on the stocked stack (`TraderInfo::SpawnItem`
+    /// IL_022F calls `AddGSStats` with stage -1, i.e. derived from the first
+    /// row of the entry's quality). Same wire shape as the inventory slot so
+    /// the buy path deposits the whole value.
+    stats: [max_item_stats]ItemStat = .{ItemStat{}} ** max_item_stats,
+    stats_n: u8 = 0,
 };
 
 fn defaultStock() [max_stock]StockEntry {
