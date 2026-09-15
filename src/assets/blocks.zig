@@ -175,6 +175,11 @@ pub const BlockDef = struct {
     /// MeshDescription.meshes[MeshIndex].textureAtlas). Empty = default mesh
     /// 0 = "opaque" (RE texture-atlas.md; no block sets MeshIndex directly).
     mesh: []const u8 = "",
+    /// blocks.xml `Material` property (e.g. Mstone, Mair): the materials.xml
+    /// row whose `collidable` decides the undeclared-`Collide` default (stock
+    /// `BlocksFromXml` IL_04D5-04EB: `blockMaterial.IsCollidable ? 255 : 0`).
+    /// Resolved through Extends like the other string properties.
+    material: []const u8 = "",
     /// Top-face texture id (first value of the Texture property, e.g.
     /// terrDirt "2", terrForestGround "195,570,..."). Indexes the atlas
     /// uvMapping for the minimap color. 0 = none.
@@ -198,6 +203,10 @@ pub const BlockDef = struct {
     /// `Block.BlockingType`), resolved through Extends. Absent at the end of
     /// the chain -> `collide_default` (255). Recorded only; see `collideMask`.
     collide: CollideMask = collide_default,
+    /// True when any block in the Extends chain declared `Collide` (including
+    /// an explicit 0 mask). Drives `applyMaterialCollideDefaults`: only the
+    /// absent default is material-driven.
+    collide_declared: bool = false,
     /// `<property name="CanPlayersSpawnOn">`: stock `Block::CanPlayersSpawnOn`
     /// defaults TRUE (Block.il IL_01BF-01F4) and 24 stock rows declare false
     /// (treeMaster and the vehicle masters), so a forest or vehicle column does
@@ -300,6 +309,21 @@ pub const BlockTable = struct {
     pub fn collideMask(self: *const BlockTable, id: u16) CollideMask {
         if (self.byId(id)) |d| return d.collide;
         return collide_default;
+    }
+
+    /// Apply the material `collidable` default to blocks with no declared
+    /// `Collide` (stock `BlocksFromXml` IL_04D5-04EB:
+    /// `blockMaterial.IsCollidable ? 255 : 0`). Declared masks (including an
+    /// explicit 0) are untouched; only the absent default is material-driven.
+    /// Runs at Game init where both tables exist, keeping `world/` table-free.
+    pub fn applyMaterialCollideDefaults(self: *BlockTable, collidable: std.StringHashMapUnmanaged(bool)) void {
+        for (@constCast(self.defs)) |*d| {
+            if (d.collide_declared) continue;
+            if (d.material.len == 0) continue;
+            if (collidable.get(d.material)) |c| {
+                if (!c) d.collide = 0;
+            }
+        }
     }
 
     /// True for blocks whose resolved Class is VendingMachine (own or inherited
@@ -549,6 +573,7 @@ pub fn loadFromPath(
         radius_effect_radius_sq: f32 = 0,
         pickup_source: ?[]const u8 = null,
         mesh: ?[]const u8 = null,
+        material: ?[]const u8 = null,
         texture_top: u16 = 0,
         map_color: u16 = 0,
         /// Own `Collide` blocking-type mask. Only a declared property can be
@@ -622,6 +647,7 @@ pub fn loadFromPath(
         var pickup_source: ?[]const u8 = null;
         var terrain = false;
         var mesh: ?[]const u8 = null;
+        var material: ?[]const u8 = null;
         var texture_top: u16 = 0;
         var map_color: u16 = 0;
         var collide: CollideMask = collide_default;
@@ -761,6 +787,8 @@ pub fn loadFromPath(
                 pickup_source = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "Mesh")) {
                 mesh = xml.attr(clean, pi, "value");
+            } else if (std.mem.eql(u8, pname, "Material")) {
+                material = xml.attr(clean, pi, "value");
             } else if (std.mem.eql(u8, pname, "Texture")) {
                 // Top-face texture id = the first value of the comma list.
                 if (xml.attr(clean, pi, "value")) |v| {
@@ -850,6 +878,7 @@ pub fn loadFromPath(
             .radius_effect_radius_sq = radius_effect_radius_sq,
             .pickup_source = if (pickup_source) |ps| try arena.dupe(u8, ps) else "",
             .mesh = if (mesh) |m| try arena.dupe(u8, m) else "",
+            .material = if (material) |m| try arena.dupe(u8, m) else null,
             .texture_top = texture_top,
             .map_color = map_color,
             .collide = collide,
@@ -887,6 +916,7 @@ pub fn loadFromPath(
         var own_class = pb.class;
         var own_trader = pb.trader_id;
         var own_mesh = pb.mesh;
+        var own_material = pb.material;
         var own_texture = pb.texture_top;
         var own_map_color = pb.map_color;
         var own_collide = pb.collide;
@@ -932,6 +962,7 @@ pub fn loadFromPath(
             if (own_class == null and !xml.tagListContains(p1, "Class")) own_class = base_p.class;
             if (own_trader < 0 and !xml.tagListContains(p1, "TraderID")) own_trader = base_p.trader_id;
             if (own_mesh == null and !xml.tagListContains(p1, "Mesh")) own_mesh = base_p.mesh;
+            if (own_material == null and !xml.tagListContains(p1, "Material")) own_material = base_p.material;
             if (own_texture == 0 and !xml.tagListContains(p1, "Texture")) own_texture = base_p.texture_top;
             if (own_map_color == 0 and !xml.tagListContains(p1, "MapColor")) own_map_color = base_p.map_color;
             // Collide follows the chain like the other blocks.xml properties
@@ -984,6 +1015,7 @@ pub fn loadFromPath(
         pb.class = own_class;
         pb.trader_id = @max(own_trader, 0);
         pb.mesh = own_mesh;
+        pb.material = own_material;
         pb.block_tag = own_tag;
         pb.is_door = own_tag != null and std.ascii.eqlIgnoreCase(own_tag.?, "Door");
         pb.texture_top = own_texture;
@@ -1063,9 +1095,11 @@ pub fn loadFromPath(
             .radius_effect_buff = if (pb.radius_effect_buff) |rb| try arena.dupe(u8, rb) else "",
             .radius_effect_radius_sq = pb.radius_effect_radius_sq,
             .mesh = if (pb.mesh) |m| try arena.dupe(u8, m) else "",
+            .material = if (pb.material) |m| try arena.dupe(u8, m) else "",
             .texture_top = pb.texture_top,
             .map_color = pb.map_color,
             .collide = pb.collide,
+            .collide_declared = pb.collide_declared,
             .can_players_spawn_on = pb.can_players_spawn_on,
             .can_mobs_spawn_on = pb.can_mobs_spawn_on,
             .pass_through = pb.pass_through,
@@ -1815,6 +1849,49 @@ test "the stock Collide rows match BlocksFromXml" {
     try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessSheet").?.collide);
     try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessCTRSheet").?.collide);
     try std.testing.expectEqual(@as(CollideMask, 255), t.byName("opaqueBusinessGlass").?.collide);
+}
+
+test "material collidable=false clears the undeclared Collide default" {
+    // Stock `BlocksFromXml` IL_04D5-04EB: a block with no declared `Collide`
+    // takes `blockMaterial.IsCollidable ? 255 : 0`. The 4 stock non-collidable
+    // materials (Mair/Mwater/Mtallgrass/Mweb) clear the default; declared
+    // masks (including explicit 0) are untouched by the fixup, which runs at
+    // Game init - here it is driven directly with a synthetic material map.
+    const game = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    const cpath = game ++ "/Data/Config/blocks.xml";
+    if (!io_fs.fileExists(cpath)) return error.SkipZigTest;
+    const Ctx = struct {
+        fn lookup(_: ?*anyopaque, _: []const u8) ?u16 {
+            return null;
+        }
+    };
+    var t = try loadFromPath(std.testing.allocator, cpath, Ctx.lookup, null);
+    defer t.deinit();
+    var map: std.StringHashMapUnmanaged(bool) = .{};
+    defer map.deinit(std.testing.allocator);
+    try map.put(std.testing.allocator, "Mair", false);
+    try map.put(std.testing.allocator, "Mwater", false);
+    try map.put(std.testing.allocator, "Mstone", true);
+    // A block on a non-collidable material with no declared Collide clears.
+    var air_found = false;
+    for (t.defs) |d| {
+        if (std.mem.eql(u8, d.material, "Mair") and !d.collide_declared) {
+            air_found = true;
+            break;
+        }
+    }
+    try std.testing.expect(air_found);
+    t.applyMaterialCollideDefaults(map);
+    for (t.defs) |d| {
+        if (std.mem.eql(u8, d.material, "Mair") and !d.collide_declared) {
+            try std.testing.expectEqual(@as(CollideMask, 0), d.collide);
+        }
+        if (std.mem.eql(u8, d.material, "Mstone") and !d.collide_declared) {
+            try std.testing.expectEqual(collide_default, d.collide);
+        }
+    }
+    // Declared masks survive the fixup, including an explicit 0.
+    try std.testing.expectEqual(@as(CollideMask, 62), t.byName("glassBusinessSheet").?.collide);
 }
 
 test "CanPlayersSpawnOn and CanMobsSpawnOn parse and inherit through Extends" {

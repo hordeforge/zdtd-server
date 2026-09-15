@@ -282,6 +282,12 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         }) |bt| {
             self.blocks.deinit();
             self.blocks = bt;
+            // Stock `BlocksFromXml` IL_04D5-04EB: a block with no declared
+            // `Collide` mask takes its material's default
+            // (`blockMaterial.IsCollidable ? 255 : 0`), so the 4 stock
+            // non-collidable materials (Mair/Mwater/Mtallgrass/Mweb) stop
+            // colliding instead of keeping the 255 absent default.
+            self.blocks.applyMaterialCollideDefaults(self.maxdamage.material_collidable);
             util_log.info("zdtd: blocks defs={d}\n", .{self.blocks.defs.len});
         }
     }
