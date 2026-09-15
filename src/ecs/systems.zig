@@ -3213,13 +3213,16 @@ pub fn systemVehicles(w: *World, dt: f32) void {
 }
 
 /// Kind defaults when vehicles.xml velocityMax missing (A12: XML first, then this).
+/// Stock `velocityMax_turbo` first components (vehicles.xml: bicycle 6,
+/// minibike 7, motorcycle 9.8, 4x4 10, gyro 9); the loader reads the same
+/// field, so offline and XML mode agree.
 pub fn vehicleKindDefaultSpeed(kind: c.VehicleKind) f32 {
     return switch (kind) {
         .bicycle => 6,
-        .minibike => 12,
-        .motorcycle => 18,
-        .four_by_four => 14,
-        .gyrocopter => 20,
+        .minibike => 7,
+        .motorcycle => 9.8,
+        .four_by_four => 10,
+        .gyrocopter => 9,
     };
 }
 
