@@ -541,24 +541,37 @@ fn parseMode(s: ?[]const u8) u8 {
 }
 
 fn parseOffsetTarget(s: ?[]const u8) u8 {
-    // Stock OffsetTarget enum order is not pinned by IL here; the byte rides
-    // verbatim, and stock files omit the attribute (0 default).
-    _ = s;
+    // Stock OffsetTarget enum order (byte): All, Shapes, Text, Noise.
+    // Absent reads All (0), matching the field default.
+    const m = s orelse return 0;
+    if (std.mem.eql(u8, m, "Shapes")) return 1;
+    if (std.mem.eql(u8, m, "Text")) return 2;
+    if (std.mem.eql(u8, m, "Noise")) return 3;
     return 0;
 }
 
 fn parseColorMode(s: ?[]const u8) u8 {
-    _ = s;
+    // Stock ColorMode enum order (byte): Multiply, Blend, Override.
+    const m = s orelse return 0;
+    if (std.mem.eql(u8, m, "Blend")) return 1;
+    if (std.mem.eql(u8, m, "Override")) return 2;
     return 0;
 }
 
 fn parseShapeMode(s: ?[]const u8) u8 {
-    _ = s;
+    // Stock ShapeMode enum order (byte): Normal, Invert, Line, Ripple.
+    const m = s orelse return 0;
+    if (std.mem.eql(u8, m, "Invert")) return 1;
+    if (std.mem.eql(u8, m, "Line")) return 2;
+    if (std.mem.eql(u8, m, "Ripple")) return 3;
     return 0;
 }
 
 fn parseGridMode(s: ?[]const u8) i32 {
-    _ = s;
+    // Stock GridWarp.Mode enum order (i32): Column, Rectangle, Hex.
+    const m = s orelse return 0;
+    if (std.mem.eql(u8, m, "Rectangle")) return 1;
+    if (std.mem.eql(u8, m, "Hex")) return 2;
     return 0;
 }
 
@@ -628,6 +641,42 @@ test "default [D] sign library loads from Data/Config/signs.xml" {
     }
     // Stock ships the mandatory zero-guid Default Sign in the [D] library.
     try std.testing.expect(found_default_sign);
+}
+
+test "prefab sign libraries parse deep nesting and enum values" {
+    // The prefab libraries (47905 layers/warps) exercise what signs.xml
+    // does not: 3-deep group nesting, shapeMode/offsetTarget/colorMode
+    // enums, and named layers with fonts. part_billboard_beanthere carries
+    // all three.
+    const p = "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Prefabs/Parts/part_billboard_beanthere_signs.xml";
+    if (!io_fs.fileExists(p)) return error.SkipZigTest;
+    const raw = try io_fs.readFileAll(std.testing.allocator, p);
+    defer std.testing.allocator.free(raw);
+    var arena_holder: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_holder.deinit();
+    const arena = arena_holder.allocator();
+    // Find the first <sign> body and parse its layers.
+    const si = std.mem.findPos(u8, raw, 0, "<sign ") orelse return error.TestUnexpectedResult;
+    const gt = std.mem.findPos(u8, raw, si, ">") orelse return error.TestUnexpectedResult;
+    const close = std.mem.findPos(u8, raw, gt, "</sign>") orelse return error.TestUnexpectedResult;
+    const layers = try parseLayers(arena, raw[gt + 1 .. close]);
+    try std.testing.expect(layers.len > 0);
+    // Depth 3 exists: a group whose child group has children.
+    var deep = false;
+    var texts: usize = 0;
+    var named = false;
+    for (layers) |l| {
+        if (l.name.len > 0) named = true;
+        if (l.kind == layer_text) texts += 1;
+        if (l.kind != layer_group) continue;
+        for (l.children) |c| {
+            if (c.kind == layer_group and c.children.len > 0) deep = true;
+            if (c.kind == layer_text) texts += 1;
+        }
+    }
+    try std.testing.expect(named);
+    try std.testing.expect(texts > 0);
+    try std.testing.expect(deep);
 }
 
 test "sign modified timestamps parse to .NET ticks" {
