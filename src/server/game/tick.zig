@@ -491,6 +491,25 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                 // (stock seeds a fresh GameRandom from MinEventParams.Seed):
                 // entity id mixed with the tick, deterministic per sim.
                 .roll_seed = @as(u32, @bitCast(c.entity_id)) *% 0x9E3779B9 +% @as(u32, @truncate(self.tick_n)),
+                // Skill children for `PerksUnlocked` (progression table
+                // parent_attr): the sum reads purchased perk levels by name.
+                .skill_children_ctx = &self.progression_table,
+                .skill_children_total = struct {
+                    fn f(holder: *const anyopaque, skill: []const u8, levels: []const requirements.NameLevel) u16 {
+                        const t: *const assets_progression.Table = @ptrCast(@alignCast(holder));
+                        var total: u16 = 0;
+                        for (t.perks) |p| {
+                            if (!std.mem.eql(u8, p.parent_attr, skill)) continue;
+                            for (levels) |l| {
+                                if (std.mem.eql(u8, l.name, p.name)) {
+                                    total += l.level;
+                                    break;
+                                }
+                            }
+                        }
+                        return total;
+                    }
+                }.f,
                 // The armour rating the previous tick's coredamageresist fold
                 // produced (see requirements.Ctx.armor_rating).
                 .armor_rating = self.sim.buff_phys_resist[ps],

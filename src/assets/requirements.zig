@@ -118,6 +118,11 @@ pub const Kind = enum(u8) {
     /// the value (or the entity's cvar when `value="@name"`). Only the
     /// `Random` seed evaluates, from the ctx roll seed; Player/Item refuse.
     random_roll,
+    /// `PerksUnlocked` IL=68: the sum of purchased levels over the named
+    /// skill's child perks, compared with the requirement op. A missing
+    /// skill (or no children lookup) reads 0 levels, like stock's
+    /// GetProgressionValue on an unknown name.
+    perks_unlocked,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -257,6 +262,12 @@ pub const Ctx = struct {
     /// event seed, which refuses the gate (a wall-clock seed would
     /// desynchronize the sim and is never used).
     roll_seed: ?u32 = null,
+    /// Skill children lookup for `PerksUnlocked`: given a skill name, the
+    /// caller lists its child perk names (progression table `parent_attr`).
+    /// Null = no tree available, which reads 0 levels (stock's unknown-name
+    /// path) rather than refusing.
+    skill_children_ctx: ?*const anyopaque = null,
+    skill_children_total: ?*const fn (ctx: *const anyopaque, skill: []const u8, levels: []const NameLevel) u16 = null,
 };
 
 /// One worn armor group: how many items of it are worn and the lowest quality
@@ -311,6 +322,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
     if (std.mem.eql(u8, name, "RandomRoll")) return .random_roll;
+    if (std.mem.eql(u8, name, "PerksUnlocked")) return .perks_unlocked;
     return .unsupported;
 }
 
@@ -699,6 +711,20 @@ fn evalRandomRoll(r: Requirement, ctx: Ctx) Verdict {
     return verdict(compare(rolled, r.op, operand(ctx, r)), r.negated);
 }
 
+/// `PerksUnlocked::IsValid` (IL=68): the sum of purchased levels over the
+/// named skill's child perks. The children come from the caller's lookup
+/// (progression table `parent_attr`); without one the sum is 0. `r.arg`
+/// carries `skill_name` (the generic attr parser maps it there).
+fn evalPerksUnlocked(r: Requirement, ctx: Ctx) Verdict {
+    var total: u16 = 0;
+    if (ctx.skill_children_total) |f| {
+        if (ctx.skill_children_ctx) |holder| {
+            total = f(holder, r.arg, ctx.levels);
+        }
+    }
+    return verdict(compare(@floatFromInt(total), r.op, operand(ctx, r)), r.negated);
+}
+
 /// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
 /// negated by `invert`.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
@@ -791,6 +817,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .cvar_compare => return evalCvarCompare(r, ctx),
         .worn_items => return evalWornItems(r, ctx),
         .random_roll => return evalRandomRoll(r, ctx),
+        .perks_unlocked => return evalPerksUnlocked(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
         .group_or => return evalList(r.children, true, ctx, counts),
     }
@@ -1546,6 +1573,51 @@ test "RandomRoll evaluates the Random seed against the value" {
     try std.testing.expectEqual(@as(f32, 0), parsed.min_max[0]);
     try std.testing.expectEqual(@as(f32, 100), parsed.min_max[1]);
     try std.testing.expectEqual(@as(f32, 70), parsed.value);
+}
+
+test "PerksUnlocked sums the skill's child perk levels" {
+    // Stock `PerksUnlocked::IsValid` (IL=68): the sum of purchased levels
+    // over the named skill's children (book groups: 7 perks at max 1).
+    var arena_holder: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_holder.deinit();
+    const arena = arena_holder.allocator();
+    const src = "<effect_group><requirement name=\"PerksUnlocked\" skill_name=\"skillFiremansAlmanac\" operation=\"GTE\" value=\"7\"/></effect_group>";
+    const b = std.mem.find(u8, src, "<requirement name=\"PerksUnlocked\"").?;
+    const parsed = try parse(src, b, arena);
+    try std.testing.expectEqual(Kind.perks_unlocked, parsed.kind);
+    try std.testing.expectEqualStrings("skillFiremansAlmanac", parsed.arg);
+    // Children lookup over a synthetic tree: 7 perks at level 1 each.
+    const Kids = struct {
+        names: []const []const u8,
+        fn total(holder: *const anyopaque, skill: []const u8, levels: []const NameLevel) u16 {
+            const self: *@This() = @ptrCast(@alignCast(@constCast(holder)));
+            _ = skill;
+            var t: u16 = 0;
+            for (self.names) |n| t += levelOf(levels, n) orelse 0;
+            return t;
+        }
+    };
+    var kids = Kids{ .names = &.{ "p1", "p2", "p3", "p4", "p5", "p6", "p7" } };
+    const levels = [_]NameLevel{
+        .{ .name = "p1", .level = 1 }, .{ .name = "p2", .level = 1 },
+        .{ .name = "p3", .level = 1 }, .{ .name = "p4", .level = 1 },
+        .{ .name = "p5", .level = 1 }, .{ .name = "p6", .level = 1 },
+        .{ .name = "p7", .level = 1 },
+    };
+    const ctx = Ctx{ .levels = &levels, .skill_children_ctx = &kids, .skill_children_total = Kids.total };
+    var counts: Counts = .{};
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{parsed}, ctx, &counts));
+    // 6 of 7: the GTE 7 gate fails.
+    const levels6 = [_]NameLevel{
+        .{ .name = "p1", .level = 1 }, .{ .name = "p2", .level = 1 },
+        .{ .name = "p3", .level = 1 }, .{ .name = "p4", .level = 1 },
+        .{ .name = "p5", .level = 1 }, .{ .name = "p6", .level = 1 },
+    };
+    counts = .{};
+    try std.testing.expectEqual(Verdict.fail, evaluate(&.{parsed}, .{ .levels = &levels6, .skill_children_ctx = &kids, .skill_children_total = Kids.total }, &counts));
+    // No lookup reads 0 (stock's unknown-name path), so GTE 7 fails, LT passes.
+    counts = .{};
+    try std.testing.expectEqual(Verdict.fail, evaluate(&.{parsed}, .{ .levels = &levels }, &counts));
 }
 
 test "all() is the AND over an empty and a multi-gate list" {
