@@ -89,10 +89,13 @@ ALLOWLIST = {
     "electricfencepost", "electrictimerrelay", "switch", "pressureplate",
     "dartTrap", "bladeTrap",
     # Forge smelt-completion sound gate (craft.zig onStationCraftDone):
-    # the block name is a data-bound selection key resolved through the
-    # loaded blocks table (stock TileEntityForge plays the ding; other
+    # the block name is a data-bound selection key resolved through the    # loaded blocks table (stock TileEntityForge plays the ding; other
     # workstations are silent — RE tile-entities-power.md).
     "forge",
+    # Spectral Grace recharge buff (game.zig foreignResistHook +
+    # c2s/misc.zig damage path): resolved through the loaded buff catalog
+    # (addCatalogBuff fails closed when a modlet renames it).
+    "buffSpectersGrace",
     # Offline class_table default (ecs/world.zig, stock ^healthNormalFeral 550).
     "zombieBoeFeral",
     # Offline loot-bag entity class default (ecs/world.zig class_table).
