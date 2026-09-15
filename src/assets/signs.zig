@@ -612,6 +612,8 @@ test "default [D] sign library loads from Data/Config/signs.xml" {
     var cat = try loadFromPrefabsRoot(std.testing.allocator, p, cfg);
     defer cat.deinit();
     var found_default_sign = false;
+    var prefab_modified: usize = 0;
+    var prefab_total: usize = 0;
     for (cat.entries) |e| {
         if (std.mem.eql(u8, e.library, "[D]") and std.mem.eql(u8, e.name, "Default Sign")) {
             found_default_sign = true;
@@ -638,9 +640,17 @@ test "default [D] sign library loads from Data/Config/signs.xml" {
             try std.testing.expect(groups > 0);
             try std.testing.expect(warps > 0);
         }
+        if (!std.mem.eql(u8, e.library, "[D]")) {
+            prefab_total += 1;
+            if (e.modified_ticks > 0) prefab_modified += 1;
+        }
     }
     // Stock ships the mandatory zero-guid Default Sign in the [D] library.
     try std.testing.expect(found_default_sign);
+    // Every prefab sign carries a modified stamp (0 missing in the shipped
+    // Parts set); all must parse to nonzero ticks.
+    try std.testing.expect(prefab_total > 0);
+    try std.testing.expectEqual(prefab_total, prefab_modified);
 }
 
 test "prefab sign libraries parse deep nesting and enum values" {
