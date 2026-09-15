@@ -445,43 +445,27 @@ pub fn elementalDamageResist(self: *Game, ps: ecs.Slot, damage_tag: []const u8) 
         &self.clients[@intCast(peer_slot)]
     else
         null;
-    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
-    const buff_lookup = BuffNameLookup{ .table = &self.buffs };
-    const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
-    const ctx = requirements.Ctx{
-        .tags = damage_tag,
-        .levels = if (c) |cc| cc.skill_levels[0..cc.skill_level_n] else &.{},
-        .player_level = if (c) |cc| cc.level else 0,
-        .alive = self.sim.alive[ps],
-        .cvars = if (c) |cc| &cc.cvars else null,
-        .active_buffs = activeBuffIds(&self.sim.buffs[ps], &buff_ids),
-        .buff_names = &buff_names,
-        .is_night = self.sim.director.clock.isNight(),
-        .entity_tags = entityClassTags(self, ps),
-        .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
-        .hp_max = h.max_hp,
-        .hp_base_max = h.base_max_hp,
-        .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
-        .stamina_max = h.stamina_max,
-        .stamina_base_max = base_consumable_stat_max,
-        .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
-        .food_max = h.food_max,
-        .food_base_max = base_consumable_stat_max,
-        .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
-        .water_max = h.water_max,
-        .water_base_max = base_consumable_stat_max,
-    };
+    var pctx: PlayerCtx = .{};
     var counts: requirements.Counts = .{};
     var total: f32 = 0;
-    var i: usize = ecs.components.inv_equip_start;
-    while (i < ecs.components.max_inv_slots) : (i += 1) {
-        const slot = self.sim.inventory[ps].slots[i];
-        if (slot.count == 0) continue;
-        const def = self.items.byId(slot.item_id) orelse continue;
-        total += itemTrackedDeltas(self, &def, slot.mods, slot.quality, ctx, &counts).elem_resist;
+    if (c) |cc| {
+        pctx.init(self, cc, ps);
+        var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+        const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+        var ctx = pctx.build(self, cc, ps, h, sandbox_groups);
+        // The tagged EDR query owns this fold: rows match the damage type's
+        // tag, not the caller's tag set.
+        ctx.tags = damage_tag;
+        var i: usize = ecs.components.inv_equip_start;
+        while (i < ecs.components.max_inv_slots) : (i += 1) {
+            const slot = self.sim.inventory[ps].slots[i];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            total += itemTrackedDeltas(self, &def, slot.mods, slot.quality, ctx, &counts).elem_resist;
+        }
+        total += assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], ctx, &counts).elem_resist;
+        total += assets_progression.perkTotals(&self.progression_table, ctx.levels, ctx, &counts).elem_resist;
     }
-    total += assets_buffs.effectTotals(&self.buffs, &self.sim.buffs[ps], ctx, &counts).elem_resist;
-    total += assets_progression.perkTotals(&self.progression_table, ctx.levels, ctx, &counts).elem_resist;
     self.harness.counters.add(.requirement_gates, counts.resolved);
     self.harness.counters.add(.requirement_unsupported, counts.unsupported);
     // Stock FastMax(0, ...) floors at zero and the fraction can exceed 1 only
