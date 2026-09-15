@@ -18486,6 +18486,12 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     // second hit inside the window lands.
     g.tickSurvival(0.05);
     try std.testing.expect(c.cvars.get("perkSpectersGrace") > 0);
+    g.sim.zombie_ai[zs].attack_cd = 0;
+    var ticks2: usize = 0;
+    while (ticks2 < 200 and g.sim.health[vs].hp >= hp0) : (ticks2 += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+    }
+    try std.testing.expect(g.sim.health[vs].hp < hp0);
     // Expire the 60 s buff (shorten the instance) and run the expiry drain:
     // the finish row clears the cvar and Grace reopens.
     const gid = g.buffs.indexOfName("buffSpectersGrace") orelse return error.TestUnexpectedResult;
