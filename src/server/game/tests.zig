@@ -6194,11 +6194,21 @@ test "progression update rows write $perkBookwormChance (stock data)" {
     var cap2: ln_peer.Capture = .{};
     const cl2 = try g.attachJoinedClient(&cap2);
     cl2.skill_points = 100;
-    // The stock purchase gate: perk level 1 needs attIntellect >= 6.
-    cl2.skill_levels[0] = .{ .name = "attIntellect", .level = 6 };
+    // The stock purchase gate: perk level 1 needs attIntellect >= 6 (level 3
+    // needs 8, so set 8 to allow buying up for the flag assertion below).
+    cl2.skill_levels[0] = .{ .name = "attIntellect", .level = 8 };
     cl2.skill_level_n = 1;
     try std.testing.expect(g.purchaseSkill(cl2.slot, "perkIntellectMastery", 1));
     try std.testing.expectEqual(@as(f32, 0), cl2.cvars.get("$perkBookwormChance"));
+    // The purchase also fires `onPerkLevelChanged`: the point-chance flag
+    // needs Intellect Mastery 3, so level 1 leaves it unset...
+    try std.testing.expectEqual(@as(f32, 0), cl2.cvars.get("$pointChanceFlag"));
+    // ...and buying up to 3 runs the one-shot latch (flag 1, chances,
+    // flag +1): the flag ends at 2 and the point chance at 50.
+    try std.testing.expect(g.purchaseSkill(cl2.slot, "perkIntellectMastery", 2));
+    try std.testing.expect(g.purchaseSkill(cl2.slot, "perkIntellectMastery", 3));
+    try std.testing.expectEqual(@as(f32, 2), cl2.cvars.get("$pointChanceFlag"));
+    try std.testing.expectEqual(@as(f32, 50), cl2.cvars.get("$perkIntellectMasteryPointChance"));
 }
 
 test "loot requirement gates read the opener's progression on the fill path" {

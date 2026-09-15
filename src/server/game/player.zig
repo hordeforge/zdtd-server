@@ -670,6 +670,7 @@ pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_l
         if (std.mem.eql(u8, c.skill_levels[i].name, interned)) {
             c.skill_levels[i].level = target_level;
             fireProgressionUpdate(self, slot, interned);
+            firePerkLevelChanged(self, slot, interned);
             return true;
         }
     }
@@ -677,6 +678,7 @@ pub fn purchaseSkillAtCost(self: *Game, slot: usize, skill: []const u8, target_l
         c.skill_levels[c.skill_level_n] = .{ .name = interned, .level = target_level };
         c.skill_level_n += 1;
         fireProgressionUpdate(self, slot, interned);
+        firePerkLevelChanged(self, slot, interned);
         return true;
     }
     return false;
@@ -816,6 +818,23 @@ pub fn fireProgressionUpdate(self: *Game, slot: usize, name: []const u8) void {
         .cvars = &c.cvars,
     };
     _ = assets_buffs.evaluateRows(rows, .progression_update, ctx, &counts);
+}
+
+/// Fire a perk's `onPerkLevelChanged` rows after a purchase (the 4
+/// `perkIntellectMastery` point-chance cvar rows). Same ctx as the
+/// progression update; a separate trigger per stock's naming.
+pub fn firePerkLevelChanged(self: *Game, slot: usize, name: []const u8) void {
+    if (slot >= self.clients.len) return;
+    const rows = progressionTriggered(self, name);
+    if (rows.len == 0) return;
+    const c = &self.clients[slot];
+    var counts: requirements.Counts = .{};
+    const ctx: requirements.Ctx = .{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .cvars = &c.cvars,
+    };
+    _ = assets_buffs.evaluateRows(rows, .perk_level_changed, ctx, &counts);
 }
 
 pub fn addProgressionLevel(self: *Game, slot: usize, name: []const u8, delta: u8) bool {

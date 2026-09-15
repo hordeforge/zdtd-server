@@ -118,6 +118,9 @@ pub const Trigger = enum(u8) {
     /// attribute, book) changes. progression.xml's `perkIntellectMastery` rows
     /// write `$perkBookwormChance` here, which the loot RandomRoll gates read.
     progression_update,
+    /// `onPerkLevelChanged`: fired when a perk level is purchased (the 4
+    /// `perkIntellectMastery` point-chance cvar rows).
+    perk_level_changed,
     /// `onSelfBuffFinish`: stock fires it when a buff's duration ends, after
     /// `onSelfBuffRemove` (87 buffs / 120 rows: stat restores, cvar clears,
     /// cooldown Adds, all currently inert).
@@ -1270,6 +1273,7 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfEnteredGame")) return .entered_game;
     if (std.mem.eql(u8, s, "onSelfFirstSpawn")) return .first_spawn;
     if (std.mem.eql(u8, s, "onSelfProgressionUpdate")) return .progression_update;
+    if (std.mem.eql(u8, s, "onPerkLevelChanged")) return .perk_level_changed;
     if (std.mem.eql(u8, s, "onSelfBuffFinish")) return .finish;
     if (std.mem.eql(u8, s, "onSelfBuffStack")) return .stack;
     return .other;
