@@ -128,6 +128,53 @@ pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u
     return true;
 }
 
+/// Fire a buff's `onSelfBuffFinish` rows at expiry (stock: after
+/// onSelfBuffRemove). Builds the victim's live ctx like the survival fold
+/// (expiry is rare, so no hot-path sharing); cvar rows apply through the
+/// ctx store, AddBuff/RemoveBuff through the sink.
+pub fn fireBuffFinish(self: *Game, ps: ecs.Slot, def_id: u16) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var buff_ids: [ecs.components.max_buffs_per_entity]u16 = undefined;
+    const buff_lookup = BuffNameLookup{ .table = &self.buffs };
+    const buff_names = requirements.BuffNames{ .ctx = &buff_lookup, .resolve = BuffNameLookup.resolve };
+    var sink_impl = BuffSink{ .game = self, .entity_id = c.entity_id, .ps = ps };
+    var req_counts: requirements.Counts = .{};
+    const ctx = requirements.Ctx{
+        .levels = c.skill_levels[0..c.skill_level_n],
+        .player_level = c.level,
+        .alive = self.sim.alive[ps],
+        .active_buffs = activeBuffIds(&self.sim.buffs[ps], &buff_ids),
+        .buff_names = &buff_names,
+        .held_tags = heldItemTags(self, ps),
+        .cvars = &c.cvars,
+        .live_buff = &sink_impl,
+        .buff_active = BuffSink.has,
+        .sink = .{ .ctx = &sink_impl, .add_buff = BuffSink.add, .remove_buff = BuffSink.remove },
+        .is_night = self.sim.director.clock.isNight(),
+        .entity_tags = entityClassTags(self, ps),
+        .hp_frac = if (h.max_hp > 0) h.hp / h.max_hp else 0,
+        .hp_max = h.max_hp,
+        .hp_base_max = h.base_max_hp,
+        .stamina_frac = if (h.stamina_max > 0) h.stamina / h.stamina_max else 0,
+        .stamina_max = h.stamina_max,
+        .stamina_base_max = base_consumable_stat_max,
+        .food_frac = if (h.food_max > 0) h.food / h.food_max else 0,
+        .food_max = h.food_max,
+        .food_base_max = base_consumable_stat_max,
+        .water_frac = if (h.water_max > 0) h.water / h.water_max else 0,
+        .water_max = h.water_max,
+        .water_base_max = base_consumable_stat_max,
+    };
+    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, .finish, ctx, &req_counts);
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+    applyTriggeredBuffs(self, c.entity_id, ps, &res);
+}
+
 /// One entry per worn equipment item: its `Tags` property (comma list), the
 /// input `WornItems` (IL=54) counts. Empty tags are kept as an empty entry so
 /// the slot count matches `Equipment::GetSlotCount` semantics, but no tag can

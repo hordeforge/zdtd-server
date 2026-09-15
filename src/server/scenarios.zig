@@ -18482,6 +18482,22 @@ test "scenario spectral grace deflects a zombie hit and recharges" {
     // Grace deflected the blow: no HP lost, and the recharge buff applied.
     try std.testing.expectEqual(hp0, g.sim.health[vs].hp);
     try std.testing.expect(gracedHere(g, vs));
+    // The buff's start row sets the recharge cvar, closing the gate: a
+    // second hit inside the window lands.
+    g.tickSurvival(0.05);
+    try std.testing.expect(c.cvars.get("perkSpectersGrace") > 0);
+    // Expire the 60 s buff (shorten the instance) and run the expiry drain:
+    // the finish row clears the cvar and Grace reopens.
+    const gid = g.buffs.indexOfName("buffSpectersGrace") orelse return error.TestUnexpectedResult;
+    const slot = g.sim.buffs[vs].find(gid) orelse return error.TestUnexpectedResult;
+    slot.duration_max = 0.05;
+    var eticks: usize = 0;
+    while (eticks < 20 and c.cvars.get("perkSpectersGrace") > 0) : (eticks += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+        g.tickSurvival(0.05);
+        try g.step();
+    }
+    try std.testing.expectEqual(@as(f32, 0), c.cvars.get("perkSpectersGrace"));
     std.debug.print("PASS grace: zombie hit deflected, recharge buff applied\n", .{});
 }
 

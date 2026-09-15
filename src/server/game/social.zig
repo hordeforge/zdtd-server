@@ -149,6 +149,16 @@ pub fn broadcastBuffExpiries(self: *Game, r: *const ecs.TickResult) !void {
         const ex = r.buff_expired[i];
         const def = self.buffs.byId(ex.def_id) orelse continue;
         try relayBuff(self, ex.entity_id, def.name, false, -1, null);
+        // onSelfBuffFinish (87 buffs / 120 rows: stat restores, cvar clears,
+        // cooldown Adds): stock fires it when the duration ends, after
+        // onSelfBuffRemove. Player victims evaluate with their live ctx so
+        // e.g. buffSpectersGrace clears the perkSpectersGrace recharge cvar
+        // and Spectral Grace reopens.
+        if (self.sim.slotOfNetId(ex.entity_id)) |ps| {
+            if (self.sim.mask[ps].player) {
+                self.fireBuffFinish(ps, ex.def_id);
+            }
+        }
     }
 }
 
