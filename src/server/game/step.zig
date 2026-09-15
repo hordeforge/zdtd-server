@@ -500,6 +500,16 @@ pub fn step(self: *Game) !void {
                     else => {},
                 }
             }
+            // Tier-completion chain (stock
+            // QuestEventManager.HandleNewCompletedQuest): finishing a quest of
+            // tier N+1 unlocks the tier-N completion quest from the catalog's
+            // tier_rewards list, so the tier ladder (and its reward bundles)
+            // advances without the validating quest carrying a Quest reward.
+            // The completed quest's own difficulty tier is the trigger, not
+            // the tier of any chained quest it granted above. `questAccept`
+            // takes the client peer slot (not the sim slot), like the
+            // completion ring's own entries.
+            grantTierReward(self, peer, d.difficulty_tier);
         }
         self.sim.completed_quests_n = 0;
     }
@@ -587,6 +597,24 @@ pub fn questRewardStage(self: *const Game, d: ecs.quest.QuestDef, peer: usize) i
     // truncates out of i32 range.
     if (base >= 2147483648.0) return std.math.maxInt(i32);
     return @max(1, @as(i32, @floor(base)));
+}
+
+/// Grant the `quest_tierNcomplete` quest whose tier the just-finished quest
+/// unlocked (stock `QuestEventManager.HandleNewCompletedQuest` walks the
+/// parsed `questTierRewards` list and `QuestTierReward.GiveRewards` grants the
+/// quest). The list is document order with the tier-N row at index N-2 (stock
+/// tiers start at 2), so the lookup is one index read; an out-of-range tier or
+/// an unresolvable id (0) accepts nothing (fail closed).
+fn grantTierReward(self: *Game, peer_slot: usize, completed_tier: u8) void {
+    if (completed_tier < 2) return;
+    const idx: usize = @as(usize, completed_tier) - 2;
+    const list = self.sim.catalog.tier_rewards;
+    if (idx >= list.len) return;
+    const def_id = list[idx];
+    if (def_id == 0) return;
+    if (self.sim.catalog.byId(def_id)) |qd| {
+        _ = systems.questAccept(&self.sim, peer_slot, qd.id);
+    }
 }
 
 /// Withdraw every plugin that disabled itself (trap / fuel) whose pending
