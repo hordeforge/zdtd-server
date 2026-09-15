@@ -1,13 +1,70 @@
 //! Prefab sign libraries (*_signs.xml under Data/Prefabs) for NetPackageSignDataResponse.
 //! Catalog data only; the wire encode lives in wire/stock_sign.zig.
-//! Minimal SignData: guid + name + next_* ids + zero layers (stops client "Failed to
-//! retrieve sign data" for missing library guids; full layer paint is later).
+//! Full SignData: guid + name + next_* ids + the ordered layer stack
+//! (research gameplay/signs.md §1-2; IL-verified field orders). Layers nest
+//! through GroupSignLayer; warps ride each layer's shared tail.
 
 const std = @import("std");
 const arena_util = @import("../util/arena.zig");
 const io_fs = @import("../util/io_fs.zig");
 
 pub const max_signs: usize = 4096;
+/// Cap on layers per sign (stock Default Sign carries ~30; groups nest).
+pub const max_layers: usize = 256;
+/// Cap on warps per layer.
+pub const max_warps: usize = 16;
+
+/// Binary TypeId bytes (SignLayer/LayerType + SignWarp/WarpType enum order).
+pub const layer_group: u8 = 0;
+pub const layer_text: u8 = 1;
+pub const layer_polygon: u8 = 2;
+pub const layer_noise: u8 = 3;
+pub const warp_skew: u8 = 0;
+pub const warp_bulge: u8 = 1;
+pub const warp_twirl: u8 = 2;
+pub const warp_kaleido: u8 = 3;
+pub const warp_perspective: u8 = 4;
+pub const warp_arc: u8 = 5;
+pub const warp_stretch: u8 = 6;
+pub const warp_grid: u8 = 7;
+
+/// Render mode byte (SignRenderSettings/Mode enum order).
+pub const mode_color_only: u8 = 0;
+pub const mode_color_and_mask: u8 = 1;
+
+pub const Warp = struct {
+    kind: u8 = warp_skew,
+    // Union payload by kind (floats; sides/mode as bit-cast i32):
+    // skew: amount(vec2) rotation(f32); bulge: offset(vec2) amount;
+    // twirl: offset(vec2) amount frequency; kaleido: offset(vec2) sides(i32)
+    //   rotation offsetScale; perspective: rotation(vec3) strength;
+    // arc: rotation radius width; stretch: offset(vec2) rotation distance
+    //   width height(5th); grid: mode(i32) offset(vec2) rotation scale(vec2).
+    f: [6]f32 = .{0} ** 6,
+};
+
+pub const Layer = struct {
+    kind: u8 = layer_polygon,
+    name: []const u8 = "",
+    pos: [2]f32 = .{ 0, 0 },
+    rot: f32 = 0,
+    scale: [2]f32 = .{ 1, 1 },
+    /// RGBA 0..1 (from the #RRGGBBAA color attr).
+    color: [4]f32 = .{ 1, 1, 1, 1 },
+    mode: u8 = mode_color_only,
+    warps: []const Warp = &.{},
+    // Subclass payload (InternalWrite order):
+    // group: offsetTarget(u8) softnessOffset dilateOffset colorMode(u8) +
+    //   nested layers; text: font text direction spacing softness dilate;
+    // polygon: sides(i32) smoothness starify softness dilate frequency
+    //   shapeMode(u8); noise: seed(i32) detail(i32) softness dilate fade.
+    text_a: []const u8 = "",
+    text_b: []const u8 = "",
+    f: [7]f32 = .{0} ** 7,
+    i: [2]i32 = .{ 0, 0 },
+    b: [2]u8 = .{ 0, 0 },
+    children: []const Layer = &.{},
+};
 
 pub const SignEntry = struct {
     /// Prefab library id (filename without `_signs.xml`).
@@ -20,6 +77,7 @@ pub const SignEntry = struct {
     next_group: i32 = 0,
     /// .NET DateTime ticks (UTC); 0 is fine for wire.
     modified_ticks: i64 = 0,
+    layers: []const Layer = &.{},
 };
 
 pub const Catalog = struct {
@@ -239,12 +297,22 @@ fn parseSignsFile(
         const si = std.mem.findPos(u8, raw, i, "<sign ") orelse break;
         const gt = std.mem.findPos(u8, raw, si, ">") orelse break;
         const tag = raw[si .. gt + 1];
-        i = gt + 1;
+        // Self-closing `<sign .../>` carries no layers; the body form runs to
+        // `</sign>`.
+        var body: []const u8 = "";
+        var next_i = gt + 1;
+        if (!(gt > si and raw[gt - 1] == '/')) {
+            const close = std.mem.findPos(u8, raw, gt, "</sign>") orelse break;
+            body = raw[gt + 1 .. close];
+            next_i = close + 7;
+        }
+        i = next_i;
 
         const guid_s = attrValue(tag, "guid") orelse continue;
         var guid: [16]u8 = undefined;
         guidFromHyphenString(guid_s, &guid) catch continue;
         const name_s = attrValue(tag, "name") orelse "";
+        const layers = parseLayers(arena, body) catch &.{};
         try list.append(gpa, .{
             .library = lib_owned,
             .name = try arena.dupe(u8, name_s),
@@ -257,8 +325,241 @@ fn parseSignsFile(
             .next_text = parseI32Attr(tag, "next_text_id", 0),
             .next_noise = parseI32Attr(tag, "next_noise_id", 0),
             .next_group = parseI32Attr(tag, "next_group_id", 0),
+            .layers = layers,
         });
     }
+}
+
+/// Parse one `<sign>` body's top-level `<layer>` elements (recursing into
+/// groups). Warps ride each layer's shared tail. Unknown layer/warp types
+/// are skipped (fail closed); a group with no parseable children still
+/// counts as a group layer.
+fn parseLayers(arena: std.mem.Allocator, body: []const u8) ![]Layer {
+    var list: std.ArrayList(Layer) = .empty;
+    defer list.deinit(arena);
+    var i: usize = 0;
+    while (i < body.len and list.items.len < max_layers) {
+        const li = std.mem.findPos(u8, body, i, "<layer") orelse break;
+        const gt = std.mem.findPos(u8, body, li, ">") orelse break;
+        const tag = body[li .. gt + 1];
+        if (gt > li and body[gt - 1] == '/') {
+            if (parseLayer(arena, tag, "")) |l| try list.append(arena, l) else {
+                // Unknown type: skip the element, keep the rest.
+            }
+            i = gt + 1;
+            continue;
+        }
+        // Matched close: nested group children carry their own </layer>,
+        // so count depth from the open tag.
+        const close = matchLayerClose(body, gt) orelse break;
+        if (parseLayer(arena, tag, body[gt + 1 .. close])) |l| try list.append(arena, l) else {
+            // Unknown type: skip the element, keep the rest.
+        }
+        i = close + 8;
+    }
+    return list.toOwnedSlice(arena);
+}
+
+/// Offset of the `</layer>` matching the element whose open tag ends at
+/// `gt` (depth-counted; group children nest). Null when unbalanced.
+fn matchLayerClose(body: []const u8, gt: usize) ?usize {
+    var depth: usize = 1;
+    var i: usize = gt + 1;
+    while (i < body.len) {
+        const open = std.mem.findPos(u8, body, i, "<layer");
+        const close = std.mem.findPos(u8, body, i, "</layer>") orelse return null;
+        if (open != null and open.? < close) {
+            // Self-closing children do not nest.
+            const ogt = std.mem.findPos(u8, body, open.?, ">") orelse return null;
+            if (ogt <= open.? or body[ogt - 1] != '/') depth += 1;
+            i = ogt + 1;
+        } else {
+            depth -= 1;
+            if (depth == 0) return close;
+            i = close + 8;
+        }
+    }
+    return null;
+}
+
+fn parseLayer(arena: std.mem.Allocator, tag: []const u8, body: []const u8) ?Layer {
+    const t = attrValue(tag, "type") orelse return null;
+    var l: Layer = .{};
+    if (std.mem.eql(u8, t, "GroupSignLayer")) {
+        l.kind = layer_group;
+        l.b[0] = parseOffsetTarget(attrValue(tag, "offsetTarget"));
+        l.f[0] = parseF32Attr(tag, "softnessOffset");
+        l.f[1] = parseF32Attr(tag, "dilateOffset");
+        l.b[1] = parseColorMode(attrValue(tag, "colorMode"));
+        l.children = parseLayers(arena, body) catch &.{};
+    } else if (std.mem.eql(u8, t, "TextSignLayer")) {
+        l.kind = layer_text;
+        l.text_a = attrValue(tag, "font") orelse "";
+        l.text_b = attrValue(tag, "text") orelse "";
+        l.f[0] = parseF32Attr(tag, "direction");
+        l.f[1] = parseF32Attr(tag, "spacing");
+        l.f[2] = parseF32Attr(tag, "softness");
+        l.f[3] = parseF32Attr(tag, "dilate");
+    } else if (std.mem.eql(u8, t, "PolygonSignLayer")) {
+        l.kind = layer_polygon;
+        l.i[0] = parseI32Attr(tag, "sides", 0);
+        l.f[0] = parseF32Attr(tag, "smoothness");
+        l.f[1] = parseF32Attr(tag, "starify");
+        l.f[2] = parseF32Attr(tag, "softness");
+        l.f[3] = parseF32Attr(tag, "dilate");
+        l.f[4] = parseF32Attr(tag, "frequency");
+        l.b[0] = parseShapeMode(attrValue(tag, "shapeMode"));
+    } else if (std.mem.eql(u8, t, "NoiseSignLayer")) {
+        l.kind = layer_noise;
+        l.i[0] = parseI32Attr(tag, "seed", 0);
+        l.i[1] = parseI32Attr(tag, "detail", 0);
+        l.f[0] = parseF32Attr(tag, "softness");
+        l.f[1] = parseF32Attr(tag, "dilate");
+        l.f[2] = parseF32Attr(tag, "fade");
+    } else return null;
+    // Shared head: name (absent = ""), transform, render settings.
+    l.name = attrValue(tag, "name") orelse "";
+    if (attrValue(tag, "pos")) |v| parseVec2(v, &l.pos);
+    l.rot = parseF32Attr(tag, "rot");
+    if (attrValue(tag, "scale")) |v| parseVec2(v, &l.scale);
+    if (attrValue(tag, "color")) |v| parseColor(v, &l.color);
+    l.mode = parseMode(attrValue(tag, "mode"));
+    l.warps = parseWarps(arena, body) catch &.{};
+    // Arena-dupe the retained strings (tag/body point into the freed raw).
+    l.name = arena.dupe(u8, l.name) catch "";
+    l.text_a = arena.dupe(u8, l.text_a) catch "";
+    l.text_b = arena.dupe(u8, l.text_b) catch "";
+    return l;
+}
+
+fn parseWarps(arena: std.mem.Allocator, body: []const u8) ![]Warp {
+    var list: std.ArrayList(Warp) = .empty;
+    defer list.deinit(arena);
+    var i: usize = 0;
+    while (i < body.len and list.items.len < max_warps) {
+        const wi = std.mem.findPos(u8, body, i, "<warp") orelse break;
+        const gt = std.mem.findPos(u8, body, wi, ">") orelse break;
+        const tag = body[wi .. gt + 1];
+        // Warps are self-closing in stock files; a body form advances past
+        // its close tag all the same.
+        if (gt > wi and body[gt - 1] == '/') {
+            i = gt + 1;
+        } else {
+            const close = std.mem.findPos(u8, body, gt, "</warp>") orelse break;
+            i = close + 7;
+        }
+        if (parseWarp(tag)) |w| try list.append(arena, w);
+    }
+    return list.toOwnedSlice(arena);
+}
+
+fn parseWarp(tag: []const u8) ?Warp {
+    const t = attrValue(tag, "type") orelse return null;
+    var w: Warp = .{};
+    if (std.mem.eql(u8, t, "SkewWarp")) {
+        w.kind = warp_skew;
+        if (attrValue(tag, "amount")) |v| parseVec2(v, w.f[0..2]);
+        w.f[2] = parseF32Attr(tag, "rotation");
+    } else if (std.mem.eql(u8, t, "BulgeWarp")) {
+        w.kind = warp_bulge;
+        if (attrValue(tag, "offset")) |v| parseVec2(v, w.f[0..2]);
+        w.f[2] = parseF32Attr(tag, "amount");
+    } else if (std.mem.eql(u8, t, "TwirlWarp")) {
+        w.kind = warp_twirl;
+        if (attrValue(tag, "offset")) |v| parseVec2(v, w.f[0..2]);
+        w.f[2] = parseF32Attr(tag, "amount");
+        w.f[3] = parseF32Attr(tag, "frequency");
+    } else if (std.mem.eql(u8, t, "KaleidoWarp")) {
+        w.kind = warp_kaleido;
+        if (attrValue(tag, "offset")) |v| parseVec2(v, w.f[0..2]);
+        w.f[2] = @floatFromInt(parseI32Attr(tag, "sides", 0));
+        w.f[3] = parseF32Attr(tag, "rotation");
+        w.f[4] = parseF32Attr(tag, "offsetScale");
+    } else if (std.mem.eql(u8, t, "PerspectiveWarp")) {
+        w.kind = warp_perspective;
+        if (attrValue(tag, "rotation")) |v| parseVec3(v, w.f[0..3]);
+        w.f[3] = parseF32Attr(tag, "strength");
+    } else if (std.mem.eql(u8, t, "ArcWarp")) {
+        w.kind = warp_arc;
+        w.f[0] = parseF32Attr(tag, "rotation");
+        w.f[1] = parseF32Attr(tag, "radius");
+        w.f[2] = parseF32Attr(tag, "width");
+    } else if (std.mem.eql(u8, t, "StretchWarp")) {
+        w.kind = warp_stretch;
+        if (attrValue(tag, "offset")) |v| parseVec2(v, w.f[0..2]);
+        w.f[2] = parseF32Attr(tag, "rotation");
+        w.f[3] = parseF32Attr(tag, "distance");
+        w.f[4] = parseF32Attr(tag, "width");
+        w.f[5] = parseF32Attr(tag, "height");
+    } else if (std.mem.eql(u8, t, "GridWarp")) {
+        w.kind = warp_grid;
+        w.f[0] = @floatFromInt(parseGridMode(attrValue(tag, "mode")));
+        if (attrValue(tag, "offset")) |v| parseVec2(v, w.f[1..3]);
+        w.f[3] = parseF32Attr(tag, "rotation");
+        if (attrValue(tag, "scale")) |v| parseVec2(v, w.f[4..6]);
+    } else return null;
+    return w;
+}
+
+fn parseF32Attr(tag: []const u8, key: []const u8) f32 {
+    const v = attrValue(tag, key) orelse return 0;
+    return std.fmt.parseFloat(f32, v) catch 0;
+}
+
+fn parseVec2(s: []const u8, out: []f32) void {
+    var it = std.mem.splitScalar(u8, s, ',');
+    if (it.next()) |a| out[0] = std.fmt.parseFloat(f32, std.mem.trim(u8, a, " ")) catch 0;
+    if (it.next()) |b| out[1] = std.fmt.parseFloat(f32, std.mem.trim(u8, b, " ")) catch 0;
+}
+
+fn parseVec3(s: []const u8, out: []f32) void {
+    var it = std.mem.splitScalar(u8, s, ',');
+    var i: usize = 0;
+    while (it.next()) |p| {
+        if (i >= out.len) break;
+        out[i] = std.fmt.parseFloat(f32, std.mem.trim(u8, p, " ")) catch 0;
+        i += 1;
+    }
+}
+
+fn parseColor(s: []const u8, out: *[4]f32) void {
+    // #RRGGBBAA.
+    if (s.len != 9 or s[0] != '#') return;
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        const h = std.fmt.parseInt(u8, s[1 + i * 2 .. 3 + i * 2], 16) catch return;
+        out[i] = @as(f32, @floatFromInt(h)) / 255.0;
+    }
+}
+
+fn parseMode(s: ?[]const u8) u8 {
+    const m = s orelse return mode_color_only;
+    if (std.mem.eql(u8, m, "ColorAndMask")) return mode_color_and_mask;
+    if (std.mem.eql(u8, m, "MaskOnly")) return 2;
+    if (std.mem.eql(u8, m, "PunchOut")) return 3;
+    return mode_color_only;
+}
+
+fn parseOffsetTarget(s: ?[]const u8) u8 {
+    // Stock OffsetTarget enum order is not pinned by IL here; the byte rides
+    // verbatim, and stock files omit the attribute (0 default).
+    _ = s;
+    return 0;
+}
+
+fn parseColorMode(s: ?[]const u8) u8 {
+    _ = s;
+    return 0;
+}
+
+fn parseShapeMode(s: ?[]const u8) u8 {
+    _ = s;
+    return 0;
+}
+
+fn parseGridMode(s: ?[]const u8) i32 {
+    _ = s;
+    return 0;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8) !?Catalog {
@@ -304,6 +605,25 @@ test "default [D] sign library loads from Data/Config/signs.xml" {
             // The stock `modified` timestamp parses to nonzero .NET ticks
             // (previously sent as 0 for all 1680 rows).
             try std.testing.expect(e.modified_ticks > 0);
+            // The drawing tree parses: the Default Sign carries polygon +
+            // group layers with warps (stock signs.xml: 285 layers, 101
+            // warps over 8 signs).
+            try std.testing.expect(e.layers.len > 0);
+            var polys: usize = 0;
+            var groups: usize = 0;
+            var warps: usize = 0;
+            for (e.layers) |l| {
+                if (l.kind == layer_polygon) polys += 1;
+                if (l.kind == layer_group) {
+                    groups += 1;
+                    try std.testing.expect(l.children.len > 0);
+                }
+                warps += l.warps.len;
+                for (l.children) |c| warps += c.warps.len;
+            }
+            try std.testing.expect(polys > 0);
+            try std.testing.expect(groups > 0);
+            try std.testing.expect(warps > 0);
         }
     }
     // Stock ships the mandatory zero-guid Default Sign in the [D] library.

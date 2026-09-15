@@ -11,7 +11,10 @@ pub const SignEntry = signs.SignEntry;
 /// Cap for the `data` blob of one response batch.
 pub const max_batch_payload: usize = 48 * 1024;
 
-/// Encode minimal SignData (zero layers).
+/// Encode SignData with its layer stack (research gameplay/signs.md §2:
+/// guid, name, ticks, four next-ids, layer count, then each layer as TypeId
+/// byte + InternalWrite payload + shared tail). A layer that fails to encode
+/// aborts the entry (fail closed) rather than sending a truncated drawing.
 pub fn writeSignData(w: *binary.Writer, e: SignEntry) !void {
     try w.writeBytes(&e.guid);
     try w.writeString(e.name);
@@ -20,7 +23,121 @@ pub fn writeSignData(w: *binary.Writer, e: SignEntry) !void {
     try w.writeI32(e.next_text);
     try w.writeI32(e.next_noise);
     try w.writeI32(e.next_group);
-    try w.writeI32(0); // layer count
+    try w.writeI32(@intCast(e.layers.len));
+    for (e.layers) |l| try writeLayer(w, l);
+}
+
+/// One layer: TypeId byte, InternalWrite payload, then the shared tail
+/// (name, transform pos/rot/scale, render color+mode, warp count + warps).
+fn writeLayer(w: *binary.Writer, l: signs.Layer) !void {
+    try w.writeByte(l.kind);
+    switch (l.kind) {
+        signs.layer_group => {
+            try w.writeByte(l.b[0]);
+            try w.writeF32(l.f[0]);
+            try w.writeF32(l.f[1]);
+            try w.writeByte(l.b[1]);
+            try w.writeI32(@intCast(l.children.len));
+            for (l.children) |c| try writeLayer(w, c);
+        },
+        signs.layer_text => {
+            try w.writeString(l.text_a);
+            try w.writeString(l.text_b);
+            try w.writeF32(l.f[0]);
+            try w.writeF32(l.f[1]);
+            try w.writeF32(l.f[2]);
+            try w.writeF32(l.f[3]);
+        },
+        signs.layer_polygon => {
+            try w.writeI32(l.i[0]);
+            try w.writeF32(l.f[0]);
+            try w.writeF32(l.f[1]);
+            try w.writeF32(l.f[2]);
+            try w.writeF32(l.f[3]);
+            try w.writeF32(l.f[4]);
+            try w.writeByte(l.b[0]);
+        },
+        signs.layer_noise => {
+            try w.writeI32(l.i[0]);
+            try w.writeI32(l.i[1]);
+            try w.writeF32(l.f[0]);
+            try w.writeF32(l.f[1]);
+            try w.writeF32(l.f[2]);
+        },
+        else => return error.Overflow,
+    }
+    try w.writeString(l.name);
+    try w.writeF32(l.pos[0]);
+    try w.writeF32(l.pos[1]);
+    try w.writeF32(l.rot);
+    try w.writeF32(l.scale[0]);
+    try w.writeF32(l.scale[1]);
+    // Unity Color: 4 floats RGBA (StreamUtils.Write(Color)).
+    try w.writeF32(l.color[0]);
+    try w.writeF32(l.color[1]);
+    try w.writeF32(l.color[2]);
+    try w.writeF32(l.color[3]);
+    try w.writeByte(l.mode);
+    try w.writeI32(@intCast(l.warps.len));
+    for (l.warps) |x| try writeWarp(w, x);
+}
+
+/// One warp: TypeId byte + InternalWrite payload.
+fn writeWarp(w: *binary.Writer, x: signs.Warp) !void {
+    try w.writeByte(x.kind);
+    switch (x.kind) {
+        signs.warp_skew => {
+            try w.writeF32(x.f[0]);
+            try w.writeF32(x.f[1]);
+            try w.writeF32(x.f[2]);
+        },
+        signs.warp_bulge => {
+            try w.writeF32(x.f[0]);
+            try w.writeF32(x.f[1]);
+            try w.writeF32(x.f[2]);
+        },
+        signs.warp_twirl => {
+            try w.writeF32(x.f[0]);
+            try w.writeF32(x.f[1]);
+            try w.writeF32(x.f[2]);
+            try w.writeF32(x.f[3]);
+        },
+        signs.warp_kaleido => {
+            try w.writeF32(x.f[0]);
+            try w.writeF32(x.f[1]);
+            try w.writeI32(@intFromFloat(x.f[2]));
+            try w.writeF32(x.f[3]);
+            try w.writeF32(x.f[4]);
+        },
+        signs.warp_perspective => {
+            try w.writeF32(x.f[0]);
+            try w.writeF32(x.f[1]);
+            try w.writeF32(x.f[2]);
+            try w.writeF32(x.f[3]);
+        },
+        signs.warp_arc => {
+            try w.writeF32(x.f[0]);
+            try w.writeF32(x.f[1]);
+            try w.writeF32(x.f[2]);
+        },
+        signs.warp_stretch => {
+            try w.writeF32(x.f[0]);
+            try w.writeF32(x.f[1]);
+            try w.writeF32(x.f[2]);
+            try w.writeF32(x.f[3]);
+            try w.writeF32(x.f[4]);
+            try w.writeF32(x.f[5]);
+        },
+        signs.warp_grid => {
+            try w.writeI32(@intFromFloat(x.f[0]));
+            try w.writeF32(x.f[1]);
+            try w.writeF32(x.f[2]);
+            try w.writeF32(x.f[3]);
+            try w.writeF32(x.f[4]);
+            try w.writeF32(x.f[5]);
+        },
+        else => return error.Overflow,
+    }
 }
 
 /// One NetPackageSignDataResponse body: isLastBatch + dataLen + data.
@@ -112,5 +229,52 @@ test "sign batch empty layers" {
     try std.testing.expectEqual(@as(i32, 13), try rd.readI32()); // nextNoise
     try std.testing.expectEqual(@as(i32, 14), try rd.readI32()); // nextGroup
     try std.testing.expectEqual(@as(i32, 0), try rd.readI32()); // layer count
+    try std.testing.expectEqual(@as(usize, 0), rd.remaining());
+}
+
+test "sign layer encode round-trips the stock field order" {
+    // One polygon layer with a warp, encoded per the IL field orders
+    // (PolygonSignLayer::InternalWrite IL=29, SignLayer::Write IL=54,
+    // TwirlWarp::InternalWrite IL=13): TypeId, subclass payload, shared
+    // tail (name, pos/rot/scale, color RGBA, mode, warp count + warps).
+    const e = [_]SignEntry{.{
+        .library = "lib",
+        .name = "S",
+        .guid = .{0} ** 16,
+        .layers = &[_]signs.Layer{.{
+            .kind = signs.layer_polygon,
+            .name = "p",
+            .pos = .{ 1, 2 },
+            .rot = 3,
+            .scale = .{ 4, 5 },
+            .color = .{ 0.5, 0.25, 1, 0 },
+            .mode = signs.mode_color_and_mask,
+            .warps = &[_]signs.Warp{.{ .kind = signs.warp_twirl, .f = .{ 6, 7, 8, 9, 0, 0 } }},
+            .f = .{ 0, 0, 0, 0, 10, 11, 0 },
+            .i = .{ 4, 0 },
+            .b = .{ 1, 0 },
+        }},
+    }};
+    var buf: [1024]u8 = undefined;
+    const r = try buildSignDataResponseBatch(&buf, &e, 0, true);
+    try std.testing.expectEqual(@as(usize, 1), r.next);
+    var rd: binary.Reader = .{ .data = r.body[9..] };
+    var s_buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("lib", try rd.readString(&s_buf));
+    rd.pos += 16; // guid
+    try std.testing.expectEqualStrings("S", try rd.readString(&s_buf));
+    rd.pos += 8 + 16; // ticks + four next-ids
+    try std.testing.expectEqual(@as(i32, 1), try rd.readI32()); // layer count
+    try std.testing.expectEqual(@as(u8, 2), try rd.readByte()); // polygon TypeId
+    try std.testing.expectEqual(@as(i32, 4), try rd.readI32()); // sides
+    for ([_]f32{ 0, 0, 0, 0, 10 }) |want| try std.testing.expectEqual(want, try rd.readF32());
+    try std.testing.expectEqual(@as(u8, 1), try rd.readByte()); // shapeMode
+    try std.testing.expectEqualStrings("p", try rd.readString(&s_buf));
+    for ([_]f32{ 1, 2, 3, 4, 5 }) |want| try std.testing.expectEqual(want, try rd.readF32());
+    for ([_]f32{ 0.5, 0.25, 1, 0 }) |want| try std.testing.expectEqual(want, try rd.readF32());
+    try std.testing.expectEqual(@as(u8, 1), try rd.readByte()); // ColorAndMask
+    try std.testing.expectEqual(@as(i32, 1), try rd.readI32()); // warp count
+    try std.testing.expectEqual(@as(u8, 2), try rd.readByte()); // twirl TypeId
+    for ([_]f32{ 6, 7, 8, 9 }) |want| try std.testing.expectEqual(want, try rd.readF32());
     try std.testing.expectEqual(@as(usize, 0), rd.remaining());
 }
