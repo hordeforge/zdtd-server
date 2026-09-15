@@ -1848,6 +1848,10 @@ pub const Game = struct {
         return game_tick.fireBuffFinish(self, ps, def_id);
     }
 
+    pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
+        return game_tick.fireBuffStack(self, ps, def_id);
+    }
+
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS
     /// entities; the BotManager owns them and integrates their move intents
     /// here. Replication streams their positions via the non-ECS path.

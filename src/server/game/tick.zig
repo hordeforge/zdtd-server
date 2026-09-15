@@ -232,7 +232,14 @@ pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u
     const def_id = self.buffs.indexOfName(name) orelse return false;
     const def = self.buffs.byId(def_id) orelse return false;
     const set = self.sim.buffsMut(ps);
-    if (set.find(def_id) != null) return false;
+    // Stock fires `onSelfBuffStack` when AddBuff lands on an instance that
+    // is already active (42 buffs / 93 rows, mostly ModifyCVar chains like
+    // harvest bonus). The stack rows evaluate with the live ctx so their
+    // cvar writes land.
+    if (set.find(def_id) != null) {
+        self.fireBuffStack(ps, def_id);
+        return false;
+    }
     _ = ecs.buff.add(set, .{
         .def_id = def_id,
         .duration = def.duration,
@@ -242,6 +249,27 @@ pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u
     }, ecs.buff.duration_from_class, -1, 0, 0, 0);
     game_social.relayBuff(self, entity_id, def.name, true, -1, null) catch {};
     return true;
+}
+
+/// Fire a buff's `onSelfBuffStack` rows when AddBuff lands on an active
+/// instance. Shares the PlayerCtx builder; cvar rows apply through the ctx
+/// store, AddBuff/RemoveBuff through the sink.
+pub fn fireBuffStack(self: *Game, ps: ecs.Slot, def_id: u16) void {
+    const peer_slot = self.sim.player[ps].peer_slot;
+    if (peer_slot < 0 or @as(usize, @intCast(peer_slot)) >= self.clients.len) return;
+    const c = &self.clients[@intCast(peer_slot)];
+    const h = &self.sim.health[ps];
+    var pctx: PlayerCtx = .{};
+    pctx.init(self, c, ps);
+    var sandbox_buf: [sandbox.max_groups]sandbox.Group = undefined;
+    const sandbox_groups = sandbox_buf[0..sandbox.decode(self.sandbox_code, &sandbox_buf)];
+    var req_counts: requirements.Counts = .{};
+    const ctx = pctx.build(self, c, ps, h, sandbox_groups);
+    const res = assets_buffs.evaluateTriggered(&self.buffs, def_id, .stack, ctx, &req_counts);
+    self.harness.counters.add(.requirement_gates, req_counts.resolved);
+    self.harness.counters.add(.requirement_unsupported, req_counts.unsupported);
+    if (res.truncated > 0) self.harness.counters.add(.triggered_rows_dropped, res.truncated);
+    applyTriggeredBuffs(self, c.entity_id, ps, &res);
 }
 
 /// Fire a buff's `onSelfBuffFinish` rows at expiry (stock: after

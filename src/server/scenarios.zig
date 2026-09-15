@@ -18691,3 +18691,33 @@ test "scenario comma buff lists apply each name" {
     try std.testing.expect(hasBuffNamed(g, ps, n1));
     std.debug.print("PASS comma-buffs: siblings apply past a renamed entry\n", .{});
 }
+
+test "scenario buff stack fires its rows" {
+    // buffHarvest: start sets $buffHarvestBonus .5, each stack adds .5.
+    // Re-adding the active buff fires onSelfBuffStack through the live ctx.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const ps = g.sim.playerByPeer(c.slot).?;
+    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest");
+    g.tickSurvival(0.05);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), c.cvars.get("$buffHarvestBonus"), 0.001);
+    // Stack twice more: .5 + .5 + .5 = 1.5.
+    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest");
+    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest");
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), c.cvars.get("$buffHarvestBonus"), 0.001);
+    std.debug.print("PASS stack: harvest bonus accumulates across stacks\n", .{});
+}
