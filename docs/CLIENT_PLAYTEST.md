@@ -734,6 +734,8 @@ now (`DeflateOutputStream(_, 3)`).
 
 **Re-run 2026-09-15 (after the trader-abundance, quest-reward-stats, craft_time-sentinel, vehicle-speed, AITarget-sense, RandomRoll/PerksUnlocked, signs-tree and worldglobal-ambient changes)**: both legs exit 0, join, spawn at `(256,72,256)` via `PlayerId`, and the stage table is unchanged (`maps=224/191`, `GameStats 231/231`, `WorldSpawnPoints 213/213`, `Localization 19554/19010`, `WorldInfo 590/97`). None of the round 74-91 changes moved a join-stage byte, which is the expected result: they touch trader windows, reward rolls, craft timing, sense distances, requirement gates, sign payloads and night ambient, all post-join behavior.
 
+**Re-run 2026-09-15 (after the hurt-class revenge gate, hear-distance gate, `IsStatAtMax`/`InSafeZone` requirement gates, and sign batch/enum work)**: both legs exit 0, join, spawn at `(256,72,256)` via `PlayerId`, and the stage table is unchanged. None of the round 92-111 changes moved a join-stage byte, which is the expected result: they touch AI targeting, requirement gates, and sign payloads, all post-join behavior.
+
 `WorldInfo` moved from the 362 first recorded to 590 on this run: the sandbox instance's `userdata` has accumulated player saves from the earlier A/B runs, and the gap is entirely the persistent-player list stock writes and zdtd replaces with the empty form (presence byte `false`). That is the expected growth, not a regression, and it is why the zdtd body stays 97.
 
 The package-id count differs in *slots*, not names: stock sends a fixed array
