@@ -268,9 +268,12 @@ pub const heat_neighbor_cooldown_seconds: f32 = director_defaults.heat_neighbor_
 /// per-tier scalars (difficulty_hp_0..5, move_scale_0..4); the const arrays
 /// moved there (numbers zdtd-tuned R9, operator policy).
 pub const max_heat_regions: usize = 32;
-/// Ambient spawn rule budget slots (spawning.xml rules are 57 in stock; the
-/// array is a bound, not a cap on the parsed table).
-pub const rule_budget_cap: usize = 64;
+/// Ambient spawn rule budget slots, keyed by the spawning.xml rule index.
+/// Matches the parsed table bound (`assets/spawning.zig max_rules`): stock
+/// has no cap, so a modlet patch adding rules past the old 64 no longer
+/// silently loses its maxcount/respawn budget. 512 × 16 B = 8 KiB per
+/// Director.
+pub const rule_budget_cap: usize = 512;
 pub const heat_scout_dist: f32 = director_defaults.heat_scout_dist; // chunk-heat spawner 0/8/10 constants
 
 pub const HeatRegion = struct {
@@ -2557,6 +2560,22 @@ test "ambient rule budget caps the drip and releases on destroy" {
     // budget admits the slot freed by the kill within the same cycle.
     for (0..950) |_| _ = w.director.tick(&w, 0.05);
     try std.testing.expect(w.countKind(.zombie) >= 2);
+}
+
+test "rule budgets cover the full parsed table, not just the first 64" {
+    // A modlet patch can add spawning.xml rules up to the parsed bound
+    // (512); an index past the old 64-slot array must be budgeted, not
+    // silently treated as unbudgeted. Index 511 with maxcount 1 admits one
+    // consume and denies the second until release.
+    var w: ecs_world.World = .{};
+    defer w.deinit();
+    const b: RuleBudget = .{ .index = 511, .maxcount = 1, .respawn_days = 1.0 };
+    try std.testing.expect(w.director.budgetAllows(b, &w));
+    w.director.budgetConsume(b, &w);
+    try std.testing.expectEqual(@as(u8, 1), w.director.rule_budgets[511].count);
+    try std.testing.expect(!w.director.budgetAllows(b, &w));
+    w.director.releaseRule(511);
+    try std.testing.expect(w.director.budgetAllows(b, &w));
 }
 
 test "difficulty damage scale uses the comptime XML ladder" {
