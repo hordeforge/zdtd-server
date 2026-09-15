@@ -123,6 +123,10 @@ pub const Kind = enum(u8) {
     /// skill (or no children lookup) reads 0 levels, like stock's
     /// GetProgressionValue on an unknown name.
     perks_unlocked,
+    /// `IsStatAtMax` IL=100: `Max - Value < 0.1` for the named stat
+    /// (Health/Stamina/Water/Food switch). Stock rows use food/water only;
+    /// `r.arg` carries `stat` (the generic parser maps it).
+    is_stat_at_max,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -323,6 +327,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
     if (std.mem.eql(u8, name, "RandomRoll")) return .random_roll;
     if (std.mem.eql(u8, name, "PerksUnlocked")) return .perks_unlocked;
+    if (std.mem.eql(u8, name, "IsStatAtMax")) return .is_stat_at_max;
     return .unsupported;
 }
 
@@ -725,6 +730,28 @@ fn evalPerksUnlocked(r: Requirement, ctx: Ctx) Verdict {
     return verdict(compare(@floatFromInt(total), r.op, operand(ctx, r)), r.negated);
 }
 
+/// `IsStatAtMax::IsValid` (IL=100): `Max - Value < 0.1` for the named stat.
+/// The four stock stats map onto the ctx fractions/maxes (food/water/HP/
+fn evalIsStatAtMax(r: Requirement, ctx: Ctx) Verdict {
+    // Stat::Max / Stat::Value as (max, value); unknown stat refuses.
+    var max: f32 = 0;
+    var val: f32 = 0;
+    if (std.mem.eql(u8, r.arg, "food")) {
+        max = ctx.food_max;
+        val = ctx.food_frac * ctx.food_max;
+    } else if (std.mem.eql(u8, r.arg, "water")) {
+        max = ctx.water_max;
+        val = ctx.water_frac * ctx.water_max;
+    } else if (std.mem.eql(u8, r.arg, "health")) {
+        max = ctx.hp_max;
+        val = ctx.hp_frac * ctx.hp_max;
+    } else if (std.mem.eql(u8, r.arg, "stamina")) {
+        max = ctx.stamina_max;
+        val = ctx.stamina_frac * ctx.stamina_max;
+    } else return .unsupported;
+    return verdict(max - val < 0.1, r.negated);
+}
+
 /// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
 /// negated by `invert`.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
@@ -818,6 +845,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .worn_items => return evalWornItems(r, ctx),
         .random_roll => return evalRandomRoll(r, ctx),
         .perks_unlocked => return evalPerksUnlocked(r, ctx),
+        .is_stat_at_max => return evalIsStatAtMax(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
         .group_or => return evalList(r.children, true, ctx, counts),
     }
@@ -1618,6 +1646,36 @@ test "PerksUnlocked sums the skill's child perk levels" {
     // No lookup reads 0 (stock's unknown-name path), so GTE 7 fails, LT passes.
     counts = .{};
     try std.testing.expectEqual(Verdict.fail, evaluate(&.{parsed}, .{ .levels = &levels }, &counts));
+}
+
+test "IsStatAtMax reads Max minus Value under 0.1" {
+    // Stock `IsStatAtMax::IsValid` (IL=100): `Max - Value < 0.1`. Stock rows
+    // use food/water only; an unknown stat refuses.
+    const full = Requirement{ .kind = .is_stat_at_max, .arg = "food" };
+    const not_full = Requirement{ .kind = .is_stat_at_max, .negated = true, .arg = "food" };
+    var counts: Counts = .{};
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{full}, .{ .food_max = 100, .food_frac = 1 }, &counts));
+    try std.testing.expectEqual(Verdict.fail, evaluate(&.{full}, .{ .food_max = 100, .food_frac = 0.5 }, &counts));
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{not_full}, .{ .food_max = 100, .food_frac = 0.5 }, &counts));
+    // Within 0.1 reads full (the heal-item gate must not fire at 99.95).
+    counts = .{};
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{full}, .{ .food_max = 100, .food_frac = 0.9995 }, &counts));
+    // Water maps the same way; unknown stats refuse.
+    const water = Requirement{ .kind = .is_stat_at_max, .arg = "water" };
+    counts = .{};
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{water}, .{ .water_max = 100, .water_frac = 1 }, &counts));
+    counts = .{};
+    const bogus = Requirement{ .kind = .is_stat_at_max, .arg = "mana" };
+    try std.testing.expectEqual(Verdict.unsupported, evaluate(&.{bogus}, .{}, &counts));
+    // The stock shape parses (stat rides the generic arg).
+    var arena_holder: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_holder.deinit();
+    const arena = arena_holder.allocator();
+    const src = "<effect_group><requirement name=\"IsStatAtMax\" stat=\"food\"/></effect_group>";
+    const b = std.mem.find(u8, src, "<requirement name=\"IsStatAtMax\"").?;
+    const parsed = try parse(src, b, arena);
+    try std.testing.expectEqual(Kind.is_stat_at_max, parsed.kind);
+    try std.testing.expectEqualStrings("food", parsed.arg);
 }
 
 test "all() is the AND over an empty and a multi-gate list" {
