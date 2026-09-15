@@ -127,6 +127,10 @@ pub const Kind = enum(u8) {
     /// (Health/Stamina/Water/Food switch). Stock rows use food/water only;
     /// `r.arg` carries `stat` (the generic parser maps it).
     is_stat_at_max,
+    /// `InSafeZone` IL=25: `EntityPlayer.TwitchSafe`. zdtd has no Twitch
+    /// integration, so the flag is never set and the gate reads false
+    /// (stock without Twitch reads the same).
+    in_safe_zone,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -328,6 +332,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "RandomRoll")) return .random_roll;
     if (std.mem.eql(u8, name, "PerksUnlocked")) return .perks_unlocked;
     if (std.mem.eql(u8, name, "IsStatAtMax")) return .is_stat_at_max;
+    if (std.mem.eql(u8, name, "InSafeZone")) return .in_safe_zone;
     return .unsupported;
 }
 
@@ -752,6 +757,13 @@ fn evalIsStatAtMax(r: Requirement, ctx: Ctx) Verdict {
     return verdict(max - val < 0.1, r.negated);
 }
 
+/// `InSafeZone::IsValid` (IL=25): `EntityPlayer.TwitchSafe`. zdtd has no
+/// Twitch integration, so the flag is never set and the gate reads false
+/// (stock without Twitch reads the same). Invert-aware like the IL.
+fn evalInSafeZone(r: Requirement) Verdict {
+    return verdict(false, r.negated);
+}
+
 /// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
 /// negated by `invert`.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
@@ -846,6 +858,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .random_roll => return evalRandomRoll(r, ctx),
         .perks_unlocked => return evalPerksUnlocked(r, ctx),
         .is_stat_at_max => return evalIsStatAtMax(r, ctx),
+        .in_safe_zone => return evalInSafeZone(r),
         .group_and => return evalList(r.children, false, ctx, counts),
         .group_or => return evalList(r.children, true, ctx, counts),
     }
@@ -1676,6 +1689,19 @@ test "IsStatAtMax reads Max minus Value under 0.1" {
     const parsed = try parse(src, b, arena);
     try std.testing.expectEqual(Kind.is_stat_at_max, parsed.kind);
     try std.testing.expectEqualStrings("food", parsed.arg);
+}
+
+test "InSafeZone reads false without a Twitch integration" {
+    // Stock `InSafeZone::IsValid` (IL=25) reads `EntityPlayer.TwitchSafe`;
+    // zdtd has no Twitch integration, so the flag is never set. Both
+    // stock rows are Twitch buffs (twitch_buffNoHealingManager,
+    // twitch_voteNoSafe).
+    const safe = Requirement{ .kind = .in_safe_zone };
+    const not_safe = Requirement{ .kind = .in_safe_zone, .negated = true };
+    var counts: Counts = .{};
+    try std.testing.expectEqual(Verdict.fail, evaluate(&.{safe}, .{}, &counts));
+    try std.testing.expectEqual(Verdict.pass, evaluate(&.{not_safe}, .{}, &counts));
+    try std.testing.expectEqual(@as(u32, 2), counts.resolved);
 }
 
 test "all() is the AND over an empty and a multi-gate list" {
