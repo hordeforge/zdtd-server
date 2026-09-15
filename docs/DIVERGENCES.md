@@ -855,10 +855,15 @@ armed joiner looked bare-handed to everyone else. Fixed at both sites, with the
 inbound and outbound halves separately pinned (each assertion verified to fail
 with its own call site reverted).
 
-`profile` stays null: zdtd stores no player appearance data (archetype, race,
-hair, colors), and `PlayerProfile.Write` has no partial form. Inventing one
-would put fabricated appearance on the wire, so the null flag is the honest
-answer. `team_number` is 0 because zdtd has no team system.
+`profile` **now carries the player's own character**: the client sends it in
+`NetPackageRequestToSpawnPlayer` (stock `PlayerProfile::Read` IL=59 behind
+`chunkViewDim:i16`), stock stores it on the EntityCreationData
+(`GameManager::RequestToSpawnPlayer` `GameManager.il.txt:4614-4617`), and zdtd
+parsed only the dim and sent `null` here plus a fabricated BaseMale in the
+`PlayerId` file. Both now use the received profile, so the owner and the nearby
+observers render the same character; a client that sends no parseable profile
+still gets the honest default. `team_number` is 0 because zdtd has no team
+system.
 
 One more from the same pass: `NetPackageEntityAddScoreClient` carries both kill
 counters in one body (RE `protocol-packages.md` 27), and two of its three call
