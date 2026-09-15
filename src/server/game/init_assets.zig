@@ -48,6 +48,15 @@ const ecs_aidirector = @import("../../ecs/aidirector.zig");
 /// parse/IO failure, so a bare `catch null` hides the second case: the server
 /// then runs forever on builtin defaults while the operator believes the stock
 /// XML is loaded. Mirrors the blocks/items loaders above.
+/// Items-table lookup for `assets_vehicles.Table.resolveMaxHp`: the item's
+/// `DegradationMax` (0 when the name is unknown, which keeps the floor).
+fn vehicleItemDegradation(ctx: ?*anyopaque, name: []const u8) ?u32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const d = g.items.byName(name) orelse return null;
+    if (d.degradation_max == 0) return null;
+    return d.degradation_max;
+}
+
 fn logged(comptime what: []const u8, result: anytype) @typeInfo(@TypeOf(result)).error_union.payload {
     return result catch |err| {
         util_log.err("zdtd: {s} load failed: {s}\n", .{ what, @errorName(err) });
@@ -561,6 +570,12 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     if (logged("vehicles.xml", assets_vehicles.tryLoad(allocator, opts.game_dir, opts.config_dir))) |vt| {
         self.vehicles.deinit();
         self.vehicles = vt;
+        // Vehicle health is not a vehicles.xml attribute: stock takes it from
+        // the placeable item's DegradationMax (Vehicle::SetItemValue IL=65 ->
+        // ItemValue::get_MaxUseTimesBase IL=25). Resolve it now that both
+        // tables are loaded, so every later reader (spawn, restore, admin) sees
+        // the stock value instead of the 200/250/300 literal.
+        self.vehicles.resolveMaxHp(&vehicleItemDegradation, self);
         util_log.info("zdtd: vehicles defs={d}\n", .{self.vehicles.defs.len});
     }
     if (logged("blocks.xml storage pairs", assets_storage_pairs.tryLoad(allocator, opts.game_dir, opts.config_dir))) |sp| {

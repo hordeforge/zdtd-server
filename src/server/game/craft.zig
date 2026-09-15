@@ -126,10 +126,14 @@ pub fn tryRefuelVehicle(self: *Game, c: *const Client, x: i32, y: i32, z: i32, a
     const vs = best orelse return false;
     const v = &self.sim.vehicle[vs];
     // Tank cap: vehicles.xml fuelTank capacity when known (Game table);
-    // else the `[rules.vehicle] fuel_cap` floor.
+    // else the `[rules.vehicle] fuel_cap` floor. A known kind with no
+    // `fuelTank` block has no tank at all - stock's bicycle declares none -
+    // so it refuses fuel instead of drinking the rules-floor 100; the floor
+    // only stands in when the table itself is absent (no game-dir).
     var fuel_cap = self.sim.rules.vehicle.fuel_cap;
     if (self.vehicles.byKind(v.kind)) |vd| {
-        if (vd.tank_capacity > 0) fuel_cap = vd.tank_capacity;
+        if (vd.tank_capacity <= 0) return false;
+        fuel_cap = vd.tank_capacity;
     }
     if (v.fuel >= fuel_cap) return false;
     v.fuel = @min(fuel_cap, v.fuel + amount);
