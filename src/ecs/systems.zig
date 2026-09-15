@@ -679,7 +679,11 @@ fn applyDeferredDamage(w: *World, dmg_fp: []const u32, dmg_attacker: []const u16
                 dmg *= 1.0 - frf(w.foreign_resist_ctx, i, dmg_attacker[i]);
             }
             if (w.player[i].peer_slot >= 0) {
-                dmg *= 1.0 - inventory.armorMitigation(w, @intCast(w.player[i].peer_slot));
+                // Attacker-aware armor (Preacher vs zombies): the Vs form
+                // folds the piece's foreign-gated rows against the
+                // accumulator's attacker; unset attacker = today's armor.
+                const atk: ?Slot = if (dmg_attacker[i] < max_entities) dmg_attacker[i] else null;
+                dmg *= 1.0 - inventory.armorMitigationVs(w, @intCast(w.player[i].peer_slot), atk);
             }
             if (w.player_damage_verdict_fn) |vdf| {
                 const v = vdf(w.player_damage_verdict_ctx, w.network_id[i].id, dmg);
