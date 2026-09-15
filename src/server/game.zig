@@ -78,6 +78,7 @@ const assets_npc = @import("../assets/npc.zig");
 const assets_block_textures = @import("../assets/block_textures.zig");
 const assets_painting = @import("../assets/painting.zig");
 const assets_spawning = @import("../assets/spawning.zig");
+const assets_worldglobal = @import("../assets/worldglobal.zig");
 const assets_buffs = @import("../assets/buffs.zig");
 const assets_progression = @import("../assets/progression.zig");
 const assets_vehicles = @import("../assets/vehicles.zig");
@@ -551,6 +552,10 @@ pub const Game = struct {
     block_textures: assets_block_textures.Table = assets_block_textures.Table.empty(),
     painting: assets_painting.Table = assets_painting.Table.empty(),
     spawning: assets_spawning.Table = assets_spawning.Table.empty(),
+    /// worldglobal.xml `<environment>` ambient scales (the night floor for
+    /// the stealth/AI ambient leg). Empty without a game dir = the stock
+    /// defaults baked into the table.
+    worldglobal: assets_worldglobal.Table = assets_worldglobal.Table.empty(),
     /// buffs.xml when present, else the builtin subset: buff names must resolve
     /// or C2S buff traffic is rejected wholesale.
     buffs: assets_buffs.Table = assets_buffs.builtin(),

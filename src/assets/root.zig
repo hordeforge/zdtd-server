@@ -38,6 +38,7 @@ pub const requirements = @import("requirements.zig");
 pub const cvars = @import("cvars.zig");
 pub const progression = @import("progression.zig");
 pub const vehicles = @import("vehicles.zig");
+pub const worldglobal = @import("worldglobal.zig");
 pub const storage_pairs = @import("storage_pairs.zig");
 pub const paths = @import("paths.zig");
 pub const xml_patch = @import("xml_patch.zig");
@@ -79,6 +80,7 @@ test {
     _ = cvars;
     _ = progression;
     _ = vehicles;
+    _ = worldglobal;
     _ = storage_pairs;
     _ = paths;
     _ = xml_patch;

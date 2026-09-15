@@ -133,7 +133,12 @@ pub fn step(self: *Game) !void {
         // 2026-08-27): the night ambient folds the 7-phase moon brightness
         // (GetMoonAmbientScale); day ambient is unchanged.
         const moon = sky.moonBrightness(clk.worldTimeBits() / sky.day_ticks);
-        self.sim.ambient_light = sky.ambientLuma(day_pct) * sky.moonAmbientScale(moon, day_pct);
+        // worldglobal.xml night floor: the day curve is 0 at ~1:00 by
+        // construction, but stock's `<environment>` night scales keep the
+        // total above 0 (sky .7, ground .05, equator .45). Floor before the
+        // moon fold so moonless nights still read above 0.
+        const luma = @max(sky.ambientLuma(day_pct), self.worldglobal.nightFloor());
+        self.sim.ambient_light = luma * sky.moonAmbientScale(moon, day_pct);
         // Wake sleeper volumes whose AABB contains this tick's combat noise
         // (stock World.CheckSleeperVolumeNoise; player-independent) - must run
         // before systems.tickAll consumes the noise ring.

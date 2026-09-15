@@ -33,6 +33,7 @@ const assets_biome_layers = @import("../../assets/biome_layers.zig");
 const assets_block_textures = @import("../../assets/block_textures.zig");
 const assets_painting = @import("../../assets/painting.zig");
 const assets_spawning = @import("../../assets/spawning.zig");
+const assets_worldglobal = @import("../../assets/worldglobal.zig");
 const assets_buffs = @import("../../assets/buffs.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_vehicles = @import("../../assets/vehicles.zig");
@@ -538,6 +539,13 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
         self.painting.deinit();
         self.painting = pt;
         util_log.info("zdtd: painting entries={d}\n", .{self.painting.n});
+    }
+    // worldglobal.xml ambient scales (the night floor for the stealth/AI
+    // ambient leg); absent without a game dir, in which case the stock
+    // defaults baked into the table apply.
+    if (logged("worldglobal.xml", assets_worldglobal.tryLoad(allocator, opts.game_dir, opts.config_dir))) |wt| {
+        self.worldglobal.deinit();
+        self.worldglobal = wt;
     }
     if (logged("spawning.xml", assets_spawning.tryLoad(allocator, opts.game_dir, opts.config_dir))) |st| {
         self.spawning.deinit();
