@@ -536,7 +536,8 @@ pub const Server = struct {
                         .{ .name = "Retry-After", .value = retry_hdr },
                     });
                 } else {
-                    try self.httpRespond(&req, .ok, "text/html; charset=utf-8", loginHintHtml(false), &.{});
+                    var login_buf: [8192]u8 = undefined;
+                    try self.httpRespond(&req, .ok, "text/html; charset=utf-8", try renderLogin(&login_buf, false), &.{});
                 }
                 return;
             }
@@ -557,11 +558,13 @@ pub const Server = struct {
                 }
                 // Missing/empty token is a client error (400). Wrong secret is 401.
                 const tok = formField(body, "token") orelse {
-                    try self.httpRespond(&req, .bad_request, "text/html; charset=utf-8", loginHintHtml(true), &.{});
+                    var login_buf: [8192]u8 = undefined;
+                    try self.httpRespond(&req, .bad_request, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                     return;
                 };
                 if (tok.len == 0) {
-                    try self.httpRespond(&req, .bad_request, "text/html; charset=utf-8", loginHintHtml(true), &.{});
+                    var login_buf: [8192]u8 = undefined;
+                    try self.httpRespond(&req, .bad_request, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                     return;
                 }
                 if (constantTimeEql(tok, self.secret())) {
@@ -581,7 +584,8 @@ pub const Server = struct {
                 self.noteLoginFailure();
                 var ts: [19]u8 = undefined;
                 std.debug.print("zdtd: {s} webui login rejected (bad token)\n", .{clock.wallStamp(&ts)});
-                try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", loginHintHtml(true), &.{});
+                var login_buf: [8192]u8 = undefined;
+                try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", try renderLogin(&login_buf, true), &.{});
                 return;
             }
             try self.httpRespond(&req, .method_not_allowed, "text/plain; charset=utf-8", "method not allowed\n", &.{
@@ -612,7 +616,8 @@ pub const Server = struct {
                     .{ .name = "WWW-Authenticate", .value = "Bearer realm=\"zdtd-webui\"" },
                 });
             } else {
-                try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", loginHintHtml(false), &.{});
+                var login_buf: [8192]u8 = undefined;
+                try self.httpRespond(&req, .unauthorized, "text/html; charset=utf-8", try renderLogin(&login_buf, false), &.{});
             }
             return;
         }
@@ -1395,12 +1400,33 @@ fn embedTrimmed(comptime path: []const u8) []const u8 {
 }
 
 const login_html = embedTrimmed("webui/login.html");
-const login_failed_html = embedTrimmed("webui/login_failed.html");
 const login_lockout_html = embedTrimmed("webui/login_lockout.html");
 const shell_html = embedTrimmed("webui/shell.html");
 
-fn loginHintHtml(bad_token: bool) []const u8 {
-    return if (bad_token) login_failed_html else login_html;
+/// Sign-in form; `bad_token` swaps the lead for the failure banner and flips
+/// the input's invalid flag + describedby (the old login_failed.html). Both
+/// placeholders are free-form attribute VALUES (data-invalid, describedby),
+/// so the raw template stays valid HTML for vnu — an aria-invalid token
+/// placeholder would fail validation. The role="alert" banner + describedby
+/// carry the error semantics to assistive tech.
+fn renderLogin(buf: []u8, bad_token: bool) ![]const u8 {
+    return renderTemplate(buf, login_html, &.{
+        .{
+            .key = "__ZDTD_LOGIN_BANNER__",
+            .val = if (bad_token)
+                "<p id=\"login-err\" class=\"err\" role=\"alert\">Sign-in failed. The shared secret was not accepted.</p>"
+            else
+                "<p class=\"lead\">Sign in with the webui shared secret to set a session cookie.</p>",
+        },
+        .{
+            .key = "__ZDTD_LOGIN_INVALID__",
+            .val = if (bad_token) "true" else "false",
+        },
+        .{
+            .key = "__ZDTD_LOGIN_DESCRIBEDBY__",
+            .val = if (bad_token) "login-err login-help" else "login-help",
+        },
+    });
 }
 
 /// Temporary lockout after too many failed sign-ins (same form chrome as login).
@@ -1452,7 +1478,7 @@ fn renderTemplate(buf: []u8, src: []const u8, subs: []const Subst) ![]const u8 {
 }
 
 test "shell template substitutes every placeholder" {
-    var buf: [64 * 1024]u8 = undefined;
+    var buf: [max_shell_html]u8 = undefined;
     const out = try renderShell(&buf, "deadbeef");
     // A missed placeholder would ship "__ZDTD_CSRF__" to the browser and break
     // the logout form, which no other test would notice.
@@ -1502,7 +1528,7 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
     const wn = s.world_name[0..s.world_name_len];
     const hh: u32 = @floor(s.hours);
     const mm: u32 = @floor((s.hours - @as(f32, @floatFromInt(hh))) * 60.0);
-    const bm: []const u8 = if (s.bloodmoon_active) "<span class=\"warn-text\">ACTIVE</span>" else "idle";
+    const bm: []const u8 = if (s.bloodmoon_active) "<span class=\"pill bad\">ACTIVE</span>" else "<span class=\"pill ok\">idle</span>";
     const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
     // HTML display only (JSON keeps "set"/"open" for tool stability).
     const pw: []const u8 = if (s.password_set) "set" else "not set";
@@ -1513,7 +1539,7 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
         \\<ul class="grid">
         \\<li class="stat"><b class="num">{d}</b><span>server tick</span></li>
         \\<li class="stat"><b class="num">d{d} {d:0>2}:{d:0>2}</b><span>world time</span></li>
-        \\<li class="stat"><b>{s}</b><span>blood moon (every {d}d, next in {d}d)</span></li>
+        \\<li class="stat"><b>{s}</b><span>blood moon · next in {d}d</span></li>
         \\<li class="stat"><b class="num">{d}/{d}</b><span>joined / max</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>entered world</span></li>
         \\<li class="stat"><b class="num">{d}</b><span>peers connected</span></li>
@@ -1526,7 +1552,6 @@ fn renderStatus(buf: []u8, s: *const Snapshot) ![]const u8 {
         hh,
         mm,
         bm,
-        s.bloodmoon_frequency,
         s.bloodmoon_in_days,
         s.joined,
         s.max_players,
@@ -1626,7 +1651,7 @@ fn renderSettings(buf: []u8, s: *const Snapshot) ![]const u8 {
     const auth: []const u8 = if (s.authority_correct) "correct" else "observe";
     const pw: []const u8 = if (s.password_set) "set" else "not set";
     const wc: []const u8 = if (s.wire_chunks) "on" else "off";
-    try w.writeAll("<h3 style=\"margin-top:0\">Server</h3><ul class=\"grid\"><li class=\"stat\"><b>");
+    try w.writeAll("<h3 class=\"flush\">Server</h3><ul class=\"grid\"><li class=\"stat\"><b>");
     // World names come from config/CLI; still escape so a crafted path cannot break HTML.
     if (wn.len == 0) {
         try w.writeAll("<span class=\"meta\">(unnamed)</span>");
@@ -1669,28 +1694,29 @@ fn renderSettings(buf: []u8, s: *const Snapshot) ![]const u8 {
 
 fn renderPlayers(buf: []u8, s: *const Snapshot) ![]const u8 {
     var w: std.Io.Writer = .fixed(buf);
-    try w.writeAll("<table><caption class=\"sr-only\">Connected players</caption><thead><tr><th scope=\"col\">Slot</th><th scope=\"col\">Name</th><th scope=\"col\">Entity ID</th><th scope=\"col\">Position</th><th scope=\"col\">State</th></tr></thead><tbody>");
+    try w.writeAll("<table class=\"stack\"><caption class=\"sr-only\">Connected players</caption><thead><tr><th scope=\"col\">Slot</th><th scope=\"col\">Name</th><th scope=\"col\">Entity ID</th><th scope=\"col\">Position</th><th scope=\"col\">State</th></tr></thead><tbody>");
     var any = false;
     for (s.players) |p| {
         if (!p.used) continue;
         any = true;
         const nm = p.name[0..p.name_len];
         const st: []const u8 = if (p.entered) "in world" else if (p.joined) "joined" else "connecting";
+        const pill: []const u8 = if (p.entered) "ok" else if (p.joined) "warn" else "";
         // Names are client-supplied (PlayerLogin); never interpolate raw into HTML.
-        try w.print("<tr><td class=\"num\">{d}</td><th scope=\"row\">", .{p.slot});
+        try w.print("<tr><td class=\"num\" data-label=\"Slot\">{d}</td><th scope=\"row\" data-label=\"Name\">", .{p.slot});
         try htmlEscape(&w, nm);
         try w.print(
-            \\</th><td class="num">{d}</td><td class="num">{d:.0},{d:.0},{d:.0}</td><td>{s}</td></tr>
-        , .{ p.entity_id, p.x, p.y, p.z, st });
+            \\</th><td class="num" data-label="Entity ID">{d}</td><td class="num" data-label="Position">{d:.0},{d:.0},{d:.0}</td><td data-label="State"><span class="pill {s}">{s}</span></td></tr>
+        , .{ p.entity_id, p.x, p.y, p.z, pill, st });
     }
-    if (!any) try w.writeAll("<tr><td colspan=\"5\" style=\"color:var(--muted)\">No players are connected. They appear here when clients join.</td></tr>");
+    if (!any) try w.writeAll("<tr><td colspan=\"5\" class=\"empty-note\">No players are connected. They appear here when clients join.</td></tr>");
     try w.writeAll("</tbody></table>");
     return w.buffered();
 }
 
 fn renderModules(buf: []u8, s: *const Snapshot, csrf: []const u8) ![]const u8 {
     var w: std.Io.Writer = .fixed(buf);
-    try w.writeAll("<table><caption class=\"sr-only\">Loaded modules</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Module</th><th scope=\"col\">State</th></tr></thead><tbody>");
+    try w.writeAll("<table class=\"stack\"><caption class=\"sr-only\">Loaded modules</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Module</th><th scope=\"col\">State</th></tr></thead><tbody>");
     var any = false;
     for (&s.modules, 0..) |m, i| {
         if (!m.used) continue;
@@ -1698,49 +1724,49 @@ fn renderModules(buf: []u8, s: *const Snapshot, csrf: []const u8) ![]const u8 {
         const nm = m.name[0..m.name_len];
         // Module names come from the mods/ dir; still escape so a crafted path
         // cannot break HTML.
-        try w.print("<tr><td class=\"num\">{d}</td><th scope=\"row\">", .{i});
+        try w.print("<tr><td class=\"num\" data-label=\"#\">{d}</td><th scope=\"row\" data-label=\"Module\">", .{i});
         try htmlEscape(&w, nm);
         const st: []const u8 = if (m.disabled) "disabled" else "enabled";
-        const st_cls: []const u8 = if (m.disabled) "num err" else "num";
-        try w.print("</th><td class=\"{s}\">{s}</td></tr>", .{ st_cls, st });
+        const st_cls: []const u8 = if (m.disabled) "bad" else "ok";
+        try w.print("</th><td data-label=\"State\"><span class=\"pill {s}\">{s}</span></td></tr>", .{ st_cls, st });
     }
-    if (!any) try w.writeAll("<tr><td colspan=\"3\" style=\"color:var(--muted)\">No modules loaded. Drop a .wasm under mods/ and restart, or run `plugin reload &lt;name&gt;`.</td></tr>");
+    if (!any) try w.writeAll("<tr><td colspan=\"3\" class=\"empty-note\">No modules loaded. Drop a .wasm under mods/ and restart, or run `plugin reload &lt;name&gt;`.</td></tr>");
     try w.writeAll("</tbody></table>");
 
     // XML-only modlets: the operator can enable/disable each one. The state is
     // a text file next to the world save; a change applies on the next start
     // (the catalog and the id mapping are built once at init).
-    try w.writeAll("<h3>Game modlets</h3><p class=\"meta\">Enable or disable XML-only mods. A change is saved and applies after a restart (patches and item ids are resolved at startup).</p>");
+    try w.writeAll("<h3>Game modlets</h3><p class=\"deck-sub\">Enable or disable XML-only mods. A change is saved and applies after a restart (patches and item ids are resolved at startup).</p>");
     const n = modlets.rosterLen();
     if (n == 0) {
-        try w.writeAll("<p class=\"meta\">No mods scanned (no Mods/ dir under the game dir and no --mods-dir).</p>");
+        try w.writeAll("<p class=\"deck-sub\">No mods scanned (no Mods/ dir under the game dir and no --mods-dir).</p>");
         return w.buffered();
     }
-    try w.writeAll("<table><caption class=\"sr-only\">Game modlets</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Modlet</th><th scope=\"col\">Version</th><th scope=\"col\">State</th><th scope=\"col\">Action</th></tr></thead><tbody>");
+    try w.writeAll("<table class=\"stack\"><caption class=\"sr-only\">Game modlets</caption><thead><tr><th scope=\"col\">#</th><th scope=\"col\">Modlet</th><th scope=\"col\">Version</th><th scope=\"col\">State</th><th scope=\"col\">Action</th></tr></thead><tbody>");
     var i: usize = 0;
     while (modlets.rosterAt(i)) |m| : (i += 1) {
         const off = modlets.isDisabled(m.name);
-        try w.print("<tr><td class=\"num\">{d}</td><th scope=\"row\">", .{i});
+        try w.print("<tr><td class=\"num\" data-label=\"#\">{d}</td><th scope=\"row\" data-label=\"Modlet\">", .{i});
         try htmlEscape(&w, m.name);
         if (m.has_code) try w.writeAll(" <span class=\"meta\">(code mod: XML only)</span>");
-        try w.writeAll("</th><td class=\"num\">");
+        try w.writeAll("</th><td class=\"num\" data-label=\"Version\">");
         try htmlEscape(&w, m.version);
         const st: []const u8 = if (off) "disabled" else "enabled";
-        const st_cls: []const u8 = if (off) "num err" else "num";
-        try w.print("</td><td class=\"{s}\">{s}</td><td>", .{ st_cls, st });
+        const st_cls: []const u8 = if (off) "bad" else "ok";
+        try w.print("</td><td data-label=\"State\"><span class=\"pill {s}\">{s}</span></td><td data-label=\"Action\">", .{ st_cls, st });
         try w.writeAll("<form hx-post=\"/api/modlet\" hx-target=\"#modules\" hx-swap=\"innerHTML\">");
         try w.writeAll("<input type=\"hidden\" name=\"csrf\" value=\"");
         try htmlEscapeAttr(&w, csrf);
         try w.writeAll("\"><input type=\"hidden\" name=\"name\" value=\"");
         try htmlEscapeAttr(&w, m.name);
-        try w.print("\"><input type=\"hidden\" name=\"action\" value=\"{s}\"><button type=\"submit\">{s}</button></form></td></tr>", .{
+        try w.print("\"><input type=\"hidden\" name=\"action\" value=\"{s}\"><button type=\"submit\" class=\"mod-btn\">{s}</button></form></td></tr>", .{
             if (off) "enable" else "disable",
             if (off) "Enable" else "Disable",
         });
     }
     try w.writeAll("</tbody></table>");
     if (modlets.statePath()) |sp| {
-        try w.writeAll("<p class=\"meta\">State file: <code>");
+        try w.writeAll("<p class=\"deck-sub\">State file: <code>");
         try htmlEscape(&w, sp);
         try w.writeAll("</code></p>");
     }
@@ -1834,14 +1860,14 @@ fn renderApm(buf: []u8, s: *const Snapshot) ![]const u8 {
     const p99_cls: []const u8 = if (s.tick_p99_ns > tick_budget_ns) "num warn-text" else "num";
     const max_cls: []const u8 = if (s.tick_max_ns > tick_budget_ns) "num warn-text" else "num";
     try w.print(
-        \\<h3 style="margin-top:0">Latency (tick budget 50 ms)</h3>
+        \\<h3 class="flush">Latency (tick budget 50 ms)</h3>
         \\<ul class="grid">
         \\<li class="stat"><b class="num">{d} ms</b><span>tick mean</span></li>
         \\<li class="stat"><b class="{s}">{d} / {d} ms</b><span>tick p50 / p99</span></li>
         \\<li class="stat"><b class="{s}">{d} ms</b><span>tick max</span></li>
         \\<li class="stat"><b class="num">{d} / {d} µs</b><span>net mean / p99</span></li>
         \\<li class="stat"><b class="num">{d} / {d} µs</b><span>sim mean / p99</span></li>
-        \\<li class="stat"><b class="num">{d} / {d} µs</b><span>replicate mean / p99</span></li>
+        \\<li class="stat"><b class="num">{d} / {d} µs</b><span>repl mean / p99</span></li>
         \\<li class="stat"><b class="num">{d} / {d} µs</b><span>stream mean / p99</span></li>
         \\<li class="stat"><b class="num">{d} µs</b><span>save mean</span></li>
         \\</ul>
@@ -2124,6 +2150,7 @@ fn renderApmJson(buf: []u8, s: *const Snapshot) ![]const u8 {
         try jsonEscapeWrite(&w, p.name[0..p.name_len]);
         try w.writeAll("\"}");
     }
+    try w.writeAll("]");
     // Loaded Wasm plugin modules (same roster as the Modules partial).
     try w.writeAll(",\"modules\":[");
     var first_module = true;
@@ -2309,6 +2336,8 @@ test "POST /api/modlet toggles a modlet and re-renders the Modules partial" {
     try testServeHttp(&s, "GET /partials/modules HTTP/1.1\r\nAuthorization: Bearer s3cr3t\r\n\r\n");
     try std.testing.expect(std.mem.find(u8, s.testResp(), "UiMod") != null);
     try std.testing.expect(std.mem.find(u8, s.testResp(), "name=\"action\" value=\"disable\"") != null);
+    // The action button carries the touch-target class.
+    try std.testing.expect(std.mem.find(u8, s.testResp(), "class=\"mod-btn\"") != null);
 
     const body = "csrf=s3cr3t&name=UiMod&action=disable";
     var req_buf: [256]u8 = undefined;
@@ -2639,11 +2668,44 @@ test "renderShell exposes console names and status updates" {
     try std.testing.expect(std.mem.find(u8, html, "action=\"/logout\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "method=\"post\" action=\"/api/cmd\"") != null);
     try std.testing.expect(std.mem.find(u8, html, "line.split") != null);
+    // Paper cockpit: horizontal tablist, glance band, terminal deck.
+    try std.testing.expect(std.mem.find(u8, html, "aria-orientation=\"horizontal\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "class=\"glance-band\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"glance-tick\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"glance-meter-fill\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "class=\"deck\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "updateGlance") != null);
+    try std.testing.expect(std.mem.find(u8, html, "aria-describedby=\"cmd-help-inline\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"cmd-help-inline\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"apm-chart-data\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "aria-describedby=\"apm-chart-data apm-chart-live apm-chart-keys\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"apm-chart-keys\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "updatePolling") != null);
+    try std.testing.expect(std.mem.find(u8, html, "panelPolls") != null);
+    // Deep-linkable tabs + keyboard/drag chart scrub + URL history window.
+    try std.testing.expect(std.mem.find(u8, html, "selectInitialTab") != null);
+    try std.testing.expect(std.mem.find(u8, html, "replaceState") != null);
+    try std.testing.expect(std.mem.find(u8, html, "id=\"apm-chart-live\"") != null);
+    try std.testing.expect(std.mem.find(u8, html, "stepScrub") != null);
+    try std.testing.expect(std.mem.find(u8, html, "scrubToEvent") != null);
+    try std.testing.expect(std.mem.find(u8, html, "syncHistoryUrl") != null);
+    try std.testing.expect(std.mem.find(u8, html, "touch-action:pan-y") != null);
+    try std.testing.expect(std.mem.find(u8, html, "tabindex=\"0\"") != null);
+    // No-JS fallback: sections unhide, dead controls hide (head noscript).
+    try std.testing.expect(std.mem.find(u8, html, "section[hidden]{display:block}") != null);
+    // Roving tabindex is correct in static markup, not only after JS runs.
+    try std.testing.expect(std.mem.find(u8, html, "id=\"tab-players\" tabindex=\"-1\"") != null);
+    // Partials use classes, not inline styles.
+    try std.testing.expect(std.mem.find(u8, html, "class=\"flush\"") == null); // partial-only, not shell
+    try std.testing.expect(std.mem.find(u8, html, ".empty-note{") != null);
+    try std.testing.expect(std.mem.find(u8, html, ".flush{") != null);
+    try std.testing.expect(std.mem.find(u8, html, "class=\"mod-btn\"") == null); // partial-only, not shell
     try std.testing.expect(html.len < max_shell_html);
 }
 
-test "loginHintHtml exposes labeled secret form" {
-    const ok = loginHintHtml(false);
+test "renderLogin substitutes banner and input state" {
+    var buf: [8192]u8 = undefined;
+    const ok = try renderLogin(&buf, false);
     try std.testing.expect(std.mem.find(u8, ok, "<label for=\"login-token\">Shared secret</label>") != null);
     try std.testing.expect(std.mem.find(u8, ok, "name=\"token\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "type=\"password\"") != null);
@@ -2652,15 +2714,18 @@ test "loginHintHtml exposes labeled secret form" {
     try std.testing.expect(std.mem.find(u8, ok, "aria-pressed=\"false\"") != null);
     try std.testing.expect(std.mem.find(u8, ok, "token.type = shown ? 'password' : 'text'") != null);
     try std.testing.expect(std.mem.find(u8, ok, "role=\"alert\"") == null);
-    const bad = loginHintHtml(true);
+    try std.testing.expect(std.mem.find(u8, ok, "data-invalid=\"false\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "aria-describedby=\"login-help\"") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "forced-colors:active") != null);
+    try std.testing.expect(std.mem.find(u8, ok, "__ZDTD_") == null);
+    const bad = try renderLogin(&buf, true);
     try std.testing.expect(std.mem.find(u8, bad, "role=\"alert\"") != null);
-    try std.testing.expect(std.mem.find(u8, bad, "aria-invalid=\"true\"") != null);
+    try std.testing.expect(std.mem.find(u8, bad, "data-invalid=\"true\"") != null);
     try std.testing.expect(std.mem.find(u8, bad, "Sign-in failed") != null);
     try std.testing.expect(std.mem.find(u8, bad, "id=\"toggle-secret\"") != null);
-    try std.testing.expect(std.mem.find(u8, ok, "aria-invalid=\"true\"") == null);
-    try std.testing.expect(std.mem.find(u8, ok, "forced-colors:active") != null);
     try std.testing.expect(std.mem.find(u8, bad, "color:MarkText;background:Mark") != null);
     try std.testing.expect(std.mem.find(u8, bad, "forced-color-adjust:none") == null);
+    try std.testing.expect(std.mem.find(u8, bad, "__ZDTD_") == null);
     const locked = loginLockoutHtml();
     try std.testing.expect(std.mem.find(u8, locked, "Too many failed sign-ins") != null);
     try std.testing.expect(std.mem.find(u8, locked, "role=\"alert\"") != null);
@@ -2792,7 +2857,9 @@ test "renderPlayers identifies each player name as a row header" {
     @memcpy(s.players[0].name[0..3], "Ada");
     var buf: [4096]u8 = undefined;
     const html = try renderPlayers(&buf, &s);
-    try std.testing.expect(std.mem.find(u8, html, "<th scope=\"row\">Ada</th>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<table class=\"stack\">") != null);
+    try std.testing.expect(std.mem.find(u8, html, "data-label=\"Name\">Ada</th>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<span class=\"pill ") != null);
 }
 
 test "renderModules lists loaded wasm modules with state" {
@@ -2803,9 +2870,9 @@ test "renderModules lists loaded wasm modules with state" {
     @memcpy(s.modules[1].name[0..13], "core_announce");
     var buf: [4096]u8 = undefined;
     const html = try renderModules(&buf, &s, "csrf-token");
-    try std.testing.expect(std.mem.find(u8, html, "<th scope=\"row\">fps_bot</th>") != null);
-    try std.testing.expect(std.mem.find(u8, html, ">enabled</td>") != null);
-    try std.testing.expect(std.mem.find(u8, html, "class=\"num err\">disabled</td>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "data-label=\"Module\">fps_bot</th>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<span class=\"pill ok\">enabled</span>") != null);
+    try std.testing.expect(std.mem.find(u8, html, "<span class=\"pill bad\">disabled</span>") != null);
     // Empty roster gets a hint row, not a bare table.
     var s2: Snapshot = .{};
     var buf2: [4096]u8 = undefined;
@@ -2840,6 +2907,12 @@ test "renderApmJson includes escaped player names and world" {
     try std.testing.expect(std.mem.find(u8, js, "\"os_load_1\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"os_uptime_s\":") != null);
     try std.testing.expect(std.mem.find(u8, js, "\"modules\":[") != null);
+    // Empty and populated rosters both close the players array: the chart
+    // parses this JSON every second, and a missing bracket broke it.
+    try std.testing.expect(std.mem.find(u8, js, "}],\"modules\":[") != null);
+    var empty: Snapshot = .{ .tick_n = 1 };
+    const js_empty = try renderApmJson(&buf, &empty);
+    try std.testing.expect(std.mem.find(u8, js_empty, "\"players\":[],\"modules\":[") != null);
 }
 
 test "prefersPlainBody honors Accept without HTML" {

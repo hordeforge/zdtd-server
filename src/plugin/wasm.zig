@@ -232,9 +232,16 @@ pub const Plugin = struct {
         var linker = engine_ptr.linker();
         errdefer if (!adopted) linker.deinit();
         defineImports(&linker, ctx) catch return error.ImportForbidden;
+        // A zero fuel or page budget traps (or OOMs) the module on its first
+        // call, so every plugin would disable immediately. Config clamps this
+        // at bind, but load is also reachable from tests and the raw path, so
+        // normalize here too: the floor is fail-loud at instantiate, not a
+        // silent mass-disable one tick later.
+        const fuel = if (budget.fuel == 0) 1 else budget.fuel;
+        const pages = if (budget.max_memory_pages == 0) 1 else budget.max_memory_pages;
         var instance = linker.instantiate(&module, .{
-            .fuel = .{ .limited = budget.fuel },
-            .max_memory_pages = .{ .limited = budget.max_memory_pages },
+            .fuel = .{ .limited = fuel },
+            .max_memory_pages = .{ .limited = pages },
         }) catch |err| {
             std.debug.print("zdtd: wasm instantiate failed: {s}\n", .{@errorName(err)});
             return error.InstantiateFailed;
@@ -1644,6 +1651,10 @@ pub const WasmHost = struct {
     /// must not own this one either.
     pub fn routeMcpFrame(self: *WasmHost, frame: []const u8, out: []u8) usize {
         for (self.slots[0..self.n]) |*p| {
+            // A trapped module must not own the frame even though
+            // callMcpFrame would also refuse it: the skip belongs at the
+            // routing decision, not one layer down.
+            if (p.disabled) continue;
             if (!p.hook_present[@intFromEnum(Hook.on_mcp_frame)]) continue;
             const rep = p.callMcpFrame(frame, out) orelse continue;
             return rep.len;

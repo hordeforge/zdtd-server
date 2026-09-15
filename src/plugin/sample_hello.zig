@@ -1,13 +1,12 @@
-//! In-tree sample static plugin: logs once on enable.
+//! In-tree sample static plugin: logs on enable.
+//! Stateless by construction: static vtables carry no per-instance state, so
+//! the enable log fires every time the host enables this slot (including
+//! after a shutdown + re-enable cycle). No module-level flag.
 
 const std = @import("std");
 const api = @import("api.zig");
 
-var enabled_once: bool = false;
-
 fn onEnable(host: *const api.Host) void {
-    if (enabled_once) return;
-    enabled_once = true;
     host.log(.info, "sample_hello enabled");
 }
 
@@ -17,18 +16,8 @@ pub const vtable: api.PluginVTable = .{
     // on_tick / on_player_join left null: host skips them.
 };
 
-/// Test helper: reset one-shot flag between unit tests.
-pub fn resetForTest() void {
-    enabled_once = false;
-}
-
-test "sample_hello enable logs once" {
-    resetForTest();
+test "sample_hello enable logs" {
     var host: api.Host = .{};
-    try std.testing.expect(!enabled_once);
     vtable.on_enable.?(&host);
-    try std.testing.expect(enabled_once);
-    // Second call is a no-op (one-shot flag already set).
     vtable.on_enable.?(&host);
-    try std.testing.expect(enabled_once);
 }

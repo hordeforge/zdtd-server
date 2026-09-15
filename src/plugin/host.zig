@@ -319,7 +319,6 @@ pub const PluginHost = struct {
 };
 
 test "host registers sample and enables once" {
-    sample_hello.resetForTest();
     var h: PluginHost = .{};
     h.enableStaticDefaults();
     try std.testing.expectEqual(@as(usize, 1), h.count());

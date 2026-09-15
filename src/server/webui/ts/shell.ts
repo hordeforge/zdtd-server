@@ -1,5 +1,7 @@
 //! Webui dashboard shell: htmx-style poller for the [hx-get] partials,
-//! auto-refresh toggle, and the admin console form (POST /api/cmd).
+//! auto-refresh toggle, the admin console form (POST /api/cmd), and the
+//! hx-post modlet forms (POST /api/modlet, delegated: the Modules partial
+//! re-renders every 5s so per-form wiring would die on each poll swap).
 //! Compiled by scripts/build-webui-ts.sh and injected into shell.html.
 
 const FETCH_TIMEOUT_MS = 8000;
@@ -67,6 +69,10 @@ function flashChanges(el: HTMLElement): void {
 // stays a thin wiring function. Inlining it would push hxPoll past the
 // 60-line function cap the strict preset enforces; the
 // @rikalabs/no-single-use-trivial-helpers off entry covers this.
+// createSwap replaces the region's content with the fetched partial
+// (hx-swap is always innerHTML on this page; the attribute stays in markup
+// as documentation of the intent, but this poller is the implementation).
+
 function createSwap(el: HxPollerElement, u: string): (force?: boolean) => Promise<void> {
     let inFlight = false;
     // Force=true skips the focus guard: Refresh now and post-command refreshes
@@ -237,6 +243,10 @@ type ApmSample = {
     tickMeanMs: number;
     tickP99Ms: number;
     sectionsMs: ReadonlyArray<number>;
+    tick: number;
+    joined: number;
+    entered: number;
+    bloodmoonActive: boolean;
 };
 
 type ApmJson = {
@@ -247,6 +257,10 @@ type ApmJson = {
     repl_mean_ns: number;
     stream_mean_ns: number;
     save_mean_ns: number;
+    tick: number;
+    joined: number;
+    entered: number;
+    bm: boolean;
 };
 
 type EdgeLerp = {
@@ -255,24 +269,25 @@ type EdgeLerp = {
     startAt: number;
 };
 
-const SECTION_KEYS: ReadonlyArray<keyof ApmJson> = ['net_mean_ns', 'sim_mean_ns', 'repl_mean_ns', 'stream_mean_ns', 'save_mean_ns'];
+const SECTION_NS_KEYS: ReadonlyArray<'net_mean_ns' | 'sim_mean_ns' | 'repl_mean_ns' | 'stream_mean_ns' | 'save_mean_ns'> = ['net_mean_ns', 'sim_mean_ns', 'repl_mean_ns', 'stream_mean_ns', 'save_mean_ns'];
+const SECTION_NAMES: ReadonlyArray<string> = ['network', 'sim', 'replication', 'chunk stream', 'save'];
 
 function cssVar(name: string): string {
     const styles = globalThis.getComputedStyle(document.documentElement);
     return styles.getPropertyValue(name).trim() || '#6b7280';
 }
 
-const CHART_LINE_COLOR = cssVar('--fg');
-const CHART_GHOST_COLOR = cssVar('--muted');
-const CHART_GRID_COLOR = cssVar('--line');
-const CHART_LABEL_COLOR = cssVar('--muted2');
-const CHART_BUDGET_COLOR = cssVar('--warn');
+const CHART_LINE_COLOR = cssVar('--term-ok');
+const CHART_GHOST_COLOR = cssVar('--term-faint');
+const CHART_GRID_COLOR = cssVar('--term-line');
+const CHART_LABEL_COLOR = cssVar('--term-faint');
+const CHART_BUDGET_COLOR = cssVar('--term-key');
 const SECTION_FILL_COLORS: ReadonlyArray<string> = [
-    cssVar('--line2'),
-    cssVar('--edge'),
-    cssVar('--muted3'),
-    cssVar('--muted2'),
-    cssVar('--muted'),
+    cssVar('--term-line'),
+    cssVar('--term-band1'),
+    cssVar('--term-band2'),
+    cssVar('--term-faint'),
+    cssVar('--term-text'),
 ];
 
 const chartCanvas = queryEl<HTMLCanvasElement>('#apm-canvas');
@@ -283,9 +298,28 @@ const chartCaption = document.querySelector<HTMLElement>('#apm-chart-caption');
 const chartWrap = document.querySelector<HTMLElement>('#apm-chart-wrap');
 
 function loadHistoryMs(): number {
+    // URL wins (?history=120000), then the stored preference, then default.
+    // Unknown values fall back down the chain (missing beats fake).
+    const param = Number(new URLSearchParams(globalThis.location.search).get('history'));
+    if (HISTORY_WINDOW_MS.includes(param)) {
+        return param;
+    }
     // oxlint-disable-next-line @rikalabs/no-json-parse-default-fallback -- deliberate: localStorage holds a bare integer written by this page, not JSON; Number() parse failure falls back to the default window
     const stored = Number(globalThis.localStorage.getItem(HISTORY_STORAGE_KEY));
     return HISTORY_WINDOW_MS.includes(stored) ? stored : HISTORY_DEFAULT_MS;
+}
+
+function syncHistoryUrl(ms: number): void {
+    const url = new URL(globalThis.location.href);
+    if (url.searchParams.get('history') === String(ms)) {
+        return;
+    }
+    if (ms === HISTORY_DEFAULT_MS) {
+        url.searchParams.delete('history');
+    } else {
+        url.searchParams.set('history', String(ms));
+    }
+    globalThis.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 const samples: Array<ApmSample> = [];
@@ -513,6 +547,124 @@ function markChartStale(): void {
     setCaption(CAPTION_STALE);
 }
 
+// Non-visual equivalent of the canvas: the newest section means as a
+// visually-hidden table, updated with the caption so screen-reader operators
+// get the same numbers the graph shows.
+const chartTableBody = document.querySelector<HTMLElement>('#apm-chart-data tbody');
+
+function updateChartTable(): void {
+    if (chartTableBody === null || samples.length === 0) {
+        return;
+    }
+    const newest = samples[samples.length - 1];
+    const rows = SECTION_NAMES
+        .map((name, i) => `<tr><th scope="row">${name}</th><td>${newest.sectionsMs[i].toFixed(2)} ms</td></tr>`)
+        .join('');
+    if (chartTableBody.dataset.sig !== rows) {
+        chartTableBody.innerHTML = rows;
+        chartTableBody.dataset.sig = rows;
+    }
+}
+
+// Keyboard scrub: the canvas is focusable and ArrowLeft/Right move an
+// inspection cursor through the samples; the readout (same element as the
+// live caption) announces that sample. Any new sample or resize clears the
+// cursor back to live.
+let scrubIndex: number | null = null;
+const chartLive = document.querySelector<HTMLElement>('#apm-chart-live');
+
+function scrubSample(): ApmSample | null {
+    if (scrubIndex === null || scrubIndex < 0 || scrubIndex >= samples.length) {
+        return null;
+    }
+    return samples[scrubIndex];
+}
+
+function announceScrub(): void {
+    if (chartLive === null) {
+        return;
+    }
+    const sample = scrubSample();
+    if (sample === null) {
+        return;
+    }
+    const ageS = Math.max(0, Math.round((Date.now() - sample.at) / SEC_MS));
+    const sections = sample.sectionsMs.map((ms, i) => `${SECTION_NAMES[i]} ${ms.toFixed(1)}`).join(', ');
+    const text = `sample ${ageS}s ago: mean ${sample.tickMeanMs.toFixed(1)}, p99 ${sample.tickP99Ms.toFixed(1)} ms. ${sections} ms`;
+    if (chartLive.textContent !== text) {
+        chartLive.textContent = text;
+    }
+}
+
+// Cockpit glance band: whole-server health in the first viewport, driven by
+// the same apm sample as the terminal chart (no second fetch).
+// Percent scale for the glance-band budget meter.
+const PERCENT_MAX = 100;
+const glanceTick = document.querySelector<HTMLElement>('#glance-tick');
+const glancePlayers = document.querySelector<HTMLElement>('#glance-players');
+const glanceP99 = document.querySelector<HTMLElement>('#glance-p99');
+const glanceMeter = document.querySelector<HTMLElement>('#glance-meter');
+const glanceMeterFill = document.querySelector<HTMLElement>('#glance-meter-fill');
+const glanceState = document.querySelector<HTMLElement>('#glance-state');
+const glancePill = document.querySelector<HTMLElement>('#glance-pill');
+const glanceLamp = document.querySelector<HTMLElement>('#glance-lamp');
+const glanceWord = document.querySelector<HTMLElement>('#glance-word');
+
+function setText(el: HTMLElement | null, text: string): void {
+    if (el !== null && el.textContent !== text) {
+        el.textContent = text;
+    }
+}
+
+function updateGlance(newest: ApmSample): void {
+    setText(glanceTick, String(newest.tick));
+    setText(glancePlayers, `${newest.entered}/${newest.joined}`);
+    const p99 = newest.tickP99Ms;
+    setText(glanceP99, `${p99.toFixed(1)} ms`);
+    const frac = Math.min(1, p99 / TICK_BUDGET_MS);
+    if (glanceMeterFill !== null) {
+        glanceMeterFill.style.width = `${Math.round(frac * PERCENT_MAX)}%`;
+    }
+    const over = p99 > TICK_BUDGET_MS;
+    if (glanceMeter !== null) {
+        glanceMeter.classList.toggle('hot', over);
+        glanceMeter.setAttribute('aria-label', over ? 'tick p99 over the 50 ms budget' : 'tick p99 within budget');
+    }
+    const blood = newest.bloodmoonActive;
+    setText(glanceState, blood ? 'ACTIVE' : 'idle');
+    if (glancePill !== null) {
+        const cls = blood ? 'pill bad glance-pill' : 'pill ok glance-pill';
+        if (glancePill.className !== cls) {
+            glancePill.className = cls;
+        }
+        setText(glancePill, blood ? 'blood moon' : 'live');
+    }
+    if (glanceLamp !== null) {
+        glanceLamp.classList.toggle('bad', over);
+    }
+    setText(glanceWord, over ? 'over budget' : 'operational');
+}
+
+function announceLive(): void {
+    if (chartLive === null || scrubIndex !== null) {
+        return;
+    }
+    const newest = samples[samples.length - 1];
+    const text = `live: mean ${newest.tickMeanMs.toFixed(1)}, p99 ${newest.tickP99Ms.toFixed(1)} ms`;
+    if (chartLive.textContent !== text) {
+        chartLive.textContent = text;
+    }
+    updateGlance(newest);
+}
+
+function clearScrub(): void {
+    scrubIndex = null;
+}
+
+type ScrubDir = typeof SCRUB_BACK | typeof SCRUB_FWD;
+const SCRUB_BACK = -1;
+const SCRUB_FWD = 1;
+
 // Leading-edge markers plus their paired numeric readout: the eye anchor and
 // the stable-position numbers for the newest mean/p99 values.
 function finishChartFrame(ctx: CanvasRenderingContext2D, nowMs: number): void {
@@ -532,6 +684,31 @@ function finishChartFrame(ctx: CanvasRenderingContext2D, nowMs: number): void {
     // Tabular digits via the caption's monospace face; setCaption no-ops
     // when nothing changed.
     setCaption(`mean ${edgeValueMs(edgeMean, nowMs, samples[samples.length - 1].tickMeanMs).toFixed(1)} · p99 ${p99Now.toFixed(1)} ms · budget ${TICK_BUDGET_MS} ms`);
+    updateChartTable();
+    announceLive();
+}
+
+function drawScrubCursor(ctx: CanvasRenderingContext2D, nowMs: number): void {
+    const sample = scrubSample();
+    if (sample === null) {
+        return;
+    }
+    const plot = plotDims();
+    const x = EDGE_PAD_PX + chartX(nowMs - sample.at, chartMaxAgeMs, plot.w, chartCompressed);
+    const yAt = (ms: number): number => EDGE_PAD_PX + plot.h * (1 - ms / chartYMaxMs);
+    ctx.save();
+    ctx.strokeStyle = CHART_LINE_COLOR;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, EDGE_PAD_PX);
+    ctx.lineTo(x, EDGE_PAD_PX + plot.h);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, yAt(sample.tickMeanMs), EDGE_MARKER_RADIUS_PX + 1, 0, 2 * Math.PI);
+    ctx.fillStyle = CHART_LINE_COLOR;
+    ctx.fill();
+    ctx.restore();
 }
 
 function drawChart(nowMs: number): void {
@@ -566,8 +743,20 @@ function drawChart(nowMs: number): void {
     drawStackedSections(ctx, nowMs);
     drawSeries(ctx, nowMs);
     drawBudgetLine(ctx);
+    drawScrubCursor(ctx, nowMs);
     finishChartFrame(ctx, nowMs);
-    if (chartRafId === null) {
+    // The frame loop animates the edge lerp and the wall-clock slide.
+    // Under reduced motion the per-sample redraw is the still frame.
+    // Once the lerp settles the slide moves sub-pixel per frame, so the
+    // chain stops and the next sample fetch redraws (fetchApmSample draws
+    // on every sample; scrub and resize draw on demand).
+    if (reduceMotion === null) {
+        reduceMotion = globalThis.matchMedia('(prefers-reduced-motion: reduce)');
+    }
+    const lerping =
+        (edgeMean !== null && nowMs - edgeMean.startAt < EDGE_LERP_MS) ||
+        (edgeP99 !== null && nowMs - edgeP99.startAt < EDGE_LERP_MS);
+    if (!reduceMotion.matches && lerping && chartRafId === null) {
         chartRafId = globalThis.requestAnimationFrame(() => {
             chartRafId = null;
             drawChart(Date.now());
@@ -575,12 +764,29 @@ function drawChart(nowMs: number): void {
     }
 }
 
+function stepScrub(dir: ScrubDir): void {
+    if (samples.length === 0) {
+        return;
+    }
+    if (scrubIndex === null) {
+        scrubIndex = samples.length - 1;
+    } else {
+        scrubIndex = Math.min(samples.length - 1, Math.max(0, scrubIndex + dir));
+    }
+    announceScrub();
+    drawChart(Date.now());
+}
+
 function toSample(json: ApmJson): ApmSample {
     return {
         at: Date.now(),
         tickMeanMs: json.tick_mean_ns / NS_PER_MS,
         tickP99Ms: json.tick_p99_ns / NS_PER_MS,
-        sectionsMs: SECTION_KEYS.map((key) => json[key] / NS_PER_MS),
+        sectionsMs: SECTION_NS_KEYS.map((key) => json[key] / NS_PER_MS),
+        tick: json.tick,
+        joined: json.joined,
+        entered: json.entered,
+        bloodmoonActive: json.bm,
     };
 }
 
@@ -590,6 +796,8 @@ function pushSample(sample: ApmSample): void {
         samples.splice(0, samples.length - CHART_SAMPLES_MAX);
     }
     pruneHistory();
+    // New data invalidates the inspection cursor; the live edge is the truth.
+    clearScrub();
 }
 
 function startEdgeLerp(): void {
@@ -662,10 +870,60 @@ function chartStop(): void {
 
 const tabButtons = [...document.querySelectorAll<HTMLButtonElement>('.tab')];
 
-function selectTab(button: HTMLButtonElement): void {
+// Deep-linkable tabs: #players selects the Players tab, plain / reloads to
+// Status. Unknown hashes fall back to Status (missing beats fake).
+function tabSlug(button: HTMLButtonElement): string {
+    return button.id.replace(/^tab-/u, '');
+}
+
+function tabBySlug(slug: string): HTMLButtonElement | null {
+    return tabButtons.find((tab) => tabSlug(tab) === slug) ?? null;
+}
+
+function tabPanel(button: HTMLButtonElement): HTMLElement | null {
+    const controls = button.getAttribute('aria-controls');
+    if (controls === null) {
+        return null;
+    }
+    return document.querySelector<HTMLElement>(`#${controls}`);
+}
+
+function panelPolls(panel: HTMLElement): Array<HxPollerElement> {
+    return polls.filter((p) => panel.contains(p));
+}
+
+// Only the visible tab's regions poll. Hidden panels keep their last markup
+// but stop fetching, so an operator staring at Status does not pay for four
+// invisible 1s fetch+innerHTML swaps per second.
+function updatePolling(): void {
+    const on = autoEl.checked && !document.hidden;
+    const selected = tabButtons.find((tab) => tab.getAttribute('aria-selected') === 'true') ?? tabButtons[0];
+    const activePanel = selected ? tabPanel(selected) : null;
+    const active = new Set<HxPollerElement>(activePanel ? panelPolls(activePanel) : []);
+    for (const pollEl of polls) {
+        if (on && active.has(pollEl)) {
+            pollEl._hxStart?.();
+        } else {
+            pollEl._hxStop?.();
+        }
+    }
+    const showChart = on && activePanel !== null && activePanel.id === 'status-section';
+    if (showChart) {
+        chartStart();
+    } else {
+        chartStop();
+    }
+}
+
+function selectTab(button: HTMLButtonElement, pushHash = true): void {
     for (const tab of tabButtons) {
         const isOn = tab === button;
         tab.setAttribute('aria-selected', String(isOn));
+        if (isOn) {
+            tab.removeAttribute('tabindex');
+        } else {
+            tab.tabIndex = -1;
+        }
         const controls = tab.getAttribute('aria-controls');
         if (controls === null) {
             continue;
@@ -676,8 +934,33 @@ function selectTab(button: HTMLButtonElement): void {
         }
         panel.hidden = !isOn;
     }
-    drawChart(Date.now());
-    void fetchApmSample();
+    if (pushHash) {
+        const slug = tabSlug(button);
+        const hash = slug === 'status' ? '' : `#${slug}`;
+        globalThis.history.replaceState(null, '', `${globalThis.location.pathname}${globalThis.location.search}${hash}`);
+    }
+    updatePolling();
+    // The chart lives on the Status tab; only refresh it when visible.
+    if (button.id === 'tab-status') {
+        drawChart(Date.now());
+        void fetchApmSample();
+    }
+}
+
+function selectInitialTab(): void {
+    const slug = globalThis.location.hash.replace(/^#/u, '');
+    if (slug === '') {
+        selectTab(tabButtons[0], false);
+        return;
+    }
+    const target = tabBySlug(slug);
+    if (target === null) {
+        // Unknown hash names no tab: show Status and drop the stray hash
+        // rather than displaying one thing under another's URL.
+        selectTab(tabButtons[0], true);
+        return;
+    }
+    selectTab(target, false);
 }
 
 function wireTabs(): void {
@@ -685,8 +968,11 @@ function wireTabs(): void {
         tab.addEventListener('click', () => selectTab(tab));
     }
     const nav = document.querySelector<HTMLElement>('.page-nav');
+    // Tabs are a vertical tablist on desktop, horizontal bar on mobile; both
+    // axes plus Home/End move per the APG tabs pattern.
     nav?.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') {
+        const keys = new Set(['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End']);
+        if (!keys.has(e.key)) {
             return;
         }
         const index = tabButtons.findIndex((tab) => tab === document.activeElement);
@@ -695,11 +981,14 @@ function wireTabs(): void {
         }
         e.preventDefault();
         const last = tabButtons.length - 1;
-        let next = e.key === 'ArrowRight' ? index + 1 : index - 1;
-        if (next > last) {
+        let next = index;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            next = index + 1 > last ? 0 : index + 1;
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            next = index - 1 < 0 ? last : index - 1;
+        } else if (e.key === 'Home') {
             next = 0;
-        }
-        if (next < 0) {
+        } else {
             next = last;
         }
         selectTab(tabButtons[next]);
@@ -707,11 +996,79 @@ function wireTabs(): void {
     });
 }
 
+function scrubToEvent(e: PointerEvent): void {
+    if (samples.length === 0 || !sizeChartCanvas()) {
+        return;
+    }
+    const plot = plotDims();
+    if (plot.w <= 0) {
+        return;
+    }
+    const rect = chartCanvas.getBoundingClientRect();
+    const frac = (e.clientX - rect.left - EDGE_PAD_PX) / plot.w;
+    const nowMs = Date.now();
+    let best = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < samples.length; i++) {
+        const x = EDGE_PAD_PX + chartX(nowMs - samples[i].at, chartMaxAgeMs, plot.w, chartCompressed);
+        const dist = Math.abs(x / plot.w - frac);
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = i;
+        }
+    }
+    scrubIndex = best;
+    announceScrub();
+    drawChart(nowMs);
+}
+
+// Pointer scrub: drag across the canvas to inspect the nearest sample.
+// Reuses the keyboard cursor (same readout, same Escape to clear).
+function initScrubPointer(): void {
+    let scrubPointer = false;
+    chartCanvas.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (samples.length < 2) {
+            return;
+        }
+        scrubPointer = true;
+        chartCanvas.setPointerCapture(e.pointerId);
+        scrubToEvent(e);
+    });
+    chartCanvas.addEventListener('pointermove', (e: PointerEvent) => {
+        if (scrubPointer) {
+            scrubToEvent(e);
+        }
+    });
+    chartCanvas.addEventListener('pointerup', () => {
+        scrubPointer = false;
+    });
+    chartCanvas.addEventListener('pointercancel', () => {
+        scrubPointer = false;
+    });
+}
+
+function initChartScrub(): void {
+    chartCanvas.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Escape') {
+            return;
+        }
+        e.preventDefault();
+        if (e.key === 'Escape') {
+            clearScrub();
+            drawChart(Date.now());
+        } else {
+            stepScrub(e.key === 'ArrowLeft' ? SCRUB_BACK : SCRUB_FWD);
+        }
+    });
+    initScrubPointer();
+}
+
 function initChart(): void {
     compressEl.addEventListener('change', () => {
         chartCompressed = compressEl.checked;
         drawChart(Date.now());
     });
+    initChartScrub();
     historyEl.value = String(historyMs);
     historyEl.addEventListener('change', () => {
         const chosen = Number(historyEl.value);
@@ -719,6 +1076,7 @@ function initChart(): void {
             return;
         }
         historyMs = chosen;
+        syncHistoryUrl(chosen);
         try {
             globalThis.localStorage.setItem(HISTORY_STORAGE_KEY, String(historyMs));
             // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: persistence is best-effort; the chosen window still applies to this session
@@ -733,6 +1091,8 @@ function initChart(): void {
 
 wireTabs();
 initChart();
+selectInitialTab();
+globalThis.addEventListener('hashchange', () => selectInitialTab());
 
 function applyRefresh(): void {
     const on = autoEl.checked;
@@ -743,18 +1103,7 @@ function applyRefresh(): void {
     } else if (on) {
         stateLabel = 'Auto-refresh paused while tab is hidden';
     }
-    for (const pollEl of polls) {
-        if (active) {
-            pollEl._hxStart?.();
-        } else {
-            pollEl._hxStop?.();
-        }
-    }
-    if (active) {
-        chartStart();
-    } else {
-        chartStop();
-    }
+    updatePolling();
     if (refreshState) {
         refreshState.textContent = stateLabel;
     }
@@ -788,6 +1137,9 @@ async function submitCommand(): Promise<void> {
     }
     input.setCustomValidity('');
     const verb = line.split(/\s+/u, 1)[0].toLowerCase();
+    // Sync point: the destructive verbs the server accepts live in
+    // parseCommand (src/server/admin.zig). A new data-loss verb added there
+    // needs an entry here or it ships without a confirm.
     const destructive = new Set(['shutdown', 'killall', 'ka', 'kick', 'kickall', 'ban', 'wipeplayer']);
     // oxlint-disable-next-line no-alert -- deliberate: destructive admin commands use a native confirm
     if (destructive.has(verb) && !globalThis.confirm(`Run "${verb}"? This can interrupt players or erase saved data.`)) {
@@ -838,6 +1190,72 @@ refreshNowButton.addEventListener('click', () => {
     void refreshNow();
 });
 autoEl.addEventListener('change', applyRefresh);
+
+// Delegated hx-post handler (modlet Enable/Disable forms in the Modules
+// partial). The partial re-renders every 5s, so per-form wiring would die on
+// each poll swap; document-level delegation survives the swap. Forms without
+// hx-post (notably #cmd-form) are ignored.
+async function submitHxForm(form: HTMLFormElement): Promise<void> {
+    const url = form.getAttribute('hx-post') ?? '';
+    const targetSel = form.getAttribute('hx-target') ?? '';
+    const target = targetSel === '' ? null : document.querySelector<HTMLElement>(targetSel);
+    if (target === null) {
+        return;
+    }
+    const button = form.querySelector<HTMLButtonElement>('button[type="submit"], button:not([type])');
+    if (button) {
+        button.disabled = true;
+    }
+    target.setAttribute('aria-busy', 'true');
+    try {
+        const fd = new FormData(form);
+        const r = await fetchWithTimeout(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            // oxlint-disable-next-line @rikalabs/no-double-type-assertion, typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- SAFETY: browsers accept FormData in the URLSearchParams constructor; the bundled lib.dom type omits it (erased at emit time)
+            body: new URLSearchParams(fd as unknown as URLSearchParams),
+        });
+        if (r.status === HTTP_UNAUTHORIZED) {
+            globalThis.location.assign('/login');
+            return;
+        }
+        if (!r.ok) {
+            throw new Error(`HTTP ${r.status}`);
+        }
+        target.innerHTML = await r.text();
+        flashChanges(target);
+        // oxlint-disable-next-line @rikalabs/no-silent-catch-fallback -- deliberate: the failure is rendered inline below (role=alert); rethrowing here would be an unhandled rejection in the submit listener
+    } catch (err) {
+        const status = err instanceof Error ? err.message : 'network error';
+        const detail = status.startsWith('HTTP')
+            ? `${status}; no change was applied. Retry.`
+            : 'not received; its outcome is unknown. Reload before retrying.';
+        const prior = target.querySelector('p.modlet-err');
+        if (prior) {
+            prior.remove();
+        }
+        const note = document.createElement('p');
+        note.className = 'err modlet-err';
+        note.setAttribute('role', 'alert');
+        note.textContent = `Modlet action failed (${detail})`;
+        target.prepend(note);
+    } finally {
+        target.removeAttribute('aria-busy');
+        if (button) {
+            button.disabled = false;
+        }
+    }
+}
+
+document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || !form.hasAttribute('hx-post')) {
+        return;
+    }
+    e.preventDefault();
+    void submitHxForm(form);
+});
 document.addEventListener('visibilitychange', applyRefresh);
 cmdForm.addEventListener('submit', (e) => {
     e.preventDefault();

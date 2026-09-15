@@ -239,7 +239,17 @@ pub fn resolve(
 
     var name_to_slot: std.StringHashMapUnmanaged(usize) = .empty;
     errdefer name_to_slot.deinit(a);
-    for (load.items) |rm| try name_to_slot.put(a, rm.manifest.name.?, rm.slot);
+    // Two mod dirs declaring the same manifest name would load twice under
+    // one Loader identity: `name_to_slot` keeps the last, `plugin reload`
+    // addresses the first, and the operator cannot reach the second. Loud
+    // boot error, like DuplicateClaim for points.
+    var seen_names: std.StringHashMapUnmanaged(void) = .empty;
+    defer seen_names.deinit(a);
+    for (load.items) |rm| {
+        if (seen_names.contains(rm.manifest.name.?)) return error.DuplicateClaim;
+        try seen_names.put(a, rm.manifest.name.?, {});
+        try name_to_slot.put(a, rm.manifest.name.?, rm.slot);
+    }
 
     // Config-only mod: at most one enabled mod may activate a preset (a
     // .toml inside the mod's own folder). First in load order wins; a second
@@ -482,6 +492,14 @@ test "resolve duplicate point claim fails" {
     const mods = [_]manifest.Manifest{
         mk("a", "a.wasm", null, null, "loot.roll"),
         mk("b", "b.wasm", null, null, "loot.roll"),
+    };
+    try testing.expectError(error.DuplicateClaim, resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{}));
+}
+
+test "resolve duplicate manifest name fails" {
+    const mods = [_]manifest.Manifest{
+        mk("dup", "one.wasm", null, null, null),
+        mk("dup", "two.wasm", null, null, null),
     };
     try testing.expectError(error.DuplicateClaim, resolve(testing.allocator, &mods, &.{}, &.{}, &.{}, &.{}));
 }

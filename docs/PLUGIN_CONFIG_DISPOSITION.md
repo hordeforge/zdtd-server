@@ -199,7 +199,7 @@ full-suite runs green). Residuals, each with a reason:
    lock was free.
 3. **Concurrent-session transient webui failure.** One `zig build test` run
    reported 2 failing webui login-lockout tests (`renderLoginLockout ...`,
-   `loginHintHtml ...`) while the concurrent session was mid-edit of the webui
+   `renderLogin ...`; the latter was then named `loginHintHtml`) while the
    HTML pages (`login_lockout.html` etc., 17:04–17:09); their follow-up HTML
    edit restored the `aria-live="off"` markup the tests assert, and subsequent
    runs pass. Not a code defect in the current tree.

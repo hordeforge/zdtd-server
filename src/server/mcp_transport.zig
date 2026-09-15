@@ -18,6 +18,7 @@ const std = @import("std");
 const tcp = @import("../util/tcp_listen.zig");
 const http = std.http;
 const secret_mod = @import("../util/secret.zig");
+const io_fs = @import("../util/io_fs.zig");
 
 /// Inbound JSON-RPC frame cap (RFC 0002 §7 `max_frame_kib`).
 pub const max_frame: usize = 16 * 1024;
@@ -91,6 +92,11 @@ pub const Transport = struct {
         self.port = 0;
         if (self.token_len > 0) @memset(self.token_buf[0..self.token_len], 0);
         self.token_len = 0;
+        // The frame handler points at Game-owned plugin state torn down
+        // beside this transport: a poll after deinit must find no handler,
+        // not a dangling one (temporal composability on teardown).
+        self.frame_fn = null;
+        self.frame_ctx = null;
     }
 
     fn token(self: *const Transport) []const u8 {
@@ -440,6 +446,20 @@ test "mcp transport: zero reply is a 202 (notification semantics)" {
     try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 202 ") != null);
 }
 
+test "mcp transport: deinit drops the frame handler" {
+    // Dispose must withdraw the registration: a poll after deinit answers
+    // 503 instead of calling into torn-down plugin state.
+    var t: Transport = .{};
+    t.setFrameHandler(&t, Stub.frameFn);
+    Stub.resp = "{}";
+    defer Stub.resp = "";
+    t.deinit();
+    try std.testing.expect(t.frame_fn == null);
+    try std.testing.expect(t.frame_ctx == null);
+    try testServeHttp(&t, "POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}");
+    try std.testing.expect(std.mem.find(u8, t.testResp(), "HTTP/1.1 503 ") != null);
+}
+
 test "mcp transport: path, method and token gates fail closed" {
     var t: Transport = .{};
     t.setFrameHandler(&t, Stub.frameFn);
@@ -622,14 +642,24 @@ test "mcp transport e2e: real guest over HTTP (initialize, tools, call)" {
     // A disabled exporter must not own the frame. Composability audit
     // 2026-09-11: the router ended the search on the first `hook_present`
     // match, so a trapped module's null response dropped the frame instead of
-    // falling through to a later live exporter. Load the module twice, disable
-    // the first, and route directly. The response is not asserted for protocol
+    // falling through to a later live exporter. Load two distinct copies of
+    // the module (distinct Loader ids, not one path twice), disable the
+    // first, and route directly. The response is not asserted for protocol
     // content: the transport normally owns the session handshake, so a direct
     // frame answers with the guest's own -32002; what matters here is that a
     // LIVE module answered at all.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    const copy_path = try std.fs.path.join(std.testing.allocator, &.{ dir, "mcp2.wasm" });
+    defer std.testing.allocator.free(copy_path);
+    const orig = try io_fs.readFileAll(std.testing.allocator, "mods/mcp/mcp.wasm");
+    defer std.testing.allocator.free(orig);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "mcp2.wasm", .data = orig });
     var host2: plugin_mod.WasmHost = .{};
     defer host2.shutdown();
-    host2.loadAll(std.testing.allocator, &[_][]const u8{ "mods/mcp/mcp.wasm", "mods/mcp/mcp.wasm" }, &ctx, .{});
+    host2.loadAll(std.testing.allocator, &[_][]const u8{ "mods/mcp/mcp.wasm", copy_path }, &ctx, .{});
     try std.testing.expectEqual(@as(usize, 2), host2.count());
     host2.slots[0].disabled = true;
     var out2: [4096]u8 = undefined;

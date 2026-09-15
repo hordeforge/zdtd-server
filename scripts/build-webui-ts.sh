@@ -39,7 +39,7 @@ import sys
 
 js_dir, html_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 
-# Compiled file per marker name; login.html and login_failed.html share login.js.
+# Compiled file per marker name; the login marker takes login.js.
 MARKER_JS = {
     "login": "login.js",
     "lockout": "lockout.js",
