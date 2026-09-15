@@ -6,6 +6,7 @@
 
 **Date pin:** 2026-08-30  
 **Game line:** V 3.x Mono (connected client **V3.2.0 b10**; bundled AssignIds dump is 3.1.0-era, see the refresh item in GAP_ANALYSIS §1a), EAC off  
+**Studied bytes:** the exact stock files the RE pins came from, by sha256 ([PROVENANCE.md](PROVENANCE.md) "Studied bytes"): `Assembly-CSharp.dll` `3737eedc…1d0fc64d`, `entityclasses.xml` `0c95e733…912db0b0`, `traders.xml` `06202f16…31ca40dfcc`, `buffs.xml` `d6c714d7…e72fdab5b1c`. Same version string, different hash = different build = re-pin before trusting value comparisons.
 **Wire delta (V3.1.0 -> V3.2.0):** packed `DamageEntity` flags + `KillXPScale` (breaking), POI metadata packages (Request/Response replace POIAround), `ConfirmSpawnEntity` + `EntityCreationData` requestedBy/requestKey tail, `ItemValue.Activated` -> Flags bitfield (wire-compatible). Grounded in 7dtd-engine-research `docs/changelog-3.2.0.md`.
 **Validation:** `make check` passes (`zig build test`, fuzz, and
 `lint-architecture: clean`). **Container loot rolls on first open 2026-09-12**:
