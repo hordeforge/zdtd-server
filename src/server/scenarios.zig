@@ -18597,5 +18597,29 @@ test "scenario preacher armor resists zombie hits more" {
     const mz = inv.armorMitigationVs(&g.sim, c.slot, zs);
     const m0 = inv.armorMitigationVs(&g.sim, c.slot, null);
     try std.testing.expect(mz > m0 + 0.14);
+    // The same hit through the AI melee accumulator lands less HP loss with
+    // the outfit than without it.
+    const hp0 = g.sim.health[vs].hp;
+    g.sim.transform[vs] = .{ .x = 258, .y = 70, .z = 259 };
+    g.sim.transform[zs] = .{ .x = 258, .y = 70, .z = 258 };
+    g.sim.zombie_ai[zs].target_id = c.entity_id;
+    g.sim.zombie_ai[zs].state = .attack;
+    g.sim.zombie_ai[zs].attack_cd = 0;
+    var ticks: usize = 0;
+    while (ticks < 200 and g.sim.health[vs].hp >= hp0) : (ticks += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+    }
+    const loss_wearing = hp0 - g.sim.health[vs].hp;
+    try std.testing.expect(loss_wearing > 0);
+    // Strip the outfit and take the same hit shape: more HP lost.
+    g.sim.inventory[vs].slots[quest_mod_components.inv_equip_start] = .{};
+    g.sim.health[vs].hp = hp0;
+    g.sim.zombie_ai[zs].attack_cd = 0;
+    ticks = 0;
+    while (ticks < 200 and g.sim.health[vs].hp >= hp0) : (ticks += 1) {
+        _ = systems.tickAll(&g.sim, 0.05);
+    }
+    const loss_naked = hp0 - g.sim.health[vs].hp;
+    try std.testing.expect(loss_naked > loss_wearing);
     std.debug.print("PASS preacher: zombie-mit {d:.3} vs unset {d:.3}\n", .{ mz, m0 });
 }
