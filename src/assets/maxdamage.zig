@@ -633,15 +633,19 @@ pub const Table = struct {
         while (it.next()) |e| {
             const bname = e.key_ptr.*;
             const mat = e.value_ptr.*;
-            if (self.by_name.contains(bname)) continue;
             // StabilitySupport defaults to the material's value when the
             // block's resolved properties do not declare it (BlocksFromXml
-            // IL_06DE-070F).
+            // IL_06DE-070F). The material MaxDamage fill below must not gate
+            // it: a block whose MaxDamage resolved (own, Extends, or an
+            // earlier material fill) still takes the material support value
+            // unless it declared its own (Mcloth, Morganic and Mleather
+            // luggage/carcass rows carry no StabilitySupport of their own).
             if (!self.stability_explicit.contains(bname)) {
                 if (self.material_stability_support.get(mat)) |sup| {
                     if (!sup) try self.non_support.put(arena, bname, {});
                 }
             }
+            if (self.by_name.contains(bname)) continue;
             const mhp = self.material_max.get(mat) orelse continue;
             try self.by_name.put(arena, bname, mhp);
             if (self.id_by_name.get(bname)) |id| {
@@ -1536,6 +1540,11 @@ test "material StabilitySupport and explosionresistance resolve per block" {
     t.tryMergeBundledAssignIds(std.testing.allocator);
     // Mtrash is StabilitySupport false and cntAmmoPileSmall declares nothing.
     try std.testing.expect(!t.stabilitySupport("cntAmmoPileSmall"));
+    // The material fallback is not gated on the MaxDamage fill: cntLuggage
+    // declares own MaxDamage 50 on Mcloth (false) and goreBlockAnimal 100 on
+    // Morganic (false), so both are non-supporting despite resolving damage.
+    try std.testing.expect(!t.stabilitySupport("cntLuggageMediumOpen"));
+    try std.testing.expect(!t.stabilitySupport("goreBlockAnimal"));
     // A material with no row keeps the stock default true (terrStone/Mstone).
     try std.testing.expect(t.stabilitySupport("terrStone"));
     // An explicit block property wins over the material (declared false here).
