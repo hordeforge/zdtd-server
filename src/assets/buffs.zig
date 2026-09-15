@@ -134,6 +134,9 @@ pub const TriggeredAction = enum(u8) {
     modify_stats,
     add_buff,
     remove_buff,
+    /// `MinEventActionAddOrRemoveBuff`: the row gates decide — pass adds,
+    /// fail removes (weather/hazard toggles on `onSelfBuffUpdate`).
+    add_or_remove_buff,
     /// `MinEventActionModifyCVar`: write one custom variable.
     modify_cvar,
     /// `MinEventActionRemoveCVar`: drop one.
@@ -1276,6 +1279,7 @@ fn parseTriggeredAction(s: []const u8) TriggeredAction {
     if (std.mem.eql(u8, s, "ModifyStats")) return .modify_stats;
     if (std.mem.eql(u8, s, "AddBuff")) return .add_buff;
     if (std.mem.eql(u8, s, "RemoveBuff")) return .remove_buff;
+    if (std.mem.eql(u8, s, "AddOrRemoveBuff")) return .add_or_remove_buff;
     if (std.mem.eql(u8, s, "ModifyCVar")) return .modify_cvar;
     if (std.mem.eql(u8, s, "RemoveCVar")) return .remove_cvar;
     return .other;
@@ -1322,6 +1326,30 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
     var out: TriggeredResult = .{};
     for (rows) |tr| {
         if (tr.trigger != event) continue;
+        // `AddOrRemoveBuff` toggles on the gates: pass adds, fail removes.
+        // Every other action runs only on pass.
+        if (tr.action == .add_or_remove_buff) {
+            if (tr.buff.len == 0) continue;
+            const pass = tr.reqs.len == 0 or requirements.evaluate(tr.reqs, ctx, counts) == .pass;
+            if (pass) {
+                if (out.add_n >= out.add_buffs.len) {
+                    out.truncated +|= 1;
+                    continue;
+                }
+                out.add_buffs[out.add_n] = tr.buff;
+                out.add_n += 1;
+                if (ctx.sink) |sk| sk.add_buff(sk.ctx, tr.buff);
+            } else {
+                if (out.remove_n >= out.remove_buffs.len) {
+                    out.truncated +|= 1;
+                    continue;
+                }
+                out.remove_buffs[out.remove_n] = tr.buff;
+                out.remove_n += 1;
+                if (ctx.sink) |sk| sk.remove_buff(sk.ctx, tr.buff);
+            }
+            continue;
+        }
         if (tr.reqs.len > 0 and requirements.evaluate(tr.reqs, ctx, counts) != .pass) continue;
         switch (tr.action) {
             .modify_stats => {
@@ -1369,6 +1397,7 @@ pub fn evaluateRows(rows: []const Triggered, event: Trigger, ctx: requirements.C
                 if (tr.cvar.len == 0) continue;
                 _ = store.remove(tr.cvar);
             },
+            .add_or_remove_buff => unreachable, // handled above (toggle, not gate)
             .other => continue,
         }
     }
@@ -2481,4 +2510,31 @@ test "explicit level= curve pairs evaluate piecewise-linearly" {
     };
     try std.testing.expectApproxEqAbs(@as(f32, 0.0), curveAt(roll, 1), 0.001);
     try std.testing.expectEqual(@as(f32, 0), curveAt(roll, 2));
+}
+
+test "AddOrRemoveBuff toggles on its gates" {
+    // Stock `MinEventActionAddOrRemoveBuff` (Execute IL=11): the row gates
+    // decide — pass adds, fail removes. Weather/hazard toggles ride
+    // `onSelfBuffUpdate` with a CVar threshold gate.
+    const rows = [_]Triggered{
+        .{ .trigger = .update, .action = .add_or_remove_buff, .buff = "buffHot", .reqs = &.{} },
+    };
+    var counts: requirements.Counts = .{};
+    // No gates: pass = add.
+    const added = evaluateRows(&rows, .update, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 1), added.add_n);
+    try std.testing.expectEqual(@as(u8, 0), added.remove_n);
+    try std.testing.expectEqualStrings("buffHot", added.add_buffs[0]);
+    // A failing gate removes instead: force-fail with an unsatisfiable
+    // cvar threshold (missing cvar reads 0, never >= 100).
+    const gated = [_]Triggered{
+        .{ .trigger = .update, .action = .add_or_remove_buff, .buff = "buffHot", .reqs = &.{
+            .{ .kind = .cvar_compare, .arg = "noSuchCvarZZZ", .op = .ge, .value = 100 },
+        } },
+    };
+    counts = .{};
+    const removed = evaluateRows(&gated, .update, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 0), removed.add_n);
+    try std.testing.expectEqual(@as(u8, 1), removed.remove_n);
+    try std.testing.expectEqualStrings("buffHot", removed.remove_buffs[0]);
 }
