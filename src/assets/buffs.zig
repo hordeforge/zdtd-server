@@ -103,7 +103,11 @@ pub const StatMod = struct {
 pub const max_triggered_per_buff: usize = 256;
 pub const max_triggered_total: usize = 8192;
 
-/// Stock onSelf* trigger names (buffStatusCheck01 uses onSelfBuffUpdate).
+/// Stock onSelf* trigger names. `finish`/`stack` exist in the enum but have no
+/// test: nothing in src evaluates one yet, so a row carrying either parses and
+/// goes nowhere. Same fail-closed rule as every unhandled trigger; the row
+/// stays in the table so a later engine change can consume it without
+/// re-parsing.
 pub const Trigger = enum(u8) {
     start,
     update,
@@ -114,6 +118,14 @@ pub const Trigger = enum(u8) {
     /// attribute, book) changes. progression.xml's `perkIntellectMastery` rows
     /// write `$perkBookwormChance` here, which the loot RandomRoll gates read.
     progression_update,
+    /// `onSelfBuffFinish`: stock fires it when a buff's duration ends, after
+    /// `onSelfBuffRemove` (87 buffs / 120 rows: stat restores, cvar clears,
+    /// cooldown Adds, all currently inert).
+    finish,
+    /// `onSelfBuffStack`: stock fires it when AddBuff lands on an instance
+    /// that is already active (42 buffs / 93 rows, mostly ModifyCVar chains
+    /// like `buffHarvest`'s `$buffHarvestBonus`).
+    stack,
     other,
 };
 
@@ -1255,6 +1267,8 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfEnteredGame")) return .entered_game;
     if (std.mem.eql(u8, s, "onSelfFirstSpawn")) return .first_spawn;
     if (std.mem.eql(u8, s, "onSelfProgressionUpdate")) return .progression_update;
+    if (std.mem.eql(u8, s, "onSelfBuffFinish")) return .finish;
+    if (std.mem.eql(u8, s, "onSelfBuffStack")) return .stack;
     return .other;
 }
 
