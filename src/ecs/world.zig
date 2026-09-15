@@ -200,6 +200,7 @@ pub const EntityClass = struct {
     /// 0 = unset (the sense path falls back to sight_range). Negative stock
     /// values (never target) stay negative so the gate keeps them denied.
     target_player_see: f32 = 0,
+    target_player_hear: f32 = 0,
     /// `SetAsTargetIfHurt class=` victim-class filter bits (see
     /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
     /// always-retarget path.
@@ -1198,6 +1199,7 @@ pub const World = struct {
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].hurt_target_classes = def.hurt_target_classes;
             self.class_id[s].target_player_see = def.target_player_see;
+            self.class_id[s].target_player_hear = def.target_player_hear;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
             self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;
@@ -1295,6 +1297,7 @@ pub const World = struct {
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].hurt_target_classes = def.hurt_target_classes;
             self.class_id[s].target_player_see = def.target_player_see;
+            self.class_id[s].target_player_hear = def.target_player_hear;
             self.class_id[s].sight_light_min = def.sight_light_min;
             self.class_id[s].sight_light_max = def.sight_light_max;
             self.class_id[s].sleeper_wake_near_min = def.sleeper_wake_near_min;

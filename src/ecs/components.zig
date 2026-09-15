@@ -128,6 +128,7 @@ pub const ClassId = struct {
     /// (bandits at -10/-8: never target) stays negative so the gate below
     /// keeps it denied rather than reading it as unset.
     target_player_see: f32 = 0,
+    target_player_hear: f32 = 0,
     /// `SetAsTargetIfHurt class=` victim-class filter bits (see
     /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
     /// always-retarget path.

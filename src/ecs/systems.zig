@@ -252,8 +252,12 @@ fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx
             const smell = smellRadiusFor(w, p.slot);
             // Stealth (RE PlayerStealth NotifyNoise): a crouched player's
             // movement noise is muffled, so the hearing gate shrinks by
-            // crouch_hear_scale.
-            const hear = if (p.crouching) w.rules.ai.hear_range * w.rules.ai.crouch_hear_scale else w.rules.ai.hear_range;
+            // crouch_hear_scale. The AITarget player hear distance wins over
+            // the Rules floor when set (stock `EAISetNearestEntityAsTarget`
+            // hearDistMax; hear 0 reads 50 at parse, so nonzero = declared).
+            const hear_base = w.class_id[zslot].target_player_hear;
+            const hear_rule = if (hear_base != 0) hear_base else w.rules.ai.hear_range;
+            const hear = if (p.crouching) hear_rule * w.rules.ai.crouch_hear_scale else hear_rule;
             if (d >= smell * smell and !canSensePlayer(w, zslot, zx, zy, zz, zyaw, p.x, p.y, p.z, hear, p.light_level)) continue;
             best_d = d;
             best_id = p.id;

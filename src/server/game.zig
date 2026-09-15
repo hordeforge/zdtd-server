@@ -3315,6 +3315,7 @@ pub const Game = struct {
             .sight_range = d.sight_range,
             .hurt_target_classes = d.hurt_target_classes,
             .target_player_see = d.target_player_see,
+            .target_player_hear = d.target_player_hear,
             .sight_light_min = d.sight_light_min,
             .sight_light_max = d.sight_light_max,
             .sleeper_wake_near_min = d.sleeper_wake_near_min,
