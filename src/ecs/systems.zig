@@ -334,6 +334,25 @@ fn applyRevengeTarget(w: *const World, pos: *const [max_entities]c.Transform, s:
         return np;
     }
     if (w.mask[ts].kind and w.mask[s].kind and w.kind[ts] == w.kind[s]) return np;
+    // `SetAsTargetIfHurt class=` filter (entityclasses AITarget-1): a
+    // class-filtered entry retargets only when the attacker's kind is named.
+    // Bit 1 = EntityPlayer (mask.player), bit 3 = EntityEnemyAnimal (animal
+    // kind); bit 2 = EntityBandit, which has no sim entity and never matches.
+    // 0 (no filtered entry, incl. bare entries) keeps the legacy
+    // always-retarget path. Turret attackers have no kind and always pass
+    // (legacy attribution only ever carried player/turret).
+    const hb = w.class_id[s].hurt_target_classes;
+    if (hb & 1 != 0) {
+        const is_player = w.mask[ts].player;
+        const is_enemy_animal = w.mask[ts].kind and w.kind[ts] == .animal;
+        if (is_player and hb & 2 == 0) return np;
+        if (is_enemy_animal and hb & 8 == 0) return np;
+        if (!is_player and !is_enemy_animal) {
+            // Turrets (no kind mask) pass; zombies/bandits do not match any
+            // named stock class here.
+            if (w.mask[ts].kind) return np;
+        }
+    }
     if (ai.revenge_target == np.id) return np;
     const dx = pos[ts].x - w.transform[s].x;
     const dz = pos[ts].z - w.transform[s].z;

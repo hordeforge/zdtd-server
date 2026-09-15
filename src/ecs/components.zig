@@ -128,6 +128,10 @@ pub const ClassId = struct {
     /// (bandits at -10/-8: never target) stays negative so the gate below
     /// keeps it denied rather than reading it as unset.
     target_player_see: f32 = 0,
+    /// `SetAsTargetIfHurt class=` victim-class filter bits (see
+    /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
+    /// always-retarget path.
+    hurt_target_classes: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
     /// zombie template; cctor default 30/100). 0,0 = class_table[id] then the
     /// Rules floor (systems.sightLightThreshold).

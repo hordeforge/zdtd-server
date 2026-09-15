@@ -95,6 +95,14 @@ pub const EntityDef = struct {
     /// falls back to sight_range). 0,0 = no player entry parsed.
     target_player_hear: f32 = 0,
     target_player_see: f32 = 0,
+    /// `SetAsTargetIfHurt class=` victim-class filter (comma names;
+    /// `EAISetAsTargetIfHurt` SetData IL splits on comma). Bit 0 = a
+    /// class-filtered entry exists, bit 1 = EntityPlayer named, bit 2 =
+    /// EntityBandit named, bit 3 = EntityEnemyAnimal named. 0 = no
+    /// SetAsTargetIfHurt entry (bare entries without class= keep the legacy
+    /// always-retarget path); nonzero with bit 0 set gates revenge on the
+    /// named classes.
+    hurt_target_classes: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock zombieTemplateMale
     /// "-2,150": "how well lit you have to be for the zombie to see you at
     /// min,max range"; the EntityClass cctor default is 30/100). The pair
@@ -501,6 +509,75 @@ fn parseTargetPlayerEntry(entry: []const u8) ?TargetPlayerSense {
     }
     return null;
 }
+
+/// Parse one `SetAsTargetIfHurt class=...` entry into the victim-class bit
+/// set (bit 0 = filtered entry exists, bit 1 = EntityPlayer, bit 2 =
+/// EntityBandit, bit 3 = EntityEnemyAnimal; `EAISetAsTargetIfHurt` SetData IL
+/// splits `class` on comma). A bare entry (no class=) returns 0, keeping the
+/// legacy always-retarget path. Null unless the entry is SetAsTargetIfHurt.
+fn parseHurtTargetClasses(entry: []const u8) ?u8 {
+    var name = entry;
+    var data: []const u8 = "";
+    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
+        name = entry[0..sp];
+        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
+    }
+    if (!std.mem.eql(u8, name, "SetAsTargetIfHurt")) return null;
+    const marker = "class=";
+    const ci = std.mem.find(u8, data, marker) orelse return 0;
+    var bits: u8 = 1;
+    var it = std.mem.splitScalar(u8, data[ci + marker.len ..], ',');
+    while (it.next()) |p| {
+        const c = std.mem.trim(u8, p, " \t");
+        if (std.mem.eql(u8, c, "EntityPlayer")) bits |= 2;
+        if (std.mem.eql(u8, c, "EntityBandit")) bits |= 4;
+        if (std.mem.eql(u8, c, "EntityEnemyAnimal")) bits |= 8;
+    }
+    return bits;
+}
+
+/// Same Extends walk as resolvedTargetPlayerSense, but for the hurt-task
+/// class filter: the first class-filtered entry walking from the child up
+/// wins; a bare entry (or none) returns 0.
+fn resolvedHurtTargetClasses(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) u8 {
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: u8 = 0;
+        var saw_numbered = false;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = val;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
+                if (parseHurtTargetClasses(entry)) |b| {
+                    if (b != 0) {
+                        if (is_pipe) return b;
+                        numbered = b;
+                        saw_numbered = true;
+                    }
+                }
+                if (cut >= rest.len) break;
+                rest = rest[cut + 1 ..];
+            }
+            if (is_pipe) return numbered;
+        }
+        if (saw_numbered) return numbered;
+        cur = rc.extends;
+    }
+    return 0;
+}
 fn resolvedAiTasks(
     classes: *const std.StringHashMapUnmanaged(RawClass),
     name: []const u8,
@@ -758,6 +835,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const ai_tasks = resolvedAiTasks(&classes, name);
         const ai_attack = resolvedAiAttacks(&classes, name);
         const target_sense = resolvedTargetPlayerSense(&classes, name);
+        const hurt_classes = resolvedHurtTargetClasses(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
         const spawnable = !(std.mem.eql(u8, ust, "None") or std.mem.eql(u8, ust, "none"));
@@ -1001,6 +1079,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .ai_tasks = ai_tasks,
             .target_player_hear = if (target_sense) |s| s.hear else 0,
             .target_player_see = if (target_sense) |s| s.see else 0,
+            .hurt_target_classes = hurt_classes,
             .chase_speed = chase,
             .chase_speed_day = chase_day,
             .wander_speed = wander,
@@ -1110,6 +1189,13 @@ test "load stock entityclasses when present" {
     const dwolf = t.byName("animalDireWolf") orelse return error.TestExpectedEqual;
     try std.testing.expectEqual(@as(f32, 28), dwolf.target_player_hear);
     try std.testing.expectEqual(@as(f32, 20), dwolf.target_player_see);
+    // SetAsTargetIfHurt class filter (EAISetAsTargetIfHurt SetData IL):
+    // zombieTemplateMale names player+bandit+enemyAnimal (bits 0+1+2+3);
+    // animalDireWolf inherits the template's filter through Extends.
+    const tm = t.byName("zombieTemplateMale") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(u8, 15), tm.hurt_target_classes);
+    try std.testing.expectEqual(@as(u8, 15), boe.hurt_target_classes);
+    try std.testing.expectEqual(@as(u8, 15), dwolf.hurt_target_classes);
     // LootDropEntityClass "EntityLootContainerRegular" resolves one hop through
     // that class's LootList to the real loot.xml container.
     try std.testing.expectEqualStrings("zPackReg", boe.loot_list);
