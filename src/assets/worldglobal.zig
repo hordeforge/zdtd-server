@@ -91,13 +91,9 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !Table {
 pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !Table {
     const raw = try io_fs.readFileAll(allocator, path);
     defer allocator.free(raw);
-    var t = try loadFromSlice(allocator, raw);
-    // Arena holder for symmetry with the other loaders (no slices retained,
-    // but deinit must stay callable unconditionally).
-    const arena_holder = try allocator.create(std.heap.ArenaAllocator);
-    arena_holder.* = std.heap.ArenaAllocator.init(allocator);
-    t.arena_ptr = arena_holder;
-    return t;
+    // No arena: the table holds plain scalars (no retained slices), so
+    // deinit is a no-op and there is nothing to leak.
+    return loadFromSlice(allocator, raw);
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
