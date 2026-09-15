@@ -462,6 +462,11 @@ pub const Catalog = struct {
     starter_name: []const u8 = "clear_the_noise",
     max_tier: u8 = 0,
     quests_per_tier: u8 = 0,
+    /// `<quest_tier_reward tier="N">` quest ids, resolved to catalog def ids
+    /// in document order (stock `QuestEventManager.questTierRewards`, fired
+    /// by `HandleNewCompletedQuest` when a completion raises the faction
+    /// tier). Missing quests resolve to 0 and never fire (fail closed).
+    tier_rewards: []const u16 = &.{},
     source: CatalogSource = .builtin,
     arena_ptr: ?*std.heap.ArenaAllocator = null,
     source_path: []const u8 = "",
@@ -484,6 +489,10 @@ pub const Catalog = struct {
     }
 
     pub fn deinit(self: *Catalog) void {
+        if (self.source == .builtin) {
+            // Builtin defs are static: no arena to free, no fields to clear.
+            return;
+        }
         if (self.arena_ptr) |ap| {
             const child = ap.child_allocator;
             ap.deinit();

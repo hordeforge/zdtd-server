@@ -985,9 +985,55 @@ pub fn parseCatalog(allocator: std.mem.Allocator, xml_src: []const u8, policy: q
     const lists_slice = try arena.alloc(quest.QuestList, lists_tmp.items.len);
     @memcpy(lists_slice, lists_tmp.items);
 
+    // `<quest_tier_reward tier="N"><reward type="Quest" id="..."/></...>`:
+    // stock fires the row whose tier the completion newly reaches
+    // (`QuestEventManager.HandleNewCompletedQuest` walks `questTierRewards`
+    // and `QuestTierReward.GiveRewards` grants the quest). The row's quest id
+    // resolves to a catalog def id in document order so the runtime walk is a
+    // plain index lookup; an unresolvable id keeps 0 and never fires. The
+    // rewarded quest is itself parsed like any other: stock has no separate
+    // quest class, so no new loader shape is needed.
+    var tier_rewards_tmp: std.ArrayList(u16) = .empty;
+    defer tier_rewards_tmp.deinit(allocator);
+    {
+        var ti: usize = 0;
+        while (ti < clean.len) {
+            const ri = std.mem.findPos(u8, clean, ti, "<quest_tier_reward") orelse break;
+            const rgt = std.mem.findPos(u8, clean, ri, ">") orelse break;
+            const close = std.mem.findPos(u8, clean, rgt + 1, "</quest_tier_reward>") orelse {
+                ti = rgt + 1;
+                continue;
+            };
+            const rw = std.mem.findPos(u8, clean, rgt + 1, "<reward") orelse {
+                ti = close + "</quest_tier_reward>".len;
+                continue;
+            };
+            if (rw >= close) {
+                ti = close + "</quest_tier_reward>".len;
+                continue;
+            }
+            const rid = xml.attr(clean, rw, "id") orelse {
+                ti = close + "</quest_tier_reward>".len;
+                continue;
+            };
+            var def_id: u16 = 0;
+            for (defs_slice) |d| {
+                if (std.mem.eql(u8, d.name, rid)) {
+                    def_id = d.id;
+                    break;
+                }
+            }
+            try tier_rewards_tmp.append(allocator, def_id);
+            ti = close + "</quest_tier_reward>".len;
+        }
+    }
+    const tier_rewards_slice = try arena.alloc(u16, tier_rewards_tmp.items.len);
+    @memcpy(tier_rewards_slice, tier_rewards_tmp.items);
+
     return .{
         .defs = defs_slice,
         .lists = lists_slice,
+        .tier_rewards = tier_rewards_slice,
         .starter_id = starter_id,
         .starter_name = starter_name,
         .max_tier = max_tier,
@@ -1180,7 +1226,14 @@ test "rally point objective becomes a rally phase without stealing one" {
 }
 
 test "load stock quests.xml when present" {
-    const path = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
+    // Both installs carry the same quests.xml (verified byte-identical); the
+    // test pins the table the dedicated server actually serves, falling back
+    // to the client copy when only it is on disk.
+    const path = blk: {
+        const dedi = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server/Data/Config/quests.xml";
+        if (io_fs.fileExists(dedi)) break :blk dedi;
+        break :blk "/home/maci/.local/share/Steam/steamapps/common/7 Days To Die/Data/Config/quests.xml";
+    };
     if (!io_fs.fileExists(path)) return;
     var cat = try loadFromPath(std.testing.allocator, path, .{});
     defer cat.deinit();
@@ -1189,6 +1242,10 @@ test "load stock quests.xml when present" {
     try std.testing.expect(cat.byName("quest_whiteRiverCitizen1") != null);
     try std.testing.expect(cat.byName("tier1_clear") != null);
     try std.testing.expect(cat.lists.len >= 1);
+    // Six tier rows in document order (tiers 2..7); walk indexes tier-2.
+    try std.testing.expectEqual(@as(usize, 6), cat.tier_rewards.len);
+    try std.testing.expectEqual(cat.byName("quest_tier1complete").?.id, cat.tier_rewards[0]);
+    try std.testing.expectEqual(cat.byName("quest_tier6complete").?.id, cat.tier_rewards[5]);
 }
 
 test "quest template inheritance fills derived quests" {
