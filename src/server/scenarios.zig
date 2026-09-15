@@ -10831,6 +10831,10 @@ test "scenario trader stock persists across restart (traders.zst)" {
             .price = 222,
             .sell = 11,
             .markup = 0,
+            // Rolled ItemValue stats ride the entry (ZTR1 v2); a restart
+            // must keep them, not strip them.
+            .stats = [_]quest_mod_components.ItemStat{ .{ .effect = 41, .slot_a = 12, .slot_b = 0 }, .{ .effect = 79, .slot_a = 3, .slot_b = 1 } } ++ [_]quest_mod_components.ItemStat{.{}} ** (quest_mod_components.max_item_stats - 2),
+            .stats_n = 2,
         };
         wood_name = wood.name;
         g.sim.trader_stock[t].n = 1;
@@ -10866,6 +10870,11 @@ test "scenario trader stock persists across restart (traders.zst)" {
         try std.testing.expectEqual(@as(i32, 4321), g.sim.trader_stock[t].wallet_default);
         try std.testing.expectEqual(@as(i32, 3), g.sim.trader_stock[t].reset_interval);
         try std.testing.expectEqual(@as(u32, 7), g.sim.trader_stock[t].last_restock_day);
+        try std.testing.expectEqual(@as(u8, 2), g.sim.trader_stock[t].entries[0].stats_n);
+        try std.testing.expectEqual(@as(u8, 41), g.sim.trader_stock[t].entries[0].stats[0].effect);
+        try std.testing.expectEqual(@as(i16, 12), g.sim.trader_stock[t].entries[0].stats[0].slot_a);
+        try std.testing.expectEqual(@as(u8, 79), g.sim.trader_stock[t].entries[0].stats[1].effect);
+        try std.testing.expectEqual(@as(i16, 1), g.sim.trader_stock[t].entries[0].stats[1].slot_b);
         std.debug.print("PASS trader-persist: stock/wallet/cadence restored across restart by trader name\n", .{});
     }
 }

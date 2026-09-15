@@ -2006,7 +2006,8 @@ pub fn loadClaims(self: *Game) !void {
 /// Format: magic | version u8 | count u16 | per trader: name_len u8 + name,
 /// reset_interval i32, last_restock_day u32, wallet i32, wallet_default i32,
 /// n u8, n x (item_name_len u8 + name, count u16, quality u8, price u16,
-/// sell u16, markup i8).
+/// sell u16, markup i8[, v2: stats_n u8 + stats_n x (effect u8, slot_a i16,
+/// slot_b i16)]). v1 files load with no stats.
 ///
 /// Walk a traders.zst blob and return the offset one past the last record,
 /// without touching sim state. `loadTraders` does the same walk inline and then
@@ -2018,7 +2019,8 @@ pub fn loadClaims(self: *Game) !void {
 /// blob that parses here parses identically in the loader.
 pub fn ztrScanLen(data: []const u8) error{ BadMagic, BadVersion, Truncated, BadRecord }!usize {
     if (data.len < 7 or !std.mem.eql(u8, data[0..4], "ZTR1")) return error.BadMagic;
-    if (data[4] != 1) return error.BadVersion;
+    if (data[4] != 1 and data[4] != 2) return error.BadVersion;
+    const v2 = data[4] == 2;
     const count = std.mem.readInt(u16, data[5..7], .little);
     var o: usize = 7;
     var i: usize = 0;
@@ -2041,6 +2043,14 @@ pub fn ztrScanLen(data: []const u8) error{ BadMagic, BadVersion, Truncated, BadR
             o += ilen;
             if (o + 8 > data.len) return error.Truncated;
             o += 8;
+            if (v2) {
+                if (o >= data.len) return error.Truncated;
+                const sn = data[o];
+                o += 1;
+                if (sn > ecs.components.max_item_stats) return error.BadRecord;
+                if (o + @as(usize, sn) * 5 > data.len) return error.Truncated;
+                o += @as(usize, sn) * 5;
+            }
         }
     }
     return o;
@@ -2072,7 +2082,7 @@ pub fn saveTraders(self: *Game) !void {
         }
     };
     try buf.appendSlice(self.allocator, "ZTR1");
-    try B.byte(self.allocator, &buf, 1); // version
+    try B.byte(self.allocator, &buf, 2); // version (v2: stat blob per entry)
     const count_pos = buf.items.len;
     try buf.appendNTimes(self.allocator, 0, 2);
     var count: u16 = 0;
@@ -2116,6 +2126,16 @@ pub fn saveTraders(self: *Game) !void {
             try B.u16v(self.allocator, &buf, st.entries[e].price);
             try B.u16v(self.allocator, &buf, st.entries[e].sell);
             try B.byte(self.allocator, &buf, @bitCast(st.entries[e].markup));
+            // v2 stat blob: the rolled ItemValue stats survive a restart.
+            const sn: u8 = @intCast(@min(st.entries[e].stats_n, ecs.components.max_item_stats));
+            try B.byte(self.allocator, &buf, sn);
+            var si: usize = 0;
+            while (si < sn) : (si += 1) {
+                const stt = st.entries[e].stats[si];
+                try B.byte(self.allocator, &buf, stt.effect);
+                try B.u16v(self.allocator, &buf, @bitCast(stt.slot_a));
+                try B.u16v(self.allocator, &buf, @bitCast(stt.slot_b));
+            }
         }
         count +|= 1;
     }
@@ -2139,7 +2159,8 @@ pub fn loadTraders(self: *Game) !void {
     };
     defer self.allocator.free(data);
     if (data.len < 7 or !std.mem.eql(u8, data[0..4], "ZTR1")) return error.BadMagic;
-    if (data[4] != 1) return error.BadVersion;
+    if (data[4] != 1 and data[4] != 2) return error.BadVersion;
+    const v2 = data[4] == 2;
     const count = std.mem.readInt(u16, data[5..7], .little);
     var o: usize = 7;
     var i: usize = 0;
@@ -2197,6 +2218,26 @@ pub fn loadTraders(self: *Game) !void {
             const sell = std.mem.readInt(u16, data[o + 5 ..][0..2], .little);
             const markup = @as(i8, @bitCast(data[o + 7]));
             o += 8;
+            // v2 stat blob; v1 records end here and restore as no stats.
+            var stats: [ecs.components.max_item_stats]ecs.components.ItemStat = .{ecs.components.ItemStat{}} ** ecs.components.max_item_stats;
+            var stats_n: u8 = 0;
+            if (v2) {
+                if (o >= data.len) return error.Truncated;
+                const sn = data[o];
+                o += 1;
+                if (sn > ecs.components.max_item_stats) return error.BadRecord;
+                if (o + @as(usize, sn) * 5 > data.len) return error.Truncated;
+                var si: usize = 0;
+                while (si < sn) : (si += 1) {
+                    stats[si] = .{
+                        .effect = data[o],
+                        .slot_a = @bitCast(std.mem.readInt(u16, data[o + 1 ..][0..2], .little)),
+                        .slot_b = @bitCast(std.mem.readInt(u16, data[o + 3 ..][0..2], .little)),
+                    };
+                    o += 5;
+                }
+                stats_n = sn;
+            }
             const t = ts orelse continue; // no live trader: entry consumed, dropped
             const iid = self.items.ecsIdByName(iname);
             if (iid == 0) continue; // unknown item (version drift) -> skipped
@@ -2210,6 +2251,8 @@ pub fn loadTraders(self: *Game) !void {
                 .price = price,
                 .sell = sell,
                 .markup = markup,
+                .stats = stats,
+                .stats_n = stats_n,
             };
             restored += 1;
         }
