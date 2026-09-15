@@ -103,6 +103,40 @@ fn parseI32Attr(open_tag: []const u8, key: []const u8, default: i32) i32 {
     return std.fmt.parseInt(i32, v, 10) catch default;
 }
 
+/// Parse a stock `modified="yyyy-MM-dd HH:mm:ssZ"` timestamp into .NET
+/// DateTime ticks (100 ns since 0001-01-01). Returns 0 when the shape is
+/// wrong rather than guessing: the writer sends the raw ticks and a wrong
+/// date is worse than the 0 the wire already sends today.
+fn parseModifiedTicks(s: []const u8) i64 {
+    // "2026-02-27 13:43:31Z" (19 chars + Z).
+    if (s.len != 20 or s[19] != 'Z') return 0;
+    const digits = [_]usize{ 0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18 };
+    for (digits) |i| {
+        if (s[i] < '0' or s[i] > '9') return 0;
+    }
+    if (s[4] != '-' or s[7] != '-' or s[10] != ' ' or s[13] != ':' or s[16] != ':') return 0;
+    const y: i64 = std.fmt.parseInt(i64, s[0..4], 10) catch return 0;
+    const mo: i64 = std.fmt.parseInt(i64, s[5..7], 10) catch return 0;
+    const d: i64 = std.fmt.parseInt(i64, s[8..10], 10) catch return 0;
+    const h: i64 = std.fmt.parseInt(i64, s[11..13], 10) catch return 0;
+    const mi: i64 = std.fmt.parseInt(i64, s[14..16], 10) catch return 0;
+    const sec: i64 = std.fmt.parseInt(i64, s[17..19], 10) catch return 0;
+    if (mo < 1 or mo > 12 or d < 1 or d > 31 or h > 23 or mi > 59 or sec > 60) return 0;
+    // Days from civil date (Howard Hinnant's algorithm) → .NET ticks.
+    var yy = y;
+    if (mo <= 2) yy -= 1;
+    const era: i64 = @divFloor(if (yy >= 0) yy else yy - 399, 400);
+    const yoe: i64 = yy - era * 400;
+    const mp: i64 = @mod(mo - 3, 12);
+    const doy: i64 = @divFloor(153 * mp + 2, 5) + d - 1;
+    const doe: i64 = yoe * 365 + @divFloor(yoe, 4) - @divFloor(yoe, 100) + doy;
+    const days: i64 = era * 146097 + doe - 719468;
+    // .NET epoch 0001-01-01 is 719162 days before Unix 1970-01-01.
+    const unix_days = days;
+    const ticks: i64 = (unix_days + 719162) * 86400 * 10000000 + (h * 3600 + mi * 60 + sec) * 10000000;
+    return ticks;
+}
+
 /// Load all `*_signs.xml` under prefabs_root (e.g. Data/Prefabs) plus, when
 /// `default_signs_path` is set, the stock `Data/Config/signs.xml` default
 /// `[D]` library (which carries the mandatory zero-guid Default Sign the
@@ -215,6 +249,10 @@ fn parseSignsFile(
             .library = lib_owned,
             .name = try arena.dupe(u8, name_s),
             .guid = guid,
+            // Stock `SignData.lastModified` (written with format "u" =
+            // "yyyy-MM-dd HH:mm:ssZ"); absent/unparseable stays 0, which the
+            // wire already sends today.
+            .modified_ticks = if (attrValue(tag, "modified")) |m| parseModifiedTicks(m) else 0,
             .next_poly = parseI32Attr(tag, "next_poly_id", 0),
             .next_text = parseI32Attr(tag, "next_text_id", 0),
             .next_noise = parseI32Attr(tag, "next_noise_id", 0),
@@ -263,8 +301,25 @@ test "default [D] sign library loads from Data/Config/signs.xml" {
     for (cat.entries) |e| {
         if (std.mem.eql(u8, e.library, "[D]") and std.mem.eql(u8, e.name, "Default Sign")) {
             found_default_sign = true;
+            // The stock `modified` timestamp parses to nonzero .NET ticks
+            // (previously sent as 0 for all 1680 rows).
+            try std.testing.expect(e.modified_ticks > 0);
         }
     }
     // Stock ships the mandatory zero-guid Default Sign in the [D] library.
     try std.testing.expect(found_default_sign);
+}
+
+test "sign modified timestamps parse to .NET ticks" {
+    // 2026-02-27 13:43:31Z (the stock Default Sign stamp).
+    const t = parseModifiedTicks("2026-02-27 13:43:31Z");
+    try std.testing.expect(t > 0);
+    // Round-trip check: ticks / 10_000_000 - 62135596800 = unix seconds for
+    // 2026-02-27 13:43:31Z = 1772199811.
+    try std.testing.expectEqual(@as(i64, 1772199811), @divFloor(t, 10000000) - 62135596800);
+    // Malformed stamps fail closed to 0, never a guessed date.
+    try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks(""));
+    try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks("2026-02-27"));
+    try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks("2026-13-27 13:43:31Z"));
+    try std.testing.expectEqual(@as(i64, 0), parseModifiedTicks("not a date"));
 }
