@@ -1481,8 +1481,13 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !ItemTable {
                 firstCvarAdd(body, "medicalRegHealthAmount") orelse 0;
             const water_amt: f32 = firstCvarAdd(body, "$waterAmountAdd") orelse 0;
             if (!is_eat and (food_amt > 0 or water_amt > 0)) is_eat = true;
-            if (!is_eat and (std.mem.startsWith(u8, name, "food") or std.mem.startsWith(u8, name, "drink")))
-                is_eat = true;
+            // No name heuristic here: stock's eatability is the presence of an
+            // `ItemActionEat` (ItemClass.Action0/1), and a `food*`/`drink*`
+            // prefix marked four real stock rows eatable - the
+            // `foodCanShamSchematic` unlock, the `foodRawMeatBundle` open-bundle
+            // action and the empty jars (`drinkJarEmpty` collects water,
+            // `drinkJarGrey` has no action) - so moving one on the C2S
+            // inventory path read as a meal and restored hunger/water.
             var prog_name: []const u8 = "";
             var prog_add: u8 = 0;
             if (firstProgressionAdd(body)) |pg| {

@@ -1347,7 +1347,10 @@ pub fn loadFromSlice(allocator: std.mem.Allocator, raw: []const u8) !LootTable {
         if (xml.attr(clean, tag, "ignore_loot_abundance")) |ila| {
             c.ignore_abundance = std.mem.eql(u8, ila, "true");
         }
-        if (xml.attr(clean, tag, "unique_item")) |ui| {
+        // Stock's loader reads the PLURAL (`LootFromXml` IL_01B8/IL_01CB parse
+        // "unique_items" into `LootContainer::UniqueItems`); the singular is
+        // what the one stock row happens to carry, so honour both.
+        if (xml.attr(clean, tag, "unique_items") orelse xml.attr(clean, tag, "unique_item")) |ui| {
             c.unique_item = std.mem.eql(u8, ui, "true");
         }
         if (xml.attr(clean, tag, "unmodified_lootstage")) |ul| {

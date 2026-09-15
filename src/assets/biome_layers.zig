@@ -53,14 +53,17 @@ pub const Stack = struct {
 /// one `DecoManager::decorateChunkRandom` samples (asm.il 1266097-1266179). It is
 /// what keeps grass (prob .85 / .99) out of the deco burst.
 ///
-/// Capacity 12 is a zdtd storage bound, not a stock rule: stock's list is
-/// unbounded. Measured against V3.2.0 `Data/Config` (2026-09-04): only **two**
-/// blocks in the whole catalog carry `IsDistantDecoration=true`, and the
-/// richest biome keeps 2 of its 122 `<decoration type="block">` rows after the
-/// filter, so 12 leaves six times the headroom stock data needs. The fill loops
-/// break at the cap rather than overflowing, so a modlet adding more distant
-/// deco loses the tail silently: raise this if that ever happens.
-pub const max_deco_per_biome: usize = 12;
+/// Capacity 16 is a zdtd storage bound, not a stock rule: stock's list is
+/// unbounded. Corrected 2026-09-14: the earlier "12 leaves six times the
+/// headroom" measurement counted the two blocks that *declare*
+/// `IsDistantDecoration`, not the ~50 that inherit it through Extends. The
+/// richest group in stock is pine_forest's "Dense large trees" subbiome
+/// (biomes.xml:368), whose 14 surviving `<decoration type="block">` rows
+/// include `treeDeadTree01` and `treeMountainPine12m`; the cap was silently
+/// dropping those two. The fill loops break at the cap rather than
+/// overflowing, so a modlet adding more distant deco still loses the tail
+/// silently: raise this if that ever happens.
+pub const max_deco_per_biome: usize = 16;
 
 pub const DecoBlock = struct {
     block_id: u16,
@@ -500,15 +503,7 @@ pub fn parseWeatherGroups(body: []const u8) WeatherGroupSet {
 
 fn parseStackBody(body: []const u8, id_by_name: *const fn (?*anyopaque, []const u8) ?u16, ctx: ?*anyopaque) Stack {
     var st: Stack = .{};
-    // Prefer first <layers>…</layers> in the biome (often inside the first subbiome).
-    const layers_body: []const u8 = blk: {
-        if (std.mem.find(u8, body, "<layers")) |ls| {
-            const gt = std.mem.findPos(u8, body, ls, ">") orelse break :blk body;
-            const close = std.mem.findPos(u8, body, gt, "</layers>") orelse break :blk body;
-            break :blk body[gt + 1 .. close];
-        }
-        break :blk body;
-    };
+    const layers_body: []const u8 = layersBody(body) orelse body;
     var i: usize = 0;
     while (i < layers_body.len and st.n < max_layers) {
         const li = std.mem.findPos(u8, layers_body, i, "<layer") orelse break;
@@ -534,6 +529,38 @@ fn parseStackBody(body: []const u8, id_by_name: *const fn (?*anyopaque, []const 
         i = li + 6;
     }
     return st;
+}
+
+/// Body of the biome's own `<layers>` group, i.e. the one that is not inside a
+/// `<subbiome>`. Stock writes every `<subbiome>` before the biome's own
+/// `<layers>`, so taking the first `<layers>` in the body read SUB0's stack:
+/// burnt_forest gained an extra `Depth 1 terrStone` layer from subbiome 0
+/// (biomes.xml:600-624) instead of its own four (biomes.xml:774-779), and
+/// wasteland's top layer became SUB0's `terrDestroyedGrass` instead of its own
+/// `terrDestroyedStone`. Every generated column in those biomes was wrong.
+/// Null when the biome declares no own layers (underwater has none), which
+/// leaves the caller on the previous "no stack" path.
+fn layersBody(body: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (std.mem.findPos(u8, body, i, "<layers")) |li| {
+        const gt = std.mem.findPos(u8, body, li, ">") orelse return null;
+        const close = std.mem.findPos(u8, body, gt, "</layers>") orelse return null;
+        if (!insideSubbiome(body, li)) return body[gt + 1 .. close];
+        i = close + "</layers>".len;
+    }
+    return null;
+}
+
+/// True when `at` sits inside an open `<subbiome>` element of `body`.
+fn insideSubbiome(body: []const u8, at: usize) bool {
+    var si: usize = 0;
+    while (std.mem.findPos(u8, body, si, "<subbiome")) |sb| {
+        if (sb > at) return false;
+        const se = std.mem.findPos(u8, body, sb, "</subbiome>") orelse body.len;
+        if (at < se) return true;
+        si = sb + "<subbiome".len;
+    }
+    return false;
 }
 
 /// Body of the biome's own `<decorations>` group, i.e. the one that is not
@@ -1077,6 +1104,42 @@ test "decorations parse without a distant-deco filter yields nothing" {
     var t = try loadFromPath(std.testing.allocator, path, testDecoId, null, null);
     defer t.deinit();
     try std.testing.expect(!t.hasDecos());
+}
+
+test "a biome's own layers win over the first subbiome's" {
+    // Stock writes every <subbiome> before the biome's own <layers>, so taking
+    // the first <layers> in the body read SUB0's stack: burnt_forest gained an
+    // extra Depth 1 terrStone layer (biomes.xml:600-624) instead of its own
+    // four (biomes.xml:774-779), and wasteland's top layer became SUB0's
+    // terrDestroyedGrass. Select the group that is not inside a <subbiome>.
+    const body =
+        \\<biome name="wasteland">
+        \\  <subbiome noise=".01, 0, .2">
+        \\    <layers>
+        \\      <layer depth="1" blockname="subStone"/>
+        \\    </layers>
+        \\  </subbiome>
+        \\  <layers>
+        \\    <layer depth="1" blockname="terrDestroyedStone,terrDestroyedGrass"/>
+        \\    <layer depth="2" blockname="terrDirt"/>
+        \\  </layers>
+        \\</biome>
+    ;
+    const own = layersBody(body).?;
+    try std.testing.expect(std.mem.find(u8, own, "terrDestroyedStone") != null);
+    try std.testing.expect(std.mem.find(u8, own, "subStone") == null);
+    // A biome with no own <layers> (underwater) reports none, leaving the
+    // caller on the "no stack" path instead of borrowing a subbiome's.
+    const sub_only =
+        \\<biome name="underwater">
+        \\  <subbiome noise=".01, 0, .2">
+        \\    <layers><layer depth="1" blockname="waterStone"/></layers>
+        \\  </subbiome>
+        \\</biome>
+    ;
+    try std.testing.expect(layersBody(sub_only) == null);
+    try std.testing.expect(insideSubbiome(body, std.mem.find(u8, body, "subStone").?));
+    try std.testing.expect(!insideSubbiome(body, std.mem.find(u8, body, "terrDestroyedStone").?));
 }
 
 test "load stock biomes.xml when present" {
