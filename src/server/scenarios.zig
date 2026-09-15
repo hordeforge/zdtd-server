@@ -18556,3 +18556,40 @@ fn hasBuffNamed(g: *game_mod.Game, vs: ecs.Slot, name: []const u8) bool {
     }
     return false;
 }
+
+test "scenario preacher armor resists zombie hits more" {
+    // armorPreacherOutfit: PhysicalDamageResist .02..15 by tier, gated on
+    // other=zombie. A zombie melee hit through the accumulator takes the
+    // foreign row; the same hit with no attacker kind takes today's armor.
+    const game_dir = "/home/maci/.local/share/Steam/steamapps/common/7 Days to Die Dedicated Server";
+    if (!io_fs.dirExists(game_dir ++ "/Data/Config")) return error.SkipZigTest;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir = dir_buf[0..try tmp.dir.realPath(std.testing.io, &dir_buf)];
+    var gpa_impl = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_impl.deinit();
+    const gpa = gpa_impl.allocator();
+    const g = try game_mod.Game.createWithOptions(gpa, dir, 0, .{ .game_dir = game_dir });
+    defer {
+        g.deinit();
+        gpa.destroy(g);
+    }
+    var cap: ln_peer.Capture = .{};
+    const c = try g.attachJoinedClient(&cap);
+    const vs = g.sim.playerByPeer(c.slot).?;
+    // Wear the Preacher outfit at quality 6 (top tier = .15).
+    const pid = g.items.byName("armorPreacherOutfit") orelse return error.TestUnexpectedResult;
+    g.sim.inventory[vs].slots[quest_mod_components.inv_equip_start] = .{ .item_id = pid.id, .count = 1, .quality = 6 };
+    const zdef = g.entities.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
+    const zid = g.sim.spawnZombie(258, 70, 258, 200).?;
+    const zs = g.sim.slotOfNetId(zid).?;
+    g.sim.class_id[zs].hash = zdef.hash;
+    // Attacker-aware armor: a zombie attacker joins the foreign row, no
+    // attacker (unset) takes today's armor only.
+    const inv = @import("../ecs/inventory.zig");
+    const mz = inv.armorMitigationVs(&g.sim, c.slot, zs);
+    const m0 = inv.armorMitigationVs(&g.sim, c.slot, null);
+    try std.testing.expect(mz > m0 + 0.14);
+    std.debug.print("PASS preacher: zombie-mit {d:.3} vs unset {d:.3}\n", .{ mz, m0 });
+}

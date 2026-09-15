@@ -343,6 +343,21 @@ pub fn armorMitigationVs(w: *const World, victim_peer: usize, attacker_slot: ?Sl
             const pen = w.item_penetration_fn.?(w.item_penetration_ctx, held.item_id, attacker_peer);
             if (pen < 0) mit *= 1.0 + pen;
         }
+        // Foreign-gated armor rows (Preacher vs zombies): the piece's
+        // `target="other"` PDR joins the rating when the attacker matches.
+        // The hook returns the raw XML fraction (perc_add keeps fractions),
+        // unlike armorPdr's percent scale, so no /100 here.
+        // The Game hook resolves the attacker's tags from its slot.
+        if (w.armor_pdr_foreign_fn) |ff| {
+            const ps = w.playerByPeer(victim_peer) orelse return @max(0, mit);
+            var i: usize = c.inv_equip_start;
+            while (i < c.max_inv_slots) : (i += 1) {
+                const slot = w.inventory[ps].slots[i];
+                if (slot.count > 0 and itemIsArmor(w, slot.item_id)) {
+                    mit += ff(w.armor_pdr_foreign_ctx, slot.item_id, slot.quality, as);
+                }
+            }
+        }
     }
     return @max(0, mit);
 }

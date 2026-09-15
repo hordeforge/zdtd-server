@@ -17,6 +17,7 @@ const assets_items = @import("../../assets/items.zig");
 const assets_recipes = @import("../../assets/recipes.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_requirements = @import("../../assets/requirements.zig");
+const requirements = assets_requirements;
 const assets_sandbox = @import("../../assets/sandbox.zig");
 const invsys = @import("../../ecs/inventory.zig");
 const systems = @import("../../ecs/systems.zig");
@@ -41,6 +42,45 @@ pub fn armorPdr(ctx: ?*anyopaque, item_id: u16, quality: u8) f32 {
         }
     }
     return 0;
+}
+
+/// Foreign-gated armor PDR (ctx, item_id, quality, attacker_slot): the
+/// piece's `target="other"` PhysicalDamageResist rows (Preacher vs zombies),
+/// folded at the slot's quality with the attacker's tags as `other`. Only
+/// rows carrying a foreign gate fold here; the untagged base rows already
+/// join the rating through `armorPdr`.
+pub fn armorPdrForeign(ctx: ?*anyopaque, item_id: u16, quality: u8, attacker: u16) f32 {
+    const g: *Game = @ptrCast(@alignCast(ctx.?));
+    const as: ecs.Slot = attacker;
+    if (as >= ecs.world.max_entities or !g.sim.alive[as]) return 0;
+    const def = g.items.byId(item_id) orelse return 0;
+    if (def.passives.len == 0) return 0;
+    const hash = if (g.sim.class_id[as].hash != 0) g.sim.class_id[as].hash else return 0;
+    const adef = g.entities.byHash(hash) orelse return 0;
+    const qmax = g.items.max_quality_tier;
+    const q: u8 = @max(1, @min(quality, qmax));
+    var counts: assets_requirements.Counts = .{};
+    const ctxr = assets_requirements.Ctx{
+        .other_tags = adef.tags,
+        .entity_tags = "",
+    };
+    // Foreign rows only: fold each gated row alone so the untagged base rows
+    // (already counted via armorPdr) do not double up.
+    var total: f32 = 0;
+    for (def.passives) |p| {
+        var foreign = false;
+        for (p.reqs) |r| {
+            if (r.target != .self) {
+                foreign = true;
+                break;
+            }
+        }
+        if (!foreign) continue;
+        total += assets_buffs.trackedDeltasAt(&.{p}, .{ .quality = .{ .level = q, .max = qmax } }, ctxr, &counts).phys_resist;
+    }
+    g.harness.counters.add(.requirement_gates, counts.resolved);
+    g.harness.counters.add(.requirement_unsupported, counts.unsupported);
+    return total;
 }
 
 /// ECS degradation hook: the held item's DegradationPerUse (per-use

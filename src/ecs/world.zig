@@ -517,6 +517,12 @@ pub const World = struct {
     /// 41 on the wearer). 0 = the item carries no row / not an armor item.
     armor_pdr_ctx: ?*anyopaque = null,
     armor_pdr_fn: ?*const fn (?*anyopaque, u16, u8) f32 = null,
+    /// Foreign-gated armor PDR (ctx, item_id, quality, attacker_slot): the
+    /// piece's `target="other"` PhysicalDamageResist rows (Preacher vs
+    /// zombies), evaluated where the attacker is known. Unset = no foreign
+    /// rows.
+    armor_pdr_foreign_ctx: ?*anyopaque = null,
+    armor_pdr_foreign_fn: ?*const fn (?*anyopaque, u16, u8, u16) f32 = null,
     /// Held-item DegradationPerUse (per-use durability wear) and TargetArmor
     /// (armor penetration fraction) lookups (Game wires from the items table;
     /// 0 = the item carries no row -> caller defaults).
