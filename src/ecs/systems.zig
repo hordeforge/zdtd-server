@@ -236,6 +236,14 @@ fn smellRadiusFor(w: *const World, slot: Slot) f32 {
 }
 
 fn nearestPlayerSnap(w: *const World, snaps: []const PlayerSnap, zslot: Slot, zx: f32, zy: f32, zz: f32, zyaw: f32) TargetSnap {
+    // `BlockIf condition=alert e 0` (the hostile-animal template): while the
+    // entity is unalerted the executing BlockIf holds MutexBits=1 over
+    // SetNearestEntityAsTarget, so no fresh sense acquisition. Revenge and
+    // the latched aggro below still run (SetAsTargetIfHurt is priority 1 and
+    // hurt sets alert, which drops this gate). Bit 1 = alert arm parsed.
+    if (w.class_id[zslot].block_if_alert_only & 2 != 0 and !w.zombie_ai[zslot].alert) {
+        return .{ .id = -1, .slot = 0, .d2 = w.rules.ai.sense_dist_sq, .px = zx, .pz = zz };
+    }
     var best_id: i32 = -1;
     var best_slot: Slot = 0;
     var best_d: f32 = w.rules.ai.sense_dist_sq;
@@ -4300,6 +4308,40 @@ test "timid animal near a player never attacks; a predator does" {
     try std.testing.expect(w.zombie_ai[ss].active_task != c.TaskId.approach_attack);
     // The predator, same distance, picks approach_attack and moves in.
     try std.testing.expectEqual(c.TaskId.approach_attack, w.zombie_ai[ws].active_task);
+}
+
+test "BlockIf animal does not sense while unalerted; hurt removes the block" {
+    // Stock animalTemplateHostile AITarget-2 `BlockIf condition=alert e 0`:
+    // while unalerted the executing BlockIf holds MutexBits=1 over
+    // SetNearestEntityAsTarget, so a wolf next to a player keeps wandering.
+    // Hurting it sets alert via the revenge path, which drops the gate and
+    // the next sense acquires the attacker.
+    var w: World = .{};
+    defer w.deinit();
+    const a = w.spawnAnimal(0, 70, 0, 100, 0, "").?;
+    const as = w.slotOfNetId(a).?;
+    w.class_id[as].is_enemy = true;
+    w.class_id[as].ai_attack = true;
+    w.class_id[as].block_if_alert_only = 3;
+    w.class_id[as].sight_light_min = -2.0;
+    w.class_id[as].sight_light_max = 150.0;
+    w.ambient_light = 0.5;
+    const p = w.spawnPlayer(0, 70, 8, 0).?;
+    var t: f32 = 0;
+    while (t < 1.0) : (t += 0.05) _ = systemZombieAi(&w, 0.05);
+    try std.testing.expect(!w.zombie_ai[as].alert);
+    try std.testing.expect(w.zombie_ai[as].active_task != c.TaskId.approach_attack);
+    // Hurt it: revenge sets alert, the block drops, sense acquires. The
+    // wander task from the blocked phase holds a decision cooldown, so run
+    // past its expiry (the stop pass drops wander to .none on the first
+    // post-hurt tick, then the re-eval picks the chase).
+    _ = w.damageFrom(a, 5, p);
+    t = 0;
+    while (t < 2.0 and w.zombie_ai[as].active_task != c.TaskId.approach_attack) : (t += 0.05) {
+        _ = systemZombieAi(&w, 0.05);
+    }
+    try std.testing.expect(w.zombie_ai[as].alert);
+    try std.testing.expectEqual(p, w.zombie_ai[as].target_id);
 }
 
 test "class without Territorial in its AITask list does not leash home" {

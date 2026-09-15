@@ -103,6 +103,17 @@ pub const EntityDef = struct {
     /// always-retarget path); nonzero with bit 0 set gates revenge on the
     /// named classes.
     hurt_target_classes: u8 = 0,
+    /// `BlockIf` target-list condition (`EAIBlockIf` SetData IL: `data=`
+    /// "condition=<type> <op> <value>" triples stepped by 3, `eType` =
+    /// None/Alert/Investigate, `eOp` = None/e/ne). Only the alert arm has a
+    /// sim state (`ai.alert`); an investigate arm has no model (zdtd
+    /// investigate spots are one-shot paths, not latched positions), so a
+    /// class whose BlockIf names only investigate reads as unset (0). Bit 0 =
+    /// a BlockIf entry exists, bit 1 = its conditions gate sense acquisition
+    /// while the entity is unalerted (the stock row is `alert e 0` on the
+    /// hostile-animal template: the executing BlockIf holds MutexBits=1 over
+    /// SetNearestEntityAsTarget). 0 = no BlockIf entry.
+    block_if_alert_only: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock zombieTemplateMale
     /// "-2,150": "how well lit you have to be for the zombie to see you at
     /// min,max range"; the EntityClass cctor default is 30/100). The pair
@@ -536,6 +547,96 @@ fn parseHurtTargetClasses(entry: []const u8) ?u8 {
     return bits;
 }
 
+/// Parse one `BlockIf` entry's `data=` condition list into the alert-gate
+/// bits (bit 0 = a BlockIf entry exists, bit 1 = an alert arm that gates
+/// sense acquisition while unalerted). Grammar (`EAIBlockIf` SetData IL):
+/// "condition=<type> <op> <value>" triples stepped by 3, whitespace split;
+/// `eType` = None/Alert/Investigate, `eOp` = None/e/ne (eOp None warns
+/// stock-side and never matches). Only the alert arm maps to sim state
+/// (`ai.alert`); investigate has no latched model here (spots are one-shot
+/// paths), so an investigate-only entry returns bit 0 alone, which the sense
+/// gate reads as unset. Null unless the entry is BlockIf. A BlockIf without
+/// `data=` returns bit 0 alone (stock parses zero conditions, so
+/// CanExecute never fires and nothing is blocked).
+fn parseBlockIfAlert(entry: []const u8) ?u8 {
+    var name = entry;
+    var data: []const u8 = "";
+    if (std.mem.findScalar(u8, entry, ' ')) |sp| {
+        name = entry[0..sp];
+        data = std.mem.trim(u8, entry[sp + 1 ..], " \t");
+    }
+    if (!std.mem.eql(u8, name, "BlockIf")) return null;
+    const marker = "condition=";
+    const ci = std.mem.find(u8, data, marker) orelse return 1;
+    var bits: u8 = 1;
+    // Whitespace-split tokens after `condition=`; a trailing `data=` key on a
+    // numbered prop (e.g. AITarget-2's own key) never appears here because the
+    // entry is already cut at the pipe.
+    var toks: [16][]const u8 = undefined;
+    var n: usize = 0;
+    var it = std.mem.splitAny(u8, data[ci + marker.len ..], " \t");
+    while (it.next()) |p| {
+        const tok = std.mem.trim(u8, p, " \t");
+        if (tok.len == 0) continue;
+        if (n >= toks.len) break;
+        toks[n] = tok;
+        n += 1;
+    }
+    var i: usize = 0;
+    while (i + 2 < n + 1 and i < n) : (i += 3) {
+        // The stock row is `alert e 0`: unalerted evaluates true, so the
+        // executing BlockIf holds the target mutex over sense acquisition.
+        // Any alert arm (e or ne, any value) marks the class gated; the gate
+        // itself only models the stock row's unalerted shape.
+        if (std.mem.eql(u8, toks[i], "alert")) bits |= 2;
+    }
+    return bits;
+}
+
+/// Same Extends walk as resolvedTargetPlayerSense, but for the BlockIf
+/// alert gate: the first BlockIf entry walking from the child up wins (a
+/// child list without one falls through to the parent template, matching
+/// the pipe/numbered merge rule of the sense resolvers above).
+fn resolvedBlockIfAlert(
+    classes: *const std.StringHashMapUnmanaged(RawClass),
+    name: []const u8,
+) u8 {
+    var cur: ?[]const u8 = name;
+    var depth: u8 = 0;
+    while (cur) |cn| : (depth += 1) {
+        if (depth > 24) break;
+        const rc = classes.get(cn) orelse break;
+        var numbered: u8 = 0;
+        var saw_numbered = false;
+        var it = rc.props.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const val = e.value_ptr.*;
+            const is_pipe = std.mem.eql(u8, key, "AITarget");
+            const is_numbered = !is_pipe and std.mem.startsWith(u8, key, "AITarget-");
+            if (!is_pipe and !is_numbered) continue;
+            var rest = val;
+            while (rest.len > 0) {
+                const cut = std.mem.findScalar(u8, rest, '|') orelse rest.len;
+                const entry = std.mem.trim(u8, rest[0..cut], " \t\r\n");
+                if (parseBlockIfAlert(entry)) |b| {
+                    if (b != 0) {
+                        if (is_pipe) return b;
+                        numbered = b;
+                        saw_numbered = true;
+                    }
+                }
+                if (cut >= rest.len) break;
+                rest = rest[cut + 1 ..];
+            }
+            if (is_pipe) return numbered;
+        }
+        if (saw_numbered) return numbered;
+        cur = rc.extends;
+    }
+    return 0;
+}
+
 /// Same Extends walk as resolvedTargetPlayerSense, but for the hurt-task
 /// class filter: the first class-filtered entry walking from the child up
 /// wins; a bare entry (or none) returns 0.
@@ -774,7 +875,19 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
                 if (keep) {
                     // last wins
                     const kn = try arena.dupe(u8, pname);
-                    const vv = try arena.dupe(u8, pval);
+                    // Numbered AITarget-N props carry the task's SetData on a
+                    // separate `data=` attribute (stock
+                    // `<property name="AITarget-2" value="BlockIf"
+                    // data="condition=alert e 0"/>`); the pipe `AITarget` blob
+                    // inlines it instead. Append it so the entry resolvers see
+                    // the same "Name key=val" text either way. Other resolvers
+                    // match on the entry name, so the suffix is inert for them.
+                    const vv = if (!is_passive and
+                        (std.mem.eql(u8, pname, "AITarget") or std.mem.startsWith(u8, pname, "AITarget-")) and
+                        (xml.attr(body, ptag, "data") != null))
+                        try std.fmt.allocPrint(arena, "{s} {s}", .{ pval, xml.attr(body, ptag, "data").? })
+                    else
+                        try arena.dupe(u8, pval);
                     try props.put(allocator, kn, vv);
                 }
             }
@@ -836,6 +949,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
         const ai_attack = resolvedAiAttacks(&classes, name);
         const target_sense = resolvedTargetPlayerSense(&classes, name);
         const hurt_classes = resolvedHurtTargetClasses(&classes, name);
+        const block_if = resolvedBlockIfAlert(&classes, name);
         const kind = inferKind(name, tags, is_animal);
         const ust = resolveProp(&classes, name, "UserSpawnType", 0) orelse "None";
         const spawnable = !(std.mem.eql(u8, ust, "None") or std.mem.eql(u8, ust, "none"));
@@ -1080,6 +1194,7 @@ pub fn loadFromPath(allocator: std.mem.Allocator, path: []const u8) !EntityTable
             .target_player_hear = if (target_sense) |s| s.hear else 0,
             .target_player_see = if (target_sense) |s| s.see else 0,
             .hurt_target_classes = hurt_classes,
+            .block_if_alert_only = block_if,
             .chase_speed = chase,
             .chase_speed_day = chase_day,
             .wander_speed = wander,
@@ -1196,6 +1311,17 @@ test "load stock entityclasses when present" {
     try std.testing.expectEqual(@as(u8, 15), tm.hurt_target_classes);
     try std.testing.expectEqual(@as(u8, 15), boe.hurt_target_classes);
     try std.testing.expectEqual(@as(u8, 15), dwolf.hurt_target_classes);
+    // BlockIf alert gate (EAIBlockIf SetData IL): the hostile-animal template
+    // ships `condition=alert e 0` on AITarget-2 (bits 0+1); the zombie template
+    // has no BlockIf row, and the dire wolf inherits the hostile gate.
+    const hostile = t.byName("animalTemplateHostile") orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(@as(u8, 3), hostile.block_if_alert_only);
+    try std.testing.expectEqual(@as(u8, 0), tm.block_if_alert_only);
+    // The dire wolf ships its own pipe AITarget blob (hurt + blocking +
+    // corpse + sense, no BlockIf), which replaces the template list; the
+    // plain wolf keeps numbered props and inherits the hostile gate.
+    try std.testing.expectEqual(@as(u8, 0), dwolf.block_if_alert_only);
+    try std.testing.expectEqual(@as(u8, 3), (t.byName("animalWolf") orelse return error.TestExpectedEqual).block_if_alert_only);
     // LootDropEntityClass "EntityLootContainerRegular" resolves one hop through
     // that class's LootList to the real loot.xml container.
     try std.testing.expectEqualStrings("zPackReg", boe.loot_list);

@@ -205,6 +205,8 @@ pub const EntityClass = struct {
     /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
     /// always-retarget path.
     hurt_target_classes: u8 = 0,
+    /// `BlockIf` alert gate bits (see EntityDef.block_if_alert_only).
+    block_if_alert_only: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
     /// zombie template; cctor default 30/100). 0,0 = use the Rules floor.
     sight_light_min: f32 = 0,
@@ -1215,6 +1217,7 @@ pub const World = struct {
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].hurt_target_classes = def.hurt_target_classes;
+            self.class_id[s].block_if_alert_only = def.block_if_alert_only;
             self.class_id[s].target_player_see = def.target_player_see;
             self.class_id[s].target_player_hear = def.target_player_hear;
             self.class_id[s].sight_light_min = def.sight_light_min;
@@ -1313,6 +1316,7 @@ pub const World = struct {
             self.class_id[s].melee_range = def.melee_range;
             self.class_id[s].sight_range = def.sight_range;
             self.class_id[s].hurt_target_classes = def.hurt_target_classes;
+            self.class_id[s].block_if_alert_only = def.block_if_alert_only;
             self.class_id[s].target_player_see = def.target_player_see;
             self.class_id[s].target_player_hear = def.target_player_hear;
             self.class_id[s].sight_light_min = def.sight_light_min;

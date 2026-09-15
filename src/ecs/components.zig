@@ -133,6 +133,9 @@ pub const ClassId = struct {
     /// EntityDef.hurt_target_classes). 0 = no filtered entry, keep the legacy
     /// always-retarget path.
     hurt_target_classes: u8 = 0,
+    /// `BlockIf` alert gate bits (see EntityDef.block_if_alert_only). Bit 1
+    /// set = sense acquisition is blocked while the entity is unalerted.
+    block_if_alert_only: u8 = 0,
     /// entityclasses SightLightThreshold "min,max" (stock "-2,150" on the
     /// zombie template; cctor default 30/100). 0,0 = class_table[id] then the
     /// Rules floor (systems.sightLightThreshold).
