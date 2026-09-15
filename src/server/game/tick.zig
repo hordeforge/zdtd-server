@@ -487,6 +487,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
                 .sandbox_groups = sandbox_groups,
                 .armor_groups = armorGroups(self, ps, &armor_group_buf),
                 .cvars = &c.cvars,
+                // Per-event roll seed for `RandomRoll seed_type="Random"`
+                // (stock seeds a fresh GameRandom from MinEventParams.Seed):
+                // entity id mixed with the tick, deterministic per sim.
+                .roll_seed = @as(u32, @bitCast(c.entity_id)) *% 0x9E3779B9 +% @as(u32, @truncate(self.tick_n)),
                 // The armour rating the previous tick's coredamageresist fold
                 // produced (see requirements.Ctx.armor_rating).
                 .armor_rating = self.sim.buff_phys_resist[ps],

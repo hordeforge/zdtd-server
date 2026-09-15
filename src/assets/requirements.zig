@@ -21,6 +21,7 @@ const std = @import("std");
 const xml = @import("xml_util.zig");
 const sandbox = @import("sandbox.zig");
 const cvars = @import("cvars.zig");
+const rng_util = @import("../util/rng.zig");
 
 /// One `<requirement name="..."/>` gate. The name may carry a leading `!`,
 /// which is stock's negation spelling (RequirementBase::invert).
@@ -51,7 +52,18 @@ pub const Requirement = struct {
     /// nested groups, in document order (`RequirementGroup::groups`/`reqs`).
     /// Empty for a leaf requirement.
     children: []const Requirement = &.{},
+    /// `RandomRoll min_max="a,b"` range ends. Bare numbers parse as both ends
+    /// at the loot gate; here the attribute pair is stored verbatim.
+    min_max: [2]f32 = .{ 0, 100 },
+    /// `RandomRoll seed_type="Random|Player|Item"` (stock SeedType enum).
+    /// Only `Random` evaluates (seeded from the ctx roll seed); the others
+    /// refuse like any unmodelled input.
+    seed_type: SeedType = .random,
 };
+
+/// `RandomRoll/SeedType`: Item = per-item seed, Player = per-entity seed,
+/// Random = per-event seed (`MinEventParams.Seed`).
+pub const SeedType = enum(u8) { random, player, item };
 
 /// The vocabulary this evaluator resolves. Everything else maps to
 /// `.unsupported` and refuses the gate.
@@ -102,6 +114,10 @@ pub const Kind = enum(u8) {
     /// `WornItems` IL=54: how many equipment slots hold an item carrying any
     /// of the row's `tags`.
     worn_items,
+    /// `RandomRoll` IL=71: `FastLerp(min,max,RandomFloat)` compared against
+    /// the value (or the entity's cvar when `value="@name"`). Only the
+    /// `Random` seed evaluates, from the ctx roll seed; Player/Item refuse.
+    random_roll,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -236,6 +252,11 @@ pub const Ctx = struct {
     /// for `ArmorGroupLowestQuality` (IL=34). A group that is not worn is
     /// absent and reads as quality 0, exactly like the stock lookup.
     armor_groups: []const ArmorGroup = &.{},
+    /// Per-event roll seed for `RandomRoll seed_type="Random"` (stock seeds a
+    /// fresh GameRandom from `MinEventParams.Seed`). Null = the caller has no
+    /// event seed, which refuses the gate (a wall-clock seed would
+    /// desynchronize the sim and is never used).
+    roll_seed: ?u32 = null,
 };
 
 /// One worn armor group: how many items of it are worn and the lowest quality
@@ -289,6 +310,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "EntityHasMovementTag")) return .entity_has_movement_tag;
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
+    if (std.mem.eql(u8, name, "RandomRoll")) return .random_roll;
     return .unsupported;
 }
 
@@ -334,6 +356,11 @@ pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) std.me
     if (xml.attr(hay, tag_start, "target")) |t| r.target = parseTarget(t);
     if (xml.attr(hay, tag_start, "biome")) |b| r.num = std.fmt.parseInt(i32, b, 10) catch -1;
     if (xml.attr(hay, tag_start, "has_all_tags")) |v| r.has_all = std.mem.eql(u8, v, "true") or std.mem.eql(u8, v, "True");
+    if (xml.attr(hay, tag_start, "min_max")) |m| r.min_max = parseMinMax(m);
+    if (xml.attr(hay, tag_start, "seed_type")) |s| {
+        if (std.mem.eql(u8, s, "Player")) r.seed_type = .player;
+        if (std.mem.eql(u8, s, "Item")) r.seed_type = .item;
+    }
     r.arg = try arena.dupe(u8, xml.attr(hay, tag_start, "progression_name") orelse
         xml.attr(hay, tag_start, "cvar") orelse
         xml.attr(hay, tag_start, "option") orelse
@@ -657,6 +684,21 @@ fn evalWornItems(r: Requirement, ctx: Ctx) Verdict {
     return verdict(compare(count, r.op, operand(ctx, r)), r.negated);
 }
 
+/// `RandomRoll::IsValid` (IL=71): `FastLerp(min,max,RandomFloat)` compared
+/// against the value (or the entity's cvar when `value="@name"`). Only the
+/// `Random` seed evaluates, drawn from `ctx.roll_seed` (the per-event seed;
+/// stock seeds a fresh GameRandom from `MinEventParams.Seed`). Player/Item
+/// seeds refuse (no per-entity/per-item stream here), and a null roll seed
+/// refuses rather than rolling on wall-clock4287 noise.
+fn evalRandomRoll(r: Requirement, ctx: Ctx) Verdict {
+    if (r.seed_type != .random) return .unsupported;
+    const seed = ctx.roll_seed orelse return .unsupported;
+    var rng = rng_util.XorShift32.init(seed);
+    const f = @as(f32, @floatFromInt(rng.next() >> 8)) / 16777216.0;
+    const rolled = r.min_max[0] + (r.min_max[1] - r.min_max[0]) * f;
+    return verdict(compare(rolled, r.op, operand(ctx, r)), r.negated);
+}
+
 /// `CVarCompare::IsValid` IL=23: `compareValues(GetCustomVar(name), op, value)`
 /// negated by `invert`.
 fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
@@ -665,6 +707,18 @@ fn evalCvarCompare(r: Requirement, ctx: Ctx) Verdict {
 
 /// The right-hand operand of a comparison: the literal `value`, or the entity's
 /// custom variable when the row wrote `value="@name"` (255 stock rows do).
+/// `min_max="a,b"` pair; a bare number is both ends.
+fn parseMinMax(s: []const u8) [2]f32 {
+    const comma = std.mem.findScalar(u8, s, ',') orelse {
+        const v = std.fmt.parseFloat(f32, std.mem.trim(u8, s, " \t")) catch 0;
+        return .{ v, v };
+    };
+    return .{
+        std.fmt.parseFloat(f32, std.mem.trim(u8, s[0..comma], " \t")) catch 0,
+        std.fmt.parseFloat(f32, std.mem.trim(u8, s[comma + 1 ..], " \t")) catch 100,
+    };
+}
+
 fn operand(ctx: Ctx, r: Requirement) f32 {
     if (r.value_cvar.len > 0) return cvarValue(ctx, r.value_cvar);
     return r.value;
@@ -736,6 +790,7 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .entity_has_movement_tag => return evalEntityHasMovementTag(r, ctx),
         .cvar_compare => return evalCvarCompare(r, ctx),
         .worn_items => return evalWornItems(r, ctx),
+        .random_roll => return evalRandomRoll(r, ctx),
         .group_and => return evalList(r.children, false, ctx, counts),
         .group_or => return evalList(r.children, true, ctx, counts),
     }
@@ -1439,25 +1494,58 @@ test "InBiome needs a biome in the params for either polarity" {
 }
 
 test "an unsupported kind or foreign target fails the gate and is counted" {
-    const random = Requirement{ .kind = .unsupported, .name = "RandomRoll" };
+    const bogus = Requirement{ .kind = .unsupported, .name = "BogusGate" };
     var counts: Counts = .{};
-    try testing.expectEqual(Verdict.unsupported, evaluate(&.{random}, .{}, &counts));
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{bogus}, .{}, &counts));
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
     // A gate that passes does not mask a later unsupported one.
     const alive = Requirement{ .kind = .is_alive };
     counts = .{};
-    try testing.expectEqual(Verdict.unsupported, evaluate(&.{ alive, random }, .{}, &counts));
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{ alive, bogus }, .{}, &counts));
     try testing.expectEqual(@as(u32, 1), counts.resolved);
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
     // A failing gate short-circuits before the unsupported one.
     counts = .{};
-    try testing.expectEqual(Verdict.fail, evaluate(&.{ alive, random }, .{ .alive = false }, &counts));
+    try testing.expectEqual(Verdict.fail, evaluate(&.{ alive, bogus }, .{ .alive = false }, &counts));
     try testing.expectEqual(@as(u32, 1), counts.resolved);
     try testing.expectEqual(@as(u32, 0), counts.unsupported);
     // `target="other"` is not resolvable in a self-only context.
     const foreign = Requirement{ .kind = .is_alive, .target = .other };
     counts = .{};
     try testing.expectEqual(Verdict.unsupported, evaluate(&.{foreign}, .{}, &counts));
+}
+
+test "RandomRoll evaluates the Random seed against the value" {
+    // Stock `RandomRoll::IsValid` (IL=71): FastLerp(min,max,RandomFloat)
+    // compared with the requirement op; seed_type Random draws from the ctx
+    // roll seed, Player/Item and a missing seed refuse.
+    const roll = Requirement{ .kind = .random_roll, .op = .le, .value = 70, .min_max = .{ 0, 100 } };
+    var counts: Counts = .{};
+    // Deterministic: the same seed rolls the same verdict.
+    const v1 = evaluate(&.{roll}, .{ .roll_seed = 1234 }, &counts);
+    counts = .{};
+    const v2 = evaluate(&.{roll}, .{ .roll_seed = 1234 }, &counts);
+    try std.testing.expectEqual(v1, v2);
+    try std.testing.expectEqual(@as(u32, 1), counts.resolved);
+    // No seed refuses (a wall-clock seed would desync the sim).
+    counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{roll}, .{}, &counts));
+    // Player/Item seeds refuse (no per-entity/per-item stream here).
+    counts = .{};
+    const proll = Requirement{ .kind = .random_roll, .op = .le, .value = 70, .min_max = .{ 0, 100 }, .seed_type = .player };
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{proll}, .{ .roll_seed = 1234 }, &counts));
+    // The stock shape parses from XML: seed_type + min_max + value/cvar.
+    var arena_holder: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_holder.deinit();
+    const arena = arena_holder.allocator();
+    const src = "<effect_group><requirement name=\"RandomRoll\" seed_type=\"Random\" min_max=\"0,100\" operation=\"LTE\" value=\"70\"/></effect_group>";
+    const b = std.mem.find(u8, src, "<requirement name=\"RandomRoll\"").?;
+    const parsed = try parse(src, b, arena);
+    try std.testing.expectEqual(Kind.random_roll, parsed.kind);
+    try std.testing.expectEqual(SeedType.random, parsed.seed_type);
+    try std.testing.expectEqual(@as(f32, 0), parsed.min_max[0]);
+    try std.testing.expectEqual(@as(f32, 100), parsed.min_max[1]);
+    try std.testing.expectEqual(@as(f32, 70), parsed.value);
 }
 
 test "all() is the AND over an empty and a multi-gate list" {
