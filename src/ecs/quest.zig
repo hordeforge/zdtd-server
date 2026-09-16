@@ -171,6 +171,9 @@ pub const QuestPolicy = struct {
     /// GetRandomPOINearTrader distance bands (blocks; stock 500/1500 m).
     trader_band_1: f32 = 500,
     trader_band_2: f32 = 1500,
+    /// Item name whose `<reward type="Item" id=…>` rows credit the wallet
+    /// (traders.xml root `currency_item`; stock "casinoCoin"). Empty → stock name.
+    currency_item: []const u8 = "",
 };
 
 /// Objective `type=` -> phase-kind mapping, config rows first (zdtd.toml /

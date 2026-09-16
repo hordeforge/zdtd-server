@@ -507,6 +507,9 @@ pub const World = struct {
     /// configured": spawnPlayer then grants the built-in default kit below.
     starter_kit: [max_starter_kit]StarterKitEntry = [_]StarterKitEntry{.{}} ** max_starter_kit,
     starter_kit_n: u8 = 0,
+    /// traders.xml root `currency_item` (stock "casinoCoin"); default starter
+    /// kit coin row resolves this name. Empty → stock name.
+    currency_item: []const u8 = "",
     /// Optional item_id → held-item light (items.xml LightValue, 0 = none).
     /// Feeds the PlayerStealth selfLight blend (rule 15).
     held_light_ctx: ?*anyopaque = null,
@@ -1413,11 +1416,14 @@ pub const World = struct {
                 _ = self.depositItem(s, it.item_id, it.count);
             }
         } else {
+            // Coin name from traders.xml `currency_item` (wired by Game); stock
+            // fallback keeps offline builtin id 6 when the hook is unset.
+            const coin = if (self.currency_item.len > 0) self.currency_item else "casinoCoin";
             const starter = [_]struct { []const u8, u16, u16 }{
                 .{ "meleeToolRepairT0StoneAxe", 8, 1 },
                 .{ "foodCanBeef", 2, 5 },
                 .{ "resourceWood", 7, 20 },
-                .{ "casinoCoin", 6, 50 },
+                .{ coin, 6, 50 },
             };
             for (starter) |it| {
                 const id: u16 = if (self.item_id_fn) |f| f(self.item_id_ctx, it[0]) else it[1];

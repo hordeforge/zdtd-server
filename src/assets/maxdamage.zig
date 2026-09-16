@@ -53,8 +53,16 @@ pub const Table = struct {
     storage_names: std.StringHashMapUnmanaged(void) = .{},
     /// block name → blocks.xml LootList (the loot.xml container the block rolls).
     loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{},
+    /// block name → blocks.xml LootStageMod.
+    loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .{},
+    /// block name → blocks.xml LootStageBonus.
+    loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .{},
     /// AssignIds → LootList (filled from the dump/nim merge; arena values).
     loot_list_by_id: std.AutoHashMapUnmanaged(u16, []const u8) = .{},
+    /// AssignIds → blocks.xml LootStageMod (container GetLootStage multiplier).
+    loot_stage_mod_by_id: std.AutoHashMapUnmanaged(u16, f32) = .{},
+    /// AssignIds → blocks.xml LootStageBonus (container GetLootStage additive).
+    loot_stage_bonus_by_id: std.AutoHashMapUnmanaged(u16, f32) = .{},
     /// block name → AssignIds runtime id (every dump row, not just MaxDamage hits).
     id_by_name: std.StringHashMapUnmanaged(u16) = .{},
     /// Reverse of `id_by_name`, written by the same merge. Without it `idName`
@@ -169,6 +177,10 @@ pub const Table = struct {
             self.storage_names = .{};
             self.loot_list_by_name = .{};
             self.loot_list_by_id = .{};
+            self.loot_stage_mod_by_name = .{};
+            self.loot_stage_bonus_by_name = .{};
+            self.loot_stage_mod_by_id = .{};
+            self.loot_stage_bonus_by_id = .{};
             self.id_by_name = .{};
             self.name_by_id = .{};
             self.power_watts_by_name = .{};
@@ -238,6 +250,16 @@ pub const Table = struct {
     /// at O(loot lists) hash probes per miss on the chunk-fill path.
     pub fn lootListFor(self: *const Table, block_id: u16) ?[]const u8 {
         return self.loot_list_by_id.get(block_id);
+    }
+
+    /// blocks.xml LootStageMod for a block id (0 when absent).
+    pub fn lootStageModFor(self: *const Table, block_id: u16) f32 {
+        return self.loot_stage_mod_by_id.get(block_id) orelse 0;
+    }
+
+    /// blocks.xml LootStageBonus for a block id (0 when absent).
+    pub fn lootStageBonusFor(self: *const Table, block_id: u16) f32 {
+        return self.loot_stage_bonus_by_id.get(block_id) orelse 0;
     }
 
     /// Runtime AssignIds id for a stock block name (from dump / .nim), else null.
@@ -528,6 +550,12 @@ pub const Table = struct {
             if (self.loot_list_by_name.get(name)) |ll| {
                 try self.loot_list_by_id.put(arena, id, ll);
             }
+            if (self.loot_stage_mod_by_name.get(name)) |v| {
+                try self.loot_stage_mod_by_id.put(arena, id, v);
+            }
+            if (self.loot_stage_bonus_by_name.get(name)) |v| {
+                try self.loot_stage_bonus_by_id.put(arena, id, v);
+            }
         }
     }
 
@@ -724,6 +752,10 @@ const DecoFacts = struct {
     dim: ?Dim = null,
     /// Direct blocks.xml LootList (resolved through Extends in a second pass).
     loot_list: ?[]const u8 = null,
+    /// Direct blocks.xml LootStageMod (resolved through Extends).
+    loot_stage_mod: ?f32 = null,
+    /// Direct blocks.xml LootStageBonus (resolved through Extends).
+    loot_stage_bonus: ?f32 = null,
     /// UpgradeBlock.ToBlock (resolved through Extends; stock upgrade chains
     /// inherit through the parent).
     upgrade_to: ?[]const u8 = null,
@@ -840,6 +872,32 @@ fn resolveLootList(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []
     return null;
 }
 
+fn resolveLootStageMod(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?f32 {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse return null;
+        if (f.loot_stage_mod) |v| return v;
+        if (xml.tagListContains(f.extends_param1, "LootStageMod")) return null;
+        cur = f.extends orelse return null;
+    }
+    return null;
+}
+
+fn resolveLootStageBonus(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?f32 {
+    const max_hops: usize = 16;
+    var cur = name;
+    var hops: usize = 0;
+    while (hops < max_hops) : (hops += 1) {
+        const f = facts.get(cur) orelse return null;
+        if (f.loot_stage_bonus) |v| return v;
+        if (xml.tagListContains(f.extends_param1, "LootStageBonus")) return null;
+        cur = f.extends orelse return null;
+    }
+    return null;
+}
+
 /// Resolve `UpgradeBlock.ToBlock` by walking `Extends` (same inheritance rule
 /// as the other per-block facts).
 fn resolveUpgrade(facts: *const std.StringHashMapUnmanaged(DecoFacts), name: []const u8) ?[]const u8 {
@@ -915,6 +973,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
     var by_name: std.StringHashMapUnmanaged(u16) = .{};
     var storage_names: std.StringHashMapUnmanaged(void) = .{};
     var loot_list_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
+    var loot_stage_mod_by_name: std.StringHashMapUnmanaged(f32) = .{};
+    var loot_stage_bonus_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var power_watts_by_name: std.StringHashMapUnmanaged(f32) = .{};
     var turret_stats_by_name: std.StringHashMapUnmanaged(components.TurretBlockStats) = .{};
     var power_class_by_name: std.StringHashMapUnmanaged([]const u8) = .{};
@@ -971,6 +1031,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         }
         if (xml.propertyValue(body, "LootList")) |ll| {
             facts.loot_list = try arena.dupe(u8, ll);
+        }
+        if (xml.propertyValue(body, "LootStageMod")) |v| {
+            if (xml.parseF32(v)) |f| facts.loot_stage_mod = f;
+        }
+        if (xml.propertyValue(body, "LootStageBonus")) |v| {
+            if (xml.parseF32(v)) |f| facts.loot_stage_bonus = f;
         }
         const watts: ?f32 = if (xml.propertyValue(body, "MaxPower")) |mp|
             xml.parseF32(mp)
@@ -1148,6 +1214,12 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         if (resolveLootList(&own_facts, e.key_ptr.*)) |ll| {
             try loot_list_by_name.put(arena, e.key_ptr.*, ll);
         }
+        if (resolveLootStageMod(&own_facts, e.key_ptr.*)) |v| {
+            try loot_stage_mod_by_name.put(arena, e.key_ptr.*, v);
+        }
+        if (resolveLootStageBonus(&own_facts, e.key_ptr.*)) |v| {
+            try loot_stage_bonus_by_name.put(arena, e.key_ptr.*, v);
+        }
         if (resolveUpgrade(&own_facts, e.key_ptr.*)) |tb| {
             try upgrade_to_names.put(arena, e.key_ptr.*, tb);
         }
@@ -1166,6 +1238,8 @@ pub fn loadFromBlocksXml(allocator: std.mem.Allocator, path: []const u8) !Table 
         .storage_ids = .{},
         .storage_names = storage_names,
         .loot_list_by_name = loot_list_by_name,
+        .loot_stage_mod_by_name = loot_stage_mod_by_name,
+        .loot_stage_bonus_by_name = loot_stage_bonus_by_name,
         .power_watts_by_name = power_watts_by_name,
         .turret_stats_by_name = turret_stats_by_name,
         .power_class_by_name = power_class_by_name,

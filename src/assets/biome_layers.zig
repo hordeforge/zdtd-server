@@ -22,6 +22,9 @@ pub const BiomeMods = struct {
     game_bonus: f32 = 0,
     loot_mod: f32 = 0,
     loot_bonus: f32 = 0,
+    /// biomes.xml lootstage_min/max; null = stock unset (-1).
+    loot_min: ?i32 = null,
+    loot_max: ?i32 = null,
 };
 
 pub const BiomeModRow = struct {
@@ -762,6 +765,14 @@ pub fn loadFromPath(
         if (xml.attr(clean, bi, "gamestage_bonus")) |v| biome_mods.game_bonus = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, bi, "lootstage_modifier")) |v| biome_mods.loot_mod = std.fmt.parseFloat(f32, v) catch 0;
         if (xml.attr(clean, bi, "lootstage_bonus")) |v| biome_mods.loot_bonus = std.fmt.parseFloat(f32, v) catch 0;
+        if (xml.attr(clean, bi, "lootstage_min")) |v| {
+            const n = std.fmt.parseInt(i32, v, 10) catch -1;
+            if (n >= 0) biome_mods.loot_min = n;
+        }
+        if (xml.attr(clean, bi, "lootstage_max")) |v| {
+            const n = std.fmt.parseInt(i32, v, 10) catch -1;
+            if (n >= 0) biome_mods.loot_max = n;
+        }
         try mods_by_name.put(allocator, bname, biome_mods);
         const gt = std.mem.findPos(u8, clean, bi, ">") orelse break;
         const close = std.mem.findPos(u8, clean, gt, "</biome>") orelse break;

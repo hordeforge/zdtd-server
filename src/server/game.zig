@@ -258,7 +258,7 @@ pub fn foreignResistHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16)
     const fg = game_tick.foreignGatedResistTags(g, vs, def.tags);
     if (fg > 0) {
         const eid = g.sim.network_id[vs].id;
-        _ = g.addCatalogBuff(eid, vs, "buffSpectersGrace");
+        _ = g.addCatalogBuff(eid, vs, "buffSpectersGrace", eid);
     }
     return fg;
 }
@@ -271,7 +271,8 @@ pub fn attackedSelfHook(ctx: ?*anyopaque, victim_slot: u16, attacker_slot: u16) 
     const as: ecs.Slot = attacker_slot;
     if (vs >= ecs.world.max_entities or as >= ecs.world.max_entities) return;
     if (!g.sim.mask[vs].player or !g.sim.alive[as]) return;
-    g.fireAttackedSelf(vs, as);
+    // ponytail: ECS damage hook has no HitBodyPart yet; wire C2S path passes d.body_part.
+    g.fireAttackedSelf(vs, as, 0);
 }
 
 /// on_player_damage verdict applied to a damage amount (AGENTS rule 29,
@@ -1682,6 +1683,10 @@ pub const Game = struct {
         return game_player.awardXp(self, slot, base);
     }
 
+    pub fn awardXpTagged(self: *Game, slot: usize, base: u64, tags: []const u8) void {
+        return game_player.awardXpTagged(self, slot, base, tags);
+    }
+
     pub fn purchaseSkill(self: *Game, slot: usize, skill: []const u8, target_level: u8) bool {
         return game_player.purchaseSkill(self, slot, skill, target_level);
     }
@@ -1805,6 +1810,10 @@ pub const Game = struct {
         return game_player.lootStageOf(self, slot);
     }
 
+    pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32, container_bonus: f32) i32 {
+        return game_player.lootStageWithContainer(self, slot, container_mod, container_bonus);
+    }
+
     pub fn partyStageAround(self: *const Game, wx: f32, wz: f32, radius: f32) i32 {
         return game_player.partyStageAround(self, wx, wz, radius);
     }
@@ -1830,6 +1839,10 @@ pub const Game = struct {
         return game_player.lootStageForPlayer(self, peer_slot);
     }
 
+    pub fn lootStageForPlayerWithContainer(self: *Game, peer_slot: usize, container_mod: f32, container_bonus: f32) i32 {
+        return game_player.lootStageForPlayerWithContainer(self, peer_slot, container_mod, container_bonus);
+    }
+
     /// PlayerEntityStats survival loop (GAP 22; RE entity-stats.md §2):
     /// Food/Water deplete with in-game time (rates from `[sim] rules.progression`,
     /// ADR 0021), starving/dehydrated players take over-time damage and
@@ -1851,8 +1864,8 @@ pub const Game = struct {
         return game_tick.foreignGatedResist(self, victim, attacker);
     }
 
-    pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8) bool {
-        return game_tick.addCatalogBuff(self, entity_id, ps, name);
+    pub fn addCatalogBuff(self: *Game, entity_id: i32, ps: ecs.Slot, name: []const u8, instigator_id: i32) bool {
+        return game_tick.addCatalogBuff(self, entity_id, ps, name, instigator_id);
     }
 
     pub fn fireBuffFinish(self: *Game, ps: ecs.Slot, def_id: u16) void {
@@ -1863,8 +1876,12 @@ pub const Game = struct {
         return game_tick.fireBuffStack(self, ps, def_id);
     }
 
-    pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot) void {
-        return game_tick.fireAttackedSelf(self, ps, attacker);
+    pub fn fireAttackedSelf(self: *Game, ps: ecs.Slot, attacker: ecs.Slot, body_part: i16) void {
+        return game_tick.fireAttackedSelf(self, ps, attacker, body_part);
+    }
+
+    pub fn fireAttackedOther(self: *Game, ps: ecs.Slot, victim: ecs.Slot, body_part: i16) void {
+        return game_tick.fireAttackedOther(self, ps, victim, body_part);
     }
 
     /// Integrate host-commanded bot move intents (ADR 0026). Bots are not ECS

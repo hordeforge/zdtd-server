@@ -737,12 +737,21 @@ pub const InvSlot = struct {
     /// so the same planted seed grows the same way (meta is durability/flags,
     /// not the seed).
     seed: u16 = 0,
+    /// Stock ItemValue.Flags (V3.2.0 bitfield). Bit 0 = Activated
+    /// (`get_Activated`); used by `IsItemActive`. Not in ZPV16 slot stride yet —
+    /// persist reloads as 0 (ponytail: add when save format bumps).
+    flags: u8 = 0,
     /// Attached mod item ids (stock ItemValue.Modifications; 4 covers the
     /// stock slot counts). The mods' stat effects are client-side; the ids
     /// persist so a modded weapon survives a relog. 0 = empty slot.
     mods: [4]u16 = .{0} ** 4,
     /// Active mod count (<= mods.len).
     mod_n: u8 = 0,
+    /// Per-mod ItemValue.Quality (parallel to `mods`). Wire nested ItemValue
+    /// carries it; RequirementItemModTier compares it. 0 with a non-zero mod
+    /// id means "unset" and folds as stock's nested default of 1.
+    /// ponytail: not in ZPV16 slot stride yet — persist reloads as 1.
+    mod_qualities: [4]u8 = .{0} ** 4,
     /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
     /// deltas a client-created item carries. Kept as the wire pair so an echo
     /// round-trips exactly (stock's `Stat` ctor sets `isBoosted = slot_b > 0`).

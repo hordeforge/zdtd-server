@@ -59,6 +59,8 @@ pub const StockSlot = struct {
     /// Attached mod item ids (stock ItemValue.Modifications; 4 slots).
     mods: [4]u16 = .{0} ** 4,
     mod_n: u8 = 0,
+    /// Per-mod Quality parallel to `mods` (nested ItemValue.Quality).
+    mod_qualities: [4]u8 = .{0} ** 4,
     /// ItemValue stats (stock `ItemValue/Stat`): the per-item passive-effect
     /// deltas a client-created item carries. Stock writes them as
     /// `type u8 | slotA i16 | slotB i16` and its `Stat` ctor makes
@@ -148,7 +150,7 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
         const mod_id = s.mods[mi];
         const has = mod_id != 0;
         try w.writeBool(has);
-        if (has) try writeItemValueNested(w, mod_id);
+        if (has) try writeItemValueNested(w, mod_id, s.mod_qualities[mi]);
     }
     try w.writeByte(0); // CosmeticMods.Length
     try w.writeByte(s.flags);
@@ -159,16 +161,18 @@ pub fn writeItemValue(w: *binary.Writer, s: StockSlot) !void {
 
 /// A mod slot's nested ItemValue (stock ItemValue.Write IL=323 recursively
 /// writes each Modifications entry): minimal v9 value with the mod item id
-/// and default quality. The mods' stat effects are client-side; the id rides
-/// so the client re-renders the attachment.
-fn writeItemValueNested(w: *binary.Writer, mod_id: u16) !void {
+/// and its Quality. The mods' stat effects are client-side; id+quality ride
+/// so RequirementItemModTier and the client re-render stay honest.
+fn writeItemValueNested(w: *binary.Writer, mod_id: u16, quality: u8) !void {
     try w.writeByte(9); // item_value_save_version
     // Mods are items: the item flag (bit 1) + the item index (the ECS id,
     // which for items IS the index past ItemsStartHere).
     try w.writeByte(1);
     try w.writeU16(mod_id);
     try w.writeF32(0); // use_times
-    try w.writeU16(1); // quality
+    // Stock default when unset is 1 (prior nested writer hardcoded it).
+    const q: u16 = if (quality == 0) 1 else quality;
+    try w.writeU16(q);
     try w.writeU16(0); // meta
     try w.writeByte(0); // metadata count
     // No nested mod arrays: ItemClassModifier items skip them (the stock
@@ -341,9 +345,11 @@ pub fn slotFromEcs(s: components.InvSlot, resolve: ?TypeResolver, ctx: ?*anyopaq
         .meta = s.meta,
         .use_times = s.use_times,
         .seed = s.seed,
+        .flags = s.flags,
     };
     out.mods = s.mods;
     out.mod_n = @min(s.mod_n, out.mods.len);
+    out.mod_qualities = s.mod_qualities;
     copyStatsToWire(&out, s.stats, s.stats_n);
     // Installed mods ride the wire as *relative* item ids (each nested
     // ItemValue writes `type - ItemsStartHere`), while the ECS slot holds ECS
@@ -663,6 +669,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
                         @intCast(m.type_id - items_start_here)
                     else
                         @intCast(m.type_id);
+                    out.mod_qualities[mi] = @min(m.quality, 255);
                     if (mi >= out.mod_n) out.mod_n = mi + 1;
                 }
             }
@@ -699,6 +706,7 @@ fn readItemValueData(r: *binary.Reader, version: u8, is_modifier: bool) binary.R
     if (!is_modifier) {
         out2.mods = out.mods;
         out2.mod_n = out.mod_n;
+        out2.mod_qualities = out.mod_qualities;
     }
     out2.stats = stats;
     out2.stats_n = stats_n;
@@ -1004,9 +1012,11 @@ pub fn toEcs(s: StockSlot, reverse: ?ReverseResolver, ctx: ?*anyopaque) componen
         .meta = s.meta,
         .use_times = s.use_times,
         .seed = s.seed,
+        .flags = s.flags,
     };
     out.mods = s.mods;
     out.mod_n = @min(s.mod_n, out.mods.len);
+    out.mod_qualities = s.mod_qualities;
     copyStatsToEcs(&out, s.stats, s.stats_n);
     // Reverse of slotFromEcs: the parsed nested mod ids are relative item
     // ids, the ECS slot wants ECS ids. No resolver keeps the fixture pin
@@ -1933,6 +1943,7 @@ test "item mods round-trip through the wire ItemValue" {
         .quality = 5,
     };
     src.mods = .{ 10, 20, 0, 0 };
+    src.mod_qualities = .{ 3, 5, 0, 0 };
     src.mod_n = 2;
     var buf: [128]u8 = undefined;
     var w: binary.Writer = .{ .buf = &buf };
@@ -1942,19 +1953,21 @@ test "item mods round-trip through the wire ItemValue" {
     try std.testing.expectEqual(@as(u8, 2), out.mod_n);
     try std.testing.expectEqual(@as(u16, 10), out.mods[0]);
     try std.testing.expectEqual(@as(u16, 20), out.mods[1]);
+    try std.testing.expectEqual(@as(u8, 3), out.mod_qualities[0]);
+    try std.testing.expectEqual(@as(u8, 5), out.mod_qualities[1]);
     try std.testing.expectEqual(@as(u16, 5), out.quality);
 
-    // The nested mod ItemValue writes fixed quality 1 then meta 0. The
-    // round-trip above recovers the mod ids but never those two, so swapping
-    // them was invisible. Find the first mod's body: outer version u8 | flags
-    // u8 | type u16 | useTimes f32 | quality u16 | meta u16 | metaCount u8 |
-    // Modifications.Length u8 | present bool, then the nested value starts.
+    // Nested mod ItemValue carries Quality (then meta 0). Byte-check the
+    // first mod body so a write/read swap of quality vs meta stays visible.
+    // Layout: outer version u8 | flags u8 | type u16 | useTimes f32 | quality
+    // u16 | meta u16 | metaCount u8 | Modifications.Length u8 | present bool,
+    // then the nested value starts.
     const body = w.written();
     const nested = 1 + 1 + 2 + 4 + 2 + 2 + 1 + 1 + 1;
     try std.testing.expectEqual(@as(u8, 9), body[nested]); // nested version
     try std.testing.expectEqual(@as(u8, 1), body[nested + 1]); // item flag
     try std.testing.expectEqual(@as(u16, 10), std.mem.readInt(u16, body[nested + 2 ..][0..2], .little));
-    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, body[nested + 8 ..][0..2], .little)); // quality
+    try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, body[nested + 8 ..][0..2], .little)); // quality
     try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, body[nested + 10 ..][0..2], .little)); // meta
 }
 
@@ -1965,13 +1978,18 @@ test "item mods survive the ECS conversion both ways" {
         .quality = 3,
     };
     inv.mods = .{ 12, 13, 0, 0 };
+    inv.mod_qualities = .{ 4, 6, 0, 0 };
     inv.mod_n = 2;
     const wire = slotFromEcs(inv, null, null);
     try std.testing.expectEqual(@as(u8, 2), wire.mod_n);
+    try std.testing.expectEqual(@as(u8, 4), wire.mod_qualities[0]);
+    try std.testing.expectEqual(@as(u8, 6), wire.mod_qualities[1]);
     const back = toEcs(wire, null, null);
     try std.testing.expectEqual(@as(u8, 2), back.mod_n);
     try std.testing.expectEqual(@as(u16, 12), back.mods[0]);
     try std.testing.expectEqual(@as(u16, 13), back.mods[1]);
+    try std.testing.expectEqual(@as(u8, 4), back.mod_qualities[0]);
+    try std.testing.expectEqual(@as(u8, 6), back.mod_qualities[1]);
 }
 
 test "applyEquipmentBody parses the standalone equipment body" {

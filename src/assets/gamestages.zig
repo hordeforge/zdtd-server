@@ -510,6 +510,15 @@ test "death pushes bornAt forward or snaps it to now" {
     try std.testing.expectEqual(@as(u64, 5), bornAtAfterDeath(cfg, 5, 9));
 }
 
+test "lootStage clamps biome_min/max" {
+    // Unset clamps: level 5 → stage 5
+    try std.testing.expectEqual(@as(i32, 5), lootStage(.{ .level = 5 }));
+    // Min raises floor
+    try std.testing.expectEqual(@as(i32, 10), lootStage(.{ .level = 5, .biome_min = 10 }));
+    // Max caps ceiling
+    try std.testing.expectEqual(@as(i32, 3), lootStage(.{ .level = 5, .biome_max = 3 }));
+}
+
 test "lootStage is level driven with clamps" {
     // No POI/biome/container terms: loot stage is just the level, min 1.
     try std.testing.expectEqual(@as(i32, 37), lootStage(.{ .level = 37 }));

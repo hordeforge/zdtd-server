@@ -18547,7 +18547,7 @@ test "scenario buff finish chains the injury cooldown" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const vs = g.sim.playerByPeer(c.slot).?;
-    _ = g.addCatalogBuff(c.entity_id, vs, "buffInjuryKnockdown01");
+    _ = g.addCatalogBuff(c.entity_id, vs, "buffInjuryKnockdown01", c.entity_id);
     // Shorten the 4 s instance so the test does not run 80 ticks of sim.
     const kid = g.buffs.indexOfName("buffInjuryKnockdown01") orelse return error.TestUnexpectedResult;
     const slot = g.sim.buffs[vs].find(kid) orelse return error.TestUnexpectedResult;
@@ -18721,12 +18721,12 @@ test "scenario buff stack fires its rows" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const ps = g.sim.playerByPeer(c.slot).?;
-    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest");
+    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest", c.entity_id);
     g.tickSurvival(0.05);
     try std.testing.expectApproxEqAbs(@as(f32, 0.5), c.cvars.get("$buffHarvestBonus"), 0.001);
     // Stack twice more: .5 + .5 + .5 = 1.5.
-    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest");
-    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest");
+    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest", c.entity_id);
+    _ = g.addCatalogBuff(c.entity_id, ps, "buffHarvest", c.entity_id);
     try std.testing.expectApproxEqAbs(@as(f32, 1.5), c.cvars.get("$buffHarvestBonus"), 0.001);
     std.debug.print("PASS stack: harvest bonus accumulates across stacks\n", .{});
 }
@@ -18751,7 +18751,7 @@ test "scenario victim hit fires concussion counter" {
     var cap: ln_peer.Capture = .{};
     const c = try g.attachJoinedClient(&cap);
     const vs = g.sim.playerByPeer(c.slot).?;
-    _ = g.addCatalogBuff(c.entity_id, vs, "buffInjuryConcussion");
+    _ = g.addCatalogBuff(c.entity_id, vs, "buffInjuryConcussion", c.entity_id);
     const zdef = g.entities.byName("zombieTemplateMale") orelse return error.TestUnexpectedResult;
     const zid = g.sim.spawnZombie(258, 70, 258, 200).?;
     const zs = g.sim.slotOfNetId(zid).?;

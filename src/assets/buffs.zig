@@ -93,8 +93,8 @@ pub const StatMod = struct {
 };
 
 /// Triggered rows per buff and in total (the onSelf* surface; only
-/// ModifyStats/AddBuff/RemoveBuff are evaluated - the other actions are
-/// recorded and skipped).
+/// ModifyStats/AddHealth/AddBuff/RemoveBuff/AddOrRemoveBuff/ModifyCVar/RemoveCVar
+/// are evaluated - the other actions are recorded and skipped).
 /// Measured against V3.2.0 `Data/Config` (2026-09-11): `buffStatusCheck02`
 /// carries the most triggered rows at 126, then `buffFarmerSetBonus` 78 and
 /// `buffStatusCheck01` 70; the file totals 3246. The old cap of 32 silently
@@ -124,6 +124,9 @@ pub const Trigger = enum(u8) {
     /// `onOtherAttackedSelf`: fired on the victim when another entity lands
     /// a hit (concussion/fatigue counters, PackMule display buff).
     other_attacked_self,
+    /// `onSelfAttackedOther`: fired on the attacker when a hit lands
+    /// (HitLocation-gated perk/buff rows: headshot/leg procs).
+    self_attacked_other,
     /// `onSelfBuffFinish`: stock fires it when a buff's duration ends, after
     /// `onSelfBuffRemove` (87 buffs / 120 rows: stat restores, cvar clears,
     /// cooldown Adds, all currently inert).
@@ -590,7 +593,13 @@ pub fn scanTriggeredRows(
         };
         const row_end = requirements.elementEnd(body, ri);
         if (row_end == 0 or row_end > end) break;
-        const act = parseTriggeredAction(act_s);
+        // AddHealth → ModifyStats Health add (MinEventActionAddHealth →
+        // EntityAlive.AddHealth). `show_splatter` is client-only. `health="@cvar"`
+        // is refused (stock has none); literal health= only.
+        const is_add_health = std.mem.eql(u8, act_s, "AddHealth");
+        const health_s = if (is_add_health) xml.attr(body, ri, "health") orelse "0" else "";
+        const health_cvar = is_add_health and health_s.len > 1 and health_s[0] == '@';
+        const act = if (is_add_health) .modify_stats else parseTriggeredAction(act_s);
         const val_s = xml.attr(body, ri, "value") orelse "0";
         // ModifyCVar takes its operand from a cvar when `value` starts with `@`
         // (MinEventActionModifyCVar::ParseXmlAttribute IL_0172 sets cvarRef and
@@ -602,14 +611,14 @@ pub fn scanTriggeredRows(
             std.mem.startsWith(u8, val_s, "randomfloat("));
         const tr: Triggered = .{
             .trigger = parseTrigger(trig_s),
-            .action = if (roll) .other else act,
+            .action = if (roll or health_cvar) .other else act,
             .buff = try arena.dupe(u8, xml.attr(body, ri, "buff") orelse ""),
-            .stat = try arena.dupe(u8, xml.attr(body, ri, "stat") orelse ""),
+            .stat = try arena.dupe(u8, if (is_add_health) "Health" else xml.attr(body, ri, "stat") orelse ""),
             .cvar = try arena.dupe(u8, xml.attr(body, ri, "cvar") orelse ""),
             .cvar_op = cvars.Operation.parse(xml.attr(body, ri, "operation") orelse "set") orelse .set,
             .value_cvar = if (val_cvar.len > 0) try arena.dupe(u8, val_cvar) else "",
-            .op = parseOp(xml.attr(body, ri, "operation") orelse "add"),
-            .value = firstF32(val_s),
+            .op = if (is_add_health) .add else parseOp(xml.attr(body, ri, "operation") orelse "add"),
+            .value = if (is_add_health) firstF32(health_s) else firstF32(val_s),
         };
         const rq0 = reqs_list.items.len;
         for (group_reqs) |g| try reqs_list.append(allocator, g);
@@ -1153,6 +1162,75 @@ pub fn lootProbFold(passives: []const Passive, axis: Axis, ctx: requirements.Ctx
     return v;
 }
 
+/// Fold the `PlayerExpGain` rows (passive 87) onto a base XP award.
+/// Same GetValue op / tag / req filtering as `lootProbFold`, but `perc_add`/
+/// `perc_subtract` use stock's fraction form (`1 +/- v`) — PlayerExpGain rows
+/// ship as fractions (Harvesting `-.1..-.4`, Kill `.05`, medical `1`/`2`/`5`),
+/// not the LootProb percent scale.
+pub fn playerExpGainFold(passives: []const Passive, axis: Axis, ctx: requirements.Ctx, base: f32, counts: *requirements.Counts) f32 {
+    const a: f32 = switch (axis) {
+        .level => |l| if (l == 0) return base else @floatFromInt(l),
+        .duration => |d| d,
+        .quality => 0,
+    };
+    var v = base;
+    for (passives) |p| {
+        if (!std.mem.eql(u8, p.name, "PlayerExpGain")) continue;
+        if (!tagsMatch(p.tags, ctx.tags)) continue;
+        if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
+        const amount = if (p.value_cvar.len > 0)
+            requirements.cvarValue(ctx, p.value_cvar)
+        else switch (axis) {
+            .quality => |q| itemQualityValue(p, q),
+            else => curveAtAxis(p, a),
+        };
+        switch (p.op) {
+            .base_set, .set => v = amount,
+            .base_add, .add => v += amount,
+            .base_subtract, .subtract => v -= amount,
+            .perc_add => v *= 1.0 + amount,
+            .perc_subtract => v *= 1.0 - amount,
+            else => {},
+        }
+        if (!(v >= 0)) v = 0;
+    }
+    return v;
+}
+
+/// Fold a named GetValue passive onto `base` with fraction `perc_add`
+/// (`1+/-v`). Used for `GlobalGameStageModifier` / `GlobalLootStageModifier`
+/// (EntityPlayer getters start at 1.0). Same tag/req filtering as the
+/// LootProb / PlayerExpGain folds.
+pub fn namedPassiveFold(name: []const u8, passives: []const Passive, axis: Axis, ctx: requirements.Ctx, base: f32, counts: *requirements.Counts) f32 {
+    const a: f32 = switch (axis) {
+        .level => |l| if (l == 0) return base else @floatFromInt(l),
+        .duration => |d| d,
+        .quality => 0,
+    };
+    var v = base;
+    for (passives) |p| {
+        if (!std.mem.eql(u8, p.name, name)) continue;
+        if (!tagsMatch(p.tags, ctx.tags)) continue;
+        if (p.reqs.len > 0 and requirements.evaluate(p.reqs, ctx, counts) != .pass) continue;
+        const amount = if (p.value_cvar.len > 0)
+            requirements.cvarValue(ctx, p.value_cvar)
+        else switch (axis) {
+            .quality => |q| itemQualityValue(p, q),
+            else => curveAtAxis(p, a),
+        };
+        switch (p.op) {
+            .base_set, .set => v = amount,
+            .base_add, .add => v += amount,
+            .base_subtract, .subtract => v -= amount,
+            .perc_add => v *= 1.0 + amount,
+            .perc_subtract => v *= 1.0 - amount,
+            else => {},
+        }
+        if (!(v >= 0)) v = 0;
+    }
+    return v;
+}
+
 /// Value of a passive row at an item's quality tier. Stock seeds
 /// `PassiveEffect.ModValue` with `ItemValue.Quality` and evaluates the row the
 /// same way it evaluates any other axis: a row with `tier=`/`level=` anchors
@@ -1209,6 +1287,41 @@ test "lootProbFold applies tagged LootProb rows in order" {
     // A perc-only list scales the base: 0.5 * 1.02 = 0.51 at level 1.
     const perc_only = [_]Passive{rows[0]};
     try std.testing.expectApproxEqAbs(@as(f32, 0.51), lootProbFold(&perc_only, .{ .level = 1 }, hit, 0.5, &counts), 1e-4);
+}
+
+test "playerExpGainFold uses fraction perc_add not percent" {
+    // Stock MotherLode / miner shape: Harvesting perc_add -.1..-.4 (penalty) or
+    // Kill/medical fraction bonuses. Unlike LootProb, perc_add is `1+v`.
+    const rows = [_]Passive{
+        .{ .name = "PlayerExpGain", .op = .perc_add, .tags = "Harvesting", .curve = .{ -0.1, -0.2, -0.3, -0.4, 0, 0, 0, 0 }, .curve_len = 4, .curve_levels = .{ 1, 2, 3, 4, 0, 0, 0, 0 }, .curve_levels_len = 4 },
+        .{ .name = "PlayerExpGain", .op = .perc_add, .tags = "Kill", .value = 0.05 },
+    };
+    var counts: requirements.Counts = .{};
+    const harvest: requirements.Ctx = .{ .tags = "Harvesting" };
+    // base 100 -> perc_add -0.4 at level 4 -> 60
+    try std.testing.expectApproxEqAbs(@as(f32, 60.0), playerExpGainFold(&rows, .{ .level = 4 }, harvest, 100.0, &counts), 1e-4);
+    // Kill tag only hits the Kill row: 100 * 1.05 = 105
+    const kill: requirements.Ctx = .{ .tags = "Kill" };
+    try std.testing.expectApproxEqAbs(@as(f32, 105.0), playerExpGainFold(&rows, .{ .level = 1 }, kill, 100.0, &counts), 1e-4);
+    // Empty tags: tagged rows do not match
+    const empty: requirements.Ctx = .{ .tags = "" };
+    try std.testing.expectApproxEqAbs(@as(f32, 100.0), playerExpGainFold(&rows, .{ .level = 4 }, empty, 100.0, &counts), 1e-4);
+    // Level 0 short-circuit
+    try std.testing.expectApproxEqAbs(@as(f32, 100.0), playerExpGainFold(&rows, .{ .level = 0 }, harvest, 100.0, &counts), 1e-4);
+}
+
+test "namedPassiveFold scales GlobalGameStageModifier from base 1" {
+    const rows = [_]Passive{
+        .{ .name = "GlobalGameStageModifier", .op = .perc_add, .value = 0.5 },
+        .{ .name = "GlobalLootStageModifier", .op = .perc_add, .value = 0.25 },
+    };
+    var counts: requirements.Counts = .{};
+    const ctx: requirements.Ctx = .{};
+    // 1 * 1.5 = 1.5
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), namedPassiveFold("GlobalGameStageModifier", &rows, .{ .level = 1 }, ctx, 1.0, &counts), 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.25), namedPassiveFold("GlobalLootStageModifier", &rows, .{ .level = 1 }, ctx, 1.0, &counts), 1e-4);
+    // wrong name leaves base alone
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), namedPassiveFold("BiomeGameStageModifier", &rows, .{ .level = 1 }, ctx, 1.0, &counts), 1e-4);
 }
 
 /// The level-1 (flat) variant, used by perk/attribute callers and tests.
@@ -1288,6 +1401,7 @@ fn parseTrigger(s: []const u8) Trigger {
     if (std.mem.eql(u8, s, "onSelfProgressionUpdate")) return .progression_update;
     if (std.mem.eql(u8, s, "onPerkLevelChanged")) return .perk_level_changed;
     if (std.mem.eql(u8, s, "onOtherAttackedSelf")) return .other_attacked_self;
+    if (std.mem.eql(u8, s, "onSelfAttackedOther")) return .self_attacked_other;
     if (std.mem.eql(u8, s, "onSelfBuffFinish")) return .finish;
     if (std.mem.eql(u8, s, "onSelfBuffStack")) return .stack;
     return .other;
@@ -1508,6 +1622,18 @@ fn triggeredHealthPerSecond(def: *const BuffDef, r: *const TriggeredResult) f32 
         per_s += m.value / secs;
     }
     return per_s;
+}
+
+/// Sum of ModifyStats Health `add` rows (AddHealth alias). Applied once per
+/// firing event; subtract rows stay on the stage3 per-second path.
+pub fn healthAddDelta(r: *const TriggeredResult) f32 {
+    var d: f32 = 0;
+    for (r.mods[0..r.mod_n]) |m| {
+        if (!eqIgnoreCase(m.stat, "Health")) continue;
+        if (m.op != .add) continue;
+        d += m.value;
+    }
+    return d;
 }
 
 pub fn tryLoad(allocator: std.mem.Allocator, game_dir: ?[]const u8, config_dir: ?[]const u8) !?Table {
@@ -2459,6 +2585,37 @@ test "evaluateTriggered gates, filters events, and caps the bounded actions" {
     // stage3HpLossPerSecond converts through the engine: 0.25 / 2.2s.
     const sv = SurvivalStages{ .hungry = 3, .thirsty = 0 };
     try std.testing.expectApproxEqAbs(@as(f32, 0.25 / 2.2), stage3HpLossPerSecond(&t, sv), 0.0001);
+}
+
+test "AddHealth parses as ModifyStats Health add" {
+    // MinEventActionAddHealth → EntityAlive.AddHealth; show_splatter is client-only.
+    const xml_src =
+        \\<buffs>
+        \\<buff name="burn">
+        \\<effect_group>
+        \\<triggered_effect trigger="onSelfBuffUpdate" action="AddHealth" health="-2"/>
+        \\<triggered_effect trigger="onSelfBuffStart" action="AddHealth" health="5"/>
+        \\</effect_group>
+        \\</buff>
+        \\</buffs>
+    ;
+    const path = "worlds/zdtd_buffs_addhealth.xml";
+    io_fs.mkdirPath("worlds");
+    try io_fs.writeFile(path, xml_src);
+    defer io_fs.deleteFile(path);
+    var table = try loadFromPath(std.testing.allocator, path);
+    defer table.deinit();
+    const id = table.indexOfName("burn").?;
+    var counts: requirements.Counts = .{};
+    const up = evaluateTriggered(&table, id, .update, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 1), up.mod_n);
+    try std.testing.expectEqualStrings("Health", up.mods[0].stat);
+    try std.testing.expect(up.mods[0].op == .add);
+    try std.testing.expectApproxEqAbs(@as(f32, -2), up.mods[0].value, 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, -2), healthAddDelta(&up), 0.0001);
+    const st = evaluateTriggered(&table, id, .start, .{}, &counts);
+    try std.testing.expectEqual(@as(u8, 1), st.mod_n);
+    try std.testing.expectApproxEqAbs(@as(f32, 5), st.mods[0].value, 0.0001);
 }
 
 test "stagesFromWanted derives the stage set from engine names" {

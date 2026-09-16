@@ -896,6 +896,8 @@ a disabled category spawns none), and `loot_stage_count_mod` grows a count with
 the loot stage (84 stock ammo rows), and a spawned entry's `buffs=` list is
 applied to the opener (63 stock rows, the bookworm success buff). The residual
 is the remaining loot-entry attributes: entry `tags` now feed the `LootProb`
+PlayerExpGain (87) folds onto non-kill `awardXp` / `awardXpTagged` (harvest uses the `Harvesting` tag; kill XP stays on `awardXpSilent`).
+GlobalGameStageModifier / GlobalLootStageModifier fold onto `gameStageOf` / `lootStageOf` (base 1, fraction perc_add); biome XML terms already cover the biome path.
 fold for the opener's perk/attribute, buff and equipped/held item rows (431
 stock entries, e.g. Dead Eye's `ammo762mm` rows and the Farmer Helmet's
 `seedSkill` row), and entry `mods=`/`mod_chance=` installs a fitting

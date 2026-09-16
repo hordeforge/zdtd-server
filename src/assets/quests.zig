@@ -358,11 +358,13 @@ fn objectiveIsArrival(kind: quest.PhaseKind) bool {
     };
 }
 
-/// Dukes total from stock `<reward type="Item" id="casinoCoin" value="N">`
+/// Dukes total from stock `<reward type="Item" id="{currency}" value="N">`
 /// entries. Stock quests.xml has no Coin reward type: quest dukes are granted
-/// as casinoCoin item rewards, so the server wallet credit must match the sum
+/// as currency item rewards, so the server wallet credit must match the sum
 /// of those values (the client Quest.Write already lists them as Item rewards).
-fn sumCoinReward(body: []const u8) u32 {
+/// `currency` is traders.xml root `currency_item` (stock "casinoCoin").
+fn sumCoinReward(body: []const u8, currency: []const u8) u32 {
+    const coin = if (currency.len > 0) currency else "casinoCoin";
     var total: u32 = 0;
     var i: usize = 0;
     while (i < body.len) {
@@ -375,7 +377,7 @@ fn sumCoinReward(body: []const u8) u32 {
         };
         if (std.mem.eql(u8, typ, "Item")) {
             if (xml.attr(open, 0, "id")) |rid| {
-                if (std.mem.eql(u8, rid, "casinoCoin")) {
+                if (std.mem.eql(u8, rid, coin)) {
                     if (xml.attr(open, 0, "value")) |v| {
                         total +%= xml.parseU32(v) orelse 0;
                     }
@@ -493,10 +495,10 @@ fn parseQuestDefBody(
         target = @as(u16, policy.default_kill_count) + @as(u16, tier) * @as(u16, policy.kill_per_tier);
     }
 
-    // Dukes: stock grants them as casinoCoin Item rewards (no Coin reward type
-    // exists in quests.xml). Fail closed: no casinoCoin reward in the body
+    // Dukes: stock grants them as currency Item rewards (no Coin reward type
+    // exists in quests.xml). Fail closed: no matching reward in the body
     // means the stock quest grants no dukes, so credit 0, not an invented floor.
-    const reward_coin: u32 = sumCoinReward(body);
+    const reward_coin: u32 = sumCoinReward(body, policy.currency_item);
 
     // Fallback quest-marker position when the quest def binds no POI rect:
     // a 50/70 center (ground-ish height) jittered deterministically per quest
@@ -1297,7 +1299,7 @@ test "objective write kinds follow objective type" {
     try std.testing.expectEqual(quest.ObjectiveWireKind.time, d.objective_kinds[4]);
 }
 
-test "reward_coin sums casinoCoin Item rewards and fails closed" {
+test "reward_coin sums currency Item rewards and fails closed" {
     const fixture =
         \\<quests>
         \\  <quest id="payday">
@@ -1308,6 +1310,10 @@ test "reward_coin sums casinoCoin Item rewards and fails closed" {
         \\  <quest id="freebie">
         \\    <reward type="Exp" value="1000"/>
         \\  </quest>
+        \\  <quest id="altpay">
+        \\    <reward type="Item" id="dukeCoin" value="100"/>
+        \\    <reward type="Item" id="casinoCoin" value="999"/>
+        \\  </quest>
         \\</quests>
     ;
     var cat = try parseCatalog(std.testing.allocator, fixture, .{});
@@ -1316,6 +1322,12 @@ test "reward_coin sums casinoCoin Item rewards and fails closed" {
     try std.testing.expectEqual(@as(u32, 750), pay.reward_coin);
     const free = cat.byName("freebie").?;
     try std.testing.expectEqual(@as(u32, 0), free.reward_coin);
+
+    // traders.xml currency_item override: only matching id rows credit the wallet.
+    var cat2 = try parseCatalog(std.testing.allocator, fixture, .{ .currency_item = "dukeCoin" });
+    defer cat2.deinit();
+    try std.testing.expectEqual(@as(u32, 0), cat2.byName("payday").?.reward_coin);
+    try std.testing.expectEqual(@as(u32, 100), cat2.byName("altpay").?.reward_coin);
 }
 
 test "objective-kinds mapping is data-driven (config spec overrides builtin)" {

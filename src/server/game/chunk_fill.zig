@@ -423,7 +423,7 @@ const LootBuffCtx = struct {
 
     fn add(ctx: ?*anyopaque, name: []const u8) void {
         const s: *@This() = @ptrCast(@alignCast(ctx.?));
-        _ = game_tick.addCatalogBuff(s.g, s.entity_id, s.ps, name);
+        _ = game_tick.addCatalogBuff(s.g, s.entity_id, s.ps, name, s.entity_id);
     }
 };
 
@@ -583,11 +583,13 @@ pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_
     if (!cont.touched) {
         if (resolved.len == 0) return;
         const ll = resolved;
+        const cmod = self.maxdamage.lootStageModFor(id);
+        const cbonus = self.maxdamage.lootStageBonusFor(id);
         self.fillContainerFromLoot(
             cont,
             ll,
             lootSeedAt(pos.x, pos.y, pos.z),
-            self.lootStageForPlayer(opener_peer),
+            self.lootStageForPlayerWithContainer(opener_peer, cmod, cbonus),
             @intCast(opener_peer),
         );
         return;
@@ -612,11 +614,13 @@ pub fn ensureContainerLoot(self: *Game, cont: *containers_mod.Container, opener_
     // Fail closed (audit A31): no LootList, the container stays empty.
     if (resolved.len == 0) return;
     const ll = resolved;
+    const cmod = self.maxdamage.lootStageModFor(id);
+    const cbonus = self.maxdamage.lootStageBonusFor(id);
     self.fillContainerFromLoot(
         cont,
         ll,
         lootSeedAt(pos.x, pos.y, pos.z) +% cycle *% 2654435761,
-        self.lootStageForPlayer(opener_peer),
+        self.lootStageForPlayerWithContainer(opener_peer, cmod, cbonus),
         @intCast(opener_peer),
     );
 }

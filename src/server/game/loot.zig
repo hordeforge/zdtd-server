@@ -20,7 +20,9 @@ pub fn ecsIdFromItemName(self: *Game, name: []const u8) u16 {
         if (std.mem.eql(u8, name, "resourceScrapIron") or std.mem.eql(u8, name, "resourceScrapLead")) return 1;
         if (std.mem.eql(u8, name, "foodCanBeef")) return 2;
         if (std.mem.eql(u8, name, "resourceWood")) return 7;
-        if (std.mem.eql(u8, name, "casinoCoin")) return 6;
+        // Offline builtin id 6 = currency; name from traders.xml `currency_item`.
+        const coin = if (self.traders.currency_item.len > 0) self.traders.currency_item else "casinoCoin";
+        if (std.mem.eql(u8, name, coin)) return 6;
     }
     return 0;
 }

@@ -17,6 +17,7 @@ const assets_buffs = @import("../../assets/buffs.zig");
 const requirements = @import("../../assets/requirements.zig");
 const assets_progression = @import("../../assets/progression.zig");
 const assets_items = @import("../../assets/items.zig");
+const hooks = @import("hooks.zig");
 const ecs_party = @import("../../ecs/party.zig");
 const systems = @import("../../ecs/systems.zig");
 
@@ -29,8 +30,18 @@ const max_clients = game_mod.max_clients;
 /// (harvest, quest Exp, craft, magazine GiveExp) also push
 /// NetPackageEntityAddExpClient as `_xpOther` so the owning client shows
 /// the icon; kill XP uses awardXpSilent + a typed Kill packet instead.
+/// Non-kill XP (harvest / craft / quest / magazine). Stock
+/// `Progression.AddLevelExp(..., useBonus: true)` folds PlayerExpGain (87)
+/// onto the award; kill XP uses `awardXpSilent` (useBonus false).
 pub fn awardXp(self: *Game, slot: usize, base: u64) void {
-    awardXpTyped(self, slot, base, packages.stock_xp.xp_type_other);
+    awardXpTagged(self, slot, base, "");
+}
+
+/// Like `awardXp`, with the GetValue query tag set (stock XPTypes FastTags —
+/// harvest passes `"Harvesting"` so miner/motherlode rows can match).
+pub fn awardXpTagged(self: *Game, slot: usize, base: u64, tags: []const u8) void {
+    const scaled = playerExpGainScale(self, slot, tags, base);
+    awardXpTyped(self, slot, scaled, packages.stock_xp.xp_type_other);
 }
 
 /// Ledger + level-up only. Kill XP and party-share use this so the typed
@@ -376,6 +387,7 @@ pub fn gameStageOf(self: *const Game, slot: usize) i32 {
             }
         }
     }
+    const global_mod = stageGlobalModifier(self, c.slot, "GlobalGameStageModifier");
     return assets_gamestages.playerStage(self.gamestages.config, .{
         .level = c.level,
         .days_alive = assets_gamestages.daysAlive(now, c.game_stage_born_world_time, c.level),
@@ -383,7 +395,61 @@ pub fn gameStageOf(self: *const Game, slot: usize) i32 {
         .biome_bonus = bmods.game_bonus,
         .quest_mod = qmod,
         .quest_bonus = qbonus,
+        .global_modifier = global_mod,
     });
+}
+
+/// Fold `GlobalGameStageModifier` / `GlobalLootStageModifier` onto base 1.0
+/// (stock EntityPlayer getters). Same perk/buff/held/equip layers as
+/// `playerExpGainScale`. Biome*StageModifier stays at 1 — biomes.xml terms
+/// already cover that path via `biomeStageMods`.
+fn stageGlobalModifier(self: *const Game, peer_slot: usize, passive_name: []const u8) f32 {
+    const ps = self.sim.playerByPeer(peer_slot) orelse return 1.0;
+    var counts: requirements.Counts = .{};
+    var v: f32 = 1.0;
+    const held = heldItemTagsForPeer(self, ps);
+    const broken = holdingItemBrokenForPeer(self, ps);
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        // ponytail: no cvars on *const Game; value_cvar Global* rows rare — add *Game overload if needed.
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .held_tags = held,
+            .holding_item_broken = broken,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.namedPassiveFold(passive_name, progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .held_tags = held, .holding_item_broken = broken };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.namedPassiveFold(passive_name, def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .held_tags = held, .holding_item_broken = broken };
+        const inv = &self.sim.inventory[ps];
+        const held_slot = inv.heldItem();
+        if (held_slot.count > 0) {
+            if (self.items.byId(held_slot.item_id)) |def| {
+                v = assets_buffs.namedPassiveFold(passive_name, def.passives, itemQualityAxis(self, held_slot.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.namedPassiveFold(passive_name, def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
+        }
+    }
+    if (!(v >= 0) or !std.math.isFinite(v)) return 1.0;
+    return v;
 }
 
 /// The player's biome stage modifiers (biomes.xml), resolved from the biome
@@ -404,6 +470,13 @@ fn biomeStageMods(self: *const Game, slot: usize) assets_biome_layers.BiomeMods 
 /// with the biome lootstage terms and no POI tier terms until those tables
 /// are parsed.
 pub fn lootStageOf(self: *const Game, slot: usize) i32 {
+    return lootStageWithContainer(self, slot, 0, 0);
+}
+
+/// GetLootStage with the opened container's blocks.xml LootStageMod/Bonus
+/// (RE loot-economy.md PropLootStageModifier/Bonus). Callers without a
+/// container keep the zero defaults via lootStageOf.
+pub fn lootStageWithContainer(self: *const Game, slot: usize, container_mod: f32, container_bonus: f32) i32 {
     if (slot >= self.clients.len) return 1;
     const bmods = biomeStageMods(self, slot);
     // POITierMod/Bonus (loot_settings, indexed DifficultyTier-1): the tier of
@@ -424,12 +497,18 @@ pub fn lootStageOf(self: *const Game, slot: usize) i32 {
             }
         }
     }
+    const global_mod = stageGlobalModifier(self, self.clients[slot].slot, "GlobalLootStageModifier");
     return assets_gamestages.lootStage(.{
         .level = self.clients[slot].level,
         .poi_tier_mod = poi_mod,
         .poi_tier_bonus = poi_bonus,
         .biome_mod = bmods.loot_mod,
         .biome_bonus = bmods.loot_bonus,
+        .biome_min = bmods.loot_min,
+        .biome_max = bmods.loot_max,
+        .container_mod = container_mod,
+        .container_bonus = container_bonus,
+        .global_modifier = global_mod,
     });
 }
 
@@ -543,18 +622,24 @@ pub fn partyHighestGameStage(self: *Game) i32 {
 /// player's party members, or the player alone when ungrouped. World-gen
 /// fills with no player context keep the global partyLootStage.
 pub fn lootStageForPlayer(self: *Game, peer_slot: usize) i32 {
+    return lootStageForPlayerWithContainer(self, peer_slot, 0, 0);
+}
+
+/// Party.GetHighestLootStage for one opener, with the opened container's
+/// LootStageMod/Bonus applied to every member's GetLootStage (stock).
+pub fn lootStageForPlayerWithContainer(self: *Game, peer_slot: usize, container_mod: f32, container_bonus: f32) i32 {
     if (peer_slot >= self.clients.len or !self.clients[peer_slot].joined) return partyLootStage(self);
     const me = self.clients[peer_slot].entity_id;
     var best: i32 = 1;
     if (self.parties.partyByMember(me)) |p| {
         for (p.members[0..p.n]) |m| {
             if (self.clientByEntityId(m)) |mc| {
-                best = @max(best, lootStageOf(self, mc.slot));
+                best = @max(best, lootStageWithContainer(self, mc.slot, container_mod, container_bonus));
             }
         }
         return best;
     }
-    return @max(1, lootStageOf(self, peer_slot));
+    return @max(1, lootStageWithContainer(self, peer_slot, container_mod, container_bonus));
 }
 
 /// Purchased level of a progression value (attribute/perk) for a client.
@@ -780,6 +865,87 @@ pub fn lootProbScale(self: *Game, peer_slot: usize, ps: ecs.Slot, tags: []const 
         }
     }
     return v;
+}
+
+/// Fold PlayerExpGain (87) onto a non-kill XP award — same layers as
+/// `lootProbScale` (purchased perks/attrs, active buffs, held + equipped
+/// items), with `held_tags` filled so `HoldingItemHasTags` rows (miner69r)
+/// can pass. Kill XP skips this (`awardXpSilent` / useBonus false).
+fn playerExpGainScale(self: *Game, peer_slot: usize, tags: []const u8, base: u64) u64 {
+    const ps = self.sim.playerByPeer(peer_slot) orelse return base;
+    var counts: requirements.Counts = .{};
+    var v: f32 = @floatFromInt(base);
+    const held = heldItemTagsForPeer(self, ps);
+    const broken = holdingItemBrokenForPeer(self, ps);
+    if (peer_slot < self.clients.len) {
+        const c = &self.clients[peer_slot];
+        const ctx: requirements.Ctx = .{
+            .levels = c.skill_levels[0..c.skill_level_n],
+            .player_level = c.level,
+            .cvars = &c.cvars,
+            .tags = tags,
+            .held_tags = held,
+            .holding_item_broken = broken,
+        };
+        for (c.skill_levels[0..c.skill_level_n]) |sl| {
+            if (sl.level == 0) continue;
+            v = assets_buffs.playerExpGainFold(progressionPassives(self, sl.name), .{ .level = sl.level }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].buffs) {
+        const ctx: requirements.Ctx = .{ .tags = tags, .held_tags = held, .holding_item_broken = broken };
+        for (&self.sim.buffs[ps].slots) |*slot| {
+            if (!slot.active) continue;
+            const def = self.buffs.byId(slot.def_id) orelse continue;
+            v = assets_buffs.playerExpGainFold(def.passives, .{ .duration = slot.durationSeconds() }, ctx, v, &counts);
+        }
+    }
+    if (self.sim.mask[ps].inventory) {
+        const ctx: requirements.Ctx = .{ .tags = tags, .held_tags = held, .holding_item_broken = broken };
+        const inv = &self.sim.inventory[ps];
+        const held_slot = inv.heldItem();
+        if (held_slot.count > 0) {
+            if (self.items.byId(held_slot.item_id)) |def| {
+                v = assets_buffs.playerExpGainFold(def.passives, itemQualityAxis(self, held_slot.quality), ctx, v, &counts);
+            }
+        }
+        var esi: usize = ecs.components.inv_equip_start;
+        while (esi < ecs.components.max_inv_slots) : (esi += 1) {
+            const slot = inv.slots[esi];
+            if (slot.count == 0) continue;
+            const def = self.items.byId(slot.item_id) orelse continue;
+            v = assets_buffs.playerExpGainFold(def.passives, itemQualityAxis(self, slot.quality), ctx, v, &counts);
+        }
+    }
+    if (!(v >= 0)) v = 0;
+    // Round toward nearest like a float→int XP grant; clamp to u64.
+    const rounded: u128 = @intFromFloat(@min(v + 0.5, @as(f32, @floatFromInt(std.math.maxInt(u64)))));
+    return @intCast(@min(rounded, @as(u128, std.math.maxInt(u64))));
+}
+
+/// Held-item tags for requirement rows (`HoldingItemHasTags`). Local copy of
+/// tick.zig's helper — that one is file-private.
+fn heldItemTagsForPeer(self: *const Game, ps: ecs.Slot) []const u8 {
+    if (!self.sim.mask[ps].inventory) return "";
+    const inv = &self.sim.inventory[ps];
+    if (inv.holding >= ecs.components.inv_toolbelt) return "";
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return "";
+    const def = self.items.byId(s.item_id) orelse return "";
+    return def.tags;
+}
+
+/// Held ItemValue brokenness for `HoldingItemBroken` (PercentUsesLeft == 0).
+fn holdingItemBrokenForPeer(self: *const Game, ps: ecs.Slot) bool {
+    if (!self.sim.mask[ps].inventory) return false;
+    const inv = &self.sim.inventory[ps];
+    if (inv.holding >= ecs.components.inv_toolbelt) return false;
+    const s = inv.slots[inv.holding];
+    if (s.count == 0 or s.item_id == 0) return false;
+    const def = self.items.byId(s.item_id) orelse return false;
+    const max_use = hooks.maxUseTimes(def, s.quality);
+    if (max_use == 0) return false;
+    return s.use_times >= @as(f32, @floatFromInt(max_use));
 }
 
 /// Item quality as the passive-fold axis (matches the tick's item fold).

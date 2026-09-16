@@ -146,7 +146,17 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
     // Patched-config S2C cache (PRD R8): deflate the same merged bytes the
     // catalogs use, once, for join-phase NetPackageConfigFile sends.
     try @import("config_files.zig").buildCache(allocator, opts.game_dir, opts.config_dir);
-    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path, opts.quest_policy) catch |err| blk: {
+    // Traders before quests: wallet credit sums reward Item rows matching
+    // traders.xml root `currency_item` (stock casinoCoin).
+    if (try assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
+        self.traders.deinit();
+        self.traders = tt;
+    }
+    // Default starter-kit coin + quest reward_coin share traders.xml currency.
+    if (self.traders.currency_item.len > 0) self.sim.currency_item = self.traders.currency_item;
+    var quest_policy = opts.quest_policy;
+    if (self.traders.currency_item.len > 0) quest_policy.currency_item = self.traders.currency_item;
+    if (assets_quests.tryLoad(allocator, opts.game_dir, opts.map_dir, opts.config_dir, opts.quests_path, quest_policy) catch |err| blk: {
         util_log.err("zdtd: quests catalog load failed: {s}\n", .{@errorName(err)});
         break :blk null;
     }) |cat| {
@@ -539,10 +549,6 @@ pub fn loadAssets(self: *Game, allocator: std.mem.Allocator, opts: game_mod.Init
             "zdtd: gamestages spawners={d} stages={d} groups={d} unknown_entitygroups={d}\n",
             .{ self.gamestages.spawners.len, stage_n, self.gamestages.groups.len, missing },
         );
-    }
-    if (try assets_traders.tryLoad(allocator, opts.game_dir, opts.config_dir)) |tt| {
-        self.traders.deinit();
-        self.traders = tt;
     }
     if (try assets_npc.tryLoad(allocator, opts.game_dir, opts.config_dir)) |nt| {
         self.npc.deinit();

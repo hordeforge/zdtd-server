@@ -796,13 +796,15 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                 // own start row sets the cvar that closes the gate.
                 const fg = self.foreignGatedResist(ei, actor_slot);
                 if (fg > 0) {
-                    _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace");
+                    _ = self.addCatalogBuff(d.entity_id, ei, "buffSpectersGrace", d.entity_id);
                 }
                 amount *= 1.0 - fg;
                 // Victim-side hit trigger: the victim's `onOtherAttackedSelf`
                 // rows (concussion/fatigue counters, PackMule display) fire
                 // with the attacker's tags as `other`.
-                self.fireAttackedSelf(ei, actor_slot);
+                self.fireAttackedSelf(ei, actor_slot, d.body_part);
+                // Attacker-side HitLocation gates (onSelfAttackedOther).
+                self.fireAttackedOther(actor_slot, ei, d.body_part);
                 if (self.sim.player[ei].peer_slot >= 0) {
                     // PlayerKillingMode 0 = no PvP: drop player-to-player damage.
                     if (self.pvp_mode == 0 and self.sim.player[ei].peer_slot != @as(i32, @intCast(c.slot)))

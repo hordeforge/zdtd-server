@@ -197,7 +197,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                         if (self.blocks.byId(cur_id)) |bd| {
                             if (bd.harvest_drops.len > 0) count = harvested;
                         }
-                        if (count > 0) self.awardXp(c.slot, hxp *| count);
+                        if (count > 0) self.awardXpTagged(c.slot, hxp *| count, "Harvesting");
                     }
                 }
             } else if (b.damage > 0 or (cur_id != 0 and b.block_id == cur_id and b.damage != cur_dmg)) {
@@ -301,7 +301,7 @@ pub fn handle(self: *Game, c: *Client, peer: *ln_peer.Peer, name: []const u8, bo
                             if (self.blocks.byId(base_cur)) |bd| {
                                 if (bd.harvest_drops.len > 0) count = harvested;
                             }
-                            if (count > 0) self.awardXp(c.slot, hxp *| count);
+                            if (count > 0) self.awardXpTagged(c.slot, hxp *| count, "Harvesting");
                         }
                         place_id = 0;
                         out_dmg = 0;

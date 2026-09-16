@@ -44,6 +44,8 @@ pub const Requirement = struct {
     value_cvar: []const u8 = "",
     /// `InBiome biome="N"`. -1 = absent.
     num: i32 = -1,
+    /// `HitLocation body_parts="Head,..."` OR-mask of EnumBodyPartHit bits.
+    body_parts: i32 = 0,
     target: Target = .self,
     /// `has_all_tags="true"` on a tag-list gate (HoldingItemHasTags/ItemHasTags):
     /// every listed tag must match instead of any one (IL=1C5).
@@ -71,12 +73,88 @@ pub const Kind = enum(u8) {
     unsupported,
     progression_level,
     player_level,
+    /// `IsDayNumber` IL=32: compare `GameUtils.WorldTimeToDays(worldTime)`
+    /// (= clock.day, 1-based) against operation/value. Null Ctx refuses.
+    is_day_number,
+    /// `TimeOfDay` IL=60: compare `world.worldTime % 24000` against
+    /// `DayTimeToWorldTime(h, m, 0)` where XML `value` is hours*100+minutes
+    /// (e.g. 1230). Null Ctx refuses (no clock).
+    time_of_day,
     has_buff,
     is_alive,
+    /// `IsMale` IL=19: target.IsMale. Fill from entity class_id vs
+    /// class_player_male / class_player_female. Null Ctx refuses.
+    is_male,
+    /// `IsCorpse` IL=16: target.IsCorpse(). Fill from Health.corpse_seconds > 0
+    /// (stock dwell timer set on death). Null Ctx refuses.
+    is_corpse,
+    /// `IsSleeping` IL=27: EntityEnemy with IsSleeping set (non-enemy fails).
+    /// Fill from mask.sleeper && !sleeper.awake. Null Ctx refuses.
+    is_sleeping,
+    /// `IsLocalPlayer` IL=23: target is EntityPlayerLocal. Dedicated server
+    /// never hosts EntityPlayerLocal — always false when Ctx is filled.
+    /// Null Ctx refuses.
+    is_local_player,
+    /// `IsFPV` IL=34: EntityPlayerLocal.bFirstPersonView. Dedicated server
+    /// never hosts EntityPlayerLocal — always false when Ctx is filled
+    /// (IL returns invert when target is not local). Null Ctx refuses.
+    is_fpv,
+    /// `IsSheltered` IL=24: EntityPlayerLocal.shelterPercent > 0. Dedicated
+    /// server never hosts EntityPlayerLocal — always false when Ctx is filled
+    /// (IL returns false when target is not local). Null Ctx refuses.
+    is_sheltered,
+    /// `IsSDCS` IL=27: target.emodel is EModelSDCS. Dedicated server never
+    /// hosts Unity EModel* — always false when Ctx is filled. Null Ctx refuses.
+    is_sdcs,
+    /// `IsAlly` IL=36: EntityPlayer && IsFriendOfLocalPlayer() && not
+    /// EntityPlayerLocal. Dedicated server never hosts a local player — always
+    /// false when Ctx is filled. Null Ctx refuses.
+    is_ally,
+    /// `IsOnLadder` IL=19: despite the name, tests `target.IsInElevator()`.
+    /// No elevator flag tracked in sim — always false when Ctx is filled.
+    /// Null Ctx refuses.
+    is_on_ladder,
+    /// `HasAttachedPrefab` IL=53: finds `tempPrefab_` + prefabName under
+    /// Self.RootTransform (Unity). Dedicated server never hosts transforms —
+    /// always false when Ctx is filled. Null Ctx refuses.
+    has_attached_prefab,
+    /// `HasParticle` IL=23: `params.Self.HasParticle(particleName)`. Dedicated
+    /// server never hosts Unity particle FX — always false when Ctx is filled.
+    /// Null Ctx refuses.
+    has_particle,
+    /// `IsLookingAtBlock` IL=8: after RequirementBase::IsValid, stock always
+    /// returns true (raycast stub is empty). Fill true when Ctx is filled.
+    /// Null Ctx refuses.
+    is_looking_at_block,
+    /// `IsLookingAtEntity` base=IsLookingAtBlock: inherits IsValid IL=8 stub
+    /// that always returns true after RequirementBase::IsValid. Fill true when
+    /// Ctx is filled. Null Ctx refuses.
+    is_looking_at_entity,
+    /// `IsIndoors` IL=25: `target.Stats.AmountEnclosed > 0`. Enclosure is not
+    /// tracked yet — AmountEnclosed stays 0 → always false when Ctx is filled.
+    /// Null Ctx refuses. (# ponytail: enclosure model later if indoors passives matter)
+    is_indoors,
     is_attached_to_entity,
     in_biome,
     holding_item_has_tags,
+    /// `HoldingItemBroken`: true when the held ItemValue's PercentUsesLeft
+    /// is 0 (`UseTimes >= MaxUseTimes`). Empty hand / no durability fails
+    /// closed (not broken). Null Ctx refuses (no inventory fold in scope).
+    holding_item_broken,
+    /// `ItemHasTags` IL=43: `params.ItemValue`'s ItemClass tags (HasAnyTags /
+    /// HasAllTags). Empty ItemValue fails closed (IL returns false).
+    item_has_tags,
+    /// `RequirementItemTier` IL=36: `params.ItemValue.Quality` compared with
+    /// the row's op/value. Null ItemValue fails closed (IL returns false).
+    requirement_item_tier,
+    /// `RequirementItemModTier` IL=84: find `mod_name` in ItemValue.Modifications
+    /// (case-insensitive) and compare that mod's Quality. Null ItemValue / no
+    /// matching mod fails closed (IL returns false).
+    requirement_item_mod_tier,
     sandbox_option_bool,
+    /// `GameStatBool` gamestat="…": reads a bool GameStat. Stock only ships
+    /// `BiomeProgression` (GameStats[66]); unknown names refuse.
+    game_stat_bool,
     armor_group_lowest_quality,
     armor_group_count,
     stat_compare_perc_current_to_max,
@@ -99,6 +177,11 @@ pub const Kind = enum(u8) {
     entity_tag_compare,
     /// `IsNight` IL=19: `!World.IsDaytime()`, invert-aware.
     is_night,
+    /// `IsDay` IL=19: World.IsDaytime() (= !isNight). Null Ctx refuses.
+    is_day,
+    /// `IsBloodMoon`: true when the world clock is on a blood-moon night
+    /// (`WorldClock.isBloodMoonNight`). Null Ctx refuses (no clock).
+    is_blood_moon,
     /// `EntityHasMovementTag` IL=47: the target's `CurrentMovementTag` set
     /// (`Test_AnySet` by default, `Test_AllSet` with `has_all_tags`),
     /// invert-aware. zdtd derives idle/walking/running from the client's
@@ -108,6 +191,17 @@ pub const Kind = enum(u8) {
     /// the target's equipment slots (the mod path scans each equipped item's
     /// Modifications array, which zdtd does not model, so a mod context refuses).
     is_equipped,
+    /// `IsItemActive` IL=29: params.ItemValue.get_Activated() (Flags bit 0).
+    /// Only the item fold fills it; buff/perk folds refuse. Null Ctx refuses.
+    is_item_active,
+    /// `IsHeldItem` IL=24: params.ItemValue == holdingItemStack.itemValue.
+    /// On the item fold this is the inverse of `item_equipped` (held row
+    /// true, equip row false). Null Ctx refuses (no item fold).
+    is_held_item,
+    /// `IsInstigator` IL=17: target == params.Instigator. Filled only on the
+    /// damage fold (attacker Self == Instigator → true; victim Self != → false).
+    /// Null Ctx refuses (no damage fold).
+    is_instigator,
     /// `CVarCompare` IL=23: the entity's custom variable against `value`
     /// (a missing name reads 0).
     cvar_compare,
@@ -131,6 +225,9 @@ pub const Kind = enum(u8) {
     /// integration, so the flag is never set and the gate reads false
     /// (stock without Twitch reads the same).
     in_safe_zone,
+    /// `HitLocation` IL=27: `(bodyParts & params.DamageResponse.HitBodyPart) != 0`,
+    /// invert-aware. Null HitBodyPart refuses (no damage fold in scope).
+    hit_location,
     /// `<requirement_group op="and">` (the default when `op` is absent or
     /// unknown): every child must pass. An empty group passes
     /// (`RequirementGroup::EvalAnd` IL=66 returns true with no children).
@@ -174,7 +271,49 @@ pub const BuffNames = struct {
 pub const Ctx = struct {
     levels: []const NameLevel = &.{},
     player_level: u16 = 1,
+    /// `WorldClock.day` for `IsDayNumber` (1-based, same as WorldTimeToDays).
+    /// Null = no clock fold (refuse).
+    day_number: ?u32 = null,
+    /// Within-day world-time ticks (`worldTime % 24000` = trunc(hours*1000))
+    /// for `TimeOfDay`. Null = no clock fold (refuse).
+    time_of_day_ticks: ?u32 = null,
     alive: bool = true,
+    /// EntityPlayer.IsMale for `IsMale`. Null = no identity fold (refuse).
+    is_male: ?bool = null,
+    /// Health.corpse_seconds > 0 for `IsCorpse`. Null = no health fold (refuse).
+    is_corpse: ?bool = null,
+    /// mask.sleeper && !sleeper.awake for `IsSleeping`. Null = no sleeper fold (refuse).
+    is_sleeping: ?bool = null,
+    /// Always false on dedi (no EntityPlayerLocal). Null = no identity fold (refuse).
+    is_local_player: ?bool = null,
+    /// Always false on dedi (no EntityPlayerLocal / bFirstPersonView).
+    /// Null = no identity fold (refuse).
+    is_fpv: ?bool = null,
+    /// Always false on dedi (no EntityPlayerLocal / shelterPercent).
+    /// Null = no identity fold (refuse).
+    is_sheltered: ?bool = null,
+    /// Always false on dedi (no Unity EModelSDCS). Null = no identity fold (refuse).
+    is_sdcs: ?bool = null,
+    /// Always false on dedi (no local player / IsFriendOfLocalPlayer).
+    /// Null = no identity fold (refuse).
+    is_ally: ?bool = null,
+    /// Always false until elevator state is tracked (RE IsOnLadder IL=19 =
+    /// IsInElevator). Null = no identity fold (refuse).
+    is_on_ladder: ?bool = null,
+    /// Always false on dedi (no Unity RootTransform / tempPrefab_*).
+    /// Null = no identity fold (refuse).
+    has_attached_prefab: ?bool = null,
+    /// Always false on dedi (no Unity particle FX). Null = no identity fold (refuse).
+    has_particle: ?bool = null,
+    /// Stock stub always true after base IsValid (RE IsLookingAtBlock IL=8).
+    /// Null = no identity fold (refuse).
+    is_looking_at_block: ?bool = null,
+    /// Stock stub always true after base IsValid (inherits IsLookingAtBlock IL=8).
+    /// Null = no identity fold (refuse).
+    is_looking_at_entity: ?bool = null,
+    /// Always false until AmountEnclosed is tracked (RE IsIndoors IL=25).
+    /// Null = no identity fold (refuse).
+    is_indoors: ?bool = null,
     attached_to_entity: bool = false,
     /// Biome id at the entity (biomes.xml `<biomemap id>`). Null = no biome in
     /// the params, which fails InBiome in BOTH polarities
@@ -192,9 +331,35 @@ pub const Ctx = struct {
     /// reads `Inventory.get_holdingItem().HasAnyTags/HasAllTags`). Empty = an
     /// empty hand, which matches no tag.
     held_tags: []const u8 = "",
+    /// Held ItemValue brokenness for `HoldingItemBroken` (PercentUsesLeft == 0).
+    /// Null = no inventory fold in scope (refuse); false = empty hand / no
+    /// durability / still has uses; true = UseTimes reached MaxUseTimes.
+    holding_item_broken: ?bool = null,
+    /// `params.ItemValue`'s ItemClass `Tags` for `ItemHasTags` (IL=43). Null =
+    /// no ItemValue in scope (buff/perk fold), which refuses rather than
+    /// matching the held hand; empty = empty ItemValue / unknown class (fail).
+    item_tags: ?[]const u8 = null,
+    /// `params.ItemValue.Quality` for `RequirementItemTier` (IL=36). Null = no
+    /// ItemValue in scope (buff/perk fold), which refuses; 0 is a valid quality
+    /// and still evaluates (IL compares the uint as float).
+    item_quality: ?u8 = null,
+    /// Installed mods for `RequirementItemModTier` (IL=84): each entry's
+    /// `name` is the mod ItemClass name and `level` is its Quality. Null =
+    /// no ItemValue in scope (buff/perk fold), which refuses; empty = ItemValue
+    /// with no mods (fail closed, no match).
+    item_mods: ?[]const NameLevel = null,
+    /// `params.DamageResponse.HitBodyPart` for `HitLocation` (IL=27). Null =
+    /// no damage fold in scope, which refuses; 0 = None still evaluates.
+    hit_body_part: ?i16 = null,
+    /// `target == params.Instigator` for `IsInstigator`. Null = no damage fold
+    /// (refuse). True on the attacker fold, false on the victim fold.
+    is_instigator: ?bool = null,
     /// Decoded sandbox code groups (`SandboxOptions.SandboxOptionManager`, see
     /// `assets/sandbox.zig`); `SandboxOptionBool` (IL=18) reads a bool option.
     sandbox_groups: []const sandbox.Group = &.{},
+    /// GameStats[66] `BiomeProgression` for `GameStatBool`. Null = no GameStats
+    /// fold in scope (refuse); true/false = the live wire value.
+    game_stat_biome_progression: ?bool = null,
     /// Live stat fractions and maxes for the StatCompare gates (0..1 fractions;
     /// a non-positive max fails the gate like the IL).
     hp_frac: f32 = 0,
@@ -217,11 +382,19 @@ pub const Ctx = struct {
     /// `World.IsDaytime()` negated, for `IsNight` (IL=19). Null = the caller has
     /// no clock, which refuses the gate rather than guessing a phase.
     is_night: ?bool = null,
+    /// `WorldClock.isNight() == false` for `IsDay`. Null = no clock (refuse).
+    is_day: ?bool = null,
+    /// `WorldClock.isBloodMoonNight()` for `IsBloodMoon`. Null = no clock
+    /// (refuse); true/false = blood-moon night phase.
+    is_blood_moon: ?bool = null,
     /// The row's item sits in an equipment slot, for `IsEquipped` (IL=97).
     /// Null = the fold has no item context (a buff or perk row), so the gate is
     /// refused; true/false = the item fold's own answer. An item in the hand is
     /// NOT equipped (Equipment::GetItems does not include the holding slot).
     item_equipped: ?bool = null,
+    /// `ItemValue.Flags` bit 0 (Activated) for `IsItemActive`. Null = no item
+    /// fold (refuse), same as `item_equipped`.
+    item_active: ?bool = null,
     /// The entity's `CurrentMovementTag` set (`EntityAlive::OnUpdateLive` sets
     /// idle/walking/running from the move direction and `bMovementRunning`), as
     /// a comma list, for `EntityHasMovementTag` (IL=47). Null = the caller has
@@ -239,6 +412,24 @@ pub const Ctx = struct {
     /// = no other entity in scope, which refuses foreign-target rows rather
     /// than reading self.
     other_tags: ?[]const u8 = null,
+    /// Healer/attacker progression ledger for `ProgressionLevel target="instigator"`
+    /// (Physician heal buffs). Null = no instigator in scope → refuse (not self).
+    instigator_levels: ?[]const NameLevel = null,
+    /// The `other` entity's progression ledger for `ProgressionLevel target="other"`
+    /// (e.g. perkBatterUpMetalChain on entity damage). Null = no other in scope → refuse.
+    other_levels: ?[]const NameLevel = null,
+    /// The `other` entity's alive bit for `IsAlive target="other"` (damage path).
+    /// Null = no other in scope → refuse (not self).
+    other_alive: ?bool = null,
+    /// The `other` entity's live buff holder for `HasBuff target="other"` (damage path).
+    /// Paired with `buff_active` (same BuffSink.has). Null = no other → refuse.
+    other_live_buff: ?*const anyopaque = null,
+    /// The `other` entity's corpse bit for `IsCorpse target="other"` (damage path).
+    /// Null = no other in scope → refuse (not self).
+    other_is_corpse: ?bool = null,
+    /// The `other` entity's sleeper bit for `IsSleeping target="other"` (damage path).
+    /// Null = no other in scope → refuse (not self).
+    other_is_sleeping: ?bool = null,
     /// One entry per worn equipment item: the item's `Tags` property as a comma
     /// list (`WornItems` IL=54 walks `Equipment::GetSlotCount` and asks each
     /// item's `ItemClass::HasAnyTags`). Empty = nothing worn.
@@ -315,12 +506,33 @@ pub const Counts = struct {
 pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "ProgressionLevel")) return .progression_level;
     if (std.mem.eql(u8, name, "PlayerLevel")) return .player_level;
+    if (std.mem.eql(u8, name, "IsDayNumber")) return .is_day_number;
+    if (std.mem.eql(u8, name, "TimeOfDay")) return .time_of_day;
     if (std.mem.eql(u8, name, "HasBuff")) return .has_buff;
     if (std.mem.eql(u8, name, "IsAlive")) return .is_alive;
+    if (std.mem.eql(u8, name, "IsMale")) return .is_male;
+    if (std.mem.eql(u8, name, "IsCorpse")) return .is_corpse;
+    if (std.mem.eql(u8, name, "IsSleeping")) return .is_sleeping;
+    if (std.mem.eql(u8, name, "IsLocalPlayer")) return .is_local_player;
+    if (std.mem.eql(u8, name, "IsFPV")) return .is_fpv;
+    if (std.mem.eql(u8, name, "IsSheltered")) return .is_sheltered;
+    if (std.mem.eql(u8, name, "IsSDCS")) return .is_sdcs;
+    if (std.mem.eql(u8, name, "IsAlly")) return .is_ally;
+    if (std.mem.eql(u8, name, "IsOnLadder")) return .is_on_ladder;
+    if (std.mem.eql(u8, name, "HasAttachedPrefab")) return .has_attached_prefab;
+    if (std.mem.eql(u8, name, "HasParticle")) return .has_particle;
+    if (std.mem.eql(u8, name, "IsLookingAtBlock")) return .is_looking_at_block;
+    if (std.mem.eql(u8, name, "IsLookingAtEntity")) return .is_looking_at_entity;
+    if (std.mem.eql(u8, name, "IsIndoors")) return .is_indoors;
     if (std.mem.eql(u8, name, "IsAttachedToEntity")) return .is_attached_to_entity;
     if (std.mem.eql(u8, name, "InBiome")) return .in_biome;
     if (std.mem.eql(u8, name, "HoldingItemHasTags")) return .holding_item_has_tags;
+    if (std.mem.eql(u8, name, "HoldingItemBroken")) return .holding_item_broken;
+    if (std.mem.eql(u8, name, "ItemHasTags")) return .item_has_tags;
+    if (std.mem.eql(u8, name, "RequirementItemTier")) return .requirement_item_tier;
+    if (std.mem.eql(u8, name, "RequirementItemModTier")) return .requirement_item_mod_tier;
     if (std.mem.eql(u8, name, "SandboxOptionBool")) return .sandbox_option_bool;
+    if (std.mem.eql(u8, name, "GameStatBool")) return .game_stat_bool;
     if (std.mem.eql(u8, name, "ArmorGroupLowestQuality")) return .armor_group_lowest_quality;
     if (std.mem.eql(u8, name, "ArmorGroupCount")) return .armor_group_count;
     if (std.mem.eql(u8, name, "StatComparePercCurrentToMax")) return .stat_compare_perc_current_to_max;
@@ -331,7 +543,11 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "StatCompareCurrent")) return .stat_compare_current;
     if (std.mem.eql(u8, name, "EntityTagCompare")) return .entity_tag_compare;
     if (std.mem.eql(u8, name, "IsNight")) return .is_night;
+    if (std.mem.eql(u8, name, "IsBloodMoon")) return .is_blood_moon;
     if (std.mem.eql(u8, name, "IsEquipped")) return .is_equipped;
+    if (std.mem.eql(u8, name, "IsItemActive")) return .is_item_active;
+    if (std.mem.eql(u8, name, "IsHeldItem")) return .is_held_item;
+    if (std.mem.eql(u8, name, "IsInstigator")) return .is_instigator;
     if (std.mem.eql(u8, name, "EntityHasMovementTag")) return .entity_has_movement_tag;
     if (std.mem.eql(u8, name, "CVarCompare")) return .cvar_compare;
     if (std.mem.eql(u8, name, "WornItems")) return .worn_items;
@@ -339,6 +555,7 @@ pub fn kindOf(name: []const u8) Kind {
     if (std.mem.eql(u8, name, "PerksUnlocked")) return .perks_unlocked;
     if (std.mem.eql(u8, name, "IsStatAtMax")) return .is_stat_at_max;
     if (std.mem.eql(u8, name, "InSafeZone")) return .in_safe_zone;
+    if (std.mem.eql(u8, name, "HitLocation")) return .hit_location;
     return .unsupported;
 }
 
@@ -392,12 +609,15 @@ pub fn parse(hay: []const u8, tag_start: usize, arena: std.mem.Allocator) std.me
     r.arg = try arena.dupe(u8, xml.attr(hay, tag_start, "progression_name") orelse
         xml.attr(hay, tag_start, "cvar") orelse
         xml.attr(hay, tag_start, "option") orelse
+        xml.attr(hay, tag_start, "gamestat") orelse
         xml.attr(hay, tag_start, "group_name") orelse
         xml.attr(hay, tag_start, "stat") orelse
         xml.attr(hay, tag_start, "skill_name") orelse
-        xml.attr(hay, tag_start, "key") orelse "");
+        xml.attr(hay, tag_start, "key") orelse
+        xml.attr(hay, tag_start, "mod_name") orelse "");
     r.list = try arena.dupe(u8, xml.attr(hay, tag_start, "buff") orelse
         xml.attr(hay, tag_start, "tags") orelse "");
+    if (xml.attr(hay, tag_start, "body_parts")) |bp| r.body_parts = parseBodyParts(bp);
     return r;
 }
 
@@ -487,6 +707,104 @@ fn evalHoldingItemHasTags(r: Requirement, ctx: Ctx) Verdict {
     return verdict(matched, r.negated);
 }
 
+/// `ItemHasTags::IsValid` (IL=43): same any-of/all-of match as HoldingItemHasTags,
+/// but against `params.ItemValue`'s ItemClass tags. Null `item_tags` = no
+/// ItemValue in scope (buff/perk fold) → refuse; empty = empty ItemValue → fail.
+fn evalItemHasTags(r: Requirement, ctx: Ctx) Verdict {
+    const tags = ctx.item_tags orelse return .unsupported;
+    var matched = r.has_all;
+    var seen = false;
+    var it = std.mem.splitScalar(u8, r.list, ',');
+    while (it.next()) |seg| {
+        const tag = std.mem.trim(u8, seg, " \t");
+        if (tag.len == 0) continue;
+        seen = true;
+        const hit = tags.len > 0 and tagListHas(tags, tag);
+        if (r.has_all) {
+            if (!hit) {
+                matched = false;
+                break;
+            }
+        } else if (hit) {
+            matched = true;
+            break;
+        }
+    }
+    if (!seen) matched = r.has_all;
+    return verdict(matched, r.negated);
+}
+
+/// `RequirementItemTier::IsValid` (IL=36): compares `params.ItemValue.Quality`
+/// with the row's op/value. Null ItemValue refuses (no item fold in scope);
+/// a present quality of 0 still evaluates (IL compares the uint as float).
+fn evalRequirementItemTier(r: Requirement, ctx: Ctx) Verdict {
+    const q = ctx.item_quality orelse return .unsupported;
+    return verdict(compare(@floatFromInt(q), r.op, operand(ctx, r)), r.negated);
+}
+
+/// `RequirementItemModTier::IsValid` (IL=84): scan Modifications for
+/// `mod_name` (case-insensitive), then compareValues(Quality, op, value).
+fn evalRequirementItemModTier(r: Requirement, ctx: Ctx) Verdict {
+    const mods = ctx.item_mods orelse return .unsupported;
+    if (r.arg.len == 0) return .unsupported;
+    var q: ?u8 = null;
+    for (mods) |m| {
+        if (m.name.len == 0) continue;
+        if (std.ascii.eqlIgnoreCase(m.name, r.arg)) {
+            q = m.level;
+            break;
+        }
+    }
+    const quality = q orelse return verdict(false, r.negated);
+    return verdict(compare(@floatFromInt(quality), r.op, operand(ctx, r)), r.negated);
+}
+
+/// `HitLocation::IsValid` (IL=27): `(bodyParts & HitBodyPart) != 0`, inverted
+/// by `invert`. Null HitBodyPart refuses (no damage fold in scope).
+fn evalHitLocation(r: Requirement, ctx: Ctx) Verdict {
+    const hit = ctx.hit_body_part orelse return .unsupported;
+    const matched = (r.body_parts & @as(i32, hit)) != 0;
+    return verdict(matched, r.negated);
+}
+
+/// Stock `EnumBodyPartHit` flag bits (components.zig comment + Extensions
+/// masks). Unknown names contribute 0 so a typo fails closed rather than
+/// matching everything.
+fn parseBodyParts(s: []const u8) i32 {
+    var mask: i32 = 0;
+    var it = std.mem.splitScalar(u8, s, ',');
+    while (it.next()) |seg| {
+        const n = std.mem.trim(u8, seg, " \t");
+        if (n.len == 0) continue;
+        mask |= bodyPartBit(n);
+    }
+    return mask;
+}
+
+fn bodyPartBit(name: []const u8) i32 {
+    // Exact stock spellings from EnumBodyPartHit / progression.xml.
+    if (std.mem.eql(u8, name, "Torso")) return 1;
+    if (std.mem.eql(u8, name, "Head")) return 2;
+    if (std.mem.eql(u8, name, "LeftUpperArm")) return 4;
+    if (std.mem.eql(u8, name, "RightUpperArm")) return 8;
+    if (std.mem.eql(u8, name, "LeftUpperLeg")) return 16;
+    if (std.mem.eql(u8, name, "RightUpperLeg")) return 32;
+    if (std.mem.eql(u8, name, "LeftLowerArm")) return 64;
+    if (std.mem.eql(u8, name, "RightLowerArm")) return 128;
+    if (std.mem.eql(u8, name, "LeftLowerLeg")) return 256;
+    if (std.mem.eql(u8, name, "RightLowerLeg")) return 512;
+    if (std.mem.eql(u8, name, "Special") or std.mem.eql(u8, name, "secondary")) return 1024;
+    // Stock shorthand in progression.xml (`xxleg,secondary`); treat as Legs.
+    if (std.mem.eql(u8, name, "xxleg")) return 816;
+    if (std.mem.eql(u8, name, "UpperArms")) return 12;
+    if (std.mem.eql(u8, name, "LowerArms")) return 192;
+    if (std.mem.eql(u8, name, "Arms")) return 204;
+    if (std.mem.eql(u8, name, "UpperLegs")) return 48;
+    if (std.mem.eql(u8, name, "LowerLegs")) return 768;
+    if (std.mem.eql(u8, name, "Legs")) return 816;
+    return 0;
+}
+
 /// `SandboxOptionBool::IsValid` (IL=18): `SandboxOptionManager.GetBool` of the
 /// named option, which is the decoded sandbox code's index or the option
 /// default when the code does not carry it (the stock override list is empty:
@@ -502,6 +820,14 @@ fn evalSandboxOptionBool(r: Requirement, ctx: Ctx) Verdict {
         break;
     }
     return verdict(value, r.negated);
+}
+
+/// `GameStatBool::IsValid`: bool GameStat by `gamestat=` name. Stock only
+/// ships BiomeProgression (GameStats[66]); unknown names refuse.
+fn evalGameStatBool(r: Requirement, ctx: Ctx) Verdict {
+    if (!std.mem.eql(u8, r.arg, "BiomeProgression")) return .unsupported;
+    const v = ctx.game_stat_biome_progression orelse return .unsupported;
+    return verdict(v, r.negated);
 }
 
 /// `ArmorGroupLowestQuality::IsValid` (IL=34): compares
@@ -630,12 +956,154 @@ fn evalIsNight(r: Requirement, ctx: Ctx) Verdict {
     return verdict(night, r.negated);
 }
 
+/// `IsDay::IsValid` IL=19: World.IsDaytime() (= !isNight).
+fn evalIsDay(r: Requirement, ctx: Ctx) Verdict {
+    const day = ctx.is_day orelse return .unsupported;
+    return verdict(day, r.negated);
+}
+
+/// `IsMale::IsValid` IL=19: target.IsMale, invert-aware.
+fn evalIsMale(r: Requirement, ctx: Ctx) Verdict {
+    const male = ctx.is_male orelse return .unsupported;
+    return verdict(male, r.negated);
+}
+
+/// `IsCorpse::IsValid` IL=16: target.IsCorpse() (= corpse dwell active).
+fn evalIsCorpse(r: Requirement, ctx: Ctx) Verdict {
+    const corpse = ctx.is_corpse orelse return .unsupported;
+    return verdict(corpse, r.negated);
+}
+
+/// `IsSleeping::IsValid` IL=27: EntityEnemy sleeper not yet awake.
+fn evalIsSleeping(r: Requirement, ctx: Ctx) Verdict {
+    const sleeping = ctx.is_sleeping orelse return .unsupported;
+    return verdict(sleeping, r.negated);
+}
+
+/// `IsLocalPlayer::IsValid` IL=23: EntityPlayerLocal only exists client-side.
+fn evalIsLocalPlayer(r: Requirement, ctx: Ctx) Verdict {
+    const local = ctx.is_local_player orelse return .unsupported;
+    return verdict(local, r.negated);
+}
+
+/// `IsFPV::IsValid` IL=34: EntityPlayerLocal.bFirstPersonView; non-local → false.
+fn evalIsFpv(r: Requirement, ctx: Ctx) Verdict {
+    const fpv = ctx.is_fpv orelse return .unsupported;
+    return verdict(fpv, r.negated);
+}
+
+/// `IsSheltered::IsValid` IL=24: EntityPlayerLocal.shelterPercent > 0; non-local → false.
+fn evalIsSheltered(r: Requirement, ctx: Ctx) Verdict {
+    const sheltered = ctx.is_sheltered orelse return .unsupported;
+    return verdict(sheltered, r.negated);
+}
+
+/// `IsSDCS::IsValid` IL=27: emodel is EModelSDCS; no Unity model on dedi → false.
+fn evalIsSdcs(r: Requirement, ctx: Ctx) Verdict {
+    const sdcs = ctx.is_sdcs orelse return .unsupported;
+    return verdict(sdcs, r.negated);
+}
+
+/// `IsAlly::IsValid` IL=36: IsFriendOfLocalPlayer; no local player on dedi → false.
+fn evalIsAlly(r: Requirement, ctx: Ctx) Verdict {
+    const ally = ctx.is_ally orelse return .unsupported;
+    return verdict(ally, r.negated);
+}
+
+/// `IsOnLadder::IsValid` IL=19: IsInElevator(); no elevator flag in sim → false.
+fn evalIsOnLadder(r: Requirement, ctx: Ctx) Verdict {
+    const on_ladder = ctx.is_on_ladder orelse return .unsupported;
+    return verdict(on_ladder, r.negated);
+}
+
+/// `HasAttachedPrefab::IsValid` IL=53: Unity RootTransform child; no transforms on dedi → false.
+fn evalHasAttachedPrefab(r: Requirement, ctx: Ctx) Verdict {
+    const attached = ctx.has_attached_prefab orelse return .unsupported;
+    return verdict(attached, r.negated);
+}
+
+/// `HasParticle::IsValid` IL=23: Self.HasParticle; no particle FX on dedi → false.
+fn evalHasParticle(r: Requirement, ctx: Ctx) Verdict {
+    const particle = ctx.has_particle orelse return .unsupported;
+    return verdict(particle, r.negated);
+}
+
+/// `IsLookingAtBlock::IsValid` IL=8: stock stub returns true after base check.
+fn evalIsLookingAtBlock(r: Requirement, ctx: Ctx) Verdict {
+    const looking = ctx.is_looking_at_block orelse return .unsupported;
+    return verdict(looking, r.negated);
+}
+
+/// `IsLookingAtEntity::IsValid`: inherits IsLookingAtBlock stub → true after base check.
+fn evalIsLookingAtEntity(r: Requirement, ctx: Ctx) Verdict {
+    const looking = ctx.is_looking_at_entity orelse return .unsupported;
+    return verdict(looking, r.negated);
+}
+
+/// `IsIndoors::IsValid` IL=25: AmountEnclosed > 0; untracked → 0 → false.
+fn evalIsIndoors(r: Requirement, ctx: Ctx) Verdict {
+    const indoors = ctx.is_indoors orelse return .unsupported;
+    return verdict(indoors, r.negated);
+}
+
+/// `IsBloodMoon::IsValid`: world clock is on a blood-moon night.
+fn evalIsBloodMoon(r: Requirement, ctx: Ctx) Verdict {
+    const bm = ctx.is_blood_moon orelse return .unsupported;
+    return verdict(bm, r.negated);
+}
+
+/// `IsDayNumber::IsValid` IL=32: compare WorldTimeToDays (= clock.day) vs value.
+fn evalIsDayNumber(r: Requirement, ctx: Ctx) Verdict {
+    const day = ctx.day_number orelse return .unsupported;
+    return verdict(compare(@floatFromInt(day), r.op, operand(ctx, r)), r.negated);
+}
+
+/// `TimeOfDay::IsValid` IL=60: compare worldTime%24000 vs DayTimeToWorldTime(HHMM).
+/// XML value is hours*100+minutes; stock converts via DayTimeToWorldTime(h,m,0)
+/// (= h*1000 + m*1000/60) then compareValues against the within-day tick.
+fn evalTimeOfDay(r: Requirement, ctx: Ctx) Verdict {
+    const ticks = ctx.time_of_day_ticks orelse return .unsupported;
+    const hhmm = operand(ctx, r);
+    const hours: f32 = @trunc(hhmm / 100.0);
+    const minutes: f32 = hhmm - hours * 100.0;
+    // DayTimeToWorldTime(h, m, 0): 1000 ticks/hour, 1000/60 per minute.
+    const time_value: f32 = hours * 1000.0 + minutes * (1000.0 / 60.0);
+    return verdict(compare(@floatFromInt(ticks), r.op, time_value), r.negated);
+}
+
+/// `HoldingItemBroken::IsValid`: held ItemValue PercentUsesLeft == 0
+/// (`UseTimes >= MaxUseTimes`). Null Ctx refuses; empty hand / no durability
+/// is not broken (IL returns false).
+fn evalHoldingItemBroken(r: Requirement, ctx: Ctx) Verdict {
+    const broken = ctx.holding_item_broken orelse return .unsupported;
+    return verdict(broken, r.negated);
+}
+
 /// `IsEquipped::IsValid` IL=97: the row's item value is in an equipment slot.
 /// The caller supplies that answer for the fold it is running (equipment true,
 /// holding false, mods unsupported); a caller with no item context refuses.
 fn evalIsEquipped(r: Requirement, ctx: Ctx) Verdict {
     const equipped = ctx.item_equipped orelse return .unsupported;
     return verdict(equipped, r.negated);
+}
+
+/// `IsItemActive::IsValid` IL=29: params.ItemValue.get_Activated() (Flags & 1).
+fn evalIsItemActive(r: Requirement, ctx: Ctx) Verdict {
+    const active = ctx.item_active orelse return .unsupported;
+    return verdict(active, r.negated);
+}
+
+/// `IsHeldItem::IsValid` IL=24: params.ItemValue == holding stack.
+/// Item fold fills `item_equipped`; held ⇒ false ⇒ held-item true.
+fn evalIsHeldItem(r: Requirement, ctx: Ctx) Verdict {
+    const equipped = ctx.item_equipped orelse return .unsupported;
+    return verdict(!equipped, r.negated);
+}
+
+/// `IsInstigator::IsValid` IL=17: target == params.Instigator.
+fn evalIsInstigator(r: Requirement, ctx: Ctx) Verdict {
+    const instigator = ctx.is_instigator orelse return .unsupported;
+    return verdict(instigator, r.negated);
 }
 
 /// `EntityHasMovementTag::IsValid` IL=47: the target's `CurrentMovementTag` set
@@ -825,19 +1293,42 @@ fn evalOne(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
 
 fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
     // TargetedCompareRequirementBase::IsValid (IL=51) resolves `other` and
-    // `instigator` from MinEventParams. Only `EntityTagCompare` evaluates
-    // foreign: against `ctx.other_tags` (the damage path's attacker tags)
-    // when supplied, refusing without it rather than reading self. Every
-    // other foreign kind refuses (its input is the other's stat/buff/cvar,
-    // which no caller supplies).
-    // `instigator` has no supplier yet and always refuses.
-    if (r.target != .self and r.kind != .entity_tag_compare) return .unsupported;
+    // `instigator` from MinEventParams. Foreign kinds that have a supplier:
+    //   EntityTagCompare + other_tags (damage path)
+    //   ProgressionLevel + instigator_levels (Physician heal buffs)
+    //   ProgressionLevel + other_levels (BatterUpMetalChain / entity damage)
+    //   IsAlive + other_alive (damage path)
+    //   HasBuff + other_live_buff (damage path; BuffSink.has)
+    //   IsCorpse + other_is_corpse / IsSleeping + other_is_sleeping (damage path)
+    // Everything else refuses rather than reading self.
+    if (r.target != .self and r.kind != .entity_tag_compare and r.kind != .progression_level and r.kind != .is_alive and r.kind != .has_buff and r.kind != .is_corpse and r.kind != .is_sleeping)
+        return .unsupported;
     var use_ctx = ctx;
     if (r.target == .other) {
-        const ot = ctx.other_tags orelse return .unsupported;
-        use_ctx.entity_tags = ot;
+        if (r.kind == .entity_tag_compare) {
+            const ot = ctx.other_tags orelse return .unsupported;
+            use_ctx.entity_tags = ot;
+        } else if (r.kind == .progression_level) {
+            const ol = ctx.other_levels orelse return .unsupported;
+            use_ctx.levels = ol;
+        } else if (r.kind == .is_alive) {
+            const oa = ctx.other_alive orelse return .unsupported;
+            use_ctx.alive = oa;
+        } else if (r.kind == .has_buff) {
+            const olb = ctx.other_live_buff orelse return .unsupported;
+            use_ctx.live_buff = olb;
+            // buff_active stays (BuffSink.has); live_buff holder is the other entity.
+        } else if (r.kind == .is_corpse) {
+            const oc = ctx.other_is_corpse orelse return .unsupported;
+            use_ctx.is_corpse = oc;
+        } else if (r.kind == .is_sleeping) {
+            const os = ctx.other_is_sleeping orelse return .unsupported;
+            use_ctx.is_sleeping = os;
+        } else return .unsupported;
     } else if (r.target == .instigator) {
-        return .unsupported;
+        if (r.kind != .progression_level) return .unsupported;
+        const il = ctx.instigator_levels orelse return .unsupported;
+        use_ctx.levels = il;
     }
     switch (r.kind) {
         .unsupported => return .unsupported,
@@ -849,15 +1340,37 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .progression_level => {
             // ProgressionLevel::IsValid returns false when the target has no
             // such progression value, before `invert` is read.
-            const lvl = levelOf(ctx.levels, r.arg) orelse return .fail;
-            return verdict(compare(@floatFromInt(lvl), r.op, operand(ctx, r)), r.negated);
+            const lvl = levelOf(use_ctx.levels, r.arg) orelse return .fail;
+            return verdict(compare(@floatFromInt(lvl), r.op, operand(use_ctx, r)), r.negated);
         },
         .player_level => return verdict(compare(@floatFromInt(ctx.player_level), r.op, operand(ctx, r)), r.negated),
-        .has_buff => return evalHasBuff(r, ctx),
-        .is_alive => return verdict(ctx.alive, r.negated),
+        .is_day_number => return evalIsDayNumber(r, ctx),
+        .time_of_day => return evalTimeOfDay(r, ctx),
+        .has_buff => return evalHasBuff(r, use_ctx),
+        .is_alive => return verdict(use_ctx.alive, r.negated),
+        .is_male => return evalIsMale(r, ctx),
+        .is_corpse => return evalIsCorpse(r, use_ctx),
+        .is_sleeping => return evalIsSleeping(r, use_ctx),
+        .is_local_player => return evalIsLocalPlayer(r, ctx),
+        .is_fpv => return evalIsFpv(r, ctx),
+        .is_sheltered => return evalIsSheltered(r, ctx),
+        .is_sdcs => return evalIsSdcs(r, ctx),
+        .is_ally => return evalIsAlly(r, ctx),
+        .is_on_ladder => return evalIsOnLadder(r, ctx),
+        .has_attached_prefab => return evalHasAttachedPrefab(r, ctx),
+        .has_particle => return evalHasParticle(r, ctx),
+        .is_looking_at_block => return evalIsLookingAtBlock(r, ctx),
+        .is_looking_at_entity => return evalIsLookingAtEntity(r, ctx),
+        .is_indoors => return evalIsIndoors(r, ctx),
         .is_attached_to_entity => return verdict(ctx.attached_to_entity, r.negated),
         .holding_item_has_tags => return evalHoldingItemHasTags(r, ctx),
+        .holding_item_broken => return evalHoldingItemBroken(r, ctx),
+        .item_has_tags => return evalItemHasTags(r, ctx),
+        .requirement_item_tier => return evalRequirementItemTier(r, ctx),
+        .requirement_item_mod_tier => return evalRequirementItemModTier(r, ctx),
+        .hit_location => return evalHitLocation(r, ctx),
         .sandbox_option_bool => return evalSandboxOptionBool(r, ctx),
+        .game_stat_bool => return evalGameStatBool(r, ctx),
         .armor_group_lowest_quality => return evalArmorGroupLowestQuality(r, ctx),
         .armor_group_count => return evalArmorGroupCount(r, ctx),
         .stat_compare_perc_current_to_max => return evalStatComparePercCurrentToMax(r, ctx),
@@ -868,7 +1381,12 @@ fn evalLeaf(r: Requirement, ctx: Ctx, counts: *Counts) Verdict {
         .stat_compare_current => return evalStatCompareCurrent(r, ctx),
         .entity_tag_compare => return evalEntityTagCompare(r, use_ctx),
         .is_night => return evalIsNight(r, ctx),
+        .is_day => return evalIsDay(r, ctx),
+        .is_blood_moon => return evalIsBloodMoon(r, ctx),
         .is_equipped => return evalIsEquipped(r, ctx),
+        .is_item_active => return evalIsItemActive(r, ctx),
+        .is_held_item => return evalIsHeldItem(r, ctx),
+        .is_instigator => return evalIsInstigator(r, ctx),
         .entity_has_movement_tag => return evalEntityHasMovementTag(r, ctx),
         .cvar_compare => return evalCvarCompare(r, ctx),
         .worn_items => return evalWornItems(r, ctx),
@@ -1085,6 +1603,79 @@ test "HoldingItemHasTags matches the held item's tags" {
     try testing.expect(all(&.{.{ .kind = .holding_item_has_tags, .list = " gun , T0 " }}, ctx));
 }
 
+test "ItemHasTags matches params.ItemValue class tags" {
+    const any = Requirement{ .kind = .item_has_tags, .list = "perkGunslinger,melee" };
+    const all_tags = Requirement{ .kind = .item_has_tags, .list = "perkGunslinger,gun", .has_all = true };
+    const neg = Requirement{ .kind = .item_has_tags, .negated = true, .list = "perkGunslinger" };
+    // No ItemValue in scope (buff/perk fold): refuse closed.
+    try testing.expect(!all(&.{any}, .{}));
+    try testing.expect(!all(&.{all_tags}, .{}));
+    try testing.expect(!all(&.{neg}, .{}));
+    // Empty ItemValue / unknown class: fail (IL returns false before invert).
+    const empty = Ctx{ .item_tags = "" };
+    try testing.expect(!all(&.{any}, empty));
+    try testing.expect(!all(&.{all_tags}, empty));
+    try testing.expect(all(&.{neg}, empty));
+    const ctx = Ctx{ .item_tags = "T0,perkGunslinger,gun" };
+    try testing.expect(all(&.{any}, ctx));
+    try testing.expect(all(&.{all_tags}, ctx));
+    try testing.expect(!all(&.{neg}, ctx));
+    try testing.expect(!all(&.{.{ .kind = .item_has_tags, .list = "perkGunslinger,axe", .has_all = true }}, ctx));
+    try testing.expect(!all(&.{.{ .kind = .item_has_tags, .list = "perkGun" }}, ctx));
+}
+
+test "RequirementItemTier compares params.ItemValue.Quality" {
+    const eq = Requirement{ .kind = .requirement_item_tier, .op = .eq, .value = 3 };
+    const gte = Requirement{ .kind = .requirement_item_tier, .op = .ge, .value = 2 };
+    const neg = Requirement{ .kind = .requirement_item_tier, .negated = true, .op = .eq, .value = 3 };
+    // No ItemValue in scope (buff/perk fold): refuse closed.
+    try testing.expect(!all(&.{eq}, .{}));
+    const q0 = Ctx{ .item_quality = 0 };
+    try testing.expect(!all(&.{eq}, q0));
+    try testing.expect(all(&.{neg}, q0));
+    const q3 = Ctx{ .item_quality = 3 };
+    try testing.expect(all(&.{eq}, q3));
+    try testing.expect(all(&.{gte}, q3));
+    try testing.expect(!all(&.{neg}, q3));
+}
+
+test "RequirementItemModTier compares matching mod Quality" {
+    const eq = Requirement{ .kind = .requirement_item_mod_tier, .op = .eq, .value = 2, .arg = "modGunCrippleEm" };
+    const ge = Requirement{ .kind = .requirement_item_mod_tier, .op = .ge, .value = 2, .arg = "modGunCrippleEm" };
+    const miss = Requirement{ .kind = .requirement_item_mod_tier, .op = .eq, .value = 1, .arg = "modMissing" };
+    // No ItemValue in scope: refuse closed.
+    try testing.expect(!all(&.{eq}, .{}));
+    const mods = [_]NameLevel{
+        .{ .name = "modOther", .level = 6 },
+        .{ .name = "modGunCrippleEm", .level = 2 },
+    };
+    const ctx = Ctx{ .item_mods = &mods };
+    try testing.expect(all(&.{eq}, ctx));
+    try testing.expect(all(&.{ge}, ctx));
+    try testing.expect(!all(&.{miss}, ctx));
+    // Case-insensitive name match (stock EqualsCaseInsensitive).
+    const ci = Requirement{ .kind = .requirement_item_mod_tier, .op = .eq, .value = 2, .arg = "MODGUNCRIPPLEEM" };
+    try testing.expect(all(&.{ci}, ctx));
+}
+
+test "HitLocation matches DamageResponse.HitBodyPart" {
+    const head = Requirement{ .kind = .hit_location, .body_parts = 2 };
+    const legs = Requirement{ .kind = .hit_location, .body_parts = 16 | 32 | 256 | 512 };
+    const neg = Requirement{ .kind = .hit_location, .negated = true, .body_parts = 2 };
+    try testing.expect(!all(&.{head}, .{})); // no damage fold
+    const h = Ctx{ .hit_body_part = 2 };
+    try testing.expect(all(&.{head}, h));
+    try testing.expect(!all(&.{legs}, h));
+    try testing.expect(!all(&.{neg}, h));
+    const l = Ctx{ .hit_body_part = 16 };
+    try testing.expect(all(&.{legs}, l));
+    try testing.expect(!all(&.{head}, l));
+    try testing.expectEqual(@as(i32, 2), parseBodyParts("Head"));
+    try testing.expectEqual(@as(i32, 816), parseBodyParts("LeftUpperLeg,RightUpperLeg,LeftLowerLeg,RightLowerLeg"));
+    try testing.expectEqual(@as(i32, 816), parseBodyParts("xxleg"));
+    try testing.expectEqual(@as(i32, 1024), parseBodyParts("secondary"));
+}
+
 test "ArmorGroupLowestQuality reads the worn group's lowest quality" {
     const req = Requirement{ .kind = .armor_group_lowest_quality, .arg = "groupBiker", .op = .eq, .value = 3 };
     const groups = [_]ArmorGroup{
@@ -1221,6 +1812,45 @@ test "IsEquipped answers from the item fold's own context" {
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
+test "IsItemActive answers from the item fold and refuses without one" {
+    // IsItemActive IL=29: Flags bit 0 (Activated) on params.ItemValue.
+    // Only the item fold knows that, so a buff/perk fold (null) refuses.
+    const active = Requirement{ .kind = .is_item_active, .name = "IsItemActive" };
+    try testing.expect(all(&.{active}, .{ .item_active = true }));
+    try testing.expect(!all(&.{active}, .{ .item_active = false }));
+    const inverted = Requirement{ .kind = .is_item_active, .name = "IsItemActive", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .item_active = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{active}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsHeldItem is the inverse of item_equipped on the item fold" {
+    // IsHeldItem IL=24: params.ItemValue == holdingItemStack.itemValue.
+    // Item fold: held row item_equipped=false → held; equip row true → not held.
+    const held = Requirement{ .kind = .is_held_item, .name = "IsHeldItem" };
+    try testing.expect(all(&.{held}, .{ .item_equipped = false }));
+    try testing.expect(!all(&.{held}, .{ .item_equipped = true }));
+    const inverted = Requirement{ .kind = .is_held_item, .name = "IsHeldItem", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .item_equipped = true }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{held}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsInstigator answers from the damage fold and refuses without one" {
+    // IsInstigator IL=17: target == params.Instigator.
+    // Attacker fold → true; victim fold → false; no damage fold → refuse.
+    const inst = Requirement{ .kind = .is_instigator, .name = "IsInstigator" };
+    try testing.expect(all(&.{inst}, .{ .is_instigator = true }));
+    try testing.expect(!all(&.{inst}, .{ .is_instigator = false }));
+    const inverted = Requirement{ .kind = .is_instigator, .name = "IsInstigator", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_instigator = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{inst}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
 test "EntityHasMovementTag matches the live movement tag set" {
     // EntityHasMovementTag IL=47: Test_AnySet by default, Test_AllSet with
     // has_all_tags, invert-aware. perkHardTarget's row is the shipped
@@ -1251,6 +1881,194 @@ test "IsNight reads the clock and refuses without one" {
     try testing.expect(all(&.{inverted}, .{ .is_night = false }));
     var counts: Counts = .{};
     try testing.expectEqual(Verdict.unsupported, evaluate(&.{night}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsDay reads the clock and refuses without one" {
+    const day = Requirement{ .kind = .is_day, .name = "IsDay" };
+    try testing.expect(all(&.{day}, .{ .is_day = true }));
+    try testing.expect(!all(&.{day}, .{ .is_day = false }));
+    const inverted = Requirement{ .kind = .is_day, .name = "IsDay", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_day = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{day}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsMale reads gender and refuses without identity" {
+    const male = Requirement{ .kind = .is_male, .name = "IsMale" };
+    try testing.expect(all(&.{male}, .{ .is_male = true }));
+    try testing.expect(!all(&.{male}, .{ .is_male = false }));
+    const inverted = Requirement{ .kind = .is_male, .name = "IsMale", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_male = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{male}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsCorpse reads corpse dwell and refuses without health" {
+    const corpse = Requirement{ .kind = .is_corpse, .name = "IsCorpse" };
+    try testing.expect(all(&.{corpse}, .{ .is_corpse = true }));
+    try testing.expect(!all(&.{corpse}, .{ .is_corpse = false }));
+    const inverted = Requirement{ .kind = .is_corpse, .name = "IsCorpse", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_corpse = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{corpse}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsSleeping reads sleeper state and refuses without fold" {
+    const sleeping = Requirement{ .kind = .is_sleeping, .name = "IsSleeping" };
+    try testing.expect(all(&.{sleeping}, .{ .is_sleeping = true }));
+    try testing.expect(!all(&.{sleeping}, .{ .is_sleeping = false }));
+    const inverted = Requirement{ .kind = .is_sleeping, .name = "IsSleeping", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_sleeping = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{sleeping}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsLocalPlayer is false on dedi and refuses without fold" {
+    const local = Requirement{ .kind = .is_local_player, .name = "IsLocalPlayer" };
+    try testing.expect(!all(&.{local}, .{ .is_local_player = false }));
+    try testing.expect(all(&.{local}, .{ .is_local_player = true }));
+    const inverted = Requirement{ .kind = .is_local_player, .name = "IsLocalPlayer", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_local_player = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{local}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsFPV is false on dedi and refuses without fold" {
+    const fpv = Requirement{ .kind = .is_fpv, .name = "IsFPV" };
+    try testing.expect(!all(&.{fpv}, .{ .is_fpv = false }));
+    try testing.expect(all(&.{fpv}, .{ .is_fpv = true }));
+    const inverted = Requirement{ .kind = .is_fpv, .name = "IsFPV", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_fpv = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{fpv}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsSheltered is false on dedi and refuses without fold" {
+    const sheltered = Requirement{ .kind = .is_sheltered, .name = "IsSheltered" };
+    try testing.expect(!all(&.{sheltered}, .{ .is_sheltered = false }));
+    try testing.expect(all(&.{sheltered}, .{ .is_sheltered = true }));
+    const inverted = Requirement{ .kind = .is_sheltered, .name = "IsSheltered", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_sheltered = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{sheltered}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsSDCS is false on dedi and refuses without fold" {
+    const sdcs = Requirement{ .kind = .is_sdcs, .name = "IsSDCS" };
+    try testing.expect(!all(&.{sdcs}, .{ .is_sdcs = false }));
+    try testing.expect(all(&.{sdcs}, .{ .is_sdcs = true }));
+    const inverted = Requirement{ .kind = .is_sdcs, .name = "IsSDCS", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_sdcs = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{sdcs}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsAlly is false on dedi and refuses without fold" {
+    const ally = Requirement{ .kind = .is_ally, .name = "IsAlly" };
+    try testing.expect(!all(&.{ally}, .{ .is_ally = false }));
+    try testing.expect(all(&.{ally}, .{ .is_ally = true }));
+    const inverted = Requirement{ .kind = .is_ally, .name = "IsAlly", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_ally = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{ally}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsOnLadder is false without elevator state and refuses without fold" {
+    const ladder = Requirement{ .kind = .is_on_ladder, .name = "IsOnLadder" };
+    try testing.expect(!all(&.{ladder}, .{ .is_on_ladder = false }));
+    try testing.expect(all(&.{ladder}, .{ .is_on_ladder = true }));
+    const inverted = Requirement{ .kind = .is_on_ladder, .name = "IsOnLadder", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_on_ladder = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{ladder}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "HasAttachedPrefab is false on dedi and refuses without fold" {
+    const prefab = Requirement{ .kind = .has_attached_prefab, .name = "HasAttachedPrefab" };
+    try testing.expect(!all(&.{prefab}, .{ .has_attached_prefab = false }));
+    try testing.expect(all(&.{prefab}, .{ .has_attached_prefab = true }));
+    const inverted = Requirement{ .kind = .has_attached_prefab, .name = "HasAttachedPrefab", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .has_attached_prefab = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{prefab}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "HasParticle is false on dedi and refuses without fold" {
+    const particle = Requirement{ .kind = .has_particle, .name = "HasParticle" };
+    try testing.expect(!all(&.{particle}, .{ .has_particle = false }));
+    try testing.expect(all(&.{particle}, .{ .has_particle = true }));
+    const inverted = Requirement{ .kind = .has_particle, .name = "HasParticle", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .has_particle = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{particle}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsLookingAtBlock is true per stock stub and refuses without fold" {
+    const looking = Requirement{ .kind = .is_looking_at_block, .name = "IsLookingAtBlock" };
+    try testing.expect(all(&.{looking}, .{ .is_looking_at_block = true }));
+    try testing.expect(!all(&.{looking}, .{ .is_looking_at_block = false }));
+    const inverted = Requirement{ .kind = .is_looking_at_block, .name = "IsLookingAtBlock", .negated = true };
+    try testing.expect(!all(&.{inverted}, .{ .is_looking_at_block = true }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{looking}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsLookingAtEntity is true per stock stub and refuses without fold" {
+    const looking = Requirement{ .kind = .is_looking_at_entity, .name = "IsLookingAtEntity" };
+    try testing.expect(all(&.{looking}, .{ .is_looking_at_entity = true }));
+    try testing.expect(!all(&.{looking}, .{ .is_looking_at_entity = false }));
+    const inverted = Requirement{ .kind = .is_looking_at_entity, .name = "IsLookingAtEntity", .negated = true };
+    try testing.expect(!all(&.{inverted}, .{ .is_looking_at_entity = true }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{looking}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsIndoors is false without enclosure and refuses without fold" {
+    const indoors = Requirement{ .kind = .is_indoors, .name = "IsIndoors" };
+    try testing.expect(!all(&.{indoors}, .{ .is_indoors = false }));
+    try testing.expect(all(&.{indoors}, .{ .is_indoors = true }));
+    const inverted = Requirement{ .kind = .is_indoors, .name = "IsIndoors", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_indoors = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{indoors}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "IsBloodMoon reads the blood-moon clock and refuses without one" {
+    const bm = Requirement{ .kind = .is_blood_moon, .name = "IsBloodMoon" };
+    try testing.expect(all(&.{bm}, .{ .is_blood_moon = true }));
+    try testing.expect(!all(&.{bm}, .{ .is_blood_moon = false }));
+    const inverted = Requirement{ .kind = .is_blood_moon, .name = "IsBloodMoon", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .is_blood_moon = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{bm}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "HoldingItemBroken reads held durability and refuses without inventory" {
+    // HoldingItemBroken: PercentUsesLeft == 0 (UseTimes >= MaxUseTimes).
+    const brk = Requirement{ .kind = .holding_item_broken, .name = "HoldingItemBroken" };
+    try testing.expect(all(&.{brk}, .{ .holding_item_broken = true }));
+    try testing.expect(!all(&.{brk}, .{ .holding_item_broken = false }));
+    const inverted = Requirement{ .kind = .holding_item_broken, .name = "HoldingItemBroken", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .holding_item_broken = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{brk}, .{}, &counts));
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
@@ -1431,6 +2249,48 @@ test "SandboxOptionBool reads the decoded option or its default" {
     try testing.expectEqual(@as(u32, 1), counts.unsupported);
 }
 
+test "GameStatBool reads BiomeProgression and refuses unknown or missing" {
+    const req = Requirement{ .kind = .game_stat_bool, .name = "GameStatBool", .arg = "BiomeProgression" };
+    try testing.expect(all(&.{req}, .{ .game_stat_biome_progression = true }));
+    try testing.expect(!all(&.{req}, .{ .game_stat_biome_progression = false }));
+    const inverted = Requirement{ .kind = .game_stat_bool, .name = "GameStatBool", .arg = "BiomeProgression", .negated = true };
+    try testing.expect(all(&.{inverted}, .{ .game_stat_biome_progression = false }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{req}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    const unk = Requirement{ .kind = .game_stat_bool, .name = "GameStatBool", .arg = "NoSuchStat" };
+    counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{unk}, .{ .game_stat_biome_progression = true }, &counts));
+}
+
+test "IsDayNumber compares WorldClock.day and refuses without clock" {
+    const req = Requirement{ .kind = .is_day_number, .name = "IsDayNumber", .op = .ge, .value = 2 };
+    try testing.expect(all(&.{req}, .{ .day_number = 2 }));
+    try testing.expect(all(&.{req}, .{ .day_number = 5 }));
+    try testing.expect(!all(&.{req}, .{ .day_number = 1 }));
+    const eq = Requirement{ .kind = .is_day_number, .name = "IsDayNumber", .op = .eq, .value = 3 };
+    try testing.expect(all(&.{eq}, .{ .day_number = 3 }));
+    try testing.expect(!all(&.{eq}, .{ .day_number = 2 }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{req}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
+test "TimeOfDay compares within-day ticks against HHMM and refuses without clock" {
+    // 1230 -> DayTimeToWorldTime(12,30,0) = 12000 + 500 = 12500
+    const req = Requirement{ .kind = .time_of_day, .name = "TimeOfDay", .op = .ge, .value = 1230 };
+    try testing.expect(all(&.{req}, .{ .time_of_day_ticks = 12500 }));
+    try testing.expect(all(&.{req}, .{ .time_of_day_ticks = 13000 }));
+    try testing.expect(!all(&.{req}, .{ .time_of_day_ticks = 12000 }));
+    // 700 -> 7*1000 = 7000 (stock dawn-ish)
+    const dawn = Requirement{ .kind = .time_of_day, .name = "TimeOfDay", .op = .eq, .value = 700 };
+    try testing.expect(all(&.{dawn}, .{ .time_of_day_ticks = 7000 }));
+    try testing.expect(!all(&.{dawn}, .{ .time_of_day_ticks = 7001 }));
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{req}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+}
+
 test "requirement_group evaluates with the stock AND/OR semantics" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -1564,6 +2424,138 @@ test "ProgressionLevel resolves against the purchased ledger and fails closed" {
     try testing.expectEqual(Verdict.fail, evaluate(&.{unknown}, ctx, &counts));
     try testing.expectEqual(Verdict.fail, evaluate(&.{unknown_neg}, ctx, &counts));
     try testing.expectEqual(@as(u32, 0), counts.unsupported);
+}
+
+test "ProgressionLevel target=instigator reads instigator_levels" {
+    // Stock Physician heal buffs gate `$legTreatedCritHealingBase` on the
+    // healer's perkPhysician via target="instigator". Without a supplier the
+    // gate refuses; with instigator_levels it resolves against that ledger.
+    const self_lv = [_]NameLevel{.{ .name = "perkPhysician", .level = 0 }};
+    const heal_lv = [_]NameLevel{.{ .name = "perkPhysician", .level = 2 }};
+    const gate = Requirement{
+        .kind = .progression_level,
+        .op = .eq,
+        .value = 2,
+        .arg = "perkPhysician",
+        .target = .instigator,
+    };
+    var counts: Counts = .{};
+    // No supplier → unsupported (not self).
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{ .levels = &self_lv }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    // Healer has perkPhysician 2 → pass.
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{
+        .levels = &self_lv,
+        .instigator_levels = &heal_lv,
+    }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    // Healer missing the perk → fail closed.
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{
+        .levels = &self_lv,
+        .instigator_levels = &[_]NameLevel{},
+    }, &counts));
+}
+
+test "ProgressionLevel target=other reads other_levels" {
+    // Stock entityclasses.xml gates EntityDamage on perkBatterUpMetalChain via
+    // target="other". Without a supplier the gate refuses; with other_levels it
+    // resolves against that ledger (not self).
+    const self_lv = [_]NameLevel{.{ .name = "perkBatterUpMetalChain", .level = 0 }};
+    const other_lv = [_]NameLevel{.{ .name = "perkBatterUpMetalChain", .level = 1 }};
+    const gate = Requirement{
+        .kind = .progression_level,
+        .op = .eq,
+        .value = 1,
+        .arg = "perkBatterUpMetalChain",
+        .target = .other,
+    };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{ .levels = &self_lv }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{
+        .levels = &self_lv,
+        .other_levels = &other_lv,
+    }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{
+        .levels = &self_lv,
+        .other_levels = &[_]NameLevel{},
+    }, &counts));
+}
+
+test "IsAlive target=other reads other_alive" {
+    // Stock damage rows gate on the other entity's alive bit via target="other".
+    // Without a supplier the gate refuses; with other_alive it resolves that bit.
+    const gate = Requirement{ .kind = .is_alive, .target = .other };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{ .alive = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{ .alive = false, .other_alive = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .alive = true, .other_alive = false }, &counts));
+}
+
+test "HasBuff target=other reads other_live_buff" {
+    // Stock fire-proc rows gate AddBuff on HasBuff target="other". Without a
+    // supplier the gate refuses; with other_live_buff + buff_active it resolves.
+    const gate = Requirement{ .kind = .has_buff, .list = "buffBurningElement", .target = .other };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{}, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+
+    const Holder = struct {
+        has_it: bool,
+        fn has(ctx: *const anyopaque, name: []const u8) bool {
+            const h: *const @This() = @ptrCast(@alignCast(ctx));
+            _ = name;
+            return h.has_it;
+        }
+    };
+    var yes: Holder = .{ .has_it = true };
+    var no: Holder = .{ .has_it = false };
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{
+        .buff_active = Holder.has,
+        .other_live_buff = &yes,
+    }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{
+        .buff_active = Holder.has,
+        .other_live_buff = &no,
+    }, &counts));
+}
+
+test "IsCorpse target=other reads other_is_corpse" {
+    // Stock corpseRemoval effect_group gates on IsCorpse target="other".
+    const gate = Requirement{ .kind = .is_corpse, .target = .other };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{ .is_corpse = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{ .is_corpse = false, .other_is_corpse = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .is_corpse = true, .other_is_corpse = false }, &counts));
+}
+
+test "IsSleeping target=other reads other_is_sleeping" {
+    // Stock NightStalker SlumberParty gates on IsSleeping target="other".
+    const gate = Requirement{ .kind = .is_sleeping, .target = .other };
+    var counts: Counts = .{};
+    try testing.expectEqual(Verdict.unsupported, evaluate(&.{gate}, .{ .is_sleeping = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.unsupported);
+    counts = .{};
+    try testing.expectEqual(Verdict.pass, evaluate(&.{gate}, .{ .is_sleeping = false, .other_is_sleeping = true }, &counts));
+    try testing.expectEqual(@as(u32, 1), counts.resolved);
+    counts = .{};
+    try testing.expectEqual(Verdict.fail, evaluate(&.{gate}, .{ .is_sleeping = true, .other_is_sleeping = false }, &counts));
 }
 
 test "InBiome needs a biome in the params for either polarity" {
