@@ -979,6 +979,11 @@ pub const TrackedDeltas = struct {
     water_ot: f32 = 0,
     stamina_max: f32 = 0,
     stamina_ot: f32 = 0,
+    /// Injury max caps (`HealthMaxBlockage`/`StaminaMaxBlockage`, the
+    /// abrasion/sprain/break rows whose `@$counter` cvar value the fold
+    /// resolves): subtracted from the max at the consumer, never added.
+    hp_block: f32 = 0,
+    stamina_block: f32 = 0,
     /// PhysicalDamageResist percent (stock passive 41, GetTotalPhysicalArmorRating).
     phys_resist: f32 = 0,
     general_resist: f32 = 0,
@@ -988,6 +993,7 @@ pub const TrackedDeltas = struct {
         return self.hp_max != 0 or self.hp_ot != 0 or self.food_max != 0 or
             self.food_ot != 0 or self.water_max != 0 or self.water_ot != 0 or
             self.stamina_max != 0 or self.stamina_ot != 0 or
+            self.hp_block != 0 or self.stamina_block != 0 or
             self.phys_resist != 0 or self.general_resist != 0 or self.elem_resist != 0;
     }
 };
@@ -1001,6 +1007,8 @@ const TrackedField = enum(u8) {
     water_ot,
     stamina_max,
     stamina_ot,
+    hp_block,
+    stamina_block,
     phys_resist,
     general_resist,
     elem_resist,
@@ -1015,6 +1023,8 @@ const tracked_names = [_]struct { name: []const u8, field: TrackedField }{
     .{ .name = "FoodMax", .field = .food_max },
     .{ .name = "WaterMax", .field = .water_max },
     .{ .name = "StaminaMax", .field = .stamina_max },
+    .{ .name = "HealthMaxBlockage", .field = .hp_block },
+    .{ .name = "StaminaMaxBlockage", .field = .stamina_block },
     .{ .name = "PhysicalDamageResist", .field = .phys_resist },
     .{ .name = "GeneralDamageResist", .field = .general_resist },
     .{ .name = "ElementalDamageResist", .field = .elem_resist },
@@ -1923,6 +1933,8 @@ test "trackedDeltas folds the tracked surface, omits base_set and untracked name
             .{ .name = "GeneralDamageResist", .op = .base_subtract, .value = 3 },
             .{ .name = "HealthMax", .op = .base_set, .value = 150 }, // no base -> omitted
             .{ .name = "HarvestCount", .op = .base_add, .value = 3 }, // untracked
+            .{ .name = "HealthMaxBlockage", .op = .base_add, .value = 12 },
+            .{ .name = "StaminaMaxBlockage", .op = .base_add, .value = 7 },
         },
     };
     var counts: requirements.Counts = .{};
@@ -1932,6 +1944,8 @@ test "trackedDeltas folds the tracked surface, omits base_set and untracked name
     try std.testing.expectEqual(@as(f32, 8), d.phys_resist);
     try std.testing.expectEqual(@as(f32, -3), d.general_resist);
     try std.testing.expectEqual(@as(f32, 0), d.hp_max); // base_set omitted
+    try std.testing.expectEqual(@as(f32, 12), d.hp_block);
+    try std.testing.expectEqual(@as(f32, 7), d.stamina_block);
     try std.testing.expect(d.any());
 }
 

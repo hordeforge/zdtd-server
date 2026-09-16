@@ -828,7 +828,10 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             // bases every tick (revertible recompute-from-set - a zero delta
             // restores the spawn max; the values are stable so no churn).
             const mhp = vm.hp_max + pvm.hp_max + ivm.hp_max;
-            h.max_hp = @max(1, h.base_max_hp + mhp);
+            // Injury caps (`HealthMaxBlockage` abrasion/sprain/break rows):
+            // the folded cvar value is subtracted from the max, never added.
+            const hblock = vm.hp_block + pvm.hp_block + ivm.hp_block;
+            h.max_hp = @max(1, h.base_max_hp + mhp - hblock);
             if (h.hp > h.max_hp) {
                 h.hp = h.max_hp;
                 self.sim.markDirty(ps, .{ .hp = true });
@@ -838,7 +841,8 @@ pub fn tickSurvival(self: *Game, dt: f32) void { // APM (P4b): the per-player ef
             const mwater = vm.water_max + pvm.water_max + ivm.water_max;
             h.water_max = @max(1, 100 + mwater);
             const mstam = vm.stamina_max + pvm.stamina_max + ivm.stamina_max;
-            h.stamina_max = @max(1, 100 + mstam);
+            const sblock = vm.stamina_block + pvm.stamina_block + ivm.stamina_block;
+            h.stamina_max = @max(1, 100 + mstam - sblock);
             const stages = assets_buffs.survivalStages(sv, h);
             const starving = stages.hungry == 3;
             const dehydrated = stages.thirsty == 3;
