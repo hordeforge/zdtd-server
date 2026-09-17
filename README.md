@@ -96,19 +96,24 @@ Golden wire in C#: sibling `7dtd-loadgen` (`PackageCodec`, `--golden-wire`).
 
 ## Build
 
-Requires Linux and Zig **0.16.0+** (`build.zig.zon` `minimum_zig_version`). UDP
+Requires Linux, GNU Make, Bash, and the exact Zig version in `.zigversion`. UDP
 and TCP setup use Zig 0.16 `std.Io.net`; non-blocking TCP I/O and clocks use
 thin POSIX calls contained in `src/util/` (see
 [`docs/STD_ABSTRACTIONS.md`](docs/STD_ABSTRACTIONS.md)). Canonical validation
 and release builds use the exact compiler in `.zigversion`; `make check`
-enforces that pin and also requires Bash, `rg` (ripgrep), and ShellCheck.
-`make release` additionally requires `sha256sum`.
+enforces that pin. For `make check`, also provide Python 3.10+, `rg` (ripgrep),
+ShellCheck, Bun (`bun` and `bunx`; CI uses 1.4.2), Node.js (oxlint's plugin
+host), Java (CI uses JRE 21), curl, tar/gzip, and standard GNU shell utilities.
+If Clang is installed, the plugin gate also rebuilds C fixtures and addons;
+it needs the Wasm target and `wasm-ld`. `make release` requires `sha256sum`.
 
 One pinned dependency: the Wasm plugin runtime `zwasm` v2.5.0 (`build.zig.zon`,
 URL + hash). `zig build` fetches it into Zig's global cache on first use, so a
-clean checkout needs network for that one fetch; later builds are offline and
-the hash pins the exact content. Override the compiler with
-`ZIG=/path/to/zig` if needed. The optional `-Dtracy` profiling build links an
+clean checkout needs network for that fetch; later server builds are offline and
+the hash pins the exact content. The full lint gate separately downloads pinned
+TypeScript, oxlint/plugins, vnu, and anti-slop sources on a cold cache
+(`scripts/lint-webui.sh`, `scripts/lint-html.sh`). Override the compiler with
+`make ZIG=/path/to/zig` if needed. The optional `-Dtracy` profiling build links an
 operator-supplied Tracy checkout (`-Dtracy-src=PATH`); it is opt-in, never
 fetched, and outside `make check` ([`docs/APM.md`](docs/APM.md)).
 
@@ -120,6 +125,18 @@ make check           # pin + lint + provenance/XML audits + build + test + fuzz 
 make release         # stripped linux-x86_64 ReleaseSafe binary + sha256 + licenses, examples, presets/
 # or: zig build / zig build test (dev builds use the native host target)
 ```
+
+For a focused edit-test loop, use the existing substring filter (repeat
+`-Dtest-filter` to select several names):
+
+```bash
+zig build test -Dtest-filter='frame roundtrip pos body size' --summary all
+```
+
+This still runs the CLI checks and shared plugin-helper tests. Run unfiltered
+`make test` before relying on suite-wide coverage. Before a PR, `make check &&
+make smoke` reproduces CI's validation, release build, and release smoke steps;
+tag releases additionally run `make repro`.
 
 ## Layout
 
