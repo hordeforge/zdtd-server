@@ -1916,21 +1916,26 @@ test "a bag count wider than the ECS bag does not spill into other slots" {
     // and the loop reads a stack per iteration, so a forged count is bounded
     // by the body running out rather than by a cap.
     var buf: [8192]u8 = undefined;
-    var inv: components.Inventory = .{};
-    inv.slots[components.inv_equip_start] = .{ .item_id = 99, .count = 1, .quality = 1 };
-    const body = try buildFromEcs(&buf, &inv);
-
-    // Widen the bag count the builder wrote, past the ECS bag width.
-    const want: u16 = @intCast(components.inv_bag_count);
-    const at = std.mem.find(u8, body, &std.mem.toBytes(want)) orelse
-        return error.TestUnexpectedResult;
-    std.mem.writeInt(u16, body[at..][0..2], want + 32, .little);
+    var slots: [bag_slots + 1]StockSlot = @splat(.{});
+    slots[bag_slots - 1] = .{ .type_id = items_start_here + 7, .count = 20 };
+    slots[bag_slots] = .{ .type_id = items_start_here + 8, .count = 3 };
+    var w: binary.Writer = .{ .buf = &buf };
+    try writePlayerInventory(&w, &.{}, &slots, &.{}, null);
 
     var applied: components.Inventory = .{};
-    // Running out mid-stack and applying are both acceptable outcomes; what
-    // must hold is that bag indices never reach the equipment slots.
-    applyPlayerInventoryBody(body, &applied, null, null) catch {};
-    try std.testing.expectEqual(@as(u16, 0), applied.slots[components.inv_equip_start].item_id);
+    applied.slots[0] = .{ .item_id = 2, .count = 5 };
+    for (applied.slots[components.inv_equip_start..]) |*slot| {
+        slot.* = .{ .item_id = 99, .count = 1, .quality = 1 };
+    }
+    const before = applied;
+    try applyPlayerInventoryBody(w.written(), &applied, null, null);
+    try std.testing.expectEqual(@as(u16, 7), applied.slots[components.inv_equip_start - 1].item_id);
+    try std.testing.expectEqual(@as(u16, 20), applied.slots[components.inv_equip_start - 1].count);
+    try std.testing.expectEqualDeep(before.slots[0..components.inv_bag_start].*, applied.slots[0..components.inv_bag_start].*);
+    try std.testing.expectEqualDeep(before.slots[components.inv_equip_start..].*, applied.slots[components.inv_equip_start..].*);
+
+    var truncated: components.Inventory = .{};
+    try std.testing.expectError(error.EndOfStream, applyPlayerInventoryBody(w.written()[0 .. w.pos - 1], &truncated, null, null));
 }
 
 test "item mods round-trip through the wire ItemValue" {
@@ -2101,6 +2106,8 @@ test "ItemValue stats survive a parse and a re-write" {
     var r3: binary.Reader = .{ .data = w3.written() };
     try std.testing.expectEqual(@as(u8, item_value_save_version), try r3.readByte());
     try std.testing.expectEqual(@as(u8, 0), (try r3.readByte()) & 2);
+    r3.pos = 0;
     const parsed3 = try readItemValue(&r3);
-    try std.testing.expectEqual(@as(u8, 0), parsed3.stats_n);
+    try std.testing.expectEqualDeep(plain, parsed3);
+    try std.testing.expectEqual(@as(usize, 0), r3.remaining());
 }

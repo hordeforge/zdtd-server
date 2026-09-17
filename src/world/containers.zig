@@ -286,6 +286,7 @@ pub const ContainerStore = struct {
             const player = buf[o + 19] != 0;
             o += 20;
             if (o + @as(usize, slot_count) * 7 > len) return error.ReadFailed;
+            if (with_size and o + @as(usize, slot_count) * 7 + 6 > len) return error.ReadFailed;
             // A record can be dropped (table full of player storage), but it
             // still has to be consumed whole: the slots AND the touched_day +
             // size tail below. Skipping only the slots would leave the cursor
@@ -323,12 +324,17 @@ pub const ContainerStore = struct {
             // version and only use the length as a guard, and where that guard
             // can fail the remaining bytes are too few for another record to
             // follow. A new format version here must keep the version test.
-            if (with_size and o + 4 <= len) {
+            // ZCT2's touched_day + size pair are required fields (the writer
+            // always emits them), so their extent is validated above, before
+            // any store mutation: a truncated tail previously slipped past the
+            // length guards here, loaded partial state as a success, and the
+            // next save persisted the partial values over the good ones.
+            if (with_size) {
                 if (maybe_c) |c| c.touched_day = std.mem.readInt(u32, buf[o..][0..4], .little);
                 o += 4;
             }
             // ZCT2: size_x/size_y u8 each follow touched_day.
-            if (with_size and o + 2 <= len) {
+            if (with_size) {
                 if (maybe_c) |c| {
                     c.size_x = buf[o];
                     c.size_y = buf[o + 1];
